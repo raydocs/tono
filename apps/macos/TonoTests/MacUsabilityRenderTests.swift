@@ -35,7 +35,34 @@ final class MacUsabilityRenderTests: XCTestCase {
         app.selectedNodeId = node.id
         app.activeNode = node
         app.proxyService.activeNodeName = node.name
+        let appearanceBefore = AppProfile.defaults.object(forKey: SeaAppearance.enabledKey) as? Bool
+        try captureDashboard("dashboard-sea-night-normal", app: app, account: account,
+                             sea: true, width: 920, height: 600)
+        try captureDashboard("dashboard-sea-night-minimum", app: app, account: account,
+                             sea: true, width: 660, height: 540)
+        try captureDashboard("dashboard-off-normal", app: app, account: account,
+                             sea: false, width: 920, height: 600)
+        app.isConnected = true
+        try captureDashboard("dashboard-sea-confirmed-normal", app: app, account: account,
+                             sea: true, width: 920, height: 600)
+        app.isConnected = false
         app.isProtectionBlocked = true
+        try captureDashboard("dashboard-sea-blocked-minimum", app: app, account: account,
+                             sea: true, width: 660, height: 540)
+        try capture("settings-sea-normal", width: 920, height: 600, annotate: false) {
+            ZStack {
+                MeshGradientBackground()
+                SettingsView()
+            }
+            .modifier(SeaPageAppearance())
+            .environment(\.seaAppearanceOverride, true)
+            .environment(\.accessibilityReduceMotion, true)
+            .environment(app)
+            .environment(account)
+            .environmentObject(AppUpdater(enabled: false))
+        }
+        XCTAssertEqual(AppProfile.defaults.object(forKey: SeaAppearance.enabledKey) as? Bool,
+                       appearanceBefore, "render fixtures must not change device appearance")
         let observation = await app.collectLocalHealth(account: account, probe: { .init(helperInstalled: true, helperRejectsApp: true) })
         let check = try XCTUnwrap(observation)
         try capture("health-unknown-helper", width: 660, height: 780) {
@@ -106,14 +133,38 @@ final class MacUsabilityRenderTests: XCTestCase {
         XCTAssertNil(account.uploadingSupportReportID)
     }
 
+    private func captureDashboard(
+        _ name: String, app: AppState, account: AccountSession,
+        sea: Bool, width: CGFloat, height: CGFloat
+    ) throws {
+        try capture(name, width: width, height: height, annotate: false) {
+            ZStack {
+                MeshGradientBackground()
+                DashboardView()
+            }
+            .modifier(SeaPageAppearance())
+            .environment(\.seaAppearanceOverride, sea)
+            .environment(\.accessibilityReduceMotion, true)
+            .environment(app)
+            .environment(account)
+        }
+    }
+
     private func capture<Content: View>(
         _ name: String, width: CGFloat, height: CGFloat,
+        annotate: Bool = true,
         @ViewBuilder content: () -> Content
     ) throws {
-        let root = VStack(alignment: .leading, spacing: 0) {
-            Text("SYNTHETIC NATIVE XCTEST · \(name)")
-                .font(.system(size: 10, design: .monospaced)).padding(8)
-            content()
+        let root = Group {
+            if annotate {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("SYNTHETIC NATIVE XCTEST · \(name)")
+                        .font(.system(size: 10, design: .monospaced)).padding(8)
+                    content()
+                }
+            } else {
+                content()
+            }
         }
         .frame(width: width, height: height, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))

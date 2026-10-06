@@ -10,19 +10,65 @@ enum SeaAppearance {
     }
 }
 
+/// Render fixtures can exercise the real views without writing the device's
+/// AppStorage preference. Production leaves this nil and uses AppProfile.
+private struct SeaAppearanceOverrideKey: EnvironmentKey {
+    static let defaultValue: Bool? = nil
+}
+
+extension EnvironmentValues {
+    var seaAppearanceOverride: Bool? {
+        get { self[SeaAppearanceOverrideKey.self] }
+        set { self[SeaAppearanceOverrideKey.self] = newValue }
+    }
+}
+
 /// The existing SwiftUI navigation and every existing page stay in place.
 /// This preference only makes their native controls legible on the night ground.
 struct SeaPageAppearance: ViewModifier {
     @AppStorage(SeaAppearance.enabledKey, store: AppProfile.defaults)
     private var enabled = false
+    @Environment(\.seaAppearanceOverride) private var previewOverride
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if enabled {
+        if previewOverride ?? enabled {
             content.environment(\.colorScheme, .dark).preferredColorScheme(.dark)
         } else {
             content
         }
+    }
+}
+
+/// A quiet, non-status-bearing horizon under the native secondary pages.
+/// It never implies a confirmed connection; the dashboard alone owns that.
+struct SeaSecondaryScene: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .top) {
+                LinearGradient(
+                    colors: [Color(hex: "111A30"), Color(hex: "26364D"), Color(hex: "102139")],
+                    startPoint: .top, endPoint: .bottom
+                )
+                if !reduceTransparency && contrast != .increased {
+                    Ellipse()
+                        .fill(Color(hex: "7187A5").opacity(0.12))
+                        .frame(width: geometry.size.width * 1.2, height: geometry.size.height * 0.22)
+                        .position(x: geometry.size.width * 0.55, y: geometry.size.height * 0.78)
+                    Rectangle()
+                        .fill(LinearGradient(colors: [Color(hex: "8498AE").opacity(0.18), .clear],
+                                             startPoint: .top, endPoint: .bottom))
+                        .frame(height: 2)
+                        .offset(y: geometry.size.height * 0.72)
+                }
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -49,6 +95,8 @@ struct SeaScene: View {
     let phase: SeaPresentationPhase
     let motionEnabled: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
 
     private var isWarm: Bool { phase == .day || phase == .dawn }
     private var sky: [Color] {
@@ -71,7 +119,9 @@ struct SeaScene: View {
                 LinearGradient(colors: sky, startPoint: .top, endPoint: .bottom)
 
                 if phase == .night {
-                    starField(width: width, horizon: horizon)
+                    if !reduceTransparency && contrast != .increased {
+                        starField(width: width, horizon: horizon)
+                    }
                     Circle()
                         .fill(Color(hex: "E5E8FA"))
                         .frame(width: disc * 0.17, height: disc * 0.17)
@@ -83,11 +133,13 @@ struct SeaScene: View {
                         }
                         .position(x: width * 0.72, y: horizon * 0.40)
                 } else {
-                    Circle()
-                        .fill(RadialGradient(colors: [Color(hex: "FFBC85").opacity(0.35), .clear],
-                                             center: .center, startRadius: disc * 0.3, endRadius: disc * 1.15))
-                        .frame(width: disc * 2.3, height: disc * 2.3)
-                        .position(x: width * 0.72, y: sunY(horizon: horizon, disc: disc))
+                    if !reduceTransparency && contrast != .increased {
+                        Circle()
+                            .fill(RadialGradient(colors: [Color(hex: "FFBC85").opacity(0.35), .clear],
+                                                 center: .center, startRadius: disc * 0.3, endRadius: disc * 1.15))
+                            .frame(width: disc * 2.3, height: disc * 2.3)
+                            .position(x: width * 0.72, y: sunY(horizon: horizon, disc: disc))
+                    }
                     Circle()
                         .fill(LinearGradient(
                             colors: isWarm ? [Color(hex: "FFE4A7"), Color(hex: "FF9B69")]
@@ -107,15 +159,17 @@ struct SeaScene: View {
 
                 // Static, geometry-scaled ripples. No display link or steady
                 // frame work, including in the full motion preference.
-                ForEach(0..<12, id: \.self) { index in
-                    Capsule()
-                        .fill((isWarm ? Color(hex: "F5B48D") : Color(hex: "8996C0"))
-                            .opacity(isWarm ? 0.17 - Double(index) * 0.009 : 0.08))
-                        .frame(width: width * (0.07 + CGFloat(index % 4) * 0.035), height: 1)
-                        .position(
-                            x: width * (0.61 + CGFloat((index * 7) % 13) * 0.017),
-                            y: horizon + CGFloat(index + 1) * (height - horizon) / 14
-                        )
+                if !reduceTransparency && contrast != .increased {
+                    ForEach(0..<12, id: \.self) { index in
+                        Capsule()
+                            .fill((isWarm ? Color(hex: "F5B48D") : Color(hex: "8996C0"))
+                                .opacity(isWarm ? 0.17 - Double(index) * 0.009 : 0.08))
+                            .frame(width: width * (0.07 + CGFloat(index % 4) * 0.035), height: 1)
+                            .position(
+                                x: width * (0.61 + CGFloat((index * 7) % 13) * 0.017),
+                                y: horizon + CGFloat(index + 1) * (height - horizon) / 14
+                            )
+                    }
                 }
                 LinearGradient(colors: [sky[2].opacity(0.4), .clear],
                                startPoint: .top, endPoint: .bottom)

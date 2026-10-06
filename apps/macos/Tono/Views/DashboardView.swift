@@ -7,6 +7,7 @@ struct DashboardView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(SeaAppearance.enabledKey, store: AppProfile.defaults)
     private var seaAppearanceEnabled = false
+    @Environment(\.seaAppearanceOverride) private var seaAppearanceOverride
     @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults)
     private var seaMotionMode = "Auto"
     @Namespace private var dashboardNS
@@ -19,13 +20,14 @@ struct DashboardView: View {
     /// Connect would cancel the attempt and release fail-closed protection.
     @State private var connectingSince: Date?
     private static let cancelGraceInterval: TimeInterval = 1.2
+    private var showsSeaAppearance: Bool { seaAppearanceOverride ?? seaAppearanceEnabled }
 
     var body: some View {
         @Bindable var appState = appState
 
         GlassEffectContainer(spacing: 24) {
             VStack(spacing: 0) {
-                if seaAppearanceEnabled {
+                if showsSeaAppearance {
                     seaDashboardHeader
                 } else {
                     dashboardHeader
@@ -43,7 +45,7 @@ struct DashboardView: View {
                 // Center: ConnectPill + ActiveNodeCard
                 Spacer(minLength: 12)
 
-                VStack(alignment: seaAppearanceEnabled ? .leading : .center, spacing: 24) {
+                VStack(alignment: showsSeaAppearance ? .leading : .center, spacing: 24) {
                     RecoveryNotice(appState: appState)
                         .frame(maxWidth: 520, alignment: .leading)
                     ConnectPill(isConnected: Binding(
@@ -109,13 +111,13 @@ struct DashboardView: View {
                         RouteChoicesView()
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: seaAppearanceEnabled ? .leading : .center)
+                .frame(maxWidth: .infinity, alignment: showsSeaAppearance ? .leading : .center)
 
                 Spacer(minLength: 12)
 
                 if !showsConnectionDetails {
-                    if !seaAppearanceEnabled || showsSeaDetails {
-                        if seaAppearanceEnabled {
+                    if !showsSeaAppearance || showsSeaDetails {
+                        if showsSeaAppearance {
                             Button {
                                 showsSeaDetails = false
                             } label: {
@@ -145,9 +147,10 @@ struct DashboardView: View {
             .padding(.horizontal, 32)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .modifier(SeaDashboardScroll(enabled: showsSeaAppearance))
         }
         .background {
-            if seaAppearanceEnabled {
+            if showsSeaAppearance {
                 SeaScene(phase: seaPhase, motionEnabled: SeaAppearance.animates(
                     seaMotionMode, reduceMotion: reduceMotion
                 ))
@@ -943,6 +946,25 @@ private struct DashboardStatCard: View {
                     .white.opacity(colorScheme == .dark ? 0.10 : 0.7),
                     lineWidth: 0.5
                 )
+        }
+    }
+}
+
+/// At the minimum window height, blocked/recovery cards can be taller than
+/// the calm state. Scrolling preserves their original actions instead of
+/// clipping them behind the bottom edge of the sea preview.
+private struct SeaDashboardScroll: ViewModifier {
+    let enabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            ScrollView {
+                content
+            }
+            .scrollIndicators(.hidden)
+        } else {
+            content
         }
     }
 }
