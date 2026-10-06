@@ -58,7 +58,8 @@ enum SeaSceneQuality: String {
     static func requested(_ preference: String, reduceMotion: Bool, lowPower: Bool,
                           automatic: Self) -> Self {
         if reduceMotion || preference == "Static" { return .static }
-        if lowPower || preference == "Lite" || preference == "Simple" { return .lite }
+        if preference == "Lite" || preference == "Simple" { return .lite }
+        if lowPower { return preference == "Auto" && automatic == .static ? .static : .lite }
         return preference == "Full" ? .full : automatic
     }
 }
@@ -79,6 +80,10 @@ struct SeaSceneQualityProbe {
     }
 
     mutating func pause() { last = nil }
+
+    func canSample(preference: String, reduceMotion: Bool, lowPower: Bool) -> Bool {
+        preference == "Auto" && !reduceMotion && !lowPower && !complete
+    }
 
     mutating func frame(at time: Double) {
         guard !complete else { return }

@@ -39,6 +39,15 @@ final class SeaSceneParametersTests: XCTestCase {
         XCTAssertEqual(probe.elapsed, elapsed, "there is no lasting per-frame sample after the bounded probe")
     }
 
+    func testLowPowerPausesAutomaticSamplingWithoutPromotingMeasuredStatic() {
+        let probe = SeaSceneQualityProbe()
+        XCTAssertTrue(probe.canSample(preference: "Auto", reduceMotion: false, lowPower: false))
+        XCTAssertFalse(probe.canSample(preference: "Auto", reduceMotion: false, lowPower: true),
+                       "a power-forced Lite scene must not be measured as Full")
+        XCTAssertEqual(SeaSceneQuality.requested("Auto", reduceMotion: false, lowPower: true, automatic: .static), .static)
+        XCTAssertEqual(SeaSceneQuality.requested("Full", reduceMotion: false, lowPower: true, automatic: .full), .lite)
+    }
+
     func testHomeLatencyOnlyShowsRecentMatchingSuccessfulSamples() {
         let now = Date(timeIntervalSince1970: 1000)
         let sample = (node: "Tokyo", ms: 83, at: now.addingTimeInterval(-30))

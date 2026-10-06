@@ -24,3 +24,10 @@
 
 - 第四轮 2323e462 / [37529037448](https://github.com/raydocs/tono/actions/runs/37529037448)：Release app、policy/privileged 已通过；XCTest 仍在 CF 颜色夹具编译处失败，SDK 指明应使用 `CGColor.typeID` 而非旧 C API。按该诊断修正，不删除检查、不放宽测试。
 - 设置 Motion 对旧 Simple 存值只做显示映射 Lite，避免四档控件无匹配标签；只在用户选择时写新值，旧存值不自动覆盖。追加一条窄回归，未扩展 B 的面板/控件打磨范围。
+
+### 2026-10-06 · 第一批真实原生图（bded69b8）
+- [37530231293](https://github.com/raydocs/tono/actions/runs/37530231293)：Release app、policy/privileged 通过；632 XCTest，1 skipped、1 failure。新整窗与动效测试均执行并通过，旧 stored-off 详情夹具因暖色胶囊 1 个 alpha254 像素失败；原图/ImageIO/重复图一致。源码给桥接场景补不透明 SwiftUI 底，不降低原断言。
+- 原始像素分析：arrival 16 帧单调；rise 首段下降，set 首段回升、末段微升，严格整窗单调判定失败。Full 文字交叉淡化与装饰循环影响整窗均值，已提请裁定；未裁定前不把 A 写为通过，不为图像指标改写 Windows 已有时长/层延迟。
+- Full 水面 idle/connected 原图分别有 67811/89298 个变化像素，天空变化按 owner 回复允许。arm64、低电量关，5s 自身 user+system/wall：可见 idle0.418%、connected0.395%；隐藏0.347%，时钟速度断言0通过但不能声称进程 CPU 真为0。该数值仍只是合成 UI host，没有网络/helper 负载。
+- 夹具需修：NSHostingView 自动尺寸 + AppKit 小屏约束使920×600变920×604、1280×720变1024×677；1280状态继承了上轮Settings选择，页面截图还处在过渡。修为固定请求原生窗口面、不裁切或放大PNG、每个稳态页面初次挂载，尺寸直接断言；此前图保留为失败证据。
+- 窄呈现续修：星点层级的CSS opacity覆盖不是乘积；低电量暂停Auto采样，已测Static不被电量事件提升。加实际层级与质量回归，等待新head托管执行。

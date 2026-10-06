@@ -48,6 +48,22 @@ final class SeaScenePaletteTests: XCTestCase {
         XCTAssertEqual(count(root), 0, "Static removes loops and in-flight phase transitions")
     }
 
+    func testStarTierOpacityOverridesTheBaseLikeTheWindowsCascade() throws {
+        let view = SeaSceneNativeView(frame: NSRect(x: 0, y: 0, width: 920, height: 600))
+        view.configure(phase: .night, progress: nil, preference: "Static", reduceMotion: false,
+                       decorations: true, active: true)
+        view.layout()
+        defer { view.stop() }
+        func find(_ layer: CALayer, _ name: String) -> CALayer? {
+            if layer.name == name { return layer }
+            return layer.sublayers?.compactMap { find($0, name) }.first
+        }
+        let root = try XCTUnwrap(view.layer)
+        XCTAssertEqual(try XCTUnwrap(find(root, "stars-0")?.sublayers?.first).opacity, 0.3)
+        XCTAssertEqual(try XCTUnwrap(find(root, "stars-1")?.sublayers?.first).opacity, 0.55)
+        XCTAssertEqual(try XCTUnwrap(find(root, "stars-2")?.sublayers?.first).opacity, 0.9)
+    }
+
 
     func testSceneKeepsTopDownCoordinatesAcrossTheAppKitBackingHierarchy() throws {
         let view = SeaSceneNativeView(frame: NSRect(x: 0, y: 0, width: 920, height: 600))

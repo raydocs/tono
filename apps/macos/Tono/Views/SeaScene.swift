@@ -134,6 +134,7 @@ struct SeaScene: View {
             reduceMotion: reduceMotion,
             decorations: decorationsOverride ?? (!reduceTransparency && contrast != .increased),
             active: active)
+        .background(Color(hex: "0A0A12"))
         .accessibilityHidden(true)
         .allowsHitTesting(false)
     }

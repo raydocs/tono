@@ -140,11 +140,15 @@ final class SeaSceneNativeView: NSView {
             paused = true
         }
         updateQuality(currentQuality)
-        if visible && preference == "Auto" && !reduced && !probe.complete && qualityDisplayLink == nil {
-            let link = displayLink(target: probeTarget, selector: #selector(SeaSceneProbeTarget.tick(_:)))
-            qualityDisplayLink = link
-            link.add(to: .main, forMode: .common)
-        } else if !visible || preference != "Auto" || reduced || probe.complete {
+        let shouldSample = visible && probe.canSample(preference: preference, reduceMotion: reduced,
+            lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
+        if shouldSample {
+            if qualityDisplayLink == nil {
+                let link = displayLink(target: probeTarget, selector: #selector(SeaSceneProbeTarget.tick(_:)))
+                qualityDisplayLink = link
+                link.add(to: .main, forMode: .common)
+            }
+        } else {
             qualityDisplayLink?.invalidate()
             qualityDisplayLink = nil
             probe.pause()
@@ -234,7 +238,7 @@ private final class SeaSceneLayers {
                     y: sky.bounds.height * star.y / 100, width: diameter, height: diameter)
                 dot.cornerRadius = diameter / 2
                 dot.backgroundColor = Self.color(star.color)
-                dot.opacity = Float([0.3, 0.3 * 0.55, 0.3 * 0.9][tier])
+                dot.opacity = Float([0.3, 0.55, 0.9][tier])
                 group.addSublayer(dot)
                 if star.twinkle {
                     let pulse = keyframes("opacity", values: [dot.opacity, dot.opacity * 0.2, dot.opacity],

@@ -38,24 +38,25 @@ final class MacSeaPolishRenderTests: XCTestCase {
                 try await capture("polish-a-\(language)-\(Int(size.width))-\(state)", window: window)
             }
             set("idle", app: fixture.app)
-            let (window, _) = makeWindow(size: size, app: fixture.app, account: fixture.account)
-            defer { close(window) }
             for page in [AppPage.proxies, .activity, .logs, .support, .settings] {
                 fixture.app.selectedPage = page
-                await settle(0.2)
+                let (window, _) = makeWindow(size: size, app: fixture.app, account: fixture.account)
+                defer { close(window) }
+                await settle(0.5)
                 try await capture("polish-a-\(language)-\(Int(size.width))-page-\(page.rawValue)", window: window)
             }
         }
         fixture.app.selectedPage = .dashboard
         set("connected", app: fixture.app)
         for option in ["reduce-motion", "reduce-transparency", "increase-contrast"] {
+            fixture.app.selectedPage = .dashboard
             let (window, _) = makeWindow(size: CGSize(width: 920, height: 600), app: fixture.app,
                 account: fixture.account, reduceMotion: option == "reduce-motion",
                 reduceTransparency: option == "reduce-transparency", highContrast: option == "increase-contrast")
             defer { close(window) }
             for page in [AppPage.dashboard, .activity] {
                 fixture.app.selectedPage = page
-                await settle(0.2)
+                await settle(0.6)
                 try await capture("polish-a-\(language)-\(option)-\(page.rawValue)", window: window)
             }
         }
@@ -169,6 +170,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
     }
 
     private func set(_ state: String, app: AppState) {
+        app.selectedPage = .dashboard
         app.isConnecting = false
         app.isConnected = false
         app.isProtectionBlocked = false
@@ -200,7 +202,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
                 reduceTransparency: reduceTransparency, contrast: highContrast ? .increased : .standard))
             .environment(\.colorScheme, .dark)
             .environment(\.locale, Locale(identifier: Locale.preferredLanguages.first ?? "en"))
-        let window = NSWindow(contentRect: CGRect(origin: .zero, size: size),
+        let window = MacSeaPolishWindow(contentRect: CGRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.setFrame(CGRect(x: 80, y: 80, width: size.width, height: size.height), display: false)
         window.title = "Tono"
@@ -212,9 +214,14 @@ final class MacSeaPolishRenderTests: XCTestCase {
         window.hasShadow = false
         window.appearance = NSAppearance(named: .darkAqua)
         let host = NSHostingView(rootView: root)
+        // The hosted display is 1024 wide. Capture the native window surface at
+        // the requested size, not a display-constrained or content-autosized proxy.
+        host.sizingOptions = []
         window.contentView = host
+        window.setFrame(CGRect(x: 80, y: 80, width: size.width, height: size.height), display: false)
         window.orderFront(nil)
         host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(window.frame.size, size, "whole-window evidence must use its requested native dimensions")
         return (window, host)
     }
 
@@ -277,4 +284,9 @@ final class MacSeaPolishRenderTests: XCTestCase {
         try receipt.write(to: folder.appendingPathComponent(name + ".txt"), atomically: true, encoding: .utf8)
         return image
     }
+}
+
+@MainActor
+private final class MacSeaPolishWindow: NSWindow {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 }
