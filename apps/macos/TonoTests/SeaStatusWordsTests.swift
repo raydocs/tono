@@ -3,6 +3,18 @@ import XCTest
 
 @MainActor
 final class SeaStatusWordsTests: XCTestCase {
+    func testSupportUnknownProtectionOverridesResidualSnapshotClaims() {
+        let app = AppState()
+        app.isConnected = true
+        app.isProtectionBlocked = true
+        let snapshot = app.compactRemoteDiagnosticSnapshot()
+        XCTAssertTrue(snapshot.protectionBlocked)
+        XCTAssertEqual(SupportView.protectionText(snapshot, unconfirmed: true, unreadable: false),
+                       String(localized: "Protection status unconfirmed"))
+        XCTAssertEqual(SupportView.protectionText(snapshot, unconfirmed: false, unreadable: true),
+                       String(localized: "Protection status unconfirmed"))
+    }
+
     func testUnknownProtectionPreemptsAnApparentlyConnectedDisplayWord() {
         XCTAssertEqual(SeaStatusWords.key(kind: .connected, connected: true, protectionBlocked: false, unknown: true, disconnecting: false),
                        "Protection status unconfirmed")

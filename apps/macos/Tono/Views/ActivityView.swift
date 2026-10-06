@@ -687,7 +687,7 @@ struct ActivityView: View {
         let current = SeaActivityPresentation.currentConnections(appState.connections, for: app.id)
         return VStack(alignment: .leading, spacing: 8) {
             Text(appState.connectionsFeedLive
-                 ? "\(app.liveConnections) current connections · up to 20 shown"
+                 ? String(localized: "\(app.liveConnections) current connections · up to 20 shown")
                  : String(localized: "Current connections unavailable"))
                 .font(.system(size: 11))
                 .foregroundStyle(SeaTheme.muted)

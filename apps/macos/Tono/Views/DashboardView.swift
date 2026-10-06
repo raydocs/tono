@@ -5,9 +5,7 @@ struct DashboardView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @AppStorage(SeaAppearance.enabledKey, store: AppProfile.defaults)
-    private var seaAppearanceEnabled = SeaAppearance.defaultEnabled
-    @Environment(\.seaAppearanceOverride) private var seaAppearanceOverride
+    @SeaAppearancePreference private var showsSeaAppearance
     @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults)
     private var seaMotionMode = "Auto"
     @Namespace private var dashboardNS
@@ -20,7 +18,6 @@ struct DashboardView: View {
     /// Connect would cancel the attempt and release fail-closed protection.
     @State private var connectingSince: Date?
     private static let cancelGraceInterval: TimeInterval = 1.2
-    private var showsSeaAppearance: Bool { seaAppearanceOverride ?? seaAppearanceEnabled }
 
     var body: some View {
         Group {
@@ -168,14 +165,12 @@ struct DashboardView: View {
                             .font(.system(size: 13)).foregroundStyle(SeaTheme.warm)
                             .accessibilityIdentifier("updateIncompleteNotice")
                     }
-                    if !showsConnectionDetails {
-                        seaConnectionAction
-                    }
+                    seaConnectionAction
                     seaLineChip
                     RecoveryNotice(appState: appState)
                         .frame(maxWidth: 520, alignment: .leading)
                     if showsConnectionDetails {
-                        ConnectionProgressCard(appState: appState)
+                        ConnectionProgressCard(appState: appState, primaryActionInHeader: true)
                             .frame(maxWidth: 520, alignment: .leading)
                     }
                     Button { showsSeaDetails = true } label: {
@@ -224,10 +219,12 @@ struct DashboardView: View {
     @ViewBuilder
     private var seaConnectionAction: some View {
         let quiet = appState.isConnected || appState.isConnecting || appState.isDisconnecting
+            || appState.isProtectionBlocked || appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable
         let title = appState.isDisconnecting ? String(localized: "Disconnecting…")
             : appState.isConnecting ? String(localized: "Cancel connection")
-            : (appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable) ? String(localized: "Restore internet")
-            : appState.isConnected ? String(localized: "Disconnect") : String(localized: "Connect")
+            : (appState.isProtectionBlocked || appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable) ? String(localized: "Restore internet")
+            : appState.isConnected ? String(localized: "Disconnect")
+            : appState.lastConnectionFailure != nil ? String(localized: "Retry now") : String(localized: "Connect")
         if quiet {
             Button(action: seaToggleConnection) {
                 Text(title).font(.system(size: 14, weight: .medium))
@@ -236,9 +233,14 @@ struct DashboardView: View {
                     .contentShape(Capsule())
             }
             .buttonStyle(.plain).disabled(appState.isDisconnecting)
+            .modifier(ConnectPillKeyboardShortcut(isConnecting: appState.isConnecting,
+                                                isDisconnecting: appState.isDisconnecting))
         } else {
             Button(title, action: seaToggleConnection)
                 .buttonStyle(GateProminentButtonStyle()).frame(width: 190)
+                .disabled(appState.lastConnectionFailure != nil && !appState.isTonoReady)
+                .modifier(ConnectPillKeyboardShortcut(isConnecting: appState.isConnecting,
+                                                    isDisconnecting: appState.isDisconnecting))
         }
     }
 
@@ -615,6 +617,7 @@ struct DashboardView: View {
 private struct ConnectionProgressCard: View {
     @SeaAppearancePreference private var seaAppearance
     @Bindable var appState: AppState
+    var primaryActionInHeader = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -881,11 +884,13 @@ private struct ConnectionProgressCard: View {
     private var actionRow: some View {
         HStack(spacing: 10) {
             if appState.isConnecting {
-                Button("Cancel and restore internet") {
-                    appState.restoreInternet()
+                if !primaryActionInHeader {
+                    Button("Cancel and restore internet") {
+                        appState.restoreInternet()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             } else if appState.isProtectionBlocked {
                 Button(appState.protectedReconnectPausedForUserAction
                     ? "Repair and reconnect"
@@ -896,11 +901,13 @@ private struct ConnectionProgressCard: View {
                 .controlSize(.small)
                 .disabled(!appState.isTonoReady || appState.isDisconnecting)
 
-                Button("Restore internet") {
-                    appState.restoreInternet()
+                if !primaryActionInHeader {
+                    Button("Restore internet") {
+                        appState.restoreInternet()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
 
                 if appState.shouldOfferManualBackupChannel() {
                     Button("Try backup channel") {
@@ -915,12 +922,14 @@ private struct ConnectionProgressCard: View {
                 disconnecting: appState.isDisconnecting,
                 hasFailureRecord: appState.lastConnectionFailure != nil
             ) {
-                Button("Retry now") {
-                    appState.connect()
+                if !primaryActionInHeader || appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable {
+                    Button("Retry now") {
+                        appState.connect()
+                    }
+                    .buttonStyle(GateProminentButtonStyle())
+                    .controlSize(.small)
+                    .disabled(!appState.isTonoReady || appState.isDisconnecting)
                 }
-                .buttonStyle(GateProminentButtonStyle())
-                .controlSize(.small)
-                .disabled(!appState.isTonoReady || appState.isDisconnecting)
 
                 Button("Choose another route") {
                     appState.selectedPage = .proxies

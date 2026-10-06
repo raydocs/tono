@@ -1,11 +1,10 @@
 import SwiftUI
 
-/// The existing device preference and the read-only render-fixture override.
+/// Production always uses the sea appearance; only render fixtures override it.
 @propertyWrapper
 struct SeaAppearancePreference: DynamicProperty {
-    @AppStorage(SeaAppearance.enabledKey, store: AppProfile.defaults) private var stored = SeaAppearance.defaultEnabled
     @Environment(\.seaAppearanceOverride) private var previewOverride
-    var wrappedValue: Bool { previewOverride ?? stored }
+    var wrappedValue: Bool { previewOverride ?? true }
 }
 
 enum SeaTheme {
@@ -103,7 +102,7 @@ struct SeaPageHeading: View {
     }
 }
 
-/// Sea primary chrome; an explicit opt-out retains native legacy prominence.
+/// Sea primary chrome; a render override can still exercise legacy prominence.
 struct SeaPrimaryAction: ViewModifier {
     @SeaAppearancePreference private var enabled
 

@@ -22,7 +22,7 @@ enum WelcomeLaunchGate {
     }
 }
 
-/// An explicit sea-appearance opt-out restores the original one-screen intro.
+/// Only render fixtures can restore the original one-screen intro.
 /// The sea presentation pages through the same promises; finish or Esc still sets
 /// `introSeen` and the parent swaps in the account gate.
 /// Windows twin: `pages/tono/intro.tsx`.

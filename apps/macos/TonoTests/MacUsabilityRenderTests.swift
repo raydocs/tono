@@ -359,6 +359,58 @@ final class MacUsabilityRenderTests: XCTestCase {
         XCTAssertNil(login.emailChallenge)
     }
 
+    func testProductionSeaAppearanceIgnoresStoredOptOutWithoutOverwritingIt() async throws {
+        let app = AppState()
+        let account = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        let defaults = AppProfile.defaults
+        let previous = defaults.object(forKey: SeaAppearance.enabledKey)
+        defer {
+            if let previous { defaults.set(previous, forKey: SeaAppearance.enabledKey) }
+            else { defaults.removeObject(forKey: SeaAppearance.enabledKey) }
+        }
+        defaults.set(false, forKey: SeaAppearance.enabledKey)
+        try await capture("dashboard-sea-production-stored-off", width: 660, height: 540,
+                          annotate: false, darkAppearance: true,
+                          nativeLabels: ["Not connected", "Connect", "Details"]) {
+            ZStack { MeshGradientBackground(); DashboardView() }
+                .modifier(SeaPageAppearance()).environment(app).environment(account)
+        }
+        XCTAssertFalse(try XCTUnwrap(defaults.object(forKey: SeaAppearance.enabledKey) as? Bool),
+                       "ignoring the obsolete preference must not rewrite it")
+        XCTAssertNil(app.connectionCoordinator.connectTask)
+    }
+
+    func testUnconfirmedProtectionWithAFailureKeepsNativeRestoreActionVisible() async throws {
+        let app = AppState()
+        app.isProtectionUnconfirmed = true
+        app.lastConnectionFailure = ConnectionFailure(stage: .verifyingTraffic,
+            message: "Synthetic previous connection failure", occurredAt: Date())
+        let account = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        try await capture("dashboard-sea-unconfirmed-failure-minimum", width: 660, height: 540,
+                          annotate: false, darkAppearance: true,
+                          nativeLabels: ["Protection status unconfirmed", "Restore internet"]) {
+            ZStack { MeshGradientBackground(); DashboardView() }
+                .modifier(SeaPageAppearance()).environment(app).environment(account)
+        }
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertTrue(app.isProtectionUnconfirmed)
+        XCTAssertNil(app.connectionCoordinator.connectTask)
+    }
+
+    func testSeaMenuKeepsTheDegradedExitAdvisoryVisible() async throws {
+        let app = AppState()
+        app.isConnected = true
+        app.isProxyDegraded = true
+        let account = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        try await capture("menubar-sea-degraded", width: 280, height: 480,
+                          annotate: false, darkAppearance: true, nativeOpacity: .isolatedSubpixelEdges,
+                          nativeLabels: ["Connected", "Exit not responding — checking", "Open Tono"]) {
+            MenuBarView().modifier(SeaPageAppearance()).environment(app).environment(account)
+        }
+        XCTAssertEqual(MenuBarProtectionStatus(app).kind, .degraded)
+        XCTAssertNil(app.connectionCoordinator.connectTask)
+    }
+
     private func captureDashboard(
         _ name: String, app: AppState, account: AccountSession,
         sea: Bool, width: CGFloat, height: CGFloat, recoveryFeedback: String? = nil, decorations: Bool? = nil

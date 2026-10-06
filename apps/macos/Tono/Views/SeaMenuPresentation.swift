@@ -1,6 +1,18 @@
 import Foundation
 
 enum SeaMenuPresentation {
+    enum QuickRouteAction {
+        case reviewRecommendation(RouteRecommendation)
+        case selectManualNode(String)
+    }
+
+    static func action(for node: ProxyNode, recommendation: RouteRecommendation?) -> QuickRouteAction {
+        if let recommendation, recommendation.name == node.name {
+            return .reviewRecommendation(recommendation)
+        }
+        return .selectManualNode(node.name)
+    }
+
     /// At most two existing catalog identities: recommendation, then favorites.
     static func quickRoutes(catalog: [ProxyNode], recommended: String?, favorites: Set<String>, selected: String?) -> [ProxyNode] {
         let eligible = catalog.filter { !ProxyNode.hy2UdpIsVendorBlocked($0.name) }

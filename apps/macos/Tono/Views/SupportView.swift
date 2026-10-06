@@ -792,6 +792,14 @@ struct SupportView: View {
     }
 
     private func protectionText(_ snapshot: TonoDiagnosticSnapshot) -> String {
+        Self.protectionText(snapshot, unconfirmed: appState.isProtectionUnconfirmed,
+                            unreadable: appState.isProtectionBlockUnreadable)
+    }
+
+    static func protectionText(_ snapshot: TonoDiagnosticSnapshot, unconfirmed: Bool, unreadable: Bool) -> String {
+        if unconfirmed || unreadable {
+            return String(localized: "Protection status unconfirmed")
+        }
         let state: String
         if snapshot.disconnecting {
             state = String(localized: "Disconnecting…")

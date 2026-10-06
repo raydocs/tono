@@ -116,7 +116,7 @@ final class LocalizationCoverageTests: XCTestCase {
         // themselves, so the literal at the call site is never extracted.
         let helperNames = [
             "actionButton", "SettingRow", "SettingToggleRow", "SupportRow", "SupportCard",
-            "formField", "ActivityCard", "DashboardStatCard", "infoItem",
+            "formField", "ActivityCard", "DashboardStatCard", "infoItem", "SeaPageHeading",
         ]
         let argumentLabels = ["title:", "label:", "subtitle:"]
 

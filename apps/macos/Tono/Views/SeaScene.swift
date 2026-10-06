@@ -1,8 +1,8 @@
 import SwiftUI
 
 enum SeaAppearance {
+    /// Retained for pre-release preference diagnostics; production no longer reads it.
     static let enabledKey = "seaAppearanceEnabled"
-    static let defaultEnabled = true
     static let motionKey = "seaMotionMode"
     static let motionOptions = ["Auto", "Full", "Simple", "Static"]
 
@@ -12,7 +12,7 @@ enum SeaAppearance {
 }
 
 /// Render fixtures can exercise the real views without writing the device's
-/// AppStorage preference. Production leaves this nil and uses AppProfile.
+/// preferences. Production leaves this nil and always uses the sea appearance.
 private struct SeaAppearanceOverrideKey: EnvironmentKey {
     static let defaultValue: Bool? = nil
 }
@@ -35,15 +35,13 @@ extension EnvironmentValues {
 }
 
 /// The existing SwiftUI navigation and every existing page stay in place.
-/// This preference only makes their native controls legible on the night ground.
+/// The sea appearance makes their native controls legible on the night ground.
 struct SeaPageAppearance: ViewModifier {
-    @AppStorage(SeaAppearance.enabledKey, store: AppProfile.defaults)
-    private var enabled = SeaAppearance.defaultEnabled
-    @Environment(\.seaAppearanceOverride) private var previewOverride
+    @SeaAppearancePreference private var enabled
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if previewOverride ?? enabled {
+        if enabled {
             content.environment(\.colorScheme, .dark).preferredColorScheme(.dark).tint(SeaTheme.cool)
         } else {
             content

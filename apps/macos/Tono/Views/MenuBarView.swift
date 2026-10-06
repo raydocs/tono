@@ -10,6 +10,9 @@ struct MenuBarView: View {
     @Environment(AppState.self) private var appState
     @Environment(AccountSession.self) private var accountSession
     @Environment(\.openWindow) private var openWindow
+    @State private var routeProposal: RouteRecommendation?
+    @State private var showingRouteConfirmation = false
+    @State private var staleRouteProposal = false
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -38,6 +41,20 @@ struct MenuBarView: View {
             if seaAppearance { SeaSecondaryScene() }
         }
         .modifier(SeaPageAppearance())
+        .confirmationDialog(String(localized: "Connect using this route?"), isPresented: $showingRouteConfirmation, titleVisibility: .visible) {
+            Button("Connect") {
+                guard let routeProposal, routeProposal.owner == accountSession.user?.id,
+                      canAct else { staleRouteProposal = true; return }
+                staleRouteProposal = !appState.confirmRouteRecommendation(routeProposal)
+                self.routeProposal = nil
+            }
+            Button("Cancel", role: .cancel) { routeProposal = nil }
+        } message: {
+            if let routeProposal {
+                Text(nodeRouteTitle(for: routeProposal.name))
+                Text("This starts a connection only after confirmation. It never switches an already connected exit.")
+            }
+        }
     }
 
     static func clampedPopoverHeight(for screenHeight: CGFloat) -> CGFloat {
@@ -74,6 +91,13 @@ struct MenuBarView: View {
                     .foregroundStyle(seaAppearance ? SeaTheme.text : .secondary)
                     .lineLimit(seaAppearance ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
+                if seaAppearance, status.kind == .degraded {
+                    Text(appState.isRecoveringProtectedConnection
+                         ? String(localized: "Recovering protected connection…")
+                         : String(localized: "Exit not responding — checking"))
+                        .font(.system(size: 11)).foregroundStyle(SeaTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: 0)
         }
@@ -215,8 +239,9 @@ struct MenuBarView: View {
            owner == ManagedExitCatalogOwnership.currentAccount,
            accountSession.state == .ready {
             let catalog = appState.managedCatalogNodes
+            let recommendation = appState.routeRecommendation(owner: owner)
             let routes = SeaMenuPresentation.quickRoutes(catalog: catalog,
-                recommended: appState.routeRecommendation(owner: owner)?.name,
+                recommended: recommendation?.name,
                 favorites: appState.routePreferences.favorites(owner: owner, catalog: catalog),
                 selected: appState.activeNode?.name ?? appState.proxyService.activeNodeName)
             if !routes.isEmpty {
@@ -226,7 +251,14 @@ struct MenuBarView: View {
                         Button {
                             guard accountSession.user?.id == owner,
                                   owner == ManagedExitCatalogOwnership.currentAccount, canAct else { return }
-                            appState.selectNode(node.name)
+                            switch SeaMenuPresentation.action(for: node, recommendation: recommendation) {
+                            case .reviewRecommendation(let proposal):
+                                routeProposal = proposal
+                                staleRouteProposal = false
+                                showingRouteConfirmation = true
+                            case .selectManualNode(let name):
+                                appState.selectNode(name)
+                            }
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: "arrow.up.right").accessibilityHidden(true)
@@ -237,6 +269,11 @@ struct MenuBarView: View {
                         }
                         .buttonStyle(.plain).disabled(!canAct)
                         .accessibilityLabel(String(localized: "Connect using \(nodeRouteTitle(node))"))
+                    }
+                    if staleRouteProposal {
+                        Text("The account, catalog, route preference, or connection changed. Review a fresh recommendation.")
+                            .font(.system(size: 11)).foregroundStyle(SeaTheme.warm)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
