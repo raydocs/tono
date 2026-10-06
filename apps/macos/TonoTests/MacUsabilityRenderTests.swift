@@ -189,22 +189,35 @@ final class MacUsabilityRenderTests: XCTestCase {
         // A bounded presentation turn lets AppKit-backed controls finish
         // layout. It does not capture the screen or request recording access.
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
-        host.layoutSubtreeIfNeeded()
-        window.displayIfNeeded()
-        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-        host.cacheDisplay(in: host.bounds, to: bitmap)
         // The root intentionally has an opaque background. PNG byte count
         // alone previously accepted a fully transparent Dashboard image.
         // This catches missing compositor pixels, not semantic/layout errors;
         // those still require actual image inspection.
+        // The blocked minimum-height Dashboard adds a ScrollView over recovery
+        // controls. Give its AppKit-backed content bounded presentation turns
+        // before accepting the offscreen cache; never fill missing pixels.
+        var bitmap: NSBitmapImageRep?
         var minimumAlpha: CGFloat = 1
-        for y in stride(from: 0, to: bitmap.pixelsHigh, by: 8) {
-            for x in stride(from: 0, to: bitmap.pixelsWide, by: 8) {
-                minimumAlpha = min(minimumAlpha, bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0)
+        for attempt in 0..<5 {
+            if attempt > 0 {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.1))
             }
+            host.layoutSubtreeIfNeeded()
+            host.needsDisplay = true
+            window.displayIfNeeded()
+            let candidate = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: candidate)
+            bitmap = candidate
+            minimumAlpha = 1
+            for y in stride(from: 0, to: candidate.pixelsHigh, by: 8) {
+                for x in stride(from: 0, to: candidate.pixelsWide, by: 8) {
+                    minimumAlpha = min(minimumAlpha, candidate.colorAt(x: x, y: y)?.alphaComponent ?? 0)
+                }
+            }
+            if minimumAlpha == 1 { break }
         }
         XCTAssertEqual(minimumAlpha, 1, "\(name): incomplete offscreen capture, not native visual acceptance")
-        let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        let png = try XCTUnwrap(bitmap?.representation(using: .png, properties: [:]))
         XCTAssertGreaterThan(png.count, 5_000, "capture must contain rendered content, not an empty canvas")
         XCTAssertLessThan(png.count, 4 * 1_024 * 1_024)
         let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
