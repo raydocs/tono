@@ -451,7 +451,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         _ name: String, host: NSView, window: NSWindow, bitmap: NSBitmapImageRep,
         receipt: inout [String]
     ) -> Bool {
-        var queue: [any NSAccessibility] = [host]
+        var queue: [any NSAccessibilityProtocol] = [host]
         var visited = Set<ObjectIdentifier>()
         var matches: [String: NSRect] = [:]
         let retryLabel = name == "dashboard-sea-blocked-paused-recovery-minimum"
@@ -472,7 +472,7 @@ final class MacUsabilityRenderTests: XCTestCase {
                 matches[identifier] = element.accessibilityFrame
             }
             for child in element.accessibilityChildren ?? [] {
-                if let child = child as? any NSAccessibility { queue.append(child) }
+                if let child = child as? any NSAccessibilityProtocol { queue.append(child) }
             }
         }
         receipt.append("accessibilityNodes=\(visited.count) matched=\(matches.keys.sorted())")
