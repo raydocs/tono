@@ -42,6 +42,14 @@ pub(super) const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(200);
 /// for the tunnel adapter.
 const TUNNEL_ADAPTER_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
+/// A lookup that takes longer than this is not asked again in this ladder, which then runs
+/// on the fixed grid.
+const TUNNEL_ADAPTER_LOOKUP_TIMEOUT: Duration = Duration::from_millis(100);
+
+/// One start needs one early retry. An adapter that keeps appearing and vanishing gets no
+/// more than this many before the ladder is back on the fixed grid.
+const LOCK_EARLY_RETRIES: u32 = 3;
+
 /// Every other controller call keeps the original general budget: `/version` polls are bounded
 /// far tighter by `CONTROLLER_POLL_TIMEOUT`, and a cloud-policy `/dns/query` must not be able to
 /// spend an exit-probe-sized slice of the transaction.
@@ -420,8 +428,11 @@ where
     Present: std::future::Future<Output = bool>,
 {
     let mut last = String::from("no response");
+    let mut early_retries = LOCK_EARLY_RETRIES;
+    let mut lookup_answers = true;
     for attempt in 0..LOCK_ATTEMPTS {
-        let adapter_was_present = adapter_present().await;
+        let adapter_was_absent =
+            early_retries > 0 && !adapter_seen(&mut lookup_answers, &mut adapter_present).await;
         match lock().await {
             Ok(()) => return Ok(()),
             Err(err) => {
@@ -432,7 +443,9 @@ where
                 if attempt + 1 == LOCK_ATTEMPTS {
                     break;
                 }
-                wait_for_lock_retry(adapter_was_present, &mut adapter_present).await;
+                if wait_for_lock_retry(adapter_was_absent, &mut lookup_answers, &mut adapter_present).await {
+                    early_retries -= 1;
+                }
             }
         }
     }
@@ -440,25 +453,47 @@ where
 }
 
 /// WIN-LOCK-RETRY-GRID: the lock can only succeed once WinTUN is registered, so a refused
-/// attempt is repeated when the adapter appears instead of on the next 200 ms tick. An adapter
-/// that was already there before the refusal explains nothing: that retry keeps the whole
-/// interval, and so does one whose adapter never shows. The Service still resolves and
-/// validates the LUID itself; this only chooses when to ask.
+/// attempt is repeated when the adapter appears instead of on the next 200 ms tick, and the
+/// answer says whether it was. An adapter that was already there before the refusal explains
+/// nothing: that retry keeps the whole interval, and so does one whose adapter never shows.
+/// The Service still resolves and validates the LUID itself; this only chooses when to ask.
 async fn wait_for_lock_retry<Present: std::future::Future<Output = bool>>(
-    adapter_was_present: bool,
+    adapter_was_absent: bool,
+    lookup_answers: &mut bool,
     adapter_present: &mut impl FnMut() -> Present,
-) {
-    if adapter_was_present {
+) -> bool {
+    if !adapter_was_absent {
         tokio::time::sleep(LOCK_RETRY_INTERVAL).await;
-        return;
+        return false;
     }
     let deadline = tokio::time::Instant::now() + LOCK_RETRY_INTERVAL;
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() || adapter_present().await {
-            return;
+        if remaining.is_zero() {
+            return false;
+        }
+        if adapter_seen(lookup_answers, adapter_present).await {
+            return true;
         }
         tokio::time::sleep(remaining.min(TUNNEL_ADAPTER_POLL_INTERVAL)).await;
+    }
+}
+
+/// The App's own lookup must not hold the lock back: one that does not answer in time counts
+/// as "not seen" and is not asked again, so a stalled IP Helper costs one timeout per ladder.
+async fn adapter_seen<Present: std::future::Future<Output = bool>>(
+    lookup_answers: &mut bool,
+    adapter_present: &mut impl FnMut() -> Present,
+) -> bool {
+    if !*lookup_answers {
+        return false;
+    }
+    match tokio::time::timeout(TUNNEL_ADAPTER_LOOKUP_TIMEOUT, adapter_present()).await {
+        Ok(present) => present,
+        Err(_) => {
+            *lookup_answers = false;
+            false
+        }
     }
 }
 

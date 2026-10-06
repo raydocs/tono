@@ -99,7 +99,7 @@ pub(super) async fn tunnel_adapter_present() -> bool {
     #[cfg(windows)]
     {
         // An IP Helper call, kept off the async workers like the route lookups above. A worker
-        // that did not answer proves nothing, and the retry then waits its whole interval.
+        // that panicked proves nothing; the caller bounds one that does not return.
         tokio::task::spawn_blocking(tunnel_adapter_present_windows).await.unwrap_or(false)
     }
     #[cfg(not(windows))]

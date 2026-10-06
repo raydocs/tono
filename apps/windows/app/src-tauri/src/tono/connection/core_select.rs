@@ -30,7 +30,8 @@ pub(super) struct SingBoxImage {
 }
 
 /// A whole-file SHA-256 of a ~35 MB image, so it is measured on a blocking thread. A worker
-/// that did not finish authenticated nothing.
+/// that panicked or was cancelled authenticated nothing. The read itself has no deadline of
+/// its own, as before; the connect transaction's does apply.
 pub(super) async fn prove_sing_box_image(mihomo_path: &Path) -> SingBoxImage {
     let binary = sing_box_binary(mihomo_path);
     let measured = binary.clone();
