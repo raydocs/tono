@@ -1,6 +1,6 @@
 ## 2026-10-06 · services/ops-console npm dependencies to the newest supported versions
 - 归属：ops 工作（非 ship gate）；仅 `services/ops-console`。取代 dependabot PR #1382（CI 红）。
-- 来源：基线 main `c7d775176`；分支 `claude/deps-ops-console-20261006`，仅本地提交，未推送、未开 PR、未合 main。
+- 来源：基线 main `5a77c6b68`；分支 `claude/deps-ops-console-20261006`，PR #1420；未合 main。
 - 缺陷修复：无。
 - 新增/优化（package.json / package-lock.json，Node 24.21.0、npm 11）：
   - `cn` ^0.2.6 → ^0.4.0; `framer-motion` ^13.2.0 → ^14.0.0; `motion` ^13.2.0 → ^14.0.0; `lucide-react` ^1.44.0 → ^1.52.0; `tailwind-merge` ^3.3.1 → ^3.7.0; `geist` ^1.5.1 → ^1.7.2; `radix-ui` ^1.6.7 → ^1.7.0.
@@ -12,6 +12,7 @@
 - 工程与测试修正：
   - `eslint` 10 recommended adds `preserve-caught-error`: 6 `throw new Error(...)` inside `catch` now pass `{ cause: error }` (`src/lib/api-customer-actions.ts`, `src/lib/api.ts` x2, `src/lib/settings-legacy.ts`, `src/pages/customer/ExpiryDrawer.tsx`, `src/pages/settings/LedgerTable.tsx`). Messages are unchanged.
   - `eslint-plugin-react-hooks` 7 is the first line whose peer allows eslint 10, and its `recommended` preset adds the React Compiler rules. They report 21 existing findings (16 `react-hooks/set-state-in-effect`, 5 `react-hooks/refs`) that need component rewrites, not a small fix. `eslint.config.js` therefore lists exactly the two rules the v5 preset enforced (`rules-of-hooks` error, `exhaustive-deps` warn) instead of spreading `recommended.rules`. The 21 findings are open and not adopted; adopting the preset is a separate cleanup. Alternative if that is unwanted: hold `eslint`, `@eslint/js` and `eslint-plugin-react-hooks` on 9.x/5.x/6.x.
+  - `js-yaml` ^5.4.3 is now a declared devDependency. `tooling/scripts/tests/desktop-update-sign-workflow.test.mjs` loads it from this package's lockfile; it used to arrive only through eslint 9 (`@eslint/eslintrc`), which eslint 10 no longer installs. The first ci-gate on this PR (run 37517212598) failed exactly there: `services / ops-contract`, 111 of 112 tooling tests, `Cannot find module 'js-yaml'`. After declaring it: `node --test "tooling/scripts/tests/*.test.mjs"` 116 pass, 0 fail.
 - 验证（services/ops-console，Node 24.21.0）：
   - Baseline on the untouched tree: lint pass; typecheck pass (unchecked-index ratchet 197, baseline 219); `vitest run` 44 files / 345 tests pass; build pass, budgets green (initial JS 205.1 KB gzip, total 318.6 KB gzip).
   - After: `rm -rf node_modules && npm ci` pass; lint pass; typecheck pass (ratchet 197, baseline 219); `vitest run` 44 files / 345 tests pass; build pass, budgets green (initial JS 206.7 KB gzip of 400, total 321.9 KB gzip of 600).
