@@ -44,3 +44,30 @@
 - 候选/发布：无。生产 Worker 仍是 `574debe1`，#1415 与 #1419 尚未部署；冻结源码 `e28ca45c` 与 7501 候选不含本批。客户更新源未动。
 - 剩余限制：本批没有任何真机验证（Windows/WebView2 上的 Tauri 2.12 窗口行为与新外观、macOS 签名包）；留给下一轮 0.0.75 候选的设备验收。
   评审中 Opus 提示：若生产现有目录里有不满足 #1415 新检查的条目（如 hy2 缺 sni 或 port），之后整份 PUT 会被拒绝（只拒绝发布，不放宽保护）；部署前未查生产目录。
+
+### 2026-10-06 续记 · 尾段评审（bca5fa9a…94817af4）与控制面部署
+- 归属：AGENTS「Finish the work」第 1 条（已评审区间）与第 2 条（部署）；运维计划 §2 项 7（部署前导出）。不推进客户 SHIP_PLAN，客户更新源未动。
+- 来源：上一段止于 `bca5fa9a8`。尾段到 `94817af4f896c0b0f629506471a877a89a6dcc3a`，两个 merge commit：[#1425](https://github.com/raydocs/tono/pull/1425)
+  Windows 二级页标题字重（`f6ce4cca8`）、[#1427](https://github.com/raydocs/tono/pull/1427) 上面这份合批记录（`94817af4f`）。尾段只有两处 CSS 与文档，
+  `services/` 无改动。
+- 评审（jev-route `6d72c5af`，区间 `bca5fa9a8...94817af4f`，Opus 5.5 + Codex `gpt-6.1-sol`，互相核验）：PASSED，1 条 minor（opus:F1 与 codex:F1 是同一条）：
+  [Windows 细节打磨记录](2026-10-06-windows-ui-polish.md)第二轮续记的来源行仍写「未合 main」，本 PR 改为 `f6ce4cca8`（#1425）。
+  评审方没有 shell，列为缺失上下文的三项事后在 MacBook 上手动核对：`git show --remerge-diff` 对 `f6ce4cca8`、`94817af4f` 均为空；
+  `c7d77517`、`5a77c6b6`、`f26c57bd`、`4c98c8c1`、`bca5fa9a`、`92e004f6`、`f4d8d401` 都是 `origin/main` 的祖先；`f6ce4cca8` 的第二父是 #1425 的
+  head `afa2c70e2`，它在 `bca5fa9a8` 之上只有两个提交：CSS 修复 `c743d5b89` 与评审后补的一个仅文档提交（同一份记录加两行）。PR 评审
+  （`2045f1b9`、`dfb70314`）各自读的是哪个 head 没有逐一核对。
+- 已评审区间：`e28ca45ce...bca5fa9a8`（上文）加 `bca5fa9a8...94817af4f`，现止于 `94817af4f`。
+- 备份：部署前 `tooling/scripts/backup-control-plane-d1.sh --keep-local` 上传 R2 `backups/control-plane-d1/2026-10-06T20:51:27Z.sql.gz` 与 `.sha256`，
+  6331680 字节，SHA-256 `1032f5ae5185f20f617b1628ea1852d8c9ccfbb24282dcdd669a735b22f0087a`，本地 `shasum -a 256` 一致。没有生产恢复、临时写入或密钥变更。
+- 部署：维护者检出 `git pull --ff-only` 到 `main@94817af4f`（干净、与 origin/main 相等、`tono` profile），`npm run deploy` 退出 0，wrangler 4.148.0
+  （#1419 升级后的版本）。脚本实跑：typecheck 通过、44 个文件 / 1002 个 Worker 测试通过、策略签名契约、控制台构建、release-center check 通过；
+  两次迁移检查均「No migrations to apply」。API Worker version `561a77e6-af76-45a7-b943-ac71203fe090`（20:53:49 UTC，100%，tag `main-94817af4f896`），
+  Admin `c31d9002-bf2a-436b-b716-30578a433dfe`（20:53:58 UTC，100%，同 tag）。相对上一个生产版本 `574debe1`，Worker 源码变化只有 #1415（共享后台
+  `PUT exit-catalog` 与 relist 的客户端准入检查）；#1419 只动开发依赖与 lockfile。
+- 生产核对：`/api/v1/system/version` 返回完整 `94817af4f896c0b0f629506471a877a89a6dcc3a`；`/api/v1/system/pulse` 为 `ok:true`、`cronAgeSec:197`、同一 SHA；
+  匿名 `/ops2/` 仍为 401。
+- 候选/发布：无客户端包、客户发布或更新源变更。
+- 剩余限制：生产现有目录没有对照 #1415 的新检查核对（`managed_exit_catalog` 在 D1 里是密文，本会话没有后台令牌）。新检查只在后台整份 PUT 与
+  relist 时执行，不在客户端取目录的路径上；若现有条目不满足（如 hy2 缺 `sni` 或 `port`），下一次发布目录会收到 400 `INVALID_CATALOG` 并列出条目，
+  已发布的目录与保护不受影响。Access 登录后的后台页面没有人工看过。回滚：分别 `npx wrangler rollback` 到 API
+  `94eae10a-97b0-474c-b3e5-e73cf004efc6` 与 Admin `b9f5153d-21fc-433b-bf2f-784ba5b8e920`（均为 `main-574debe1cc5e`）；两个要一起回。
