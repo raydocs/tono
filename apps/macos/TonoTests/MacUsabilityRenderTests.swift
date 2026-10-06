@@ -56,7 +56,6 @@ final class MacUsabilityRenderTests: XCTestCase {
             }
             .modifier(SeaPageAppearance())
             .environment(\.seaAppearanceOverride, true)
-            .environment(\.accessibilityReduceMotion, true)
             .environment(app)
             .environment(account)
             .environmentObject(AppUpdater(enabled: false))
@@ -144,7 +143,6 @@ final class MacUsabilityRenderTests: XCTestCase {
             }
             .modifier(SeaPageAppearance())
             .environment(\.seaAppearanceOverride, sea)
-            .environment(\.accessibilityReduceMotion, true)
             .environment(app)
             .environment(account)
         }
