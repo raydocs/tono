@@ -4,6 +4,21 @@ import XCTest
 
 @MainActor
 final class SeaAppearanceTests: XCTestCase {
+    func testProductionSchemeIgnoresStoredThemeWithoutOverwritingIt() {
+        let defaults = AppProfile.defaults
+        let previous = defaults.object(forKey: SettingsKey.themeMode)
+        defer {
+            if let previous { defaults.set(previous, forKey: SettingsKey.themeMode) }
+            else { defaults.removeObject(forKey: SettingsKey.themeMode) }
+        }
+        defaults.set("Light", forKey: SettingsKey.themeMode)
+        XCTAssertEqual(TonoApp.preferredScheme, .dark)
+        XCTAssertEqual(defaults.string(forKey: SettingsKey.themeMode), "Light")
+        defaults.set("Dark", forKey: SettingsKey.themeMode)
+        XCTAssertEqual(TonoApp.preferredScheme, .dark)
+        XCTAssertEqual(defaults.string(forKey: SettingsKey.themeMode), "Dark")
+    }
+
     func testConnectionShortcutMappingRetainsToggleCancelAndDisconnectGuard() {
         XCTAssertEqual(ConnectPillKeyboardShortcut(isConnecting: false, isDisconnecting: false).key,
                        KeyEquivalent("k"))

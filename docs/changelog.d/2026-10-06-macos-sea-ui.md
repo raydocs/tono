@@ -61,3 +61,6 @@
 - 2026-10-06 其余minor：菜单栏degraded保留Connected会话标题但补已有出口检查/恢复说明，新增一个原生PNG回归；Activity展开连接计数实时分支显式String(localized:)沿用既有%lld中文资源。两项新产品分片in-PR；重复缺中文/动效问题归并既有R3条目，四档两行为仍open。所有新增原生/单元回归本机NOTRUN，等待本轮唯一最终head hosted，不冒充真机/按键/弹窗事件验收。
 
 - 2026-10-06 页首取消补全：重读移走重复 Cancel 后的初始连接态，Dashboard 首次出现若已在 connecting，补记 connectingSince（仍1.2s保守宽限），避免等待不到 onChange 而永远不能取消；不改变 seaToggleConnection 原处理器或特权释放。此为同轮 source 集成修正，新最终 head 替代2aff，未将其在途CI称通过。
+
+- 2026-10-06 最后单点 minor：协作增量评审 1e556431 覆盖 f2bf4149..155815e7，报告 PASSED/无阻断（不是 owner 验收）。opus:F2 确认移除外观开关后旧 Theme 行不可达，主窗口和 MenuBarExtra 却仍读取已存 themeMode；现删除应用入口的该读取，两处共用固定 dark 海景 scheme，不删除或改写旧值，旧夹具设置行保留待专门清理。新增一个实际 AppProfile Light/Dark 存值不影响生产 scheme 且值不变的 XCTest，MacBook 未运行；新最终 head hosted 仍待验证。四档动效 I-UI0075-R3-O-F6 保持 open，无其他源码续改。
+- 2026-10-06 评审证据限制：菜单 proposal 回归没有运行旧代码红灯，不声称它证明旧实现必失败；真实 MenuBarExtra 确认弹窗/焦点/按键/AX 和 owner 实机仍未验。155815e7 的 hosted 原始日志为 622 tests/1 skipped/0 failures、13 原生窗口合同通过；该结果是主题单点修复前的基线，不冒称新 head CI 已绿。

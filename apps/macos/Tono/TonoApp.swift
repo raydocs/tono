@@ -4,7 +4,6 @@ import AppKit
 @main
 struct TonoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @AppStorage(SettingsKey.themeMode, store: AppProfile.defaults) private var themeMode = "Adaptive"
     @AppStorage(SettingsKey.interfaceLanguage, store: AppProfile.defaults) private var interfaceLanguage = "Auto"
     @AppStorage(SettingsKey.introSeen, store: AppProfile.defaults) private var introSeen = false
     @StateObject private var updater: AppUpdater
@@ -124,13 +123,7 @@ struct TonoApp: App {
         }
     }
 
-    private var preferredScheme: ColorScheme? {
-        switch themeMode {
-        case "Light": return .light
-        case "Dark": return .dark
-        default: return nil
-        }
-    }
+    static let preferredScheme: ColorScheme = .dark
 
     private var appLocale: Locale {
         switch interfaceLanguage {
@@ -197,7 +190,7 @@ struct TonoApp: App {
                     await accountSession.restore()
                 }
             }
-            .preferredColorScheme(preferredScheme)
+            .preferredColorScheme(Self.preferredScheme)
             .environment(\.locale, appLocale)
             .tonoToastHost()
             .onOpenURL { url in
@@ -221,7 +214,7 @@ struct TonoApp: App {
                 .environment(accountSession)
                 .environmentObject(updater)
                 .defaultAppStorage(AppProfile.defaults)
-                .preferredColorScheme(preferredScheme)
+                .preferredColorScheme(Self.preferredScheme)
                 .environment(\.locale, appLocale)
         } label: {
             // Status items must be template images so AppKit can tint them
