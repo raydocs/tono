@@ -497,7 +497,7 @@ private final class SeaSceneLayers {
                 ease: CAMediaTimingFunction(name: .linear), delay: handoffDelay)
         }
         for tier in 0..<3 {
-            change("stars-\(tier)", "opacity", p.stars, duration: animated && (phase == .dawn || phase == .day) ? 2 : skyTime,
+            change("stars-\(tier)", "opacity", p.stars, duration: animated ? (phase == .dawn || phase == .day ? 2 : phase == .dusk || phase == .blocked ? 2.6 : skyTime) : 0,
                 ease: skyEase, delay: animated && (phase == .dawn || phase == .day) ? Double(tier) * 0.3 : 0)
         }
         change("sun-track", "position.y", Double(sky.bounds.height - 145 * unit) + p.offset * Double(unit),
@@ -536,7 +536,7 @@ private final class SeaSceneLayers {
         opacity("column-day", p.day, dayTime)
         opacity("horizon", p.horizon, skyTime)
         opacity("moon", phase == .night ? 1 : 0, animated ? (phase == .night ? 3.4 : 0.5) : 0)
-        change("moon", "transform.translation.y", phase == .night ? 0 : Double(30 * unit), duration: animated ? 0.5 : 0, ease: ease)
+        change("moon", "transform.translation.y", phase == .night ? 0 : Double(30 * unit), duration: animated ? (phase == .night ? 4.2 : 0.5) : 0, ease: ease)
         opacity("moon-path", phase == .night ? 0.34 : 0, animated ? (phase == .night ? 3.4 : 0.5) : 0)
         opacity("afterglow", phase == .night ? 0 : 0.5, animated && phase == .night ? 6.6 : skyTime)
         if phase == .day && lastPhase != nil && lastPhase != .day && animated { arrival() }
@@ -561,13 +561,25 @@ private final class SeaSceneLayers {
         }
         for tone in ["sun", "moon"] { named[tone + "-glints-far"]?.isHidden = quality != .full }
         for (target, key, animation, fullOnly) in loops {
-            let phaseAllowed = key != "meteor" && !key.hasPrefix("moon-") && key != "halo-breathe"
-                || key == "meteor" && phase == .night || key.hasPrefix("moon-") && phase == .night || key == "halo-breathe" && phase == .dawn
-            let enabled = decorations && quality != .static && (!fullOnly || quality == .full) && phaseAllowed
-            if !enabled { target.removeAnimation(forKey: key) }
-            else if rebuild || target.animation(forKey: key) == nil {
+            let moonLoop = key.hasPrefix("moon-") || target.name?.hasPrefix("moon-") == true
+            let phaseAllowed = key == "meteor" || moonLoop ? phase == .night
+                : key == "halo-breathe" ? phase == .dawn : true
+            // Hold phase-specific loop clocks independently of their parent's exit fade.
+            if phaseAllowed && target.speed == 0 {
+                let held = target.timeOffset
+                target.speed = 1
+                target.timeOffset = 0
+                target.beginTime = 0
+                target.beginTime = target.convertTime(CACurrentMediaTime(), from: nil) - held
+            } else if !phaseAllowed && target.speed != 0 {
+                target.timeOffset = target.convertTime(CACurrentMediaTime(), from: nil)
+                target.speed = 0
+            }
+            let enabled = decorations && quality != .static && (!fullOnly || quality == .full)
+            if !enabled || key == "meteor" && !phaseAllowed { target.removeAnimation(forKey: key) }
+            else if phaseAllowed && (rebuild || target.animation(forKey: key) == nil) {
                 let copy = animation.copy() as! CAAnimation
-                if key == "meteor" { copy.beginTime = root.convertTime(CACurrentMediaTime(), from: nil) + 55 }
+                if key == "meteor" { copy.beginTime = target.convertTime(CACurrentMediaTime(), from: nil) + 55 }
                 target.add(copy, forKey: key)
             }
         }

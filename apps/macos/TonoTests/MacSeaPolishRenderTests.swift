@@ -185,9 +185,8 @@ final class MacSeaPolishRenderTests: XCTestCase {
             .environmentObject(AppUpdater(enabled: false))
             .environment(\.seaAppearanceOverride, true)
             .environment(\.seaDecorationsOverride, !reduceTransparency && !highContrast)
-            .environment(\.accessibilityReduceMotion, reduceMotion)
-            .environment(\.accessibilityReduceTransparency, reduceTransparency)
-            .environment(\.colorSchemeContrast, highContrast ? .increased : .standard)
+            .environment(\.seaDisplayOverride, SeaDisplayOptions(reduceMotion: reduceMotion,
+                reduceTransparency: reduceTransparency, contrast: highContrast ? .increased : .standard))
             .environment(\.colorScheme, .dark)
             .environment(\.locale, Locale(identifier: Locale.preferredLanguages.first ?? "en"))
         let window = NSWindow(contentRect: CGRect(origin: .zero, size: size),
@@ -199,6 +198,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
         window.isReleasedWhenClosed = false
         window.backgroundColor = NSColor(srgbRed: 10 / 255, green: 10 / 255, blue: 18 / 255, alpha: 1)
         window.isOpaque = true
+        window.hasShadow = false
         window.appearance = NSAppearance(named: .darkAqua)
         let host = NSHostingView(rootView: root)
         window.contentView = host
@@ -248,6 +248,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
         config.width = Int(window.frame.width)
         config.height = Int(window.frame.height)
         config.showsCursor = false
+        config.ignoreShadowsSingleWindow = true
         let image: CGImage = try await nativeWindowRequest("polish exact window image", timeout: 10) { complete in
             SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) { image, error in
                 if let error { complete(.failure(error)) }
@@ -261,7 +262,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
         try data.write(to: folder.appendingPathComponent(name + ".png"), options: .atomic)
         let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
         attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
-        let receipt = "source=first own-PID native window PNG; windowID=\(expectedID) ownerPID=\(pid) frame=\(target.frame) dimensions=\(image.width)x\(image.height) language=\(Locale.preferredLanguages) lowPower=\(ProcessInfo.processInfo.isLowPowerModeEnabled)\n"
+        let receipt = "source=first own-PID native window PNG; windowID=\(expectedID) ownerPID=\(pid) frame=\(target.frame) dimensions=\(image.width)x\(image.height) language=\(Locale.preferredLanguages) lowPower=\(ProcessInfo.processInfo.isLowPowerModeEnabled) accessibilitySource=shared-presentation-inputs-not-host-OS-mutation\n"
         try receipt.write(to: folder.appendingPathComponent(name + ".txt"), atomically: true, encoding: .utf8)
         return image
     }

@@ -61,8 +61,9 @@ struct SeaPageAppearance: ViewModifier {
 /// A quiet, non-status-bearing horizon under the native secondary pages.
 /// It never implies a confirmed connection; the dashboard alone owns that.
 struct SeaSecondaryScene: View {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceTransparency: Bool { displayPreferences.reduceTransparency }
+    private var contrast: ColorSchemeContrast { displayPreferences.contrast }
 
     var body: some View {
         GeometryReader { geometry in
@@ -117,9 +118,10 @@ struct SeaScene: View {
     var progress: Double? = nil
     var active = true
     @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults) private var motionPreference = "Auto"
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceTransparency: Bool { displayPreferences.reduceTransparency }
+    private var contrast: ColorSchemeContrast { displayPreferences.contrast }
     @Environment(\.seaDecorationsOverride) private var decorationsOverride
 
     var body: some View {

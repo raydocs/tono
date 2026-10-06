@@ -4,7 +4,8 @@ struct SidebarView: View {
     @SeaAppearancePreference private var seaAppearance
     @Binding var selectedPage: AppPage
     @AppStorage(SettingsKey.logsEnabled) private var logsEnabled = true
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
     @Environment(\.colorScheme) private var colorScheme
     @State private var hoveredPage: AppPage?
     @Namespace private var navNS

@@ -4,7 +4,8 @@ import SwiftUI
 struct DashboardView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
     @Environment(\.seaSceneInWindow) private var sceneInWindow
     @SeaAppearancePreference private var showsSeaAppearance
     @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults)
@@ -322,7 +323,8 @@ struct DashboardView: View {
                 if let name = appState.activeNode?.name ?? appState.proxyService.activeNodeName {
                     Text(nodeRouteTitle(for: name)).lineLimit(1)
                     let runtime = appState.proxyService.node(named: name)
-                    if runtime?.lastTestFailed != true, let latency = runtime?.latency, latency > 0 {
+                    if let latency = SeaHomePresentation.freshExitDelay(appState.proxyService.lastExitSample,
+                        for: name, failed: runtime?.lastTestFailed == true) {
                         Text("\(latency) ms").foregroundStyle(SeaTheme.muted).monospacedDigit()
                     }
                 } else { Text("No server selected") }
@@ -677,7 +679,8 @@ private struct ConnectionProgressCard: View {
     @Bindable var appState: AppState
     var primaryActionInHeader = false
     var homePresentation = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in

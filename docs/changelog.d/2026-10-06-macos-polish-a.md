@@ -12,3 +12,7 @@
 - head `0685f5d1` / ci-gate [37524855860](https://github.com/raydocs/tono/actions/runs/37524855860)：policy-tests 的原生编译失败，两处新 renderer 编译问题（CGFloat→NSNumber 的停止点、像素亮度表达式类型推断超时），不是产品运行时缺陷。拆分/显式桥接修正后重跑同一入口；原失败日志保留，不记为通过。
 - 同轮修正证据夹具输出目录（以 #filePath 锚定 apps/macos）、Full 水面相对采样时刻；旧 Restore 标签合约跟随新增「Restore normal internet」，没有放宽 OCR/像素断言。补读 Windows 源，保留其 3400/4400/5600ms 日落 day/path/light 时长与 night 曲线，均不是新增延迟。
 - 新增只读 PNG 分析脚本，输出全部源像素亮度、相邻差值、严格无容差单调判定、水面/天空差分与标记过的图像条带；不修饰原生源 PNG。`python3 -m py_compile tooling/scripts/analyze-mac-sea-polish.py` exit0；实际图像分析未执行。
+- 呈现内续修：月亮/光晕/流星的相位循环单独暂停，父层仍能完成退场；保留失败星点 2600ms、月亮回场 4200ms 时长，仍不新增 moon 延迟。增加实际 CALayer Full > Lite > Static(0) 循环回归；整窗证据明确排除窗口外阴影，不裁切图像。
+- 新增 provisional 决策 070：首页只显示当前线路最近 120s 的成功带时间实测（对应现有两分钟刷新），未知/失败/缓存无时间不补数字；不改变测量器或处理器。en/zh 新资源 `%lld ms` → `%lld 毫秒`。这些续修尚待最终 head 原生验证。
+
+- 第二轮 a07fbfb1 / [37525498343](https://github.com/raydocs/tono/actions/runs/37525498343)：Release app 构建、policy-tests、privileged-tests 已通过；XCTest 编译失败，因为 SwiftUI 的原生 accessibility/contrast 环境是只读。改为场景/表面的共享呈现输入，生产从 OS 环境读取、预览/夹具显式注入同一值；不写系统辅助功能偏好、不伪造 OS 标志，也不绕过动态/透明/对比度的真实呈现分支。夹具证明呈现回退，尚不证明 OS 偏好通知或真机设置路径。

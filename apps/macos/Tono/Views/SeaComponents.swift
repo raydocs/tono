@@ -28,8 +28,9 @@ enum SeaTheme {
 /// Secondary pages use an opaque/static panel, not compositor-backed glass.
 struct SeaPanelSurface: ViewModifier {
     @SeaAppearancePreference private var enabled
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceTransparency: Bool { displayPreferences.reduceTransparency }
+    private var contrast: ColorSchemeContrast { displayPreferences.contrast }
 
     @ViewBuilder
     func body(content: Content) -> some View {

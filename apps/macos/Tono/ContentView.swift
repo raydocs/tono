@@ -2,7 +2,8 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
     @SeaAppearancePreference private var seaAppearance
     @State private var columnVisibility: NavigationSplitViewVisibility = .doubleColumn
 

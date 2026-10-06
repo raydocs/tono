@@ -38,4 +38,16 @@ final class SeaSceneParametersTests: XCTestCase {
         probe.frame(at: 200)
         XCTAssertEqual(probe.elapsed, elapsed, "there is no lasting per-frame sample after the bounded probe")
     }
+
+    func testHomeLatencyOnlyShowsRecentMatchingSuccessfulSamples() {
+        let now = Date(timeIntervalSince1970: 1000)
+        let sample = (node: "Tokyo", ms: 83, at: now.addingTimeInterval(-30))
+        XCTAssertEqual(SeaHomePresentation.freshExitDelay(sample, for: "Tokyo", failed: false, now: now), 83)
+        XCTAssertNil(SeaHomePresentation.freshExitDelay(sample, for: "Seattle", failed: false, now: now))
+        XCTAssertNil(SeaHomePresentation.freshExitDelay(sample, for: "Tokyo", failed: true, now: now))
+        XCTAssertNil(SeaHomePresentation.freshExitDelay(sample, for: "Tokyo", failed: false, now: now.addingTimeInterval(200)))
+        XCTAssertNil(SeaHomePresentation.freshExitDelay(sample, for: "Tokyo", failed: false, now: now.addingTimeInterval(-40)))
+        XCTAssertNil(SeaHomePresentation.freshExitDelay(nil, for: "Tokyo", failed: false, now: now))
+    }
+
 }

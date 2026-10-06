@@ -3,9 +3,10 @@ import SwiftUI
 /// Home-only action treatment; page control unification belongs to polish B.
 struct SeaHomePillStyle: ButtonStyle {
     let primary: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
+    private var reduceTransparency: Bool { displayPreferences.reduceTransparency }
+    private var contrast: ColorSchemeContrast { displayPreferences.contrast }
     @Environment(\.isEnabled) private var enabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -59,5 +60,17 @@ struct SeaHomeActionShortcut: ViewModifier {
         if ownsShortcut {
             content.modifier(ConnectPillKeyboardShortcut(isConnecting: false, isDisconnecting: false))
         } else { content }
+    }
+}
+
+/// The existing selected-exit timer samples every 120 s. Untimed catalog/cache
+/// numbers are not fresh readings and never become a Home measurement.
+enum SeaHomePresentation {
+    static func freshExitDelay(_ sample: (node: String, ms: Int, at: Date)?,
+                               for name: String, failed: Bool, now: Date = Date()) -> Int? {
+        guard !failed, let sample, sample.ms > 0,
+              ConfigParser.extractFlag(from: sample.node).cleanName == ConfigParser.extractFlag(from: name).cleanName,
+              (0...120).contains(now.timeIntervalSince(sample.at)) else { return nil }
+        return sample.ms
     }
 }
