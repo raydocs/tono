@@ -32,6 +32,7 @@ export const customerCopy = {
     never_used: (n: number) => `${n} 位还没用起来`,
   },
   customerPlanNotWired: '服务使用、最低版本和到期还没有一位客户填过，先不占位置',
+  customerOverview: '用量与到期概览',
   platform: {
     macos: 'macOS',
     windows: 'Windows',

@@ -3,14 +3,17 @@ import type { FunnelStage } from '@contract';
 import type { TableSort } from '@/components/ops/DataTable';
 import type { CustomerFilter } from '@/lib/customers';
 
-type View = { filter: CustomerFilter; stage: FunnelStage | null; sort: TableSort; top: number; left: number };
+type View = { filter: CustomerFilter; stage: FunnelStage | null; sort: TableSort; query: string; querySource: string | null; top: number; left: number };
 // Only view preferences, in tab memory. No selection or confirmation intent.
 const views = new Map<string, View>();
-const initial = (): View => ({ filter: null, stage: null, sort: { id: null, direction: 'asc' }, top: 0, left: 0 });
+const initial = (): View => ({ filter: null, stage: null, sort: { id: null, direction: 'asc' }, query: '', querySource: null, top: 0, left: 0 });
 
 /** The caller is keyed by platform/bucket so each URL context is independent. */
-export function useCustomerView(key: string, ready: boolean) {
-  const [view, setView] = useState(() => views.get(key) ?? initial());
+export function useCustomerView(key: string, ready: boolean, query: string | null = null) {
+  const [view, setView] = useState(() => {
+    const saved = views.get(key) ?? initial();
+    return query === null || saved.querySource === query ? saved : { ...saved, query, querySource: query };
+  });
   const latest = useRef(view);
   const container = useRef<HTMLDivElement>(null);
   const restored = useRef(false);

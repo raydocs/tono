@@ -95,10 +95,9 @@ export default function CustomersPage({
   query?: string | null;
 }) {
   const privacy = usePrivacy();
-  const context = useCustomerView(`${platform ?? ''}/${bucket ?? ''}`, customers.status === 'ready');
-  const { filter, stage, sort } = context.view;
+  const context = useCustomerView(`${platform ?? ''}/${bucket ?? ''}`, customers.status === 'ready', initialQuery);
+  const { filter, stage, sort, query } = context.view;
   const [onboarding, setOnboarding] = useState(false);
-  const [query, setQuery] = useState(initialQuery ?? '');
 
   const all = useMemo(
     () => (customers.status === 'ready' ? customers.data : []),
@@ -201,7 +200,7 @@ export default function CustomersPage({
   return (
     <div ref={context.container} className="page-wrap customers-page customers-wide">
       <label className="flex items-center gap-3 text-fine">{copy.traffic.search}
-        <input type="search" className="min-w-0 max-w-sm flex-1 rounded-md border border-[var(--hairline)] bg-[var(--surface)] px-3 py-2 text-body" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <input type="search" className="min-w-0 max-w-sm flex-1 rounded-md border border-[var(--hairline)] bg-[var(--surface)] px-3 py-2 text-body" value={query} onChange={(event) => context.change({ query: event.target.value })} />
       </label>
       {privacy.privacy ? <p className="text-fine" role="status">{copy.privacyCustomerSearchNotice}</p> : null}
       <div className="page-head">
@@ -286,16 +285,19 @@ export default function CustomersPage({
         )}
       </div>
 
-      <div className="customers-board">
-        <ListBand rows={customers.status === 'ready' ? all : null} />
-        <ListCharts
-          rows={all}
-          state={customers.status === 'ready' ? 'ready' : customers.status}
-          asOfSec={customers.status === 'ready' ? customers.fetchedAt : null}
-          mask={privacy.email}
-          onRetry={customers.reload}
-        />
-      </div>
+      <details className="customers-overview">
+        <summary className="text-body">{copy.customerOverview}</summary>
+        <div className="customers-board">
+          <ListBand rows={customers.status === 'ready' ? all : null} />
+          <ListCharts
+            rows={all}
+            state={customers.status === 'ready' ? 'ready' : customers.status}
+            asOfSec={customers.status === 'ready' ? customers.fetchedAt : null}
+            mask={privacy.email}
+            onRetry={customers.reload}
+          />
+        </div>
+      </details>
 
       {/* Between the filters and the table, because it is the second question
           this page answers and the first one an operator asks in the morning:

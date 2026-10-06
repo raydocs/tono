@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { NodeAcceptanceDto, NodeDetailDto } from '@contract';
+import type { JobDto, NodeAcceptanceDto, NodeDetailDto } from '@contract';
 import { Action, ActionRow } from '@/components/ops/Action';
 import { copy } from '@/copy/copy';
 import { nodeApi } from '@/lib/api-node';
@@ -34,12 +34,14 @@ export function ActionRail({
   node,
   sheet,
   onChanged,
+  onJobQueued,
   className,
 }: {
   node: NodeDetailDto;
   /** The sale-readiness sheet the page already fetched; relisting is gated on it. */
   sheet: Resource<NodeAcceptanceDto>;
   onChanged: () => void;
+  onJobQueued: (job: JobDto) => void;
   className?: string;
 }) {
   const [open, setOpen] = useState<NodeActionSpec | null>(null);
@@ -91,12 +93,12 @@ export function ActionRail({
         });
         setDone(copy.nodeActionRetired(node.name));
       } else {
-        await nodeApi.enqueueJob(node.name, {
+        const job = await nodeApi.enqueueJob(node.name, {
           type: open.jobType,
           confirmName: open.destructive ? node.name : undefined,
           override: open.override === true ? true : undefined,
         });
-        setDone(copy.nodeActionQueued(open.label));
+        onJobQueued(job);
       }
       setOpen(null);
       onChanged();

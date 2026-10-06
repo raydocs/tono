@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Empty } from '@/components/ops/Empty';
 import { copy } from '@/copy/copy';
-import type { CustomerSummaryDto } from '@contract';
+import type { CustomerSummaryDto, JobDto } from '@contract';
 import { ledgerApi } from '@/lib/api-ledger';
 import { nodeApi } from '@/lib/api-node';
 import { sloApi } from '@/lib/api-slo';
@@ -21,6 +21,7 @@ import { NodeErrors } from './node/Errors';
 import { NodeHeader } from './node/Header';
 import { NodeHistory, NodeReceipts } from './node/History';
 import { NodeJobs } from './node/Jobs';
+import { NodeJobReceipt } from './node/JobReceipt';
 import { NodeLoad } from './node/Load';
 import { NodeOccupants } from './node/Occupants';
 import { NodePaths } from './node/Paths';
@@ -53,6 +54,7 @@ export default function NodeDetailPage({ name, customers, fleet }: {
   const privacy = usePrivacy();
   const [editing, setEditing] = useState(false);
   const [range, setRange] = useState<QualityRange>('7d');
+  const [startedJobs, setStartedJobs] = useState<JobDto[]>([]);
   // The week feeds the headline tiles whatever the chart shows; the month is
   // only fetched once somebody asks for it.
   const week = useResource(`node-slo-7d-${name}`, (signal) => sloApi.get({ node: name, range: '7d' }, signal));
@@ -92,6 +94,7 @@ export default function NodeDetailPage({ name, customers, fleet }: {
         <NodeHeader
           node={node}
           sheet={acceptance}
+          onJobQueued={(job) => setStartedJobs((current) => [job, ...current.filter((row) => row.id !== job.id)])}
           onChanged={() => {
             detail.reload();
             acceptance.reload();
@@ -101,6 +104,16 @@ export default function NodeDetailPage({ name, customers, fleet }: {
           }}
         />
       </section>
+
+      {startedJobs.filter((job) => job.subjectType === 'node' && job.subjectId === name).map((job) => (
+        <NodeJobReceipt key={job.id} nodeName={name} initialJob={job} onChanged={() => {
+          detail.reload();
+          acceptance.reload();
+          jobs.reload();
+          history.reload();
+          receipts.reload();
+        }} />
+      ))}
 
       <NodeAcceptance sheet={acceptance} lifecycle={node.lifecycle} />
 
