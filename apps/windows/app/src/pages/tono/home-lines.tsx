@@ -33,6 +33,7 @@ export const HomeLines = ({
   open,
   anchor,
   root,
+  avoid,
   close,
   status,
   refreshStatus,
@@ -40,6 +41,8 @@ export const HomeLines = ({
   open: boolean
   anchor: RefObject<HTMLButtonElement | null>
   root: RefObject<HTMLDivElement | null>
+  /** Block the panel must never cover when it flips upward (the title sentence). */
+  avoid?: RefObject<HTMLElement | null>
   close: () => void
   status: TonoStatus | undefined
   refreshStatus: () => Promise<unknown>
@@ -105,9 +108,14 @@ export const HomeLines = ({
       const bounds = root.current?.getBoundingClientRect()
       const chip = anchor.current?.getBoundingClientRect()
       if (!bounds || !chip) return
-      // Prefer downward scrolling; flip only when less than 200px remain below.
+      // Prefer downward scrolling; flip only when less than 200px remain below
+      // and the room above the chip (under the title sentence) is larger.
       const below = bounds.bottom - chip.bottom - 16
-      const above = chip.top - bounds.top - 16
+      const ceiling = Math.max(
+        bounds.top,
+        avoid?.current?.getBoundingClientRect().bottom ?? bounds.top,
+      )
+      const above = chip.top - ceiling - 16
       const down = below >= 200 || above <= below
       const maxHeight = Math.max(72, Math.min(320, down ? below : above))
       const height = Math.min(panelRef.current?.scrollHeight ?? 260, maxHeight)
@@ -127,13 +135,14 @@ export const HomeLines = ({
     const observer = new ResizeObserver(place)
     if (root.current) observer.observe(root.current)
     if (anchor.current) observer.observe(anchor.current)
+    if (avoid?.current) observer.observe(avoid.current)
     if (panelRef.current) observer.observe(panelRef.current)
     window.addEventListener('resize', place)
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', place)
     }
-  }, [open, anchor, root])
+  }, [open, anchor, root, avoid])
   useHomeDialog(open, panelRef, anchor, close)
 
   const select = useLockFn(async (name: string) => {

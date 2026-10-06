@@ -119,6 +119,7 @@ export const SeaHome = ({
   const rootRef = useRef<HTMLDivElement>(null)
   const attentionRef = useRef<HTMLDivElement>(null)
   const actionsRef = useRef<HTMLDivElement>(null)
+  const sentenceRef = useRef<HTMLParagraphElement>(null)
   const columnRef = useRef<HTMLDivElement>(null)
   const [sheetHeight, setSheetHeight] = useState(240)
   const primaryRef = useRef<HTMLButtonElement>(null)
@@ -361,7 +362,11 @@ export const SeaHome = ({
         >
           <TextSwap text={title} />
         </h1>
-        <p className="tono-home__sentence" data-testid="tono-home-sentence">
+        <p
+          ref={sentenceRef}
+          className="tono-home__sentence"
+          data-testid="tono-home-sentence"
+        >
           <TextSwap
             text={sentence}
             transitionKey={`${state}:${phase}:${state === 'connecting' ? `${status?.stage}:${elapsed >= HOME_CONNECT_TIMES.slow}` : ''}`}
@@ -513,6 +518,7 @@ export const SeaHome = ({
           open={linesOpen}
           anchor={chipRef}
           root={rootRef}
+          avoid={sentenceRef}
           close={closeLines}
           status={status}
           refreshStatus={refreshStatus}

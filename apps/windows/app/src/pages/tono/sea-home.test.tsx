@@ -495,6 +495,32 @@ it('removes the trailing stage ellipsis before the slow sentence suffix', () => 
   ).not.toMatch(/(?:\.\.\.|…)/)
 })
 
+it('keeps the line picker below the chip instead of covering the title when neither side has room', () => {
+  // 860×540 English: the sentence wraps to three lines, the chip bottom sits at 399,
+  // 125px remain below and only 45px between the sentence and the chip above.
+  const original = HTMLElement.prototype.getBoundingClientRect
+  const geometry = vi
+    .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains('tono-home'))
+        return new DOMRect(0, 0, 860, 540)
+      if (this.classList.contains('tono-home__chip'))
+        return new DOMRect(163, 351, 206, 48)
+      if (this.classList.contains('tono-home__sentence'))
+        return new DOMRect(56, 195, 400, 103)
+      return original.call(this)
+    })
+  try {
+    render(view())
+    fireEvent.click(screen.getByTestId('tono-home-line-chip'))
+    const panel = screen.getByRole('dialog', { name: 'Switch line' })
+    expect(panel.style.top).toBe('407px')
+    expect(panel.style.maxHeight).toBe('125px')
+  } finally {
+    geometry.mockRestore()
+  }
+})
+
 it('opens a scrollable line picker downward when 255 pixels remain below the chip', () => {
   const original = HTMLElement.prototype.getBoundingClientRect
   const geometry = vi
