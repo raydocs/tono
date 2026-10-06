@@ -21,15 +21,25 @@ final class MacSeaPolishRenderTests: XCTestCase {
         let language = Locale.preferredLanguages.first?.hasPrefix("zh") == true ? "zh" : "en"
         let fixture = try makeFixture()
         defer { fixture.clean() }
+        let old = AppProfile.defaults.object(forKey: SeaAppearance.motionKey)
+        AppProfile.defaults.set("Full", forKey: SeaAppearance.motionKey)
+        defer {
+            if let old { AppProfile.defaults.set(old, forKey: SeaAppearance.motionKey) }
+            else { AppProfile.defaults.removeObject(forKey: SeaAppearance.motionKey) }
+        }
         for size in [CGSize(width: 920, height: 600), CGSize(width: 1280, height: 720)] {
-            let (window, _) = makeWindow(size: size, app: fixture.app, account: fixture.account, reduceMotion: true)
-            defer { close(window) }
             for state in ["idle", "connecting-early", "connecting-middle", "connecting-late", "connected", "failed", "blocked"] {
                 set(state, app: fixture.app)
-                await settle(0.15)
+                // An initial Full mount has the real destination plus live loops, not a
+                // Reduce Motion stand-in or a manufactured wait for an earlier transition.
+                let (window, _) = makeWindow(size: size, app: fixture.app, account: fixture.account)
+                defer { close(window) }
+                await settle(0.3)
                 try await capture("polish-a-\(language)-\(Int(size.width))-\(state)", window: window)
             }
             set("idle", app: fixture.app)
+            let (window, _) = makeWindow(size: size, app: fixture.app, account: fixture.account)
+            defer { close(window) }
             for page in [AppPage.proxies, .activity, .logs, .support, .settings] {
                 fixture.app.selectedPage = page
                 await settle(0.2)
@@ -69,7 +79,8 @@ final class MacSeaPolishRenderTests: XCTestCase {
         defer { close(window) }
         var receipt = ["source=first native own-PID ScreenCaptureKit window; PNGs unmodified",
                        "quality=Full skyDecorationsMayChange=true lowPower=\(ProcessInfo.processInfo.isLowPowerModeEnabled)",
-                       "host=\(ProcessInfo.processInfo.operatingSystemVersionString) processors=\(ProcessInfo.processInfo.processorCount)"]
+                       "host=\(ProcessInfo.processInfo.operatingSystemVersionString) processors=\(ProcessInfo.processInfo.processorCount)",
+                       "CPU scope=synthetic native UI host, no live-network/helper load; not production connected-device CPU acceptance"]
         #if arch(arm64)
         receipt.append("architecture=arm64")
         #else

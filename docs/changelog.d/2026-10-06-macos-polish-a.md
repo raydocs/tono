@@ -16,3 +16,5 @@
 - 新增 provisional 决策 070：首页只显示当前线路最近 120s 的成功带时间实测（对应现有两分钟刷新），未知/失败/缓存无时间不补数字；不改变测量器或处理器。en/zh 新资源 `%lld ms` → `%lld 毫秒`。这些续修尚待最终 head 原生验证。
 
 - 第二轮 a07fbfb1 / [37525498343](https://github.com/raydocs/tono/actions/runs/37525498343)：Release app 构建、policy-tests、privileged-tests 已通过；XCTest 编译失败，因为 SwiftUI 的原生 accessibility/contrast 环境是只读。改为场景/表面的共享呈现输入，生产从 OS 环境读取、预览/夹具显式注入同一值；不写系统辅助功能偏好、不伪造 OS 标志，也不绕过动态/透明/对比度的真实呈现分支。夹具证明呈现回退，尚不证明 OS 偏好通知或真机设置路径。
+
+- 状态整窗夹具使用 Full 的真实初始挂载 + 活动循环，不以 Reduce Motion 代替普通截图；过渡与导航实例保留另由同窗实时序列证明。CPU 收据明确只是合成状态 UI test host 自身，未叠加真实网络/helper 负载，不冒充 owner 连接设备预算验收。
