@@ -87,7 +87,7 @@ export async function getJson<T>(
   } catch (error) {
     if (isAbortError(error)) throw error;
     if (error instanceof DOMException && error.name === 'TimeoutError') {
-      throw new Error(copy.loadError);
+      throw new Error(copy.loadError, { cause: error });
     }
     throw error;
   }
@@ -174,7 +174,7 @@ async function writeJson<T>(
     });
   } catch (error) {
     if (isAbortError(error)) throw error;
-    throw new Error(copy.actionFailed);
+    throw new Error(copy.actionFailed, { cause: error });
   }
   if (response.status === 401 || response.status === 403) throw new SessionExpiredError();
   if (!response.ok) {

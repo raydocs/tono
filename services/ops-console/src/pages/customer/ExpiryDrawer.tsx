@@ -97,7 +97,7 @@ export function ExpiryDrawer({
       } catch (error) {
         throw new Error(copy.ledger.alsoLogFailed(
           error instanceof Error ? error.message : copy.actionFailed,
-        ));
+        ), { cause: error });
       }
     };
   }

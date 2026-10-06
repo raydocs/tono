@@ -1,0 +1,20 @@
+## 2026-10-06 · services/ops-console npm dependencies to the newest supported versions
+- 归属：ops 工作（非 ship gate）；仅 `services/ops-console`。取代 dependabot PR #1382（CI 红）。
+- 来源：基线 main `c7d775176`；分支 `claude/deps-ops-console-20261006`，仅本地提交，未推送、未开 PR、未合 main。
+- 缺陷修复：无。
+- 新增/优化（package.json / package-lock.json，Node 24.21.0、npm 11）：
+  - `cn` ^0.2.6 → ^0.4.0; `framer-motion` ^13.2.0 → ^14.0.0; `motion` ^13.2.0 → ^14.0.0; `lucide-react` ^1.44.0 → ^1.52.0; `tailwind-merge` ^3.3.1 → ^3.7.0; `geist` ^1.5.1 → ^1.7.2; `radix-ui` ^1.6.7 → ^1.7.0.
+  - `@eslint/js` ^9.39.5 → ^10.0.1; `eslint` ^9.39.5 → ^10.12.0; `eslint-plugin-react-hooks` ^5.2.0 → ^7.1.1; `eslint-plugin-react-refresh` ^0.5.6 → ^0.5.7; `typescript-eslint` ^8.44.0 → ^8.71.1.
+  - `vite` ^8.3.0 → ^8.3.3; `vitest` 5.0.0 → 5.0.3; `@vitejs/plugin-react` ^6.1.1 → ^6.1.2; `jsdom` ^30.0.1 → ^30.1.2; `@types/node` ^26.5.1 → ^26.6.4; `@tailwindcss/vite` and `tailwindcss` ^4.1.13 → ^4.3.3; `tw-animate-css` ^1.3.8 → ^1.4.0.
+  - Lockfile also refreshed with `npm update`; `npm audit` reports 0 vulnerabilities after (the `npm install` before the update reported 4: 3 high, 1 critical).
+  - Held: `typescript` stays `~6.0.3` (newest 6.0.x; latest is 7.0.2). `typescript-eslint` 8.71.1 (also canary 8.71.1-alpha.14) declares peer `typescript >=4.8.4 <6.1.0`, and at load it throws `typescript-eslint does not support TS 7.0` (tracking issue typescript-eslint#10940, TS >=7.1). Moving to TS 7 needs a typescript-eslint release that supports it. No `overrides` and no `--legacy-peer-deps` in the committed state.
+  - `react`, `react-dom`, `@types/react*`, `@playwright/test`, `class-variance-authority`, `clsx`, `cmdk` were already at their newest versions.
+- 工程与测试修正：
+  - `eslint` 10 recommended adds `preserve-caught-error`: 6 `throw new Error(...)` inside `catch` now pass `{ cause: error }` (`src/lib/api-customer-actions.ts`, `src/lib/api.ts` x2, `src/lib/settings-legacy.ts`, `src/pages/customer/ExpiryDrawer.tsx`, `src/pages/settings/LedgerTable.tsx`). Messages are unchanged.
+  - `eslint-plugin-react-hooks` 7 is the first line whose peer allows eslint 10, and its `recommended` preset adds the React Compiler rules. They report 21 existing findings (16 `react-hooks/set-state-in-effect`, 5 `react-hooks/refs`) that need component rewrites, not a small fix. `eslint.config.js` therefore lists exactly the two rules the v5 preset enforced (`rules-of-hooks` error, `exhaustive-deps` warn) instead of spreading `recommended.rules`. The 21 findings are open and not adopted; adopting the preset is a separate cleanup. Alternative if that is unwanted: hold `eslint`, `@eslint/js` and `eslint-plugin-react-hooks` on 9.x/5.x/6.x.
+- 验证（services/ops-console，Node 24.21.0）：
+  - Baseline on the untouched tree: lint pass; typecheck pass (unchecked-index ratchet 197, baseline 219); `vitest run` 44 files / 345 tests pass; build pass, budgets green (initial JS 205.1 KB gzip, total 318.6 KB gzip).
+  - After: `rm -rf node_modules && npm ci` pass; lint pass; typecheck pass (ratchet 197, baseline 219); `vitest run` 44 files / 345 tests pass; build pass, budgets green (initial JS 206.7 KB gzip of 400, total 321.9 KB gzip of 600).
+  - Throwaway experiment, not committed: TypeScript ~7.0.2 plus all other updates, `npm install --legacy-peer-deps`. lint exit 2, eslint cannot load the config (`Error: typescript-eslint does not support TS 7.0`); typecheck pass (ratchet 197, baseline 219); vitest 43 files pass, 1 failed (`test/lint-rules.test.ts`, same load error), 324 tests passed (the failed file's tests did not run); build pass.
+- 未运行：Playwright e2e (no browsers installed locally, baselines are macOS; hosted `ops-console-e2e` covers it); no visual check of the `motion` 14 / `lucide-react` bump (jsdom component tests and the production build pass); `proto:build` not run; no cargo/Swift/Tauri.
+- 候选/发布：仅源码，无新候选，未部署。

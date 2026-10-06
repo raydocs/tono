@@ -16,7 +16,10 @@ export default tseslint.config(
       ops,
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
+      // The two rules the v5 preset enforced. v7's preset also turns on the React Compiler
+      // rules (set-state-in-effect, refs, ...), which are not adopted yet.
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
       'react-refresh/only-export-components': 'off',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'ops/no-implementation-note-copy': 'error',
