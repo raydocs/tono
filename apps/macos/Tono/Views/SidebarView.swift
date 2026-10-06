@@ -33,11 +33,7 @@ struct SidebarView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
                 Spacer(minLength: 0)
-                if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
-                    Text("v\(version)")
-                        .font(.system(size: 9, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.tertiary)
-                }
+
             }
             .padding(.horizontal, 14)
             .padding(.top, 12)
@@ -54,10 +50,6 @@ struct SidebarView: View {
             Spacer()
 
             // Support 与 Settings 推至底部
-            Divider()
-                .opacity(0.35)
-                .padding(.horizontal, 8)
-                .padding(.bottom, 10)
             VStack(alignment: .leading, spacing: 7) {
                 navigationItem(for: .support)
                 navigationItem(for: .settings)
@@ -65,6 +57,14 @@ struct SidebarView: View {
         }
         .padding(.bottom, 12)
         .padding(.horizontal, 6)
+        .background {
+            if seaAppearance {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color.black.opacity(0.24))
+                    .glassEffect(.regular.tint(.black.opacity(0.25)), in: RoundedRectangle(cornerRadius: 20))
+                    .padding(6)
+            }
+        }
         .navigationSplitViewColumnWidth(min: 220, ideal: 220, max: 280)
         .onChange(of: logsEnabled) { _, newValue in
             if !newValue && selectedPage == .logs {
@@ -87,12 +87,12 @@ struct SidebarView: View {
                     // only color the row carries; the glass does the rest.
                     .foregroundStyle(
                         isSelected
-                            ? (seaAppearance ? AnyShapeStyle(SeaTheme.cool) : AnyShapeStyle(TonoBrand.routeGradient))
+                            ? (seaAppearance ? AnyShapeStyle(SeaTheme.text) : AnyShapeStyle(TonoBrand.routeGradient))
                             : AnyShapeStyle(.primary)
                     )
                 Text(seaAppearance && page == .proxies ? LocalizedStringKey("Servers")
                     : (seaAppearance && page == .dashboard ? LocalizedStringKey("sea.nav.home") : page.displayName))
-                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                    .font(.system(size: 13, weight: seaAppearance ? .medium : (isSelected ? .semibold : .regular)))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
@@ -100,7 +100,7 @@ struct SidebarView: View {
             .symbolRenderingMode(.monochrome)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .frame(height: seaAppearance ? 32 : 38)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .background {
                 // Liquid glass selection: a lifted glass capsule, not a
@@ -110,11 +110,11 @@ struct SidebarView: View {
                     // (matched geometry); crossing groups it fades instead of
                     // stretching through the spacer.
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(.white.opacity(colorScheme == .dark ? 0.13 : 0.78))
+                        .fill(.white.opacity(seaAppearance ? 0.10 : (colorScheme == .dark ? 0.13 : 0.78)))
                         .overlay {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .strokeBorder(
-                                    .white.opacity(colorScheme == .dark ? 0.22 : 0.9),
+                                    .white.opacity(seaAppearance ? 0 : (colorScheme == .dark ? 0.22 : 0.9)),
                                     lineWidth: 0.5
                                 )
                         }
@@ -126,7 +126,7 @@ struct SidebarView: View {
                 }
             }
             .overlay(alignment: .leading) {
-                if isSelected {
+                if isSelected && !seaAppearance {
                     Capsule()
                         .fill(
                             LinearGradient(

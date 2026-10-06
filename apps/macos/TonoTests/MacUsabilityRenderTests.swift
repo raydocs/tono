@@ -67,7 +67,7 @@ private final class NativeWindowRequestCompletion<Value>: @unchecked Sendable {
 }
 
 @MainActor
-private func nativeWindowRequest<Value>(
+func nativeWindowRequest<Value>(
     _ name: String, timeout: TimeInterval,
     start: (@escaping (Result<Value, Error>) -> Void) -> Void
 ) async throws -> Value {

@@ -125,11 +125,11 @@ ambient-scene class below does not extend any control duration:
 
 **全 app 只有「连接成功」这一处过冲**；其他表面一律临界阻尼。
 
-### Ambient scene (Windows 0.0.75 preview only)
+### Ambient scene (0.0.75, Windows and macOS)
 
 `SeaScene` is an explicit decorative exception to the solid content ground.
-It is not mounted in the shipped app. Keep glass on navigation/controls;
-future dashboard safety/recovery cards require solid or smoked surfaces.
+It is mounted behind the whole window; glass remains on navigation/controls,
+and dashboard safety/recovery cards use dark smoked surfaces.
 The scene must never delay labels or actions: switch those within 250ms.
 
 | Ambient motion | Duration | Windows token / contract |
@@ -163,6 +163,15 @@ including delayed afterglow, so an in-flight preference change snaps too.
 Reduced transparency/missing backdrop-filter make
 controls opaque, not the scene static (review E30, decision 057). Software rendering/remote-desktop detection is not
 reliable in the renderer: the caller must explicitly set `paused`.
+The canonical 11 baked PNGs live in Windows `tono-ui/sea-assets`; macOS reads
+byte-identical copies from `Assets.xcassets/sea-*.imageset`. Change the canonical
+set and both copies together. The Mac uses a persistent native CALayer graph:
+resize bakes contents once; render-server transform/opacity animations drive
+frames. Full/Lite/Static are distinct, Auto has one bounded visible 3 s probe,
+Low Power selects Lite and Reduce Motion selects Static. Hidden, occluded,
+miniaturized and secondary-page scenes hold their compositor clocks. The
+Windows warm evening/night handoff (3800 ms hold, 2200 ms linear cross-fade)
+is retained; no additional moon/sky delays are introduced.
 See [preview and measured evidence](sea-scene-preview.md).
 
 

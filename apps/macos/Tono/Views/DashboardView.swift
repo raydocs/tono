@@ -5,6 +5,7 @@ struct DashboardView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.seaSceneInWindow) private var sceneInWindow
     @SeaAppearancePreference private var showsSeaAppearance
     @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults)
     private var seaMotionMode = "Auto"
@@ -12,6 +13,7 @@ struct DashboardView: View {
     @State private var trafficHistory = TrafficHistory()
     @State private var showsDataUsagePopover = false
     @State private var showsSeaDetails = false
+    @State private var showsSeaSteps = false
     /// When the pill last flipped into connecting. A click that lands within
     /// `cancelGraceInterval` of that moment is ignored: the pill is now the
     /// Cancel control while connecting, so without this a double-click on
@@ -25,10 +27,10 @@ struct DashboardView: View {
         }
         .modifier(SeaPageAppearance())
         .background {
-            if showsSeaAppearance {
+            if showsSeaAppearance && !sceneInWindow {
                 SeaScene(phase: seaPhase, motionEnabled: SeaAppearance.animates(
                     seaMotionMode, reduceMotion: reduceMotion
-                ))
+                ), progress: appState.isConnecting ? SeaSceneParameters.progress(for: appState.connectionStage) : nil)
             }
         }
         .contentShape(Rectangle())
@@ -161,30 +163,58 @@ struct DashboardView: View {
     private var seaDashboard: some View {
         GeometryReader { geometry in
             ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: showsConnectionDetails ? 12 : 20) {
+                VStack(alignment: .leading, spacing: 20) {
                     seaDashboardHeader
                     if appState.updateIncomplete {
                         Text(UpdateHandoffStore.incompleteUpdateCopy)
                             .font(.system(size: 13)).foregroundStyle(SeaTheme.warm)
                             .accessibilityIdentifier("updateIncompleteNotice")
                     }
-                    seaConnectionAction
-                    seaLineChip
+                    if appState.isConnecting { seaStageDots }
+                    HStack(spacing: 12) {
+                        if seaAttentionActions {
+                            seaRetryAction
+                            Button("Restore normal internet") { appState.restoreInternet() }
+                                .buttonStyle(SeaHomePillStyle(primary: false))
+                                .modifier(SeaHomeActionShortcut(ownsShortcut: appState.isProtectionBlocked
+                                    || appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable))
+                        } else {
+                            seaConnectionAction
+                            seaLineChip
+                        }
+                    }
                     RecoveryNotice(appState: appState)
                         .frame(maxWidth: 520, alignment: .leading)
-                    if showsConnectionDetails {
-                        ConnectionProgressCard(appState: appState, primaryActionInHeader: true)
+                    if appState.isConnecting {
+                        DisclosureGroup("View steps", isExpanded: $showsSeaSteps) {
+                            ConnectionProgressCard(appState: appState, primaryActionInHeader: true, homePresentation: true)
+                        }
+                        .font(.system(size: 13)).frame(maxWidth: 520, alignment: .leading)
+                    } else if showsConnectionDetails {
+                        ConnectionProgressCard(appState: appState, primaryActionInHeader: true, homePresentation: true)
                             .frame(maxWidth: 520, alignment: .leading)
                     }
-                    Button { showsSeaDetails = true } label: {
-                        Label("Details", systemImage: "chevron.up")
-                            .font(.system(size: 12)).foregroundStyle(SeaTheme.muted)
+                    Spacer(minLength: 24)
+                    HStack(alignment: .bottom) {
+                        if appState.isConnected && appState.trafficFeedLive {
+                            Text("↓ \(TonoByteFormat.rate(appState.trafficStats.downloadSpeed)) · ↑ \(TonoByteFormat.rate(appState.trafficStats.uploadSpeed)) · \(String(localized: "This connection")) \(TonoByteFormat.bytes(appState.trafficStats.totalUpload + appState.trafficStats.totalDownload))")
+                                .font(.system(size: 13)).monospacedDigit()
+                                .foregroundStyle(SeaTheme.muted)
+                        }
+                        Spacer(minLength: 12)
+                        Button { showsSeaDetails = true } label: {
+                            HStack(spacing: 6) {
+                                Text("Details")
+                                Image(systemName: "chevron.up").font(.system(size: 10))
+                            }
+                            .font(.system(size: 13)).foregroundStyle(SeaTheme.muted)
+                        }
+                        .buttonStyle(.plain).accessibilityIdentifier("seaDashboardDetails")
                     }
-                    .buttonStyle(.plain).accessibilityIdentifier("seaDashboardDetails")
                 }
                 .foregroundStyle(SeaTheme.text)
-                .frame(maxWidth: .infinity, minHeight: max(0, geometry.size.height - (showsConnectionDetails ? 48 : 64)), alignment: .topLeading)
-                .padding(showsConnectionDetails ? 24 : 32)
+                .frame(maxWidth: .infinity, minHeight: max(0, geometry.size.height - 64), alignment: .topLeading)
+                .padding(32)
             }
         }
         .environment(\.colorScheme, .dark)
@@ -228,23 +258,46 @@ struct DashboardView: View {
             : (appState.isProtectionBlocked || appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable) ? String(localized: "Restore internet")
             : appState.isConnected ? String(localized: "Disconnect")
             : appState.lastConnectionFailure != nil ? String(localized: "Retry now") : String(localized: "Connect")
-        if quiet {
-            Button(action: seaToggleConnection) {
-                Text(title).font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(SeaTheme.text).frame(width: 190, height: 44)
-                    .background(.white.opacity(0.08), in: Capsule())
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(.plain).disabled(appState.isDisconnecting)
+        Button(title, action: seaToggleConnection)
+            .buttonStyle(SeaHomePillStyle(primary: !quiet))
+            .disabled(appState.isDisconnecting || (!quiet && appState.lastConnectionFailure != nil && !appState.isTonoReady))
             .modifier(ConnectPillKeyboardShortcut(isConnecting: appState.isConnecting,
                                                 isDisconnecting: appState.isDisconnecting))
+    }
+
+    private var seaAttentionActions: Bool {
+        !appState.isConnecting && !appState.isDisconnecting && (appState.isProtectionBlocked
+            || ReleasedConnectFailureActions.shouldOfferRetryAndRoute(
+                protectionBlocked: appState.isProtectionBlocked, connecting: appState.isConnecting,
+                disconnecting: appState.isDisconnecting, hasFailureRecord: appState.lastConnectionFailure != nil))
+    }
+
+    @ViewBuilder private var seaRetryAction: some View {
+        if appState.isProtectionBlocked {
+            Button(appState.protectedReconnectPausedForUserAction ? "Repair and reconnect" : "Retry now") {
+                appState.retryProtectedConnectionNow()
+            }
+            .buttonStyle(SeaHomePillStyle(primary: true))
+            .disabled(!appState.isTonoReady || appState.isDisconnecting)
         } else {
-            Button(title, action: seaToggleConnection)
-                .buttonStyle(GateProminentButtonStyle()).frame(width: 190)
-                .disabled(appState.lastConnectionFailure != nil && !appState.isTonoReady)
-                .modifier(ConnectPillKeyboardShortcut(isConnecting: appState.isConnecting,
-                                                    isDisconnecting: appState.isDisconnecting))
+            Button("Retry now") { appState.connect() }
+                .buttonStyle(SeaHomePillStyle(primary: true))
+                .disabled(!appState.isTonoReady || appState.isDisconnecting)
+                .modifier(SeaHomeActionShortcut(ownsShortcut: !appState.isProtectionUnconfirmed
+                    && !appState.isProtectionBlockUnreadable))
         }
+    }
+
+    private var seaStageDots: some View {
+        HStack(spacing: 6) {
+            ForEach(ConnectionStage.allCases, id: \.self) { stage in
+                Circle().fill(stage == appState.connectionStage ? Color(hex: "FFF3D4")
+                    : appState.completedConnectionStages.contains(stage) ? Color(hex: "FFD9A0") : .white.opacity(0.26))
+                    .frame(width: 6, height: 6)
+            }
+        }
+        .accessibilityLabel(Text(appState.connectionStage.localizedTitle))
+        .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: appState.connectionStage)
     }
 
     private func seaToggleConnection() {
@@ -269,19 +322,15 @@ struct DashboardView: View {
                 if let name = appState.activeNode?.name ?? appState.proxyService.activeNodeName {
                     Text(nodeRouteTitle(for: name)).lineLimit(1)
                     let runtime = appState.proxyService.node(named: name)
-                    if runtime?.lastTestFailed == true {
-                        Text("Timeout").foregroundStyle(SeaTheme.muted)
-                    } else if let latency = runtime?.latency, latency > 0 {
-                        Text(LatencyLevel.spokenTitle(for: latency, kind: .exit)).foregroundStyle(SeaTheme.muted)
+                    if runtime?.lastTestFailed != true, let latency = runtime?.latency, latency > 0 {
+                        Text("\(latency) ms").foregroundStyle(SeaTheme.muted).monospacedDigit()
                     }
                 } else { Text("No server selected") }
                 Image(systemName: "chevron.down").accessibilityHidden(true)
             }
-            .font(.system(size: 12)).foregroundStyle(SeaTheme.text)
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .background(.white.opacity(0.08), in: Capsule())
+            .font(.system(size: 13)).foregroundStyle(SeaTheme.text)
         }
-        .buttonStyle(.plain).frame(maxWidth: 440, alignment: .leading)
+        .buttonStyle(SeaHomePillStyle(primary: false)).frame(maxWidth: 300, alignment: .leading)
         .accessibilityHint("Choose another route")
     }
 
@@ -296,15 +345,21 @@ struct DashboardView: View {
     private var seaDashboardHeader: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(LocalizedStringKey(seaStatusKey))
-                .font(.system(size: showsConnectionDetails ? 32 : 44, weight: .light)).tracking(-0.7)
+                .font(.system(size: 56, weight: .light)).tracking(1.12)
+                .lineLimit(1).minimumScaleFactor(0.65)
+                .shadow(color: Color(hex: "0C060A").opacity(0.45), radius: 18, y: 2)
+                .id(seaStatusKey)
+                .transition(reduceMotion ? .opacity : TonoMotion.textSwapTransition)
                 .foregroundStyle(SeaTheme.text)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             Text(seaSummary)
-                .font(.system(size: 14)).foregroundStyle(SeaTheme.muted)
+                .font(.system(size: 15)).foregroundStyle(SeaTheme.text.opacity(0.86))
+                .frame(maxWidth: 400, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: 440, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(TonoMotion.textSwap(reduceMotion: reduceMotion), value: seaStatusKey)
     }
 
     private var seaSummary: String {
@@ -621,14 +676,20 @@ private struct ConnectionProgressCard: View {
     @SeaAppearancePreference private var seaAppearance
     @Bindable var appState: AppState
     var primaryActionInHeader = false
+    var homePresentation = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             VStack(alignment: .leading, spacing: 12) {
                 header(now: context.date)
+                if homePresentation && appState.isProtectionBlockUnreadable {
+                    Text("Tono's network helper is not answering this copy of Tono, so Tono cannot tell whether direct traffic is still blocked. Repair and reconnect from the dashboard, or restore internet here.")
+                        .font(.system(size: 12)).foregroundStyle(SeaTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
-                if appState.isConnecting {
+                if appState.isConnecting && !homePresentation {
                     stageDots
                 }
 
@@ -653,10 +714,14 @@ private struct ConnectionProgressCard: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
             .frame(maxWidth: 520, alignment: .leading)
-            .glassEffect(
-                .regular.tint(cardTint),
-                in: RoundedRectangle(cornerRadius: 18)
-            )
+            .background {
+                if homePresentation {
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(LinearGradient(colors: [Color(hex: "1A1012").opacity(0.56), Color(hex: "1A1012").opacity(0.66)], startPoint: .top, endPoint: .bottom))
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+                }
+            }
+            .glassEffect(.regular.tint(homePresentation ? .black.opacity(0.3) : cardTint), in: RoundedRectangle(cornerRadius: 18))
             // A failure shifts the tint over 220 ms; it does not snap or shake.
             .animation(
                 TonoMotion.stateChange(reduceMotion: reduceMotion),
@@ -895,14 +960,16 @@ private struct ConnectionProgressCard: View {
                     .controlSize(.small)
                 }
             } else if appState.isProtectionBlocked {
-                Button(appState.protectedReconnectPausedForUserAction
-                    ? "Repair and reconnect"
-                    : "Retry now") {
-                    appState.retryProtectedConnectionNow()
-                }
+                if !primaryActionInHeader {
+                    Button(appState.protectedReconnectPausedForUserAction
+                        ? "Repair and reconnect"
+                        : "Retry now") {
+                        appState.retryProtectedConnectionNow()
+                    }
                 .buttonStyle(GateProminentButtonStyle())
                 .controlSize(.small)
                 .disabled(!appState.isTonoReady || appState.isDisconnecting)
+                }
 
                 if !primaryActionInHeader {
                     Button("Restore internet") {
@@ -925,7 +992,7 @@ private struct ConnectionProgressCard: View {
                 disconnecting: appState.isDisconnecting,
                 hasFailureRecord: appState.lastConnectionFailure != nil
             ) {
-                if !primaryActionInHeader || appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable {
+                if !primaryActionInHeader {
                     Button("Retry now") {
                         appState.connect()
                     }

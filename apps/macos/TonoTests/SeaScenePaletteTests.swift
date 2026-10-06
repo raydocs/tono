@@ -1,27 +1,27 @@
+import AppKit
 import XCTest
 @testable import Tono
 
+@MainActor
 final class SeaScenePaletteTests: XCTestCase {
-    func testFirstWaterCompositionIsDarkerThanSkyHorizonInEveryPhase() {
-        func luminance(_ color: SeaSceneRGB) -> Double {
-            func linear(_ value: Double) -> Double {
-                value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
-            }
-            return 0.2126 * linear(color.red)
-                + 0.7152 * linear(color.green)
-                + 0.0722 * linear(color.blue)
+    func testWaterStartsOnItsOwnDarkBaseRatherThanTheSkyHorizon() throws {
+        let view = SeaSceneNativeView(frame: NSRect(x: 0, y: 0, width: 920, height: 600))
+        view.configure(phase: .day, progress: nil, preference: "Static", reduceMotion: false,
+                       decorations: false, active: true)
+        view.layout()
+        defer { view.stop() }
+        func find(_ layer: CALayer, _ name: String) -> CALayer? {
+            if layer.name == name { return layer }
+            return layer.sublayers?.compactMap { find($0, name) }.first
         }
-
-        func horizonContrast(_ phase: SeaPresentationPhase) -> Double {
-            let palette = SeaScenePalette.forPhase(phase)
-            return luminance(SeaSceneRGB(hex: palette.sky[2]))
-                - luminance(palette.waterSurface)
-        }
-
-        XCTAssertGreaterThan(horizonContrast(.day), 0.015)
-        XCTAssertGreaterThan(horizonContrast(.dawn), 0.015)
-        XCTAssertGreaterThan(horizonContrast(.dusk), 0.015)
-        XCTAssertGreaterThan(horizonContrast(.blocked), 0.015)
-        XCTAssertGreaterThan(horizonContrast(.night), 0.015)
+        let root = try XCTUnwrap(view.layer)
+        let water = try XCTUnwrap(find(root, "water-night") as? CAGradientLayer)
+        let sky = try XCTUnwrap(find(root, "sky-night") as? CAGradientLayer)
+        let waterTop = try XCTUnwrap((water.colors?.first as? CGColor)?.components)
+        let skyBottom = try XCTUnwrap((sky.colors?.last as? CGColor)?.components)
+        XCTAssertLessThan(waterTop[0], skyBottom[0])
+        XCTAssertLessThan(waterTop[1], skyBottom[1])
+        XCTAssertLessThan(waterTop[2], skyBottom[2])
+        XCTAssertEqual(waterTop.last, 1, "the water's own base is opaque, never a glowing sky continuation")
     }
 }
