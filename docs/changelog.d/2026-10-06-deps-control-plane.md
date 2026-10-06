@@ -1,0 +1,20 @@
+## 2026-10-06 · services/control-plane npm dependencies to the newest supported versions
+- Owner: ops (dependency upkeep, not a ship gate); services/control-plane only.
+- Source: baseline `origin/main` 5a77c6b68; branch `claude/deps-control-plane-20261006`, PR #1419; supersedes dependabot PR #1381 (its CI is red because it moves vitest to 5.x). Merge state is on the PR.
+- Bug fixes: none.
+- Updates (old -> new, `services/control-plane/package.json`; the lockfile carries the resolved versions):
+  - `@cloudflare/workers-types` ^5.20260910.1 -> ^5.20261006.1 (resolved 5.20260911.1 -> 5.20261006.1)
+  - `fast-check` 4.5.3 -> 4.10.2
+  - `jsdom` ^30.0.1 -> ^30.1.2 (resolved 30.0.1 -> 30.1.2)
+  - `vite` ^8.3.0 -> ^8.3.3 (resolved 8.3.0 -> 8.3.3)
+  - `wrangler` ^4.131.0 -> ^4.148.0 (resolved 4.131.1 -> 4.148.0)
+  - `overrides.sharp` 0.35.4 -> 0.35.5 (advisory GHSA-wq5f-xc86-pv6w, `sharp <0.35.5`, librsvg; 0.35.5 is the npm `latest`)
+- Held: `vitest` 4.1.11 and `@vitest/coverage-istanbul` 4.1.11 (npm dist-tag `V4`; `latest` is 5.0.3). `@cloudflare/vitest-pool-workers` 0.22.0 is already the newest release (only dist-tag `latest`) and declares `peerDependencies`: `vitest ^4.1.0`, `@vitest/runner ^4.1.0`, `@vitest/snapshot ^4.1.0`, so vitest 5 is outside its supported range.
+- Experiment, not committed: vitest and @vitest/coverage-istanbul 5.0.3 installed with `--legacy-peer-deps`, then `npm test`. Result: exit 1, "Test Files no tests, Tests no tests, Errors 44 errors". Every test file failed to start: `Error: [vitest-pool]: Failed to start cloudflare-pool worker for test files .../test/worker.test.ts. Caused by: SyntaxError: Unexpected identifier 'file' (ProxyServer.fetch node_modules/miniflare/src/workers/core/proxy.worker.ts:173:11)`, preceded by the pool's `[vpw:warn]` that it only officially supports `vitest ^4.1.0`. Coverage thresholds then failed at 0%.
+- Engineering and tests: no source, config or test change was needed. No `--legacy-peer-deps` and no override that contradicts a peer range in the committed state; the `sharp` override predates this change.
+- Verification (Node 24 from `node@24` on the MacBook, `services/control-plane`):
+  - baseline on the untouched tree: `npm ci` ok; `npm test` 44 files / 1002 tests passed; coverage 88.36 / 82.48 / 90.47 / 93.02 (stmts / branches / funcs / lines); `npm run typecheck` ok.
+  - after the update: `rm -rf node_modules && npm ci` exit 0 (193 packages); `npm run typecheck` exit 0 (unchecked-index ratchet 520 vs baseline 521, admin 76 vs 99); `npm test` 44 files / 1002 tests passed, coverage identical to the baseline; `wrangler deploy --dry-run` for `wrangler.jsonc` and for `wrangler.admin.jsonc` both exited after bundling with no error.
+  - not run: any deploy, remote or production wrangler command, `check:contract`, `check:budgets`, ops-console build and tests, hosted `ci-gate`.
+- Candidate/release: source only, no new candidate; does not change the customer update feed.
+- Remaining limits: `npm audit` still reports high findings under `miniflare` (`undici` 7.0.0-7.29.0, pinned by miniflare) and `source-map-js` 1.0.0-1.2.1 (transitive); the only automated fix for the first downgrades `@cloudflare/vitest-pool-workers` to 0.16.16 and was not taken. Moving to vitest 5 needs a `@cloudflare/vitest-pool-workers` release that supports it.
