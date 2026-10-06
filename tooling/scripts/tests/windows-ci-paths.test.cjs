@@ -169,6 +169,14 @@ test('Windows candidate build and installer smoke agree with the product version
   assert.equal(installer.match(/\$manifest\.version -ne '([^']+)'/)?.[1], version)
 })
 
+test('Windows candidate pnpm pin matches the frozen application package manager', () => {
+  const candidate = load(readFileSync(path.join(root, '.github/workflows/windows-candidate.yml'), 'utf8'))
+  const app = JSON.parse(readFileSync(path.join(root, 'apps/windows/app/package.json'), 'utf8'))
+  assert.match(app.packageManager, /^pnpm@/)
+  const setup = candidate.jobs.build.steps.find(step => step.uses?.startsWith('pnpm/action-setup@'))
+  assert.equal(setup?.with?.version, app.packageManager.slice('pnpm@'.length).split('+')[0])
+})
+
 test('paired candidates share one source and sequence without granting signing or publication', () => {
   const read = name => load(readFileSync(path.join(root, '.github/workflows', name), 'utf8'))
   const pair = read('desktop-update-candidate.yml')

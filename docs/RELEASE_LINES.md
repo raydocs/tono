@@ -52,8 +52,7 @@ The first customer publication after 0.0.67 / 0.0.34 is gated by
 [SHIP_PLAN.md](SHIP_PLAN.md): Connected-means-usable, a next step on
 connect failure, a proven protected update journal, then feed promotion
 as **0.0.75**. Sparkle and `windows-updates` advance only after the owner
-has recorded G1–G3 evidence (for 0.0.75: G1 and G2; G3 moves to 0.0.76, see
-[0.0.74 defers G3](decisions/019-2026-09-26-release-0074-defers-g3.md) carried by [decision 061](decisions/061-2026-10-05-release-is-0075.md)) in SHIP_PLAN §6; agents then run G4 per
+has recorded G1–G3 evidence in SHIP_PLAN §6 ([decision 061](decisions/061-2026-10-05-release-is-0075.md): the 0.0.74 exception does not automatically waive G3 for 0.0.75); agents then run G4 per
 [AGENTS.md](../AGENTS.md). GitHub `v0.0.72` / `tono-macos-0.0.72-build72`
 tags are not those feeds.
 
@@ -109,11 +108,11 @@ If it already happened, reinstalling 0.0.73+ repairs NRPT and encrypted DNS.
 ## Customer publish (G4)
 
 When an agent may start is set in [AGENTS.md](../AGENTS.md) (owner-written G1–G3
-evidence in SHIP_PLAN §6; for 0.0.75 G1 and G2 only). Record each step's run URL, SHA and artifact hashes in the publish's
+evidence in SHIP_PLAN §6; all three remain required for 0.0.75 until an explicit owner deferral). Record each step's run URL, SHA and artifact hashes in the publish's
 `docs/changelog.d/` entry ([format](changelog.d/README.md)).
 
 - **Candidate identity.** Before customer promotion, match the release's source SHA,
-  version/build and package hashes to the candidate the owner's G1–G3 evidence (0.0.75: G1–G2) names.
+  version/build and package hashes to the candidate the owner's G1–G3 evidence (0.0.75: G1–G3) names.
   A changed candidate does not reuse that acceptance; it needs new owner evidence.
   The one exception is rebuilding an already-published good source as a higher build
   for rollback.
@@ -181,7 +180,7 @@ configured separately and is still untested. By owner decision of 2026-09-28
 themselves (`windows-release` for any candidate, `windows-update-channel` at G4); none waits
 for the owner. Record each approval (run URL, environment, candidate SHA and release
 sequence) in the changelog. The customer-publish precondition is unchanged: the owner's
-`[x]` for G1–G2 in SHIP_PLAN §6 (0.0.75), and only the candidate that evidence names.
+`[x]` for G1–G3 in SHIP_PLAN §6 (0.0.75, absent an explicit owner deferral), and only the candidate that evidence names.
 
 **Rollback.** Moving a feed back to the last good entry only stops machines that
 have not updated yet. Updated machines refuse a lower build or release sequence on
