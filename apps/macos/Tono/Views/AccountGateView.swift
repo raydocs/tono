@@ -57,5 +57,6 @@ struct AccountGateView<Content: View>: View {
                 .toolbar(removing: .sidebarToggle)
             }
         }
+        .modifier(SeaPageAppearance())
     }
 }

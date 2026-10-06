@@ -5,9 +5,14 @@ struct DashboardView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(SeaAppearance.enabledKey, store: AppProfile.defaults)
+    private var seaAppearanceEnabled = false
+    @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults)
+    private var seaMotionMode = "Auto"
     @Namespace private var dashboardNS
     @State private var trafficHistory = TrafficHistory()
     @State private var showsDataUsagePopover = false
+    @State private var showsSeaDetails = false
     /// When the pill last flipped into connecting. A click that lands within
     /// `cancelGraceInterval` of that moment is ignored: the pill is now the
     /// Cancel control while connecting, so without this a double-click on
@@ -20,7 +25,11 @@ struct DashboardView: View {
 
         GlassEffectContainer(spacing: 24) {
             VStack(spacing: 0) {
-                dashboardHeader
+                if seaAppearanceEnabled {
+                    seaDashboardHeader
+                } else {
+                    dashboardHeader
+                }
 
                 if appState.updateIncomplete {
                     Text(UpdateHandoffStore.incompleteUpdateCopy)
@@ -34,7 +43,7 @@ struct DashboardView: View {
                 // Center: ConnectPill + ActiveNodeCard
                 Spacer(minLength: 12)
 
-                VStack(spacing: 24) {
+                VStack(alignment: seaAppearanceEnabled ? .leading : .center, spacing: 24) {
                     RecoveryNotice(appState: appState)
                         .frame(maxWidth: 520, alignment: .leading)
                     ConnectPill(isConnected: Binding(
@@ -100,20 +109,49 @@ struct DashboardView: View {
                         RouteChoicesView()
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: seaAppearanceEnabled ? .leading : .center)
 
                 Spacer(minLength: 12)
 
                 if !showsConnectionDetails {
-                    dashboardOverview
+                    if !seaAppearanceEnabled || showsSeaDetails {
+                        if seaAppearanceEnabled {
+                            Button {
+                                showsSeaDetails = false
+                            } label: {
+                                Label("Hide details", systemImage: "chevron.down")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .buttonStyle(.bordered)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        dashboardOverview
 
-                    if appState.isConnected {
-                        networkInfoBar
+                        if appState.isConnected {
+                            networkInfoBar
+                        }
+                    } else {
+                        Button {
+                            showsSeaDetails = true
+                        } label: {
+                            Label("Details", systemImage: "chevron.up")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
             .padding(.horizontal, 32)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background {
+            if seaAppearanceEnabled {
+                SeaScene(phase: seaPhase, motionEnabled: SeaAppearance.animates(
+                    seaMotionMode, reduceMotion: reduceMotion
+                ))
+            }
         }
         .contentShape(Rectangle())
         // Surfaces swap with the critically damped contract spring; the one
@@ -131,6 +169,48 @@ struct DashboardView: View {
         .onAppear {
             appState.updateIncomplete = UpdateHandoffStore.showsIncompleteUpdate()
         }
+    }
+
+    private var seaPhase: SeaPresentationPhase {
+        SeaPresentationPhase.resolve(
+            status: MenuBarProtectionStatus(appState).kind,
+            disconnecting: appState.isDisconnecting,
+            failed: appState.lastConnectionFailure != nil
+        )
+    }
+
+    private var seaDashboardHeader: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(MenuBarProtectionStatus(appState).title)
+                    .font(.system(size: 40, weight: .light))
+                    .foregroundStyle(Color(hex: "F6F2EC"))
+                Text(seaSummary)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Color(hex: "E7E2E3"))
+            }
+            Spacer(minLength: 0)
+            Image(systemName: seaPhase == .day ? "sun.horizon" : "moon.stars")
+                .font(.system(size: 17))
+                .foregroundStyle(Color(hex: "F6F2EC").opacity(0.7))
+                .accessibilityHidden(true)
+        }
+        .padding(.top, 24)
+    }
+
+    private var seaSummary: String {
+        if appState.isConnecting { return String(localized: "Securing your connection") }
+        if appState.isDisconnecting { return String(localized: "Finishing network transition") }
+        if appState.isRecoveringProtectedConnection {
+            return String(localized: "Recovering protected connection…")
+        }
+        if MenuBarProtectionStatus(appState).kind == .blocked && !appState.isProtectionBlocked {
+            return String(localized: "Connection needs attention")
+        }
+        if appState.lastConnectionFailure != nil && !appState.isConnected {
+            return String(localized: "Connection needs attention")
+        }
+        return protectionDetail
     }
 
     private var dashboardHeader: some View {

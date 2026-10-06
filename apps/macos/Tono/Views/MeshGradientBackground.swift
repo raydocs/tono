@@ -36,6 +36,8 @@ extension Color {
 /// the blue tint, not GPU work. Sign-in always uses the quietest ground.
 struct MeshGradientBackground: View {
     var emphasis: Bool = false
+    @AppStorage(SeaAppearance.enabledKey, store: AppProfile.defaults)
+    private var seaAppearanceEnabled = false
     @AppStorage(SettingsKey.glassTransparency) private var glassTransparency: Double = 50
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -43,8 +45,9 @@ struct MeshGradientBackground: View {
 
     var body: some View {
         ZStack {
-            colorScheme == .dark ? Color(hex: "141922") : Color(hex: "F6F8FC")
-            if !emphasis && !reduceTransparency && contrast != .increased {
+            seaAppearanceEnabled ? Color(hex: "10192B")
+                : (colorScheme == .dark ? Color(hex: "141922") : Color(hex: "F6F8FC"))
+            if !seaAppearanceEnabled && !emphasis && !reduceTransparency && contrast != .increased {
                 (colorScheme == .dark ? Color(hex: "202B45") : Color(hex: "E4EBFA"))
                     .opacity(min(max(glassTransparency, 0), 100) / 100 * 0.22)
             }

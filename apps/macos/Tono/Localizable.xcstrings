@@ -1,6 +1,30 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Sea appearance preview": {
+      "localizations": { "zh-Hans": { "stringUnit": { "state": "translated", "value": "海景外观预览" } } }
+    },
+    "Use the dark sea look on this Mac only. Connection behavior does not change.": {
+      "localizations": { "zh-Hans": { "stringUnit": { "state": "translated", "value": "仅在这台 Mac 使用深色海景外观。连接行为不变。" } } }
+    },
+    "Sea motion": {
+      "localizations": { "zh-Hans": { "stringUnit": { "state": "translated", "value": "海景动效" } } }
+    },
+    "Full": {
+      "localizations": { "zh-Hans": { "stringUnit": { "state": "translated", "value": "完整" } } }
+    },
+    "Simple": {
+      "localizations": { "zh-Hans": { "stringUnit": { "state": "translated", "value": "简洁" } } }
+    },
+    "Static": {
+      "localizations": { "zh-Hans": { "stringUnit": { "state": "translated", "value": "静态" } } }
+    },
+    "Details": {
+      "localizations": { "zh-Hans": { "stringUnit": { "state": "translated", "value": "详情" } } }
+    },
+    "Hide details": {
+      "localizations": { "zh-Hans": { "stringUnit": { "state": "translated", "value": "收起详情" } } }
+    },
     "": {},
     "Account": {
       "localizations": {

@@ -8,6 +8,15 @@ import XCTest
 @MainActor
 final class MacUsabilityRenderTests: XCTestCase {
     func testNativeUsabilityStatesProduceReviewableAttachments() async throws {
+        try capture("sea-night", width: 600, height: 400) {
+            SeaScene(phase: .night, motionEnabled: false).frame(width: 600, height: 375)
+        }
+        try capture("sea-confirmed", width: 600, height: 400) {
+            SeaScene(phase: .day, motionEnabled: false).frame(width: 600, height: 375)
+        }
+        try capture("sea-blocked", width: 600, height: 400) {
+            SeaScene(phase: .blocked, motionEnabled: false).frame(width: 600, height: 375)
+        }
         let suite = "tono-render-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite); ManagedExitCatalogOwnership.purge() }
