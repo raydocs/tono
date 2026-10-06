@@ -180,6 +180,17 @@ it('renders a failed scene, never sunshine, when connected has no live protectio
   )
 })
 
+it('offers the restore action the unknown-protection sentence names', () => {
+  mocks.status.uiState = 'connected'
+  render(view())
+  expect(screen.getByTestId('tono-home-sentence').textContent).toContain(
+    enTono.progress.restore,
+  )
+  expect(
+    screen.getByRole('button', { name: enTono.progress.restore }),
+  ).toBeDefined()
+})
+
 it('keeps AI traffic mounted while details open and close', () => {
   render(view())
   expect(screen.getByTestId('ai-mounted')).toBeDefined()

@@ -398,7 +398,10 @@ export const SeaHome = ({
           >
             <TextSwap text={action} />
           </button>
-          {state === 'protectedOffline' ? (
+          {state === 'protectedOffline' ||
+          (state === 'connected' && !protectedNow) ? (
+            // The unknown-protection sentence names "restore normal internet";
+            // the action it names must be on the same screen.
             <button
               type="button"
               className="tono-home__pill tono-home__quiet"
