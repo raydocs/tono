@@ -28,3 +28,5 @@
 - 2026-10-06 夹具修正与画面复核：root 逐张查看5ce的线路、账户、设置、活动、支持首屏、登录、引导和菜单8张真实组件/页面原生PNG；活动历史流量提示被单行布局省略，已允许完整换行；支持首屏原生 borderedProminent 在非活跃窗口丢失暖填充，改用既有 GateProminentButtonStyle 的小号海景暖动作，调用/上传确认不变。窗口夹具从自身NSWindow及host遍历公开AX，保留真正role元素与legacy属性桥接（SDK Swift typed attributes），unsupported/超限仍失败；设置真实窗口 opaque backing，不改捕获像素或ScreenCaptureKit填充。账户/设置旧图各仅2像素alpha252，其余255，明确配置后是否解决仍待hosted，不放宽全图不透明断言。
 
 - 2026-10-06 SDK 续核：NSAccessibilityElement 的 identifier 是 @optional 方法（SDK NSAccessibilityProtocols.h:24–27），role 协议调用加方法可选链 `accessibilityIdentifier?()`；全协议必选调用不变。此为源码/API更正，未冒称原生编译通过。
+
+- 2026-10-06 状态词源码续核：旧 MenuBar.kind 可在 isConnected=false 时仍为 degraded，新词映射因此额外要求实际 isConnected 才显示 Connected；未知仍优先，已无连接的残留 degraded 只说 Not connected。不改原 status model/FSM/动作，新增一个窄投影回归（未本机运行），避免外观映射凭单独 degraded 标志误宣告连接成功。

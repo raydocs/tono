@@ -4,7 +4,12 @@ import XCTest
 @MainActor
 final class SeaStatusWordsTests: XCTestCase {
     func testUnknownProtectionPreemptsAnApparentlyConnectedDisplayWord() {
-        XCTAssertEqual(SeaStatusWords.title(kind: .connected, unknown: true, disconnecting: false),
+        XCTAssertEqual(SeaStatusWords.title(kind: .connected, connected: true, unknown: true, disconnecting: false),
                        String(localized: "Protection status unconfirmed"))
+    }
+
+    func testADegradedFlagWithoutAConnectionNeverShowsConnected() {
+        XCTAssertEqual(SeaStatusWords.title(kind: .degraded, connected: false, unknown: false, disconnecting: false),
+                       String(localized: "Not connected"))
     }
 }

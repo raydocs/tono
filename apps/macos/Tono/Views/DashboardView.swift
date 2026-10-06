@@ -153,7 +153,7 @@ struct DashboardView: View {
     }
 
     private var seaStatusTitle: String {
-        SeaStatusWords.title(kind: MenuBarProtectionStatus(appState).kind,
+        SeaStatusWords.title(kind: MenuBarProtectionStatus(appState).kind, connected: appState.isConnected,
             unknown: appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable,
             disconnecting: appState.isDisconnecting)
     }
