@@ -2,7 +2,7 @@
 
 Cloud-managed VPN (product identity is Tono, not Clash Verge or LiquidClash): clients pull a per-device exit catalog and a signed traffic policy, then dial VLESS
 Reality nodes. Maps: [docs/README.md](docs/README.md), [docs/architecture.md](docs/architecture.md) (deployables, code map, do-not list).
-[docs/SHIP_PLAN.md](docs/SHIP_PLAN.md) owns customer 0.0.74 (G1–G4); [docs/ops/plan-2026-09-11.md](docs/ops/plan-2026-09-11.md) owns ops work (not a
+[docs/SHIP_PLAN.md](docs/SHIP_PLAN.md) owns customer 0.0.75 (G1–G4); [docs/ops/plan-2026-09-11.md](docs/ops/plan-2026-09-11.md) owns ops work (not a
 ship gate). Every PR names one of them; during the G4 freeze only SHIP_PLAN §2 item 10 fixes merge.
 
 ## Invariants (never loosen)
@@ -50,7 +50,7 @@ value for a Tono-controlled secret the task names for creation or rotation (coor
 never fabricate third-party credentials or print or commit a secret. Rollback: `npx wrangler rollback` per Worker.
 
 Customer channel publish only after the owner has written `[x]` for G1, G2 and G3 in SHIP_PLAN §6
-(for 0.0.74 only: G1 and G2; G3 moves to 0.0.75 by owner decision, [DECISIONS](docs/decisions/019-2026-09-26-release-0074-defers-g3.md)) with evidence links; agents never edit those lines. The evidence names the candidate (source SHA, package
+(for 0.0.75 only: G1 and G2; G3 moves to 0.0.76 by owner decision [019](docs/decisions/019-2026-09-26-release-0074-defers-g3.md), carried to 0.0.75 by [decision 061](docs/decisions/061-2026-10-05-release-is-0075.md)) with evidence links; agents never edit those lines. The evidence names the candidate (source SHA, package
 hashes); publish only that candidate. Any other SHA or version needs new owner evidence, except rebuilding
 a published good source as a higher build for rollback. Then G4 is the agent's, in SHIP_PLAN §5 order
 (G4.2 on the owner's devices first; G4.3 needs the release row's `verifiedAt`); steps, both Windows
