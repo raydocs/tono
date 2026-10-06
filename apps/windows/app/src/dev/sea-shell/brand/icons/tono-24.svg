@@ -1,0 +1,3 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" role="img" aria-label="Tono sun on horizon — unapproved draft">
+<defs><linearGradient id="ground" x2="0" y2="1"><stop stop-color="#15162E"/><stop offset="1" stop-color="#24264B"/></linearGradient><linearGradient id="sun" x2="0" y2="1"><stop stop-color="#FFF0D2"/><stop offset="1" stop-color="#FFAD74"/></linearGradient></defs>
+<rect width="24" height="24" rx="6" fill="url(#ground)"/><path d="M6 12a6 6 0 0 1 12 0Z" fill="url(#sun)"/><rect x="3" y="13" width="18" height="1" rx="0.5" fill="url(#sun)"/><rect x="7" y="16" width="10" height="1" rx="0.5" fill="url(#sun)"/><rect x="10" y="19" width="5" height="1" rx="0.5" fill="url(#sun)"/></svg>
