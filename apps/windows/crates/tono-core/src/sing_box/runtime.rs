@@ -21,6 +21,7 @@ use std::{
 /// sing-box fake-IP pool: the upper half of the 198.18.0.0/16 the Windows DNS proof accepts,
 /// clear of the TUN /30 (198.18.0.0–198.18.0.3). The template refuses plain-IP connections
 /// into it.
+#[cfg(test)]
 pub const SING_BOX_FAKE_IPV4: &str = "198.18.128.0/17";
 
 /// The pool holds eight /20 slots, and one process allocates from one of them (#1258). Its
@@ -159,9 +160,7 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
             "hy2" if input.nodes.iter().any(|node| node.is_hysteria2()) => (),
             "hy2" => return Err(UnsupportedCertificatePin),
             "direct" if input.direct_plan.is_some() => (),
-            "home" if input.routing.home_proxy.is_some() || input.routing.home_socks5.is_some() => {
-                ()
-            }
+            "home" if input.routing.home_proxy.is_some() || input.routing.home_socks5.is_some() => {}
             _ => return Err(UnsupportedPolicy),
         }
     }
@@ -797,7 +796,7 @@ mod tests {
         let selected = build_runtime(request).unwrap();
         assert!(selected.runtime_json().contains(&spki));
         assert!(selected.runtime_json().contains("certificate_public_key_sha256"));
-        assert!(selected.runtime_json().contains(&encoded));
+        assert!(selected.runtime_json().contains(encoded));
         assert!(selected.runtime_json().contains("\"keep_alive_period\":\"5s\""));
         assert!(!selected.runtime_json().contains("idle_timeout"));
         assert!(!selected.runtime_json().contains("disable_chrome_parrot"));
