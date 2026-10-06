@@ -78,3 +78,24 @@ it('sea account leaves unknown account facts unknown', () => {
   expect(screen.queryByRole('progressbar')).toBeNull()
   expect(screen.getAllByText('—')).toHaveLength(2)
 })
+
+it('sea account says what the date beside the plan is', () => {
+  render(
+    <SeaAccount
+      account={{
+        email: 'a@example.test',
+        suspended: false,
+        deviceLimit: 3,
+        plan: 'Pro',
+        quotaBytes: null,
+        usageBytes: null,
+        expiresAt: Date.UTC(2026, 11, 31, 12) / 1000,
+      }}
+      devices={null}
+      deviceCount={0}
+      onSignOut={() => {}}
+      dialogs={null}
+    />,
+  )
+  expect(screen.getByText(/Expires 2026-12-31/)).toBeTruthy()
+})

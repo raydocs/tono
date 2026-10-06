@@ -1561,6 +1561,7 @@ export interface TranslationResources {
         evidence: string
         explanation: string
         inUse: string
+        noEvidence: string
         recommendation: string
         selected: string
       }

@@ -40,7 +40,8 @@ export const SeaAccount = ({
           {account && ' · '}
           {account &&
             (account.expiresAt != null
-              ? dayjs(account.expiresAt * 1000).format('YYYY-MM-DD')
+              ? // A bare date beside the plan does not say what it dates.
+                `${t('tono.account.expires')} ${dayjs(account.expiresAt * 1000).format('YYYY-MM-DD')}`
               : t('tono.account.noExpiry'))}
         </span>
       </div>

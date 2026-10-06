@@ -763,7 +763,8 @@
     "explanation": "Server preferences explained",
     "inUse": "In use",
     "all": "All servers · {{count}}",
-    "evidence": "{{count}} tunnel verification records in the last 24 hours",
+    "evidence": "Connected and verified in the last 24 hours",
+    "noEvidence": "No recent record",
     "selected": "Selected {{name}} · {{latency}}"
   },
   "seaIntro": {

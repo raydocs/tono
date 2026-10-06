@@ -763,7 +763,8 @@
     "explanation": "线路偏好说明",
     "inUse": "正在使用",
     "all": "全部线路 · {{count}}",
-    "evidence": "24 小时内有 {{count}} 条隧道验证记录",
+    "evidence": "近 24 小时内连上过，已通过验证",
+    "noEvidence": "暂无近期记录",
     "selected": "已选 {{name}} · {{latency}}"
   },
   "seaIntro": {

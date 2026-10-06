@@ -625,7 +625,8 @@ const ServersPage = () => {
               : failure
                 ? t('tono.nodes.testFailed')
                 : value !== null
-                  ? t(latencyLabelKey(kind, value), latencyLabelVars(value))
+                  ? // One unit in the new look: the home chip reads milliseconds too.
+                    `${Math.round(value)} ms`
                   : t('tono.nodes.untested')
           return {
             label,

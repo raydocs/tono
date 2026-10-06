@@ -258,7 +258,8 @@ export const SeaLines = ({
       }}
     >
       <PageHeader
-        title={t('tono.nodes.title')}
+        // The page is named as the navigation names it.
+        title={t('tono.nav.nodes')}
         trailing={
           <div className="sea-lines-actions">
             <label>
@@ -322,14 +323,15 @@ export const SeaLines = ({
             </p>
           )}
           <p>
+            {/* The record keeps one entry per line, so it says whether, never how often. */}
             {recommended && preferences
-              ? t('tono.seaLines.evidence', {
-                  count: recentRoutes(preferences, servers ?? [], now).filter(
-                    (entry) =>
-                      entry.name === recommended.name &&
-                      entry.revision === preferences?.catalogRevision,
-                  ).length,
-                })
+              ? recentRoutes(preferences, servers ?? [], now).some(
+                  (entry) =>
+                    entry.name === recommended.name &&
+                    entry.revision === preferences?.catalogRevision,
+                )
+                ? t('tono.seaLines.evidence')
+                : t('tono.seaLines.noEvidence')
               : t('tono.routes.noRecent')}
           </p>
         </div>
