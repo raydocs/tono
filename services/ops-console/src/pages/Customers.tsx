@@ -285,7 +285,7 @@ export default function CustomersPage({
         )}
       </div>
 
-      <details className="customers-overview">
+      <details className="customers-overview" open={context.view.overview} onToggle={(event) => context.change({ overview: event.currentTarget.open })}>
         <summary className="text-body">{copy.customerOverview}</summary>
         <div className="customers-board">
           <ListBand rows={customers.status === 'ready' ? all : null} />
