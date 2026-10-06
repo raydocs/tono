@@ -1062,6 +1062,7 @@ export interface TranslationResources {
           coreUnpinned: string
           dnsPortBusy: string
           encryptedDns: string
+          hy2Idle: string
           nodeUnreachable: string
           protectedHttpsFailed: string
           protectionHeldByAnotherUser: string
@@ -1199,6 +1200,54 @@ export interface TranslationResources {
           unknown: string
         }
         summaryHint: string
+      }
+      home: {
+        chooseOtherLine: string
+        closeDetails: string
+        details: string
+        duration: {
+          justConnected: string
+          minutes_one: string
+          minutes_other: string
+        }
+        firstRun: string
+        pickLine: string
+        popover: {
+          all: string
+          empty: string
+          favorites: string
+          recent: string
+          recommended: string
+          title: string
+        }
+        recovery: {
+          scheduled: string
+          unscheduled: string
+        }
+        retry: {
+          checking: string
+          now: string
+          scheduled: string
+          unscheduled: string
+        }
+        sentence: {
+          idle: string
+        }
+        showSteps: string
+        slow: {
+          elapsed: string
+          sentence: string
+          switch: string
+        }
+        telemetry: {
+          aiToday: string
+        }
+        title: {
+          connecting: string
+          disconnecting: string
+          failed: string
+          idle: string
+        }
       }
       intro: {
         getStarted: string
@@ -1471,6 +1520,58 @@ export interface TranslationResources {
         title: string
         useRecommendation: string
         verifiedAt: string
+      }
+      scenePreview: {
+        action: string
+        connected: string
+        connecting: string
+        detail: string
+        failed: string
+        idle: string
+        node: string
+        notice: string
+        notSampled: string
+        paused: string
+        probeFinished: string
+        probePending: string
+        progress: string
+        quality: string
+        qualityModes: {
+          auto: string
+          full: string
+          lite: string
+          static: string
+        }
+        remeasure: string
+        staticProbe: string
+        useProgress: string
+        viewport: string
+      }
+      seaActivity: {
+        exit: string
+        summary: string
+      }
+      seaIntro: {
+        line: string
+        next: string
+        skip: string
+      }
+      seaLines: {
+        all: string
+        evidence: string
+        explanation: string
+        inUse: string
+        noEvidence: string
+        recommendation: string
+        selected: string
+      }
+      seaSettings: {
+        auditBrief: string
+        learnMore: string
+        motion: string
+        motionHint: string
+        networkBrief: string
+        telemetryBrief: string
       }
       servers: {
         cloudGroup: string

@@ -1,0 +1,82 @@
+{
+  "cloud-2.png": {
+    "sha256": "e2f93ed9df13d836af39700f3e43879e9f8e926ac1fe965ce3346c29ded2803e",
+    "width": 768,
+    "height": 128,
+    "colorType": 6,
+    "bytes": 24662,
+    "crcAndRows": "valid"
+  },
+  "specks-1.png": {
+    "sha256": "5bb053fbe255b3459ebe852d2ac0ebe9ab8253572f6b97a2bdce5910de381049",
+    "width": 512,
+    "height": 192,
+    "colorType": 0,
+    "bytes": 13323,
+    "crcAndRows": "valid"
+  },
+  "swell-1.png": {
+    "sha256": "4af8fe15e296cc95e14b011aebdcab88e4a794047f270eac103c2647c900e1e6",
+    "width": 920,
+    "height": 180,
+    "colorType": 0,
+    "bytes": 37545,
+    "crcAndRows": "valid"
+  },
+  "ripple-2.png": {
+    "sha256": "344edd0851fb64b340b9dc4c6c66ecf4e2aa1cb118c7be9eeb3cbc545c257595",
+    "width": 920,
+    "height": 270,
+    "colorType": 0,
+    "bytes": 39875,
+    "crcAndRows": "valid"
+  },
+  "cloud-1.png": {
+    "sha256": "76997bfff6a6eea2d40902182c2f9f3caee1e2ad3cbeb1c363f1009c765a800d",
+    "width": 768,
+    "height": 128,
+    "colorType": 6,
+    "bytes": 25296,
+    "crcAndRows": "valid"
+  },
+  "specks-2.png": {
+    "sha256": "753556d0645f704d6a876330f1dd98dd2dab68ec5dc5342052158455bffba8d3",
+    "width": 512,
+    "height": 192,
+    "colorType": 0,
+    "bytes": 13522,
+    "crcAndRows": "valid"
+  },
+  "swell-2.png": {
+    "sha256": "436040e83080d7e174540b1d705b5babef2816e13cbf4bc8d4594a5053220009",
+    "width": 920,
+    "height": 180,
+    "colorType": 0,
+    "bytes": 37601,
+    "crcAndRows": "valid"
+  },
+  "ripple-1.png": {
+    "sha256": "926446df9b47123d425965c0d1c9f64111465296532f9e98995881e84f2ba759",
+    "width": 920,
+    "height": 270,
+    "colorType": 0,
+    "bytes": 41874,
+    "crcAndRows": "valid"
+  },
+  "path-envelope.png": {
+    "sha256": "acd608c504bee7cfba2ae7134fb8e016685cf3cc5c158c57dac02c594df5face",
+    "width": 300,
+    "height": 270,
+    "colorType": 0,
+    "bytes": 16472,
+    "crcAndRows": "valid"
+  },
+  "grain.png": {
+    "sha256": "d26a28b3d28d9b3c31a85ceaea6ba5d1ceaa3bcd07f58580d4e31ef7418f862c",
+    "width": 220,
+    "height": 220,
+    "colorType": 6,
+    "bytes": 47644,
+    "crcAndRows": "valid"
+  }
+}

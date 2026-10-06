@@ -64,3 +64,5 @@
 
 - 2026-10-06 最后单点 minor：协作增量评审 1e556431 覆盖 f2bf4149..155815e7，报告 PASSED/无阻断（不是 owner 验收）。opus:F2 确认移除外观开关后旧 Theme 行不可达，主窗口和 MenuBarExtra 却仍读取已存 themeMode；现删除应用入口的该读取，两处共用固定 dark 海景 scheme，不删除或改写旧值，旧夹具设置行保留待专门清理。新增一个实际 AppProfile Light/Dark 存值不影响生产 scheme 且值不变的 XCTest，MacBook 未运行；新最终 head hosted 仍待验证。四档动效 I-UI0075-R3-O-F6 保持 open，无其他源码续改。
 - 2026-10-06 评审证据限制：菜单 proposal 回归没有运行旧代码红灯，不声称它证明旧实现必失败；真实 MenuBarExtra 确认弹窗/焦点/按键/AX 和 owner 实机仍未验。155815e7 的 hosted 原始日志为 622 tests/1 skipped/0 failures、13 原生窗口合同通过；该结果是主题单点修复前的基线，不冒称新 head CI 已绿。
+
+- 2026-10-06 主题回归验真与最新 main 集成：8596a593/run37515683280 exact-head ci-gate SUCCESS，raw `testProductionSchemeIgnoresStoredThemeWithoutOverwritingIt passed (0.039 seconds)` 与 623 tests/1 skipped/0 failures；不是安装/签名/owner 证据。按 ribboneel 新请求合入 main5a77c6b681b694c4174acf1dffd43368e0d49471（Windows #1417），自动无冲突；相对上一 hosted 主线基线 c7d77517 的新增仅 Windows/docs，未再次改 Mac 产品代码或做合并解决，HelperProtocolVersion 同一 blob、无版本碰撞，不人为升级。Windows 使用既有 main 树不另修改；068 保留，无旧063-windows文件链接或新决策号。复用已记录的 Mac 评审范围及本轮主题单点修复，不重审全栈；集成 head 的 hosted/原图须重新通过，不沿用8596绿灯。

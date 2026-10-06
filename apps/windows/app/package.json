@@ -16,6 +16,7 @@
     "web:dev": "vite",
     "web:build": "tsc --noEmit && vite build",
     "web:serve": "vite preview",
+    "scene:build": "node scripts/build-sea-preview.mjs",
     "prebuild": "node scripts/prebuild.mjs",
     "portable": "node scripts/portable.mjs",
     "portable-fixed-webview2": "node scripts/portable-fixed-webview2.mjs",
@@ -37,7 +38,7 @@
     "typecheck": "tsc --noEmit && node ../../../services/unchecked-index-ratchet.mjs --baseline unchecked-index.baseline -- ./node_modules/.bin/tsc --noEmit --pretty false --incremental false --noUncheckedIndexedAccess",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:dev-control": "node --test scripts/cargo-version.test.mjs scripts/pinned-core.test.mjs scripts/dev-control.test.mjs scripts/prepare-updater-config.test.mjs scripts/service-release.test.mjs scripts/validate-windows-channel.test.mjs scripts/windows-packaging.test.mjs",
+    "test:dev-control": "node --test scripts/cargo-version.test.mjs scripts/pinned-core.test.mjs scripts/dev-control.test.mjs scripts/prepare-updater-config.test.mjs scripts/service-release.test.mjs scripts/validate-windows-channel.test.mjs scripts/windows-packaging.test.mjs scripts/sea-brand-assets.test.mjs",
     "knip:check": "knip",
     "knip:report": "knip --no-exit-code"
   },

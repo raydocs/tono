@@ -1,0 +1,90 @@
+[
+  {
+    "w": 860,
+    "h": 540,
+    "full": false,
+    "name": "contrast-860-sidebar",
+    "x": 232,
+    "y": 199.1875,
+    "width": 204,
+    "height": 46.5,
+    "color": "rgba(246, 242, 236, 0.94)",
+    "minimum": 8.33971525823326,
+    "worstPixel": {
+      "x": 429,
+      "y": 243,
+      "rgb": [
+        93,
+        55,
+        44
+      ]
+    },
+    "pass": true
+  },
+  {
+    "w": 920,
+    "h": 600,
+    "full": false,
+    "name": "contrast-920-sidebar",
+    "x": 232,
+    "y": 212.390625,
+    "width": 240,
+    "height": 46.5,
+    "color": "rgba(246, 242, 236, 0.94)",
+    "minimum": 9.067145911984566,
+    "worstPixel": {
+      "x": 462,
+      "y": 243,
+      "rgb": [
+        87,
+        49,
+        42
+      ]
+    },
+    "pass": true
+  },
+  {
+    "w": 1920,
+    "h": 1080,
+    "full": false,
+    "name": "contrast-1920-sidebar",
+    "x": 256,
+    "y": 317.984375,
+    "width": 400,
+    "height": 23.25,
+    "color": "rgba(246, 242, 236, 0.94)",
+    "minimum": 13.683010678039922,
+    "worstPixel": {
+      "x": 301,
+      "y": 339,
+      "rgb": [
+        40,
+        22,
+        30
+      ]
+    },
+    "pass": true
+  },
+  {
+    "w": 920,
+    "h": 600,
+    "full": true,
+    "name": "contrast-920-full",
+    "x": 56,
+    "y": 212.390625,
+    "width": 336,
+    "height": 23.25,
+    "color": "rgba(246, 242, 236, 0.94)",
+    "minimum": 9.493483250448593,
+    "worstPixel": {
+      "x": 391,
+      "y": 233,
+      "rgb": [
+        83,
+        46,
+        41
+      ]
+    },
+    "pass": true
+  }
+]

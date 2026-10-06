@@ -1,4 +1,4 @@
-/* Tono motion. Two curves only, and short durations: 0.22s for state, 0.15/0.16s
+/* Tono control motion. Two curves and short durations: 0.22s for state, 0.15/0.16s
    for hover. Everything decorative must degrade under prefers-reduced-motion. */
 :root {
   --tono-ease: cubic-bezier(
@@ -23,7 +23,8 @@
 
   /* Motion contract — one table, both clients (macOS: Views/TonoMotion.swift;
      the numbers are listed in docs/ui-design-system.md §7). Everything is
-     feedback for something that just happened; nothing here loops. */
+     feedback for something that just happened; no control tokens here loop.
+     The separate ambient-scene class below may loop, never delaying controls. */
   --tono-duration-press: 0.1s; /* @kind other */
   --tono-duration-text: 0.22s; /* @kind other */ /* live text replacing live text */
   --tono-duration-surface: 0.35s; /* @kind other */ /* a card arriving or leaving */
@@ -43,4 +44,69 @@
   --tono-rise-surface: 6px;
   --tono-hover-lift: -2px; /* ConnectPill */
   --tono-hover-lift-card: -1px;
+}
+
+/* Ambient scene is a separate class; never use these timings on controls. */
+:root {
+  --tono-ambient-ease-sun: cubic-bezier(0.3, 0, 0.2, 1);
+  --tono-ambient-ease-sky: cubic-bezier(0.4, 0, 0.4, 1);
+  --tono-ambient-ease-dawn: cubic-bezier(0.25, 0, 0.75, 1);
+  --tono-ambient-ease-fail: cubic-bezier(0.45, 0, 0.3, 1);
+  --tono-ambient-ease-set: cubic-bezier(0.4, 0, 0.2, 1);
+  --tono-ambient-ease-horizon: var(--tono-ambient-ease-set);
+  --tono-ambient-sun-arrive: 2400ms;
+  --tono-ambient-sun-rise: 2600ms;
+  --tono-ambient-progress: 900ms;
+  --tono-ambient-sun-fail: 1800ms;
+  --tono-ambient-sun-set: 4600ms;
+  --tono-ambient-sky: 2600ms;
+  --tono-ambient-night: 6000ms;
+  --tono-ambient-breathe: 2.4s;
+  --tono-ambient-sun-breathe: 7.6s;
+  --tono-ambient-bob: 5s;
+  --tono-ambient-ember: 6.4s;
+  --tono-ambient-water-near: 3.1s;
+  --tono-ambient-water-far: 3.8s;
+  /* Seeded star periods vary from 3–9s; the meteor is a 700ms shot per minute. */
+  --tono-ambient-meteor: 60s;
+  --tono-ambient-star-exit: 2000ms;
+  --tono-ambient-star-stagger: 300ms;
+  --tono-ambient-cloud-near: 110s;
+  --tono-ambient-cloud-far: 137s;
+  --tono-ambient-reflection-near: 24s;
+  --tono-ambient-reflection-far: 31s;
+  --tono-ambient-speck-near: 8s;
+  --tono-ambient-speck-far: 11s;
+  --tono-ambient-speck-distant: 16s;
+  --tono-ambient-speck-distant-alt: 21s;
+  --tono-ambient-glint-shimmer: 9.2s;
+  --tono-ambient-glint-shimmer-alt: 13.7s;
+  --tono-ambient-moon-breathe: 12s;
+  --tono-ambient-swell-near: 40s;
+  --tono-ambient-swell-far: 65s;
+  --tono-ambient-bloom: var(--tono-ambient-sun-arrive);
+  --tono-ambient-sweep: 900ms;
+  --tono-ambient-sweep-delay: 1400ms;
+  --tono-ambient-moon-exit: 500ms;
+  --tono-ambient-afterglow: 6600ms;
+}
+
+/* Keep the original curve as the fallback in older web engines. */
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    /* Delay sunset deformation until the high sun approaches the horizon.
+       Shared disk copies use this curve; the travel curve remains unchanged. */
+    --tono-ambient-ease-horizon: linear(0, 0 18%, 0.6 38%, 1 55%, 1);
+    --tono-ambient-ease-set: linear(
+      0,
+      0.05 6%,
+      0.3 18%,
+      0.58 38%,
+      0.72 55%,
+      0.82 72%,
+      0.86 82%,
+      0.91 91%,
+      1
+    );
+  }
 }

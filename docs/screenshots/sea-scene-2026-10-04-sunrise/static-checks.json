@@ -1,0 +1,59 @@
+{
+  "paused": {
+    "before": [
+      {
+        "property": "opacity",
+        "state": "running"
+      }
+    ],
+    "after": {
+      "motion": "static",
+      "transitions": 0,
+      "running": 0,
+      "shape": [
+        0.97,
+        0.97,
+        0.97
+      ],
+      "afterglow": "0"
+    }
+  },
+  "prefers-reduced-motion": {
+    "before": [
+      {
+        "property": "opacity",
+        "state": "running"
+      }
+    ],
+    "after": {
+      "motion": "static",
+      "transitions": 0,
+      "running": 0,
+      "shape": [
+        0.97,
+        0.97,
+        0.97
+      ],
+      "afterglow": "0"
+    }
+  },
+  "forced-colors": {
+    "before": [
+      {
+        "property": "opacity",
+        "state": "running"
+      }
+    ],
+    "after": {
+      "motion": "static",
+      "transitions": 0,
+      "running": 0,
+      "shape": [
+        0.97,
+        0.97,
+        0.97
+      ],
+      "afterglow": "0"
+    }
+  }
+}

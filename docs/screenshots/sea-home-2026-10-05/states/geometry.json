@@ -1,0 +1,1157 @@
+[
+  {
+    "state": "idle",
+    "w": 860,
+    "h": 540,
+    "phase": "idle",
+    "title": "未连接",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 660,
+      "height": 540,
+      "bottom": 540,
+      "scroll": 752,
+      "client": 540
+    },
+    "actions": {
+      "x": 232,
+      "y": 244.4375,
+      "width": 316.796875,
+      "height": 48,
+      "bottom": 292.4375,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 232,
+      "y": 308.4375,
+      "width": 316.796875,
+      "height": 0,
+      "bottom": 308.4375,
+      "scroll": 0,
+      "client": 0
+    },
+    "chip": {
+      "x": 337.96875,
+      "y": 244.4375,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 292.4375,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 232,
+      "y": 199.1875,
+      "width": 292.796875,
+      "height": 23.25,
+      "bottom": 222.4375,
+      "scroll": 23,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "connecting",
+    "w": 860,
+    "h": 540,
+    "phase": "connecting",
+    "title": "连接中…",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 660,
+      "height": 540,
+      "bottom": 540,
+      "scroll": 672,
+      "client": 540
+    },
+    "actions": {
+      "x": 232,
+      "y": 264.4375,
+      "width": 316.796875,
+      "height": 108,
+      "bottom": 372.4375,
+      "scroll": 108,
+      "client": 108
+    },
+    "attention": {
+      "x": 232,
+      "y": 388.4375,
+      "width": 316.796875,
+      "height": 46,
+      "bottom": 434.4375,
+      "scroll": 46,
+      "client": 46
+    },
+    "chip": {
+      "x": 232,
+      "y": 324.4375,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 372.4375,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 232,
+      "y": 199.1875,
+      "width": 292.796875,
+      "height": 23.25,
+      "bottom": 222.4375,
+      "scroll": 43,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "connected",
+    "w": 860,
+    "h": 540,
+    "phase": "connected",
+    "title": "已连接",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 660,
+      "height": 540,
+      "bottom": 540,
+      "scroll": 752,
+      "client": 540
+    },
+    "actions": {
+      "x": 232,
+      "y": 244.4375,
+      "width": 316.796875,
+      "height": 48,
+      "bottom": 292.4375,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 232,
+      "y": 308.4375,
+      "width": 316.796875,
+      "height": 0,
+      "bottom": 308.4375,
+      "scroll": 0,
+      "client": 0
+    },
+    "chip": {
+      "x": 337.96875,
+      "y": 244.4375,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 292.4375,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 232,
+      "y": 199.1875,
+      "width": 292.796875,
+      "height": 23.25,
+      "bottom": 222.4375,
+      "scroll": 23,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "disconnecting",
+    "w": 860,
+    "h": 540,
+    "phase": "idle",
+    "title": "断开中…",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 660,
+      "height": 540,
+      "bottom": 540,
+      "scroll": 692,
+      "client": 540
+    },
+    "actions": {
+      "x": 232,
+      "y": 244.4375,
+      "width": 316.796875,
+      "height": 108,
+      "bottom": 352.4375,
+      "scroll": 108,
+      "client": 108
+    },
+    "attention": {
+      "x": 232,
+      "y": 368.4375,
+      "width": 316.796875,
+      "height": 0,
+      "bottom": 368.4375,
+      "scroll": 0,
+      "client": 0
+    },
+    "chip": {
+      "x": 232,
+      "y": 304.4375,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 352.4375,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 232,
+      "y": 199.1875,
+      "width": 292.796875,
+      "height": 23.25,
+      "bottom": 222.4375,
+      "scroll": 43,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "failed",
+    "w": 860,
+    "h": 540,
+    "phase": "failed",
+    "title": "没连上",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 660,
+      "height": 540,
+      "bottom": 540,
+      "scroll": 752,
+      "client": 540
+    },
+    "actions": {
+      "x": 232,
+      "y": 244.4375,
+      "width": 316.796875,
+      "height": 48,
+      "bottom": 292.4375,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 232,
+      "y": 308.4375,
+      "width": 316.796875,
+      "height": 155.546875,
+      "bottom": 463.984375,
+      "scroll": 289,
+      "client": 156
+    },
+    "chip": {
+      "x": 337.96875,
+      "y": 244.4375,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 292.4375,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 232,
+      "y": 199.1875,
+      "width": 292.796875,
+      "height": 23.25,
+      "bottom": 222.4375,
+      "scroll": 23,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "protectedOffline",
+    "w": 860,
+    "h": 540,
+    "phase": "failed",
+    "title": "保护中，未连上",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 660,
+      "height": 540,
+      "bottom": 540,
+      "scroll": 716,
+      "client": 540
+    },
+    "actions": {
+      "x": 232,
+      "y": 279.640625,
+      "width": 316.796875,
+      "height": 48,
+      "bottom": 327.640625,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 232,
+      "y": 343.640625,
+      "width": 316.796875,
+      "height": 120.34375,
+      "bottom": 463.984375,
+      "scroll": 536,
+      "client": 120
+    },
+    "chip": {
+      "x": 248,
+      "y": 817.234375,
+      "width": 284.796875,
+      "height": 48,
+      "bottom": 865.234375,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 232,
+      "y": 234.390625,
+      "width": 292.796875,
+      "height": 23.25,
+      "bottom": 257.640625,
+      "scroll": 23,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "unknown",
+    "w": 860,
+    "h": 540,
+    "phase": "failed",
+    "title": "保护状态未确认",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 660,
+      "height": 540,
+      "bottom": 540,
+      "scroll": 693,
+      "client": 540
+    },
+    "actions": {
+      "x": 232,
+      "y": 302.890625,
+      "width": 316.796875,
+      "height": 48,
+      "bottom": 350.890625,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 232,
+      "y": 366.890625,
+      "width": 316.796875,
+      "height": 0,
+      "bottom": 366.890625,
+      "scroll": 0,
+      "client": 0
+    },
+    "chip": {
+      "x": 337.96875,
+      "y": 302.890625,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 350.890625,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 232,
+      "y": 234.390625,
+      "width": 292.796875,
+      "height": 46.5,
+      "bottom": 280.890625,
+      "scroll": 47,
+      "client": 47
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "idle",
+    "w": 920,
+    "h": 600,
+    "phase": "idle",
+    "title": "未连接",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 720,
+      "height": 600,
+      "bottom": 600,
+      "scroll": 854,
+      "client": 600
+    },
+    "actions": {
+      "x": 232,
+      "y": 257.640625,
+      "width": 345.59375,
+      "height": 48,
+      "bottom": 305.640625,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 232,
+      "y": 321.640625,
+      "width": 345.59375,
+      "height": 0,
+      "bottom": 321.640625,
+      "scroll": 0,
+      "client": 0
+    },
+    "chip": {
+      "x": 337.96875,
+      "y": 257.640625,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 305.640625,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 232,
+      "y": 212.390625,
+      "width": 321.59375,
+      "height": 23.25,
+      "bottom": 235.640625,
+      "scroll": 23,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "connecting",
+    "w": 920,
+    "h": 600,
+    "phase": "connecting",
+    "title": "连接中…",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 720,
+      "height": 600,
+      "bottom": 600,
+      "scroll": 838,
+      "client": 600
+    },
+    "actions": {
+      "x": 232,
+      "y": 277.640625,
+      "width": 345.59375,
+      "height": 48,
+      "bottom": 325.640625,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 232,
+      "y": 341.640625,
+      "width": 345.59375,
+      "height": 46,
+      "bottom": 387.640625,
+      "scroll": 46,
+      "client": 46
+    },
+    "chip": {
+      "x": 367.921875,
+      "y": 277.640625,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 325.640625,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 232,
+      "y": 212.390625,
+      "width": 321.59375,
+      "height": 23.25,
+      "bottom": 235.640625,
+      "scroll": 43,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "connected",
+    "w": 920,
+    "h": 600,
+    "phase": "connected",
+    "title": "已连接",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 720,
+      "height": 600,
+      "bottom": 600,
+      "scroll": 854,
+      "client": 600
+    },
+    "actions": {
+      "x": 232,
+      "y": 257.640625,
+      "width": 345.59375,
+      "height": 48,
+      "bottom": 305.640625,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 232,
+      "y": 321.640625,
+      "width": 345.59375,
+      "height": 0,
+      "bottom": 321.640625,
+      "scroll": 0,
+      "client": 0
+    },
+    "chip": {
+      "x": 337.96875,
+      "y": 257.640625,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 305.640625,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 232,
+      "y": 212.390625,
+      "width": 321.59375,
+      "height": 23.25,
+      "bottom": 235.640625,
+      "scroll": 23,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "disconnecting",
+    "w": 920,
+    "h": 600,
+    "phase": "idle",
+    "title": "断开中…",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 720,
+      "height": 600,
+      "bottom": 600,
+      "scroll": 854,
+      "client": 600
+    },
+    "actions": {
+      "x": 232,
+      "y": 257.640625,
+      "width": 345.59375,
+      "height": 48,
+      "bottom": 305.640625,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 232,
+      "y": 321.640625,
+      "width": 345.59375,
+      "height": 0,
+      "bottom": 321.640625,
+      "scroll": 0,
+      "client": 0
+    },
+    "chip": {
+      "x": 366.125,
+      "y": 257.640625,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 305.640625,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 232,
+      "y": 212.390625,
+      "width": 321.59375,
+      "height": 23.25,
+      "bottom": 235.640625,
+      "scroll": 43,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "failed",
+    "w": 920,
+    "h": 600,
+    "phase": "failed",
+    "title": "没连上",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 720,
+      "height": 600,
+      "bottom": 600,
+      "scroll": 854,
+      "client": 600
+    },
+    "actions": {
+      "x": 232,
+      "y": 257.640625,
+      "width": 345.59375,
+      "height": 48,
+      "bottom": 305.640625,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 232,
+      "y": 321.640625,
+      "width": 345.59375,
+      "height": 202.34375,
+      "bottom": 523.984375,
+      "scroll": 289,
+      "client": 202
+    },
+    "chip": {
+      "x": 337.96875,
+      "y": 257.640625,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 305.640625,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 232,
+      "y": 212.390625,
+      "width": 321.59375,
+      "height": 23.25,
+      "bottom": 235.640625,
+      "scroll": 23,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "protectedOffline",
+    "w": 920,
+    "h": 600,
+    "phase": "failed",
+    "title": "保护中，未连上",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 720,
+      "height": 600,
+      "bottom": 600,
+      "scroll": 854,
+      "client": 600
+    },
+    "actions": {
+      "x": 232,
+      "y": 240.046875,
+      "width": 345.59375,
+      "height": 48,
+      "bottom": 288.046875,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 232,
+      "y": 304.046875,
+      "width": 345.59375,
+      "height": 219.9375,
+      "bottom": 523.984375,
+      "scroll": 518,
+      "client": 220
+    },
+    "chip": {
+      "x": 248,
+      "y": 759.640625,
+      "width": 313.59375,
+      "height": 48,
+      "bottom": 807.640625,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 232,
+      "y": 194.796875,
+      "width": 321.59375,
+      "height": 23.25,
+      "bottom": 218.046875,
+      "scroll": 23,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "unknown",
+    "w": 920,
+    "h": 600,
+    "phase": "failed",
+    "title": "保护状态未确认",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 720,
+      "height": 600,
+      "bottom": 600,
+      "scroll": 853,
+      "client": 600
+    },
+    "actions": {
+      "x": 232,
+      "y": 263.296875,
+      "width": 345.59375,
+      "height": 48,
+      "bottom": 311.296875,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 232,
+      "y": 327.296875,
+      "width": 345.59375,
+      "height": 0,
+      "bottom": 327.296875,
+      "scroll": 0,
+      "client": 0
+    },
+    "chip": {
+      "x": 337.96875,
+      "y": 263.296875,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 311.296875,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 232,
+      "y": 194.796875,
+      "width": 321.59375,
+      "height": 46.5,
+      "bottom": 241.296875,
+      "scroll": 47,
+      "client": 47
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "idle",
+    "w": 1920,
+    "h": 1080,
+    "phase": "idle",
+    "title": "未连接",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 1720,
+      "height": 1080,
+      "bottom": 1080,
+      "scroll": 1392,
+      "client": 1080
+    },
+    "actions": {
+      "x": 256,
+      "y": 363.234375,
+      "width": 440,
+      "height": 48,
+      "bottom": 411.234375,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 256,
+      "y": 427.234375,
+      "width": 440,
+      "height": 0,
+      "bottom": 427.234375,
+      "scroll": 0,
+      "client": 0
+    },
+    "chip": {
+      "x": 361.96875,
+      "y": 363.234375,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 411.234375,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 256,
+      "y": 317.984375,
+      "width": 400,
+      "height": 23.25,
+      "bottom": 341.234375,
+      "scroll": 23,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "connecting",
+    "w": 1920,
+    "h": 1080,
+    "phase": "connecting",
+    "title": "连接中…",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 1720,
+      "height": 1080,
+      "bottom": 1080,
+      "scroll": 1392,
+      "client": 1080
+    },
+    "actions": {
+      "x": 256,
+      "y": 383.234375,
+      "width": 440,
+      "height": 48,
+      "bottom": 431.234375,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 256,
+      "y": 447.234375,
+      "width": 440,
+      "height": 46,
+      "bottom": 493.234375,
+      "scroll": 46,
+      "client": 46
+    },
+    "chip": {
+      "x": 391.921875,
+      "y": 383.234375,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 431.234375,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 256,
+      "y": 317.984375,
+      "width": 400,
+      "height": 23.25,
+      "bottom": 341.234375,
+      "scroll": 43,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "connected",
+    "w": 1920,
+    "h": 1080,
+    "phase": "connected",
+    "title": "已连接",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 1720,
+      "height": 1080,
+      "bottom": 1080,
+      "scroll": 1392,
+      "client": 1080
+    },
+    "actions": {
+      "x": 256,
+      "y": 363.234375,
+      "width": 440,
+      "height": 48,
+      "bottom": 411.234375,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 256,
+      "y": 427.234375,
+      "width": 440,
+      "height": 0,
+      "bottom": 427.234375,
+      "scroll": 0,
+      "client": 0
+    },
+    "chip": {
+      "x": 361.96875,
+      "y": 363.234375,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 411.234375,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 256,
+      "y": 317.984375,
+      "width": 400,
+      "height": 23.25,
+      "bottom": 341.234375,
+      "scroll": 23,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "disconnecting",
+    "w": 1920,
+    "h": 1080,
+    "phase": "idle",
+    "title": "断开中…",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 1720,
+      "height": 1080,
+      "bottom": 1080,
+      "scroll": 1392,
+      "client": 1080
+    },
+    "actions": {
+      "x": 256,
+      "y": 363.234375,
+      "width": 440,
+      "height": 48,
+      "bottom": 411.234375,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 256,
+      "y": 427.234375,
+      "width": 440,
+      "height": 0,
+      "bottom": 427.234375,
+      "scroll": 0,
+      "client": 0
+    },
+    "chip": {
+      "x": 390.125,
+      "y": 363.234375,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 411.234375,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 256,
+      "y": 317.984375,
+      "width": 400,
+      "height": 23.25,
+      "bottom": 341.234375,
+      "scroll": 43,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "failed",
+    "w": 1920,
+    "h": 1080,
+    "phase": "failed",
+    "title": "没连上",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 1720,
+      "height": 1080,
+      "bottom": 1080,
+      "scroll": 1392,
+      "client": 1080
+    },
+    "actions": {
+      "x": 256,
+      "y": 363.234375,
+      "width": 440,
+      "height": 48,
+      "bottom": 411.234375,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 256,
+      "y": 427.234375,
+      "width": 440,
+      "height": 289.09375,
+      "bottom": 716.328125,
+      "scroll": 289,
+      "client": 289
+    },
+    "chip": {
+      "x": 361.96875,
+      "y": 363.234375,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 411.234375,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 256,
+      "y": 317.984375,
+      "width": 400,
+      "height": 23.25,
+      "bottom": 341.234375,
+      "scroll": 23,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "protectedOffline",
+    "w": 1920,
+    "h": 1080,
+    "phase": "failed",
+    "title": "保护中，未连上",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 1720,
+      "height": 1080,
+      "bottom": 1080,
+      "scroll": 1392,
+      "client": 1080
+    },
+    "actions": {
+      "x": 256,
+      "y": 345.640625,
+      "width": 440,
+      "height": 48,
+      "bottom": 393.640625,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 256,
+      "y": 409.640625,
+      "width": 440,
+      "height": 498.09375,
+      "bottom": 907.734375,
+      "scroll": 498,
+      "client": 498
+    },
+    "chip": {
+      "x": 272,
+      "y": 845.734375,
+      "width": 408,
+      "height": 48,
+      "bottom": 893.734375,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 256,
+      "y": 300.390625,
+      "width": 400,
+      "height": 23.25,
+      "bottom": 323.640625,
+      "scroll": 23,
+      "client": 23
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  },
+  {
+    "state": "unknown",
+    "w": 1920,
+    "h": 1080,
+    "phase": "failed",
+    "title": "保护状态未确认",
+    "root": {
+      "x": 200,
+      "y": 0,
+      "width": 1720,
+      "height": 1080,
+      "bottom": 1080,
+      "scroll": 1392,
+      "client": 1080
+    },
+    "actions": {
+      "x": 256,
+      "y": 368.890625,
+      "width": 440,
+      "height": 48,
+      "bottom": 416.890625,
+      "scroll": 48,
+      "client": 48
+    },
+    "attention": {
+      "x": 256,
+      "y": 432.890625,
+      "width": 440,
+      "height": 0,
+      "bottom": 432.890625,
+      "scroll": 0,
+      "client": 0
+    },
+    "chip": {
+      "x": 361.96875,
+      "y": 368.890625,
+      "width": 202.984375,
+      "height": 48,
+      "bottom": 416.890625,
+      "scroll": 48,
+      "client": 48
+    },
+    "sentence": {
+      "x": 256,
+      "y": 300.390625,
+      "width": 400,
+      "height": 46.5,
+      "bottom": 346.890625,
+      "scroll": 47,
+      "client": 47
+    },
+    "textColor": "rgba(246, 242, 236, 0.94)",
+    "overflow": false,
+    "exceptions": []
+  }
+]

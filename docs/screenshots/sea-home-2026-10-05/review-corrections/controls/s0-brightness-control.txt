@@ -1,0 +1,12 @@
+{
+  off: {
+    frames: 247,
+    geometry: { x: 0, y: 0, width: 920, height: 600, phase: 'connected' },
+    phase: 'idle'
+  },
+  on: {
+    frames: 247,
+    geometry: { x: 0, y: 0, width: 920, height: 600, phase: 'connected' },
+    phase: 'idle'
+  }
+}

@@ -1,0 +1,9 @@
+Low-sun/shared mirror vertical scales [1,1,1]
+file:///private/tmp/tono-sunrise-20261004/shape-regression.mjs:2
+const{ws,send,evaluate}=await connect();await send('Page.navigate',{url:'http://127.0.0.1:3000/dev/sea-scene/index.html?lang=zh&static&phase=connecting&progress=0.5'});await sleep(500);const shape=await evaluate(`[...document.querySelectorAll('.sea-sun-body')].map(n=>new DOMMatrix(getComputedStyle(n).transform).d)`);console.log('Low-sun/shared mirror vertical scales',JSON.stringify(shape));ws.close();if(!shape.every(v=>v>=.97&&v<.99))throw Error('Low sun has no subtle horizon compression');console.log('PASS low-sun/shared mirror compression');
+                                                                                                                                                                                                                                                                                                                                                                                                                                                            ^
+
+Error: Low sun has no subtle horizon compression
+    at file:///private/tmp/tono-sunrise-20261004/shape-regression.mjs:2:445
+
+Node.js v26.10.0

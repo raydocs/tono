@@ -1,0 +1,210 @@
+[
+  {
+    "width": 920,
+    "height": 600,
+    "phase": "idle",
+    "depth": "far",
+    "delay": -5000,
+    "duration": 16000,
+    "boundary": 11000,
+    "clip": {
+      "x": 662,
+      "y": 330,
+      "width": 168,
+      "height": 170,
+      "scale": 1
+    },
+    "before": {
+      "time": 10999,
+      "transform": "matrix(1, 0, 0, 1, 0, 95.994)"
+    },
+    "after": {
+      "time": 11001,
+      "transform": "matrix(1, 0, 0, 1, 0, 0.006)"
+    },
+    "changedPixelsOver5": 0,
+    "maxDelta": 2
+  },
+  {
+    "width": 920,
+    "height": 600,
+    "phase": "idle",
+    "depth": "near",
+    "delay": 0,
+    "duration": 8000,
+    "boundary": 8000,
+    "clip": {
+      "x": 662,
+      "y": 330,
+      "width": 168,
+      "height": 170,
+      "scale": 1
+    },
+    "before": {
+      "time": 7999,
+      "transform": "matrix(1, 0, 0, 1, 0, 191.976)"
+    },
+    "after": {
+      "time": 8000.999999999999,
+      "transform": "matrix(1, 0, 0, 1, 0, 0.024)"
+    },
+    "changedPixelsOver5": 0,
+    "maxDelta": 2
+  },
+  {
+    "width": 920,
+    "height": 600,
+    "phase": "connected",
+    "depth": "far",
+    "delay": -5000,
+    "duration": 16000,
+    "boundary": 11000,
+    "clip": {
+      "x": 469,
+      "y": 330,
+      "width": 300,
+      "height": 270,
+      "scale": 1
+    },
+    "before": {
+      "time": 10999,
+      "transform": "matrix(1, 0, 0, 1, 0, 95.994)"
+    },
+    "after": {
+      "time": 11001,
+      "transform": "matrix(1, 0, 0, 1, 0, 0.006)"
+    },
+    "changedPixelsOver5": 0,
+    "maxDelta": 2
+  },
+  {
+    "width": 920,
+    "height": 600,
+    "phase": "connected",
+    "depth": "near",
+    "delay": 0,
+    "duration": 8000,
+    "boundary": 8000,
+    "clip": {
+      "x": 469,
+      "y": 330,
+      "width": 300,
+      "height": 270,
+      "scale": 1
+    },
+    "before": {
+      "time": 7999,
+      "transform": "matrix(1, 0, 0, 1, 0, 191.976)"
+    },
+    "after": {
+      "time": 8000.999999999999,
+      "transform": "matrix(1, 0, 0, 1, 0, 0.024)"
+    },
+    "changedPixelsOver5": 0,
+    "maxDelta": 3
+  },
+  {
+    "width": 2560,
+    "height": 1440,
+    "phase": "idle",
+    "depth": "far",
+    "delay": -5000,
+    "duration": 16000,
+    "boundary": 11000,
+    "clip": {
+      "x": 1991,
+      "y": 792,
+      "width": 168,
+      "height": 170,
+      "scale": 1
+    },
+    "before": {
+      "time": 10999,
+      "transform": "matrix(1, 0, 0, 1, 0, 95.994)"
+    },
+    "after": {
+      "time": 11001,
+      "transform": "matrix(1, 0, 0, 1, 0, 0.006)"
+    },
+    "changedPixelsOver5": 0,
+    "maxDelta": 2
+  },
+  {
+    "width": 2560,
+    "height": 1440,
+    "phase": "idle",
+    "depth": "near",
+    "delay": 0,
+    "duration": 8000,
+    "boundary": 8000,
+    "clip": {
+      "x": 1991,
+      "y": 792,
+      "width": 168,
+      "height": 170,
+      "scale": 1
+    },
+    "before": {
+      "time": 7999,
+      "transform": "matrix(1, 0, 0, 1, 0, 191.976)"
+    },
+    "after": {
+      "time": 8000.999999999999,
+      "transform": "matrix(1, 0, 0, 1, 0, 0.024)"
+    },
+    "changedPixelsOver5": 0,
+    "maxDelta": 2
+  },
+  {
+    "width": 2560,
+    "height": 1440,
+    "phase": "connected",
+    "depth": "far",
+    "delay": -5000,
+    "duration": 16000,
+    "boundary": 11000,
+    "clip": {
+      "x": 1488,
+      "y": 792,
+      "width": 474,
+      "height": 427,
+      "scale": 1
+    },
+    "before": {
+      "time": 10999,
+      "transform": "matrix(1, 0, 0, 1, 0, 151.569)"
+    },
+    "after": {
+      "time": 11001,
+      "transform": "matrix(1, 0, 0, 1, 0, 0.00947368)"
+    },
+    "changedPixelsOver5": 712,
+    "maxDelta": 27
+  },
+  {
+    "width": 2560,
+    "height": 1440,
+    "phase": "connected",
+    "depth": "near",
+    "delay": 0,
+    "duration": 8000,
+    "boundary": 8000,
+    "clip": {
+      "x": 1488,
+      "y": 792,
+      "width": 474,
+      "height": 427,
+      "scale": 1
+    },
+    "before": {
+      "time": 7999,
+      "transform": "matrix(1, 0, 0, 1, 0, 303.12)"
+    },
+    "after": {
+      "time": 8000.999999999999,
+      "transform": "matrix(1, 0, 0, 1, 0, 0.0378947)"
+    },
+    "changedPixelsOver5": 15,
+    "maxDelta": 7
+  }
+]

@@ -20,3 +20,7 @@ CLAUDE.md
 AGENTS.md
 .zed
 src-tauri/tauri.updater.conf.json
+
+# Isolated web-only SeaScene preview outputs
+sea-preview/
+sea-preview.zip

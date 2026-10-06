@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import enTono from '@/locales/en/tono.json'
+import { setNewAppearance } from '@/tono-ui/appearance-preferences'
 
 const mocks = vi.hoisted(() => ({
   signOut: vi.fn(),
@@ -16,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   status: {} as Record<string, unknown>,
 }))
 
+vi.mock('@/tono-ui/SeaScene', () => ({
+  SeaScene: ({ phase }: { phase: string }) => <div data-scene-phase={phase} />,
+}))
 vi.mock('@/services/states', () => ({ useThemeMode: () => 'light' }))
 vi.mock('@/hooks/use-tono', () => ({
   useTonoStatus: () => ({
@@ -50,6 +54,7 @@ void i18n.use(initReactI18next).init({
 })
 
 beforeEach(() => {
+  setNewAppearance(false)
   vi.useFakeTimers()
   mocks.signOut.mockReset().mockResolvedValue(undefined)
   mocks.disconnect.mockReset().mockResolvedValue(undefined)
@@ -61,6 +66,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  setNewAppearance(false)
   vi.useRealTimers()
 })
 
@@ -329,5 +335,56 @@ describe('login request exclusion', () => {
     expect(screen.getByText('Session ended')).toBeDefined()
     expect(screen.queryByText('Account paused')).toBeNull()
     expect(screen.queryByText('Internet is blocked')).toBeNull()
+  })
+})
+
+describe('sea sign-in', () => {
+  it('pastes all six digits into the single accessible input and submits exactly once', async () => {
+    setNewAppearance(true)
+    await enterCodeStep()
+    mocks.verify.mockRejectedValue(new Error('Unavailable'))
+    const input = screen.getByLabelText('6-digit code')
+    await act(async () =>
+      fireEvent.paste(input, { clipboardData: { getData: () => '123 456' } }),
+    )
+    expect(mocks.verify).toHaveBeenCalledTimes(1)
+    expect(mocks.verify).toHaveBeenCalledWith('person@example.com', '123456')
+    expect(document.querySelectorAll('.sea-code-boxes span')).toHaveLength(6)
+    await act(async () => vi.advanceTimersByTime(1000))
+    expect(mocks.verify).toHaveBeenCalledTimes(1)
+  })
+  it('takes the code, not the date beside it, from a pasted message', async () => {
+    setNewAppearance(true)
+    await enterCodeStep()
+    mocks.verify.mockRejectedValue(new Error('Unavailable'))
+    await act(async () =>
+      fireEvent.paste(screen.getByLabelText('6-digit code'), {
+        clipboardData: { getData: () => '2026-10-06 code 123456' },
+      }),
+    )
+    expect(mocks.verify).toHaveBeenCalledWith('person@example.com', '123456')
+  })
+  it('clears only an invalid code in the new look, retaining the recovery error and retry input', async () => {
+    setNewAppearance(true)
+    await enterCodeStep()
+    mocks.verify.mockRejectedValue(
+      new Error('TONO_AUTH_INVALID_CODE: Code rejected'),
+    )
+    await act(async () =>
+      fireEvent.change(screen.getByLabelText('6-digit code'), {
+        target: { value: '123456' },
+      }),
+    )
+    expect(
+      (screen.getByLabelText('6-digit code') as HTMLInputElement).value,
+    ).toBe('')
+    expect(screen.getByRole('alert').textContent).toContain(
+      'TONO_AUTH_INVALID_CODE',
+    )
+    expect(
+      document.querySelector('.sea-code-entry')?.getAttribute('data-rejected'),
+    ).toBe('true')
+    expect(document.activeElement).toBe(screen.getByLabelText('6-digit code'))
+    expect(mocks.verify).toHaveBeenCalledTimes(1)
   })
 })

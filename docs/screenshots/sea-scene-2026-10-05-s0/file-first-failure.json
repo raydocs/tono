@@ -1,0 +1,92 @@
+{
+  "page": {
+    "url": "file:///Users/ruirui/orca/workspaces/tono/coral/apps/windows/app/sea-preview/index.html?lang=zh&quality=full&phase=connected",
+    "root": "",
+    "process": "undefined"
+  },
+  "exceptions": [
+    {
+      "exceptionId": 1,
+      "text": "Uncaught ReferenceError: process is not defined",
+      "lineNumber": 12,
+      "columnNumber": 13020,
+      "scriptId": "3",
+      "url": "file:///Users/ruirui/orca/workspaces/tono/coral/apps/windows/app/sea-preview/scene.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "",
+            "scriptId": "3",
+            "url": "file:///Users/ruirui/orca/workspaces/tono/coral/apps/windows/app/sea-preview/scene.js",
+            "lineNumber": 12,
+            "columnNumber": 13020
+          },
+          {
+            "functionName": "",
+            "scriptId": "3",
+            "url": "file:///Users/ruirui/orca/workspaces/tono/coral/apps/windows/app/sea-preview/scene.js",
+            "lineNumber": 0,
+            "columnNumber": 276
+          },
+          {
+            "functionName": "",
+            "scriptId": "3",
+            "url": "file:///Users/ruirui/orca/workspaces/tono/coral/apps/windows/app/sea-preview/scene.js",
+            "lineNumber": 244,
+            "columnNumber": 3537
+          },
+          {
+            "functionName": "",
+            "scriptId": "3",
+            "url": "file:///Users/ruirui/orca/workspaces/tono/coral/apps/windows/app/sea-preview/scene.js",
+            "lineNumber": 265,
+            "columnNumber": 15863
+          }
+        ]
+      },
+      "executionContextId": 1
+    },
+    {
+      "exceptionId": 2,
+      "text": "Uncaught ReferenceError: process is not defined",
+      "lineNumber": 12,
+      "columnNumber": 13020,
+      "scriptId": "3",
+      "url": "file:///Users/ruirui/orca/workspaces/tono/coral/apps/windows/app/sea-preview/scene.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "",
+            "scriptId": "3",
+            "url": "file:///Users/ruirui/orca/workspaces/tono/coral/apps/windows/app/sea-preview/scene.js",
+            "lineNumber": 12,
+            "columnNumber": 13020
+          },
+          {
+            "functionName": "",
+            "scriptId": "3",
+            "url": "file:///Users/ruirui/orca/workspaces/tono/coral/apps/windows/app/sea-preview/scene.js",
+            "lineNumber": 0,
+            "columnNumber": 276
+          },
+          {
+            "functionName": "",
+            "scriptId": "3",
+            "url": "file:///Users/ruirui/orca/workspaces/tono/coral/apps/windows/app/sea-preview/scene.js",
+            "lineNumber": 244,
+            "columnNumber": 3537
+          },
+          {
+            "functionName": "",
+            "scriptId": "3",
+            "url": "file:///Users/ruirui/orca/workspaces/tono/coral/apps/windows/app/sea-preview/scene.js",
+            "lineNumber": 265,
+            "columnNumber": 15863
+          }
+        ]
+      },
+      "executionContextId": 2
+    }
+  ],
+  "network": []
+}

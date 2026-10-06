@@ -1,0 +1,25 @@
+[
+  {
+    "name": "unmapped city row does not repeat codename",
+    "pass": true,
+    "detail": [
+      "Sakura 东京\n83 ms",
+      "Niagara 布法罗\n—",
+      "Harbor Singapore\n—",
+      "全部线路\n→"
+    ]
+  },
+  {
+    "name": "all AI week bars use scoped warm accent, including today",
+    "pass": false,
+    "detail": [
+      "color(srgb 1 0.886275 0.690196 / 0.35)",
+      "color(srgb 1 0.886275 0.690196 / 0.35)",
+      "color(srgb 1 0.886275 0.690196 / 0.35)",
+      "color(srgb 1 0.886275 0.690196 / 0.35)",
+      "color(srgb 1 0.886275 0.690196 / 0.35)",
+      "color(srgb 1 0.886275 0.690196 / 0.35)",
+      "rgb(255, 226, 176)"
+    ]
+  }
+]

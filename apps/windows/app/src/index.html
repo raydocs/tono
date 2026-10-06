@@ -9,6 +9,10 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tono</title>
+    <script>
+      // The new appearance is the only one (decision 066); a stored off is not read.
+      document.documentElement.dataset.seaAppearance = 'true';
+    </script>
     <!-- Tauri adds its runtime CSP nonce to bundled style elements. Runtime CSS-in-JS reads
          this marked element's DOM `nonce` property and reuses it for styles created later. -->
     <style data-tauri-csp-nonce-source>
@@ -77,6 +81,27 @@
         #initial-loading-overlay::after {
           animation-duration: 1.8s;
         }
+      }
+
+      html[data-sea-appearance='true'] {
+        --bg-color: #0b0a12;
+        --text-color: #f6f2ec;
+        color-scheme: dark;
+        background: #0b0a12;
+      }
+      html[data-sea-appearance='true'] #initial-loading-overlay::before {
+        content: '';
+        width: 48px;
+        height: 48px;
+        background: url('./assets/image/tono-mark.svg') center / contain no-repeat;
+      }
+      html[data-sea-appearance='true'] #initial-loading-overlay::after {
+        width: 120px;
+        height: 1px;
+        border: 0;
+        border-radius: 0;
+        background: linear-gradient(90deg, transparent, #c9cfff80, transparent);
+        animation: none;
       }
 
       #initial-loading-overlay[data-hidden='true'] {

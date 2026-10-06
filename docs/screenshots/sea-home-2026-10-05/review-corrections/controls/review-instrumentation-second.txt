@@ -1,0 +1,9 @@
+file:///private/tmp/tono-round3-20261005/cdp.mjs:9
+  const evaluate = async expression => { const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true}); if(r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; };
+                                                                                                                                                                ^
+
+Error: {"exceptionId":14,"text":"Uncaught","lineNumber":0,"columnNumber":207,"scriptId":"10445","exception":{"type":"object","subtype":"error","className":"SyntaxError","description":"SyntaxError: Unexpected token '}'","objectId":"8942542699797666664.227.2"}}
+    at Object.evaluate (file:///private/tmp/tono-round3-20261005/cdp.mjs:9:161)
+    at async file:///private/tmp/tono-pr2-review-20261005/review-audit.mjs:35:59
+
+Node.js v26.10.0

@@ -34,9 +34,11 @@ const buildSupportMessage = ({
 export const SupportContact = ({
   email,
   extra,
+  compact = false,
 }: {
   email?: string
   extra?: string
+  compact?: boolean
 }) => {
   const { t } = useTranslation()
   const dark = useThemeMode() !== 'light'
@@ -62,6 +64,21 @@ export const SupportContact = ({
     }
   })
 
+  const button = (
+    <button
+      type="button"
+      className="tono-button tono-action"
+      onClick={() => void copy()}
+      style={{
+        minHeight: 32,
+        padding: '6px 12px',
+        fontSize: 12,
+      }}
+    >
+      {t('tono.support.contact.copyMessage')}
+    </button>
+  )
+  if (compact) return button
   return (
     <div
       style={{
@@ -82,18 +99,7 @@ export const SupportContact = ({
       >
         {t('tono.support.contact.description')}
       </p>
-      <button
-        type="button"
-        className="tono-button tono-action"
-        onClick={() => void copy()}
-        style={{
-          minHeight: 32,
-          padding: '6px 12px',
-          fontSize: 12,
-        }}
-      >
-        {t('tono.support.contact.copyMessage')}
-      </button>
+      {button}
     </div>
   )
 }

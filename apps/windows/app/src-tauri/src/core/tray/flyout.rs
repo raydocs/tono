@@ -5,7 +5,8 @@ use anyhow::Result;
 use once_cell::sync::Lazy;
 use tauri::utils::config::Color;
 use tauri::{
-    AppHandle, Manager as _, PhysicalPosition, Rect, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, LogicalSize, Manager as _, PhysicalPosition, Rect, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
 };
 use tono_logging::{Type, logging, logging_error};
 
@@ -14,10 +15,15 @@ use crate::feat;
 use crate::utils::window_manager::WindowManager;
 
 pub const FLYOUT_LABEL: &str = "tray-flyout";
-const FLYOUT_WIDTH: f64 = 280.0;
-const FLYOUT_HEIGHT: f64 = 176.0;
+const FLYOUT_WIDTH: f64 = 320.0;
+const LEGACY_FLYOUT_WIDTH: f64 = 280.0;
+const FLYOUT_HEIGHT: f64 = 232.0;
+const LEGACY_FLYOUT_HEIGHT: f64 = 176.0;
 const FLYOUT_GAP: f64 = 8.0;
 const BLUR_GRACE: Duration = Duration::from_millis(400);
+
+static LAST_ANCHOR: Lazy<Mutex<Option<(Rect, PhysicalPosition<f64>)>>> =
+    Lazy::new(|| Mutex::new(None));
 
 static LAST_SHOWN: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
 
@@ -69,7 +75,7 @@ pub async fn toggle_flyout(rect: Rect, cursor: PhysicalPosition<f64>) -> Result<
 fn build_flyout(app: &AppHandle) -> Result<WebviewWindow> {
     let builder = WebviewWindowBuilder::new(app, FLYOUT_LABEL, WebviewUrl::App("/tray".into()))
         .title("Tono")
-        .inner_size(FLYOUT_WIDTH, FLYOUT_HEIGHT)
+        .inner_size(LEGACY_FLYOUT_WIDTH, LEGACY_FLYOUT_HEIGHT)
         .resizable(false)
         .maximizable(false)
         .minimizable(false)
@@ -124,6 +130,9 @@ fn show_flyout(window: &WebviewWindow) {
 }
 
 fn position_flyout(window: &WebviewWindow, rect: Rect, cursor: PhysicalPosition<f64>) {
+    if let Ok(mut anchor) = LAST_ANCHOR.lock() {
+        *anchor = Some((rect, cursor));
+    }
     let app = window.app_handle();
     let monitor = app
         .monitor_from_point(cursor.x, cursor.y)
@@ -134,8 +143,11 @@ fn position_flyout(window: &WebviewWindow, rect: Rect, cursor: PhysicalPosition<
     let icon_pos = rect.position.to_physical::<f64>(scale);
     let icon_size = rect.size.to_physical::<f64>(scale);
 
-    let flyout_w = (FLYOUT_WIDTH * scale).round() as i32;
-    let flyout_h = (FLYOUT_HEIGHT * scale).round() as i32;
+    let logical = window.inner_size().ok().map(|size| {
+        size.to_logical::<f64>(window.scale_factor().unwrap_or(scale))
+    }).unwrap_or(LogicalSize::new(LEGACY_FLYOUT_WIDTH, LEGACY_FLYOUT_HEIGHT));
+    let flyout_w = (logical.width * scale).round() as i32;
+    let flyout_h = (logical.height * scale).round() as i32;
     let gap = (FLYOUT_GAP * scale).round() as i32;
 
     let icon_x = icon_pos.x.round() as i32;
@@ -183,4 +195,38 @@ pub async fn tray_flyout_open_dashboard() {
 pub async fn tray_flyout_quit() {
     hide_flyout();
     feat::quit_or_resync().await;
+}
+
+/// Unprivileged presentation-only command, scoped to the actual flyout window.
+#[tauri::command]
+pub fn tray_flyout_set_appearance(window: WebviewWindow, enabled: bool) -> Result<(), String> {
+    if window.label() != FLYOUT_LABEL {
+        return Err("flyout appearance requires the flyout window".into());
+    }
+    let (width, height) = flyout_dimensions(enabled);
+    window.set_size(LogicalSize::new(width, height)).map_err(|error| error.to_string())?;
+    let anchor = LAST_ANCHOR.lock().ok().and_then(|value| *value);
+    if let Some((rect, cursor)) = anchor {
+        position_flyout(&window, rect, cursor);
+    }
+    Ok(())
+}
+
+fn flyout_dimensions(enabled: bool) -> (f64, f64) {
+    if enabled {
+        (FLYOUT_WIDTH, FLYOUT_HEIGHT)
+    } else {
+        (LEGACY_FLYOUT_WIDTH, LEGACY_FLYOUT_HEIGHT)
+    }
+}
+
+#[cfg(test)]
+mod presentation_tests {
+    use super::flyout_dimensions;
+
+    #[test]
+    fn preview_dimensions_do_not_replace_legacy_dimensions() {
+        assert_eq!(flyout_dimensions(true), (320.0, 232.0));
+        assert_eq!(flyout_dimensions(false), (280.0, 176.0));
+    }
 }

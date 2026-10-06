@@ -4,7 +4,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.mock('./design-tokens.css', () => ({}))
 vi.mock('./tono.css', () => ({}))
 
-import { connectFromShortcut, handleTonoWindowShortcut } from './tono-layout'
+import {
+  applyWindowFrame,
+  connectFromShortcut,
+  handleTonoWindowShortcut,
+} from './tono-layout'
 
 const fire = (
   init: KeyboardEventInit,
@@ -57,6 +61,24 @@ describe('handleTonoWindowShortcut', () => {
   })
 })
 
+it('leaves Ctrl+K to an open confirmation instead of connecting or disconnecting behind it', () => {
+  const dialog = document.createElement('div')
+  dialog.setAttribute('role', 'dialog')
+  dialog.setAttribute('aria-modal', 'true')
+  document.body.append(dialog)
+  const connect = vi.fn()
+  const disconnect = vi.fn()
+  for (const uiState of ['connected', 'notConnected'])
+    handleTonoWindowShortcut(fire({ key: 'k', ctrlKey: true }).event, {
+      navigate: vi.fn(),
+      uiState,
+      connect,
+      disconnect,
+    })
+  expect(connect).not.toHaveBeenCalled()
+  expect(disconnect).not.toHaveBeenCalled()
+})
+
 describe('connectFromShortcut', () => {
   it('opens the server picker when Ctrl+K connect is refused for no server', async () => {
     const navigate = vi.fn()
@@ -65,5 +87,16 @@ describe('connectFromShortcut', () => {
       navigate,
     )
     expect(navigate).toHaveBeenCalledWith('/servers')
+  })
+})
+
+describe('applyWindowFrame', () => {
+  it('gives the old look its frame back when the window was restored frameless', async () => {
+    const target = {
+      isDecorated: vi.fn().mockResolvedValue(false),
+      setDecorations: vi.fn().mockResolvedValue(undefined),
+    }
+    expect(await applyWindowFrame(target, false)).toBe(true)
+    expect(target.setDecorations).toHaveBeenCalledWith(true)
   })
 })

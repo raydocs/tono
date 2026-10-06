@@ -1,0 +1,62 @@
+.sea-settings {
+  max-width: 760px;
+  margin: 0 auto;
+}
+.sea-settings-groups {
+  display: grid;
+  gap: 22px;
+}
+.sea-settings .tono-row {
+  min-height: 56px;
+  padding: 12px 0;
+  align-items: center;
+  gap: 20px;
+  border-color: var(--sea-divider);
+}
+.sea-settings h2,
+.sea-appearance-settings h2 {
+  font-size: 13px;
+  font-weight: 400;
+  margin: 0 0 12px;
+  color: var(--sea-secondary, var(--tono-text-secondary));
+}
+.sea-appearance-settings {
+  margin-bottom: 18px;
+}
+.sea-settings .sea-appearance-settings {
+  margin-bottom: 0;
+}
+.sea-appearance-settings .tono-row > div > span {
+  font-size: 15px;
+}
+.sea-appearance-settings p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--sea-secondary, var(--tono-text-secondary));
+}
+.sea-motion-row {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.sea-privacy-help {
+  font: inherit;
+  color: var(--sea-accent);
+}
+.sea-settings-about-copy {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--sea-secondary);
+}
+
+.sea-appearance-legacy {
+  --sea-accent: #8e81ff;
+  --sea-text: var(--tono-text-primary);
+  --sea-secondary: var(--tono-text-secondary);
+}
+.sea-appearance-legacy .sea-segmented {
+  background: #8e81ff14;
+}
+.sea-appearance-legacy .sea-segmented button[aria-pressed="true"] {
+  background: #8e81ff25;
+}

@@ -1,0 +1,67 @@
+{
+  "checks": 39,
+  "failed": [
+    {
+      "name": "collapsed steps 860: text only",
+      "pass": false,
+      "detail": {
+        "x": 232,
+        "y": 388.4375,
+        "width": 316.796875,
+        "height": 24,
+        "bottom": 412.4375,
+        "right": 548.796875,
+        "client": 24,
+        "scroll": 24,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      }
+    },
+    {
+      "name": "collapsed steps 920: text only",
+      "pass": false,
+      "detail": {
+        "x": 232,
+        "y": 341.640625,
+        "width": 345.59375,
+        "height": 24,
+        "bottom": 365.640625,
+        "right": 577.59375,
+        "client": 24,
+        "scroll": 24,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      }
+    },
+    {
+      "name": "collapsed steps 1920: text only",
+      "pass": false,
+      "detail": {
+        "x": 256,
+        "y": 447.234375,
+        "width": 440,
+        "height": 24,
+        "bottom": 471.234375,
+        "right": 696,
+        "client": 24,
+        "scroll": 24,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      }
+    },
+    {
+      "name": "scheduled recovery shares same deadline count",
+      "pass": false,
+      "detail": {
+        "sentence": "已拦住直连，12 秒后自动重试。",
+        "card": "当前线路未通过检查\n失败于 正在验证连接\n已安排自动重试\n已安排重试。你可以立即重试，也可以明确选择恢复普通网络。\n查看步骤\n总计 9.1s\n第 2 次\n正在验证连接…\n3.1s\n技术详情"
+      }
+    }
+  ]
+}

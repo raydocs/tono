@@ -1,0 +1,83 @@
+{
+  "locales": [
+    {
+      "lang": "en",
+      "changedExisting": [],
+      "addedCount": 30,
+      "added": [
+        "home.chooseOtherLine",
+        "home.closeDetails",
+        "home.details",
+        "home.duration.justConnected",
+        "home.duration.minutes_one",
+        "home.duration.minutes_other",
+        "home.firstRun",
+        "home.pickLine",
+        "home.popover.all",
+        "home.popover.empty",
+        "home.popover.favorites",
+        "home.popover.recent",
+        "home.popover.recommended",
+        "home.popover.title",
+        "home.recovery.scheduled",
+        "home.recovery.unscheduled",
+        "home.retry.checking",
+        "home.retry.now",
+        "home.retry.scheduled",
+        "home.retry.unscheduled",
+        "home.sentence.idle",
+        "home.showSteps",
+        "home.slow.elapsed",
+        "home.slow.sentence",
+        "home.slow.switch",
+        "home.telemetry.aiToday",
+        "home.title.connecting",
+        "home.title.disconnecting",
+        "home.title.failed",
+        "home.title.idle"
+      ]
+    },
+    {
+      "lang": "zh",
+      "changedExisting": [],
+      "addedCount": 30,
+      "added": [
+        "home.chooseOtherLine",
+        "home.closeDetails",
+        "home.details",
+        "home.duration.justConnected",
+        "home.duration.minutes_one",
+        "home.duration.minutes_other",
+        "home.firstRun",
+        "home.pickLine",
+        "home.popover.all",
+        "home.popover.empty",
+        "home.popover.favorites",
+        "home.popover.recent",
+        "home.popover.recommended",
+        "home.popover.title",
+        "home.recovery.scheduled",
+        "home.recovery.unscheduled",
+        "home.retry.checking",
+        "home.retry.now",
+        "home.retry.scheduled",
+        "home.retry.unscheduled",
+        "home.sentence.idle",
+        "home.showSteps",
+        "home.slow.elapsed",
+        "home.slow.sentence",
+        "home.slow.switch",
+        "home.telemetry.aiToday",
+        "home.title.connecting",
+        "home.title.disconnecting",
+        "home.title.failed",
+        "home.title.idle"
+      ]
+    }
+  ],
+  "unchangedBaselineTests": [
+    "dashboard.test.tsx",
+    "connect-progress.test.tsx",
+    "servers.test.tsx"
+  ]
+}

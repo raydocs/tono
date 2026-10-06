@@ -1,0 +1,104 @@
+{
+  "frames": [
+    {
+      "file": "progress-0.png",
+      "elapsed": 162,
+      "progress": "0",
+      "offset": "205",
+      "sun": "matrix(1.08, 0, 0, 1.08, 0, 205)",
+      "mirror": "matrix(1.08, 0, 0, 1.08, 0, -205)",
+      "duration": "0.9s",
+      "brightness": 59.92673107890499
+    },
+    {
+      "file": "progress-1.png",
+      "elapsed": 1386,
+      "progress": "0.125",
+      "offset": "186.25",
+      "sun": "matrix(1.08, 0, 0, 1.08, 0, 186.25)",
+      "mirror": "matrix(1.08, 0, 0, 1.08, 0, -186.25)",
+      "duration": "0.9s",
+      "brightness": 60.59037842190016
+    },
+    {
+      "file": "progress-2.png",
+      "elapsed": 2594,
+      "progress": "0.25",
+      "offset": "167.5",
+      "sun": "matrix(1.08, 0, 0, 1.08, 0, 167.5)",
+      "mirror": "matrix(1.08, 0, 0, 1.08, 0, -167.5)",
+      "duration": "0.9s",
+      "brightness": 61.55857487922705
+    },
+    {
+      "file": "progress-3.png",
+      "elapsed": 3811,
+      "progress": "0.375",
+      "offset": "148.75",
+      "sun": "matrix(1.08, 0, 0, 1.08, 0, 148.75)",
+      "mirror": "matrix(1.08, 0, 0, 1.08, 0, -148.75)",
+      "duration": "0.9s",
+      "brightness": 62.35567632850242
+    },
+    {
+      "file": "progress-4.png",
+      "elapsed": 5035,
+      "progress": "0.5",
+      "offset": "130",
+      "sun": "matrix(1.08, 0, 0, 1.08, 0, 130)",
+      "mirror": "matrix(1.08, 0, 0, 1.08, 0, -130)",
+      "duration": "0.9s",
+      "brightness": 63.58454106280193
+    },
+    {
+      "file": "progress-5.png",
+      "elapsed": 6241,
+      "progress": "0.625",
+      "offset": "111.25",
+      "sun": "matrix(1.08, 0, 0, 1.08, 0, 111.25)",
+      "mirror": "matrix(1.08, 0, 0, 1.08, 0, -111.25)",
+      "duration": "0.9s",
+      "brightness": 64.14452495974236
+    },
+    {
+      "file": "progress-6.png",
+      "elapsed": 7461,
+      "progress": "0.75",
+      "offset": "92.5",
+      "sun": "matrix(1.08, 0, 0, 1.08, 0, 92.5)",
+      "mirror": "matrix(1.08, 0, 0, 1.08, 0, -92.5)",
+      "duration": "0.9s",
+      "brightness": 65.49114331723027
+    },
+    {
+      "file": "progress-7.png",
+      "elapsed": 8668,
+      "progress": "0.875",
+      "offset": "73.75",
+      "sun": "matrix(1.08, 0, 0, 1.08, 0, 73.75)",
+      "mirror": "matrix(1.08, 0, 0, 1.08, 0, -73.75)",
+      "duration": "0.9s",
+      "brightness": 65.73128019323671
+    },
+    {
+      "file": "progress-8.png",
+      "elapsed": 9876,
+      "progress": "1",
+      "offset": "55",
+      "sun": "matrix(1.08, 0, 0, 1.08, 0, 55)",
+      "mirror": "matrix(1.08, 0, 0, 1.08, 0, -55)",
+      "duration": "0.9s",
+      "brightness": 67.13546698872786
+    }
+  ],
+  "held": {
+    "before": {
+      "offset": "55",
+      "transform": "matrix(1.08, 0, 0, 1.08, 0, 55)"
+    },
+    "after": {
+      "offset": "55",
+      "transform": "matrix(1.08, 0, 0, 1.08, 0, 55)"
+    }
+  }
+}

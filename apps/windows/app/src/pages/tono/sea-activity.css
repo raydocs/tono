@@ -1,0 +1,157 @@
+.sea-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: calc(100vh - 92px);
+  min-height: 420px;
+}
+.sea-activity-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+/* Same field as on Lines, wide enough for the whole hint. */
+.sea-activity-toolbar input {
+  width: 340px;
+  min-height: 36px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+.sea-activity-legend {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--sea-secondary);
+}
+.sea-activity-legend span {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.sea-activity-legend i {
+  width: 8px;
+  height: 5px;
+  border-radius: 2px;
+}
+.sea-activity [data-route="direct"] {
+  --route-color: rgb(255 255 255 / 0.3);
+}
+.sea-activity [data-route="home"] {
+  --route-color: #ff9e63;
+}
+.sea-activity [data-route="proxied"] {
+  --route-color: #ffd58e;
+}
+.sea-activity [data-route="rejected"] {
+  --route-color: #ff9a8a;
+}
+.sea-activity i[data-route] {
+  background: var(--route-color);
+}
+.sea-activity-summary {
+  margin: 0;
+  font-size: 13px;
+  color: var(--sea-secondary);
+}
+.sea-activity-app {
+  border-bottom: 1px solid var(--sea-divider);
+}
+.sea-activity-app-row {
+  min-height: 50px;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 28px minmax(140px, 1fr) 44px 150px 116px;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 14.5px;
+}
+.sea-activity-app-row::-webkit-details-marker {
+  display: none;
+}
+.sea-activity-app-row:focus-visible {
+  outline: 2px solid var(--sea-accent);
+  outline-offset: -2px;
+}
+.sea-activity-app-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sea-activity-app-icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #ffffff12;
+  font-size: 15px;
+}
+.sea-activity-bar {
+  height: 6px;
+  display: flex;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: 99px;
+}
+.sea-activity-counts {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--sea-secondary);
+}
+.sea-activity-counts [data-route] {
+  color: var(--route-color);
+}
+.sea-activity-expanded {
+  padding: 8px 0 12px 40px;
+}
+.sea-activity-connection {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) 60px 80px minmax(80px, 1fr) 32px;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  min-height: 40px;
+}
+.sea-activity-connection > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--sea-secondary);
+}
+.sea-activity-target {
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--sea-text);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+}
+.sea-activity-connection > .sea-activity-route {
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #ffffff0a;
+  color: var(--route-color);
+  text-align: center;
+}
+.sea-activity-expanded > p {
+  font-size: 11px;
+  color: var(--sea-secondary);
+}
+.sea-activity footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--sea-secondary);
+}
+.sea-activity footer .sea-button {
+  flex-shrink: 0;
+}

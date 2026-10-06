@@ -1,0 +1,46 @@
+[
+  {
+    "w": 860,
+    "h": 540,
+    "full": false,
+    "name": "contrast-860-sidebar",
+    "x": 232,
+    "y": 199.1875,
+    "width": 204,
+    "height": 46.5,
+    "color": "rgba(246, 242, 236, 0.94)"
+  },
+  {
+    "w": 920,
+    "h": 600,
+    "full": false,
+    "name": "contrast-920-sidebar",
+    "x": 232,
+    "y": 212.390625,
+    "width": 240,
+    "height": 46.5,
+    "color": "rgba(246, 242, 236, 0.94)"
+  },
+  {
+    "w": 1920,
+    "h": 1080,
+    "full": false,
+    "name": "contrast-1920-sidebar",
+    "x": 256,
+    "y": 317.984375,
+    "width": 400,
+    "height": 23.25,
+    "color": "rgba(246, 242, 236, 0.94)"
+  },
+  {
+    "w": 920,
+    "h": 600,
+    "full": true,
+    "name": "contrast-920-full",
+    "x": 56,
+    "y": 212.390625,
+    "width": 336,
+    "height": 23.25,
+    "color": "rgba(246, 242, 236, 0.94)"
+  }
+]

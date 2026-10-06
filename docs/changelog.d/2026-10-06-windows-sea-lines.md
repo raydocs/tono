@@ -1,0 +1,11 @@
+## 2026-10-06 · Windows 新外观 PR 5：线路页
+- 归属：`docs/SHIP_PLAN.md` 0.0.75 UI，ROUND-3 §7；默认关闭，stacked on #1407。
+- 来源：`05dc44ef` → 本 PR head，`codex/windows-ui-pr5-20261006`；未合 main。
+- 缺陷修复：实际 shell fixture 暴露窄顶栏隐藏状态词时链接无可访问名称（UI0075-W-F1）；补充同一状态词 aria-label，回归实际先红后绿。新线路搜索也纳入既有 Ctrl/Cmd+F 目标。六页 browser 截图又发现 UI0075-W-F2：首页路由容器0px裁掉操作；新增只在 opt-in 首页生效的全高 route frame。
+- 新增/优化：760px 线路列、搜索/单测速按钮、地区/收藏 Tabs、推荐与证据说明、46px 收藏/全部列表、latency 三格、不可用原因、空/读取状态、静默同步和显式选择后连接胶囊。连接中/已连接仍走既有选线处理；断开时新外观只选择，胶囊按钮调用既有 idle admission helper。scope/revision 由既有后端接口验证，陈旧选择不展示胶囊。
+- 保留行为：旧外观完整原列表与选线语义；测试全部/当前/取消、刷新及错误详情、收藏上限/同节点 hy2 共享身份、地区按账号保存在本机、近期验证、不可用/供应商屏蔽、连接竞争拒绝分类均保留。新 Tabs 映射既有 fixedRegion；收藏只是展示过滤，不改偏好地区。
+- 文案续修：PR4 保留的 `support.summary.node` 实际只用于客户页面；改为“当前线路”。复制客服摘要另用固定 `node` 技术标签，未改；英文此项未改；英文共用导航 Dashboard→Home、Nodes→Servers，恢复 PR3 临时 keys 的同义文案。没有制造验证成功次数：仅显示现有24小时、同revision的记录数，TCP 不等于隧道验证。
+- 工程与测试：真实 ServersPage 增加断开时选择不连接、显式连接一次的回归；既有测试保持。dev-only 实际 TonoLayout 六页 fixture，模拟 native/feeds/config，禁用 IPC；支持 count/long/unavailable 场景，不进入生产构建。
+- 验证：MacBook 窄3文件23tests pass；typecheck79/baseline79；Vite build pass；修改代码 ESLint0warnings/Biome pass。最终全套54files363tests pass；六页×zh/en×860/920共24张最终 browser 截图，首页实际600px高度/断开控件可见；截图仅模拟IO，活动页为读取态，真实字体/原生性能不据此推断。结果在本 PR comment；UI 行动证据与模拟源分开，未主张真实设备状态。
+- 候选/发布：无新包、签名、安装、main合并或客户发布；当前安装仍旧版。
+- 剩余限制：Windows/WebView2/低端/RDP、最大化和屏幕阅读器实机未运行；API 只返回最多8条近期记录，不把它称为今天全部成功连接。原生冷启动/窗口清单/连接录像待 owner；后续 PR6–10 未交付。

@@ -18,7 +18,12 @@ import { TonoIcon } from './TonoIcon'
 const SHOW_MS = 2500
 const EXIT_MS = 200
 
-type TonoToast = { id: number; message: string; leaving: boolean }
+type TonoToast = {
+  id: number
+  message: string
+  leaving: boolean
+  kind: 'success' | 'attention' | 'error'
+}
 
 export const TonoToastProvider = ({ children }: { children: ReactNode }) => {
   const dark = useThemeMode() !== 'light'
@@ -34,23 +39,26 @@ export const TonoToastProvider = ({ children }: { children: ReactNode }) => {
     [],
   )
 
-  const show = useCallback((message: string) => {
-    for (const timer of timersRef.current) clearTimeout(timer)
-    timersRef.current = []
-    idRef.current += 1
-    const id = idRef.current
-    setToast({ id, message, leaving: false })
-    timersRef.current.push(
-      setTimeout(() => {
-        setToast((current) =>
-          current?.id === id ? { ...current, leaving: true } : current,
-        )
-      }, SHOW_MS),
-      setTimeout(() => {
-        setToast((current) => (current?.id === id ? null : current))
-      }, SHOW_MS + EXIT_MS),
-    )
-  }, [])
+  const show = useCallback(
+    (message: string, kind: 'success' | 'attention' | 'error' = 'success') => {
+      for (const timer of timersRef.current) clearTimeout(timer)
+      timersRef.current = []
+      idRef.current += 1
+      const id = idRef.current
+      setToast({ id, message, leaving: false, kind })
+      timersRef.current.push(
+        setTimeout(() => {
+          setToast((current) =>
+            current?.id === id ? { ...current, leaving: true } : current,
+          )
+        }, SHOW_MS),
+        setTimeout(() => {
+          setToast((current) => (current?.id === id ? null : current))
+        }, SHOW_MS + EXIT_MS),
+      )
+    },
+    [],
+  )
 
   const contextValue = useMemo(() => show, [show])
 
@@ -59,12 +67,14 @@ export const TonoToastProvider = ({ children }: { children: ReactNode }) => {
       {children}
       {toast && (
         <div
+          data-kind={toast.kind}
           role="status"
           aria-live="polite"
           className={`tono-toast${toast.leaving ? ' tono-toast--leaving' : ''}`}
           style={{
             position: 'fixed',
-            top: 14,
+            top: 'var(--tono-toast-top, 14px)',
+            bottom: 'var(--tono-toast-bottom, auto)',
             left: '50%',
             zIndex: 9999,
             display: 'flex',
@@ -79,7 +89,7 @@ export const TonoToastProvider = ({ children }: { children: ReactNode }) => {
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
-            color: text.primary,
+            color: `var(--tono-toast-text, ${text.primary})`,
             background: 'var(--tono-surface-toast)',
             border: '1px solid var(--tono-surface-card-border)',
             boxShadow: 'var(--tono-shadow-toast)',

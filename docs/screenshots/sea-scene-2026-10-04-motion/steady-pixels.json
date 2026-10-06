@@ -1,0 +1,69 @@
+{
+  "method": "Two real PNGs ~2s apart; changed if max RGB channel delta >5/255. Same static-initialised-then-enabled harness for exact9f baseline and current source; not comparable to differently spaced review frames.",
+  "regions": {
+    "sky": [
+      0,
+      56,
+      920,
+      330
+    ],
+    "water": [
+      0,
+      330,
+      920,
+      490
+    ],
+    "waterOutsideSun": [
+      0,
+      330,
+      450,
+      490
+    ]
+  },
+  "results": {
+    "baseline": {
+      "connected": {
+        "sky": 0.006347191367819739,
+        "water": 6.2927989130434785,
+        "waterOutsideSun": 0.0
+      },
+      "connecting": {
+        "sky": 0.023008568708346555,
+        "water": 8.931385869565217,
+        "waterOutsideSun": 0.0
+      },
+      "failed": {
+        "sky": 0.02340526816883529,
+        "water": 3.1025815217391304,
+        "waterOutsideSun": 0.0
+      },
+      "idle": {
+        "sky": 0.019834973024436688,
+        "water": 0.5835597826086957,
+        "waterOutsideSun": 0.0
+      }
+    },
+    "final": {
+      "connected": {
+        "sky": 0.0,
+        "water": 21.371603260869566,
+        "waterOutsideSun": 20.658333333333335
+      },
+      "connecting": {
+        "sky": 0.017454776261504285,
+        "water": 29.14673913043478,
+        "waterOutsideSun": 21.406944444444445
+      },
+      "failed": {
+        "sky": 0.01904157410345922,
+        "water": 22.945652173913043,
+        "waterOutsideSun": 23.106944444444444
+      },
+      "idle": {
+        "sky": 0.01904157410345922,
+        "water": 22.613451086956523,
+        "waterOutsideSun": 23.42361111111111
+      }
+    }
+  }
+}

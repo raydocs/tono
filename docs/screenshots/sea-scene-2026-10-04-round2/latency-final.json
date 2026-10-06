@@ -1,0 +1,607 @@
+{
+  "stage": "final",
+  "variants": {
+    "full": {
+      "samples": [
+        {
+          "unchangedMs": 166.8949580000001,
+          "commitMs": 3.5462079999999787,
+          "firstCaptureMs": 194.8157920000001
+        },
+        {
+          "unchangedMs": 161.37770799999998,
+          "commitMs": 2.9890840000002754,
+          "firstCaptureMs": 165.0707910000001
+        },
+        {
+          "unchangedMs": 168.49291600000015,
+          "commitMs": 3.065334000000348,
+          "firstCaptureMs": 182.74424999999974
+        },
+        {
+          "unchangedMs": 196.3508750000001,
+          "commitMs": 6.361457999999857,
+          "firstCaptureMs": 156.6436249999997
+        },
+        {
+          "unchangedMs": 165.42750000000024,
+          "commitMs": 2.8399169999997866,
+          "firstCaptureMs": 178.57066699999996
+        },
+        {
+          "unchangedMs": 153.02341699999988,
+          "commitMs": 3.1861250000001746,
+          "firstCaptureMs": 158.60116600000038
+        }
+      ],
+      "costs": {
+        "Paint": {
+          "count": 172,
+          "totalMs": 16.084,
+          "maxMs": 1.638
+        },
+        "Layout": {
+          "count": 15,
+          "totalMs": 1.358,
+          "maxMs": 0.172
+        },
+        "RasterTask": {
+          "count": 479,
+          "totalMs": 5.011,
+          "maxMs": 0.336
+        },
+        "UpdateLayoutTree": {
+          "count": 92,
+          "totalMs": 38.21,
+          "maxMs": 3.192
+        },
+        "LayerTreeHostImpl::PrepareTiles": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "LayerTreeHostImpl::ActivateSyncTree": {
+          "count": 238,
+          "totalMs": 7.058,
+          "maxMs": 0.507
+        },
+        "ProxyImpl::ScheduledActionDraw": {
+          "count": 141,
+          "totalMs": 145.877,
+          "maxMs": 2.553
+        },
+        "DrawFrame": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "CompositeLayers": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "BeginMainThreadFrame": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        }
+      }
+    },
+    "path": {
+      "samples": [
+        {
+          "unchangedMs": 155.48400000000038,
+          "commitMs": 3.056749999999738,
+          "firstCaptureMs": 148.5347499999989
+        },
+        {
+          "unchangedMs": 161.06333299999824,
+          "commitMs": 3.051959000000352,
+          "firstCaptureMs": 164.59758300000067
+        },
+        {
+          "unchangedMs": 161.11562500000036,
+          "commitMs": 2.9479170000013255,
+          "firstCaptureMs": 146.90549999999894
+        },
+        {
+          "unchangedMs": 160.38154199999917,
+          "commitMs": 4.191584000000148,
+          "firstCaptureMs": 168.1207910000012
+        },
+        {
+          "unchangedMs": 159.1560840000002,
+          "commitMs": 2.7606249999989814,
+          "firstCaptureMs": 152.19520799999918
+        },
+        {
+          "unchangedMs": 153.61675000000105,
+          "commitMs": 2.772791999999754,
+          "firstCaptureMs": 168.82345800000076
+        }
+      ],
+      "costs": {
+        "Paint": {
+          "count": 181,
+          "totalMs": 15.416,
+          "maxMs": 0.913
+        },
+        "Layout": {
+          "count": 15,
+          "totalMs": 1.402,
+          "maxMs": 0.158
+        },
+        "RasterTask": {
+          "count": 494,
+          "totalMs": 3.624,
+          "maxMs": 0.072
+        },
+        "UpdateLayoutTree": {
+          "count": 89,
+          "totalMs": 29.278,
+          "maxMs": 1.336
+        },
+        "LayerTreeHostImpl::PrepareTiles": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "LayerTreeHostImpl::ActivateSyncTree": {
+          "count": 244,
+          "totalMs": 6.663,
+          "maxMs": 0.35
+        },
+        "ProxyImpl::ScheduledActionDraw": {
+          "count": 145,
+          "totalMs": 136.989,
+          "maxMs": 1.432
+        },
+        "DrawFrame": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "CompositeLayers": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "BeginMainThreadFrame": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        }
+      }
+    },
+    "ripples": {
+      "samples": [
+        {
+          "unchangedMs": 164.07716699999946,
+          "commitMs": 2.7648750000007567,
+          "firstCaptureMs": 146.2007080000003
+        },
+        {
+          "unchangedMs": 161.87758299999768,
+          "commitMs": 3.2417500000010477,
+          "firstCaptureMs": 164.9696670000012
+        },
+        {
+          "unchangedMs": 156.6384999999973,
+          "commitMs": 3.4132920000010927,
+          "firstCaptureMs": 163.30395800000042
+        },
+        {
+          "unchangedMs": 168.7374579999996,
+          "commitMs": 2.8062079999981506,
+          "firstCaptureMs": 162.83633299999929
+        },
+        {
+          "unchangedMs": 158.0634170000012,
+          "commitMs": 2.401332999997976,
+          "firstCaptureMs": 154.47958300000028
+        },
+        {
+          "unchangedMs": 156.39683400000285,
+          "commitMs": 3.294499999999971,
+          "firstCaptureMs": 162.1071660000016
+        }
+      ],
+      "costs": {
+        "Paint": {
+          "count": 172,
+          "totalMs": 15.324,
+          "maxMs": 1.09
+        },
+        "Layout": {
+          "count": 15,
+          "totalMs": 1.339,
+          "maxMs": 0.143
+        },
+        "RasterTask": {
+          "count": 468,
+          "totalMs": 3.439,
+          "maxMs": 0.073
+        },
+        "UpdateLayoutTree": {
+          "count": 89,
+          "totalMs": 29.178,
+          "maxMs": 1.377
+        },
+        "LayerTreeHostImpl::PrepareTiles": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "LayerTreeHostImpl::ActivateSyncTree": {
+          "count": 241,
+          "totalMs": 6.139,
+          "maxMs": 0.274
+        },
+        "ProxyImpl::ScheduledActionDraw": {
+          "count": 143,
+          "totalMs": 128.791,
+          "maxMs": 1.657
+        },
+        "DrawFrame": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "CompositeLayers": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "BeginMainThreadFrame": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        }
+      }
+    },
+    "swells": {
+      "samples": [
+        {
+          "unchangedMs": 167.74829200000022,
+          "commitMs": 3.0217499999998836,
+          "firstCaptureMs": 149.9808329999978
+        },
+        {
+          "unchangedMs": 167.82395799999722,
+          "commitMs": 2.8824580000000424,
+          "firstCaptureMs": 164.1905000000006
+        },
+        {
+          "unchangedMs": 158.37866699999722,
+          "commitMs": 4.889999999999418,
+          "firstCaptureMs": 164.4905410000065
+        },
+        {
+          "unchangedMs": 163.35879199999908,
+          "commitMs": 2.7079159999993863,
+          "firstCaptureMs": 160.5572500000053
+        },
+        {
+          "unchangedMs": 164.63245800000004,
+          "commitMs": 2.389792000001762,
+          "firstCaptureMs": 163.14637499999662
+        },
+        {
+          "unchangedMs": 160.37141600000177,
+          "commitMs": 3.299084000005678,
+          "firstCaptureMs": 163.68187500000204
+        }
+      ],
+      "costs": {
+        "Paint": {
+          "count": 172,
+          "totalMs": 15.259,
+          "maxMs": 1.128
+        },
+        "Layout": {
+          "count": 15,
+          "totalMs": 1.5,
+          "maxMs": 0.237
+        },
+        "RasterTask": {
+          "count": 487,
+          "totalMs": 3.779,
+          "maxMs": 0.319
+        },
+        "UpdateLayoutTree": {
+          "count": 90,
+          "totalMs": 31.875,
+          "maxMs": 1.657
+        },
+        "LayerTreeHostImpl::PrepareTiles": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "LayerTreeHostImpl::ActivateSyncTree": {
+          "count": 241,
+          "totalMs": 6.019,
+          "maxMs": 0.316
+        },
+        "ProxyImpl::ScheduledActionDraw": {
+          "count": 148,
+          "totalMs": 147.877,
+          "maxMs": 3.84
+        },
+        "DrawFrame": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "CompositeLayers": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "BeginMainThreadFrame": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        }
+      }
+    },
+    "reflection": {
+      "samples": [
+        {
+          "unchangedMs": 242.00295800000458,
+          "commitMs": 7.625291999996989,
+          "firstCaptureMs": 218.00650000000314
+        },
+        {
+          "unchangedMs": 186.42120799999975,
+          "commitMs": 4.565875000000233,
+          "firstCaptureMs": 192.0954170000041
+        },
+        {
+          "unchangedMs": 206.21349999999802,
+          "commitMs": 3.2407080000048154,
+          "firstCaptureMs": 185.375165999998
+        },
+        {
+          "unchangedMs": 196.3996249999982,
+          "commitMs": 2.9907920000041486,
+          "firstCaptureMs": 177.9016660000052
+        },
+        {
+          "unchangedMs": 158.58629199999996,
+          "commitMs": 2.4581660000039847,
+          "firstCaptureMs": 165.15354200000002
+        },
+        {
+          "unchangedMs": 171.84187499999825,
+          "commitMs": 3.1814589999994496,
+          "firstCaptureMs": 159.31908299999486
+        }
+      ],
+      "costs": {
+        "Paint": {
+          "count": 173,
+          "totalMs": 16.848,
+          "maxMs": 1.783
+        },
+        "Layout": {
+          "count": 15,
+          "totalMs": 3.847,
+          "maxMs": 2.157
+        },
+        "RasterTask": {
+          "count": 470,
+          "totalMs": 6.365,
+          "maxMs": 0.661
+        },
+        "UpdateLayoutTree": {
+          "count": 91,
+          "totalMs": 34.882,
+          "maxMs": 2.53
+        },
+        "LayerTreeHostImpl::PrepareTiles": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "LayerTreeHostImpl::ActivateSyncTree": {
+          "count": 238,
+          "totalMs": 8.123,
+          "maxMs": 0.587
+        },
+        "ProxyImpl::ScheduledActionDraw": {
+          "count": 146,
+          "totalMs": 173.308,
+          "maxMs": 10.704
+        },
+        "DrawFrame": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "CompositeLayers": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "BeginMainThreadFrame": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        }
+      }
+    },
+    "grain": {
+      "samples": [
+        {
+          "unchangedMs": 137.43812500000058,
+          "commitMs": 5.516292000000249,
+          "firstCaptureMs": 157.18699999999808
+        },
+        {
+          "unchangedMs": 149.1593750000029,
+          "commitMs": 4.4192499999990105,
+          "firstCaptureMs": 148.6190409999981
+        },
+        {
+          "unchangedMs": 139.55791699999827,
+          "commitMs": 3.0655420000039157,
+          "firstCaptureMs": 145.28895900000498
+        },
+        {
+          "unchangedMs": 142.5186659999963,
+          "commitMs": 3.0606669999979204,
+          "firstCaptureMs": 214.54108400000405
+        },
+        {
+          "unchangedMs": 128.81079099999624,
+          "commitMs": 3.301707999999053,
+          "firstCaptureMs": 145.76166699999885
+        },
+        {
+          "unchangedMs": 133.86083399999916,
+          "commitMs": 3.5165000000051805,
+          "firstCaptureMs": 145.77045799999905
+        }
+      ],
+      "costs": {
+        "Paint": {
+          "count": 172,
+          "totalMs": 17.124,
+          "maxMs": 1.237
+        },
+        "Layout": {
+          "count": 14,
+          "totalMs": 1.745,
+          "maxMs": 0.311
+        },
+        "RasterTask": {
+          "count": 493,
+          "totalMs": 4.01,
+          "maxMs": 0.062
+        },
+        "UpdateLayoutTree": {
+          "count": 88,
+          "totalMs": 33.088,
+          "maxMs": 1.682
+        },
+        "LayerTreeHostImpl::PrepareTiles": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "LayerTreeHostImpl::ActivateSyncTree": {
+          "count": 238,
+          "totalMs": 6.711,
+          "maxMs": 0.296
+        },
+        "ProxyImpl::ScheduledActionDraw": {
+          "count": 135,
+          "totalMs": 134.146,
+          "maxMs": 2.026
+        },
+        "DrawFrame": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "CompositeLayers": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "BeginMainThreadFrame": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        }
+      }
+    },
+    "all": {
+      "samples": [
+        {
+          "unchangedMs": 112.45745799999713,
+          "commitMs": 4.524207999995269,
+          "firstCaptureMs": 110.04824999999983
+        },
+        {
+          "unchangedMs": 113.75383300000249,
+          "commitMs": 2.4753750000018044,
+          "firstCaptureMs": 120.97449999999662
+        },
+        {
+          "unchangedMs": 125.28616700000566,
+          "commitMs": 2.8166669999991427,
+          "firstCaptureMs": 112.19120800000383
+        },
+        {
+          "unchangedMs": 111.18708399999741,
+          "commitMs": 2.8717499999984284,
+          "firstCaptureMs": 111.14870800000062
+        },
+        {
+          "unchangedMs": 110.56733399999939,
+          "commitMs": 2.454208999995899,
+          "firstCaptureMs": 120.59566699999414
+        },
+        {
+          "unchangedMs": 129.3279579999944,
+          "commitMs": 2.7606249999953434,
+          "firstCaptureMs": 125.3842500000028
+        }
+      ],
+      "costs": {
+        "Paint": {
+          "count": 181,
+          "totalMs": 14.661,
+          "maxMs": 0.943
+        },
+        "Layout": {
+          "count": 15,
+          "totalMs": 1.239,
+          "maxMs": 0.171
+        },
+        "RasterTask": {
+          "count": 340,
+          "totalMs": 2.572,
+          "maxMs": 0.075
+        },
+        "UpdateLayoutTree": {
+          "count": 79,
+          "totalMs": 23.544,
+          "maxMs": 1.374
+        },
+        "LayerTreeHostImpl::PrepareTiles": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "LayerTreeHostImpl::ActivateSyncTree": {
+          "count": 235,
+          "totalMs": 5.398,
+          "maxMs": 0.245
+        },
+        "ProxyImpl::ScheduledActionDraw": {
+          "count": 128,
+          "totalMs": 90.968,
+          "maxMs": 1.195
+        },
+        "DrawFrame": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "CompositeLayers": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "BeginMainThreadFrame": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        }
+      }
+    }
+  }
+}

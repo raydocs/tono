@@ -1,0 +1,32 @@
+
+ RUN  v5.0.1 /Users/ruirui/orca/workspaces/tono/coral/apps/windows/app
+
+ ❯ src/tono-ui/SeaScene.test.tsx (7 tests | 1 failed | 6 skipped) 99ms
+   × keeps the broken moonlight and its depth planes mounted across phases 99ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/tono-ui/SeaScene.test.tsx > keeps the broken moonlight and its depth planes mounted across phases
+AssertionError: expected  to have a length of 4 but got +0
+
+- Expected
++ Received
+
+- 4
++ 0
+
+ ❯ src/tono-ui/SeaScene.test.tsx:254:54
+    252|   const distant = moonlight?.querySelector('.sea-glints-far')
+    253|   const nearby = moonlight?.querySelector('.sea-glints-near')
+    254|   expect(moonlight?.querySelectorAll('.sea-specks')).toHaveLength(4)
+       |                                                      ^
+    255|   expect(distant).not.toBeNull()
+    256|   expect(nearby).not.toBeNull()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 skipped (7)
+   Start at  03:24:59
+   Duration  1.25s (environment 71%, import 14%, tests 9%, transform 5%)

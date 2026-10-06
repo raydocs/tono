@@ -1,0 +1,30 @@
+[
+  {
+    "layer": 1,
+    "time": 23999,
+    "duration": 24000,
+    "flow": 269.989,
+    "counter": -269.989
+  },
+  {
+    "layer": 1,
+    "time": 24001,
+    "duration": 24000,
+    "flow": 0.01125,
+    "counter": -0.01125
+  },
+  {
+    "layer": 2,
+    "time": 23999,
+    "duration": 31000,
+    "flow": 269.991,
+    "counter": -269.991
+  },
+  {
+    "layer": 2,
+    "time": 24001,
+    "duration": 31000,
+    "flow": 0.00870968,
+    "counter": -0.00870968
+  }
+]

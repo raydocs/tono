@@ -1,0 +1,274 @@
+[
+  {
+    "width": 860,
+    "height": 540,
+    "phase": "connected",
+    "scene": [
+      860,
+      540
+    ],
+    "sunSize": [
+      190,
+      190
+    ],
+    "sunTransform": "matrix(1, 0, 0, 1, 0, 0)",
+    "mirrorTransform": "matrix(1, 0, 0, 1, 0, 0)",
+    "stars": 45,
+    "overflow": false
+  },
+  {
+    "width": 860,
+    "height": 540,
+    "phase": "connecting",
+    "scene": [
+      860,
+      540
+    ],
+    "sunSize": [
+      190,
+      190
+    ],
+    "sunTransform": "matrix(1.08, 0, 0, 1.08, 0, 125)",
+    "mirrorTransform": "matrix(1.08, 0, 0, 1.08, 0, -125)",
+    "stars": 45,
+    "overflow": false
+  },
+  {
+    "width": 860,
+    "height": 540,
+    "phase": "failed",
+    "scene": [
+      860,
+      540
+    ],
+    "sunSize": [
+      190,
+      190
+    ],
+    "sunTransform": "matrix(1.1, 0, 0, 1.1, 0, 223)",
+    "mirrorTransform": "matrix(1.1, 0, 0, 1.1, 0, -223)",
+    "stars": 45,
+    "overflow": false
+  },
+  {
+    "width": 860,
+    "height": 540,
+    "phase": "idle",
+    "scene": [
+      860,
+      540
+    ],
+    "sunSize": [
+      190,
+      190
+    ],
+    "sunTransform": "matrix(1.1, 0, 0, 1.1, 0, 290)",
+    "mirrorTransform": "matrix(1.1, 0, 0, 1.1, 0, -290)",
+    "stars": 45,
+    "overflow": false
+  },
+  {
+    "width": 920,
+    "height": 600,
+    "phase": "connected",
+    "scene": [
+      920,
+      600
+    ],
+    "sunSize": [
+      190,
+      190
+    ],
+    "sunTransform": "matrix(1, 0, 0, 1, 0, 0)",
+    "mirrorTransform": "matrix(1, 0, 0, 1, 0, 0)",
+    "stars": 54,
+    "overflow": false
+  },
+  {
+    "width": 920,
+    "height": 600,
+    "phase": "connecting",
+    "scene": [
+      920,
+      600
+    ],
+    "sunSize": [
+      190,
+      190
+    ],
+    "sunTransform": "matrix(1.08, 0, 0, 1.08, 0, 125)",
+    "mirrorTransform": "matrix(1.08, 0, 0, 1.08, 0, -125)",
+    "stars": 54,
+    "overflow": false
+  },
+  {
+    "width": 920,
+    "height": 600,
+    "phase": "failed",
+    "scene": [
+      920,
+      600
+    ],
+    "sunSize": [
+      190,
+      190
+    ],
+    "sunTransform": "matrix(1.1, 0, 0, 1.1, 0, 223)",
+    "mirrorTransform": "matrix(1.1, 0, 0, 1.1, 0, -223)",
+    "stars": 54,
+    "overflow": false
+  },
+  {
+    "width": 920,
+    "height": 600,
+    "phase": "idle",
+    "scene": [
+      920,
+      600
+    ],
+    "sunSize": [
+      190,
+      190
+    ],
+    "sunTransform": "matrix(1.1, 0, 0, 1.1, 0, 290)",
+    "mirrorTransform": "matrix(1.1, 0, 0, 1.1, 0, -290)",
+    "stars": 54,
+    "overflow": false
+  },
+  {
+    "width": 1920,
+    "height": 1080,
+    "phase": "connected",
+    "scene": [
+      1920,
+      1080
+    ],
+    "sunSize": [
+      281,
+      281
+    ],
+    "sunTransform": "matrix(1, 0, 0, 1, 0, 0)",
+    "mirrorTransform": "matrix(1, 0, 0, 1, 0, 0)",
+    "stars": 200,
+    "overflow": false
+  },
+  {
+    "width": 1920,
+    "height": 1080,
+    "phase": "connecting",
+    "scene": [
+      1920,
+      1080
+    ],
+    "sunSize": [
+      281,
+      281
+    ],
+    "sunTransform": "matrix(1.08, 0, 0, 1.08, 0, 184.737)",
+    "mirrorTransform": "matrix(1.08, 0, 0, 1.08, 0, -184.737)",
+    "stars": 200,
+    "overflow": false
+  },
+  {
+    "width": 1920,
+    "height": 1080,
+    "phase": "failed",
+    "scene": [
+      1920,
+      1080
+    ],
+    "sunSize": [
+      281,
+      281
+    ],
+    "sunTransform": "matrix(1.1, 0, 0, 1.1, 0, 329.571)",
+    "mirrorTransform": "matrix(1.1, 0, 0, 1.1, 0, -329.571)",
+    "stars": 200,
+    "overflow": false
+  },
+  {
+    "width": 1920,
+    "height": 1080,
+    "phase": "idle",
+    "scene": [
+      1920,
+      1080
+    ],
+    "sunSize": [
+      281,
+      281
+    ],
+    "sunTransform": "matrix(1.1, 0, 0, 1.1, 0, 428.589)",
+    "mirrorTransform": "matrix(1.1, 0, 0, 1.1, 0, -428.589)",
+    "stars": 200,
+    "overflow": false
+  },
+  {
+    "width": 2560,
+    "height": 1440,
+    "phase": "connected",
+    "scene": [
+      2560,
+      1440
+    ],
+    "sunSize": [
+      300,
+      300
+    ],
+    "sunTransform": "matrix(1, 0, 0, 1, 0, 0)",
+    "mirrorTransform": "matrix(1, 0, 0, 1, 0, 0)",
+    "stars": 200,
+    "overflow": false
+  },
+  {
+    "width": 2560,
+    "height": 1440,
+    "phase": "connecting",
+    "scene": [
+      2560,
+      1440
+    ],
+    "sunSize": [
+      300,
+      300
+    ],
+    "sunTransform": "matrix(1.08, 0, 0, 1.08, 0, 197.368)",
+    "mirrorTransform": "matrix(1.08, 0, 0, 1.08, 0, -197.368)",
+    "stars": 200,
+    "overflow": false
+  },
+  {
+    "width": 2560,
+    "height": 1440,
+    "phase": "failed",
+    "scene": [
+      2560,
+      1440
+    ],
+    "sunSize": [
+      300,
+      300
+    ],
+    "sunTransform": "matrix(1.1, 0, 0, 1.1, 0, 352.105)",
+    "mirrorTransform": "matrix(1.1, 0, 0, 1.1, 0, -352.105)",
+    "stars": 200,
+    "overflow": false
+  },
+  {
+    "width": 2560,
+    "height": 1440,
+    "phase": "idle",
+    "scene": [
+      2560,
+      1440
+    ],
+    "sunSize": [
+      300,
+      300
+    ],
+    "sunTransform": "matrix(1.1, 0, 0, 1.1, 0, 457.895)",
+    "mirrorTransform": "matrix(1.1, 0, 0, 1.1, 0, -457.895)",
+    "stars": 200,
+    "overflow": false
+  }
+]

@@ -1,0 +1,18 @@
+[
+  {
+    "quality": "full",
+    "x": 0,
+    "y": 0,
+    "width": 920,
+    "height": 600,
+    "gradient": "linear-gradient(90deg, rgba(10, 8, 15, 0.56), rgba(10, 8, 15, 0.56) calc(60% - 160px), rgba(0, 0, 0, 0) 60%)"
+  },
+  {
+    "quality": "lite",
+    "x": 0,
+    "y": 0,
+    "width": 920,
+    "height": 600,
+    "gradient": "linear-gradient(90deg, rgba(10, 8, 15, 0.56), rgba(10, 8, 15, 0.56) calc(60% - 160px), rgba(0, 0, 0, 0) 60%)"
+  }
+]

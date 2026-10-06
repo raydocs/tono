@@ -1,0 +1,62 @@
+[
+  {
+    "requested": "full",
+    "quality": "full",
+    "motion": "ambient",
+    "fieldHeight": "60px",
+    "readout": "画质: 完整\nfps 30.0 · p95 33.4 ms\nANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)\n采样完成 · 不再运行帧脚本",
+    "phases": [
+      "connected",
+      "connecting",
+      "failed",
+      "idle"
+    ],
+    "exceptions": [],
+    "network": []
+  },
+  {
+    "requested": "lite",
+    "quality": "lite",
+    "motion": "ambient",
+    "fieldHeight": "60px",
+    "readout": "画质: 简洁\nfps 30.0 · p95 33.4 ms\nANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)\n采样完成 · 不再运行帧脚本",
+    "phases": [
+      "connected",
+      "connecting",
+      "failed",
+      "idle"
+    ],
+    "exceptions": [],
+    "network": []
+  },
+  {
+    "requested": "static",
+    "quality": "static",
+    "motion": "static",
+    "fieldHeight": "60px",
+    "readout": "画质: 静态\nfps — · p95 —\n未采样\n静态 · 不运行帧采样",
+    "phases": [
+      "connected",
+      "connecting",
+      "failed",
+      "idle"
+    ],
+    "exceptions": [],
+    "network": []
+  },
+  {
+    "requested": "auto",
+    "quality": "full",
+    "motion": "ambient",
+    "fieldHeight": "60px",
+    "readout": "画质: 完整\nfps 30.0 · p95 33.4 ms\nANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)\n采样完成 · 不再运行帧脚本",
+    "phases": [
+      "connected",
+      "connecting",
+      "failed",
+      "idle"
+    ],
+    "exceptions": [],
+    "network": []
+  }
+]

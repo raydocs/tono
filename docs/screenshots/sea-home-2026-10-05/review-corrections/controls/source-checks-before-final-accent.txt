@@ -1,0 +1,13 @@
+PASS typecheck/full-frontend-tests/eslint/biome/frontend-build/i18n-check
+$ tsc --noEmit && node ../../../services/unchecked-index-ratchet.mjs --baseline unchecked-index.baseline -- ./node_modules/.bin/tsc --noEmit --pretty false --incremental false --noUncheckedIndexedAccess
+unchecked indexed access errors 79 (baseline 79)
+      Tests  350 passed (350)
+   Start at  16:32:53
+   Duration  8.43s (tests 43%, environment 31%, import 20%, transform 6%)
+
+    Isolate  48 workers spawned · ~524ms startup each (spawn + environment, per file)
+             at least ~1.76s faster with isolate: false — reuses workers across files instead of one per file
+
+Checked 22 files in 31ms. No fixes applied.
+
+✓ built in 987ms

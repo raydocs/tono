@@ -1,0 +1,56 @@
+[
+  {
+    "progress": 0,
+    "shape": 0.97,
+    "file": "progress-0.png",
+    "mean": 58.19585346215781
+  },
+  {
+    "progress": 0.125,
+    "shape": 0.97,
+    "file": "progress-1.png",
+    "mean": 59.01670692431562
+  },
+  {
+    "progress": 0.25,
+    "shape": 0.97,
+    "file": "progress-2.png",
+    "mean": 59.897946859903385
+  },
+  {
+    "progress": 0.375,
+    "shape": 0.97,
+    "file": "progress-3.png",
+    "mean": 60.82528180354267
+  },
+  {
+    "progress": 0.5,
+    "shape": 0.9775,
+    "file": "progress-4.png",
+    "mean": 61.74255233494364
+  },
+  {
+    "progress": 0.625,
+    "shape": 0.986875,
+    "file": "progress-5.png",
+    "mean": 62.609299516908216
+  },
+  {
+    "progress": 0.75,
+    "shape": 0.99625,
+    "file": "progress-6.png",
+    "mean": 63.37983091787439
+  },
+  {
+    "progress": 0.875,
+    "shape": 1,
+    "file": "progress-7.png",
+    "mean": 64.06320450885669
+  },
+  {
+    "progress": 1,
+    "shape": 1,
+    "file": "progress-8.png",
+    "mean": 64.69786634460547
+  }
+]

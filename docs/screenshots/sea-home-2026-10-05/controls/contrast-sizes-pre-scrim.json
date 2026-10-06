@@ -1,0 +1,74 @@
+[
+  {
+    "width": 860,
+    "height": 540,
+    "box": {
+      "x": 232,
+      "y": 199.1875,
+      "width": 316.796875,
+      "height": 23.25,
+      "bottom": 222.4375,
+      "scroll": 23,
+      "client": 23
+    },
+    "minContrast": 3.4573221412282575,
+    "worstPixel": {
+      "x": 548,
+      "y": 207,
+      "rgb": [
+        165,
+        114,
+        74
+      ]
+    },
+    "passes": false
+  },
+  {
+    "width": 920,
+    "height": 600,
+    "box": {
+      "x": 232,
+      "y": 212.390625,
+      "width": 345.59375,
+      "height": 23.25,
+      "bottom": 235.640625,
+      "scroll": 23,
+      "client": 23
+    },
+    "minContrast": 3.6551040030212585,
+    "worstPixel": {
+      "x": 577,
+      "y": 227,
+      "rgb": [
+        160,
+        110,
+        72
+      ]
+    },
+    "passes": false
+  },
+  {
+    "width": 1920,
+    "height": 1080,
+    "box": {
+      "x": 256,
+      "y": 317.984375,
+      "width": 400,
+      "height": 23.25,
+      "bottom": 341.234375,
+      "scroll": 23,
+      "client": 23
+    },
+    "minContrast": 12.913161942993668,
+    "worstPixel": {
+      "x": 621,
+      "y": 341,
+      "rgb": [
+        49,
+        26,
+        33
+      ]
+    },
+    "passes": true
+  }
+]

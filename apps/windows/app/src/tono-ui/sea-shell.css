@@ -1,0 +1,268 @@
+.tono-root[data-sea-appearance="true"] {
+  background: #0b0a12;
+  color: #f6f2ec;
+  --tono-sea-focus: #c9cfff;
+}
+.tono-root[data-sea-tone="warm"] {
+  --tono-sea-focus: #ffd9a0;
+}
+.tono-sea-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+}
+.tono-sea-backdrop[data-visible="true"] {
+  opacity: 1;
+}
+.tono-root[data-sea-appearance="true"] .tono-home {
+  background: transparent;
+}
+.tono-sea-ground {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.tono-sea-ground > div {
+  position: absolute;
+  inset: 0;
+  transition: opacity 600ms ease;
+}
+.tono-sea-ground-cool {
+  background:
+    radial-gradient(
+      120% 78% at 80% 122%,
+      #7884e638,
+      #50469617 40%,
+      transparent 66%
+    ),
+    linear-gradient(180deg, #0a0a12, #0e0d18 60%, #12111e);
+}
+.tono-sea-ground-warm {
+  background:
+    radial-gradient(
+      120% 78% at 80% 122%,
+      #ff965057,
+      #be463c21 38%,
+      transparent 64%
+    ),
+    linear-gradient(180deg, #0d0a12, #150e15 60%, #1e1216);
+}
+.tono-sea-ground-ember {
+  background:
+    radial-gradient(120% 78% at 80% 122%, #e6503c42, transparent 64%),
+    linear-gradient(180deg, #0d0a12, #150e15 60%, #1e1216);
+}
+.tono-sea-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 30;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  color: #f6f2ec;
+}
+.tono-sea-lockup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 18px;
+  width: 110px;
+  flex-shrink: 0;
+  font-weight: 500;
+}
+.tono-sea-navigation {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.tono-sea-capsule {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 34px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #c4ceff16;
+  box-shadow: inset 0 1px 0 #ffffff26;
+}
+.tono-sea-capsule a {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 15px;
+  border-radius: 999px;
+  color: #f6f2ecb8;
+  text-decoration: none;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.tono-sea-capsule a[aria-current="page"],
+.tono-sea-icon[aria-current="page"] {
+  color: #f6f2ec;
+  background: #ffffff29;
+  box-shadow: inset 0 1px 0 #ffffff26;
+}
+.tono-sea-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: #f6f2ecb8;
+  text-decoration: none;
+}
+.tono-sea-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: #f6f2ecb8;
+  text-decoration: none;
+}
+.tono-sea-state-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #c9cfff70;
+}
+.tono-sea-bar[data-tone="warm"] .tono-sea-state-dot {
+  background: #ffd58e;
+  box-shadow: 0 0 8px #ffd58e80;
+}
+.tono-sea-bar[data-tone="ember"] .tono-sea-state-dot {
+  background: #ff9a8a;
+}
+.tono-sea-window-controls {
+  margin-left: auto;
+  align-self: flex-start;
+}
+.tono-sea-window-controls button {
+  width: 46px;
+  height: 32px;
+  padding: 0;
+  border-radius: 0;
+  color: #f6f2ec;
+}
+.tono-sea-window-controls > div {
+  gap: 0;
+}
+.tono-root[data-sea-appearance="true"] .tono-main {
+  padding-top: 48px;
+  scrollbar-gutter: auto;
+}
+.tono-root[data-sea-appearance="true"][data-sea-home="true"] .tono-main {
+  padding-top: 0;
+}
+/* Scrolled content fades out under the transparent bar instead of running through it. */
+.tono-root[data-sea-appearance="true"]:not([data-sea-home="true"])
+.tono-main:not(:has(.sea-welcome-scene)) {
+  -webkit-mask-image: linear-gradient(transparent 34px, #000 56px);
+  mask-image: linear-gradient(transparent 34px, #000 56px);
+}
+.tono-root[data-sea-appearance="true"][data-sea-home="true"]
+  .tono-main
+  > :not(:last-child) {
+  position: relative;
+  z-index: 25;
+  top: 48px;
+}
+.tono-sea-page {
+  max-width: 760px;
+  margin: 22px auto 0;
+  min-height: 100%;
+}
+/* The frame already sets the measure and the top offset; the old page padding would set both a second time. */
+.tono-sea-page > .tono-page {
+  padding: 0 0 24px;
+}
+.tono-root[data-sea-appearance="true"]
+  :is(button, input, a, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--tono-sea-focus);
+  outline-offset: 2px;
+}
+.tono-root[data-sea-appearance="true"] .tono-main::-webkit-scrollbar {
+  width: 6px;
+}
+.tono-root[data-sea-appearance="true"] .tono-main::-webkit-scrollbar-thumb {
+  background: transparent;
+  border: 0;
+}
+.tono-root[data-sea-appearance="true"]
+  .tono-main:hover::-webkit-scrollbar-thumb,
+.tono-root[data-sea-appearance="true"]
+  .tono-main[data-scrolling="true"]::-webkit-scrollbar-thumb {
+  background: #f6f2ec30;
+}
+.tono-sea-page-in {
+  animation: tono-sea-page-in 180ms ease-out both;
+}
+@keyframes tono-sea-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (max-width: 1100px) {
+  .tono-sea-state-word {
+    display: none;
+  }
+  .tono-sea-navigation {
+    position: static;
+    transform: none;
+    margin-left: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tono-sea-page-in {
+    animation: none;
+  }
+  .tono-sea-ground > div {
+    transition: none;
+  }
+}
+
+.tono-root[data-sea-appearance="true"]:has(
+    .tono-sea-backdrop .sea-scene[data-quality="lite"]
+  )
+  .tono-home {
+  --tono-home-quiet: rgba(34, 16, 16, 0.78);
+  --tono-home-blur: none;
+  --tono-home-panel-blur: none;
+  --tono-home-panel: #1d1917;
+}
+.tono-root[data-sea-appearance="true"]:has(
+    .tono-sea-backdrop .sea-scene[data-quality="lite"]
+  )
+  .tono-home[data-tone="cool"] {
+  --tono-home-quiet: rgba(22, 22, 36, 0.8);
+}
+.tono-sea-page-in {
+  view-transition-name: tono-page;
+}
+::view-transition-old(tono-page) {
+  animation: tono-sea-page-out 120ms ease-in both;
+}
+::view-transition-new(tono-page) {
+  animation: tono-sea-page-in 180ms ease-out both;
+}
+@keyframes tono-sea-page-out {
+  to {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(tono-page),
+  ::view-transition-new(tono-page) {
+    animation: none;
+  }
+}

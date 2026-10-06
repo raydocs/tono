@@ -1,0 +1,170 @@
+{
+  "beforeHidden": {
+    "requested": 34,
+    "callbacks": 33,
+    "pending": 1,
+    "preferences": {
+      "newAppearance": false,
+      "motion": "auto",
+      "automaticQuality": "full",
+      "measured": false,
+      "revision": 41,
+      "report": null
+    },
+    "tier": "full"
+  },
+  "hiddenStart": {
+    "requested": 34,
+    "callbacks": 33,
+    "pending": 0,
+    "preferences": {
+      "newAppearance": false,
+      "motion": "auto",
+      "automaticQuality": "full",
+      "measured": false,
+      "revision": 41,
+      "report": null
+    },
+    "tier": "full"
+  },
+  "hiddenEnd": {
+    "requested": 34,
+    "callbacks": 33,
+    "pending": 0,
+    "preferences": {
+      "newAppearance": false,
+      "motion": "auto",
+      "automaticQuality": "full",
+      "measured": false,
+      "revision": 41,
+      "report": null
+    },
+    "tier": "full"
+  },
+  "complete": {
+    "requested": 184,
+    "callbacks": 183,
+    "pending": 0,
+    "preferences": {
+      "newAppearance": false,
+      "motion": "auto",
+      "automaticQuality": "full",
+      "measured": true,
+      "revision": 41,
+      "report": {
+        "fps": 60.00267857261251,
+        "p95": 16.700000000000728,
+        "liteP95": null,
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)",
+        "visibleMs": 3016.5320000000006,
+        "samples": 181
+      }
+    },
+    "tier": "full"
+  },
+  "stopped": {
+    "requested": 184,
+    "callbacks": 183,
+    "pending": 0,
+    "preferences": {
+      "newAppearance": false,
+      "motion": "auto",
+      "automaticQuality": "full",
+      "measured": true,
+      "revision": 41,
+      "report": {
+        "fps": 60.00267857261251,
+        "p95": 16.700000000000728,
+        "liteP95": null,
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)",
+        "visibleMs": 3016.5320000000006,
+        "samples": 181
+      }
+    },
+    "tier": "full"
+  },
+  "reload": {
+    "requested": 0,
+    "callbacks": 0,
+    "pending": 0,
+    "preferences": {
+      "newAppearance": false,
+      "motion": "auto",
+      "automaticQuality": "full",
+      "measured": true,
+      "revision": 41,
+      "report": {
+        "fps": 60.00267857261251,
+        "p95": 16.700000000000728,
+        "liteP95": null,
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)",
+        "visibleMs": 3016.5320000000006,
+        "samples": 181
+      }
+    },
+    "tier": "full"
+  },
+  "rearmed": {
+    "requested": 32,
+    "callbacks": 31,
+    "pending": 1,
+    "preferences": {
+      "newAppearance": false,
+      "motion": "auto",
+      "automaticQuality": "full",
+      "measured": false,
+      "revision": 42,
+      "report": null
+    },
+    "tier": "full"
+  },
+  "rearmedComplete": {
+    "requested": 182,
+    "callbacks": 182,
+    "pending": 0,
+    "preferences": {
+      "newAppearance": false,
+      "motion": "auto",
+      "automaticQuality": "full",
+      "measured": true,
+      "revision": 42,
+      "report": {
+        "fps": 60.00132599615462,
+        "p95": 16.700000000000728,
+        "liteP95": null,
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)",
+        "visibleMs": 3016.5999999999995,
+        "samples": 181
+      }
+    },
+    "tier": "full"
+  },
+  "prefers-reduced-motion": {
+    "requested": 0,
+    "callbacks": 0,
+    "pending": 0,
+    "preferences": {
+      "newAppearance": false,
+      "motion": "full",
+      "automaticQuality": "full",
+      "measured": false,
+      "revision": 43,
+      "report": null
+    },
+    "tier": "static"
+  },
+  "forced-colors": {
+    "requested": 0,
+    "callbacks": 0,
+    "pending": 0,
+    "preferences": {
+      "newAppearance": false,
+      "motion": "full",
+      "automaticQuality": "full",
+      "measured": false,
+      "revision": 44,
+      "report": null
+    },
+    "tier": "static"
+  }
+}

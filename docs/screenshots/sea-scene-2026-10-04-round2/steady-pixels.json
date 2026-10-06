@@ -1,0 +1,154 @@
+{
+  "connected": {
+    "sky": {
+      "region": [
+        0,
+        56,
+        920,
+        330
+      ],
+      "threshold": 5,
+      "changed": 11994,
+      "pixels": 252080,
+      "percent": 4.758013329101872
+    },
+    "water": {
+      "region": [
+        0,
+        330,
+        920,
+        490
+      ],
+      "threshold": 5,
+      "changed": 15900,
+      "pixels": 147200,
+      "percent": 10.80163043478261
+    },
+    "openWater": {
+      "region": [
+        0,
+        330,
+        450,
+        490
+      ],
+      "threshold": 5,
+      "changed": 6904,
+      "pixels": 72000,
+      "percent": 9.588888888888889
+    }
+  },
+  "connecting": {
+    "sky": {
+      "region": [
+        0,
+        56,
+        920,
+        330
+      ],
+      "threshold": 5,
+      "changed": 4171,
+      "pixels": 252080,
+      "percent": 1.6546334496985085
+    },
+    "water": {
+      "region": [
+        0,
+        330,
+        920,
+        490
+      ],
+      "threshold": 5,
+      "changed": 30085,
+      "pixels": 147200,
+      "percent": 20.438179347826086
+    },
+    "openWater": {
+      "region": [
+        0,
+        330,
+        450,
+        490
+      ],
+      "threshold": 5,
+      "changed": 7128,
+      "pixels": 72000,
+      "percent": 9.9
+    }
+  },
+  "failed": {
+    "sky": {
+      "region": [
+        0,
+        56,
+        920,
+        330
+      ],
+      "threshold": 5,
+      "changed": 5197,
+      "pixels": 252080,
+      "percent": 2.061647096159949
+    },
+    "water": {
+      "region": [
+        0,
+        330,
+        920,
+        490
+      ],
+      "threshold": 5,
+      "changed": 15516,
+      "pixels": 147200,
+      "percent": 10.540760869565217
+    },
+    "openWater": {
+      "region": [
+        0,
+        330,
+        450,
+        490
+      ],
+      "threshold": 5,
+      "changed": 8077,
+      "pixels": 72000,
+      "percent": 11.218055555555555
+    }
+  },
+  "idle": {
+    "sky": {
+      "region": [
+        0,
+        56,
+        920,
+        330
+      ],
+      "threshold": 5,
+      "changed": 948,
+      "pixels": 252080,
+      "percent": 0.37607108854331955
+    },
+    "water": {
+      "region": [
+        0,
+        330,
+        920,
+        490
+      ],
+      "threshold": 5,
+      "changed": 17105,
+      "pixels": 147200,
+      "percent": 11.62024456521739
+    },
+    "openWater": {
+      "region": [
+        0,
+        330,
+        450,
+        490
+      ],
+      "threshold": 5,
+      "changed": 8733,
+      "pixels": 72000,
+      "percent": 12.129166666666666
+    }
+  }
+}
