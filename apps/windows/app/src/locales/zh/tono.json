@@ -774,5 +774,15 @@
   "seaActivity": {
     "summary": "当前 {{apps}} 个应用 · {{connections}} 条活动连接",
     "exit": "线路"
+  },
+  "seaSettings": {
+    "preview": "新外观（预览）",
+    "previewHint": "在这台设备上使用海面与新控件，默认关闭。",
+    "motion": "动效",
+    "motionHint": "自动模式在本机采样一次；减少动态效果或强制颜色时始终使用静态。",
+    "learnMore": "了解更多",
+    "auditBrief": "在本机日志中记录连接与保护事件。",
+    "telemetryBrief": "分享保护/网络事件、路由字节量和错误码。",
+    "networkBrief": "上传包含主机名、应用、规则与流量的日志。"
   }
 }

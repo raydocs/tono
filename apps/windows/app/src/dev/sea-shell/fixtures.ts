@@ -2,6 +2,10 @@
 import { createTheme } from '@mui/material'
 import i18n from 'i18next'
 
+import type {
+  TonoDiagnosticsReport,
+  TonoLocalDiagnosticsReport,
+} from '../../services/tono'
 import { tonoStatus as simulatedStatus } from '../sea-home/fixtures'
 
 // Existing product UI/status push, synthetic IO only. This separate entry cannot contact a device.
@@ -97,9 +101,6 @@ export const tonoAuditLogPath = async () => ({
 export const tonoInternalBuild = async () => false
 export const tonoPeriodicTelemetryEnabled = async () => false
 export const tonoNetworkLogUploadEnabled = async () => false
-export const tonoDiagnosticsReport = async () => {
-  throw new Error('Synthetic preview: no machine diagnostics')
-}
 export const tonoCheckTerminalEnv = async () => ({ variables: [], sources: [] })
 export const tonoCancelServerTests = async () => {}
 export const tonoRefreshCatalog = async () => {}
@@ -242,3 +243,71 @@ export const useConnectionData = () => ({
 export const tonoCloseConnection = async () => {}
 export const tonoCloseAllConnections = async () => {}
 export const tonoRevokeDevice = async () => {}
+
+export const tonoDiagnosticsReport =
+  async (): Promise<TonoDiagnosticsReport> => {
+    if (params.has('diagnosticError'))
+      throw new Error('Synthetic diagnostics unavailable')
+    const status = await simulatedStatus()
+    return {
+      schemaVersion: 1,
+      reportedAtMs: Date.now(),
+      appVersion: '0.0.75',
+      osVersion: 'Synthetic Windows preview',
+      osArch: 'x86_64',
+      serviceProtocol: 'SYNTHETIC',
+      serviceBuild: 'RENDER-ONLY',
+      uiState: status.uiState,
+      accountState: status.accountState,
+      selectedServer: status.selectedServer,
+      catalogRevision: status.catalogRevision,
+      killSwitchMode: status.killSwitch?.mode ?? null,
+      killSwitchWanted: status.killSwitch?.wanted ?? null,
+      killSwitchLive: status.killSwitch?.live ?? null,
+      killSwitchLastError: null,
+      dnsEnabled: null,
+      dnsLastError: null,
+      failedStage: null,
+      error: null,
+      retryAttempt: 0,
+      totalElapsedMs: null,
+      steps: [],
+      virtualAdapters: [],
+      auditLogPath: 'C:\\Tono-preview\\audit.log',
+      serviceLogPath: 'C:\\Tono-preview\\service.log',
+    }
+  }
+export const tonoLocalDiagnosticsReport =
+  async (): Promise<TonoLocalDiagnosticsReport> => {
+    const report = await tonoDiagnosticsReport(),
+      status = await simulatedStatus()
+    return {
+      ...report,
+      localEvidence: {
+        status: 'collected',
+        coreLog: {
+          status: 'synthetic-not-read',
+          inspectedLines: 0,
+          truncated: false,
+          observations: [],
+        },
+        buildProvenance: 'development',
+        appBuild: 'SYNTHETIC-RENDER-ONLY',
+        accountScope: status.routePreferenceScope,
+        connectionGeneration: 8,
+        controllerGeneration: status.controllerGeneration ?? 8,
+        failureAtMs: null,
+        protectionLive: report.killSwitchLive,
+        protectionWanted: report.killSwitchWanted,
+        expectedCoreVersion: null,
+        reportedCoreVersion: null,
+      },
+    }
+  }
+export const tonoPrepareSupportReport = async () => ({
+  previewId: 'synthetic-no-upload',
+  report: await tonoDiagnosticsReport(),
+})
+export const tonoUploadDiagnostics = async () => {
+  throw new Error('Synthetic preview: no upload')
+}

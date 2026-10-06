@@ -774,5 +774,15 @@
   "seaActivity": {
     "summary": "Now · {{apps}} apps · {{connections}} active connections",
     "exit": "Exit"
+  },
+  "seaSettings": {
+    "preview": "New appearance (preview)",
+    "previewHint": "Use the sea scene and new controls on this device. Off by default.",
+    "motion": "Motion",
+    "motionHint": "Auto samples once on this device. Reduced motion and forced colours always use Static.",
+    "learnMore": "Learn more",
+    "auditBrief": "Record connection and protection events in a local log.",
+    "telemetryBrief": "Share protection/network events, route byte totals and error codes.",
+    "networkBrief": "Upload logs containing hostnames, apps, routing rules and traffic totals."
   }
 }

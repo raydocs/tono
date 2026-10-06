@@ -1,0 +1,72 @@
+.sea-support-page {
+  max-width: 760px;
+  margin: 0 auto;
+}
+.sea-support-content {
+  display: grid;
+  gap: 20px;
+}
+.sea-support-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.sea-support-actions .tono-button {
+  border-radius: 999px;
+  min-height: 40px;
+}
+.sea-support-actions .sea-health-primary {
+  background: var(--sea-primary);
+  border-color: transparent;
+  color: #311707;
+}
+.sea-support-note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--sea-secondary);
+}
+.sea-health-results [data-health-state] > div > span {
+  border: 1px solid var(--sea-divider);
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 11px;
+}
+.sea-support-tools {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.sea-support-tools > details,
+.sea-support-technical {
+  border: 1px solid var(--sea-divider);
+  border-radius: 18px;
+  background: #ffffff05;
+}
+.sea-support-tools summary,
+.sea-support-technical > summary {
+  padding: 20px;
+  font-size: 15px;
+  cursor: pointer;
+}
+.sea-support-technical > div {
+  display: grid;
+  gap: 14px;
+  padding: 0 14px 14px;
+}
+.sea-support-content details > summary:focus-visible {
+  outline: 2px solid var(--sea-accent);
+  outline-offset: -3px;
+  border-radius: 18px;
+}
+@media (max-width: 700px) {
+  .sea-support-tools {
+    grid-template-columns: 1fr;
+  }
+}
+.sea-support-actions .tono-action {
+  background: #ffffff0e;
+  border: 1px solid var(--sea-divider);
+  color: var(--sea-text);
+}

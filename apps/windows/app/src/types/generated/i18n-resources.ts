@@ -1564,6 +1564,16 @@ export interface TranslationResources {
         recommendation: string
         selected: string
       }
+      seaSettings: {
+        auditBrief: string
+        learnMore: string
+        motion: string
+        motionHint: string
+        networkBrief: string
+        preview: string
+        previewHint: string
+        telemetryBrief: string
+      }
       servers: {
         cloudGroup: string
         empty: string
