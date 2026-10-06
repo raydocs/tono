@@ -132,7 +132,7 @@ export function LedgerTable({
               if (refusalCode(error) !== 'MONTH_CLOSED') throw error;
               setReversing(null);
               onChanged();
-              throw new Error(words.reverseRefused);
+              throw new Error(words.reverseRefused, { cause: error });
             }
           }).then((ok) => {
             if (ok) setReversing(null);

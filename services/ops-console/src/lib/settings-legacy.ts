@@ -102,7 +102,7 @@ export async function send<T>(
     });
   } catch (error) {
     if (isAbortError(error)) throw error;
-    throw new Error(fallback);
+    throw new Error(fallback, { cause: error });
   }
   if (response.status === 401 || response.status === 403) throw new SessionExpiredError();
   if (!response.ok) throw await refusalFrom(response, fallback);
