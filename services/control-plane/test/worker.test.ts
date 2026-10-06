@@ -3119,6 +3119,16 @@ rules: []
       '    port: 443',
       '    uuid: {{TONO_CLIENT_UUID}}',
       '    tls: true',
+      '  - name: Tono-Quoted',
+      '    type: vless',
+      '    server: quoted.example.com',
+      '    port: "443"',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '    tls: true',
+      '    servername: www.microsoft.com',
+      '    reality-opts:',
+      '      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      '      short-id: abcd1234',
       '  - name: Tono-Exit · hy2',
       '    type: hysteria2',
       '    server: 203.0.113.9',
@@ -3131,6 +3141,8 @@ rules: []
     const error = (await put.json() as any).error;
     expect(error.code).toBe('INVALID_CATALOG');
     expect(error.message).toContain('Tono-Bare: servername, reality-opts');
+    // Windows reads the port as a number; a quoted one fails its whole catalog.
+    expect(error.message).toContain('Tono-Quoted: port');
     expect(error.message).toContain('Tono-Exit · hy2: port, sni');
     expect(await env.DB.prepare('SELECT revision FROM managed_exit_catalog').first()).toBeNull();
   });

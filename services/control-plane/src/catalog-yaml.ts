@@ -318,24 +318,35 @@ export function catalogRelistTemplateUsesManagedIdentity(block: string): boolean
     && (catalogProxyType(block) !== 'vless' || catalogFieldKeys(block, 'password') === 0);
 }
 
+/** A port both clients read as a number: a bare integer 1..65535, not a quoted or padded one. */
+function catalogPortIsDialable(block: string): boolean {
+  const line = block.match(/^\s*(?:-\s+)?port\s*:[ \t]*([1-9]\d{0,4})[ \t]*(?:#.*)?$/m);
+  const flow = block.match(/[{,]\s*port\s*:\s*([1-9]\d{0,4})\s*[,}]/);
+  const raw = line?.[1] ?? flow?.[1];
+  return raw !== undefined && Number(raw) <= 65535;
+}
+
 /**
- * The VLESS fields both clients require before they admit a node (macOS
+ * The fields both clients require before they admit a node (macOS
  * `validatedOwnedNode`, Windows `admit_node`). One inadmissible entry makes
  * each client refuse the whole catalog, so the Worker must refuse to publish
  * it. Returns the missing or unusable fields; empty means admissible.
  * A Hysteria2 block's identity and pins are checked by
  * catalogProxyUsesManagedIdentity; here it only needs its dial target.
+ * Keys are matched anywhere in the block, not by YAML parent, and the server
+ * is not checked to be a public IPv4 address.
  */
 export function catalogEntryMissingClientFields(block: string): string[] {
   const missing: string[] = [];
+  if (new TextEncoder().encode(catalogProxyPlainName(block) ?? '').length > 128) missing.push('name of at most 128 bytes');
+  if (!/(?:^\s*(?:-\s+)?|[{,]\s*)type\s*:/m.test(block)) missing.push('type');
+  if (!catalogScalar(block, 'server')) missing.push('server');
+  if (!catalogPortIsDialable(block)) missing.push('port');
   if (catalogProxyType(block) === 'hysteria2') {
-    const rawPort = catalogScalar(block, 'port') ?? '';
-    if (!catalogScalar(block, 'server')) missing.push('server');
-    if (!/^\d+$/.test(rawPort) || Number(rawPort) < 1 || Number(rawPort) > 65535) missing.push('port');
     if (!catalogScalar(block, 'sni') && !catalogScalar(block, 'servername')) missing.push('sni');
     return missing;
   }
-  if (catalogProxyType(block) !== 'vless') return [];
+  if (catalogProxyType(block) !== 'vless') return missing;
   if (!/^true$/i.test(catalogScalar(block, 'tls') ?? '')) missing.push('tls: true');
   if (!catalogScalar(block, 'servername') && !catalogScalar(block, 'sni')) missing.push('servername');
   if (catalogScalar(block, 'reality-opts') === null) missing.push('reality-opts');
