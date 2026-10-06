@@ -241,6 +241,26 @@
   backdrop-filter: var(--tono-home-panel-blur) !important;
   -webkit-backdrop-filter: var(--tono-home-panel-blur) !important;
 }
+/* The glass card is the container; the old tinted box and its orange text would be a second one inside it. */
+.tono-home__attention-slot > :where([role="alert"]) > div:only-child {
+  padding: 0 !important;
+  background: none !important;
+  color: #f6f2ecdb !important;
+  font-size: 13px !important;
+  line-height: 1.5;
+}
+/* This whole card is a link to the lines page; an arrow says so, small orange text did not. */
+.tono-home__attention-slot > :where(div:not([role])) > a {
+  display: flex !important;
+  justify-content: space-between;
+  gap: 12px;
+  color: #f6f2ecdb !important;
+  font-size: 13px !important;
+}
+.tono-home__attention-slot > :where(div:not([role])) > a::after {
+  content: "›";
+  color: var(--sea-accent);
+}
 .tono-home__attention button {
   min-height: 32px;
 }

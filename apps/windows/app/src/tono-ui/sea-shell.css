@@ -160,7 +160,8 @@
   padding-top: 0;
 }
 /* Scrolled content fades out under the transparent bar instead of running through it. */
-.tono-root[data-sea-appearance="true"]:not([data-sea-home="true"]) .tono-main {
+.tono-root[data-sea-appearance="true"]:not([data-sea-home="true"])
+.tono-main:not(:has(.sea-welcome-scene)) {
   -webkit-mask-image: linear-gradient(transparent 34px, #000 56px);
   mask-image: linear-gradient(transparent 34px, #000 56px);
 }
@@ -175,6 +176,10 @@
   max-width: 760px;
   margin: 22px auto 0;
   min-height: 100%;
+}
+/* The frame already sets the measure and the top offset; the old page padding would set both a second time. */
+.tono-sea-page > .tono-page {
+  padding: 0 0 24px;
 }
 .tono-root[data-sea-appearance="true"]
   :is(button, input, a, summary, [tabindex]):focus-visible {
