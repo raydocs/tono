@@ -14,7 +14,7 @@ import { useI18n } from '@/hooks/use-i18n'
 import { useTonoStatus } from '@/hooks/use-tono'
 import { useTonoPreferences } from '@/hooks/use-tono-preferences'
 import { useUpdate } from '@/hooks/use-update'
-import { useWindowDecorations } from '@/hooks/use-window'
+import { useWindowControls, useWindowDecorations } from '@/hooks/use-window'
 import {
   useCustomTheme,
   useLayoutEvents,
@@ -31,8 +31,12 @@ import {
 } from '@/services/tono'
 import getSystem from '@/utils/get-system'
 
+import { useAppearancePreferences } from './appearance-preferences'
 import { MeshBackground } from './MeshBackground'
 import { ProtectedOfflineBanner } from './ProtectedOfflineBanner'
+import { seaPresentation } from './sea-presentation'
+import { SeaBackdrop } from './SeaBackdrop'
+import { SeaChrome } from './SeaChrome'
 import { ServicePrereqBanner } from './ServicePrereqBanner'
 import { TONO_FONT_STACK, tonoText } from './theme'
 import { TonoSidebar } from './TonoSidebar'
@@ -40,6 +44,7 @@ import { TonoToastProvider } from './TonoToast'
 
 import './design-tokens.css'
 import './tono.css'
+import './sea-shell.css'
 import 'dayjs/locale/ru'
 import 'dayjs/locale/zh-cn'
 
@@ -139,12 +144,44 @@ const TonoLayout = () => {
   const themeReady = useMemo(() => Boolean(theme), [theme])
 
   const windowControlsRef = useRef<any>(null)
-  const { decorated } = useWindowDecorations()
+  const { decorated, refreshDecorated } = useWindowDecorations()
+  const { currentWindow, toggleMaximize } = useWindowControls()
+  const { newAppearance } = useAppearancePreferences()
+  const { tone } = seaPresentation(status)
+  const originalDecorationsRef = useRef<boolean | null>(null)
+  const decorationQueueRef = useRef(Promise.resolve())
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (scrollTimeoutRef.current !== null)
+        clearTimeout(scrollTimeoutRef.current)
+    },
+    [],
+  )
 
   const isLoginRoute =
     location.pathname === '/login' || location.pathname === '/intro'
   const isTrayRoute = location.pathname === '/tray'
   const isDashboardRoute = location.pathname === '/'
+
+  useEffect(() => {
+    if (OS !== 'windows' || isTrayRoute || decorated === null) return
+    originalDecorationsRef.current ??= decorated
+    const desired = newAppearance ? false : originalDecorationsRef.current
+    decorationQueueRef.current = decorationQueueRef.current
+      .then(async () => {
+        if ((await currentWindow.isDecorated()) !== desired) {
+          await currentWindow.setDecorations(desired)
+          await refreshDecorated()
+        }
+      })
+      .catch((error) =>
+        console.warn(
+          '[Tono appearance] Window decoration change refused:',
+          error,
+        ),
+      )
+  }, [newAppearance, decorated, currentWindow, refreshDecorated, isTrayRoute])
 
   useLoadingOverlay(themeReady)
 
@@ -194,7 +231,11 @@ const TonoLayout = () => {
         style={{
           width: '100vw',
           height: '100vh',
-          background: mode === 'light' ? '#fff' : '#181a1b',
+          background: newAppearance
+            ? '#0B0A12'
+            : mode === 'light'
+              ? '#fff'
+              : '#181a1b',
         }}
       />
     )
@@ -216,6 +257,9 @@ const TonoLayout = () => {
         }`}
         data-tono-theme={isDark ? 'dark' : 'light'}
         data-tono-refined=""
+        data-sea-appearance={newAppearance && !isTrayRoute}
+        data-sea-home={isDashboardRoute}
+        data-sea-tone={tone}
         style={{
           fontFamily: TONO_FONT_STACK,
           color: text.primary,
@@ -224,64 +268,113 @@ const TonoLayout = () => {
             : {}),
         }}
       >
-        {!isTrayRoute && <MeshBackground dark={isDark} />}
-
-        {!isTrayRoute && decorated === false && (
-          <>
-            <WindowResizeHandles />
-            <div className="tono-titlebar" data-tauri-drag-region="true">
-              <WindowControls ref={windowControlsRef} />
+        <SeaBackdrop
+          enabled={newAppearance && !isTrayRoute}
+          active={isDashboardRoute}
+        >
+          {!isTrayRoute && !newAppearance && <MeshBackground dark={isDark} />}
+          {!isTrayRoute && newAppearance && !isDashboardRoute && (
+            <div className="tono-sea-ground" aria-hidden="true">
+              {(['cool', 'warm', 'ember'] as const).map((value) => (
+                <div
+                  key={value}
+                  className={`tono-sea-ground-${value}`}
+                  style={{ opacity: tone === value ? 1 : 0 }}
+                />
+              ))}
             </div>
-          </>
-        )}
+          )}
 
-        <TonoToastProvider>
-          <TonoAuthGuard>
-            {/* Structural layout is also inline (see TonoSidebar): a real
+          {!isTrayRoute && !newAppearance && decorated === false && (
+            <>
+              <WindowResizeHandles />
+              <div className="tono-titlebar" data-tauri-drag-region="true">
+                <WindowControls ref={windowControlsRef} />
+              </div>
+            </>
+          )}
+
+          <TonoToastProvider>
+            <TonoAuthGuard>
+              {/* Structural layout is also inline (see TonoSidebar): a real
                 machine was found rendering with no layout stylesheet, which
                 turned the shell into a single unstyled column. */}
-            <div
-              className="tono-shell"
-              style={{
-                position: 'relative',
-                zIndex: 1,
-                display: 'flex',
-                height: '100%',
-              }}
-            >
-              {!isLoginRoute && !isTrayRoute && <TonoSidebar />}
-              <main
-                className="tono-main"
+              <div
+                className="tono-shell"
                 style={{
-                  flex: 1,
-                  minWidth: 0,
-                  overflowY: isTrayRoute ? 'hidden' : 'auto',
                   position: 'relative',
-                  display: isTrayRoute ? undefined : 'flex',
-                  flexDirection: isTrayRoute ? undefined : 'column',
+                  zIndex: 1,
+                  display: 'flex',
+                  height: '100%',
                 }}
               >
-                {!isTrayRoute && <ServicePrereqBanner />}
-                {!isLoginRoute && !isTrayRoute && !isDashboardRoute && (
-                  <ProtectedOfflineBanner />
+                {!isTrayRoute && (
+                  <SeaChrome
+                    appearance={newAppearance}
+                    login={isLoginRoute}
+                    home={isDashboardRoute}
+                    status={status}
+                    sidebar={<TonoSidebar />}
+                    controls={<WindowControls ref={windowControlsRef} />}
+                    onDoubleClick={toggleMaximize}
+                  />
                 )}
-                <div
-                  style={{ flex: isTrayRoute ? undefined : 1, minHeight: 0 }}
+                {!isTrayRoute && newAppearance && decorated === false && (
+                  <WindowResizeHandles />
+                )}
+                <main
+                  className="tono-main"
+                  onScroll={
+                    newAppearance
+                      ? (event) => {
+                          const element = event.currentTarget
+                          element.dataset.scrolling = 'true'
+                          if (scrollTimeoutRef.current !== null)
+                            clearTimeout(scrollTimeoutRef.current)
+                          scrollTimeoutRef.current = setTimeout(() => {
+                            delete element.dataset.scrolling
+                          }, 700)
+                        }
+                      : undefined
+                  }
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    overflowY: isTrayRoute ? 'hidden' : 'auto',
+                    position: 'relative',
+                    display: isTrayRoute ? undefined : 'flex',
+                    flexDirection: isTrayRoute ? undefined : 'column',
+                  }}
                 >
-                  <BaseErrorBoundary>
-                    {isLoginRoute || isTrayRoute ? (
-                      <Outlet />
-                    ) : (
-                      <div key={location.pathname} className="tono-page-in">
+                  {!isTrayRoute && <ServicePrereqBanner />}
+                  {!isLoginRoute && !isTrayRoute && !isDashboardRoute && (
+                    <ProtectedOfflineBanner />
+                  )}
+                  <div
+                    style={{ flex: isTrayRoute ? undefined : 1, minHeight: 0 }}
+                  >
+                    <BaseErrorBoundary>
+                      {isLoginRoute || isTrayRoute ? (
                         <Outlet />
-                      </div>
-                    )}
-                  </BaseErrorBoundary>
-                </div>
-              </main>
-            </div>
-          </TonoAuthGuard>
-        </TonoToastProvider>
+                      ) : (
+                        <div
+                          key={location.pathname}
+                          className={
+                            newAppearance
+                              ? `tono-sea-page-in${isDashboardRoute ? '' : ' tono-sea-page'}`
+                              : 'tono-page-in'
+                          }
+                        >
+                          <Outlet />
+                        </div>
+                      )}
+                    </BaseErrorBoundary>
+                  </div>
+                </main>
+              </div>
+            </TonoAuthGuard>
+          </TonoToastProvider>
+        </SeaBackdrop>
       </div>
     </ThemeProvider>
   )

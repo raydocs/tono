@@ -21,6 +21,7 @@ import { hasLiveProtection } from '@/tono-ui/protection-evidence'
 import { SeaScene, type SeaPhase } from '@/tono-ui/SeaScene'
 import { TONO_FONT_STACK } from '@/tono-ui/theme'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
+import { useSharedSeaBackdrop } from '@/tono-ui/use-shared-sea-backdrop'
 
 import { useHomeDialog } from './home-focus'
 import { homeLineParts, homeLineReading } from './home-line-meta'
@@ -152,6 +153,8 @@ export const SeaHome = ({
         ? 'failed'
         : 'idle'
   const stageIndex = status?.stage ? stages.indexOf(status.stage) : -1
+  const sceneProgress = stageIndex < 0 ? undefined : stageIndex / stages.length
+  const sharedBackdrop = useSharedSeaBackdrop(phase, sceneProgress, state)
   const { elapsed, minutes } = useHomeTiming(status, progress)
   const stageSentence = t(
     status?.stage
@@ -335,10 +338,7 @@ export const SeaHome = ({
         fontFamily: TONO_FONT_STACK,
       }}
     >
-      <SeaScene
-        phase={phase}
-        progress={stageIndex < 0 ? undefined : stageIndex / stages.length}
-      />
+      {!sharedBackdrop && <SeaScene phase={phase} progress={sceneProgress} />}
       <div
         ref={columnRef}
         className="tono-home__column"

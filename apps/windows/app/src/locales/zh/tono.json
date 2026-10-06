@@ -107,6 +107,8 @@
     "installHint": "若未安装 TonoService，请重新安装已验证的候选版，不要反复尝试连接。"
   },
   "nav": {
+    "home": "首页",
+    "lines": "线路",
     "dashboard": "总览",
     "activity": "活动",
     "nodes": "节点",

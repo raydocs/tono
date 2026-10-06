@@ -107,6 +107,8 @@
     "installHint": "If TonoService is not installed, reinstall the verified candidate instead of repeatedly reconnecting."
   },
   "nav": {
+    "home": "Home",
+    "lines": "Servers",
     "dashboard": "Dashboard",
     "activity": "Activity",
     "nodes": "Nodes",
