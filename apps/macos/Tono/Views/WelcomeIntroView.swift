@@ -22,13 +22,35 @@ enum WelcomeLaunchGate {
     }
 }
 
-/// One-screen intro: three promises and one primary action. Get started (or
-/// Esc) sets `introSeen` and the parent swaps in the account gate.
+/// The original one-screen intro remains the default. The optional sea
+/// presentation pages through the same promises; finish or Esc still sets
+/// `introSeen` and the parent swaps in the account gate.
 /// Windows twin: `pages/tono/intro.tsx`.
 struct WelcomeIntroView: View {
     @AppStorage(SettingsKey.introSeen, store: AppProfile.defaults) private var introSeen = false
+    @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults) private var seaMotionMode = "Auto"
+    @SeaAppearancePreference private var seaAppearance
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var seaStep: SeaIntroStep = .connected
 
     var body: some View {
+        Group {
+            if seaAppearance {
+                seaIntro
+            } else {
+                originalIntro
+            }
+        }
+        .background {
+            Button(action: finish) { EmptyView() }
+                .keyboardShortcut(.cancelAction)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var originalIntro: some View {
         GeometryReader { geo in
             let narrow = geo.size.width < 800
             ZStack {
@@ -43,12 +65,102 @@ struct WelcomeIntroView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
+    }
+
+    private var seaIntro: some View {
+        GeometryReader { geo in
+            ZStack {
+                // These scenes explain Tono's states; they do not read or claim live protection.
+                SeaScene(phase: seaStep.scenePhase,
+                         motionEnabled: SeaAppearance.animates(seaMotionMode, reduceMotion: reduceMotion))
+                    .ignoresSafeArea()
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 26) {
+                        HStack(spacing: 10) {
+                            Image("TonoMark").resizable().scaledToFit()
+                                .frame(width: 30, height: 30).accessibilityHidden(true)
+                            Text("Tono").font(.title3.weight(.semibold))
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Spacer(minLength: 24)
+
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("HOW TONO WORKS")
+                                .font(.caption.weight(.semibold)).tracking(1.3)
+                                .foregroundStyle(SeaTheme.cool)
+                            Text(seaStep.title)
+                                .font(.system(size: 36, weight: .light)).tracking(-0.7)
+                                .accessibilityAddTraits(.isHeader)
+                            Text(seaStep.detail)
+                                .font(.body)
+                                .foregroundStyle(SeaTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if seaStep == .routes {
+                                Label("Tono picks your route", systemImage: "network")
+                                    .font(.callout.weight(.medium))
+                                    .padding(.horizontal, 14).padding(.vertical, 9)
+                                    .background(.white.opacity(0.10), in: Capsule())
+                            }
+                            Text("Illustration only · not your current connection status")
+                                .font(.caption).foregroundStyle(SeaTheme.muted)
+                        }
+                        .padding(28)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(hex: "171E34").opacity(0.94),
+                                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .strokeBorder(.white.opacity(0.16), lineWidth: 1)
+                        }
+
+                        HStack(spacing: 10) {
+                            ForEach(SeaIntroStep.allCases, id: \.self) { step in
+                                Button {
+                                    seaStep = step
+                                } label: {
+                                    Circle()
+                                        .fill(step == seaStep ? SeaTheme.warm : SeaTheme.muted.opacity(0.5))
+                                        .frame(width: 9, height: 9)
+                                        .frame(width: 26, height: 26)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Page \(step.rawValue + 1) of 3")
+                                .accessibilityAddTraits(step == seaStep ? .isSelected : [])
+                            }
+                            Spacer()
+                            if seaStep != .routes {
+                                Button("Skip") { finish() }
+                                    .buttonStyle(.link)
+                            }
+                            Button {
+                                if let next = seaStep.next { seaStep = next } else { finish() }
+                            } label: {
+                                if seaStep == .routes { Text("Get started") } else { Text("Next") }
+                            }
+                            .buttonStyle(GateProminentButtonStyle())
+                            .frame(width: 150)
+                            .keyboardShortcut(.defaultAction)
+                        }
+                    }
+                    .foregroundStyle(SeaTheme.text)
+                    .frame(maxWidth: 620, alignment: .leading)
+                    .padding(.horizontal, 32).padding(.vertical, 32)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: geo.size.height, alignment: .center)
+                }
+            }
+        }
         .background {
-            Button(action: finish) { EmptyView() }
-                .keyboardShortcut(.cancelAction)
-                .frame(width: 0, height: 0)
-                .opacity(0)
-                .accessibilityHidden(true)
+            Group {
+                Button(action: { if let previous = seaStep.previous { seaStep = previous } }) { EmptyView() }
+                    .keyboardShortcut(.leftArrow, modifiers: [])
+                    .disabled(seaStep.previous == nil)
+                Button(action: { if let next = seaStep.next { seaStep = next } }) { EmptyView() }
+                    .keyboardShortcut(.rightArrow, modifiers: [])
+                    .disabled(seaStep.next == nil)
+            }
+            .frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
         }
     }
 
@@ -148,6 +260,37 @@ struct WelcomeIntroView: View {
             body: "Nothing to configure. To change region, pick a node."
         ),
     ]
+}
+
+enum SeaIntroStep: Int, CaseIterable {
+    case connected, offline, routes
+
+    var previous: Self? { Self(rawValue: rawValue - 1) }
+    var next: Self? { Self(rawValue: rawValue + 1) }
+
+    var scenePhase: SeaPresentationPhase {
+        switch self {
+        case .connected: .day
+        case .offline: .blocked
+        case .routes: .night
+        }
+    }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .connected: "Connected means protected."
+        case .offline: "Offline, never exposed."
+        case .routes: "Routes are Tono's job."
+        }
+    }
+
+    var detail: LocalizedStringKey {
+        switch self {
+        case .connected: "When you connect, Tono carries your traffic on a protected route."
+        case .offline: "If that route fails, Tono blocks direct traffic first."
+        case .routes: "Choose a region when you want to. Tono handles the route."
+        }
+    }
 }
 
 #Preview("Welcome intro · Light") {

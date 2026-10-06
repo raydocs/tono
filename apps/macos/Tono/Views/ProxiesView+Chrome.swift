@@ -6,8 +6,8 @@ extension ProxiesView {
     var headerRow: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Nodes")
-                    .font(.system(size: 24, weight: .semibold))
+                Text(LocalizedStringKey(showsSeaAppearance ? "Servers" : "Nodes"))
+                    .font(.system(size: showsSeaAppearance ? 28 : 24, weight: showsSeaAppearance ? .light : .semibold))
                     .foregroundStyle(.primary)
                 Text("Choose a secure exit for your protected traffic.")
                     .font(.callout)

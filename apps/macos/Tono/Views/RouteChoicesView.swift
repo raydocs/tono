@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct RouteChoicesView: View {
+    @SeaAppearancePreference private var seaAppearance
     @Environment(AppState.self) private var appState
     @Environment(AccountSession.self) private var account: AccountSession?
     @State private var proposal: RouteRecommendation?
@@ -49,9 +50,10 @@ struct RouteChoicesView: View {
                         .font(.system(size: 11)).foregroundStyle(.orange)
                 }
             }
-            .padding(12)
-            .frame(maxWidth: 520, alignment: .leading)
+            .padding(seaAppearance ? 20 : 12)
+            .frame(maxWidth: seaAppearance ? .infinity : 520, alignment: .leading)
             .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+            .modifier(SeaPanelSurface())
             .confirmationDialog(String(localized: "Connect using this route?"), isPresented: $showingConfirmation, titleVisibility: .visible) {
                 Button("Connect") {
                     guard let proposal, proposal.owner == account?.user?.id, account?.isReady == true else { return }

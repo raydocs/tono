@@ -17,3 +17,6 @@
 - 2026-10-06 续记：更正原生窗口验收的 AX 文本匹配：普通阻断要求海景标题 `Protected Offline`，暂停恢复要求 `Protected Offline · retries paused`；两者由 `MenuBarProtectionStatus` 供给真实海景 Dashboard 标题。仅按公开 `accessibilityLabel` 或 String `accessibilityValue` 精确匹配，保留几何、像素、来源、超时及失败即拒绝检查。MacBook 未运行原生 XCTest；更正后的 hosted 执行仍待验证。
 
 - 2026-10-06 续记：head965991d193/run37455171701 编译失败，AX 遍历误用 Swift 的 NSAccessibility 命名空间类型；SDK AppKit.apinotes 明确协议 Swift 名为 NSAccessibilityProtocol，现仅更正两处协议类型，所有来源/像素/内容/超时门槛不变。未本机原生构建，hosted 重跑待验。
+
+- 2026-10-06 继续升级：Mac 默认关闭的海景外观已扩展到原生登录单栏/三段首次引导、紧凑线路列表/收藏筛选、活动当前连接与历史会话区分/最多20条展开、账户设备与真实配额条、单栏分组设置/完整隐私说明弹出、支持首屏健康检查/复制/明确预览后确认上传，以及原生侧栏与菜单栏静态地面/最多两条同账户目录快捷线路。旧外观分支和现有操作/保护守卫保留；原生线路点击仍按既有 selectNode 连接/重试，没有移植 Windows 的仅选择胶囊；Mac 仍用原生侧栏/窗口，不冒称 Windows 逐像素一致。新增加 51 个 zh/en key，原 833 个 catalog 条目未改（Home 原键为家宽，首页另用 sea.nav.home）。root 源码对照确认7类关键原调用仍在，3文件原长隐私/支持文案保留；diff check、JSON与0.0.75源码版本检查通过，不是原生执行。
+- 2026-10-06 夹具续记：cd3df7d5/run37457325171 编译仍失败，Swift 导入的 NSAccessibilityProtocol 暴露 getter 方法；现调用 accessibilityLabel()/Value()/Identifier()/Frame()/Children()，不再把方法当属性。新增各页面真实视图的预选精确窗口采样，调用前给定标题/控件合同；原先两张blocked fixture合同保持，其余原离屏验收不变。新样本不按离屏结果择优，原生缺失/超时/内容缺失仍失败；保留离屏诊断、原生逐像素/几何/内容门槛及TXT/xcresult收据。登录夹具预置非生产auth-method数据；支持仅采实际首屏组件，未运行全页浏览器扫描或Helper探测，因此不声称全支持页截图通过。新增intro步骤、20条上限、收藏双传输身份、菜单两条身份上限各一个XCTest，未本机运行；新head hosted/图像/交互/真机仍待验。无Windows改动、无图标接线、无合并/签名包/安装/发布。

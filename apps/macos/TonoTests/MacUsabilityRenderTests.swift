@@ -192,6 +192,90 @@ final class MacUsabilityRenderTests: XCTestCase {
         XCTAssertNil(account.uploadingSupportReportID)
     }
 
+    func testSeaSecondaryPagesProduceReviewableAttachments() async throws {
+        let suite = "tono-sea-pages-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite); ManagedExitCatalogOwnership.purge() }
+        let app = AppState()
+        app.routePreferences = LocalRoutePreferences(defaults: defaults)
+        let account = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        account.user = try JSONDecoder().decode(TonoUser.self, from: Data(#"{"id":"synthetic-sea-pages","email":"fixture@example.test","plan":"Fixture plan","quotaBytes":1000000000,"usageBytes":250000000}"#.utf8))
+        account.state = .ready
+        account.devices = try JSONDecoder().decode([TonoDevice].self, from: Data(#"[{"id":"current","name":"Fixture Mac","current":true},{"id":"other","name":"Fixture laptop","current":false}]"#.utf8))
+        let owner = try XCTUnwrap(account.user?.id)
+        ManagedExitCatalogOwnership.adopt(owner)
+        let node = Fixture.realityNode(name: "Osaka", id: "osaka", flag: "🇯🇵")
+        let other = Fixture.realityNode(name: "Paris", id: "paris", flag: "🇫🇷")
+        app.proxyRegions = [.init(id: AppState.managedCatalogRegionID, name: "Tono", nodes: [node, other])]
+        app.managedCatalogRevision = 73
+        app.managedCatalogDigest = String(repeating: "a", count: 64)
+        app.selectedNodeId = node.id
+        app.activeNode = node
+        app.proxyService.activeNodeName = node.name
+        app.toggleRouteFavorite(other.name, owner: owner)
+        let preferenceBefore = AppProfile.defaults.object(forKey: SeaAppearance.enabledKey) as? Bool
+        let introBefore = AppProfile.defaults.object(forKey: SettingsKey.introSeen) as? Bool
+        try await capture("servers-sea-normal", width: 760, height: 720, annotate: false,
+                          nativeLabels: ["Servers", "Favorites", "Cloud Servers", "Remove favorite"]) {
+            ZStack { MeshGradientBackground(); ProxiesView() }
+                .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
+                .environment(app).environment(account)
+        }
+        try await capture("account-sea-normal", width: 660, height: 540, annotate: false,
+                          nativeLabels: ["Account", "fixture@example.test", "Sign Out"]) {
+            ZStack { MeshGradientBackground(); AccountSettingsCard(session: account).padding(32) }
+                .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
+        }
+        let cloud = APIConnection(id: "fixture-cloud", metadata: .init(network: "tcp", type: "HTTPS", process: "Fixture App", processPath: nil, sourceIP: nil, destinationIP: nil, sourcePort: nil, destinationPort: "443", host: "fixture.example.test"), upload: 10, download: 30, start: "0", chains: [node.name, "Tono-Exit"], rule: "DOMAIN-SUFFIX", rulePayload: "example.test")
+        let direct = APIConnection(id: "fixture-direct", metadata: .init(network: "tcp", type: "HTTPS", process: "Fixture App", processPath: nil, sourceIP: nil, destinationIP: nil, sourcePort: nil, destinationPort: "443", host: "direct.example.test"), upload: 5, download: 20, start: "0", chains: ["DIRECT"], rule: "MATCH", rulePayload: nil)
+        app.isConnected = true
+        app.updateConnections(from: .init(downloadTotal: 50, uploadTotal: 15, connections: [cloud, direct]))
+        try await capture("activity-sea-normal", width: 760, height: 640, annotate: false,
+                          nativeLabels: ["Activity", "Routes now", "Session bytes include closed connections; they are not current traffic."]) {
+            ZStack { MeshGradientBackground(); ActivityView() }
+                .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true).environment(app)
+        }
+        try await capture("settings-sea-grouped", width: 760, height: 820, annotate: false,
+                          nativeLabels: ["Settings", "Account", "General"]) {
+            ZStack { MeshGradientBackground(); SettingsView() }
+                .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
+                .environment(app).environment(account).environmentObject(AppUpdater(enabled: false))
+        }
+        try await capture("support-sea-actions", width: 760, height: 420, annotate: false,
+                          nativeLabels: ["Local health check", "Check this Mac", "Upload diagnostics"]) {
+            ZStack {
+                MeshGradientBackground()
+                SupportHealthSection(check: .constant(nil), copyReport: {}, reportCopied: false).padding(32)
+            }
+            .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
+            .environment(app).environment(account)
+        }
+        let login = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        login.state = .signedOut
+        login.authMethods = .init(email: .init(enabled: true, clientId: nil),
+            apple: .init(enabled: false, clientId: nil), google: .init(enabled: false, clientId: nil))
+        try await capture("login-sea-email", width: 760, height: 720, annotate: false,
+                          nativeLabels: ["Sign in to Tono", "Send a sign-in code"]) {
+            LoginView(session: login).modifier(SeaPageAppearance())
+                .environment(\.seaAppearanceOverride, true).environment(app)
+        }
+        try await capture("intro-sea-first", width: 760, height: 680, annotate: false,
+                          nativeLabels: ["Connected means protected.", "Illustration only · not your current connection status", "Next"]) {
+            WelcomeIntroView().modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
+        }
+        app.isConnected = false
+        try await capture("menubar-sea-normal", width: 280, height: 480, annotate: false,
+                          nativeLabels: ["Open Tono", "Quit Tono", "Connect"]) {
+            MenuBarView().modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
+                .environment(app).environment(account)
+        }
+        XCTAssertEqual(AppProfile.defaults.object(forKey: SeaAppearance.enabledKey) as? Bool, preferenceBefore)
+        XCTAssertEqual(AppProfile.defaults.object(forKey: SettingsKey.introSeen) as? Bool, introBefore)
+        XCTAssertNil(app.connectionCoordinator.connectTask)
+        XCTAssertNil(account.uploadingSupportReportID)
+        XCTAssertNil(login.emailChallenge)
+    }
+
     private func captureDashboard(
         _ name: String, app: AppState, account: AccountSession,
         sea: Bool, width: CGFloat, height: CGFloat
@@ -211,6 +295,8 @@ final class MacUsabilityRenderTests: XCTestCase {
     private func capture<Content: View>(
         _ name: String, width: CGFloat, height: CGFloat,
         annotate: Bool = true,
+        nativeLabels: [String]? = nil,
+        nativeIdentifiers: [String] = [],
         @ViewBuilder content: () -> Content
     ) async throws {
         let root = Group {
@@ -281,7 +367,7 @@ final class MacUsabilityRenderTests: XCTestCase {
             .appendingPathComponent("test-results/renders", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let nativeOnly = name == "dashboard-sea-blocked-minimum"
-            || name == "dashboard-sea-blocked-paused-recovery-minimum"
+            || name == "dashboard-sea-blocked-paused-recovery-minimum" || nativeLabels != nil
         let offscreenName = nativeOnly ? name + "-offscreen" : name
         try png.write(to: folder.appendingPathComponent(offscreenName + ".png"), options: .atomic)
         let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
@@ -301,7 +387,12 @@ final class MacUsabilityRenderTests: XCTestCase {
             let hostedDiagnostic = environment["TEST_RUNNER_TONO_HOSTED_WINDOW_DIAGNOSTIC"]
                 ?? environment["TONO_HOSTED_WINDOW_DIAGNOSTIC"]
             if hostedDiagnostic == "1" {
-                await captureNativeWindowAcceptance(name, window: window, host: host, folder: folder)
+                let paused = name == "dashboard-sea-blocked-paused-recovery-minimum"
+                let labels = nativeLabels ?? [paused ? "Protected Offline · retries paused" : "Protected Offline",
+                    paused ? "Repair and reconnect" : "Retry now", "Restore internet"]
+                let identifiers = nativeLabels == nil && paused ? ["protectedRecoveryFeedback"] : nativeIdentifiers
+                await captureNativeWindowAcceptance(name, window: window, host: host, folder: folder,
+                    width: Int(width), height: Int(height), requiredLabels: labels, requiredIdentifiers: identifiers)
             } else {
                 XCTFail("\(name): exact-window native acceptance unavailable; TEST_RUNNER_TONO_HOSTED_WINDOW_DIAGNOSTIC=1 required")
             }
@@ -314,7 +405,10 @@ final class MacUsabilityRenderTests: XCTestCase {
 
     /// Only these two preselected fixtures accept this same-process window image.
     /// Offscreen cacheDisplay output remains separate failed diagnostic evidence.
-    private func captureNativeWindowAcceptance(_ name: String, window: NSWindow, host: NSView, folder: URL) async {
+    private func captureNativeWindowAcceptance(
+        _ name: String, window: NSWindow, host: NSView, folder: URL,
+        width: Int, height: Int, requiredLabels: [String], requiredIdentifiers: [String]
+    ) async {
         var receipt = ["name=\(name)", "api=ScreenCaptureKit independent window"]
         defer {
             let data = Data((receipt.joined(separator: "\n") + "\n").utf8)
@@ -335,9 +429,10 @@ final class MacUsabilityRenderTests: XCTestCase {
         let expectedPID = ProcessInfo.processInfo.processIdentifier
         receipt.append("windowNumber=\(window.windowNumber) processID=\(expectedPID) visible=\(window.isVisible) frame=\(window.frame)")
         guard window.windowNumber > 0, window.isVisible,
-              window.frame.width == 660, window.frame.height == 540 else {
-            receipt.append("capture=failed: synthetic window not visible at 660x540")
-            XCTFail("\(name): synthetic window not visible at 660x540")
+              window.frame.width == CGFloat(width), window.frame.height == CGFloat(height),
+              !requiredLabels.isEmpty else {
+            receipt.append("capture=failed: synthetic window not visible at required dimensions or content contract missing")
+            XCTFail("\(name): synthetic window not visible at required dimensions or content contract missing")
             return
         }
         let expectedID = CGWindowID(window.windowNumber)
@@ -377,15 +472,15 @@ final class MacUsabilityRenderTests: XCTestCase {
             }
             receipt.append("shareableWindowID=\(target.windowID) ownerPID=\(target.owningApplication?.processID ?? -1) onScreen=\(target.isOnScreen) frame=\(target.frame)")
             guard target.isOnScreen, target.frame == windowServerFrame,
-                  target.frame.width == 660, target.frame.height == 540 else {
+                  target.frame.width == CGFloat(width), target.frame.height == CGFloat(height) else {
                 receipt.append("capture=failed: shareable window on-screen/frame mismatch")
                 XCTFail("\(name): shareable window on-screen/frame mismatch")
                 return
             }
             let filter = SCContentFilter(desktopIndependentWindow: target)
             let configuration = SCStreamConfiguration()
-            configuration.width = 660
-            configuration.height = 540
+            configuration.width = width
+            configuration.height = height
             configuration.showsCursor = false
             receipt.append("captureImageDeadline=10s")
             let image: CGImage = try await nativeWindowRequest("SCScreenshotManager.captureImage", timeout: 10) { complete in
@@ -400,7 +495,7 @@ final class MacUsabilityRenderTests: XCTestCase {
                     }
                 }
             }
-            guard image.width == 660, image.height == 540 else {
+            guard image.width == width, image.height == height else {
                 receipt.append("capture=failed: image dimensions \(image.width)x\(image.height)")
                 XCTFail("\(name): native image dimensions mismatch")
                 return
@@ -432,7 +527,8 @@ final class MacUsabilityRenderTests: XCTestCase {
                     }
                 }
             }
-            guard nativeContentIsVisible(name, host: host, window: window, bitmap: bitmap, receipt: &receipt) else {
+            guard nativeContentIsVisible(host: host, window: window, bitmap: bitmap,
+                required: requiredLabels, requiredIdentifiers: requiredIdentifiers, receipt: &receipt) else {
                 receipt.append("acceptance=failed: fixture content/layout evidence")
                 XCTFail("\(name): native image lacks bounded fixture content/layout evidence")
                 return
@@ -448,38 +544,33 @@ final class MacUsabilityRenderTests: XCTestCase {
     /// Public in-process accessibility geometry must agree with visible pixels;
     /// an opaque gradient alone cannot satisfy the Dashboard fixture contract.
     private func nativeContentIsVisible(
-        _ name: String, host: NSView, window: NSWindow, bitmap: NSBitmapImageRep,
-        receipt: inout [String]
+        host: NSView, window: NSWindow, bitmap: NSBitmapImageRep,
+        required: [String], requiredIdentifiers: [String], receipt: inout [String]
     ) -> Bool {
         var queue: [any NSAccessibilityProtocol] = [host]
         var visited = Set<ObjectIdentifier>()
         var matches: [String: NSRect] = [:]
-        let retryLabel = name == "dashboard-sea-blocked-paused-recovery-minimum"
-            ? "Repair and reconnect" : "Retry now"
-        let blockedTitle = name == "dashboard-sea-blocked-paused-recovery-minimum"
-            ? "Protected Offline · retries paused" : "Protected Offline"
-        let required = [blockedTitle, retryLabel, "Restore internet"]
         while !queue.isEmpty && visited.count < 512 {
             let element = queue.removeFirst()
             guard visited.insert(ObjectIdentifier(element as AnyObject)).inserted else { continue }
-            let label = element.accessibilityLabel ?? ""
-            let stringValue = element.accessibilityValue as? String
-            let identifier = element.accessibilityIdentifier ?? ""
+            let label = element.accessibilityLabel() ?? ""
+            let stringValue = element.accessibilityValue() as? String
+            let identifier = element.accessibilityIdentifier() ?? ""
             for expected in required where label == expected || stringValue == expected {
-                matches[expected] = element.accessibilityFrame
+                matches[expected] = element.accessibilityFrame()
             }
-            if identifier == "protectedRecoveryFeedback" {
-                matches[identifier] = element.accessibilityFrame
+            receipt.append("AX[\(visited.count)] label=\(label) value=\(stringValue ?? "") identifier=\(identifier) frame=\(element.accessibilityFrame())")
+            if requiredIdentifiers.contains(identifier) {
+                matches[identifier] = element.accessibilityFrame()
             }
-            for child in element.accessibilityChildren ?? [] {
+            for child in element.accessibilityChildren() ?? [] {
                 if let child = child as? any NSAccessibilityProtocol { queue.append(child) }
             }
         }
         receipt.append("accessibilityNodes=\(visited.count) matched=\(matches.keys.sorted())")
         guard visited.count < 512, required.allSatisfy({ matches[$0] != nil }) else { return false }
-        if name == "dashboard-sea-blocked-paused-recovery-minimum",
-           matches["protectedRecoveryFeedback"] == nil { return false }
-        for key in required + (name == "dashboard-sea-blocked-paused-recovery-minimum" ? ["protectedRecoveryFeedback"] : []) {
+        guard requiredIdentifiers.allSatisfy({ matches[$0] != nil }) else { return false }
+        for key in required + requiredIdentifiers {
             guard let frame = matches[key], frame.width >= 10, frame.height >= 10,
                   window.frame.contains(frame),
                   nativePixelContrast(in: frame, windowFrame: window.frame, bitmap: bitmap) else {

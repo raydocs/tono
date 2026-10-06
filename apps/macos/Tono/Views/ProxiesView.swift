@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct ProxiesView: View {
+    @SeaAppearancePreference var showsSeaAppearance
+    @State var seaFavoritesOnly = false
     @Environment(AppState.self) var appState
     @Environment(AccountSession.self) var accountSession
     @Environment(\.colorScheme) var colorScheme
@@ -21,11 +23,14 @@ struct ProxiesView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             headerRow
-            catalogSummary
-                .padding(.top, 14)
-            nodeToolbar
-                .padding(.top, 12)
-                .padding(.bottom, 16)
+            if !showsSeaAppearance {
+                catalogSummary.padding(.top, 14)
+            }
+            Group {
+                if showsSeaAppearance { seaNodeToolbar } else { nodeToolbar }
+            }
+            .padding(.top, 12)
+            .padding(.bottom, 16)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
@@ -34,7 +39,10 @@ struct ProxiesView: View {
                         proxyGroupsSection(proxyGroups)
                     }
 
-                    nodesSection
+                    Group {
+                        if showsSeaAppearance { seaNodesSection } else { nodesSection }
+                    }
+                    if showsSeaAppearance { catalogSummary }
 
                     if AppProfile.isDev {
                         ForEach(appState.proxyRegions.filter { $0.id == "custom" }) { region in
@@ -65,6 +73,7 @@ struct ProxiesView: View {
             }
             .scrollIndicators(.hidden)
         }
+        .frame(maxWidth: showsSeaAppearance ? 760 : .infinity, alignment: .leading)
         .padding(.horizontal, 32)
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

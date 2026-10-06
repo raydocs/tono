@@ -153,6 +153,7 @@ jobs:
           path: |
             apps/macos/test-results/TonoTests.xcresult
             apps/macos/test-results/renders/*.png
+            apps/macos/test-results/renders/*.txt
           if-no-files-found: warn
           retention-days: 7
 

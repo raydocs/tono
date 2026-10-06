@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SidebarView: View {
+    @SeaAppearancePreference private var seaAppearance
     @Binding var selectedPage: AppPage
     @AppStorage(SettingsKey.logsEnabled) private var logsEnabled = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -86,10 +87,11 @@ struct SidebarView: View {
                     // only color the row carries; the glass does the rest.
                     .foregroundStyle(
                         isSelected
-                            ? AnyShapeStyle(TonoBrand.routeGradient)
+                            ? (seaAppearance ? AnyShapeStyle(SeaTheme.cool) : AnyShapeStyle(TonoBrand.routeGradient))
                             : AnyShapeStyle(.primary)
                     )
-                Text(page.displayName)
+                Text(seaAppearance && page == .proxies ? LocalizedStringKey("Servers")
+                    : (seaAppearance && page == .dashboard ? LocalizedStringKey("sea.nav.home") : page.displayName))
                     .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
@@ -128,7 +130,7 @@ struct SidebarView: View {
                     Capsule()
                         .fill(
                             LinearGradient(
-                                colors: [TonoBrand.accent, TonoBrand.accentSoft],
+                                colors: seaAppearance ? [SeaTheme.cool, SeaTheme.cool.opacity(0.65)] : [TonoBrand.accent, TonoBrand.accentSoft],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )

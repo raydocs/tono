@@ -4,6 +4,7 @@ import SwiftUI
 /// Menu bar extra: state, current node, one safe action, Open Tono, Quit.
 /// Not a second dashboard — no TUN toggle, IP, DNS, or node list.
 struct MenuBarView: View {
+    @SeaAppearancePreference private var seaAppearance
     static let popoverWidth: CGFloat = 280
 
     @Environment(AppState.self) private var appState
@@ -23,6 +24,7 @@ struct MenuBarView: View {
                     || (KillSwitchService.isArmed && accountSession.state != .ready) {
                     restoreAction
                 }
+                if seaAppearance { seaQuickRoutes }
                 menuDivider
                 openTonoButton
                 quitButton
@@ -32,6 +34,10 @@ struct MenuBarView: View {
         }
         .frame(width: Self.popoverWidth)
         .frame(maxHeight: maximumPopoverHeight)
+        .background {
+            if seaAppearance { SeaSecondaryScene() }
+        }
+        .modifier(SeaPageAppearance())
     }
 
     static func clampedPopoverHeight(for screenHeight: CGFloat) -> CGFloat {
@@ -58,17 +64,23 @@ struct MenuBarView: View {
                 .frame(width: 8, height: 8)
                 .shadow(color: appState.isConnected ? TonoStatus.connected.opacity(0.6) : .clear, radius: 3)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Tono")
-                    .font(.system(size: 13, weight: .semibold))
+                if !seaAppearance {
+                    Text("Tono").font(.system(size: 13, weight: .semibold))
+                }
                 Text(status.title)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .font(.system(size: seaAppearance ? 20 : 11, weight: seaAppearance ? .light : .regular))
+                    .foregroundStyle(seaAppearance ? SeaTheme.text : .secondary)
+                    .lineLimit(seaAppearance ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
+            if seaAppearance {
+                Image(systemName: status.kind == .connected ? "sun.horizon" : "moon.stars")
+                    .font(.system(size: 15)).foregroundStyle(SeaTheme.muted).accessibilityHidden(true)
+            }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 12)
+        .padding(.top, seaAppearance ? 16 : 12)
         .padding(.bottom, 8)
     }
 
@@ -186,18 +198,52 @@ struct MenuBarView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
-                .background(
-                    prominent
-                        ? TonoBrand.accent.opacity(0.92)
-                        : Color.primary.opacity(0.06),
-                    in: Capsule()
-                )
-                .foregroundStyle(prominent ? Color.white : Color.primary)
+                .background {
+                    Capsule().fill(prominent
+                        ? (seaAppearance ? AnyShapeStyle(SeaTheme.primaryGradient) : AnyShapeStyle(TonoBrand.accent.opacity(0.92)))
+                        : AnyShapeStyle(Color.primary.opacity(0.06)))
+                }
+                .foregroundStyle(prominent ? (seaAppearance ? SeaTheme.ink : Color.white) : Color.primary)
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+    }
+
+    @ViewBuilder
+    private var seaQuickRoutes: some View {
+        if !busy, let owner = accountSession.user?.id,
+           owner == ManagedExitCatalogOwnership.currentAccount,
+           accountSession.state == .ready {
+            let catalog = appState.managedCatalogNodes
+            let routes = SeaMenuPresentation.quickRoutes(catalog: catalog,
+                recommended: appState.routeRecommendation(owner: owner)?.name,
+                favorites: appState.routePreferences.favorites(owner: owner, catalog: catalog),
+                selected: appState.activeNode?.name ?? appState.proxyService.activeNodeName)
+            if !routes.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Choose another route").font(.system(size: 10)).foregroundStyle(SeaTheme.muted)
+                    ForEach(routes) { node in
+                        Button {
+                            guard accountSession.user?.id == owner,
+                                  owner == ManagedExitCatalogOwnership.currentAccount, canAct else { return }
+                            appState.selectNode(node.name)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "arrow.up.right").accessibilityHidden(true)
+                                Text(nodeRouteTitle(node)).lineLimit(1)
+                                Spacer(minLength: 4)
+                            }
+                            .font(.system(size: 12)).padding(.vertical, 6).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).disabled(!canAct)
+                        .accessibilityLabel(String(localized: "Connect using \(nodeRouteTitle(node))"))
+                    }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 8)
+            }
+        }
     }
 
     private var openTonoButton: some View {

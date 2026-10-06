@@ -60,6 +60,7 @@ struct ProgressPillButtonStyle: ButtonStyle {
 /// The shared surface: gradient fill, a sheen that answers hover and press,
 /// a colored shadow that pulls in on press, asymmetric press/release timing.
 private struct ActionSurface<Extra: View>: View {
+    @SeaAppearancePreference private var seaAppearance
     let configuration: ButtonStyle.Configuration
     let compact: Bool
     let isEnabled: Bool
@@ -70,7 +71,7 @@ private struct ActionSurface<Extra: View>: View {
     private var pressed: Bool { configuration.isPressed }
 
     private var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: compact ? 6 : 10, style: .continuous)
+        RoundedRectangle(cornerRadius: seaAppearance ? 999 : (compact ? 6 : 10), style: .continuous)
     }
 
     /// The highlight layer: none at rest, a touch on hover, clear on press.
@@ -90,20 +91,20 @@ private struct ActionSurface<Extra: View>: View {
     var body: some View {
         configuration.label
             .font(.system(size: compact ? 12 : 13, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(seaAppearance ? SeaTheme.ink : .white)
             .padding(.horizontal, compact ? 10 : 0)
             .frame(maxWidth: compact ? nil : .infinity)
             .frame(height: compact ? 22 : 44)
             .background {
                 ZStack {
-                    shape.fill(TonoBrand.actionGradient)
+                    shape.fill(seaAppearance ? SeaTheme.primaryGradient : TonoBrand.actionGradient)
                     extra()
                     shape.fill(.white.opacity(sheen))
                 }
                 .clipShape(shape)
             }
             .shadow(
-                color: TonoBrand.actionShadow.opacity(shadowOpacity),
+                color: (seaAppearance ? SeaTheme.warm : TonoBrand.actionShadow).opacity(shadowOpacity),
                 radius: pressed ? 6 : (isHovered ? 16 : 12),
                 y: pressed ? 2 : (isHovered ? 7 : 5)
             )
@@ -122,7 +123,7 @@ private struct ActionSurface<Extra: View>: View {
                 isHovered = hovering
             }
             .contentShape(shape)
-            .tint(.white)
+            .tint(seaAppearance ? SeaTheme.ink : .white)
     }
 }
 
