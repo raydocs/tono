@@ -6,6 +6,46 @@ import Vision
 import XCTest
 @testable import Tono
 
+private struct NativeRenderPixel {
+    let red: CGFloat
+    let green: CGFloat
+    let blue: CGFloat
+    let alpha: CGFloat
+
+    var isValid: Bool {
+        [red, green, blue, alpha].allSatisfy { $0.isFinite && (0...1).contains($0) }
+    }
+}
+
+private enum NativeRenderOpacityPolicy: Equatable {
+    case opaque, isolatedSubpixelEdges
+
+    /// Independent-window captures can preserve isolated raster-edge alpha.
+    /// Bound the maximum possible matte contribution to five 8-bit levels, not
+    /// a blanket alpha threshold: border pixels, neighboring gaps and color
+    /// discontinuities are rejected. No captured pixel is modified.
+    static func acceptsIsolatedEdge(
+        x: Int, y: Int, width: Int, height: Int,
+        pixel: (Int, Int) -> NativeRenderPixel?
+    ) -> Bool {
+        guard x > 0, y > 0, x < width - 1, y < height - 1,
+              let center = pixel(x, y), center.isValid,
+              center.alpha < 1, center.alpha >= CGFloat(250) / 255 else { return false }
+        var sameFill = false
+        for ny in (y - 1)...(y + 1) {
+            for nx in (x - 1)...(x + 1) where nx != x || ny != y {
+                guard let neighbor = pixel(nx, ny), neighbor.isValid, neighbor.alpha == 1 else { return false }
+                if abs(neighbor.red - center.red) <= CGFloat(2) / 255,
+                   abs(neighbor.green - center.green) <= CGFloat(2) / 255,
+                   abs(neighbor.blue - center.blue) <= CGFloat(2) / 255 {
+                    sameFill = true
+                }
+            }
+        }
+        return sameFill
+    }
+}
+
 private final class NativeWindowRequestCompletion<Value>: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Value, Error>?
@@ -45,6 +85,28 @@ private func nativeWindowRequest<Value>(
 /// Synthetic state only: no sign-in, helper calls, browser scans or uploads.
 @MainActor
 final class MacUsabilityRenderTests: XCTestCase {
+    func testIsolatedRasterEdgesCannotHideMissingNativeContent() {
+        let opaque = NativeRenderPixel(red: 0.8, green: 0.4, blue: 0.2, alpha: 1)
+        let edge = NativeRenderPixel(red: 0.8, green: 0.4, blue: 0.2, alpha: CGFloat(253) / 255)
+        func accepts(_ center: NativeRenderPixel, x: Int = 2, y: Int = 2,
+                     neighbor: NativeRenderPixel? = nil, absentNeighbor: Bool = false) -> Bool {
+            NativeRenderOpacityPolicy.acceptsIsolatedEdge(x: x, y: y, width: 5, height: 5) { px, py in
+                if px == x && py == y { return center }
+                if px == x + 1 && py == y { return absentNeighbor ? nil : neighbor ?? opaque }
+                return opaque
+            }
+        }
+        XCTAssertTrue(accepts(edge))
+        XCTAssertFalse(accepts(NativeRenderPixel(red: 0.8, green: 0.4, blue: 0.2, alpha: 0)))
+        XCTAssertFalse(accepts(NativeRenderPixel(red: 0.8, green: 0.4, blue: 0.2, alpha: CGFloat(240) / 255)))
+        XCTAssertFalse(accepts(edge, neighbor: edge), "connected fractional gaps must fail")
+        XCTAssertFalse(accepts(edge, absentNeighbor: true))
+        XCTAssertFalse(accepts(edge, x: 0), "image borders must be opaque")
+        XCTAssertFalse(accepts(NativeRenderPixel(red: 0.1, green: 0.8, blue: 0.9, alpha: CGFloat(253) / 255)),
+                       "a fractional pixel needs an opaque same-fill neighbor")
+        XCTAssertFalse(accepts(NativeRenderPixel(red: .nan, green: 0.4, blue: 0.2, alpha: CGFloat(253) / 255)))
+    }
+
     func testNativeWindowRequestTimeoutIgnoresLateCallback() async throws {
         var lateCallback: ((Result<Int, Error>) -> Void)?
         do {
@@ -236,14 +298,14 @@ final class MacUsabilityRenderTests: XCTestCase {
         let preferenceBefore = AppProfile.defaults.object(forKey: SeaAppearance.enabledKey) as? Bool
         let introBefore = AppProfile.defaults.object(forKey: SettingsKey.introSeen) as? Bool
         try await capture("servers-sea-normal", width: 760, height: 720, annotate: false, darkAppearance: true,
-                          nativeLabels: ["Servers", "Favorites", "Cloud Servers", "Paris"],
+                          nativeOpacity: .isolatedSubpixelEdges, nativeLabels: ["Servers", "Favorites", "Cloud Servers", "Paris"],
                           nativeAXLabels: ["Remove favorite"]) {
             ZStack { MeshGradientBackground(); ProxiesView() }
                 .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
                 .environment(app).environment(account)
         }
         try await capture("account-sea-normal", width: 660, height: 540, annotate: false, darkAppearance: true,
-                          nativeLabels: ["Account", "fixture@example.test", "Sign Out"]) {
+                          nativeOpacity: .isolatedSubpixelEdges, nativeLabels: ["Account", "fixture@example.test", "Sign Out"]) {
             ZStack { MeshGradientBackground(); AccountSettingsCard(session: account).padding(32) }
                 .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
         }
@@ -252,18 +314,18 @@ final class MacUsabilityRenderTests: XCTestCase {
         app.isConnected = true
         app.updateConnections(from: .init(downloadTotal: 50, uploadTotal: 15, connections: [cloud, direct]))
         try await capture("activity-sea-normal", width: 760, height: 640, annotate: false, darkAppearance: true,
-                          nativeLabels: ["Activity", "Routes now", "Session bytes include closed connections; they are not current traffic."]) {
+                          nativeOpacity: .isolatedSubpixelEdges, nativeLabels: ["Activity", "Routes now", "Session bytes include closed connections; they are not current traffic."]) {
             ZStack { MeshGradientBackground(); ActivityView() }
                 .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true).environment(app)
         }
         try await capture("settings-sea-grouped", width: 760, height: 820, annotate: false, darkAppearance: true,
-                          nativeLabels: ["Settings", "Account", "General"]) {
+                          nativeOpacity: .isolatedSubpixelEdges, nativeLabels: ["Settings", "Account", "General"]) {
             ZStack { MeshGradientBackground(); SettingsView() }
                 .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
                 .environment(app).environment(account).environmentObject(AppUpdater(enabled: false))
         }
         try await capture("support-sea-actions", width: 760, height: 420, annotate: false, darkAppearance: true,
-                          nativeLabels: ["Local health check", "Check this Mac", "Upload diagnostics"]) {
+                          nativeOpacity: .isolatedSubpixelEdges, nativeLabels: ["Local health check", "Check this Mac", "Upload diagnostics"]) {
             ZStack {
                 MeshGradientBackground()
                 SupportHealthSection(check: .constant(nil), copyReport: {}, reportCopied: false).padding(32)
@@ -276,17 +338,17 @@ final class MacUsabilityRenderTests: XCTestCase {
         login.authMethods = .init(email: .init(enabled: true, clientId: nil),
             apple: .init(enabled: false, clientId: nil), google: .init(enabled: false, clientId: nil))
         try await capture("login-sea-email", width: 760, height: 720, annotate: false, darkAppearance: true,
-                          nativeLabels: ["Sign in to Tono", "Send a sign-in code"]) {
+                          nativeOpacity: .isolatedSubpixelEdges, nativeLabels: ["Sign in to Tono", "Send a sign-in code"]) {
             LoginView(session: login).modifier(SeaPageAppearance())
                 .environment(\.seaAppearanceOverride, true).environment(app)
         }
         try await capture("intro-sea-first", width: 760, height: 680, annotate: false, darkAppearance: true,
-                          nativeLabels: ["Connected means protected.", "Illustration only · not your current connection status", "Next"]) {
+                          nativeOpacity: .isolatedSubpixelEdges, nativeLabels: ["Connected means protected.", "Illustration only · not your current connection status", "Next"]) {
             WelcomeIntroView().modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
         }
         app.isConnected = false
         try await capture("menubar-sea-normal", width: 280, height: 480, annotate: false, darkAppearance: true,
-                          nativeLabels: ["Open Tono", "Quit Tono", "Connect"]) {
+                          nativeOpacity: .isolatedSubpixelEdges, nativeLabels: ["Open Tono", "Quit Tono", "Connect"]) {
             MenuBarView().modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
                 .environment(app).environment(account)
         }
@@ -319,6 +381,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         _ name: String, width: CGFloat, height: CGFloat,
         annotate: Bool = true,
         darkAppearance: Bool = false,
+        nativeOpacity: NativeRenderOpacityPolicy = .opaque,
         nativeLabels: [String]? = nil,
         nativeIdentifiers: [String] = [],
         nativeAXLabels: [String]? = nil,
@@ -423,7 +486,7 @@ final class MacUsabilityRenderTests: XCTestCase {
                 await captureNativeWindowAcceptance(name, window: window, host: host, folder: folder,
                     width: Int(width), height: Int(height), requiredLabels: labels,
                     requiredIdentifiers: nativeIdentifiers.isEmpty && paused ? ["protectedRecoveryFeedback"] : nativeIdentifiers, requiredRecoveryFeedback: requiredRecoveryFeedback,
-                    requiredAXLabels: nativeAXLabels)
+                    requiredAXLabels: nativeAXLabels, opacityPolicy: nativeOpacity)
             } else {
                 XCTFail("\(name): exact-window native acceptance unavailable; TEST_RUNNER_TONO_HOSTED_WINDOW_DIAGNOSTIC=1 required")
             }
@@ -439,7 +502,7 @@ final class MacUsabilityRenderTests: XCTestCase {
     private func captureNativeWindowAcceptance(
         _ name: String, window: NSWindow, host: NSView, folder: URL,
         width: Int, height: Int, requiredLabels: [String], requiredIdentifiers: [String],
-        requiredRecoveryFeedback: String?, requiredAXLabels: [String]?
+        requiredRecoveryFeedback: String?, requiredAXLabels: [String]?, opacityPolicy: NativeRenderOpacityPolicy
     ) async {
         var receipt = ["name=\(name)", "api=ScreenCaptureKit independent window"]
         defer {
@@ -575,13 +638,28 @@ final class MacUsabilityRenderTests: XCTestCase {
             let visualContentVisible = nativeVisionContentIsVisible(
                 image: image, bitmap: bitmap, required: requiredLabels,
                 recoveryFeedback: requiredRecoveryFeedback, receipt: &receipt)
+            var rejectedFractional = 0
+            receipt.append("opacityContract=\(opacityPolicy) originalFractionalCount=\(fractional.count) borders=opaque; first source unmodified")
+            for (x, y, _) in fractional {
+                let allowed = opacityPolicy == .isolatedSubpixelEdges && NativeRenderOpacityPolicy.acceptsIsolatedEdge(
+                    x: x, y: y, width: bitmap.pixelsWide, height: bitmap.pixelsHigh
+                ) { px, py in
+                    guard let color = bitmap.colorAt(x: px, y: py)?.usingColorSpace(.deviceRGB) else { return nil }
+                    return NativeRenderPixel(red: color.redComponent, green: color.greenComponent,
+                                             blue: color.blueComponent, alpha: color.alphaComponent)
+                }
+                if !allowed { rejectedFractional += 1 }
+                receipt.append("fractionalCompletenessPixel=(\(x),\(y)) acceptedIsolatedEdge=\(allowed)")
+            }
             if !fractional.isEmpty {
                 await nativeAlphaDiagnostic(name, window: window, expectedID: expectedID, expectedPID: expectedPID,
                                             expectedFrame: windowServerFrame, original: image,
                                             bitmap: bitmap, png: png, fractional: fractional, folder: folder,
                                             receipt: &receipt)
-                receipt.append("acceptance=failed: \(fractional.count) original nonopaque pixels; original image remains sole acceptance source")
-                XCTFail("\(name): native image contains a transparent pixel")
+            }
+            guard rejectedFractional == 0 else {
+                receipt.append("acceptance=failed: \(rejectedFractional) original pixels violate completeness; original image remains sole acceptance source")
+                XCTFail("\(name): native image contains a transparent pixel outside its completeness contract")
                 return
             }
             guard visualContentVisible else {
@@ -589,7 +667,7 @@ final class MacUsabilityRenderTests: XCTestCase {
                 XCTFail("\(name): native image lacks bounded fixture content/layout evidence")
                 return
             }
-            receipt.append("acceptance=passed: exact window, original opaque native PNG and Vision glyph/layout evidence; AX/action/hardware unverified")
+            receipt.append("acceptance=passed: exact window, original native PNG completeness and Vision glyph/layout evidence; AX/action/hardware unverified")
         } catch {
             let failure = error as NSError
             receipt.append("capture=failed: domain=\(failure.domain) code=\(failure.code) reason=\(failure.localizedDescription) userInfo=\(failure.userInfo)")
@@ -739,7 +817,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         return normalized.split(whereSeparator: \.isWhitespace).map(String.init)
     }
 
-    /// Diagnostic only. The first image still fails for any fractional pixel.
+    /// Diagnostic only. A repeat never replaces the first image completeness check.
     private func nativeAlphaDiagnostic(
         _ name: String, window: NSWindow, expectedID: CGWindowID, expectedPID: pid_t,
         expectedFrame: CGRect, original: CGImage,
