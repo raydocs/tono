@@ -1358,7 +1358,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
   it('keeps catalogs on an acknowledged legacy user credential while the device credential propagates', async () => {
     await env.DB.prepare('DELETE FROM exit_nodes').run();
     const account = await createAccount('dual-rollout-fallback');
-    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
     // The served exit acknowledged a roster after the shared credential was
     // created but before this device's credential existed.
@@ -1399,7 +1399,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
   it('never serves a new dual account an exit identity no served exit has acknowledged', async () => {
     await env.DB.prepare('DELETE FROM exit_nodes').run();
     const account = await createAccount('dual-unacked-shared');
-    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
     const node = await admin('exit-nodes', { id: 'exit-unacked', name: 'Tono-Exit' });
     const nodeToken = String((await node.json() as any).token);
@@ -1436,7 +1436,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     });
     expect(second.status).toBe(200);
     const survivor = await second.json() as any;
-    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
 
     // The shared credential a revoked device may hold.
@@ -1496,7 +1496,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     await env.DB.prepare(
       'INSERT INTO exit_credentials(user_id, client_uuid, created_at, retired_at) VALUES(?, ?, 1, 1)',
     ).bind(account.user.id, crypto.randomUUID()).run();
-    const served = '  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n';
+    const served = '  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n';
     const published = await admin('exit-catalog', { yaml: `proxies:\n${served}`, expectedRevision: 0 }, 'PUT');
     expect(published.status).toBe(200);
     const timestamp = Math.floor(Date.now() / 1000);
@@ -1530,7 +1530,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
   it('serves the device identity to a bound catalog-home user once the served exit nodes ack', async () => {
     const account = await createAccount('catalog-home-ready');
-    const block = (name: string, server: string) => `  - name: ${name}\n    type: vless\n    server: ${server}\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    const block = (name: string, server: string) => `  - name: ${name}\n    type: vless\n    server: ${server}\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
     expect((await admin('exit-catalog', {
       yaml: `proxies:\n${block('Tono-Exit', 'exit.example.com')}${block('Home Residential A', 'home.example.com')}`,
       expectedRevision: 0,
@@ -1561,7 +1561,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     await env.DB.prepare(
       'INSERT INTO exit_credentials(user_id, client_uuid, created_at, retired_at) VALUES(?, ?, 1, 1)',
     ).bind(account.user.id, crypto.randomUUID()).run();
-    const block = (name: string, server: string) => `  - name: ${name}\n    type: vless\n    server: ${server}\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    const block = (name: string, server: string) => `  - name: ${name}\n    type: vless\n    server: ${server}\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
     expect((await admin('exit-catalog', {
       yaml: `proxies:\n${block('Tono-Exit', 'exit.example.com')}${block('Collision', 'collision.example.com')}`,
       expectedRevision: 0,
@@ -1800,7 +1800,7 @@ rules: []
 
   it('does not treat a same-second roster acknowledgement as covering a new credential', async () => {
     await env.DB.prepare("UPDATE exit_nodes SET name = 'Tono-Exit' WHERE id = 'exit-default'").run();
-    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
     expect((await admin('exit-credential-rollout', { phase: 'device_only' })).status).toBe(200);
 
@@ -1836,7 +1836,7 @@ rules: []
     try {
       await env.DB.prepare("UPDATE exit_nodes SET name = 'Tono-Exit' WHERE id = 'exit-default'").run();
       const account = await createAccount('credential-rollout');
-      const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+      const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
       expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
 
       const advanced = await admin('exit-credential-rollout', { phase: 'device_only' });
@@ -1854,7 +1854,7 @@ rules: []
       const late = await admin('exit-nodes', { id: 'exit-late', name: 'Late Exit' });
       const lateToken = String((await late.json() as any).token);
       expect((await admin('exit-catalog', {
-        yaml: `${yaml}  - name: Late Exit\n    type: vless\n    server: late.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`,
+        yaml: `${yaml}  - name: Late Exit\n    type: vless\n    server: late.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`,
         expectedRevision: 1,
       }, 'PUT')).status).toBe(200);
       const blocked = await api('exit-catalog', {
@@ -3097,6 +3097,56 @@ rules: []
     expect(await build()).toEqual({ client_platform: 'macos', client_version: '0.0.74' });
   });
 
+  it('refuses to publish a catalog holding an entry clients cannot admit', async () => {
+    // One inadmissible entry makes every client refuse the whole catalog, so
+    // fresh devices would get no catalog at all.
+    const yaml = [
+      'proxies:',
+      '  - name: Tono-Exit',
+      '    type: vless',
+      '    server: exit.example.com',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '    tls: true',
+      '    servername: www.microsoft.com',
+      '    flow: xtls-rprx-vision',
+      '    reality-opts:',
+      '      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      '      short-id: abcd1234',
+      '  - name: Tono-Bare',
+      '    type: vless',
+      '    server: bare.example.com',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '    tls: true',
+      '  - name: Tono-Quoted',
+      '    type: vless',
+      '    server: quoted.example.com',
+      '    port: "443"',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '    tls: true',
+      '    servername: www.microsoft.com',
+      '    reality-opts:',
+      '      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      '      short-id: abcd1234',
+      '  - name: Tono-Exit · hy2',
+      '    type: hysteria2',
+      '    server: 203.0.113.9',
+      '    password: {{TONO_CLIENT_UUID}}',
+      `    fingerprint: ${'ab'.repeat(32)}`,
+      '',
+    ].join('\n');
+    const put = await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT');
+    expect(put.status).toBe(400);
+    const error = (await put.json() as any).error;
+    expect(error.code).toBe('INVALID_CATALOG');
+    expect(error.message).toContain('Tono-Bare: servername, reality-opts');
+    // Windows reads the port as a number; a quoted one fails its whole catalog.
+    expect(error.message).toContain('Tono-Quoted: port');
+    expect(error.message).toContain('Tono-Exit · hy2: port, sni');
+    expect(await env.DB.prepare('SELECT revision FROM managed_exit_catalog').first()).toBeNull();
+  });
+
   it('encrypts, versions, and serves the managed exit catalog only to authenticated users', async () => {
     // Identities are placeholders now: one catalog served verbatim to everyone is
     // how every account came to present the same identity at the exit, which is
@@ -3108,6 +3158,10 @@ rules: []
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
 `;
     expect((await api('exit-catalog')).status).toBe(401);
 
@@ -3246,6 +3300,10 @@ rules: []
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
   - name: Tokyo · Sakura · hy2
     type: hysteria2
     server: 8.8.8.8
@@ -3336,11 +3394,21 @@ rules: []
     server: 1.1.1.1
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
 ${nameLine}
     type: vless
     server: 198.51.100.20
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
 `;
     for (const nameLine of [
       '  - name: "Home\\x20A"',
@@ -3384,18 +3452,30 @@ ${nameLine}
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
   - name: "Home Residential A"
     type: vless
     server: 8.8.8.8
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
   - name: "Home Residential B"
     type: vless
     server: 9.9.9.9
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
 `;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
 
@@ -3525,6 +3605,10 @@ ${nameLine}
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
 `;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
     const home = await admin('home-exits', { proxyName: 'Home Rename A', displayName: '家庭 rename' });
@@ -3552,12 +3636,20 @@ ${nameLine}
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
   - name: "Home Residential A"
     type: vless
     server: 8.8.8.8
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
   - name: "Home Residential A · hy2"
     type: hysteria2
     server: 8.8.8.8
@@ -3571,6 +3663,10 @@ ${nameLine}
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
   - name: "Home Residential B · hy2"
     type: hysteria2
     server: 9.9.9.9
@@ -3613,12 +3709,20 @@ ${nameLine}
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
   - name: "Home Residential Route"
     type: vless
     server: 8.8.8.8
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
 `;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
 
@@ -3745,12 +3849,20 @@ ${nameLine}
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
   - name: "Home Route"
     type: vless
     server: 8.8.8.8
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
 `;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
     const revision = async () =>
@@ -3860,6 +3972,10 @@ ${nameLine}
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
 `;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
 
@@ -4040,6 +4156,10 @@ ${nameLine}
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
 `;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
 
@@ -4120,12 +4240,20 @@ ${nameLine}
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
   - name: "Home Residential Split"
     type: vless
     server: 8.8.8.8
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
 `;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
 
@@ -6785,6 +6913,10 @@ ${nameLine}
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
 `;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
 
@@ -6842,6 +6974,10 @@ ${nameLine}
     port: 443
     uuid: {{TONO_CLIENT_UUID}}
     tls: true
+    servername: www.microsoft.com
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
 `;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
     const billed = await createAccount('roster-watermark');
@@ -9159,11 +9295,21 @@ ${nameLine}
       '    server: 203.0.113.60',
       '    port: 443',
       '    uuid: {{TONO_CLIENT_UUID}}',
+      '    tls: true',
+      '    servername: www.microsoft.com',
+      '    reality-opts:',
+      '      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      '      short-id: abcd1234',
       '  - name: Tokyo · Fuji',
       '    type: vless',
       '    server: 203.0.113.61',
       '    port: 443',
       '    uuid: {{TONO_CLIENT_UUID}}',
+      '    tls: true',
+      '    servername: www.microsoft.com',
+      '    reality-opts:',
+      '      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      '      short-id: abcd1234',
       'proxy-groups:',
       '  - name: Tono-Exit',
       '    type: select',
@@ -9219,11 +9365,21 @@ ${nameLine}
       '    server: 203.0.113.60',
       '    port: 443',
       '    uuid: {{TONO_CLIENT_UUID}}',
+      '    tls: true',
+      '    servername: www.microsoft.com',
+      '    reality-opts:',
+      '      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      '      short-id: abcd1234',
       '  - name: Tokyo · Fuji',
       '    type: vless',
       '    server: 203.0.113.61',
       '    port: 443',
       '    uuid: {{TONO_CLIENT_UUID}}',
+      '    tls: true',
+      '    servername: www.microsoft.com',
+      '    reality-opts:',
+      '      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      '      short-id: abcd1234',
       'proxy-groups:',
       '  - name: Tono-Exit',
       '    type: select',
@@ -9326,11 +9482,21 @@ ${nameLine}
       '    server: 203.0.113.60',
       '    port: 443',
       '    uuid: {{TONO_CLIENT_UUID}}',
+      '    tls: true',
+      '    servername: www.microsoft.com',
+      '    reality-opts:',
+      '      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      '      short-id: abcd1234',
       '  - name: Tokyo · Fuji',
       '    type: vless',
       '    server: 203.0.113.61',
       '    port: 443',
       '    uuid: {{TONO_CLIENT_UUID}}',
+      '    tls: true',
+      '    servername: www.microsoft.com',
+      '    reality-opts:',
+      '      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      '      short-id: abcd1234',
       'proxy-groups:',
       '  - name: Tono-Exit',
       '    type: select',

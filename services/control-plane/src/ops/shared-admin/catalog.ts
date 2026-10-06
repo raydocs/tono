@@ -4,7 +4,9 @@ import {
 } from '../../crypto';
 import { ApiError } from '../../errors';
 import {
+  catalogEntryMissingClientFields,
   managedCatalogYAML,
+  splitManagedCatalogProxies,
 } from '../../catalog-yaml';
 import {
   type Env,
@@ -122,6 +124,19 @@ export async function catalogResource(
     const b = await body(req, 2 * 1024 * 1024);
     rejectUnexpectedKeys(b, ['yaml', 'expectedRevision']);
     const yaml = managedCatalogYAML(b.yaml);
+    // A client that cannot admit one entry refuses the whole catalog, so a
+    // fresh device would be left with none. Relist already refuses these.
+    const incomplete = splitManagedCatalogProxies(yaml).items
+      .map(({ name, block }) => ({ name, missing: catalogEntryMissingClientFields(block) }))
+      .filter(({ missing }) => missing.length > 0);
+    if (incomplete.length > 0) {
+      throw new ApiError(
+        400,
+        'INVALID_CATALOG',
+        `Catalog entries lack fields clients require: ${incomplete.slice(0, 8)
+          .map(({ name, missing }) => `${name}: ${missing.join(', ')}`).join('; ')}`,
+      );
+    }
     const expectedRevision = b.expectedRevision;
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'expectedRevision is required and must be a non-negative integer');
