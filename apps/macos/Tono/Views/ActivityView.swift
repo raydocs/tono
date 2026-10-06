@@ -62,6 +62,7 @@ private enum ClientAppIconCache {
 }
 
 private struct ClientAppIcon: View {
+    @SeaAppearancePreference private var seaEnabled
     let processName: String?
 
     var body: some View {
@@ -70,6 +71,12 @@ private struct ClientAppIcon: View {
                 Image(nsImage: icon)
                     .resizable()
                     .frame(width: 22, height: 22)
+            } else if seaEnabled, let processName, let initial = processName.first {
+                Text(String(initial).uppercased())
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(SeaTheme.ink)
+                    .frame(width: 22, height: 22)
+                    .background(SeaTheme.warm, in: RoundedRectangle(cornerRadius: 6))
             } else {
                 Image(systemName: processName == nil ? "globe" : "app.dashed")
                     .font(.system(size: 13, weight: .medium))
@@ -95,21 +102,32 @@ private enum RouteTint {
     static let blocked = TonoStatus.neutral
 }
 
+private enum SeaRouteTint {
+    static func color(for type: ConnectionType) -> Color {
+        switch type {
+        case .proxied, .home: return SeaTheme.cool
+        case .direct: return SeaTheme.warm
+        case .rejected: return SeaTheme.danger
+        }
+    }
+}
+
 /// Proportional bar for a route split.
 ///
 /// Segments below a pixel are dropped rather than rounded up: a hairline that
 /// cannot be read is worse than an absent one, because it implies a category is
 /// present at a size the eye cannot compare.
 private struct RouteSplitBar: View {
+    @SeaAppearancePreference private var seaEnabled
     let split: AppTrafficLedger.RouteSplit
     var height: CGFloat = 6
 
     private var segments: [(Color, Int64)] {
         [
-            (RouteTint.direct, split.direct),
-            (RouteTint.residential, split.residential),
-            (RouteTint.tunnel, split.tunnel),
-            (RouteTint.blocked, split.blocked),
+            (seaEnabled ? SeaTheme.warm : RouteTint.direct, split.direct),
+            (seaEnabled ? SeaTheme.cool.opacity(0.7) : RouteTint.residential, split.residential),
+            (seaEnabled ? SeaTheme.cool : RouteTint.tunnel, split.tunnel),
+            (seaEnabled ? SeaTheme.danger : RouteTint.blocked, split.blocked),
         ].filter { $0.1 > 0 }
     }
 
@@ -178,12 +196,14 @@ private struct ActivityCard<Content: View>: View {
 struct ActivityView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.colorScheme) private var colorScheme
+    @SeaAppearancePreference private var seaEnabled
     @State private var selectedFilter: String = "All"
     @State private var section: Section = .apps
     @State private var connectionQuery = ""
     @State private var isTestingLatency = false
     @State private var trafficHistory = TrafficHistory()
     @State private var explainingApp: String?
+    @State private var expandedApp: String?
 
     private enum Section: String, CaseIterable {
         case apps = "Apps"
@@ -227,19 +247,31 @@ struct ActivityView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            headerRow
-                .padding(.bottom, 14)
+            Group {
+                if seaEnabled { seaHeader } else { headerRow }
+            }
+            .padding(.bottom, 14)
 
             // One container so neighbouring cards' glass borders merge and move
             // together — the part of this that a screenshot of another client
             // cannot be copied into.
-            GlassEffectContainer(spacing: 10) {
-                statCards
+            if seaEnabled {
+                seaOverview
+                    .padding(.bottom, 14)
+            } else {
+                GlassEffectContainer(spacing: 10) {
+                    statCards
+                }
+                .padding(.bottom, 14)
             }
-            .padding(.bottom, 14)
 
-            sectionPicker
-                .padding(.bottom, 12)
+            Group {
+                if seaEnabled {
+                    ScrollView(.horizontal, showsIndicators: false) { sectionPicker }
+                        .frame(height: 40)
+                } else { sectionPicker }
+            }
+            .padding(.bottom, 12)
 
             switch section {
             case .apps: appsList
@@ -264,6 +296,132 @@ struct ActivityView: View {
                 up: appState.trafficStats.uploadSpeed,
                 down: appState.trafficStats.downloadSpeed
             )
+        }
+    }
+
+    // Sea is a presentation of the existing session ledger and current feed,
+    // not a replacement source of traffic or connection lifecycle state.
+    private var seaHeader: some View {
+        HStack(alignment: .top) {
+            SeaPageHeading(title: "Activity", subtitle: "Current connections and this session's traffic")
+            Spacer()
+            if !appState.connections.isEmpty, section == .connections {
+                Button("Close All", role: .destructive) {
+                    Task { await appState.closeAllConnections() }
+                }
+                .buttonStyle(.bordered)
+                .tint(SeaTheme.danger)
+            }
+        }
+    }
+
+    private var seaOverview: some View {
+        HStack(alignment: .top, spacing: 12) {
+            SeaPanel("Current exit", icon: "network") {
+                let exitNode = selectedExitNode
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(appState.proxyService.activeNodeName.map(nodeCityTitle)
+                         ?? String(localized: "No exit selected"))
+                        .font(.system(size: 17, weight: .medium))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    latencyRefreshButton
+                }
+                Text(seaLatencyText)
+                    .font(.system(size: 12))
+                    .foregroundStyle(exitNode?.lastTestFailed == true ? SeaTheme.danger : SeaTheme.muted)
+                HStack(spacing: 14) {
+                    seaRate("Upload", value: appState.trafficStats.uploadSpeed)
+                    seaRate("Download", value: appState.trafficStats.downloadSpeed)
+                }
+            }
+            SeaPanel("Routes now", icon: "point.3.connected.trianglepath.dotted") {
+                if appState.connectionsFeedLive {
+                    let count = appState.connections.count
+                    Text("\(count) current connections")
+                        .font(.system(size: 15, weight: .medium))
+                    if appState.connectionsDisplayLimited {
+                        Text("Route counts show the newest \(ConnectionActivityPresentation.maxDisplayed) connections only.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(SeaTheme.muted)
+                    }
+                    seaRouteCounts
+                } else {
+                    Text(appState.isConnected ? "Reading connections…" : "Connect Tono to view live activity.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(SeaTheme.muted)
+                }
+                Divider()
+                Text("Traffic by route · this session")
+                    .font(.system(size: 11))
+                    .foregroundStyle(SeaTheme.muted)
+                RouteSplitBar(split: appState.appTrafficLedger.overall, height: 7)
+                Text(activityBytes(appState.appTrafficLedger.overall.total))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                Text("Session bytes include closed connections; they are not current traffic.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(SeaTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .foregroundStyle(SeaTheme.text)
+    }
+
+    private var seaLatencyText: String {
+        if selectedExitNode?.lastTestFailed == true { return String(localized: "Timeout") }
+        if let ms = selectedExitNode?.latency, ms > 0 {
+            return LatencyLevel.spokenTitle(for: ms, kind: .exit)
+        }
+        return String(localized: "Not tested")
+    }
+
+    private func seaRate(_ title: LocalizedStringKey, value: Int64) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.system(size: 11)).foregroundStyle(SeaTheme.muted)
+            Text(appState.trafficFeedLive ? "\(activityBytes(value))/s" : "—")
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+            Text(appState.trafficFeedLive ? "Live" : "No live reading")
+                .font(.system(size: 10)).foregroundStyle(SeaTheme.muted)
+        }
+    }
+
+    private var seaRouteCounts: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 12) {
+                ForEach(filters.dropFirst(), id: \.self) { filter in
+                    let count = appState.connections.filter { $0.type.rawValue == filter }.count
+                    HStack(spacing: 4) {
+                        Circle().fill(seaColor(for: filter)).frame(width: 6, height: 6)
+                        Text(LocalizedStringKey(filter))
+                        Text("\(count)").fontDesign(.monospaced)
+                    }
+                    .font(.system(size: 10))
+                }
+            }
+            GeometryReader { geometry in
+                let total = max(appState.connections.count, 1)
+                HStack(spacing: 1) {
+                    ForEach(filters.dropFirst(), id: \.self) { filter in
+                        let count = appState.connections.filter { $0.type.rawValue == filter }.count
+                        if count > 0 {
+                            Rectangle()
+                                .fill(seaColor(for: filter))
+                                .frame(width: geometry.size.width * CGFloat(count) / CGFloat(total))
+                        }
+                    }
+                }
+                .clipShape(Capsule())
+            }
+            .frame(height: 6)
+        }
+        .foregroundStyle(SeaTheme.muted)
+    }
+
+    private func seaColor(for filter: String) -> Color {
+        switch filter {
+        case "Direct": return SeaTheme.warm
+        case "Rejected": return SeaTheme.danger
+        default: return SeaTheme.cool
         }
     }
 
@@ -436,12 +594,14 @@ struct ActivityView: View {
                 } label: {
                     Text(LocalizedStringKey(candidate.rawValue))
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(section == candidate ? .white : .secondary)
+                        .foregroundStyle(seaEnabled
+                            ? (section == candidate ? SeaTheme.ink : SeaTheme.muted)
+                            : (section == candidate ? Color.white : Color.secondary))
                         .padding(.horizontal, 14)
                         .padding(.vertical, 6)
                         .background(
                             section == candidate
-                                ? AnyShapeStyle(TonoBrand.accent)
+                                ? AnyShapeStyle(seaEnabled ? SeaTheme.warm : TonoBrand.accent)
                                 : AnyShapeStyle(.white.opacity(colorScheme == .dark ? 0.08 : 0.4)),
                             in: Capsule()
                         )
@@ -483,11 +643,33 @@ struct ActivityView: View {
         ScrollView {
             LazyVStack(spacing: 8) {
                 ForEach(appState.appTrafficLedger.apps) { app in
-                    Button { explainingApp = app.id } label: {
-                        AppTrafficRow(app: app, peak: appState.appTrafficLedger.apps.first?.total ?? 1)
+                    if seaEnabled {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Button {
+                                expandedApp = expandedApp == app.id ? nil : app.id
+                            } label: {
+                                HStack {
+                                    AppTrafficRow(app: app, peak: appState.appTrafficLedger.apps.first?.total ?? 1)
+                                    Image(systemName: expandedApp == app.id ? "chevron.up" : "chevron.down")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(SeaTheme.muted)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("\(app.id), \(activityBytes(app.total)) this session, \(app.liveConnections) current connections")
+                            if expandedApp == app.id {
+                                seaExpandedConnections(for: app)
+                            }
+                        }
+                        .padding(8)
+                        .modifier(SeaPanelSurface())
+                    } else {
+                        Button { explainingApp = app.id } label: {
+                            AppTrafficRow(app: app, peak: appState.appTrafficLedger.apps.first?.total ?? 1)
+                        }
+                        .buttonStyle(.plain)
+                        .help(String(localized: "Why this route?"))
                     }
-                    .buttonStyle(.plain)
-                    .help(String(localized: "Why this route?"))
                 }
                 if appState.appTrafficLedger.apps.isEmpty {
                     Text(appsEmptyCopy)
@@ -499,6 +681,44 @@ struct ActivityView: View {
             }
         }
         .scrollIndicators(.hidden)
+    }
+
+    private func seaExpandedConnections(for app: AppTrafficLedger.AppTotals) -> some View {
+        let current = SeaActivityPresentation.currentConnections(appState.connections, for: app.id)
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(appState.connectionsFeedLive
+                 ? String(localized: "\(app.liveConnections) current connections · up to 20 shown")
+                 : String(localized: "Current connections unavailable"))
+                .font(.system(size: 11))
+                .foregroundStyle(SeaTheme.muted)
+            if !appState.connectionsFeedLive {
+                Text("Reading connections…")
+                    .font(.system(size: 11)).foregroundStyle(SeaTheme.muted)
+            } else if current.isEmpty {
+                Text("No current connections. Session totals can include closed flows.")
+                    .font(.system(size: 11)).foregroundStyle(SeaTheme.muted)
+            }
+            if appState.connectionsFeedLive {
+                ForEach(current) { entry in
+                    HStack(spacing: 8) {
+                        Circle().fill(SeaRouteTint.color(for: entry.type)).frame(width: 6, height: 6)
+                        Text(entry.domain).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 4)
+                        Text(LocalizedStringKey(entry.type.rawValue))
+                            .foregroundStyle(SeaRouteTint.color(for: entry.type))
+                        Button("Why this route?") { explainingApp = app.id }
+                            .buttonStyle(.link)
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(SeaTheme.text)
+                }
+            }
+            Button("Full route explanation") { explainingApp = app.id }
+                .buttonStyle(.link)
+                .font(.system(size: 11))
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
     }
 
     // MARK: - Connections
@@ -619,7 +839,9 @@ struct ActivityView: View {
                 } label: {
                     Text(LocalizedStringKey(filter))
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(selectedFilter == filter ? .primary : .secondary)
+                        .foregroundStyle(seaEnabled
+                            ? (selectedFilter == filter ? SeaTheme.text : SeaTheme.muted)
+                            : (selectedFilter == filter ? Color.primary : Color.secondary))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 5)
                         .background(
@@ -642,6 +864,8 @@ struct ActivityView: View {
 
 private struct AppTrafficRow: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(AppState.self) private var appState
+    @SeaAppearancePreference private var seaEnabled
     let app: AppTrafficLedger.AppTotals
     /// The largest total on the page, so every bar shares one scale and two rows
     /// can be compared by length rather than only by their labels.
@@ -656,9 +880,10 @@ private struct AppTrafficRow: View {
                     Text(app.id == AppTrafficLedger.unattributed
                          ? String(localized: "Unattributed")
                          : app.id)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: seaEnabled ? 14 : 12, weight: .medium))
+                        .foregroundStyle(seaEnabled ? SeaTheme.text : Color.primary)
                         .lineLimit(1)
-                    if app.liveConnections > 0 {
+                    if app.liveConnections > 0, (!seaEnabled || appState.connectionsFeedLive) {
                         Text("\(app.liveConnections)")
                             .font(.system(size: 9, weight: .semibold, design: .monospaced))
                             .foregroundStyle(.secondary)
@@ -669,6 +894,7 @@ private struct AppTrafficRow: View {
                     Spacer(minLength: 6)
                     Text(activityBytes(app.total))
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(seaEnabled ? SeaTheme.text : Color.primary)
                 }
 
                 // Two bars: the outer one scales this app against the busiest,
@@ -691,6 +917,11 @@ private struct AppTrafficRow: View {
                 }
 
                 HStack(spacing: 10) {
+                    if seaEnabled {
+                        Text("This session")
+                            .font(.system(size: 10))
+                            .foregroundStyle(SeaTheme.muted)
+                    }
                     Label(activityBytes(app.upload), systemImage: "arrow.up")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.secondary)
@@ -704,7 +935,7 @@ private struct AppTrafficRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(
-            .white.opacity(colorScheme == .dark ? 0.05 : 0.5),
+            .white.opacity(seaEnabled ? 0 : (colorScheme == .dark ? 0.05 : 0.5)),
             in: RoundedRectangle(cornerRadius: 12)
         )
     }
@@ -714,6 +945,7 @@ private struct AppTrafficRow: View {
 
 private struct LogEntryRow: View {
     @Environment(\.colorScheme) private var colorScheme
+    @SeaAppearancePreference private var seaEnabled
     let entry: ConnectionEntry
     var onClose: (() -> Void)?
     @State private var isHovered = false
@@ -722,6 +954,7 @@ private struct LogEntryRow: View {
     // Same palette as RouteTint so the per-connection dots agree with the
     // header split bar and legend on this page.
     private var dotColor: Color {
+        if seaEnabled { return SeaRouteTint.color(for: entry.type) }
         switch entry.type {
         case .proxied:  return RouteTint.tunnel
         case .home:     return RouteTint.residential

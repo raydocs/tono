@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Environment(AccountSession.self) private var accountSession
     @EnvironmentObject private var updater: AppUpdater
     @Environment(\.colorScheme) private var colorScheme
+    @SeaAppearancePreference private var seaEnabled
 
     @State private var launchAtStartup =
         SMAppService.mainApp.status == .enabled
@@ -40,6 +41,8 @@ struct SettingsView: View {
         store: AppProfile.defaults
     ) private var internalFailureReportsOptedOut = false
     @AppStorage(SettingsKey.themeMode) private var themeMode = "Adaptive"
+    @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults)
+    private var seaMotionMode = "Auto"
     @State private var researchProgramsExpanded = false
 
     private let languages = InterfaceLanguagePreference.options
@@ -47,24 +50,41 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Settings")
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(.primary)
-                .padding(.bottom, 20)
+            if seaEnabled {
+                SeaPageHeading(title: "Settings", subtitle: "Your Mac, appearance, privacy, and app information.")
+                    .padding(.bottom, 20)
+            } else {
+                Text("Settings")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .padding(.bottom, 20)
+            }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     AccountSettingsCard(session: accountSession)
-
-                    Grid(horizontalSpacing: 20, verticalSpacing: 20) {
-                        GridRow {
-                            preferencesCard
-                            aboutCard
+                    if seaEnabled {
+                        SettingsCard(icon: "gearshape", title: "General") {
+                            generalRows
+                            settingDivider
+                            logsPageRow
                         }
+                        SettingsCard(icon: "paintbrush", title: "Appearance") {
+                            appearanceRows
+                        }
+                        privacyCard
+                        aboutCard
+                    } else {
+                        Grid(horizontalSpacing: 20, verticalSpacing: 20) {
+                            GridRow {
+                                preferencesCard
+                                aboutCard
+                            }
+                        }
+                        privacyCard
                     }
-
-                    privacyCard
                 }
+                .frame(maxWidth: seaEnabled ? 760 : .infinity, alignment: .leading)
             }
             .scrollIndicators(.hidden)
         }
@@ -78,6 +98,16 @@ struct SettingsView: View {
 
     private var preferencesCard: some View {
         SettingsCard(icon: "gearshape", title: "Preferences") {
+            generalRows
+            settingDivider
+            appearanceRows
+            settingDivider
+            logsPageRow
+        }
+    }
+
+    private var generalRows: some View {
+        Group {
             SettingToggleRow(
                 label: "Open at login",
                 isOn: Binding(
@@ -106,25 +136,88 @@ struct SettingsView: View {
                 )
             }
 
-            settingDivider
+        }
+    }
 
-            SettingRow(label: "Theme") {
-                settingsPicker(selection: $themeMode, options: themes)
+    private var logsPageRow: some View {
+        SettingToggleRow(label: "Show Logs page", isOn: $logsEnabled)
+    }
+
+    private var appearanceRows: some View {
+        Group {
+            if !seaEnabled {
+                SettingRow(label: "Theme") {
+                    settingsPicker(selection: $themeMode, options: themes)
+                }
+                settingDivider
             }
 
-            settingDivider
-
-            SettingToggleRow(
-                label: "Show Logs page",
-                isOn: $logsEnabled
-            )
+            SettingRow(label: "Sea motion", subtitle: seaEnabled ? "Choose how much of the sea scene moves on this Mac." : nil) {
+                if seaEnabled {
+                    Picker("Sea motion", selection: $seaMotionMode) {
+                        ForEach(SeaAppearance.motionOptions, id: \.self) { option in
+                            Text(LocalizedStringKey(option)).tag(option)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 330)
+                } else {
+                    settingsPicker(selection: $seaMotionMode, options: SeaAppearance.motionOptions)
+                }
+            }
         }
     }
 
     // MARK: - About
 
     private var aboutCard: some View {
+        Group {
+        if seaEnabled {
+            SettingsCard(icon: "info.circle", title: "About") {
+                aboutContents
+                settingDivider
+                SettingRow(label: "Cloud protection", subtitle: "See current and uncertain protection details in Support; this is not release attestation.") {
+                    Button("Open Support") { appState.selectedPage = .support }
+                        .buttonStyle(.borderless)
+                }
+                settingDivider
+                SettingRow(label: "Audit Log") {
+                    Button("Copy path") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(LocalTrafficAudit.shared.logFileURL.path, forType: .string)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+        } else {
         VStack(alignment: .leading, spacing: 16) {
+            aboutContents
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(
+            LinearGradient(
+                colors: [
+                    TonoBrand.accent.opacity(0.1),
+                    Color(hex: "FF6E52").opacity(0.1)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 24)
+        )
+        .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: RoundedRectangle(cornerRadius: 24))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24)
+                .strokeBorder(.white.opacity(colorScheme == .dark ? 0.12 : 0.7), lineWidth: 1)
+        )
+        }
+        }
+    }
+
+    private var aboutContents: some View {
+        Group {
             HStack(spacing: 12) {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
@@ -151,28 +244,10 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(TonoBrand.accent)
+                .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
                 .disabled(!updater.canCheckForUpdates)
             }
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(
-            LinearGradient(
-                colors: [
-                    TonoBrand.accent.opacity(0.1),
-                    Color(hex: "FF6E52").opacity(0.1)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 24)
-        )
-        .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: RoundedRectangle(cornerRadius: 24))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24)
-                .strokeBorder(.white.opacity(colorScheme == .dark ? 0.12 : 0.7), lineWidth: 1)
-        )
     }
 
     private var versionLabel: String {
@@ -196,6 +271,7 @@ struct SettingsView: View {
                 SettingToggleRow(
                     label: "Failed connection reports",
                     subtitle: "Internal test build, on by default: a failed connection is reported to Tono (stage, error code, version and server only). Turn it off here.",
+                    seaSummary: "Internal test reports send failed-connection details by default.",
                     isOn: Binding(
                         get: { !internalFailureReportsOptedOut },
                         set: { internalFailureReportsOptedOut = !$0 }
@@ -208,6 +284,7 @@ struct SettingsView: View {
             SettingToggleRow(
                 label: "Crash reporting",
                 subtitle: "Tell Tono support when this app crashed",
+                seaSummary: "Tell support when Tono crashed.",
                 isOn: $crashReportingEnabled
             )
 
@@ -216,6 +293,7 @@ struct SettingsView: View {
             SettingToggleRow(
                 label: "Protection snapshot",
                 subtitle: "On by default. About every 20 minutes, share protection status, the selected server, per-route byte totals and recent connection events with Tono. No website names or page contents. Turning this off stops the snapshot and the error text in failure reports. Failed connections and lost protection are always reported with their stage, code and server.",
+                seaSummary: "Share a periodic protection snapshot; failure reports still go through.",
                 isOn: Binding(
                     get: { periodicTelemetryEnabled },
                     set: { newValue in
@@ -235,6 +313,7 @@ struct SettingsView: View {
             SettingToggleRow(
                 label: "Remote diagnostics",
                 subtitle: "Let Tono support ask this Mac for a snapshot, refresh its server list or retry protection",
+                seaSummary: "Allow support-requested snapshots and recovery actions.",
                 isOn: $remoteDiagnosticsEnabled
             )
             .onChange(of: remoteDiagnosticsEnabled) { _, enabled in
@@ -254,6 +333,7 @@ struct SettingsView: View {
             SettingToggleRow(
                 label: "Network log upload",
                 subtitle: "On by default for new installations; existing choices are kept. Uploads hostnames you connected to, the process that opened each connection, and the matched rule and route. Never page content, passwords or node secrets. Turn it off here.",
+                seaSummary: "Upload connection hostnames, processes, rules, and routes.",
                 isOn: Binding(
                     get: { networkLogUploadEnabled },
                     set: {
@@ -275,6 +355,7 @@ struct SettingsView: View {
             SettingToggleRow(
                 label: "Local traffic log",
                 subtitle: "Save connections on this Mac",
+                seaSummary: "Save a local record of connections on this Mac.",
                 isOn: $localTrafficAuditEnabled
             )
             .onChange(of: localTrafficAuditEnabled) { _, enabled in
@@ -291,7 +372,7 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(TonoBrand.accent)
+                .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
             }
 
             settingDivider
@@ -301,6 +382,7 @@ struct SettingsView: View {
                     SettingToggleRow(
                         label: "App routing research",
                         subtitle: "Share anonymized app-route counts",
+                        seaSummary: "Share anonymized app-route counts.",
                         isOn: $aggregatedAppRoutingResearchEnabled
                     )
                     .onChange(of: aggregatedAppRoutingResearchEnabled) { _, enabled in
@@ -313,6 +395,7 @@ struct SettingsView: View {
                     SettingToggleRow(
                         label: "AI and messaging routing research",
                         subtitle: "Requires diagnostics. Route aggregates only.",
+                        seaSummary: "Share route aggregates when diagnostics are enabled.",
                         isOn: $claudeTrafficResearchEnabled
                     )
                     .onChange(of: claudeTrafficResearchEnabled) { _, enabled in
@@ -445,11 +528,15 @@ struct SettingsView: View {
 
 private struct SettingsCard<Content: View>: View {
     @Environment(\.colorScheme) private var colorScheme
+    @SeaAppearancePreference private var seaEnabled
     let icon: String
     let title: String
     @ViewBuilder let content: Content
 
     var body: some View {
+        if seaEnabled {
+            SeaPanel(title, icon: icon) { content }
+        } else {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
                 Image(systemName: icon)
@@ -472,6 +559,7 @@ private struct SettingsCard<Content: View>: View {
             RoundedRectangle(cornerRadius: 24)
                 .strokeBorder(.white.opacity(colorScheme == .dark ? 0.12 : 0.7), lineWidth: 1)
         )
+        }
     }
 }
 
@@ -500,16 +588,34 @@ private struct SettingRow<Trailing: View>: View {
 }
 
 private struct SettingToggleRow: View {
+    @SeaAppearancePreference private var seaEnabled
     let label: String
     var subtitle: String?
+    var seaSummary: String?
     @Binding var isOn: Bool
+    @State private var showingDetails = false
 
     var body: some View {
-        SettingRow(label: label, subtitle: subtitle) {
-            Toggle("", isOn: $isOn)
-                .toggleStyle(.switch)
-                .tint(TonoBrand.accent)
-                .labelsHidden()
+        VStack(alignment: .leading, spacing: 4) {
+            SettingRow(label: label, subtitle: seaEnabled ? (seaSummary ?? subtitle) : subtitle) {
+                Toggle("", isOn: $isOn)
+                    .toggleStyle(.switch)
+                    .tint(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
+                    .labelsHidden()
+            }
+            if seaEnabled, let subtitle, seaSummary != nil {
+                Button("Learn more") { showingDetails = true }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(SeaTheme.cool)
+                    .popover(isPresented: $showingDetails) {
+                        Text(LocalizedStringKey(subtitle))
+                            .font(.system(size: 12))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(16)
+                            .frame(width: 320, alignment: .leading)
+                    }
+            }
         }
     }
 }

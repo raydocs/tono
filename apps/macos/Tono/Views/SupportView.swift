@@ -5,6 +5,7 @@ struct SupportView: View {
     @Environment(AppState.self) private var appState
     @Environment(AccountSession.self) private var accountSession: AccountSession?
     @Environment(\.colorScheme) private var colorScheme
+    @SeaAppearancePreference private var seaEnabled
     @AppStorage(SettingsKey.remoteDiagnosticsEnabled)
     private var remoteDiagnosticsEnabled = false
     @AppStorage(
@@ -22,6 +23,8 @@ struct SupportView: View {
     /// button reports the one that happened rather than that a run finished.
     @State private var logUploadOutcome: DiagnosticsLogUploader.SweepOutcome?
     @State private var copiedTarget: CopyTarget?
+    @State private var healthCheck: LocalHealthCheck?
+    @State private var technicalDetailsExpanded = false
 
     private static let recoveryCommand =
         "sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-reset"
@@ -57,8 +60,39 @@ struct SupportView: View {
             header
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    SupportHealthSection()
+                VStack(alignment: .leading, spacing: seaEnabled ? 18 : 24) {
+                    SupportHealthSection(
+                        check: $healthCheck,
+                        copyReport: { copy(report(for: snapshot), target: .report) },
+                        reportCopied: copiedTarget == .report
+                    )
+                    if seaEnabled {
+                        SeaPanel("Current state", icon: "shield.lefthalf.filled") {
+                            SupportRow(label: String(localized: "Protection"), value: protectionText(snapshot))
+                            SupportRow(label: String(localized: "Network helper"), value: helperText)
+                            SupportRow(label: String(localized: "Core engine"), value: coreText)
+                            SupportRow(label: String(localized: "Server catalog"), value: catalogText(snapshot))
+                            SupportRow(label: String(localized: "Traffic policy"), value: trafficPolicyText)
+                        }
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text("Support tools")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(SeaTheme.text)
+                            terminalEnvCard
+                            webrtcCard
+                        }
+                        DisclosureGroup(isExpanded: $technicalDetailsExpanded) {
+                            VStack(alignment: .leading, spacing: 18) {
+                                technicalCards(snapshot)
+                            }
+                            .padding(.top, 12)
+                        } label: {
+                            Label("Technical details", systemImage: "chevron.right.circle")
+                                .font(.system(size: 16, weight: .medium))
+                        }
+                        .padding(20)
+                        .modifier(SeaPanelSurface())
+                    } else {
                     summaryCard(snapshot)
                     webrtcCard
                     browserDNSCard
@@ -69,6 +103,7 @@ struct SupportView: View {
                     logsCard
                     diagnosticsCard(report: report(for: snapshot))
                     recoveryCard
+                    }
                 }
                 .frame(maxWidth: 760, alignment: .leading)
             }
@@ -81,18 +116,42 @@ struct SupportView: View {
         .task { await refreshProbe() }
     }
 
+    @ViewBuilder
+    private func technicalCards(_ snapshot: TonoDiagnosticSnapshot) -> some View {
+        summaryCard(snapshot)
+        logsCard
+        browserDNSCard
+        if let healthCheck,
+           healthCheck.owner == accountSession?.user?.id,
+           healthCheck.accountRevision == accountSession?.accountReadRevision {
+            SupportCard(icon: "hammer", title: String(localized: "Build and runtime identity")) {
+                BuildIdentityDetails(check: healthCheck)
+            }
+        }
+        if !appState.lastConnectionStageDurations.isEmpty { connectTimingCard }
+        diagnosticsCard(report: report(for: snapshot))
+        recoveryCard
+    }
+
     // MARK: - Header
 
     private var header: some View {
         HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(String(localized: "Support & Diagnostics"))
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(.primary)
+            if seaEnabled {
+                SeaPageHeading(
+                    title: "Support & Diagnostics",
+                    subtitle: "State, logs and recovery steps support may ask you for."
+                )
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(String(localized: "Support & Diagnostics"))
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(.primary)
 
-                Text(String(localized: "State, logs and recovery steps support may ask you for."))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    Text(String(localized: "State, logs and recovery steps support may ask you for."))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Spacer(minLength: 12)
@@ -455,7 +514,7 @@ struct SupportView: View {
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(TonoBrand.accent)
+                    .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
                     .disabled(isUploadingLog || logUploadBlockedReason != nil)
                 }
 
@@ -475,7 +534,7 @@ struct SupportView: View {
                             }
                             .buttonStyle(.plain)
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(TonoBrand.accent)
+                            .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
                         }
                     }
                 } else if let outcome = logUploadOutcome {
@@ -585,7 +644,7 @@ struct SupportView: View {
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(TonoBrand.accent)
+                    .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
                 }
             }
         }
@@ -643,7 +702,7 @@ struct SupportView: View {
                 Button(String(localized: "Show in Finder"), action: reveal)
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(TonoBrand.accent)
+                    .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
 
                 Button(
                     copiedTarget == copyTarget
@@ -654,7 +713,7 @@ struct SupportView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(TonoBrand.accent)
+                .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -733,6 +792,14 @@ struct SupportView: View {
     }
 
     private func protectionText(_ snapshot: TonoDiagnosticSnapshot) -> String {
+        Self.protectionText(snapshot, unconfirmed: appState.isProtectionUnconfirmed,
+                            unreadable: appState.isProtectionBlockUnreadable)
+    }
+
+    static func protectionText(_ snapshot: TonoDiagnosticSnapshot, unconfirmed: Bool, unreadable: Bool) -> String {
+        if unconfirmed || unreadable {
+            return String(localized: "Protection status unconfirmed")
+        }
         let state: String
         if snapshot.disconnecting {
             state = String(localized: "Disconnecting…")
@@ -877,11 +944,15 @@ struct SupportView: View {
 
 struct SupportCard<Content: View>: View {
     @Environment(\.colorScheme) private var colorScheme
+    @SeaAppearancePreference private var seaEnabled
     let icon: String
     let title: String
     @ViewBuilder let content: Content
 
     var body: some View {
+        if seaEnabled {
+            SeaPanel(title, icon: icon) { content }
+        } else {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 Image(systemName: icon)
@@ -914,6 +985,7 @@ struct SupportCard<Content: View>: View {
                     lineWidth: 1
                 )
         )
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ActiveNodeCard: View {
+    @SeaAppearancePreference private var seaAppearance
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let nodeName: String
@@ -35,7 +36,7 @@ struct ActiveNodeCard: View {
                 Text(eyebrow)
                     .font(.system(size: 10, weight: .semibold))
                     .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(seaAppearance ? SeaTheme.muted : Color.secondary)
                     .kerning(0.6)
                 Spacer()
                 Button {
@@ -44,7 +45,7 @@ struct ActiveNodeCard: View {
                     Text("Switch")
                         .font(.system(size: 12, weight: .medium))
                         .fontWeight(.medium)
-                        .foregroundStyle(isSwitchHovered ? .primary : .secondary)
+                        .foregroundStyle(isSwitchHovered ? (seaAppearance ? SeaTheme.text : Color.primary) : (seaAppearance ? SeaTheme.muted : Color.secondary))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
                         .background(
@@ -75,10 +76,10 @@ struct ActiveNodeCard: View {
                             Text(nodeRouteTitle(for: nodeName))
                                 .font(.system(size: 13, weight: .semibold))
                                 .fontWeight(.semibold)
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(seaAppearance ? SeaTheme.text : Color.primary)
                             Text(secondaryLine)
                                 .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(seaAppearance ? SeaTheme.muted : Color.secondary)
                         }
                     }
                     Spacer()
@@ -109,7 +110,7 @@ struct ActiveNodeCard: View {
                 .overlay {
                     RoundedRectangle(cornerRadius: 10)
                         .strokeBorder(
-                            (isCardHovered ? TonoBrand.accent.opacity(0.4) : .white.opacity(colorScheme == .dark ? 0.14 : 0.45)),
+                            (isCardHovered ? (seaAppearance ? SeaTheme.cool : TonoBrand.accent).opacity(0.4) : .white.opacity(colorScheme == .dark ? 0.14 : 0.45)),
                             lineWidth: 1
                         )
                 }
@@ -128,10 +129,10 @@ struct ActiveNodeCard: View {
             if isConnected {
                 HStack(spacing: 8) {
                     Circle()
-                        .fill(isClaudeHomeActive ? TonoStatus.connected : TonoBrand.accent)
+                        .fill(isClaudeHomeActive ? TonoStatus.connected : (seaAppearance ? SeaTheme.cool : TonoBrand.accent))
                         .frame(width: 8, height: 8)
                         .shadow(
-                            color: (isClaudeHomeActive ? TonoStatus.connected : TonoBrand.accent).opacity(0.5),
+                            color: (isClaudeHomeActive ? TonoStatus.connected : (seaAppearance ? SeaTheme.cool : TonoBrand.accent)).opacity(0.5),
                             radius: 3
                         )
 
@@ -142,7 +143,7 @@ struct ActiveNodeCard: View {
                                 : String(localized: "Standard Cloud Protection (Data Center)")
                         )
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(seaAppearance ? SeaTheme.text : Color.primary)
 
                         Text(
                             isClaudeHomeActive
@@ -150,7 +151,7 @@ struct ActiveNodeCard: View {
                                 : String(localized: "All traffic routed through selected cloud node")
                         )
                         .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(seaAppearance ? SeaTheme.muted : Color.secondary)
                     }
 
                     Spacer()
@@ -160,18 +161,18 @@ struct ActiveNodeCard: View {
                     } label: {
                         Text(String(localized: "View Rules"))
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(TonoBrand.accent)
+                            .foregroundStyle((seaAppearance ? SeaTheme.cool : TonoBrand.accent))
                     }
                     .buttonStyle(.plain)
                     .popover(isPresented: $showsRulesPopover) {
                         VStack(alignment: .leading, spacing: 12) {
                             Text(String(localized: "Claude / AI Residential Protection Scope"))
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(seaAppearance ? SeaTheme.text : Color.primary)
 
                             Text(String(localized: "The following traffic is transparently captured via TUN virtual adapter and forwarded through high-reputation residential broadband exits to prevent IP flagging:\n\n• Anthropic Core Services: *.anthropic.com, *.claude.ai\n• Cloudflare Turnstile Verification: challenges.cloudflare.com, cf-assets.www.cloudflare.com\n• Telemetry & Feature Flags: *.datadoghq.com, *.statsigapi.net, *.stripe.network\n• Local Developer Apps: Claude Code CLI, Claude Desktop\n\nZero terminal configuration required."))
                                 .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(seaAppearance ? SeaTheme.muted : Color.secondary)
                                 .lineSpacing(3)
                         }
                         .padding(16)
@@ -181,14 +182,14 @@ struct ActiveNodeCard: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(
-                    (isClaudeHomeActive ? TonoStatus.connected : TonoBrand.accent)
+                    (isClaudeHomeActive ? TonoStatus.connected : (seaAppearance ? SeaTheme.cool : TonoBrand.accent))
                         .opacity(colorScheme == .dark ? 0.12 : 0.08),
                     in: RoundedRectangle(cornerRadius: 10)
                 )
                 .overlay {
                     RoundedRectangle(cornerRadius: 10)
                         .strokeBorder(
-                            (isClaudeHomeActive ? TonoStatus.connected : TonoBrand.accent)
+                            (isClaudeHomeActive ? TonoStatus.connected : (seaAppearance ? SeaTheme.cool : TonoBrand.accent))
                                 .opacity(colorScheme == .dark ? 0.22 : 0.18),
                             lineWidth: 1
                         )

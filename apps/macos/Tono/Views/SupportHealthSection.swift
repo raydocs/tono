@@ -4,7 +4,10 @@ import SwiftUI
 struct SupportHealthSection: View {
     @Environment(AppState.self) private var appState
     @Environment(AccountSession.self) private var account: AccountSession?
-    @State private var check: LocalHealthCheck?
+    @SeaAppearancePreference private var seaEnabled
+    @Binding var check: LocalHealthCheck?
+    let copyReport: () -> Void
+    let reportCopied: Bool
     @State private var checking = false
     @State private var changedDuringCheck = false
     @State private var showingReport = false
@@ -13,33 +16,55 @@ struct SupportHealthSection: View {
         SupportCard(icon: "stethoscope", title: String(localized: "Local health check")) {
             Text("Read-only checks. No connection, network reset, repair, or upload happens here.")
                 .font(.system(size: 12)).foregroundStyle(.secondary)
-            Button(checking ? String(localized: "Checking…") : String(localized: "Check this Mac")) {
-                guard !checking else { return }
-                checking = true
-                changedDuringCheck = false
-                Task {
-                    check = await appState.collectLocalHealth(account: account)
-                    changedDuringCheck = check == nil
-                    checking = false
+            if seaEnabled {
+                HStack(spacing: 10) {
+                    Button(checking ? String(localized: "Checking…") : String(localized: "Check this Mac"), action: runCheck)
+                        .buttonStyle(GateProminentButtonStyle())
+                        .controlSize(.small)
+                        .disabled(checking)
+                        .accessibilityIdentifier("localHealthCheck")
+                    Button(reportCopied ? String(localized: "Copied") : String(localized: "Copy for support"), action: copyReport)
+                        .buttonStyle(.bordered)
+                    Button("Upload diagnostics") { previewReport() }
+                        .buttonStyle(.bordered)
+                        .disabled(!canPreviewReport)
                 }
+            } else {
+                Button(checking ? String(localized: "Checking…") : String(localized: "Check this Mac"), action: runCheck)
+                    .disabled(checking)
+                    .accessibilityIdentifier("localHealthCheck")
             }
-            .disabled(checking)
-            .accessibilityIdentifier("localHealthCheck")
+            if seaEnabled {
+                Text("Copy for support copies the redacted diagnostic snapshot. Upload diagnostics opens a separate health report preview first; sending still requires your confirmation.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            }
             if changedDuringCheck {
                 Text("The account or connection changed during the check. Check again for a consistent snapshot.")
                     .font(.system(size: 12)).foregroundStyle(.orange)
             }
+            if seaEnabled, let check,
+               (check.owner != account?.user?.id
+                || check.accountRevision != account?.accountReadRevision) {
+                Text("The account changed. Check again for a current health result.")
+                    .font(.system(size: 12)).foregroundStyle(.orange)
+            }
             if let check, check.owner == account?.user?.id,
                check.accountRevision == account?.accountReadRevision {
+                if seaEnabled,
+                   check.generation != appState.connectionCoordinator.protectionOperationGeneration {
+                    Text("The connection changed since this check. Results may be stale; check again before sending.")
+                        .font(.system(size: 12)).foregroundStyle(.orange)
+                }
                 LocalHealthResults(check: check)
-                DisclosureGroup(String(localized: "Build and runtime identity")) {
-                    BuildIdentityDetails(check: check)
+                if !seaEnabled {
+                    DisclosureGroup(String(localized: "Build and runtime identity")) {
+                        BuildIdentityDetails(check: check)
+                    }
                 }
-                Button("Preview support report") {
-                    account?.previewSupportReport(check)
-                    showingReport = account?.supportReportDraft != nil
+                if !seaEnabled {
+                    Button("Preview support report") { previewReport() }
+                        .disabled(!canPreviewReport)
                 }
-                .disabled(account?.isReady != true || check.generation != appState.connectionCoordinator.protectionOperationGeneration)
                 Text("Sending requires a separate confirmation and a signed-in account. Raw-log upload and remote diagnostics settings are not changed.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
@@ -67,9 +92,35 @@ struct SupportHealthSection: View {
             }
         }
     }
+
+    private var canPreviewReport: Bool {
+        guard let check else { return false }
+        return check.owner == account?.user?.id
+            && check.accountRevision == account?.accountReadRevision
+            && account?.isReady == true
+            && check.generation == appState.connectionCoordinator.protectionOperationGeneration
+    }
+
+    private func runCheck() {
+        guard !checking else { return }
+        checking = true
+        changedDuringCheck = false
+        Task {
+            check = await appState.collectLocalHealth(account: account)
+            changedDuringCheck = check == nil
+            checking = false
+        }
+    }
+
+    private func previewReport() {
+        guard canPreviewReport, let check else { return }
+        account?.previewSupportReport(check)
+        showingReport = account?.supportReportDraft != nil
+    }
 }
 
 struct LocalHealthResults: View {
+    @SeaAppearancePreference private var seaEnabled
     let check: LocalHealthCheck
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -87,7 +138,16 @@ struct LocalHealthResults: View {
                         .foregroundStyle(finding.status == .attention ? Color.orange : Color.secondary)
                         .accessibilityLabel(finding.status == .observed ? String(localized: "Observed") : finding.status == .attention ? String(localized: "Needs attention") : String(localized: "Unknown"))
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(finding.title).font(.system(size: 12, weight: .semibold))
+                        HStack(spacing: 7) {
+                            Text(finding.title).font(.system(size: 12, weight: .semibold))
+                            if seaEnabled {
+                                Text(finding.status == .observed ? String(localized: "Observed")
+                                     : finding.status == .attention ? String(localized: "Needs attention")
+                                     : String(localized: "Unknown"))
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(finding.status == .attention ? Color.orange : SeaTheme.cool)
+                            }
+                        }
                         Text(finding.detail).font(.system(size: 11)).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -147,7 +207,7 @@ struct SupportReportConfirmationView: View {
                 Spacer()
                 if receipt == nil {
                     Button(sending ? String(localized: "Sending…") : String(localized: "Send this report"), action: confirm)
-                        .buttonStyle(.borderedProminent)
+                        .modifier(SeaPrimaryAction())
                         .disabled(sending || !canSend)
                         .accessibilityIdentifier("confirmSupportReport")
                 }

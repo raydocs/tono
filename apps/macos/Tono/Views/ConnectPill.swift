@@ -2,16 +2,20 @@ import SwiftUI
 
 /// ⌘. cancels an in-flight connect; ⌘K toggles connect/disconnect.
 /// Neither collides with sidebar ⌘1–⌘4 or Nodes ⌘F.
-private struct ConnectPillKeyboardShortcut: ViewModifier {
+struct ConnectPillKeyboardShortcut: ViewModifier {
     let isConnecting: Bool
     let isDisconnecting: Bool
 
+    var key: KeyEquivalent? {
+        if isConnecting { return "." }
+        if !isDisconnecting { return "k" }
+        return nil
+    }
+
     @ViewBuilder
     func body(content: Content) -> some View {
-        if isConnecting {
-            content.keyboardShortcut(".", modifiers: .command)
-        } else if !isDisconnecting {
-            content.keyboardShortcut("k", modifiers: .command)
+        if let key {
+            content.keyboardShortcut(key, modifiers: .command)
         } else {
             content
         }

@@ -5,9 +5,13 @@ struct DashboardView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SeaAppearancePreference private var showsSeaAppearance
+    @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults)
+    private var seaMotionMode = "Auto"
     @Namespace private var dashboardNS
     @State private var trafficHistory = TrafficHistory()
     @State private var showsDataUsagePopover = false
+    @State private var showsSeaDetails = false
     /// When the pill last flipped into connecting. A click that lands within
     /// `cancelGraceInterval` of that moment is ignored: the pill is now the
     /// Cancel control while connecting, so without this a double-click on
@@ -16,8 +20,39 @@ struct DashboardView: View {
     private static let cancelGraceInterval: TimeInterval = 1.2
 
     var body: some View {
-        @Bindable var appState = appState
+        Group {
+            if showsSeaAppearance { seaDashboard } else { legacyDashboard }
+        }
+        .modifier(SeaPageAppearance())
+        .background {
+            if showsSeaAppearance {
+                SeaScene(phase: seaPhase, motionEnabled: SeaAppearance.animates(
+                    seaMotionMode, reduceMotion: reduceMotion
+                ))
+            }
+        }
+        .contentShape(Rectangle())
+        // Surfaces swap with the critically damped contract spring; the one
+        // overshoot in the app belongs to the connected glow, not the layout.
+        .animation(TonoMotion.surfaceIn(reduceMotion: reduceMotion), value: appState.isConnected)
+        .animation(TonoMotion.surfaceIn(reduceMotion: reduceMotion), value: showsConnectionDetails)
+        .onChange(of: appState.isConnecting) { _, connecting in
+            connectingSince = connecting ? Date() : nil
+        }
+        .onChange(of: appState.isConnected) { _, connected in
+            if !connected {
+                appState.networkInfo = NetworkInfo()
+            }
+        }
+        .onAppear {
+            if appState.isConnecting, connectingSince == nil {
+                connectingSince = Date()
+            }
+            appState.updateIncomplete = UpdateHandoffStore.showsIncompleteUpdate()
+        }
+    }
 
+    private var legacyDashboard: some View {
         GlassEffectContainer(spacing: 24) {
             VStack(spacing: 0) {
                 dashboardHeader
@@ -34,7 +69,7 @@ struct DashboardView: View {
                 // Center: ConnectPill + ActiveNodeCard
                 Spacer(minLength: 12)
 
-                VStack(spacing: 24) {
+                VStack(alignment: .center, spacing: 24) {
                     RecoveryNotice(appState: appState)
                         .frame(maxWidth: 520, alignment: .leading)
                     ConnectPill(isConnected: Binding(
@@ -100,12 +135,12 @@ struct DashboardView: View {
                         RouteChoicesView()
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .center)
 
                 Spacer(minLength: 12)
 
                 if !showsConnectionDetails {
                     dashboardOverview
-
                     if appState.isConnected {
                         networkInfoBar
                     }
@@ -115,22 +150,176 @@ struct DashboardView: View {
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .contentShape(Rectangle())
-        // Surfaces swap with the critically damped contract spring; the one
-        // overshoot in the app belongs to the connected glow, not the layout.
-        .animation(TonoMotion.surfaceIn(reduceMotion: reduceMotion), value: appState.isConnected)
-        .animation(TonoMotion.surfaceIn(reduceMotion: reduceMotion), value: showsConnectionDetails)
-        .onChange(of: appState.isConnecting) { _, connecting in
-            connectingSince = connecting ? Date() : nil
-        }
-        .onChange(of: appState.isConnected) { _, connected in
-            if !connected {
-                appState.networkInfo = NetworkInfo()
+    }
+
+    private var seaStatusKey: String {
+        SeaStatusWords.key(kind: MenuBarProtectionStatus(appState).kind, connected: appState.isConnected, protectionBlocked: appState.isProtectionBlocked,
+            unknown: appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable,
+            disconnecting: appState.isDisconnecting)
+    }
+
+    private var seaDashboard: some View {
+        GeometryReader { geometry in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: showsConnectionDetails ? 12 : 20) {
+                    seaDashboardHeader
+                    if appState.updateIncomplete {
+                        Text(UpdateHandoffStore.incompleteUpdateCopy)
+                            .font(.system(size: 13)).foregroundStyle(SeaTheme.warm)
+                            .accessibilityIdentifier("updateIncompleteNotice")
+                    }
+                    seaConnectionAction
+                    seaLineChip
+                    RecoveryNotice(appState: appState)
+                        .frame(maxWidth: 520, alignment: .leading)
+                    if showsConnectionDetails {
+                        ConnectionProgressCard(appState: appState, primaryActionInHeader: true)
+                            .frame(maxWidth: 520, alignment: .leading)
+                    }
+                    Button { showsSeaDetails = true } label: {
+                        Label("Details", systemImage: "chevron.up")
+                            .font(.system(size: 12)).foregroundStyle(SeaTheme.muted)
+                    }
+                    .buttonStyle(.plain).accessibilityIdentifier("seaDashboardDetails")
+                }
+                .foregroundStyle(SeaTheme.text)
+                .frame(maxWidth: .infinity, minHeight: max(0, geometry.size.height - (showsConnectionDetails ? 48 : 64)), alignment: .topLeading)
+                .padding(showsConnectionDetails ? 24 : 32)
             }
         }
-        .onAppear {
-            appState.updateIncomplete = UpdateHandoffStore.showsIncompleteUpdate()
+        .environment(\.colorScheme, .dark)
+        .preferredColorScheme(.dark)
+        .sheet(isPresented: $showsSeaDetails) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    HStack {
+                        SeaPageHeading(title: "Details")
+                        Spacer()
+                        Button("Close") { showsSeaDetails = false }.keyboardShortcut(.cancelAction)
+                    }
+                    if let name = appState.activeNode?.name ?? appState.proxyService.activeNodeName {
+                        ActiveNodeCard(nodeName: name,
+                            groupName: appState.isConnected ? appState.proxyService.activeGroupName : String(localized: "Ready to connect"),
+                            latency: appState.proxyService.latency(forNodeNamed: name),
+                            eyebrow: appState.isConnected ? "ACTIVE SERVER" : "SELECTED SERVER",
+                            isConnected: appState.isConnected, isClaudeHomeActive: appState.isClaudeHomeActive,
+                            claudeHomeHost: appState.residentialHomeHost,
+                            onSwitch: { showsSeaDetails = false; appState.selectedPage = .proxies })
+                    }
+                    RouteChoicesView()
+                    dashboardOverview
+                    if appState.isConnected { networkInfoBar }
+                }
+                .padding(24).frame(minWidth: 560, maxWidth: 760)
+            }
+            .frame(minWidth: 560, idealWidth: 640, maxWidth: 760,
+                   minHeight: 360, idealHeight: 520, maxHeight: 640)
+            .background(SeaSecondaryScene())
+            .environment(\.colorScheme, .dark).preferredColorScheme(.dark)
         }
+    }
+
+    @ViewBuilder
+    private var seaConnectionAction: some View {
+        let quiet = appState.isConnected || appState.isConnecting || appState.isDisconnecting
+            || appState.isProtectionBlocked || appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable
+        let title = appState.isDisconnecting ? String(localized: "Disconnecting…")
+            : appState.isConnecting ? String(localized: "Cancel connection")
+            : (appState.isProtectionBlocked || appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable) ? String(localized: "Restore internet")
+            : appState.isConnected ? String(localized: "Disconnect")
+            : appState.lastConnectionFailure != nil ? String(localized: "Retry now") : String(localized: "Connect")
+        if quiet {
+            Button(action: seaToggleConnection) {
+                Text(title).font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(SeaTheme.text).frame(width: 190, height: 44)
+                    .background(.white.opacity(0.08), in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain).disabled(appState.isDisconnecting)
+            .modifier(ConnectPillKeyboardShortcut(isConnecting: appState.isConnecting,
+                                                isDisconnecting: appState.isDisconnecting))
+        } else {
+            Button(title, action: seaToggleConnection)
+                .buttonStyle(GateProminentButtonStyle()).frame(width: 190)
+                .disabled(appState.lastConnectionFailure != nil && !appState.isTonoReady)
+                .modifier(ConnectPillKeyboardShortcut(isConnecting: appState.isConnecting,
+                                                    isDisconnecting: appState.isDisconnecting))
+        }
+    }
+
+    private func seaToggleConnection() {
+        if appState.isConnecting {
+            guard let since = connectingSince,
+                  Date().timeIntervalSince(since) >= Self.cancelGraceInterval else { return }
+            appState.restoreInternet()
+        } else if appState.isProtectionBlocked || appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable {
+            appState.restoreInternet()
+        } else if !appState.isConnected {
+            appState.connect()
+        } else {
+            appState.disconnect(releaseKillSwitch: true)
+        }
+    }
+
+    private var seaLineChip: some View {
+        Button { appState.selectedPage = .proxies } label: {
+            HStack(spacing: 8) {
+                Circle().fill(seaPhase == .day ? SeaTheme.warm : SeaTheme.cool.opacity(0.60))
+                    .frame(width: 6, height: 6).accessibilityHidden(true)
+                if let name = appState.activeNode?.name ?? appState.proxyService.activeNodeName {
+                    Text(nodeRouteTitle(for: name)).lineLimit(1)
+                    let runtime = appState.proxyService.node(named: name)
+                    if runtime?.lastTestFailed == true {
+                        Text("Timeout").foregroundStyle(SeaTheme.muted)
+                    } else if let latency = runtime?.latency, latency > 0 {
+                        Text(LatencyLevel.spokenTitle(for: latency, kind: .exit)).foregroundStyle(SeaTheme.muted)
+                    }
+                } else { Text("No server selected") }
+                Image(systemName: "chevron.down").accessibilityHidden(true)
+            }
+            .font(.system(size: 12)).foregroundStyle(SeaTheme.text)
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(.white.opacity(0.08), in: Capsule())
+        }
+        .buttonStyle(.plain).frame(maxWidth: 440, alignment: .leading)
+        .accessibilityHint("Choose another route")
+    }
+
+    private var seaPhase: SeaPresentationPhase {
+        SeaPresentationPhase.resolve(
+            status: MenuBarProtectionStatus(appState).kind,
+            disconnecting: appState.isDisconnecting,
+            failed: appState.lastConnectionFailure != nil
+        )
+    }
+
+    private var seaDashboardHeader: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(LocalizedStringKey(seaStatusKey))
+                .font(.system(size: showsConnectionDetails ? 32 : 44, weight: .light)).tracking(-0.7)
+                .foregroundStyle(SeaTheme.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            Text(seaSummary)
+                .font(.system(size: 14)).foregroundStyle(SeaTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: 440, alignment: .leading)
+    }
+
+    private var seaSummary: String {
+        if appState.isConnecting { return String(localized: "Securing your connection") }
+        if appState.isDisconnecting { return String(localized: "Finishing network transition") }
+        if appState.isRecoveringProtectedConnection {
+            return String(localized: "Recovering protected connection…")
+        }
+        if MenuBarProtectionStatus(appState).kind == .blocked && !appState.isProtectionBlocked {
+            return String(localized: "Connection needs attention")
+        }
+        if appState.lastConnectionFailure != nil && !appState.isConnected {
+            return String(localized: "Connection needs attention")
+        }
+        return protectionDetail
     }
 
     private var dashboardHeader: some View {
@@ -192,7 +381,7 @@ struct DashboardView: View {
                     value: trafficSummaryValue,
                     detail: trafficSummaryDetail,
                     systemImage: "waveform.path.ecg",
-                    tint: Color(hex: "5856D6")
+                    tint: showsSeaAppearance ? SeaTheme.cool : Color(hex: "5856D6")
                 )
             }
             .buttonStyle(.plain)
@@ -429,7 +618,9 @@ struct DashboardView: View {
 }
 
 private struct ConnectionProgressCard: View {
+    @SeaAppearancePreference private var seaAppearance
     @Bindable var appState: AppState
+    var primaryActionInHeader = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -493,8 +684,8 @@ private struct ConnectionProgressCard: View {
     }
 
     private func dotColor(_ stage: ConnectionStage) -> Color {
-        if appState.completedConnectionStages.contains(stage) { return TonoBrand.accent }
-        if stage == appState.connectionStage { return TonoBrand.accent.opacity(0.55) }
+        if appState.completedConnectionStages.contains(stage) { return seaAppearance ? SeaTheme.cool : TonoBrand.accent }
+        if stage == appState.connectionStage { return (seaAppearance ? SeaTheme.cool : TonoBrand.accent).opacity(0.55) }
         if appState.lastConnectionFailure?.stage == stage { return TonoStatus.blocked }
         return Color.secondary.opacity(0.35)
     }
@@ -512,7 +703,7 @@ private struct ConnectionProgressCard: View {
         if appState.lastConnectionFailure != nil, !appState.isConnecting {
             return .orange.opacity(0.08)
         }
-        return TonoBrand.accent.opacity(0.06)
+        return (seaAppearance ? SeaTheme.cool : TonoBrand.accent).opacity(0.06)
     }
 
     @ViewBuilder
@@ -620,7 +811,7 @@ private struct ConnectionProgressCard: View {
     private var headerColor: Color {
         appState.lastConnectionFailure != nil && !appState.isConnecting
             ? .orange
-            : TonoBrand.accent
+            : (seaAppearance ? SeaTheme.cool : TonoBrand.accent)
     }
 
     private var activeStartedAt: Date? {
@@ -696,11 +887,13 @@ private struct ConnectionProgressCard: View {
     private var actionRow: some View {
         HStack(spacing: 10) {
             if appState.isConnecting {
-                Button("Cancel and restore internet") {
-                    appState.restoreInternet()
+                if !primaryActionInHeader {
+                    Button("Cancel and restore internet") {
+                        appState.restoreInternet()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             } else if appState.isProtectionBlocked {
                 Button(appState.protectedReconnectPausedForUserAction
                     ? "Repair and reconnect"
@@ -711,11 +904,13 @@ private struct ConnectionProgressCard: View {
                 .controlSize(.small)
                 .disabled(!appState.isTonoReady || appState.isDisconnecting)
 
-                Button("Restore internet") {
-                    appState.restoreInternet()
+                if !primaryActionInHeader {
+                    Button("Restore internet") {
+                        appState.restoreInternet()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
 
                 if appState.shouldOfferManualBackupChannel() {
                     Button("Try backup channel") {
@@ -730,12 +925,14 @@ private struct ConnectionProgressCard: View {
                 disconnecting: appState.isDisconnecting,
                 hasFailureRecord: appState.lastConnectionFailure != nil
             ) {
-                Button("Retry now") {
-                    appState.connect()
+                if !primaryActionInHeader || appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable {
+                    Button("Retry now") {
+                        appState.connect()
+                    }
+                    .buttonStyle(GateProminentButtonStyle())
+                    .controlSize(.small)
+                    .disabled(!appState.isTonoReady || appState.isDisconnecting)
                 }
-                .buttonStyle(GateProminentButtonStyle())
-                .controlSize(.small)
-                .disabled(!appState.isTonoReady || appState.isDisconnecting)
 
                 Button("Choose another route") {
                     appState.selectedPage = .proxies

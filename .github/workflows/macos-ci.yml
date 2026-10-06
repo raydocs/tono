@@ -123,6 +123,7 @@ jobs:
       - name: Run the TonoTests unit tests
         env:
           TEST_RUNNER_TONO_EMIT_SINGBOX: ${{ runner.temp }}/sing-box-product.json
+          TEST_RUNNER_TONO_HOSTED_WINDOW_DIAGNOSTIC: "1"
           TEST_RUNNER_TONO_EMIT_UPDATE_CONTRACT: ${{ runner.temp }}/update-contract-v1-result.txt
         run: |
           xcodebuild \
@@ -152,6 +153,7 @@ jobs:
           path: |
             apps/macos/test-results/TonoTests.xcresult
             apps/macos/test-results/renders/*.png
+            apps/macos/test-results/renders/*.txt
           if-no-files-found: warn
           retention-days: 7
 

@@ -6,6 +6,9 @@ import AppKit
 
 struct LoginView: View {
     @Bindable var session: AccountSession
+    @Environment(AppState.self) private var appState
+    @SeaAppearancePreference private var seaAppearance
+    @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults) private var seaMotionMode = "Auto"
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var email = ""
@@ -81,6 +84,40 @@ struct LoginView: View {
     }
 
     var body: some View {
+        if seaAppearance {
+            seaSignIn
+        } else {
+            originalSignIn
+        }
+    }
+
+    private var seaSignIn: some View {
+        GeometryReader { proxy in
+            ZStack {
+                SeaScene(phase: appState.gateProtectionNotice == nil ? .night : .blocked,
+                         motionEnabled: SeaAppearance.animates(seaMotionMode, reduceMotion: reduceMotion))
+                    .ignoresSafeArea()
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 30) {
+                        HStack(spacing: 10) {
+                            Image("TonoMark").resizable().scaledToFit()
+                                .frame(width: 30, height: 30).accessibilityHidden(true)
+                            Text("Tono").font(.title3.weight(.semibold))
+                        }
+                        .foregroundStyle(SeaTheme.text)
+                        signInForm
+                    }
+                    .frame(maxWidth: 460, alignment: .leading)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 40)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: proxy.size.height, alignment: .center)
+                }
+            }
+        }
+    }
+
+    private var originalSignIn: some View {
         GeometryReader { proxy in
             ScrollView(.vertical) {
                 ViewThatFits(in: .horizontal) {
@@ -443,12 +480,14 @@ struct LoginView: View {
             }
         }
         .padding(28)
-        .background(colorScheme == .dark ? Color(hex: "1B1C36") : .white,
+        .background(seaAppearance ? SeaTheme.panel
+                    : (colorScheme == .dark ? Color(hex: "1B1C36") : .white),
                     in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(.secondary.opacity(0.3), lineWidth: 1)
+                .strokeBorder(seaAppearance ? Color.white.opacity(0.16) : Color.secondary.opacity(0.3), lineWidth: 1)
         }
+        .foregroundStyle(seaAppearance ? SeaTheme.text : Color.primary)
         .onAppear {
             if session.emailChallenge != nil {
                 revealCodeStep = true
@@ -585,13 +624,13 @@ struct LoginView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .background(
-                .white.opacity(colorScheme == .dark ? 0.07 : 0.85),
+                .white.opacity(seaAppearance ? 0.10 : (colorScheme == .dark ? 0.07 : 0.85)),
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(
-                        colorScheme == .dark
+                        seaAppearance || colorScheme == .dark
                             ? .white.opacity(0.45)
                             : .black.opacity(0.45),
                         lineWidth: 1
