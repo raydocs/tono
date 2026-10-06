@@ -245,6 +245,7 @@ private final class SeaSceneLayers {
         meteor.startPoint = CGPoint(x: 0, y: 0.5)
         meteor.endPoint = CGPoint(x: 1, y: 0.5)
         meteor.opacity = 0
+        meteor.setAffineTransform(CGAffineTransform(rotationAngle: .pi * 24 / 180))
         let shot = CAAnimationGroup()
         shot.animations = [keyframes("opacity", values: [0, 0.7, 0, 0], times: [0, 0.003, 0.01166667, 1], duration: 60),
             keyframes("transform.translation.x", values: [0, 180, 180], times: [0, 0.01166667, 1], duration: 60),
@@ -256,7 +257,7 @@ private final class SeaSceneLayers {
         loops.append((meteor, "meteor", shot, true))
 
         let dusk = layer("sky-dusk", parent: sky)
-        skyTint("evening", parent: dusk, night: false)
+        _ = skyTint("evening", parent: dusk, night: false)
         let night = layer("night-blend", parent: dusk)
         let blue = skyTint("night-bottom", parent: night, night: true)
         blue.mask = gradientMask(frame: blue.bounds, stops: [0, 0.454545, 0.606061, 1], values: [0, 0, 1, 1])
@@ -338,7 +339,7 @@ private final class SeaSceneLayers {
         linear("water-day", parent: water, colors: ["FFA66057", "AA40361F", "00000000"], stops: [0, 0.32, 0.76])
         let swell = layer("swell-envelope", parent: water)
         swell.mask = gradientMask(frame: swell.bounds,
-            stops: [0, 0.16, 0.42, max(0.43, 1 - 100 / water.bounds.height)], values: [0, 1, 0.5, 0])
+            stops: [0, 0.16, 0.42, NSNumber(value: Double(max(0.43, 1 - 100 / water.bounds.height)))], values: [0, 1, 0.5, 0])
         for (index, duration, delay, direction) in [(1, 40.0, 0.0, 1.0), (2, 65.0, -19.0, -1.0)] {
             let fold = layer("swell-\(index)", parent: swell,
                 frame: CGRect(x: 0, y: -180, width: size.width, height: water.bounds.height + 180))
@@ -469,11 +470,12 @@ private final class SeaSceneLayers {
         let p = SeaSceneParameters.forPhase(phase, progress: progress)
         let sunTime = animated ? SeaSceneTiming.sunDuration(phase: phase, stageAdvance: stageAdvance) : 0
         let skyTime = animated ? (phase == .night ? 6 : phase == .dusk || phase == .blocked ? 2.2 : 2.6) : 0
-        let dayTime = animated ? (phase == .dusk || phase == .blocked ? 1.8 : 2.6) : 0
-        let pathTime = animated ? 2.6 : 0
-        let lightTime = animated ? 2.6 : 0
+        let dayTime = animated ? (phase == .night ? 3.4 : phase == .dusk || phase == .blocked ? 1.8 : 2.6) : 0
+        let pathTime = animated && phase == .night ? 4.4 : skyTime
+        let lightTime = animated && phase == .night ? 5.6 : skyTime
         let ease = phase == .dawn ? SeaSceneTiming.dawn : phase == .dusk || phase == .blocked ? SeaSceneTiming.failEase : SeaSceneTiming.sun
-        let skyEase = phase == .dawn ? SeaSceneTiming.dawn : SeaSceneTiming.skyEase
+        let skyEase = phase == .dawn ? SeaSceneTiming.dawn : phase == .night
+            ? CAMediaTimingFunction(controlPoints: 0.5, 0, 0.3, 1) : SeaSceneTiming.skyEase
         func opacity(_ name: String, _ value: Double, _ duration: Double) {
             change(name, "opacity", value, duration: duration, ease: skyEase)
         }
@@ -574,13 +576,14 @@ private final class SeaSceneLayers {
         if decorations && quality == .full {
             if phase == .day {
                 named["sun-glow-pulse"]?.add(keyframes("opacity", values: [0.9, 1, 0.9], times: [0, 0.5, 1], duration: 7.6), forKey: "phase-loop")
-                named["sun-glow-pulse"]?.add(keyframes("transform.scale", values: [1, 1.025, 1], times: [0, 0.5, 1], duration: 7.6), forKey: "phase-scale")
+                named["sun-glow-pulse"]?.add(keyframes("transform.scale", values: [1, 1.03, 1], times: [0, 0.5, 1], duration: 7.6), forKey: "phase-scale")
             } else if phase == .dusk || phase == .blocked {
                 named["sun-motion"]?.add(keyframes("transform.translation.y", values: [0, 3, 0, -3, 0], times: [0, 0.25, 0.5, 0.75, 1], duration: 5), forKey: "phase-loop")
                 for name in ["mirror-soft-track", "mirror-track-1", "mirror-track-2"] {
                     named[name]?.add(keyframes("transform.translation.y", values: [0, -3, 0, 3, 0], times: [0, 0.25, 0.5, 0.75, 1], duration: 5), forKey: "phase-loop")
                 }
                 named["sun-glow-pulse"]?.add(keyframes("opacity", values: [0.82, 1, 0.82], times: [0, 0.5, 1], duration: 6.4), forKey: "phase-loop")
+                named["sun-glow-pulse"]?.add(keyframes("transform.scale", values: [1, 1.025, 1], times: [0, 0.5, 1], duration: 6.4), forKey: "phase-scale")
             }
         }
         CATransaction.commit()
@@ -750,7 +753,10 @@ private final class SeaSceneLayers {
             for y in 0..<context.height {
                 for x in 0..<context.width {
                     let p = data + y * context.bytesPerRow + x * 4
-                    let alpha = UInt8((0.2126 * Double(p[0]) + 0.7152 * Double(p[1]) + 0.0722 * Double(p[2])).rounded())
+                    let red = 0.2126 * Double(p[0])
+                    let green = 0.7152 * Double(p[1])
+                    let blue = 0.0722 * Double(p[2])
+                    let alpha = UInt8((red + green + blue).rounded())
                     p[0] = alpha; p[1] = alpha; p[2] = alpha; p[3] = alpha
                 }
             }

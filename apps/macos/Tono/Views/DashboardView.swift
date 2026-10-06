@@ -966,9 +966,9 @@ private struct ConnectionProgressCard: View {
                         : "Retry now") {
                         appState.retryProtectedConnectionNow()
                     }
-                .buttonStyle(GateProminentButtonStyle())
-                .controlSize(.small)
-                .disabled(!appState.isTonoReady || appState.isDisconnecting)
+                    .buttonStyle(GateProminentButtonStyle())
+                    .controlSize(.small)
+                    .disabled(!appState.isTonoReady || appState.isDisconnecting)
                 }
 
                 if !primaryActionInHeader {

@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import Darwin
 import ImageIO
 import ScreenCaptureKit
@@ -10,7 +11,7 @@ import XCTest
 /// no connect/disconnect/restore handlers are invoked and no other process is captured.
 @MainActor
 final class MacSeaPolishRenderTests: XCTestCase {
-    private let folder = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    private let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("test-results/renders", isDirectory: true)
 
     func testWholeWindowStatesAndAccessibility() async throws {
@@ -84,9 +85,12 @@ final class MacSeaPolishRenderTests: XCTestCase {
             await settle(5)
             let percent = 100 * (cpuTime() - cpu) / (CACurrentMediaTime() - t)
             receipt.append("CPU visible state=\(state) ownProcessUserPlusSystem oneCorePercent=\(percent) interval=5s captureDuringSample=false")
+            let pairStart = CACurrentMediaTime()
             for index in 0...1 {
-                if index == 1 { await settle(0.5) }
+                if index == 1 { await settle(max(0, pairStart + 0.5 - CACurrentMediaTime())) }
+                receipt.append("water state=\(state) index=\(index) beforeCaptureSeconds=\(CACurrentMediaTime() - pairStart)")
                 try await capture("polish-a-water-\(state)-\(index)", window: window)
+                receipt.append("water state=\(state) index=\(index) afterCaptureSeconds=\(CACurrentMediaTime() - pairStart)")
             }
         }
         let scene = try XCTUnwrap(findScene(host))

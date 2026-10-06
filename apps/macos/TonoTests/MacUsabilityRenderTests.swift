@@ -388,7 +388,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         let account = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
         try await capture("dashboard-sea-unconfirmed-failure-minimum", width: 660, height: 540,
                           annotate: false, darkAppearance: true,
-                          nativeLabels: ["Protection status unconfirmed", "Restore internet"]) {
+                          nativeLabels: ["Protection status unconfirmed", "Restore normal internet"]) {
             ZStack { MeshGradientBackground(); DashboardView() }
                 .modifier(SeaPageAppearance()).environment(app).environment(account)
         }
@@ -534,7 +534,7 @@ final class MacUsabilityRenderTests: XCTestCase {
             if hostedDiagnostic == "1" {
                 let paused = name == "dashboard-sea-blocked-paused-recovery-minimum"
                 let labels = nativeLabels ?? ["Protected, not connected",
-                    paused ? "Repair and reconnect" : "Retry now", "Restore internet"]
+                    paused ? "Repair and reconnect" : "Retry now", "Restore normal internet"]
                 await captureNativeWindowAcceptance(name, window: window, host: host, folder: folder,
                     width: Int(width), height: Int(height), requiredLabels: labels,
                     requiredIdentifiers: nativeIdentifiers.isEmpty && paused ? ["protectedRecoveryFeedback"] : nativeIdentifiers, requiredRecoveryFeedback: requiredRecoveryFeedback,
