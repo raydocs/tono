@@ -11,3 +11,22 @@
 - 生产状态：API version `94eae10a-97b0-474c-b3e5-e73cf004efc6`、admin version `b9f5153d-21fc-433b-bf2f-784ba5b8e920`，均从 `574debe1` 部署；在线 [system/version](https://api.afk.ccwu.cc/api/v1/system/version) 返回该完整 SHA。客户 [appcast](https://api.afk.ccwu.cc/appcast.xml) 仍 0.0.67、[Windows feed](https://api.afk.ccwu.cc/windows/latest.json) 仍 0.0.34；不因 Worker 部署推进客户版本。
 - 候选/发布：本记录创建时仅源码与 Workers 已部署，无 0.0.75 新包；#1399 final head fcfc4ed6 的 ci-gate37428864266 尚待完成，冻结后才建7501同源签名候选。候选源码、包哈希、签名及构建/环境审批将续记本文件；老板验收 checkbox 未编辑。
 - 剩余限制：#1375/#1393 UI 草稿、Dependabot #1381–#1384 与非本轮 backlog 不合入。Windows release/sign-only 工作流变更未来可能不自动触发 pnpm 静态 guard，此工程 minor 经一轮修正后保持在 #1399 limitations。原生编译/测试/包装均 hosted，MacBook 未运行；没有任何新真机 G1/G2、G3 或客户源发布结论。
+
+
+### 2026-10-06 续记 · 最终冻结与两端签名候选（非客户发布）
+- 冻结：#1399 在准确 head `fcfc4ed6a175de830ca4f806703f6ba3621ac2d8` 的 [ci-gate37428864266](https://github.com/raydocs/tono/actions/runs/37428864266) 成功及全部依赖合入后，以 `e28ca45ce80acce1081f11643f6748f640b9d328` 合入 main；前面 cancelled heads 不计通过。该 PR CI 的实际 checkout 是 `84f810f`（当时 base `3c9f3923`），不是最终 main；下面另列最终源码的原生回归，避免混用证据。
+- 集成续范围：`574debe1…e28ca45c`，#1402 docs-only source-status/deploy记录 + #1399版本/发布门/pnpm 已覆盖 head。冻结 merge 的 `git show --remerge-diff --exit-code` 在 apps/services/tooling/.github 为空，无新高风险 source resolution；沿用已记录独立审查，不重审整份报告。两 Worker 源树相对574debe1为空，所以不为仅桌面/文档冻结再次部署。
+- 最终树检查：Python六处版本0.0.75一致；Ruby11branch cases/authority/signing guards成功（synthetic, unsigned）；Node `tests30/pass30/fail0`；MacBook只做这些合同与文件验签，不做原生构建/测试/包装。
+- 最终准确源码 `e28ca45c` 的自动 main CI：macOS [37430611584](https://github.com/raydocs/tono/actions/runs/37430611584) success（XCTest602tests、1skipped、0failures；传播等待、自动换城gate、前路由健康结果抛弃回归实际passed）；Windows [37430611648](https://github.com/raydocs/tono/actions/runs/37430611648) success（core343、Service482、App Rust674；新增策略期限/可读性及迟到答案freshness回归实际ok）；Services [37430611543](https://github.com/raydocs/tono/actions/runs/37430611543) success，Worker1001/1001。未另行重复dispatch这些自动main工作流；并非声称所有非必需audit都绿。
+- 发布线：验证旧release/macos与release/windows均为冻结祖先后，atomic正常快进两线并创建 `stability/desktop-0.0.75-20261005`，remote read-back三者均完整 `e28ca45ce80acce1081f11643f6748f640b9d328`。初次shell refspec插值错误在服务端变更前失败，改为显式`${SHA}`后成功；没有force/rebase发布历史。
+- 构建：macOS [signedrun37430802468](https://github.com/raydocs/tono/actions/runs/37430802468) 在release/macos，version0.0.75、candidate_only=false、sequence7501；Windows [signedrun37430805437](https://github.com/raydocs/tono/actions/runs/37430805437) 在release/windows，version0.0.75、sequence7501。两者head均冻结SHA且completed/success；macOS appcast步骤仅dry-run。
+- 环境自批准：按decision023于 `2026-10-06T07:45:19Z` 批准Windowsrun37430805437的 `windows-release`（environment19923957922），候选sourcee28ca45c/sequence7501；不是windows-update-channel批准，不代替G1/G2或发布授权。
+
+| 平台 | 实际候选文件 / bytes | SHA-256 | 签名与保留状态 |
+| --- | --- | --- | --- |
+| macOS arm64 | `Tono-0.0.75-build75-arm64.zip` / 20303903 | `4e063bfb10da7617c49d470d0d011fad19a21fc325a8520c385086d7f0ab4781` | Developer ID deep/strict验签通过；Apple notarization原始statusAccepted；Sparkle签名对下载ZIP实际字节与bundle公钥验签成功；[artifact11397382668](https://github.com/raydocs/tono/actions/runs/37430802468/artifacts/11397382668)，未创建发布tag |
+| Windows x64 | `Tono_0.0.75_x64-setup.exe` / 37730878 | `ff6df9bc440fb742cb22ec96eea5e616db4812f957ca255c24386c4526d7533b` | 实际NSIS updater签名在仓库publickey下通过；与草稿资产API digest/size、构建stage摘要同字节；[artifact11398157750](https://github.com/raydocs/tono/actions/runs/37430805437/artifacts/11398157750)；[v0.0.75草稿](https://github.com/raydocs/tono/releases/tag/untagged-51928a31928317f50af5) release404464530保持draft，target冻结SHA；不声称Authenticode实机验收 |
+
+- 包内核验：macOS0.0.75/build75、stamp source冻结SHA、dirty=false、Release、releaseSequence7501，实际App/Sing-box/Helper测量通过。Windows7zz只解包未执行安装器；真实selector强制App/Core/Service/sing-box安装位、全部副本一致，新measurement实际含四组件digest（singBox `b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027`）。Windows编译输入为7501，不冒称已安装设备floor验收。`.sig` SHA-256 `48db97343b95833e6c7d022430d136c56357e94f908864ddd292e2886e7b5ced`。
+- 留存：两包、签名、公开receipt、实际component measurement与owner验收README留在 `/Users/ruirui/Downloads/Tono/0.0.75-e28ca45c-7501/`；`shasum -a 256 -c SHA256SUMS.txt` 十项均OK。GitHubActions包/签名七天到期，已留副本；measurement与candidate-verification-receipt是**未签名核验材料，不是v1签名manifest或设备证明**。
+- 发布界线：老板G1/G2/G3的12条checkbox与原内容逐行相同，G1/G2未验收；G3明确0.0.76补验收。两候选未安装、未进行真机G1/G2/G3，也未把草稿publish、创建macOS发布tag、上传候选至客户R2或推进客户feeds；最后在线仍macOS0.0.67/Windows0.0.34。首次v1手动引导先正常、已验证断开；候选手装不等于G3受保护自动更新。客户推进须老板精确SHA/两包hash验收后再按G4.2→G4.3（verifiedAt）→G4.4执行。
