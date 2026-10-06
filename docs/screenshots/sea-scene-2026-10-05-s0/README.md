@@ -146,7 +146,7 @@ fixes it, and the failed file receipt is retained locally.
 - PASSproduction scene/preferences/dev entry/texture isolation; old10PNG hashes
   and control tokens unchanged. i18n1128keys: en/zh frontend clean; scanner exits0
   with existing inactive/legacy gaps, not a globally clean locale claim.
-- [Seven supplied owner decisions](../../decisions/063-2026-10-05-windows-round3-appearance.md)
+- [Seven supplied owner decisions](../../decisions/069-2026-10-05-windows-round3-appearance.md)
   recorded; no app mount, old customer-string changes, native build/package,
   automatic reviewer, auto-merge, deploy or publish.
 

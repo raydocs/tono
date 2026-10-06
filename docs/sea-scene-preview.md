@@ -394,7 +394,7 @@ remain pending; this continuation does not mount the scene or start home work.
 ## ROUND-3 S0 — 2026-10-05
 
 [Current evidence, three-tier movies, raw measurements and Windows web ZIP](screenshots/sea-scene-2026-10-05-s0/README.md).
-The [seven supplied owner approvals](decisions/063-2026-10-05-windows-round3-appearance.md)
+The [seven supplied owner approvals](decisions/069-2026-10-05-windows-round3-appearance.md)
 supersede the earlier unresolved questions; the moon stays. No PR2/3 mount yet.
 
 - Filled soft sun glow/feathered edge removes the dark cut-out; all measured

@@ -2,7 +2,7 @@
 
 Ownership: [SHIP_PLAN](SHIP_PLAN.md), Windows 0.0.75 UI work. Stacked on draft
 [#1375](https://github.com/raydocs/tono/pull/1375). Source only: no merge, native
-package, deployment or publication. The [owner decisions](decisions/063-2026-10-05-windows-round3-appearance.md)
+package, deployment or publication. The [owner decisions](decisions/069-2026-10-05-windows-round3-appearance.md)
 remain provisional. No automatic external review was requested or performed.
 
 ## Enable and reproduce

@@ -33,4 +33,8 @@
   确认框打开时窗口级 Ctrl+K 不再在其后连接或断开。两条回归在还原源码修复后实跑为红（各 `expected "vi.fn()" to not be called at all`），
   恢复后 `Test Files 56 passed (56) / Tests 393 passed (393)`，typecheck `79 (baseline 79)`。
   评审方未能核实：WebView2 在托盘 `window.hide()` 后是否把 `document.visibilityState` 置为 hidden（`whileVisible` 在托盘上是否真的停表取决于此），需真机。
-
+- 续记 2026-10-06（复审与合入准备）：修复轮 head `544bc299b` 的复审 jev-route `e3f355f1`（Opus 5.5 + Codex gpt-6.1-sol）PASSED，
+  两席均无发现；该 head 的 [ci-gate 37511628558](https://github.com/raydocs/tono/actions/runs/37511628558) 成功。
+  合入前记录改号：本栈的 ROUND-3 外观决策文件原为 `063-…-windows-round3-appearance.md`，与 main 已有的
+  `063-…-unarmed-retry-attempt-floor.md` 撞号（main 的 063 先合入）；本栈那份尚未进过 main，改为 `069`（068 已被 macOS 分支占用），
+  内容未动，四处链接与一处文字引用同步改。整栈以本 PR 一次合入 main（老板 2026-10-06 授权合并 UI PR、只保留新外观，决策 066）。
