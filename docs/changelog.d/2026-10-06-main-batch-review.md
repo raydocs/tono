@@ -54,7 +54,8 @@
   [Windows 细节打磨记录](2026-10-06-windows-ui-polish.md)第二轮续记的来源行仍写「未合 main」，本 PR 改为 `f6ce4cca8`（#1425）。
   评审方没有 shell，列为缺失上下文的三项事后在 MacBook 上手动核对：`git show --remerge-diff` 对 `f6ce4cca8`、`94817af4f` 均为空；
   `c7d77517`、`5a77c6b6`、`f26c57bd`、`4c98c8c1`、`bca5fa9a`、`92e004f6`、`f4d8d401` 都是 `origin/main` 的祖先；`f6ce4cca8` 的第二父是 #1425 的
-  head `afa2c70e2`，即 PR 评审（`2045f1b9`、`dfb70314`）读过的 head。
+  head `afa2c70e2`，它在 `bca5fa9a8` 之上只有两个提交：CSS 修复 `c743d5b89` 与评审后补的一个仅文档提交（同一份记录加两行）。PR 评审
+  （`2045f1b9`、`dfb70314`）各自读的是哪个 head 没有逐一核对。
 - 已评审区间：`e28ca45ce...bca5fa9a8`（上文）加 `bca5fa9a8...94817af4f`，现止于 `94817af4f`。
 - 备份：部署前 `tooling/scripts/backup-control-plane-d1.sh --keep-local` 上传 R2 `backups/control-plane-d1/2026-10-06T20:51:27Z.sql.gz` 与 `.sha256`，
   6331680 字节，SHA-256 `1032f5ae5185f20f617b1628ea1852d8c9ccfbb24282dcdd669a735b22f0087a`，本地 `shasum -a 256` 一致。没有生产恢复、临时写入或密钥变更。
