@@ -1158,11 +1158,21 @@ pub(crate) async fn tono_renew_direct_runtime_reload(
             tokio::time::sleep(DIRECT_MUTATION_RETRY_DELAY).await;
         }
     }
-    bail!(
-        "DIRECT renewal remained ambiguous after replay: {}",
-        last_ambiguous.unwrap_or_else(|| "no response".to_owned())
-    )
+    Err(DirectRenewalAmbiguous(last_ambiguous.unwrap_or_else(|| "no response".to_owned())).into())
 }
+
+/// Every renewal attempt ended without a Service verdict: a transport error, or a reply that
+/// carried no renewal proof. The lease may still be valid, unlike a Service rejection.
+#[derive(Debug)]
+pub(crate) struct DirectRenewalAmbiguous(pub(crate) String);
+
+impl std::fmt::Display for DirectRenewalAmbiguous {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "DIRECT renewal remained ambiguous after replay: {}", self.0)
+    }
+}
+
+impl std::error::Error for DirectRenewalAmbiguous {}
 
 /// `POST /kill-switch/lock`: permit the tunnel interface and retract the API bootstrap channel.
 /// Idempotent on the Service side; doubles as the TUN adapter existence check.

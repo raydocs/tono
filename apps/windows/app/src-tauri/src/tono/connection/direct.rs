@@ -59,6 +59,44 @@ pub(super) fn direct_renewal_follow_up(error: &str) -> DirectRenewalFollowUp {
     }
 }
 
+/// A renewal that reached no Service verdict is retried on later ticks until this long after the
+/// last granted one was sent. The Service committed that renewal no earlier than its send, so its
+/// 60 s committed lease outlasts this window; the grace only stops one short IPC blip (a busy
+/// pipe, a transient transport error) releasing protection while the Service still holds the
+/// lease. It does not carry a session across a Service restart, which loses the in-memory lease,
+/// or cover a renewal queued behind a long WFP operation, which gets no verdict only after its
+/// own IPC timeout, past this window.
+pub(super) const DIRECT_RENEWAL_AMBIGUITY_GRACE: Duration = Duration::from_secs(40);
+
+/// When this heartbeat's last granted renewal was sent. Counting from its reply instead would
+/// stretch the grace by however long a slow reply took, past the Service's lease.
+#[derive(Debug, Default)]
+pub(super) struct DirectRenewalGrace {
+    last_granted_sent: Option<tokio::time::Instant>,
+}
+
+impl DirectRenewalGrace {
+    /// Run one renewal, remembering when it was sent if the Service granted it.
+    pub(super) async fn renew<T, E>(&mut self, renewal: impl std::future::Future<Output = Result<T, E>>) -> Result<T, E> {
+        let sent = tokio::time::Instant::now();
+        let result = renewal.await;
+        if result.is_ok() {
+            self.last_granted_sent = Some(sent);
+        }
+        result
+    }
+
+    /// Whether a failed renewal waits for the next tick instead of acting now. Only a renewal with
+    /// no Service verdict qualifies, and only once this heartbeat had one granted: a rejection, a
+    /// proof that does not match, or a first renewal without a verdict acts at once.
+    pub(super) fn retries(&self, ambiguous: bool) -> bool {
+        ambiguous
+            && self
+                .last_granted_sent
+                .is_some_and(|sent| sent.elapsed() < DIRECT_RENEWAL_AMBIGUITY_GRACE)
+    }
+}
+
 pub(super) async fn spawn_direct_lease_heartbeat(state: &Arc<TonoState>, generation: u64, heartbeat: DirectLeaseHeartbeat) {
     let task_state = Arc::clone(state);
     let handle = AsyncHandler::spawn(move || {
@@ -76,6 +114,7 @@ pub(super) async fn spawn_direct_lease_heartbeat(state: &Arc<TonoState>, generat
 pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generation: u64, heartbeat: DirectLeaseHeartbeat) {
     let mut interval = tokio::time::interval(DIRECT_LEASE_HEARTBEAT_INTERVAL);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut grace = DirectRenewalGrace::default();
     loop {
         // Tokio's first tick is immediate, closing the finalize-to-monitor handoff window.
         interval.tick().await;
@@ -88,23 +127,28 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
                 return;
             }
         }
-        let renewal = match service::tono_renew_direct_runtime_reload(
-            &heartbeat.session,
-            heartbeat.reload_id,
-            &heartbeat.endpoint_digest,
-        )
-        .await
-        {
-            Ok(result) => validate_direct_reload_result(
-                &result,
-                &heartbeat.session,
-                Some(heartbeat.reload_id),
-                &heartbeat.endpoint_digest,
-            )
-            .map(|_| ()),
-            Err(error) => Err(format!("{error:#}")),
-        };
-        if let Err(error) = renewal {
+        let renewal = grace
+            .renew(async {
+                match service::tono_renew_direct_runtime_reload(
+                    &heartbeat.session,
+                    heartbeat.reload_id,
+                    &heartbeat.endpoint_digest,
+                )
+                .await
+                {
+                    Ok(result) => validate_direct_reload_result(
+                        &result,
+                        &heartbeat.session,
+                        Some(heartbeat.reload_id),
+                        &heartbeat.endpoint_digest,
+                    )
+                    .map(|_| ())
+                    .map_err(|error| (false, error)),
+                    Err(error) => Err((error.is::<service::DirectRenewalAmbiguous>(), format!("{error:#}"))),
+                }
+            })
+            .await;
+        if let Err((ambiguous, error)) = renewal {
             let raw = format!("{error:#}");
             let follow_up = direct_renewal_follow_up(&raw);
             let redacted = audit::redact(&raw);
@@ -112,6 +156,15 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
                 probe: "directLeaseHeartbeat",
                 error: redacted.clone(),
             });
+            // Read after the call returned, so time spent waiting on the Service counts.
+            if grace.retries(ambiguous) {
+                logging!(
+                    warn,
+                    Type::Service,
+                    "Tono: DIRECT lease renewal reached no Service verdict; retrying on the next heartbeat: {redacted}"
+                );
+                continue;
+            }
             // Do not reconnect from inside the heartbeat task: a successful fresh attempt would
             // replace this task and abort its own caller mid-commit. Do not restrict to Blocked.
             // A non-strict failure releases the original network and keeps AI destinations blocked.
@@ -2182,9 +2235,39 @@ pub fn build_direct_plan(
 #[cfg(test)]
 mod tests {
     use super::{
-        DIRECT_RENEW_FAILED_PREFIX, DIRECT_RENEW_STRICT_BLOCKED_PREFIX, DirectRenewalFollowUp,
-        direct_renewal_follow_up,
+        DIRECT_RENEW_FAILED_PREFIX, DIRECT_RENEW_STRICT_BLOCKED_PREFIX, DIRECT_RENEWAL_AMBIGUITY_GRACE,
+        DirectRenewalFollowUp, DirectRenewalGrace, direct_renewal_follow_up,
     };
+    use crate::core::service::DirectRenewalAmbiguous;
+    use std::time::Duration;
+
+    /// WIN-DIRECT-RENEW-AMBIGUITY: two renewal attempts that reached no Service verdict released a
+    /// working session at once and ended its heartbeat, while the Service lease still held. That
+    /// case alone now waits, within a grace counted from when the last granted renewal was sent:
+    /// a slow reply must not stretch it past the Service's lease. A Service rejection acts at once.
+    #[tokio::test(start_paused = true)]
+    async fn transport_ambiguity_grace_counts_from_the_granted_send() {
+        let ambiguous = anyhow::Error::from(DirectRenewalAmbiguous("pipe busy".into()));
+        assert!(ambiguous.is::<DirectRenewalAmbiguous>());
+        let rejected = anyhow::anyhow!("{DIRECT_RENEW_FAILED_PREFIX}: proof mismatched");
+        assert!(!rejected.is::<DirectRenewalAmbiguous>());
+
+        let mut grace = DirectRenewalGrace::default();
+        assert!(!grace.retries(true), "no grace before this heartbeat had a renewal granted");
+        let reply_delay = Duration::from_secs(30);
+        grace
+            .renew(async {
+                tokio::time::sleep(reply_delay).await;
+                Ok::<(), ()>(())
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(DIRECT_RENEWAL_AMBIGUITY_GRACE - reply_delay - Duration::from_secs(1)).await;
+        assert!(grace.retries(true), "just inside the grace counted from the granted send");
+        assert!(!grace.retries(false), "a Service verdict acts at once");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(!grace.retries(true), "past it: the slow reply must not extend the grace");
+    }
 
     #[test]
     fn a_direct_renewal_failure_releases_unless_the_kill_switch_is_strict() {
