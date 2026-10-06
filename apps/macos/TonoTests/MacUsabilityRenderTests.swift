@@ -238,7 +238,9 @@ final class MacUsabilityRenderTests: XCTestCase {
         if name == "dashboard-sea-blocked-minimum"
             || name == "dashboard-sea-blocked-paused-recovery-minimum" {
             let environment = ProcessInfo.processInfo.environment
-            if environment["TONO_HOSTED_WINDOW_DIAGNOSTIC"] == "1" {
+            let hostedDiagnostic = environment["TEST_RUNNER_TONO_HOSTED_WINDOW_DIAGNOSTIC"]
+                ?? environment["TONO_HOSTED_WINDOW_DIAGNOSTIC"]
+            if hostedDiagnostic == "1" {
                 await captureNativeWindowDiagnostic(name, window: window, folder: folder)
             }
         }
