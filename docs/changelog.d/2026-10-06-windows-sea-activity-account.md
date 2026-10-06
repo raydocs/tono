@@ -1,6 +1,6 @@
 ## 2026-10-06 · Windows 新外观 PR 8：活动与账户
 - 归属：`docs/SHIP_PLAN.md` 0.0.75 UI，ROUND-3 §10；默认关闭，stacked on #1410。
-- 来源：`3be3709c` → 本 PR head；`codex/windows-ui-pr8-20261006`，未合 main。
+- 来源：`3be3709c` → 本 PR head；`codex/windows-ui-pr8-20261006`，2026-10-06 已合 main `5a77c6b6`（#1411）。
 - 缺陷修复：无已发布产品缺陷；未知账户不伪造套餐/有效期，保留未知占位。
 - 新增/优化：50px应用组、150px路由分布条、当前应用/连接摘要、展开最多20条连接；搜索、拒绝筛选、本机DNS隐藏、完整线路说明与所有证据 caveat、逐条关闭/关闭全部原 generation guard 保留。账户单面板含邮箱/套餐有效期/6px流量条/设备/移除和退出；两个原确认共用且动作与账户scope不变。
 - 工程与测试：只新增 opt-in presenter/CSS；旧外观原 JSX/动作保留。独立回归证明20条上限及原generation关闭一次、未知账户不显示无到期/流量。合成fixture填充全部路由及两台设备，无本机诊断/账号/连接 IO。

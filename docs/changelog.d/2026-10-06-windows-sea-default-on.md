@@ -1,6 +1,6 @@
 ## 2026-10-06 · Windows 新外观 PR 12：默认开启
 - 归属：`docs/SHIP_PLAN.md` 0.0.75；[决策 065](../decisions/065-2026-10-06-sea-appearance-on-by-default-in-0075.md)（老板 2026-10-06：「授权你合并 新外观开」）。stacked on #1414。
-- 来源：`8d337686` → 本 PR head，`claude/windows-ui-pr12-default-on-20261006`；未合 main。
+- 来源：`8d337686` → 本 PR head，`claude/windows-ui-pr12-default-on-20261006`；2026-10-06 已合 main `5a77c6b6`（#1416）。
 - 缺陷修复：无。
 - 新增/优化：没有存过选择的设备启动即为新外观（`appearance-preferences.ts` 与 `index.html` 的首帧标记同一口径：只有明确存了「关」才是旧外观；
   本地存储读不出或损坏时也是新外观）。设置里的开关保留，文案由「新外观（预览）…默认关闭」改为「新外观…关闭后回到旧外观」。

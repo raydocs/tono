@@ -1,6 +1,6 @@
 ## 2026-10-06 · Windows 新外观 PR 11：评审修复
 - 归属：`docs/SHIP_PLAN.md` 0.0.75 UI，ROUND-3 评审续修；默认关闭，stacked on #1413。
-- 来源：`a49496fa` → 本 PR head，`claude/windows-ui-pr11-review-fixes-20261006`；未合 main。
+- 来源：`a49496fa` → 本 PR head，`claude/windows-ui-pr11-review-fixes-20261006`；2026-10-06 已合 main `5a77c6b6`（#1414）。
 - 缺陷修复（均只在新外观下，未发布）：
   - 二级页滚动时内容从透明顶栏下穿过，标题与导航、窗口按钮叠字 → 滚动容器顶部渐隐，首页不受影响。
   - 托盘未连接时「连接」按钮无底色、深色字不可见：配色变量只从页面加载时的根标记继承，托盘自身不带 →

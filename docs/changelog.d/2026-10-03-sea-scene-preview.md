@@ -1,7 +1,7 @@
 ## 2026-10-03 · Windows SeaScene component preview (draft, 0.0.75)
 
 - Ownership: [SHIP_PLAN](../SHIP_PLAN.md), deferred 0.0.75 UI work, handoff section 8 PR 1 only; not a 0.0.74 G4 freeze exception.
-- Source: baseline `a97c963e` → branch `raydocs/feat-sea-scene-pr1`, draft PR; not merged into main.
+- Source: baseline `a97c963e` → branch `raydocs/feat-sea-scene-pr1`, merged into main `5a77c6b6` on 2026-10-06 (#1375).
 - Defect fixes: none in the shipped product. No connection, protection, routing, dashboard, native chrome, tray or logo behavior changes.
 - Added/refined: inert `SeaScene(phase, paused)` with four phases, responsive horizon/fixed sun size, baked ripple/grain textures, persistent interruptible transitions and separate ambient tokens. Opacity cross-fades replace animated colors; a broader dawn-sky curve meets the brightness-step target. Development-only HTML preview with English/Chinese controls; no app mount.
 - Engineering/tests: two narrow vitests covering phase DOM/static preference and hidden-transition lifecycle; the added regression was run on the old code and failed before the fix; deterministic Python-stdlib texture baker; scoped design-system/Clarity exception and [provisional decision 055](../decisions/055-2026-10-03-windows-sea-scene-preview.md). Existing control timings and production solid ground remain.

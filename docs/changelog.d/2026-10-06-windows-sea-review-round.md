@@ -1,7 +1,7 @@
 ## 2026-10-06 · Windows 新外观 PR 13：逐 PR 评审的修复轮，只保留新外观
 - 归属：`docs/SHIP_PLAN.md` 0.0.75；[决策 066](../decisions/066-2026-10-06-sea-appearance-is-the-only-appearance.md)（老板 2026-10-06：
   「和合并的全都合并到 main 只用新外观就好了」）、[决策 067](../decisions/067-2026-10-06-sea-home-and-tray-refuse-ambiguous-input.md)（agent 暂定）。stacked on #1416。
-- 来源：`c3c994e7` → 本 PR head，`claude/windows-ui-pr13-review-round-20261006`；未合 main。
+- 来源：`c3c994e7` → 本 PR head，`claude/windows-ui-pr13-review-round-20261006`；2026-10-06 已合 main `5a77c6b6`（#1417）。
 - 评审来源（jev-route，逐 PR 的 diff）：#1375 `de0102f9`、#1393 `bcb7ebef`、#1406 `e8f4bad6`、#1407 `6b685fc2`、#1408 `9c6375c8`（BLOCKED）、
   #1409 `7609c403`、#1410 `9b925507`（BLOCKED）、#1411 `35d55379`、#1412 `91788532`、#1413 `2696ac41`、#1414 `c5b379dc`、#1416 `8b4798fe`。
   #1375 / #1393 的 `docs/screenshots` 证据 JSON 因 diff 超过评审上限被排除在评审之外。

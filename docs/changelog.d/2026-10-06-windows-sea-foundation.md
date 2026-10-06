@@ -1,6 +1,6 @@
 ## 2026-10-06 · Windows 新外观 PR 4：组件与文案基础
 - 归属：`docs/SHIP_PLAN.md` 0.0.75 UI，ROUND-3 §6；沿用 provisional 决策 069（合入前原编号 063，与 main 的 063 撞号后改号），默认关闭。
-- 来源：#1406 `079cef47` → 本 PR head；`codex/windows-ui-pr4-20261006`，stacked draft，未合 main。
+- 来源：#1406 `079cef47` → 本 PR head；`codex/windows-ui-pr4-20261006`，stacked，2026-10-06 已合 main `5a77c6b6`（#1407）。
 - 缺陷修复：无；本次不更改保护语义、连接或路由服务。
 - 新增/优化：局部 sea 字体/颜色/空间/曲面 tokens；按钮、字段、标签、Tabs、分段、开关、行、面板、Popover/Sheet、现有安全确认 Dialog、attention/empty/skeleton/signal 组件；Toast 兼容原单参数 API 并可指定三种提示类型。旧组件 API 保留，新外观才改变 token 外观。
 - 文案：中文客户文字统一“线路”和六种状态；复制诊断的 `support.summary.node` 保留“节点”。英文保留 server/current nouns（托盘两处 node 改 server），Standby 改 Not connected。完整 before/after 表在 PR body；临时导航 key 已删除，恢复共用现有 keys。旧外观仅这些文字变化。

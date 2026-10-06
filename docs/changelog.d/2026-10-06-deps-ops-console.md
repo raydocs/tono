@@ -1,6 +1,6 @@
 ## 2026-10-06 · services/ops-console npm dependencies to the newest supported versions
 - 归属：ops 工作（非 ship gate）；仅 `services/ops-console`。取代 dependabot PR #1382（CI 红）。
-- 来源：基线 main `5a77c6b68`；分支 `claude/deps-ops-console-20261006`，PR #1420；未合 main。
+- 来源：基线 main `5a77c6b68`；分支 `claude/deps-ops-console-20261006`，PR #1420；2026-10-06 已合 main `70af58a7`（#1420）。
 - 缺陷修复：无。
 - 新增/优化（package.json / package-lock.json，Node 24.21.0、npm 11）：
   - `cn` ^0.2.6 → ^0.4.0; `framer-motion` ^13.2.0 → ^14.0.0; `motion` ^13.2.0 → ^14.0.0; `lucide-react` ^1.44.0 → ^1.52.0; `tailwind-merge` ^3.3.1 → ^3.7.0; `geist` ^1.5.1 → ^1.7.2; `radix-ui` ^1.6.7 → ^1.7.0.
