@@ -45,6 +45,9 @@ struct DashboardView: View {
             }
         }
         .onAppear {
+            if appState.isConnecting, connectingSince == nil {
+                connectingSince = Date()
+            }
             appState.updateIncomplete = UpdateHandoffStore.showsIncompleteUpdate()
         }
     }

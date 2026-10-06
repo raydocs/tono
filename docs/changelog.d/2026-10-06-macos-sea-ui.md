@@ -59,3 +59,5 @@
 
 - 2026-10-06 同一轮追加8e366两项：Support 的所有保护摘要先用真实 appState unconfirmed/unreadable 覆盖残留 snapshot；未知不拼接未确认 Kill Switch/TUN 事实，一个真实快照投影回归。菜单栏推荐按钮保存完整 proposal 并打开原确认文案，确认才调用既有 confirmRouteRecommendation；取消不拨号，过期/跨账户拒绝复用原函数和提示。手动收藏仍走已有手动选择路径，不声称整张菜单的所有线路改为推荐。新 menu action 捕获+目录变化拒绝一个回归；本轮没有 Core、Services 或准入/选择语义改动，确认UI增量仍须独立审阅。
 - 2026-10-06 其余minor：菜单栏degraded保留Connected会话标题但补已有出口检查/恢复说明，新增一个原生PNG回归；Activity展开连接计数实时分支显式String(localized:)沿用既有%lld中文资源。两项新产品分片in-PR；重复缺中文/动效问题归并既有R3条目，四档两行为仍open。所有新增原生/单元回归本机NOTRUN，等待本轮唯一最终head hosted，不冒充真机/按键/弹窗事件验收。
+
+- 2026-10-06 页首取消补全：重读移走重复 Cancel 后的初始连接态，Dashboard 首次出现若已在 connecting，补记 connectingSince（仍1.2s保守宽限），避免等待不到 onChange 而永远不能取消；不改变 seaToggleConnection 原处理器或特权释放。此为同轮 source 集成修正，新最终 head 替代2aff，未将其在途CI称通过。
