@@ -95,7 +95,7 @@ pub(super) fn monitor_interval() -> tokio::time::Interval {
 
 /// Remember control-plane addresses only from the protected resolver.
 ///
-/// `bootstrap_hosts` still uses the system resolver so a first connect can
+/// `bootstrap_addresses` still uses the system resolver so a first connect can
 /// widen WFP for this session, but those answers must not be persisted: a
 /// poisoned physical DNS would otherwise become tomorrow's recovery pin.
 ///
@@ -1722,25 +1722,24 @@ fn bootstrap_lookup_budget(armed: bool) -> Duration {
     if armed { ARMED_BOOTSTRAP_LOOKUP_TIMEOUT } else { DNS_LOOKUP_TIMEOUT }
 }
 
-/// F1: merge the pinned bootstrap IPs with the live resolution of the API
-/// host (best-effort — a failed lookup just yields the pins alone).
-pub(super) async fn bootstrap_hosts(armed: bool) -> Vec<String> {
-    bootstrap_hosts_within(
+/// F1: the live resolution of the API host, which `bootstrap::merge_bootstrap_hosts` adds to
+/// the pinned bootstrap IPs (best-effort — a failed lookup just yields the pins alone).
+pub(super) async fn bootstrap_addresses(armed: bool) -> Vec<String> {
+    bootstrap_addresses_within(
         bootstrap_lookup_budget(armed),
         tokio::net::lookup_host((bootstrap::API_HOST, 443)),
     )
     .await
 }
 
-async fn bootstrap_hosts_within<I: Iterator<Item = std::net::SocketAddr>>(
+async fn bootstrap_addresses_within<I: Iterator<Item = std::net::SocketAddr>>(
     budget: Duration,
     lookup: impl std::future::Future<Output = std::io::Result<I>>,
 ) -> Vec<String> {
-    let dynamic: Vec<String> = match tokio::time::timeout(budget, lookup).await {
+    match tokio::time::timeout(budget, lookup).await {
         Ok(Ok(addrs)) => addrs.map(|addr| addr.ip().to_string()).collect(),
         Ok(Err(_)) | Err(_) => Vec::new(),
-    };
-    bootstrap::merge_bootstrap_hosts(&dynamic)
+    }
 }
 
 #[cfg(test)]
@@ -1756,11 +1755,12 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn armed_bootstrap_lookup_is_short_best_effort() {
         let started = tokio::time::Instant::now();
-        let hosts = super::bootstrap_hosts_within(
+        let addresses = super::bootstrap_addresses_within(
             super::bootstrap_lookup_budget(true),
             std::future::pending::<std::io::Result<std::vec::IntoIter<std::net::SocketAddr>>>(),
         )
         .await;
+        let hosts = crate::tono::bootstrap::merge_bootstrap_hosts(&addresses);
         assert!(started.elapsed() <= std::time::Duration::from_millis(300));
         for pinned in crate::tono::bootstrap::API_BOOTSTRAP_IPS {
             assert!(hosts.iter().any(|host| host == pinned), "the compiled pins still carry the bootstrap");

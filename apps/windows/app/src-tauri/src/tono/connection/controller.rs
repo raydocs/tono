@@ -38,6 +38,10 @@ pub(super) const LOCK_ATTEMPTS: u32 = 50;
 
 pub(super) const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(200);
 
+/// A local alias lookup on a blocking thread, no IPC: how often a waiting lock retry looks
+/// for the tunnel adapter.
+const TUNNEL_ADAPTER_POLL_INTERVAL: Duration = Duration::from_millis(20);
+
 /// Every other controller call keeps the original general budget: `/version` polls are bounded
 /// far tighter by `CONTROLLER_POLL_TIMEOUT`, and a cloud-policy `/dns/query` must not be able to
 /// spend an exit-probe-sized slice of the transaction.
@@ -399,9 +403,26 @@ pub(super) async fn wait_controller(secret: &str, controller_port: u16) -> Resul
 /// retryable failures). Permanent lock errors fail immediately so a bad owner/WFP state does
 /// not burn the connect transaction budget on 50 full lifecycle IPCs.
 pub(super) async fn lock_kill_switch_with_retries(session: &OwnerSessionProof) -> Result<(), String> {
+    lock_with_retries(
+        || service::tono_lock_kill_switch_for_session(session),
+        super::platform::tunnel_adapter_present,
+    )
+    .await
+}
+
+async fn lock_with_retries<Attempt, Failure, Present>(
+    mut lock: impl FnMut() -> Attempt,
+    mut adapter_present: impl FnMut() -> Present,
+) -> Result<(), String>
+where
+    Attempt: std::future::Future<Output = Result<(), Failure>>,
+    Failure: std::fmt::Display,
+    Present: std::future::Future<Output = bool>,
+{
     let mut last = String::from("no response");
     for attempt in 0..LOCK_ATTEMPTS {
-        match service::tono_lock_kill_switch_for_session(session).await {
+        let adapter_was_present = adapter_present().await;
+        match lock().await {
             Ok(()) => return Ok(()),
             Err(err) => {
                 last = err.to_string();
@@ -411,11 +432,34 @@ pub(super) async fn lock_kill_switch_with_retries(session: &OwnerSessionProof) -
                 if attempt + 1 == LOCK_ATTEMPTS {
                     break;
                 }
-                tokio::time::sleep(LOCK_RETRY_INTERVAL).await;
+                wait_for_lock_retry(adapter_was_present, &mut adapter_present).await;
             }
         }
     }
     Err(format!("kill switch lock failed (TUN adapter not ready?): {last}"))
+}
+
+/// WIN-LOCK-RETRY-GRID: the lock can only succeed once WinTUN is registered, so a refused
+/// attempt is repeated when the adapter appears instead of on the next 200 ms tick. An adapter
+/// that was already there before the refusal explains nothing: that retry keeps the whole
+/// interval, and so does one whose adapter never shows. The Service still resolves and
+/// validates the LUID itself; this only chooses when to ask.
+async fn wait_for_lock_retry<Present: std::future::Future<Output = bool>>(
+    adapter_was_present: bool,
+    adapter_present: &mut impl FnMut() -> Present,
+) {
+    if adapter_was_present {
+        tokio::time::sleep(LOCK_RETRY_INTERVAL).await;
+        return;
+    }
+    let deadline = tokio::time::Instant::now() + LOCK_RETRY_INTERVAL;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() || adapter_present().await {
+            return;
+        }
+        tokio::time::sleep(remaining.min(TUNNEL_ADAPTER_POLL_INTERVAL)).await;
+    }
 }
 
 #[cfg(test)]
@@ -438,5 +482,23 @@ mod tests {
         let (probe, resume) = super::preflight_dns_listener_unless_resuming(held(), async { None::<()> }).await;
         assert_eq!(probe, Err("held".to_owned()), "without a proven runtime the probe still gates");
         assert!(resume.is_none());
+    }
+
+    /// WIN-LOCK-RETRY-GRID: the Service refuses the lock until WinTUN is registered, and the
+    /// App asked again only on a fixed 200 ms grid, so an adapter that appeared at 250 ms was
+    /// locked at 400 ms.
+    #[tokio::test(start_paused = true)]
+    async fn lock_retry_follows_the_tunnel_adapter() {
+        let started = tokio::time::Instant::now();
+        let registered = move || started.elapsed() >= Duration::from_millis(250);
+        let locked = super::lock_with_retries(
+            || async move {
+                if registered() { Ok(()) } else { Err("interface alias \"Tono\" did not resolve to a LUID") }
+            },
+            || async move { registered() },
+        )
+        .await;
+        assert_eq!(locked, Ok(()));
+        assert!(started.elapsed() < Duration::from_millis(300), "locked at {:?}", started.elapsed());
     }
 }

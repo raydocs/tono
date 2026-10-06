@@ -49,7 +49,7 @@ pub use failure::{
 #[allow(unused_imports, reason = "retain the existing public error-marker path")]
 pub use failure::SERVICE_NOT_RUNNING_PREFIX;
 use failure::{CATALOG_NOT_READY_REJECTION, StageFailure, TRANSITION_IN_FLIGHT_REJECTION};
-use stages::run_stages;
+use stages::{ready_service_and_prefetch, run_stages};
 use transaction::ConnectTransaction;
 #[cfg(test)]
 use transaction::{CONNECT_BUDGET_LEGS, CONNECT_TRANSACTION_TIMEOUT};
@@ -108,7 +108,7 @@ pub(crate) use crate::tono::connection_routes::{
 use cleanup::{ensure_fresh, retire_timed_out_generation};
 use controller::{
     CONTROLLER_HTTP_TIMEOUT, CONTROLLER_READY_TIMEOUT, LOCK_ATTEMPTS, LOCK_RETRY_INTERVAL,
-    classify_bfe_state, controller_client, controller_url, dns_listener_conflict_message, ensure_service_ready,
+    classify_bfe_state, controller_client, controller_url, dns_listener_conflict_message,
     lock_kill_switch_with_retries, select_exit_group, wait_controller,
 };
 pub use controller::close_owned_controller_connection;
@@ -465,10 +465,10 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
         }
 
         let proof = unarmed_probe::tcp_proof_before_tunnel(state, &node);
-        let service = transaction.wait("service readiness", ensure_service_ready());
+        let service = transaction.wait("service readiness", ready_service_and_prefetch(state));
         let (proof, service) = tokio::join!(proof, service);
-        match service {
-            Ok(Ok(())) => {}
+        let prefetched = match service {
+            Ok(Ok(prefetched)) => prefetched,
             Ok(Err(err)) => {
                 // The kill switch may already be armed from a previous session, so this is a
                 // transaction failure, not a guard rejection. `fail_connect` runs the decision
@@ -479,7 +479,7 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
                 return attempt_from_stage_failure(state, generation, &attempt_record, failure, account_owner)
                     .await;
             }
-        }
+        };
         if let Err(error) = proof {
             return Attempt::Failed { generation, error, account_owner };
         }
@@ -494,6 +494,7 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
             started,
             &transaction,
             route_owner.as_ref(),
+            prefetched,
         )
         .await
         {
