@@ -58,6 +58,7 @@
 }
 .tono-home__title {
   margin: 0;
+  font-family: var(--sea-display);
   font-weight: 300;
   line-height: 1.1;
   letter-spacing: 0.02em;

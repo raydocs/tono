@@ -24,3 +24,16 @@
 - 剩余限制：未在 Windows/WebView2 真机验证（`:has()`、`:nth-last-child(… of …)` 需要 WebView2 ≥ 111，Windows 10/11 的常青运行时满足，
   但没有在真机上看过）。`biome` 对 `activity.test.tsx` 仍报两条本 PR 之前就有的问题（第 69 行 `useSemanticElements`、`serversMock` 一段的格式），
   未顺手改。TextSwap 240 ms 交叉淡入（#1393 codex:F1）与遥测简介文案（#1412 F2，文案由老板定）仍未做。
+
+### 2026-10-06 续记 · 二级页标题字重（第二轮）
+- 来源：main `bca5fa9a8` → `claude/windows-ui-polish-r2-20261006`；未合 main。只改两处 CSS，不动任何处理函数。
+- 缺陷修复：新外观的 token 把页标题定为 28px / 300（与首页的细体大标题一致），但后加载的 `tono.css` 旧规则（24px / 650）按源码顺序胜出，
+  线路、活动、账号、支持、设置五页的标题一直是粗体 24px。现在新外观下的 `.tono-page-title` 明确取 token，字距归零。
+  同一个类还用在登录页「账号已暂停 / 会话已结束」卡片的标题上（`login.tsx`），它也随之变为 28px / 300，与新外观登录标题的细体一致；这一屏预览里出不来，没有截图（评审 `2045f1b9` opus:F1 指出原记录漏列）。
+- 新增/优化：首页大标题改用标题字体栈（`--sea-display`），与二级页标题同一套字；该字体栈补上 `Segoe UI`，没有 Segoe UI Variable 的
+  Windows 10 上拉丁字母不再落到微软雅黑的字形。
+- 验证：MacBook 预览里读计算样式。改前五页均为 `650 | 24px`；改后中英文十张均为 `300 | 28px`，首页标题 `300 | 64px` 且字体栈为
+  `"Segoe UI Variable Display", …`。改前改后截图逐张看过（线路、设置、活动、账号、支持、首页）。`vitest run src/tono-ui` 通过。无新单测（纯 CSS，jsdom 无布局）。
+- 评审：jev-route 两次路由一次给 dual、一次给 single，按 dual 执行：Opus 5.5（`2045f1b9`，Codex 核验）PASSED，1 条 minor 即上面的漏列；Codex `gpt-6.1-sol`（`dfb70314`）PASSED 无发现。
+- 剩余限制：MacBook 没有 Segoe 字体，预览里看到的是回退字体的 300 字重；Segoe UI Variable Display 与微软雅黑 Light 的实际观感要在
+  Windows 真机上看。TextSwap 交叉淡入此前已在 `sea-home.tsx` 实现（240 ms），上文“仍未做”一条作废。

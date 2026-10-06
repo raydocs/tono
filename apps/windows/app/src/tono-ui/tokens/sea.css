@@ -5,7 +5,8 @@
 .sea-sheet {
   --sea-font:
     "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif;
-  --sea-display: "Segoe UI Variable Display", "Microsoft YaHei UI", sans-serif;
+  --sea-display:
+    "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", sans-serif;
   --sea-text: #f6f2ec;
   --sea-secondary: #f6f2ecb8;
   --sea-tertiary: #f6f2ec8f;
@@ -302,8 +303,12 @@
 [data-sea-appearance="true"] .tono-toggle[aria-checked="true"] > span {
   transform: translateX(16px);
 }
+/* tono.css loads later and would keep the old 24px / 650 title. */
 [data-sea-appearance="true"] .tono-page-title {
   font-family: var(--sea-display);
+  font-size: var(--tono-size-page-title);
+  font-weight: var(--tono-weight-title);
+  letter-spacing: 0;
 }
 
 /* One chevron for the new look's disclosures instead of the platform triangle. */
