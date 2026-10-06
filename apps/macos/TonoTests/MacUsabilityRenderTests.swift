@@ -743,7 +743,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.recognitionLanguages = ["en-US"]
-        request.usesLanguageCorrection = false
+        request.usesLanguageCorrection = true
         do {
             try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
         } catch {
@@ -757,7 +757,7 @@ final class MacUsabilityRenderTests: XCTestCase {
             if abs(left.2.midY - right.2.midY) > 0.015 { return left.2.midY > right.2.midY }
             return left.2.minX < right.2.minX
         }
-        receipt.append("Vision lines=\(lines.count) recognition=accurate language=en-US correction=false")
+        receipt.append("Vision lines=\(lines.count) recognition=accurate language=en-US correction=true")
         for (index, line) in lines.prefix(80).enumerated() {
             receipt.append("OCR[\(index)] text=\(line.0.debugDescription) confidence=\(line.1) box=\(line.2)")
         }
