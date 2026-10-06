@@ -16,17 +16,17 @@ abort 'candidate workflow must not gain release-write permissions' unless workfl
 gate = workflow.fetch('jobs').fetch('branch').fetch('steps').first.fetch('run')
 candidate_env = workflow.fetch('env', {})
 cases = [
-  ['true', 'branch', 'refs/heads/stability/desktop-0.0.74-20260926', true],
-  ['true', 'branch', 'refs/heads/stability/desktop-0.0.73-20260922', false],
-  ['true', 'branch', 'refs/heads/stability/desktop-0.0.74-20260926-unreviewed', false],
+  ['true', 'branch', 'refs/heads/stability/desktop-0.0.75-20261005', true],
+  ['true', 'branch', 'refs/heads/stability/desktop-0.0.74-20260926', false],
+  ['true', 'branch', 'refs/heads/stability/desktop-0.0.75-20261005-unreviewed', false],
   ['true', 'branch', 'refs/pull/276/merge', false],
   ['true', 'branch', 'refs/heads/main', false],
   ['true', 'branch', 'refs/heads/release/macos', false],
-  ['true', 'tag', 'refs/tags/tono-macos-0.0.74-build74', false],
+  ['true', 'tag', 'refs/tags/tono-macos-0.0.75-build75', false],
   ['false', 'branch', 'refs/heads/release/macos', true],
   ['false', 'branch', 'refs/heads/main', false],
-  ['false', 'branch', 'refs/heads/stability/desktop-0.0.74-20260926', false],
-  ['false', 'tag', 'refs/tags/tono-macos-0.0.74-build74', false],
+  ['false', 'branch', 'refs/heads/stability/desktop-0.0.75-20261005', false],
+  ['false', 'tag', 'refs/tags/tono-macos-0.0.75-build75', false],
 ]
 cases.each do |candidate, type, ref, expected|
   output, status = Open3.capture2e(
@@ -97,9 +97,9 @@ source, status = Open3.capture2e('git', 'rev-parse', 'HEAD', chdir: root)
 abort 'cannot resolve the actual test checkout' unless status.success?
 source = source.strip
 environment = candidate_env.merge('CANDIDATE_ONLY' => 'true', 'GITHUB_SHA' => source,
-                                  'GITHUB_REF' => 'refs/heads/stability/desktop-0.0.74-20260926')
+                                  'GITHUB_REF' => 'refs/heads/stability/desktop-0.0.75-20261005')
 output, status = Open3.capture2e(environment, '/bin/bash', '-c', source_gate, chdir: root)
-abort "0.0.74 source must pass the second candidate gate:\n#{output}" unless status.success?
+abort "0.0.75 source must pass the second candidate gate:\n#{output}" unless status.success?
 _, status = Open3.capture2e(environment.merge('GITHUB_SHA' => '0' * 40), '/bin/bash', '-c', source_gate, chdir: root)
 abort 'candidate gate accepted a different source checkout' if status.success?
 
@@ -108,7 +108,7 @@ abort 'candidate provenance must stay candidate-only' unless manifest_step['if']
 signing_index = build_steps.index { |step| step['name'] == 'Build, sign and notarize the release archive' }
 abort 'candidate provenance must follow signing/notarization verification' unless signing_index && build_steps.index(manifest_step) > signing_index
 Dir.mktmpdir('tono-candidate-manifest-') do |directory|
-  name = 'Tono-0.0.74-build74-arm64'
+  name = 'Tono-0.0.75-build75-arm64'
   release = File.join(directory, 'release')
   contents = File.join(release, name + '.app', 'Contents')
   files = [name + '.zip', name + '.app/Contents/MacOS/Tono',
@@ -121,25 +121,25 @@ Dir.mktmpdir('tono-candidate-manifest-') do |directory|
   plist = <<~PLIST
     <?xml version="1.0" encoding="UTF-8"?>
     <plist version="1.0"><dict>
-    <key>CFBundleShortVersionString</key><string>0.0.74</string>
-    <key>CFBundleVersion</key><string>74</string>
+    <key>CFBundleShortVersionString</key><string>0.0.75</string>
+    <key>CFBundleVersion</key><string>75</string>
     </dict></plist>
   PLIST
   File.write(File.join(contents, 'Info.plist'), plist)
   manifest_env = environment.merge('RUNNER_TEMP' => directory, 'ARTIFACT_NAME' => name)
   output, status = Open3.capture2e(manifest_env, '/bin/bash', '-c', manifest_step.fetch('run'))
-  abort "0.0.74 artifact must pass the candidate manifest boundary:\n#{output}" unless status.success?
+  abort "0.0.75 artifact must pass the candidate manifest boundary:\n#{output}" unless status.success?
   report = JSON.parse(File.read(File.join(release, 'candidate-manifest.json')))
-  abort 'manifest must describe actual 0.0.74/build74 bytes and source' unless report.values_at('version', 'build', 'source') == ['0.0.74', 74, source]
+  abort 'manifest must describe actual 0.0.75/build75 bytes and source' unless report.values_at('version', 'build', 'source') == ['0.0.75', 75, source]
   abort 'candidate must not claim release or Sparkle authority' unless report.values_at('candidateOnly', 'releaseAccepted', 'sparkleSigned') == [true, false, false]
   expected_files = files.map { |relative| { 'name' => relative, 'sha256' => Digest::SHA256.file(File.join(release, relative)).hexdigest } }
   abort 'candidate manifest must fingerprint every shipped component' unless report['files'] == expected_files
   # Signing is NOT exercised here. Old bundle identity must fail before a new receipt is written.
-  File.write(File.join(contents, 'Info.plist'), plist.sub('0.0.74', '0.0.73').sub('>74<', '>73<'))
+  File.write(File.join(contents, 'Info.plist'), plist.sub('0.0.75', '0.0.74').sub('>75<', '>74<'))
   _, status = Open3.capture2e(manifest_env, '/bin/bash', '-c', manifest_step.fetch('run'))
-  abort 'candidate manifest accepted stale 0.0.73 artifact bytes' if status.success?
+  abort 'candidate manifest accepted stale 0.0.74 artifact bytes' if status.success?
 end
-puts 'macOS 0.0.74 candidate: exact checkout, source version, bundle identity and manifest digests verified (synthetic, unsigned fixtures)'
+puts 'macOS 0.0.75 candidate: exact checkout, source version, bundle identity and manifest digests verified (synthetic, unsigned fixtures)'
 
 # Signing material and the token reach only the steps that use them.
 signing_secret = /secrets\.(MACOS_DEVELOPER_ID_|APPLE_NOTARY_|MACOS_KEYCHAIN_|SPARKLE_ED_)/

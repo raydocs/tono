@@ -60,9 +60,9 @@ permissions:
 
 # Advance the reviewed candidate contract together; never admit arbitrary PR refs.
 env:
-  CANDIDATE_REF: refs/heads/stability/desktop-0.0.74-20260926
-  CANDIDATE_VERSION: '0.0.74'
-  CANDIDATE_BUILD: '74'
+  CANDIDATE_REF: refs/heads/stability/desktop-0.0.75-20261005
+  CANDIDATE_VERSION: '0.0.75'
+  CANDIDATE_BUILD: '75'
 
 concurrency:
   group: macos-release-${{ inputs.version }}

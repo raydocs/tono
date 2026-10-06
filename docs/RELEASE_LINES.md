@@ -32,14 +32,16 @@ format and the release script passes and verifies the exact source commit.
 
 ## Current source and published state
 
-Source versions in this tree are **macOS 0.0.74 (build 74)** and **Windows
-0.0.74**. That is not a claim that either candidate is notarised, signed for
+Source versions in this tree are **macOS 0.0.75 (build 75)** and **Windows
+0.0.75**. That is not a claim that either candidate is notarised, signed for
 customers, or present on a live update feed. Publication and channel
 promotion are separate gated operations; see
-`apps/macos/release-notes/build74.md` and
-`apps/windows/release-notes/0.0.74.md`. The customer release is 0.0.74 because
-`tono-macos-0.0.73-build73` already points at older source (`bdc75a4e`) and
-`v0.0.73` holds an older draft; neither is moved or reused.
+`apps/macos/release-notes/build75.md` and
+`apps/windows/release-notes/0.0.75.md`. The customer release is 0.0.75: 0.0.74 was
+frozen and built (candidate 7403) but never accepted on the owner's devices or
+published, and the owner retargeted on 2026-10-05 ([decision 061](decisions/061-2026-10-05-release-is-0075.md)). Its `v0.0.74`
+draft, `tono-macos-0.0.73-build73` (older source `bdc75a4e`) and the `v0.0.73` draft
+are not moved or reused.
 
 In-tree customer feeds in this checkout (what a control-plane deploy of
 *this* commit would serve) are Sparkle `public/appcast.xml` at **0.0.67**
@@ -49,9 +51,9 @@ newer published installer from the source version.
 The first customer publication after 0.0.67 / 0.0.34 is gated by
 [SHIP_PLAN.md](SHIP_PLAN.md): Connected-means-usable, a next step on
 connect failure, a proven protected update journal, then feed promotion
-as **0.0.74**. Sparkle and `windows-updates` advance only after the owner
-has recorded G1–G3 evidence (for 0.0.74: G1 and G2; G3 moves to 0.0.75, see
-[0.0.74 defers G3](decisions/019-2026-09-26-release-0074-defers-g3.md)) in SHIP_PLAN §6; agents then run G4 per
+as **0.0.75**. Sparkle and `windows-updates` advance only after the owner
+has recorded G1–G3 evidence (for 0.0.75: G1 and G2; G3 moves to 0.0.76, see
+[0.0.74 defers G3](decisions/019-2026-09-26-release-0074-defers-g3.md) carried by [decision 061](decisions/061-2026-10-05-release-is-0075.md)) in SHIP_PLAN §6; agents then run G4 per
 [AGENTS.md](../AGENTS.md). GitHub `v0.0.72` / `tono-macos-0.0.72-build72`
 tags are not those feeds.
 
@@ -107,11 +109,11 @@ If it already happened, reinstalling 0.0.73+ repairs NRPT and encrypted DNS.
 ## Customer publish (G4)
 
 When an agent may start is set in [AGENTS.md](../AGENTS.md) (owner-written G1–G3
-evidence in SHIP_PLAN §6; for 0.0.74 G1 and G2 only). Record each step's run URL, SHA and artifact hashes in the publish's
+evidence in SHIP_PLAN §6; for 0.0.75 G1 and G2 only). Record each step's run URL, SHA and artifact hashes in the publish's
 `docs/changelog.d/` entry ([format](changelog.d/README.md)).
 
 - **Candidate identity.** Before customer promotion, match the release's source SHA,
-  version/build and package hashes to the candidate the owner's G1–G3 evidence (0.0.74: G1–G2) names.
+  version/build and package hashes to the candidate the owner's G1–G3 evidence (0.0.75: G1–G2) names.
   A changed candidate does not reuse that acceptance; it needs new owner evidence.
   The one exception is rebuilding an already-published good source as a higher build
   for rollback.
@@ -124,7 +126,7 @@ evidence in SHIP_PLAN §6; for 0.0.74 G1 and G2 only). Record each step's run UR
 Both platforms publish the accepted bytes; nothing is rebuilt at publish time. Release
 builds are dispatched with `update_release_sequence` (both workflows refuse an empty
 value, because bytes without a v1 installed floor refuse every later v1 update). For
-0.0.74 the tags are `tono-macos-0.0.74-build74` and `v0.0.74`.
+0.0.75 the tags are `tono-macos-0.0.75-build75` and `v0.0.75`.
 
 **macOS.** This composite is documented in `macos-release.yml`'s step summary and
 has not yet run end to end.
@@ -179,7 +181,7 @@ configured separately and is still untested. By owner decision of 2026-09-28
 themselves (`windows-release` for any candidate, `windows-update-channel` at G4); none waits
 for the owner. Record each approval (run URL, environment, candidate SHA and release
 sequence) in the changelog. The customer-publish precondition is unchanged: the owner's
-`[x]` for G1–G2 in SHIP_PLAN §6 (0.0.74), and only the candidate that evidence names.
+`[x]` for G1–G2 in SHIP_PLAN §6 (0.0.75), and only the candidate that evidence names.
 
 **Rollback.** Moving a feed back to the last good entry only stops machines that
 have not updated yet. Updated machines refuse a lower build or release sequence on
