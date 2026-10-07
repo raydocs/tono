@@ -148,6 +148,51 @@ final class MacSeaPolishRenderTests: XCTestCase {
         XCTAssertEqual(scene.layer?.sublayers?.first?.speed, 1)
     }
 
+    func testNativeResizeCoverageBeforeAndAfterCachedTreeRebuild() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["TONO_HOSTED_WINDOW_DIAGNOSTIC"] == "1",
+                          "native resize evidence requires the hosted WindowServer")
+        try XCTSkipUnless(Locale.preferredLanguages.first?.hasPrefix("zh") != true,
+                          "shared resize evidence is in the English run")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let old = AppProfile.defaults.object(forKey: SeaAppearance.motionKey)
+        AppProfile.defaults.set("Full", forKey: SeaAppearance.motionKey)
+        defer {
+            if let old { AppProfile.defaults.set(old, forKey: SeaAppearance.motionKey) }
+            else { AppProfile.defaults.removeObject(forKey: SeaAppearance.motionKey) }
+        }
+        let fixture = try makeFixture()
+        defer { fixture.clean() }
+        set("connected", app: fixture.app)
+        let (window, host) = try await makeWindow(size: CGSize(width: 1000, height: 680),
+                                                app: fixture.app, account: fixture.account)
+        defer { close(window) }
+        let scene = try XCTUnwrap(findScene(host))
+        let tree = try XCTUnwrap(scene.layer?.sublayers?.first)
+        let grain = try XCTUnwrap(tree.sublayers?.first(where: { $0.name == "grain" }))
+        try await capture("polish-b-resize-original", window: window)
+        // Real AppKit window sizing with the native view's live-resize lifecycle;
+        // no synthetic image resize. The fixture, not an installed WindowGroup,
+        // owns these requested frames, as in every whole-window capture above.
+        scene.viewWillStartLiveResize()
+        (window as? MacSeaPolishWindow)?.requestedSize = CGSize(width: 1280, height: 720)
+        sizeNativeWindow(window, outerSize: CGSize(width: 1280, height: 720))
+        host.layoutSubtreeIfNeeded()
+        XCTAssertTrue(tree.sublayers?.contains(where: { $0 === grain }) == true)
+        try await capture("polish-b-resize-growing-cached", window: window)
+        scene.viewDidEndLiveResize()
+        host.layoutSubtreeIfNeeded()
+        try await capture("polish-b-resize-growing-rebuilt", window: window)
+        scene.viewWillStartLiveResize()
+        (window as? MacSeaPolishWindow)?.requestedSize = CGSize(width: 920, height: 600)
+        sizeNativeWindow(window, outerSize: CGSize(width: 920, height: 600))
+        host.layoutSubtreeIfNeeded()
+        try await capture("polish-b-resize-shrinking-cached", window: window)
+        scene.viewDidEndLiveResize()
+        host.layoutSubtreeIfNeeded()
+        try await capture("polish-b-resize-shrinking-rebuilt", window: window)
+        XCTAssertTrue(CATransform3DIsIdentity(tree.sublayerTransform))
+    }
+
     private struct FixtureState {
         let app: AppState
         let account: AccountSession

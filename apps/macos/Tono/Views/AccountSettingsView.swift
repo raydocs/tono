@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AccountSettingsCard: View {
     @Bindable var session: AccountSession
+    @Environment(\.seaAccent) private var seaAccent
     @SeaAppearancePreference private var seaEnabled
 
     var body: some View {
@@ -34,7 +35,7 @@ struct AccountSettingsCard: View {
                             GeometryReader { geometry in
                                 ZStack(alignment: .leading) {
                                     Capsule().fill(.white.opacity(0.10))
-                                    Capsule().fill(SeaTheme.warm)
+                                    Capsule().fill(seaAccent)
                                         .frame(width: geometry.size.width * min(Double(usage) / Double(quota), 1))
                                 }
                             }
@@ -43,16 +44,16 @@ struct AccountSettingsCard: View {
                             .accessibilityValue("\(ByteCountFormatter.string(fromByteCount: usage, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: quota, countStyle: .file))")
                         }
                     }
-                    Divider()
+                    Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
                     Text("Devices")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(SeaTheme.text)
                     ForEach(session.devices) { device in
                         HStack(spacing: 10) {
                             Image(systemName: "desktopcomputer")
-                                .foregroundStyle(SeaTheme.cool)
+                                .foregroundStyle(seaAccent)
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(device.name).foregroundStyle(SeaTheme.text)
+                                Text(device.name).font(.system(size: 15)).foregroundStyle(SeaTheme.text)
                                 if let seen = device.lastSeenAt {
                                     Text("Last seen \(seen.formatted(.relative(presentation: .named)))")
                                         .font(.caption).foregroundStyle(SeaTheme.muted)
@@ -60,27 +61,29 @@ struct AccountSettingsCard: View {
                             }
                             Spacer()
                             if device.id == session.device?.id || device.current == true {
-                                Text("This Mac")
-                                    .font(.caption).foregroundStyle(SeaTheme.cool)
+                                SeaTag(title: "This Mac")
                             } else {
                                 Button("Revoke", role: .destructive) {
                                     Task { await session.revoke(device) }
                                 }
+                                .buttonStyle(SeaButtonStyle(variant: .danger, size: .row))
                             }
                         }
+                        .frame(minHeight: 52)
+                        .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.06)).frame(height: 1) }
                     }
                     if let error = session.deviceActionError {
                         Label(error, systemImage: "exclamationmark.circle")
                             .font(.callout).foregroundStyle(SeaTheme.danger)
                     }
                     if session.isAtDeviceLimit {
-                        Label("\(session.deviceLimit)-device limit reached", systemImage: "info.circle")
-                            .foregroundStyle(SeaTheme.warm)
+                        SeaTag(title: "\(session.deviceLimit)-device limit reached", kind: .attention)
                     }
-                    Divider()
+                    Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
                     Button("Sign Out", role: .destructive) {
                         Task { await session.logout() }
                     }
+                    .buttonStyle(SeaButtonStyle(variant: .danger))
                 }
             }
         } else {
@@ -130,7 +133,7 @@ struct AccountSettingsCard: View {
     private func seaFact(_ label: LocalizedStringKey, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(.system(size: 11)).foregroundStyle(SeaTheme.muted)
-            Text(value).font(.system(size: 12, weight: .medium)).foregroundStyle(SeaTheme.text)
+            Text(value).font(.system(size: 12, weight: .medium)).monospacedDigit().foregroundStyle(SeaTheme.text)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

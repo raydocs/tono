@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SidebarView: View {
+    @Environment(\.seaAccent) private var seaAccent
     @SeaAppearancePreference private var seaAppearance
     @Binding var selectedPage: AppPage
     @AppStorage(SettingsKey.logsEnabled) private var logsEnabled = true
@@ -131,7 +132,7 @@ struct SidebarView: View {
                     Capsule()
                         .fill(
                             LinearGradient(
-                                colors: seaAppearance ? [SeaTheme.cool, SeaTheme.cool.opacity(0.65)] : [TonoBrand.accent, TonoBrand.accentSoft],
+                                colors: seaAppearance ? [seaAccent, seaAccent.opacity(0.65)] : [TonoBrand.accent, TonoBrand.accentSoft],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )

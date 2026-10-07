@@ -41,6 +41,7 @@ struct MenuBarView: View {
             if seaAppearance { SeaSecondaryScene() }
         }
         .modifier(SeaPageAppearance())
+        .environment(\.seaAccent, SeaPresentationPhase.resolve(status: status.kind, disconnecting: appState.isDisconnecting, failed: appState.lastConnectionFailure != nil) == .day ? SeaTheme.warm : SeaTheme.cool)
         .confirmationDialog(String(localized: "Connect using this route?"), isPresented: $showingRouteConfirmation, titleVisibility: .visible) {
             Button("Connect") {
                 guard let routeProposal, routeProposal.owner == accountSession.user?.id,
@@ -157,7 +158,7 @@ struct MenuBarView: View {
                 }
                 .disabled(!canAct)
                 if appState.shouldOfferManualBackupChannel() {
-                    actionButton(title: "Try backup channel", prominent: true) {
+                    actionButton(title: "Try backup channel", prominent: true, seaVariant: .quiet) {
                         appState.tryBackupChannelManually()
                     }
                     .disabled(!canAct)
@@ -181,7 +182,7 @@ struct MenuBarView: View {
                 }
                 .disabled(!canAct)
                 if appState.shouldOfferManualBackupChannel() {
-                    actionButton(title: "Try backup channel", prominent: true) {
+                    actionButton(title: "Try backup channel", prominent: true, seaVariant: .quiet) {
                         appState.tryBackupChannelManually()
                     }
                     .disabled(!canAct)
@@ -201,34 +202,38 @@ struct MenuBarView: View {
             }
         } label: {
             Text("Restore internet (turn off protection)")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: seaAppearance ? 15 : 12, weight: .medium))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .modifier(SeaActionStyle(variant: .text, size: .row))
         .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .padding(.vertical, seaAppearance ? 0 : 6)
     }
 
     private func actionButton(
         title: LocalizedStringKey,
         prominent: Bool,
+        seaVariant: SeaButtonVariant? = nil,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        let seaStyle = seaVariant ?? (prominent ? SeaButtonVariant.primary : .quiet)
+        return Button(action: action) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: seaAppearance ? 15 : 12, weight: seaAppearance ? .medium : .semibold))
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+                .padding(.vertical, seaAppearance ? 0 : 8)
                 .background {
-                    Capsule().fill(prominent
-                        ? (seaAppearance ? AnyShapeStyle(SeaTheme.primaryGradient) : AnyShapeStyle(TonoBrand.accent.opacity(0.92)))
-                        : AnyShapeStyle(Color.primary.opacity(0.06)))
+                    if !seaAppearance {
+                        Capsule().fill(prominent
+                            ? AnyShapeStyle(TonoBrand.accent.opacity(0.92))
+                            : AnyShapeStyle(Color.primary.opacity(0.06)))
+                    }
                 }
-                .foregroundStyle(prominent ? (seaAppearance ? SeaTheme.ink : Color.white) : Color.primary)
+                .foregroundStyle(seaAppearance ? (seaStyle == .primary ? SeaTheme.ink : SeaTheme.text) : (prominent ? Color.white : Color.primary))
                 .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .modifier(SeaActionStyle(variant: seaStyle))
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
     }
@@ -284,13 +289,13 @@ struct MenuBarView: View {
     private var openTonoButton: some View {
         Button(action: openMainWindow) {
             Label("Open Tono", systemImage: "macwindow")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: seaAppearance ? 15 : 12, weight: .medium))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .modifier(SeaActionStyle(variant: .text, size: .row))
         .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .padding(.vertical, seaAppearance ? 0 : 6)
     }
 
     private var quitButton: some View {
@@ -298,13 +303,13 @@ struct MenuBarView: View {
             NSApp.terminate(nil)
         } label: {
             Label("Quit Tono", systemImage: "power")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: seaAppearance ? 15 : 12, weight: .medium))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .modifier(SeaActionStyle(variant: .danger, size: .row))
         .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .padding(.vertical, seaAppearance ? 0 : 6)
     }
 
     private var menuDivider: some View {

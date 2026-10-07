@@ -5,6 +5,9 @@ import AppKit
 struct LogsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.seaAccent) private var seaAccent
+    @SeaAppearancePreference private var seaEnabled
+    @FocusState private var searchFocused
     @State private var searchText: String = ""
     @State private var levelFilter: String?
 
@@ -107,17 +110,18 @@ struct LogsView: View {
                             }
                             .buttonStyle(.plain)
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(TonoBrand.accent)
+                            .foregroundStyle(seaEnabled ? seaAccent : TonoBrand.accent)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: RoundedRectangle(cornerRadius: 20))
+            .background(.white.opacity(seaEnabled ? 0 : (colorScheme == .dark ? 0.08 : 0.4)), in: RoundedRectangle(cornerRadius: 20))
             .overlay(
                 RoundedRectangle(cornerRadius: 20)
-                    .strokeBorder(.white.opacity(colorScheme == .dark ? 0.12 : 0.7), lineWidth: 0.5)
+                    .strokeBorder(.white.opacity(seaEnabled ? 0 : (colorScheme == .dark ? 0.12 : 0.7)), lineWidth: 0.5)
             )
+            .modifier(SeaPanelSurface())
         }
         .padding(.horizontal, 32)
         .padding(.vertical, 16)
@@ -134,18 +138,29 @@ struct LogsView: View {
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(.primary)
 
+                if seaEnabled {
+                    SeaTag(title: "\(appState.logEntries.count) entries")
+                } else {
                 Text("\(appState.logEntries.count) entries")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: seaEnabled ? 15 : 12, weight: .medium))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
                     .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
+                }
             }
 
             Spacer()
 
             HStack(spacing: 10) {
                 // Search
+                if seaEnabled {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(SeaTheme.muted)
+                        TextField("Filter logs...", text: $searchText)
+                            .textFieldStyle(.plain).focused($searchFocused).frame(width: 160)
+                    }.modifier(SeaFieldSurface(focused: searchFocused))
+                } else {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 11))
@@ -159,6 +174,7 @@ struct LogsView: View {
                 .padding(.vertical, 6)
                 .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
                 .overlay(Capsule().strokeBorder(.white.opacity(colorScheme == .dark ? 0.12 : 0.5), lineWidth: 0.5))
+                }
 
                 // Export logs
                 Button {
@@ -168,16 +184,16 @@ struct LogsView: View {
                         Image(systemName: "square.and.arrow.down")
                             .font(.system(size: 11))
                         Text("Export")
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: seaEnabled ? 15 : 12, weight: .medium))
                     }
                     .foregroundStyle(.primary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
-                    .overlay(Capsule().strokeBorder(.white.opacity(colorScheme == .dark ? 0.12 : 0.5), lineWidth: 0.5))
+                    .padding(.horizontal, seaEnabled ? 0 : 12)
+                    .padding(.vertical, seaEnabled ? 0 : 6)
+                    .background(seaEnabled ? .clear : .white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
+                    .overlay(Capsule().strokeBorder(.white.opacity(seaEnabled ? 0 : (colorScheme == .dark ? 0.12 : 0.5)), lineWidth: 0.5))
                     .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .modifier(SeaActionStyle(variant: .quiet, size: .row))
                 .fixedSize()
 
                 // Clear
@@ -188,16 +204,16 @@ struct LogsView: View {
                         Image(systemName: "trash")
                             .font(.system(size: 11))
                         Text("Clear")
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: seaEnabled ? 15 : 12, weight: .medium))
                     }
-                    .foregroundStyle(Color(hex: "FF6E52"))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+                    .foregroundStyle(seaEnabled ? SeaTheme.danger : Color(hex: "FF6E52"))
+                    .padding(.horizontal, seaEnabled ? 0 : 12)
+                    .padding(.vertical, seaEnabled ? 0 : 6)
                     .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
-                    .overlay(Capsule().strokeBorder(Color(hex: "FF6E52").opacity(0.3), lineWidth: 0.5))
+                    .overlay(Capsule().strokeBorder(Color(hex: "FF6E52").opacity(seaEnabled ? 0 : 0.3), lineWidth: 0.5))
                     .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .modifier(SeaActionStyle(variant: .danger, size: .row))
                 .fixedSize()
             }
         }
@@ -241,7 +257,7 @@ struct LogsView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .background(
-                isOn ? TonoBrand.accent.opacity(0.14) : .clear,
+                isOn ? (seaEnabled ? seaAccent : TonoBrand.accent).opacity(0.14) : .clear,
                 in: Capsule()
             )
             .contentShape(Capsule())
@@ -254,12 +270,12 @@ struct LogsView: View {
     private func logRow(_ entry: LogEntry) -> some View {
         HStack(spacing: 0) {
             Text(entry.formattedTime)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: seaEnabled ? .default : .monospaced)).monospacedDigit()
                 .foregroundStyle(.secondary)
                 .frame(width: 100, alignment: .leading)
 
             Text(entry.level.uppercased())
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.system(size: 10, weight: .semibold, design: seaEnabled ? .default : .monospaced))
                 .foregroundStyle(levelTint(entry.level))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
@@ -267,7 +283,7 @@ struct LogsView: View {
                 .frame(width: 80, alignment: .leading)
 
             Text(entry.message)
-                .font(.system(size: 12, design: .monospaced))
+                .font(.system(size: 12, design: seaEnabled ? .default : .monospaced))
                 .foregroundStyle(.primary)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
