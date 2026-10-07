@@ -1144,8 +1144,12 @@ fn restore_proof_reads_the_effective_resolver_not_the_restored_registry() -> Res
     test_io::with(|io| io.adapters[0].dns_servers = None);
     assert!(any_loopback(&guids).is_err());
 
-    // Positive control: once the DNS Client uses the user's own servers again, it proves.
-    test_io::with(|io| io.adapters[0].dns_servers = Some(vec!["9.9.9.9".parse().unwrap()]));
+    // Positive control: once the DNS Client uses the user's own servers again — here a local
+    // resolver with a public fallback, which is not Tono's — it proves.
+    test_io::with(|io| {
+        io.adapters[0].dns_servers =
+            Some(vec!["127.0.0.1".parse().unwrap(), "9.9.9.9".parse().unwrap()]);
+    });
     let live = any_loopback(&guids)?;
     assert!(facade::restore_is_proven(&fixture.originals, &current, Some(live)));
     Ok(())
