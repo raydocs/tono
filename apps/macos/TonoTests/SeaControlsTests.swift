@@ -30,7 +30,7 @@ final class SeaControlsTests: XCTestCase {
         let window = mount(host)
         defer { window.orderOut(nil); window.close() }
         let toggle = try await element(named: "B fixture toggle", in: host)
-        XCTAssertTrue(toggle.accessibilityPerformPress())
+        XCTAssertTrue(press(toggle))
         XCTAssertTrue(enabled)
     }
 
@@ -43,7 +43,7 @@ final class SeaControlsTests: XCTestCase {
         let window = mount(host)
         defer { window.orderOut(nil); window.close() }
         let option = try await element(named: "Second", in: host)
-        XCTAssertTrue(option.accessibilityPerformPress())
+        XCTAssertTrue(press(option))
         XCTAssertEqual(selected, "Second")
         XCTAssertEqual(writes, 1)
     }
@@ -59,7 +59,7 @@ final class SeaControlsTests: XCTestCase {
         return window
     }
 
-    private func element(named name: String, in host: NSView) async throws -> any NSAccessibilityProtocol {
+    private func element(named name: String, in host: NSView) async throws -> NSObject {
         // Only the fixture's untyped child tree; no system AX permission or
         // typed navigation-order bridge (which older SwiftUI hosts can crash).
         var diagnostics: [String] = []
@@ -73,15 +73,22 @@ final class SeaControlsTests: XCTestCase {
                 guard visited.insert(ObjectIdentifier(next)).inserted else { continue }
                 let full = next as? any NSAccessibilityProtocol
                 let object = next as? NSObject
-                let label = full?.accessibilityLabel()
-                    ?? (object?.accessibilityAttributeValue(.description) as? String)
-                    ?? (object?.accessibilityAttributeValue(.title) as? String)
-                let value = full?.accessibilityValue() as? String
-                    ?? (object?.accessibilityAttributeValue(.value) as? String)
-                diagnostics.append("type=\(type(of: next)) label=\(label ?? "") value=\(value ?? "") full=\(full != nil)")
-                if label == name || value == name, let full { return full }
-                let children = full?.accessibilityChildren()
-                    ?? (object?.accessibilityAttributeValue(.children) as? [Any]) ?? []
+                let labels = [full?.accessibilityLabel(),
+                    modernValue("accessibilityLabel", of: object) as? String,
+                    object?.accessibilityAttributeValue(.description) as? String,
+                    object?.accessibilityAttributeValue(.title) as? String,
+                    full?.accessibilityValue() as? String,
+                    modernValue("accessibilityValue", of: object) as? String]
+                    .compactMap { $0 }
+                diagnostics.append("type=\(type(of: next)) labels=\(labels) full=\(full != nil) modernChildren=\(object?.responds(to: NSSelectorFromString("accessibilityChildren")) == true)")
+                if labels.contains(name), let object { return object }
+                var children = full?.accessibilityChildren() ?? []
+                if children.isEmpty {
+                    children = modernValue("accessibilityChildren", of: object) as? [Any] ?? []
+                }
+                if children.isEmpty {
+                    children = object?.accessibilityAttributeValue(.children) as? [Any] ?? []
+                }
                 queue += children.compactMap { $0 as? NSObject }
             }
             try await Task.sleep(for: .milliseconds(25))
@@ -94,5 +101,25 @@ final class SeaControlsTests: XCTestCase {
         print("SeaControls AX \(name):\n\(raw)")
         XCTFail("Native accessible control missing: \(name)")
         throw NSError(domain: "SeaControlsTests", code: 1)
+    }
+
+    private func modernValue(_ name: String, of object: NSObject?) -> AnyObject? {
+        // SwiftUI can vend public role-based AX elements without declaring
+        // the entire NSAccessibilityProtocol. Use the documented id-returning
+        // selectors, not private proxy members or the typed navigation array.
+        let selector = NSSelectorFromString(name)
+        guard let object, object.responds(to: selector) else { return nil }
+        return object.perform(selector)?.takeUnretainedValue()
+    }
+
+    private func press(_ object: NSObject) -> Bool {
+        if let full = object as? any NSAccessibilityProtocol { return full.accessibilityPerformPress() }
+        if let button = object as? any NSAccessibilityButton { return button.accessibilityPerformPress() }
+        let selector = NSSelectorFromString("accessibilityPerformPress")
+        guard object.responds(to: selector), let implementation = object.method(for: selector) else { return false }
+        // accessibilityPerformPress is a documented BOOL-returning selector;
+        // perform(_:) cannot be used for a non-object return value.
+        typealias Press = @convention(c) (AnyObject, Selector) -> Bool
+        return unsafeBitCast(implementation, to: Press.self)(object, selector)
     }
 }
