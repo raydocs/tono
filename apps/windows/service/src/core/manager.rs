@@ -818,6 +818,8 @@ impl CoreManager {
             let mut shutdown_rx = shutdown_rx;
             let mut restart_timestamps: Vec<Instant> = Vec::new();
             let mut consecutive_attempt = 0u32;
+            // The config file the current process was started from (#1258).
+            let mut running_document = config.core_config.config_path.clone();
 
             'watchdog: loop {
                 let Some(mut current_guard) = child_guard.take() else {
@@ -961,16 +963,39 @@ impl CoreManager {
                         // Watchdog restart is not successor recovery authority.
                         break 'watchdog;
                     }
-                    let args = core_args(&config);
+                    // #1258: sing-box's fake-IP table died with the process. Restarting on the
+                    // same range would hand addresses apps still cache to other names.
+                    let respawn = match crate::core::sing_box_fake_ip::respawn_config(
+                        &config,
+                        &running_document,
+                    )
+                    .await
+                    {
+                        Ok(respawn) => respawn,
+                        Err(error) => {
+                            error!(
+                                "Refusing Core respawn on the exited process's fake-IP slot: {error:#}"
+                            );
+                            consecutive_attempt += 1;
+                            let now = Instant::now();
+                            restart_timestamps.retain(|timestamp| {
+                                now.duration_since(*timestamp) < watchdog_config.restart_window
+                            });
+                            restart_timestamps.push(now);
+                            continue;
+                        }
+                    };
+                    let args = core_args(&respawn);
                     match run_with_logging(
-                        &config.core_config.core_path,
+                        &respawn.core_config.core_path,
                         &args,
-                        &config.log_config,
+                        &respawn.log_config,
                         &owner,
                     )
                     .await
                     {
                         Ok(mut new_guard) => {
+                            running_document = respawn.core_config.config_path;
                             let new_pid = new_guard.id();
                             if let Err(error) = secure_core_ipc_for(&config, &owner, new_pid).await
                             {

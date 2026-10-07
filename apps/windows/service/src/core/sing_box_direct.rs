@@ -59,12 +59,24 @@ pub(crate) async fn replace_running_sing_box_document(
     let Some(error) = failed else {
         return Ok(());
     };
+    // The document the watchdog last restarted, which may be what ran before
+    // the replacement. Its fake-IP slot is left as well (#1258).
+    let respawned =
+        crate::core::sing_box_fake_ip::respawned_document(&config.core_config.config_path).await;
     if restore_previous {
+        let previous = crate::core::sing_box_fake_ip::retained_document(
+            &previous,
+            &[document.as_bytes(), respawned.as_slice()],
+        );
         restore_or_release(&path, &previous, &config, owner, error).await
     } else {
         // The caller asked for the full-tunnel document. Retry that document
         // only. Writing `previous` back would revive DIRECT rules.
-        retry_requested_or_release(&path, document, &config, owner, error).await
+        let document = crate::core::sing_box_fake_ip::retained_document(
+            document.as_bytes(),
+            &[previous.as_slice(), respawned.as_slice()],
+        );
+        retry_requested_or_release(&path, &document, &config, owner, error).await
     }
 }
 
@@ -97,12 +109,12 @@ async fn restore_or_release(
 
 async fn retry_requested_or_release(
     path: &Path,
-    document: &str,
+    document: &[u8],
     config: &ClashConfig,
     owner: &OwnerIdentity,
     error: anyhow::Error,
 ) -> Result<()> {
-    let started = if write_document(path, document.as_bytes()).await.is_ok() {
+    let started = if write_document(path, document).await.is_ok() {
         let manager = CORE_MANAGER.lock().await;
         manager.start_core(config.clone(), owner.clone()).await
     } else {
@@ -171,7 +183,7 @@ async fn release_general_traffic(error: anyhow::Error) -> Result<()> {
     }
 }
 
-async fn write_document(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) async fn write_document(path: &Path, bytes: &[u8]) -> Result<()> {
     let tmp = path.with_extension("json.sing-next");
     tokio::fs::write(&tmp, bytes)
         .await

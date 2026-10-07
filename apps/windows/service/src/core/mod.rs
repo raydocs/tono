@@ -74,6 +74,8 @@ mod selective_layer;
 mod server;
 #[cfg(feature = "standalone")]
 mod sing_box_direct;
+#[cfg(feature = "standalone")]
+mod sing_box_fake_ip;
 #[cfg(any(feature = "standalone", feature = "client"))]
 mod sing_box_runtime;
 #[cfg(any(feature = "standalone", feature = "client"))]
