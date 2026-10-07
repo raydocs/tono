@@ -1446,6 +1446,52 @@ fn recover_unpublished_previous_service(
     collected_failures("failed to recover the unchanged previous Service", failures)
 }
 
+/// #815: a Service-only repair whose published replacement did not start or become ready puts the
+/// previous executable back before restarting. `stop` stops the replacement and proves its owner
+/// is gone; `restart` restores SCM recovery and starts what is installed when the Service was
+/// running before. A restore that fails still restarts (the old best effort) and keeps the
+/// recovery copy; a restored predecessor leaves none behind to refuse the next repair.
+#[cfg(windows)]
+fn restore_predecessor_after_failed_start<Owner>(
+    start_error: Error,
+    predecessor: Option<&mut CoordinatedBinaryReplacement>,
+    stop: impl FnOnce() -> Result<Owner, Error>,
+    restart: impl FnOnce(Owner) -> Result<(), Error>,
+) -> Error {
+    eprintln!("replacement Service did not become ready; restoring the previous executable: {start_error:#}");
+    let owner = match stop() {
+        Ok(owner) => owner,
+        Err(error) => {
+            return start_error.context(format!(
+                "the replacement Service could not be stopped to restore the previous executable: {error:#}"
+            ));
+        }
+    };
+    let restored = match predecessor {
+        Some(predecessor) => predecessor.rollback().map(|()| predecessor),
+        None => Err(anyhow::anyhow!(
+            "no previous Service executable existed to restore"
+        )),
+    };
+    let restarted = restart(owner);
+    match (restored, restarted) {
+        (Ok(predecessor), Ok(())) => {
+            predecessor.cleanup();
+            start_error.context("the previous Service executable was restored and restarted")
+        }
+        (Ok(predecessor), Err(error)) => {
+            predecessor.cleanup();
+            start_error.context(format!(
+                "the previous Service executable was restored but did not restart: {error:#}"
+            ))
+        }
+        (Err(error), restarted) => start_error.context(format!(
+            "the previous Service executable could not be restored ({error:#}); restart: {}",
+            restarted.map_or_else(|error| format!("{error:#}"), |()| "ok".to_owned())
+        )),
+    }
+}
+
 #[cfg(windows)]
 fn set_windows_service_on_demand(
     service: &platform_lib::service::Service,
@@ -2367,25 +2413,64 @@ fn main() -> anyhow::Result<()> {
             // would abort the install on top of a half-swapped binary.
             match service.change_config(&service_info) {
                 Ok(()) => {
+                    // #815: keep the predecessor until the replacement proves ready. Only a
+                    // missing executable, which is what a repair exists for, has none to keep.
+                    let mut predecessor = match std::fs::symlink_metadata(&target) {
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                        _ => Some(CoordinatedBinaryReplacement::prepare(
+                            &staged,
+                            &target,
+                            sha256(&staged)?,
+                        )?),
+                    };
                     let publish_outcome = publish_staged_binary(&staged, &target)?;
+                    if publish_outcome == PublishOutcome::Published {
+                        // A blind restart now runs the replacement; it is not a rollback.
+                        restart_on_failure.disarm();
+                        let started = (|| -> Result<(), Error> {
+                            configure_windows_service_recovery(&service)?;
+                            service.start(&Vec::<&OsStr>::new())?;
+                            wait_for_service_ready()
+                        })();
+                        if let Err(start_error) = started {
+                            return Err(restore_predecessor_after_failed_start(
+                                start_error,
+                                predecessor.as_mut(),
+                                || {
+                                    suppress_windows_service_recovery(&service)?;
+                                    stop_windows_service(&service)?;
+                                    acquire_windows_replacement_owner()
+                                },
+                                |owner| {
+                                    recover_unpublished_previous_service(
+                                        &service,
+                                        was_active,
+                                        &mut Some(owner),
+                                    )
+                                },
+                            ));
+                        }
+                        if let Some(predecessor) = &predecessor {
+                            predecessor.cleanup();
+                        }
+                        return Ok(());
+                    }
+                    // The swap is queued for reboot: the old binary stays in place, and its
+                    // recovery copy would outlive the queued rename.
+                    if let Some(predecessor) = &predecessor {
+                        predecessor.cleanup_with_staged_retained(true);
+                    }
                     configure_windows_service_recovery(&service)?;
                     service.start(&Vec::<&OsStr>::new())?;
-                    // The service is running on either path here — the old binary when the swap
-                    // was deferred — so liveness stays provable, and a build that dies on start
-                    // must not pass as a successful "reboot pending" install.
-                    if publish_outcome == PublishOutcome::RebootRequired {
-                        wait_for_previous_service_liveness()?;
-                    } else {
-                        wait_for_service_ready()?;
-                    }
+                    // The service is running the old binary here, so liveness stays provable,
+                    // and a build that dies on start must not pass as a successful "reboot
+                    // pending" install.
+                    wait_for_previous_service_liveness()?;
                     restart_on_failure.disarm();
-                    if publish_outcome == PublishOutcome::RebootRequired {
-                        println!(
-                            "Service restarted with the existing binary; reboot is required to publish the replacement."
-                        );
-                        std::process::exit(3010);
-                    }
-                    return Ok(());
+                    println!(
+                        "Service restarted with the existing binary; reboot is required to publish the replacement."
+                    );
+                    std::process::exit(3010);
                 }
                 Err(error) if raw_error_code(&error) == Some(ERROR_SERVICE_MARKED_FOR_DELETE) => {
                     // Nothing irreversible has run yet. SCM unregisters a deleted record only
@@ -2834,6 +2919,48 @@ mod tests {
         replacement.cleanup();
         assert!(!replacement.backup.exists());
         assert!(!replacement.restore.exists());
+    }
+
+    /// #815: a Service-only repair whose published replacement never became ready stops it,
+    /// puts the previous executable back before the restart, and leaves no recovery copy behind.
+    #[cfg(windows)]
+    #[test]
+    fn service_repair_restores_the_previous_executable_when_the_replacement_is_not_ready() {
+        let directory = TransactionTestDirectory::new("service-repair-restore");
+        let target = directory.0.join("tono-service.exe");
+        let staged = target.with_extension("exe.next");
+        std::fs::write(&target, b"old-service").unwrap();
+        std::fs::write(&staged, b"new-service").unwrap();
+        let mut predecessor =
+            CoordinatedBinaryReplacement::prepare(&staged, &target, sha256(&staged).unwrap())
+                .unwrap();
+        assert_eq!(
+            publish_staged_binary(&staged, &target).unwrap(),
+            PublishOutcome::Published
+        );
+        assert_eq!(std::fs::read(&target).unwrap(), b"new-service");
+
+        let events = std::cell::RefCell::new(Vec::new());
+        let error = restore_predecessor_after_failed_start(
+            anyhow::anyhow!("service IPC did not become protocol-ready"),
+            Some(&mut predecessor),
+            || {
+                events.borrow_mut().push("stop".to_owned());
+                Ok(())
+            },
+            |()| {
+                let installed = std::fs::read(&target).unwrap();
+                events
+                    .borrow_mut()
+                    .push(format!("restart {}", String::from_utf8_lossy(&installed)));
+                Ok(())
+            },
+        );
+
+        assert_eq!(*events.borrow(), ["stop", "restart old-service"]);
+        assert_eq!(std::fs::read(&target).unwrap(), b"old-service");
+        assert!(!predecessor.backup.exists() && !predecessor.restore.exists());
+        assert!(format!("{error:#}").contains("protocol-ready"));
     }
 
     #[cfg(windows)]
