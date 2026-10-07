@@ -65,7 +65,7 @@ import {
   email,
   optionalText,
 } from './request';
-import { cronStep, runHousekeepingRetention } from './retention';
+import { cronStep, runHousekeepingRetention, V1_USAGE_REPORT_NOT_SUPERSEDED } from './retention';
 import {
   sharedAdministrativeResource,
   backfillDeviceExitCredentials,
@@ -3359,7 +3359,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
             AND usage_reports.protocol_version = input.protocol_version
             AND usage_reports.total_bytes = input.total_bytes
             AND usage_reports.observed_at = input.observed_at
-           WHERE input.protocol_version = 1
+           WHERE input.protocol_version = 1 AND ${V1_USAGE_REPORT_NOT_SUPERSEDED}
          )
          INSERT INTO usage_report_sources(
            user_id, source_id, protocol_version,

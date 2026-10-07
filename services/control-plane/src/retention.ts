@@ -7,6 +7,23 @@ import {
   OPS_AUDIT_RETENTION_SECONDS,
 } from './telemetry/routes';
 
+// Retained legacy v1 report IDs are the replay evidence for the usage fold
+// (`/api/v1/home/usage`). A retained report that a later-inserted report from
+// the same account and source has superseded was already folded, or refused,
+// when it first arrived. Folding its exact replay again lets the v1
+// higher-counter exception read a pre-reset high-water figure as new growth
+// (900 then 120 after a reset, replaying 900 bills 780 twice, GitHub #816).
+// Insertion order is the rowid (`usage_reports` has a TEXT key, so it keeps an
+// implicit rowid), not the sender's wall clock, so a genuinely new report whose
+// clock stepped backwards is still the newest row and keeps that exception.
+// Expects the fold's `usage_reports` row in scope under that name.
+export const V1_USAGE_REPORT_NOT_SUPERSEDED = `NOT EXISTS (
+  SELECT 1 FROM usage_reports later
+  WHERE later.rowid > usage_reports.rowid
+    AND later.user_id = usage_reports.user_id
+    AND later.source_id = usage_reports.source_id
+)`;
+
 // Each cron step logs and continues. One failing statement must not skip the
 // steps after it (retention, usage snapshots, the ops cron).
 export async function cronStep(name: string, run: () => Promise<unknown>) {
@@ -76,8 +93,10 @@ export async function runHousekeepingRetention(e: Env, t: number) {
     e.DB.prepare('DELETE FROM failure_alert_sends WHERE sent_at <= ?').bind(diagnosticsKeep).run());
   // Individual report ids are bounded retry evidence, not the billing ledger.
   // usage_report_sources retains the monotonic per-node totals, so deleting old
-  // ids cannot lower or double-count usage; a stale replay is ignored by that
-  // source's total/observed_at guards.
+  // ids cannot lower usage. A stale v2 replay is ignored by that source's
+  // observed_at watermark. A legacy v1 replay is kept out of the fold by
+  // V1_USAGE_REPORT_NOT_SUPERSEDED above only while the ids it needs are
+  // retained; once pruned, a pre-reset v1 replay can be billed again (#816).
   await cronStep('usage report retention', () => e.DB.prepare(
     `DELETE FROM usage_reports WHERE report_id IN (
        SELECT report_id FROM usage_reports
