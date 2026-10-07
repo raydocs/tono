@@ -1485,9 +1485,8 @@ async function clearClaim(e: Env, deviceId: string, claimToken: string, claimGen
 }
 
 async function processRevocations(e: Env) {
-  // Keep durable jobs queued while Home-US is paused, but do not contact
-  // Tailscale from API requests or scheduled maintenance.
-  if (!tailscaleEnrollmentEnabled(e)) return;
+  // Deleting a revoked identity's tailnet node is enforcement: it runs while
+  // enrollment is paused too, which only fences new enrollment (H17-G-F2).
   const jobs = await e.DB.prepare(
     `SELECT * FROM revocation_jobs WHERE completed_at IS NULL
      ORDER BY last_attempt_at, created_at, id LIMIT 40`,
@@ -1626,7 +1625,7 @@ async function enforceUser(e: Env, userId: string, processNow = true) {
            )
        )`,
   ).bind(t, userId, userId, t).run();
-  if (processNow && tailscaleEnrollmentEnabled(e)) await processRevocations(e);
+  if (processNow) await processRevocations(e);
 }
 
 // Users the cron enforces per tick. Each costs three queries plus one batch per
@@ -1675,18 +1674,16 @@ async function enforceAll(e: Env) {
   // Revocation is enforcement, not housekeeping. Run it before retention so a
   // transient failure deleting old diagnostics or telemetry cannot leave an
   // ineligible user's tailnet identity live until the next cron tick.
-  if (tailscaleEnrollmentEnabled(e)) {
-    try {
-      await cleanupOrphanPendingNodes(e);
-    } catch (x) {
-      console.error('cleanupOrphanPendingNodes failed', x instanceof Error ? x.message : String(x));
-    }
-    try {
-      await processRevocations(e);
-    } catch (x) {
-      // The durable outbox remains pending and the next scheduled run retries it.
-      console.error('processRevocations failed', x instanceof Error ? x.message : String(x));
-    }
+  try {
+    await cleanupOrphanPendingNodes(e);
+  } catch (x) {
+    console.error('cleanupOrphanPendingNodes failed', x instanceof Error ? x.message : String(x));
+  }
+  try {
+    await processRevocations(e);
+  } catch (x) {
+    // The durable outbox remains pending and the next scheduled run retries it.
+    console.error('processRevocations failed', x instanceof Error ? x.message : String(x));
   }
   await runHousekeepingRetention(e, t);
   try {

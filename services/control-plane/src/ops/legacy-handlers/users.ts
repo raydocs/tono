@@ -404,10 +404,10 @@ export async function patchOpsUser(req: Request, e: Env, actor: { email: string 
   ) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'status, expiresAt, notes, contact, plan, wechatId or resetUsage is required');
   }
-  // Tailnet revocation jobs only run while enrollment is on. With it paused
-  // they stay queued (the node really is still on the tailnet), so waiting on
-  // them would refuse the re-enable forever; they are recorded on the audit
-  // line instead, and the per-device enrollment fence still holds them.
+  // With enrollment paused, queued tailnet revocations do not hold the
+  // re-enable: they still run on the cron tick (the node really is still on
+  // the tailnet until then), are recorded on the audit line, and the
+  // per-device enrollment fence still holds them.
   let queuedTailnetRevocations = 0;
   if (status === 'active') {
     const residual = await e.DB.prepare(
@@ -489,7 +489,7 @@ export async function patchOpsUser(req: Request, e: Env, actor: { email: string 
     await writeOpsAudit(
       e, actor.email, 'user.tailnet-revocation-queued', 'user', mt[1],
       `re-enabled with ${queuedTailnetRevocations} tailnet node revocation(s) still queued; `
-        + 'they run when Tailscale enrollment is turned back on',
+        + 'they run on the next cron tick',
     );
   }
   await deps.enforceUser(e, mt[1]);
