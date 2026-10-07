@@ -1480,7 +1480,7 @@ impl RepairPredecessor {
         };
         kept.discard()?;
         copy_ordinary_file_exclusive(target, &kept.copy)?;
-        ensure!(
+        anyhow::ensure!(
             sha256(&kept.copy)? == kept.digest,
             "the copy of the previous Service executable does not match it"
         );
@@ -1494,7 +1494,7 @@ impl RepairPredecessor {
         publish_staged_binary_immediately(&self.restore, &self.target).with_context(|| {
             format!("failed to restore the previous Service executable at {:?}", self.target)
         })?;
-        ensure!(
+        anyhow::ensure!(
             sha256(&self.target)? == self.digest,
             "the restored Service executable failed hash verification"
         );
