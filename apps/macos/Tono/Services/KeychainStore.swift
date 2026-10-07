@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import IOKit
 import os
@@ -9,22 +10,31 @@ nonisolated struct KeychainStore: Sendable {
     enum Error: Swift.Error { case unexpectedStatus(OSStatus), invalidData }
 
     private let service: String
+    private let suppressionDirectory: URL
     /// `SecItemCopyMatching`, unless a test stands in for a keychain that
     /// refuses a read (locked, or interaction not allowed).
     private let copyMatching: @Sendable (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus
     private let updateItem: @Sendable (CFDictionary, CFDictionary) -> OSStatus
+    private let deleteItem: @Sendable (CFDictionary) -> OSStatus
     init(
         service: String = Bundle.main.bundleIdentifier.map { "\($0).tono" } ?? "app.tono.account",
+        suppressionDirectory: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Tono/credential-suppression", isDirectory: true),
         copyMatching: @escaping @Sendable (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus = {
             SecItemCopyMatching($0, $1)
         },
         updateItem: @escaping @Sendable (CFDictionary, CFDictionary) -> OSStatus = {
             SecItemUpdate($0, $1)
+        },
+        deleteItem: @escaping @Sendable (CFDictionary) -> OSStatus = {
+            SecItemDelete($0)
         }
     ) {
         self.service = service
+        self.suppressionDirectory = suppressionDirectory
         self.copyMatching = copyMatching
         self.updateItem = updateItem
+        self.deleteItem = deleteItem
     }
 
     func data(for key: Key) throws -> Data? {
@@ -57,8 +67,34 @@ nonisolated struct KeychainStore: Sendable {
     }
     func set(_ value: String, for key: Key) throws { try set(Data(value.utf8), for: key) }
     func remove(_ key: Key) throws {
-        let status = SecItemDelete(base(key) as CFDictionary)
+        let status = deleteItem(base(key) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw Error.unexpectedStatus(status) }
+    }
+
+    /// Contains no credential. The service digest keeps independently injected
+    /// stores from suppressing one another after a refused replacement.
+    private var suppressionURL: URL {
+        let digest = SHA256.hash(data: Data(service.utf8)).map { String(format: "%02x", $0) }.joined()
+        return suppressionDirectory.appendingPathComponent(digest)
+    }
+
+    func suppressRefreshTokenRestoration() throws {
+        try RuntimeCleanup.writeSynced("signed-out", to: suppressionURL)
+    }
+
+    func isRefreshTokenRestorationSuppressed() throws -> Bool {
+        let path = suppressionURL.path
+        // Existence is the refusal signal; never open a substituted FIFO or
+        // follow a symlink just to ask whether restoration is suppressed.
+        var metadata = stat()
+        if lstat(path, &metadata) == 0 { return true }
+        if errno == ENOENT { return false }
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+
+    func clearRefreshTokenSuppression() throws {
+        do { try FileManager.default.removeItem(at: suppressionURL) }
+        catch let error as CocoaError where error.code == .fileNoSuchFile { return }
     }
     func installationId() throws -> String {
         if let existing = try string(for: .installationId) { return existing }

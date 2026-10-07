@@ -66,7 +66,11 @@ struct LoginView: View {
     /// Sign-out or Restore internet cleanup drops any sign-in submitted
     /// before it finishes, so the controls stay disabled until then (#1256).
     private var locked: Bool { busy || session.accountLifecycle.isCleaningUp }
-    private var error: String? { if case let .error(message) = session.state { message } else { nil } }
+    private var error: String? {
+        if session.state == .signedOut, let signInError = session.signInError { return signInError }
+        if case let .error(message) = session.state { return message }
+        return nil
+    }
     private var methods: TonoAuthMethodsResponse? { session.authMethods }
     private var nativeAppleSignInEnabled: Bool {
         #if DEBUG
@@ -222,7 +226,7 @@ struct LoginView: View {
                     // methods != nil is the signed-in-form branch: the only Retry
                     // used to live on the methods == nil path, so a helper launch
                     // failure after methods loaded had no recovery button at all.
-                    if session.user == nil && methods != nil {
+                    if session.user == nil && methods != nil && session.signInError == nil {
                         Button {
                             Task { await session.retryRestore() }
                         } label: {

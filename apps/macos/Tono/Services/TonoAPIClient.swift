@@ -154,8 +154,8 @@ actor TonoAPIClient {
     private var prefersPinnedAddresses = false
     private let keychain: KeychainStore
     private var accessToken: String?
-    /// A failed initial credential write must not fall back to a previous
-    /// account's still-readable keychain item in this process.
+    /// A failed credential adoption must not use either account's credentials
+    /// in this process; the durable marker also blocks old-item restoration.
     private var failedAdoption = false
     private var refreshTask: (id: UUID, task: Task<String, Error>)?
     private var logoutTask: (id: UUID, generation: UInt64, task: Task<Void, Never>)?
@@ -400,7 +400,11 @@ actor TonoAPIClient {
         unpersistedRefreshToken = nil
         failedAdoption = true
         do {
+            // Record suppression before touching Keychain. If replacement and
+            // deletion both fail, the old item remains unreadable on relaunch.
+            try keychain.suppressRefreshTokenRestoration()
             try keychain.set(refresh, for: .refreshToken)
+            try keychain.clearRefreshTokenSuppression()
         } catch {
             // A failed replacement may leave the previous account's durable
             // credential. Neither account can own this failed sign-in.
@@ -551,6 +555,7 @@ actor TonoAPIClient {
     /// an account the server never refused.
     private func currentRefreshToken() throws -> String? {
         guard !failedAdoption else { return nil }
+        guard try !keychain.isRefreshTokenRestorationSuppressed() else { return nil }
         return try unpersistedRefreshToken ?? keychain.string(for: .refreshToken)
     }
 
@@ -1104,6 +1109,7 @@ actor TonoAPIClient {
     /// could match, and a logout in progress owns these credentials.
     func recordOfflineGrant(accountId: String, confirmed digests: InstalledCatalogDigests) {
         guard !failedAdoption, unpersistedRefreshToken == nil, !isLoggingOut,
+              (try? keychain.isRefreshTokenRestorationSuppressed()) == false,
               let token = try? keychain.string(for: .refreshToken) else { return }
         offlineGate.writeGrant(OfflineGrant(
             accountId: accountId,

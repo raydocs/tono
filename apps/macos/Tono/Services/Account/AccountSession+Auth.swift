@@ -329,6 +329,7 @@ extension AccountSession {
     }
 
     private func performEmailCodeRequest(email: String, deviceName: String) async {
+        signInError = nil
         guard TonoAccountRules.validEmail(email) else {
             state = .error(String(localized: "Enter a valid email address."))
             return

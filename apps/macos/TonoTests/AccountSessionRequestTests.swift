@@ -70,7 +70,8 @@ final class AccountSessionRequestTests: XCTestCase {
         routeSplitConsumer: @escaping @MainActor () -> AppTrafficLedger.RouteSplit = { .init() },
         offlineGate: OfflineGrantGate? = nil,
         installedCatalogConsumer: @escaping @MainActor () -> InstalledCatalogDigests? = { nil },
-        keychainUpdate: @escaping @Sendable (CFDictionary, CFDictionary) -> OSStatus = { SecItemUpdate($0, $1) }
+        keychainUpdate: @escaping @Sendable (CFDictionary, CFDictionary) -> OSStatus = { SecItemUpdate($0, $1) },
+        keychainDelete: @escaping @Sendable (CFDictionary) -> OSStatus = { SecItemDelete($0) }
     ) -> (AccountSession, URLSession, String, AsyncStream<HeldAccountProtocol>) {
         let host = "\(UUID().uuidString.lowercased()).invalid"
         let (requests, continuation) = AsyncStream<HeldAccountProtocol>.makeStream()
@@ -79,7 +80,9 @@ final class AccountSessionRequestTests: XCTestCase {
         config.protocolClasses = [HeldAccountProtocol.self]
         let transport = URLSession(configuration: config)
         let keychain = KeychainStore(
-            service: "app.tono.tests.account-requests.\(host)", updateItem: keychainUpdate
+            service: "app.tono.tests.account-requests.\(host)",
+            suppressionDirectory: testSuppressionDirectory(host),
+            updateItem: keychainUpdate, deleteItem: keychainDelete
         )
         let api = TonoAPIClient(
             baseURL: URL(string: "https://\(host)")!, keychain: keychain, session: transport,
@@ -308,7 +311,14 @@ final class AccountSessionRequestTests: XCTestCase {
     }
 
     private func testKeychain(_ host: String) -> KeychainStore {
-        KeychainStore(service: "app.tono.tests.account-requests.\(host)")
+        KeychainStore(
+            service: "app.tono.tests.account-requests.\(host)",
+            suppressionDirectory: testSuppressionDirectory(host)
+        )
+    }
+
+    private func testSuppressionDirectory(_ host: String) -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("tono-credential-suppression-\(host)")
     }
 
     private func adoptTestAccount(_ account: AccountSession) async throws {
@@ -1617,14 +1627,20 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "test-only-refresh")
     }
 
-    func testFailedSignInKeychainWriteDiscardsBothAccounts() async throws {
+    func testFailedSignInKeychainWriteAndDeleteSuppressesOldAccountAcrossClientRelaunch() async throws {
         let refusal = RefuseOneTokenWrite("new-refresh")
         var disarms = 0
         let (account, transport, host, _) = fixture(
             killSwitchDisarmConsumer: { disarms += 1 },
-            keychainUpdate: { refusal.update($0, $1) }
+            keychainUpdate: { refusal.update($0, $1) },
+            keychainDelete: { _ in errSecInteractionNotAllowed }
         )
-        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        defer {
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            try? FileManager.default.removeItem(at: testSuppressionDirectory(host))
+        }
         try await adoptTestAccount(account)
         account.shouldResumeProtection = true
         let newUser = try JSONDecoder().decode(TonoUser.self, from: Data(#"{"id":"replacement","email":"new@example.test"}"#.utf8))
@@ -1639,11 +1655,20 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(account.state, .signedOut)
         XCTAssertNil(account.user)
         XCTAssertEqual(account.signInError, TonoAPIClient.APIError.credentialPersistence.errorDescription)
-        XCTAssertNil(try testKeychain(host).string(for: .refreshToken))
+        XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "test-only-refresh")
+        XCTAssertTrue(try testKeychain(host).isRefreshTokenRestorationSuppressed())
         let restorable = try await account.api.hasRestorableSession()
         let digest = await account.api.currentRefreshTokenDigest()
         XCTAssertFalse(restorable)
         XCTAssertNil(digest)
+        let relaunched = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory)
+        )
+        let relaunchRestorable = try await relaunched.hasRestorableSession()
+        let relaunchDigest = await relaunched.currentRefreshTokenDigest()
+        XCTAssertFalse(relaunchRestorable)
+        XCTAssertNil(relaunchDigest)
         let requests = PathCallCounter()
         HeldAccountProtocol.install(host) { request in
             requests.record()
@@ -1658,6 +1683,18 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(requests.count, 0)
         XCTAssertTrue(account.shouldResumeProtection)
         XCTAssertEqual(disarms, 0)
+        try await relaunched.adopt(TonoAuthResponse(
+            accessToken: "accepted-access", refreshToken: "accepted-refresh",
+            user: newUser, device: nil, enrollment: nil
+        ))
+        XCTAssertFalse(try testKeychain(host).isRefreshTokenRestorationSuppressed())
+        XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "accepted-refresh")
+        let nextRelaunch = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory)
+        )
+        let nextRelaunchRestorable = try await nextRelaunch.hasRestorableSession()
+        XCTAssertTrue(nextRelaunchRestorable)
     }
 
     func testCancelledAuthenticationDoesNotAdoptLateCredentials() async throws {
