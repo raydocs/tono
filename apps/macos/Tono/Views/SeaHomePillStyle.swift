@@ -47,7 +47,7 @@ private struct SeaHomePill: View {
             }
             .contentShape(Capsule(style: .circular))
             .opacity(enabled ? (hovered ? 0.88 : 1) : 0.45)
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .scaleEffect(SeaHomePresentation.pressScale(pressed: configuration.isPressed, reduceMotion: reduceMotion))
             .animation(TonoMotion.press(reduceMotion: reduceMotion), value: configuration.isPressed)
             .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: hovered)
             .onHover { hovered = $0 }
@@ -66,11 +66,43 @@ struct SeaHomeActionShortcut: ViewModifier {
 /// The existing selected-exit timer samples every 120 s. Untimed catalog/cache
 /// numbers are not fresh readings and never become a Home measurement.
 enum SeaHomePresentation {
+    static func pressScale(pressed: Bool, reduceMotion: Bool) -> CGFloat {
+        pressed && !reduceMotion ? 0.97 : 1
+    }
+
     static func freshExitDelay(_ sample: (node: String, ms: Int, at: Date)?,
                                for name: String, failed: Bool, now: Date = Date()) -> Int? {
         guard !failed, let sample, sample.ms > 0,
               ConfigParser.extractFlag(from: sample.node).cleanName == ConfigParser.extractFlag(from: name).cleanName,
-              (0...120).contains(now.timeIntervalSince(sample.at)) else { return nil }
+              (0..<120).contains(now.timeIntervalSince(sample.at)) else { return nil }
         return sample.ms
+    }
+}
+
+/// A single presentation expiry, not a new measurement or periodic redraw.
+/// SwiftUI cancels it when this reading leaves Home or the sample is replaced.
+struct SeaHomeLatencyReading: View {
+    let sample: (node: String, ms: Int, at: Date)?
+    let name: String
+    let failed: Bool
+    @State private var checkedAt = Date()
+
+    var body: some View {
+        Group {
+            if let latency = SeaHomePresentation.freshExitDelay(sample, for: name,
+                failed: failed, now: max(checkedAt, Date())) {
+                Text("\(latency) ms").foregroundStyle(SeaTheme.muted).monospacedDigit()
+            }
+        }
+        .task(id: sample?.at) {
+            checkedAt = Date()
+            guard let sample else { return }
+            let delay = sample.at.addingTimeInterval(120).timeIntervalSinceNow
+            guard delay > 0 else { return }
+            do { try await Task.sleep(for: .seconds(delay)) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            checkedAt = Date()
+        }
     }
 }

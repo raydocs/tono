@@ -1,7 +1,33 @@
 import XCTest
+import AppKit
+import SwiftUI
 @testable import Tono
 
 final class SeaSceneParametersTests: XCTestCase {
+    func testReducedMotionKeepsPressedPillsAtUnitScale() {
+        XCTAssertEqual(SeaHomePresentation.pressScale(pressed: true, reduceMotion: true), 1)
+        XCTAssertEqual(SeaHomePresentation.pressScale(pressed: false, reduceMotion: true), 1)
+        XCTAssertLessThan(SeaHomePresentation.pressScale(pressed: true, reduceMotion: false), 1)
+    }
+
+    @MainActor
+    func testHomeLatencyReadingExpiresWithoutAnotherSampleOrInteraction() async throws {
+        let sample = (node: "Tokyo", ms: 83, at: Date().addingTimeInterval(-118))
+        let host = NSHostingView(rootView: SeaHomeLatencyReading(sample: sample, name: "Tokyo", failed: false))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 60),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.orderOut(nil); window.contentView = nil; window.close() }
+        window.orderFront(nil)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(host.fittingSize.width, 0, "fresh sample is initially rendered")
+        try await Task.sleep(for: .milliseconds(2300))
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(host.fittingSize.width, 0, "expiry itself must invalidate the visible reading")
+        XCTAssertNil(SeaHomePresentation.freshExitDelay(sample, for: "Tokyo", failed: false))
+    }
+
     func testOnlyRealConnectingStagesAdvanceTheSun() {
         XCTAssertEqual(SeaSceneParameters.progress(for: .preparing), 0)
         XCTAssertEqual(SeaSceneParameters.progress(for: .verifyingTraffic), 1)

@@ -398,6 +398,22 @@ final class MacUsabilityRenderTests: XCTestCase {
         XCTAssertNil(app.connectionCoordinator.connectTask)
     }
 
+    func testDisconnectingSeaHomeKeepsNativeRestoreActionVisible() async throws {
+        let app = AppState()
+        app.isDisconnecting = true
+        app.isProtectionBlocked = true
+        let account = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        try await capture("dashboard-sea-disconnecting-restore-minimum", width: 660, height: 540,
+                          annotate: false, darkAppearance: true,
+                          nativeLabels: ["Disconnecting…", "Restore normal internet"]) {
+            ZStack { MeshGradientBackground(); DashboardView() }
+                .modifier(SeaPageAppearance()).environment(app).environment(account)
+        }
+        XCTAssertTrue(app.isDisconnecting)
+        XCTAssertTrue(app.isProtectionBlocked)
+        XCTAssertNil(app.connectionCoordinator.connectTask, "rendering the recovery entry never invokes a handler")
+    }
+
     func testSeaMenuKeepsTheDegradedExitAdvisoryVisible() async throws {
         let app = AppState()
         app.isConnected = true

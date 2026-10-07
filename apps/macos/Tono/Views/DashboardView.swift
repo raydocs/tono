@@ -37,8 +37,8 @@ struct DashboardView: View {
         .contentShape(Rectangle())
         // Surfaces swap with the critically damped contract spring; the one
         // overshoot in the app belongs to the connected glow, not the layout.
-        .animation(TonoMotion.surfaceIn(reduceMotion: reduceMotion), value: appState.isConnected)
-        .animation(TonoMotion.surfaceIn(reduceMotion: reduceMotion), value: showsConnectionDetails)
+        .animation(showsSeaAppearance ? nil : TonoMotion.surfaceIn(reduceMotion: reduceMotion), value: appState.isConnected)
+        .animation(showsSeaAppearance ? nil : TonoMotion.surfaceIn(reduceMotion: reduceMotion), value: showsConnectionDetails)
         .onChange(of: appState.isConnecting) { _, connecting in
             connectingSince = connecting ? Date() : nil
         }
@@ -184,6 +184,11 @@ struct DashboardView: View {
                             seaLineChip
                         }
                     }
+                    if appState.isDisconnecting {
+                        Button("Restore normal internet") { appState.restoreInternet() }
+                            .buttonStyle(SeaHomePillStyle(primary: false))
+                            .accessibilityIdentifier("seaDisconnectingRestoreInternet")
+                    }
                     RecoveryNotice(appState: appState)
                         .frame(maxWidth: 520, alignment: .leading)
                     if appState.isConnecting {
@@ -323,10 +328,8 @@ struct DashboardView: View {
                 if let name = appState.activeNode?.name ?? appState.proxyService.activeNodeName {
                     Text(nodeRouteTitle(for: name)).lineLimit(1)
                     let runtime = appState.proxyService.node(named: name)
-                    if let latency = SeaHomePresentation.freshExitDelay(appState.proxyService.lastExitSample,
-                        for: name, failed: runtime?.lastTestFailed == true) {
-                        Text("\(latency) ms").foregroundStyle(SeaTheme.muted).monospacedDigit()
-                    }
+                    SeaHomeLatencyReading(sample: appState.proxyService.lastExitSample,
+                        name: name, failed: runtime?.lastTestFailed == true)
                 } else { Text("No server selected") }
                 Image(systemName: "chevron.down").accessibilityHidden(true)
             }
@@ -345,23 +348,8 @@ struct DashboardView: View {
     }
 
     private var seaDashboardHeader: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(LocalizedStringKey(seaStatusKey))
-                .font(.system(size: 56, weight: .light)).tracking(1.12)
-                .lineLimit(1).minimumScaleFactor(0.65)
-                .shadow(color: Color(hex: "0C060A").opacity(0.45), radius: 18, y: 2)
-                .foregroundStyle(SeaTheme.text)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-            Text(seaSummary)
-                .font(.system(size: 15)).foregroundStyle(SeaTheme.text.opacity(0.86))
-                .frame(maxWidth: 400, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .id(seaStatusKey + "\n" + seaSummary)
-        .transition(reduceMotion ? .identity : SeaHomeHeaderTransition.transition)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(TonoMotion.textSwap(reduceMotion: reduceMotion), value: seaStatusKey + "\n" + seaSummary)
+        SeaHomeHeaderWordsView(title: seaStatusKey, summary: seaSummary, reduceMotion: reduceMotion)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var seaSummary: String {
@@ -1134,9 +1122,67 @@ private struct DashboardStatCard: View {
     }
 }
 
-/// The incoming and outgoing groups traverse the same curve in opposite
-/// directions. Only its upper half is visible, so the old words disappear
-/// before the new words arrive, including when just the subtitle changes.
+private struct SeaHomeHeaderWordsView: View {
+    let title: String
+    let summary: String
+    let reduceMotion: Bool
+    @State private var shownTitle: String
+    @State private var shownSummary: String
+    @State private var progress = 1.0
+
+    init(title: String, summary: String, reduceMotion: Bool) {
+        self.title = title
+        self.summary = summary
+        self.reduceMotion = reduceMotion
+        _shownTitle = State(initialValue: title)
+        _shownSummary = State(initialValue: summary)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(LocalizedStringKey(shownTitle))
+                .font(.system(size: 56, weight: .light)).tracking(1.12)
+                .lineLimit(1).minimumScaleFactor(0.65)
+                .shadow(color: Color(hex: "0C060A").opacity(0.45), radius: 18, y: 2)
+                .foregroundStyle(SeaTheme.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            Text(shownSummary)
+                .font(.system(size: 15)).foregroundStyle(SeaTheme.text.opacity(0.86))
+                .frame(maxWidth: 400, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .modifier(SeaHomeHeaderTransition(progress: progress))
+        .task(id: title + "\n" + summary + "\n\(reduceMotion)") {
+            if shownTitle == title && shownSummary == summary && !reduceMotion {
+                // A quick cancellation can return to the old words while
+                // their outgoing fade is still in flight.
+                withAnimation(.easeOut(duration: 0.13)) { progress = 1 }
+                return
+            }
+            if !reduceMotion {
+                withAnimation(.linear(duration: 0.09)) { progress = 0 }
+                do { try await Task.sleep(for: .milliseconds(90)) }
+                catch { return }
+                guard !Task.isCancelled else { return }
+            }
+            // One text group, replaced while invisible, never an outgoing
+            // and incoming string retained by two different ancestor curves.
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                shownTitle = title
+                shownSummary = summary
+                progress = reduceMotion ? 1 : 0
+            }
+            if !reduceMotion {
+                withAnimation(.easeOut(duration: 0.13)) { progress = 1 }
+            }
+        }
+    }
+}
+
+/// Each half of the sequential swap is invisible below its midpoint.
 struct SeaHomeHeaderTransition: AnimatableModifier {
     var progress: Double
 
@@ -1147,10 +1193,6 @@ struct SeaHomeHeaderTransition: AnimatableModifier {
 
     static func opacity(at progress: Double) -> Double {
         min(1, max(0, progress * 2 - 1))
-    }
-
-    static var transition: AnyTransition {
-        .modifier(active: Self(progress: 0), identity: Self(progress: 1))
     }
 
     func body(content: Content) -> some View {

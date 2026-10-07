@@ -36,6 +36,9 @@ final class SeaSceneNativeView: NSView {
     private var qualityDisplayLink: CADisplayLink?
     private var observers: [NSObjectProtocol] = []
     private var lastSize = CGSize.zero
+    private var lastBackingScale: CGFloat = 0
+    private var resizeTask: Task<Void, Never>?
+    private var liveResizeActive = false
     private var paused = false
     private var selectedQuality = SeaSceneQuality.static
     private lazy var probeTarget = SeaSceneProbeTarget(view: self)
@@ -59,15 +62,74 @@ final class SeaSceneNativeView: NSView {
         // once against that hierarchy, rather than blindly flipping it twice.
         scene.isGeometryFlipped = !(layer?.contentsAreFlipped() ?? false)
         scene.frame = bounds
-        if lastSize != bounds.size {
-            lastSize = bounds.size
-            renderer = SeaSceneLayers(root: scene, size: bounds.size,
-                backingScale: window?.backingScaleFactor ?? 2)
-            renderer?.apply(phase: phase, progress: progress, animated: false)
-            renderer?.setQuality(selectedQuality, decorations: decorations, phase: phase)
-        }
+        updateRendererGeometry()
         CATransaction.commit()
         reconcileVisibility()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        needsLayout = true
+    }
+
+    override func viewWillStartLiveResize() {
+        super.viewWillStartLiveResize()
+        liveResizeActive = true
+        resizeTask?.cancel()
+        resizeTask = nil
+    }
+
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        liveResizeActive = false
+        rebuildRendererIfNeeded()
+    }
+
+    private func updateRendererGeometry() {
+        guard renderer == nil || lastSize != bounds.size
+                || lastBackingScale != (window?.backingScaleFactor ?? 2) else {
+            resizeTask?.cancel()
+            resizeTask = nil
+            scene.sublayerTransform = CATransform3DIdentity
+            return
+        }
+        if renderer == nil {
+            rebuildRendererIfNeeded()
+            return
+        }
+        // Reuse compositor geometry during a drag/full-screen resize; bake
+        // only the final size, not every intermediate main-thread layout.
+        scene.sublayerTransform = CATransform3DMakeScale(
+            bounds.width / lastSize.width, bounds.height / lastSize.height, 1)
+        resizeTask?.cancel()
+        resizeTask = nil
+        guard !liveResizeActive && !inLiveResize else { return }
+        resizeTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(150)) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            self?.rebuildRendererIfNeeded()
+        }
+    }
+
+    private func rebuildRendererIfNeeded() {
+        resizeTask?.cancel()
+        resizeTask = nil
+        let scale = window?.backingScaleFactor ?? 2
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        scene.sublayerTransform = CATransform3DIdentity
+        guard renderer == nil || lastSize != bounds.size || lastBackingScale != scale else {
+            CATransaction.commit()
+            return
+        }
+        lastSize = bounds.size
+        lastBackingScale = scale
+        renderer = SeaSceneLayers(root: scene, size: bounds.size, backingScale: scale)
+        renderer?.apply(phase: phase, progress: progress, animated: false)
+        renderer?.setQuality(selectedQuality, decorations: decorations, phase: phase)
+        CATransaction.commit()
     }
 
     override func viewDidMoveToWindow() {
@@ -77,7 +139,7 @@ final class SeaSceneNativeView: NSView {
         let center = NotificationCenter.default
         if let window {
             for name in [NSWindow.didChangeOcclusionStateNotification, NSWindow.didMiniaturizeNotification,
-                         NSWindow.didDeminiaturizeNotification, NSWindow.didChangeBackingPropertiesNotification] {
+                         NSWindow.didDeminiaturizeNotification] {
                 observers.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
                     Task { @MainActor [weak self] in self?.reconcileVisibility() }
                 })
@@ -104,7 +166,8 @@ final class SeaSceneNativeView: NSView {
         self.active = active
         let quality = currentQuality
         if changed {
-            renderer?.apply(phase: phase, progress: progress, animated: quality != .static,
+            renderer?.apply(phase: phase, progress: progress,
+                animated: quality != .static && sceneIsVisible && !paused,
                 stageAdvance: wasPhase == .dawn && phase == .dawn)
         }
         updateQuality(quality)
@@ -122,10 +185,14 @@ final class SeaSceneNativeView: NSView {
         if quality == .static { renderer?.apply(phase: phase, progress: progress, animated: false) }
     }
 
-    private func reconcileVisibility() {
-        let visible = active && !isHidden && !NSApp.isHidden
+    private var sceneIsVisible: Bool {
+        active && !isHidden && !NSApp.isHidden
             && window?.isVisible == true && window?.isMiniaturized == false
             && window?.occlusionState.contains(.visible) == true
+    }
+
+    private func reconcileVisibility() {
+        let visible = sceneIsVisible
         if visible && paused {
             scene.speed = 1
             let held = scene.timeOffset
@@ -166,6 +233,8 @@ final class SeaSceneNativeView: NSView {
     }
 
     func stop() {
+        resizeTask?.cancel()
+        resizeTask = nil
         qualityDisplayLink?.invalidate()
         qualityDisplayLink = nil
         observers.forEach(NotificationCenter.default.removeObserver)
@@ -205,6 +274,9 @@ private final class SeaSceneLayers {
         unit = CGFloat(SeaSceneParameters.unit(height: size.height))
         sky = CALayer()
         water = CALayer()
+        root.contentsScale = scale
+        sky.contentsScale = scale
+        water.contentsScale = scale
         root.sublayers?.forEach { $0.removeFromSuperlayer() }
         sky.frame = CGRect(x: 0, y: 0, width: size.width, height: size.height * 0.55)
         water.frame = CGRect(x: 0, y: size.height * 0.55, width: size.width, height: size.height * 0.45)
@@ -233,6 +305,7 @@ private final class SeaSceneLayers {
             let group = layer("stars-\(tier)", parent: stars)
             for star in SeaSceneStar.seeded.prefix(count) where star.tier == tier {
                 let dot = CALayer()
+                dot.contentsScale = scale
                 let diameter: CGFloat = [1, 1.5, 2.5][tier]
                 dot.frame = CGRect(x: sky.bounds.width * star.x / 100,
                     y: sky.bounds.height * star.y / 100, width: diameter, height: diameter)
@@ -676,6 +749,7 @@ private final class SeaSceneLayers {
     @discardableResult private func linear(_ name: String, parent: CALayer, colors: [String], stops: [NSNumber]) -> CAGradientLayer {
         let gradient = CAGradientLayer()
         gradient.name = name
+        gradient.contentsScale = scale
         gradient.frame = parent.bounds
         gradient.colors = colors.map(Self.color)
         gradient.locations = stops
@@ -697,6 +771,7 @@ private final class SeaSceneLayers {
 
     private func gradientMask(frame: CGRect, stops: [NSNumber], values: [CGFloat]) -> CALayer {
         let mask = CAGradientLayer()
+        mask.contentsScale = scale
         mask.frame = frame
         mask.colors = values.map { CGColor(gray: 1, alpha: $0) }
         mask.locations = stops
@@ -707,6 +782,7 @@ private final class SeaSceneLayers {
 
     private func radialMask(size: CGSize, stops: [CGFloat], values: [CGFloat]) -> CALayer {
         let mask = CALayer()
+        mask.contentsScale = scale
         mask.frame = CGRect(origin: .zero, size: size)
         mask.contents = Self.radialImage(size: size, scale: scale,
             colors: values.map { Self.color("FFFFFF").copy(alpha: $0)! }, stops: stops,
@@ -716,6 +792,7 @@ private final class SeaSceneLayers {
 
     private func textureMask(_ name: String, size: CGSize, tile: CGSize? = nil) -> CALayer {
         let mask = CALayer()
+        mask.contentsScale = scale
         mask.frame = CGRect(origin: .zero, size: size)
         mask.contents = Self.texture(name, size: size, scale: scale, tile: tile, luminance: true)
         return mask
