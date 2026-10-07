@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| BRICK-W3 | Windows 卸载结果 StillProtected（exit 3）仍删除 SCM 注册与 ProgramData 里的 Service 二进制，NSIS 随后却说什么都没删 | open | 待开 | 中·已确认（读码，Codex+Opus 交叉核实） | 推迟到 PLAN-win-keep-service（草案）：保留 Service 之前须先保证留下的 Service 不会在没有屏障时重放 Core 运行意图（5d381aec/codex:F1；BRICK-W1 的恢复门已拒绝没有 wanted 屏障的重放，保留路径的回归仍待补），并须排在 PLAN-win-release-paths（PR-A）之后合入 |
+| BRICK-W3 | Windows 卸载结果 StillProtected（exit 3）仍删除 SCM 注册与 ProgramData 里的 Service 二进制，NSIS 随后却说什么都没删 | in-PR | [#1438](https://github.com/raydocs/tono/pull/1438) | 中·已确认（读码，Codex+Opus 交叉核实） | 修复：先定结果（含 NRPT 清扫证明）再删，StillProtected 时 Service 注册、二进制与恢复文件都保留；NSIS 文字如实说明保护可能仍在、Service 已保留及释放方法。保留的 Service 开机不重放 Core：`desired.rs` 的开机会话门与 wanted 屏障门（BRICK-W1）。仍剩：未实机验证；nsExec 超时若落在删除过程中，Service 可能只删了一部分 |
 
 来源：2026-09-28 砖机审计（origin/main `c0e7758e`），codex WINDOWS-3 = opus WIN-2。证据（行号为 `c0e7758e`）：
 `service/src/bin/uninstall_service.rs:632-672`（阻塞结果照样删注册与二进制）、`installer.nsi:926-929`（「nothing was deleted」）。

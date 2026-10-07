@@ -925,7 +925,8 @@ FunctionEnd
     ;   2 = the network was provably restored; only cosmetic cleanup (SCM record/binary) failed
     ;   4 = the kill-switch filters were removed; DNS may be inexact (DHCP fallback, still on a
     ;       Tono resolver, or unproven). Continue — an inexact resolver is not a blocked machine.
-    ;   3 = cleanup could not show the WFP barrier was removed; recovery files stay on disk
+    ;   3 = cleanup could not show the WFP barrier (or Tono's NRPT rule) was removed; the
+    ;       Service registration, its binary and the recovery files stay (BRICK-W3)
     ; nsExec may also return "error"/"timeout" or another numeric string. Only a proven-safe
     ; result may let the uninstall continue: anything that is not 0, 2 or 4 is treated exactly
     ; like 3, because nothing showed the machine was made safe. That discipline is unchanged —
@@ -935,12 +936,12 @@ FunctionEnd
     ${ElseIf} $0 == "4"
       DetailPrint "${PRODUCTNAME} network protection (kill switch) was removed. DNS may need a manual check: Settings > Network & Internet > your adapter > DNS server assignment > Automatic (DHCP) for IPv4 and IPv6. Install/uninstall continues because the machine is no longer blocked."
     ${ElseIf} $0 != "0"
-      ; Result 3 means the kill-switch filters may still be installed. DNS-only problems no longer
-      ; land here (they are exit 4). Reboot and retry, or reinstall to repair the Service first.
+      ; Result 3 means the kill-switch filters, or Tono's NRPT rule, may still be installed. An
+      ; inexact resolver no longer lands here (it is exit 4). The helper kept the Service.
       !ifdef __UNINSTALL__
         Call un.HandBackManualLease
       !endif
-      Abort "Tono could not confirm this machine was made safe to uninstall (result $0), so nothing was deleted and the recovery files were kept. See the messages above for what failed. The kill switch may still be installed. A reboot does not clear it and makes it worse — the block filters survive a restart while the loopback and DHCP exceptions beside them do not — so use the elevated Start-Menu shortcut ${RESTORENETWORKLINK} first, or run this uninstaller or installer again. Removing Tono while the barrier stays armed would leave the machine blocked with nothing left to unblock it. Installing Tono again first also repairs the Service."
+      Abort "Tono could not confirm this machine was made safe (result $0), so it stopped here. Network protection may still be active: the kill switch, or Tono's DNS rule, may still be installed. The Tono Service, Tono's files and the recovery files were kept so protection can still be released. To release it, run the elevated Start-Menu shortcut ${RESTORENETWORKLINK}, or run this uninstaller or installer again. Do not rely on a reboot: the block filters survive a restart while the loopback and DHCP exceptions beside them do not. See the messages above for what failed."
     ${EndIf}
   ${EndIf}
 !macroend
@@ -1477,7 +1478,7 @@ Function .onInstFailed
   ${ElseIf} $0 == "4"
     DetailPrint "${PRODUCTNAME} network protection was removed, but your previous DNS servers could not be verified, so the affected adapters were set back to automatic (DHCP)."
   ${Else}
-    DetailPrint "${PRODUCTNAME} Service cleanup could not be verified (result $0); your connection may still be protected by the kill switch. Reboot Windows, then run this installer again or uninstall ${PRODUCTNAME} from Add/Remove Programs."
+    DetailPrint "${PRODUCTNAME} Service cleanup could not be verified (result $0); network protection may still be active, so the ${PRODUCTNAME} Service was kept to release it. Run this installer again, or uninstall ${PRODUCTNAME} from Add/Remove Programs. Do not rely on a reboot: the block filters survive a restart."
   ${EndIf}
 FunctionEnd
 

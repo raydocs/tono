@@ -127,7 +127,9 @@ fn stop_windows_service_gracefully(service: &platform_lib::service::Service) -> 
 /// The escalation path for a daemon that ignored the SCM stop. Suppress the configured
 /// crash-restart actions first (best effort — without it the SCM relaunches the daemon five
 /// seconds after the kill and races whatever the caller does next; the installer reinstates
-/// the actions via `configure_windows_service_recovery`, the uninstaller deletes the service),
+/// the actions via `configure_windows_service_recovery`; the uninstaller deletes the service,
+/// or on a blocking result keeps it with the actions still suppressed until an install or
+/// update reinstates them),
 /// then terminate the process and wait until the SCM reports Stopped. The pid comes from
 /// `QueryServiceStatusEx` (`SERVICE_STATUS_PROCESS.dwProcessId`); the pid file the daemon
 /// writes beside its owner lock is the fallback when the SCM no longer reports one.

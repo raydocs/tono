@@ -42,10 +42,9 @@ enum CleanupOutcome {
     /// machine is neither blocked nor redirected, so the uninstall **continues**; the deviation
     /// is reported so the installer can log it.
     RestoredToAutomatic(Error),
-    /// Cleanup could not prove the machine is unblocked. The SCM service registration was
-    /// still deleted whenever a handle was available (an orphaned auto-start service with no
-    /// binary on disk is the failure this outcome exists to prevent), and the recovery files
-    /// were preserved; only this outcome may block an uninstall.
+    /// Cleanup could not prove the machine is unblocked. Nothing of the Service is removed: the
+    /// SCM registration, its binary and the recovery files all stay, so the product keeps a
+    /// release path (BRICK-W3). Only this outcome may block an uninstall.
     StillProtected(Error),
 }
 
@@ -371,9 +370,9 @@ fn main() -> anyhow::Result<()> {
         }
         CleanupOutcome::StillProtected(error) => {
             eprintln!(
-                "Cleanup could not prove this machine was made safe. The service registration \
-                 was deleted whenever a service handle was available, and the recovery state \
-                 files were preserved. Do NOT rely on a reboot: the floor's condition-free \
+                "Cleanup could not prove this machine was made safe, so network protection may \
+                 still be active. The Tono Service, its binary and the recovery state files were \
+                 kept so protection can still be released. Do NOT rely on a reboot: the floor's condition-free \
                  block filters are persistent (only its loopback, DHCP and NDP permits persist \
                  beside them), so restarting keeps Internet traffic blocked. Run the elevated \
                  Start-Menu shortcut \"Tono — 恢复网络 (Restore \
@@ -465,12 +464,11 @@ fn windows_cleanup() -> CleanupOutcome {
             println!(
                 "No service, recovery state, or residual Tono WFP filters present; nothing to clean up."
             );
-            let outcome = match remove_windows_service_binary() {
-                Ok(()) => CleanupOutcome::Clean,
-                Err(error) => CleanupOutcome::CosmeticFailure(error),
-            };
-            return with_resolver_rule_proof(outcome, || {
+            let outcome = with_resolver_rule_proof(CleanupOutcome::Clean, || {
                 tono_service_protocol::remove_tono_resolver_rule_within(NRPT_SWEEP_BUDGET)
+            });
+            return remove_service_unless_still_protected(outcome, || {
+                remove_windows_service_binary().err()
             });
         }
         println!(
@@ -479,11 +477,9 @@ fn windows_cleanup() -> CleanupOutcome {
         );
     }
 
-    // A stop failure no longer aborts the cleanup: the uninstall contract is that the SCM
-    // registration is deleted whenever a handle is in hand, because returning early here is
-    // what left customer machines with an auto-start service whose binary the NSIS macro then
-    // removed. The unproven stop is recorded as the blocking error and reported after the
-    // disarm attempt and the delete.
+    // A stop failure does not abort the cleanup: the disarm is still attempted. The unproven
+    // stop is recorded as the blocking error, so the Service and its binary are kept
+    // (BRICK-W3) and the NSIS macro, which aborts on exit 3, keeps its files too.
     let mut blocking_error: Option<Error> = None;
     if let Some(service) = service.as_ref()
         && let Err(error) = stop_windows_service(service)
@@ -497,8 +493,8 @@ fn windows_cleanup() -> CleanupOutcome {
             Err(force_error) => {
                 eprintln!(
                     "Could not stop the service even after force-termination ({force_error:#}); \
-                     continuing with the disarm attempt and service deletion so no orphaned \
-                     auto-start service survives the uninstall."
+                     continuing with the disarm attempt; the Service is kept because the \
+                     machine cannot be proven unblocked."
                 );
                 blocking_error = Some(force_error);
             }
@@ -622,14 +618,12 @@ fn windows_cleanup() -> CleanupOutcome {
                             // `exactly_the_intent_floor_is_persistent_in_every_mode` pins that
                             // the persistent set is exactly the intent floor, so a restart keeps
                             // the condition-free block (with only its loopback, DHCP and NDP
-                            // permits). The registration is still deleted — an orphaned auto-start
-                            // service registration is the one leftover nothing else clears — but
-                            // the user must be pointed at the elevated disarm, not at a restart.
+                            // permits). The Service and its binary stay (BRICK-W3), and the user
+                            // must be pointed at the elevated disarm, not at a restart.
                             eprintln!(
                                 "Disarm could not prove the network barrier was removed ({error:#}); \
-                                 the service registration will still be deleted so no orphaned \
-                                 auto-start service remains, and the state files are preserved for \
-                                 recovery. A reboot will NOT clear the barrier — the \
+                                 the Tono Service, its binary and the state files are kept so \
+                                 protection can still be released. A reboot will NOT clear the barrier — the \
                                  condition-free block filters are persistent, with only the \
                                  loopback, DHCP and NDP permits beside them — so use the elevated \
                                  Restore Network shortcut or run this uninstaller again first."
@@ -649,56 +643,78 @@ fn windows_cleanup() -> CleanupOutcome {
         println!("Kill switch was disarmed and protected DNS restore was verified.");
     }
 
-    // The service registration is deleted whenever the handle is in hand, even when the disarm
-    // or the stop could not be proven: an orphaned auto-start service with no binary on disk is
-    // not cleared by anything, and the elevated Restore Network shortcut in the install
-    // directory remains the escape for an unproven barrier. Note that a reboot is not that
-    // escape — the persistent floor blocks survive it and the permits do not. A delete/poll/binary failure stays cosmetic: both continue, and the
-    // leftovers are the thing a future install has to act on. `final_cleanup_outcome` gives the
-    // blocking error precedence so an unproven-safe machine never reads as a mere cosmetic miss.
-    let mut cosmetic_error: Option<Error> = None;
-    if let Some(service) = service {
-        match service.delete() {
-            Ok(()) => {
-                drop(service);
-                if let Err(error) = poll_until(
-                    POLL_ATTEMPTS,
-                    || match service_manager.open_service(
-                        tono_service_protocol::WINDOWS_SERVICE_NAME,
-                        ServiceAccess::QUERY_STATUS,
-                    ) {
-                        Ok(service) => {
-                            drop(service);
-                            Ok(None)
-                        }
-                        Err(error) if has_raw_error(&error, ERROR_SERVICE_DOES_NOT_EXIST) => {
-                            Ok(Some(()))
-                        }
-                        Err(error) => Err(error.into()),
-                    },
-                    || thread::sleep(POLL_INTERVAL),
-                    "timed out waiting for service deletion",
-                ) {
-                    cosmetic_error = Some(error);
-                }
-            }
-            Err(error) => cosmetic_error = Some(error.into()),
-        }
-    }
-    if let Err(error) = remove_windows_service_binary()
-        && cosmetic_error.is_none()
-    {
-        cosmetic_error = Some(error);
-    }
-    with_resolver_rule_proof(
-        final_cleanup_outcome(blocking_error, cosmetic_error, dns_fallback),
+    // BRICK-W3: whether the machine is proven unblocked (the barrier, then Tono's NRPT rule) is
+    // settled before anything of the Service is removed. A blocking result keeps the SCM
+    // registration and the binary, so the App's Disconnect and a later uninstall still have a
+    // Service to release protection through. A kept Service never replays Core without a wanted
+    // barrier: `restore_desired_state` holds an intent from another boot, and one without a
+    // restored wanted barrier. Only a continuing outcome deletes the registration and the
+    // binary; a delete/poll/binary failure then stays cosmetic, and the leftovers are the thing
+    // a future install has to act on.
+    let outcome = with_resolver_rule_proof(
+        final_cleanup_outcome(blocking_error, None, dns_fallback),
         || tono_service_protocol::remove_tono_resolver_rule_within(NRPT_SWEEP_BUDGET),
-    )
+    );
+    remove_service_unless_still_protected(outcome, || {
+        let mut cosmetic_error: Option<Error> = None;
+        if let Some(service) = service {
+            match service.delete() {
+                Ok(()) => {
+                    drop(service);
+                    if let Err(error) = poll_until(
+                        POLL_ATTEMPTS,
+                        || match service_manager.open_service(
+                            tono_service_protocol::WINDOWS_SERVICE_NAME,
+                            ServiceAccess::QUERY_STATUS,
+                        ) {
+                            Ok(service) => {
+                                drop(service);
+                                Ok(None)
+                            }
+                            Err(error) if has_raw_error(&error, ERROR_SERVICE_DOES_NOT_EXIST) => {
+                                Ok(Some(()))
+                            }
+                            Err(error) => Err(error.into()),
+                        },
+                        || thread::sleep(POLL_INTERVAL),
+                        "timed out waiting for service deletion",
+                    ) {
+                        cosmetic_error = Some(error);
+                    }
+                }
+                Err(error) => cosmetic_error = Some(error.into()),
+            }
+        }
+        if let Err(error) = remove_windows_service_binary()
+            && cosmetic_error.is_none()
+        {
+            cosmetic_error = Some(error);
+        }
+        cosmetic_error
+    })
+}
+
+/// Remove the Service (registration and binary) only when `outcome` lets the uninstall
+/// continue (BRICK-W3). `StillProtected` returns untouched with `remove` never run: the Service
+/// is the product's release path while protection may still be active. A removal failure on a
+/// continuing outcome is `CosmeticFailure`, reported instead of the DNS fallback.
+#[cfg(any(windows, test))]
+fn remove_service_unless_still_protected(
+    outcome: CleanupOutcome,
+    remove: impl FnOnce() -> Option<Error>,
+) -> CleanupOutcome {
+    if matches!(outcome, CleanupOutcome::StillProtected(_)) {
+        return outcome;
+    }
+    match remove() {
+        Some(error) => CleanupOutcome::CosmeticFailure(error),
+        None => outcome,
+    }
 }
 
 /// Resolve the cleanup result after every step has run. Precedence: a blocking error (the stop
-/// or the disarm could not be proven) is `StillProtected` — with the service registration now
-/// deleted whenever a handle was available, per the outcome's contract. A delete, deletion-poll,
+/// or the disarm could not be proven) is `StillProtected` — and then nothing of the Service is
+/// removed, per the outcome's contract. A delete, deletion-poll,
 /// or binary-removal failure is `CosmeticFailure`, reported *instead of* the DNS fallback: both
 /// continue, and the leftovers are the thing a future install has to act on. Otherwise the DNS
 /// ladder result stands.
@@ -728,7 +744,7 @@ const NRPT_SWEEP_BUDGET: std::time::Duration = std::time::Duration::from_secs(10
 /// continue (exit 0, 2 or 4) stands only once Tono's NRPT catch-all is proven gone. Otherwise every
 /// lookup still goes to 198.18.0.2 with nothing left to answer it, so the outcome blocks, the
 /// uninstall stops and the product files stay. An outcome that already blocks is not swept.
-/// Deletion is unchanged: this runs after it.
+/// It runs before the Service is removed, so a blocking result keeps the Service (BRICK-W3).
 #[cfg(any(windows, test))]
 fn with_resolver_rule_proof(
     outcome: CleanupOutcome,
@@ -1057,7 +1073,8 @@ mod tests {
         DNS_STILL_ON_LOOPBACK_MARKER, EXIT_COSMETIC_FAILURE, EXIT_RESTORED_AUTOMATIC,
         EXIT_STILL_PROTECTED, WFP_REMOVED_CONTINUE_MARKER, classify_disarm_failure,
         cleanup_exit_code, cleanup_fast_path_allowed, final_cleanup_outcome,
-        final_uninstall_cleanup, poll_until, uninstall_may_continue, with_resolver_rule_proof,
+        final_uninstall_cleanup, poll_until, remove_service_unless_still_protected,
+        uninstall_may_continue, with_resolver_rule_proof,
     };
     use super::INSTALL_DIR_SWEEP;
     use std::cell::Cell;
@@ -1415,19 +1432,33 @@ mod tests {
         Ok(())
     }
 
-    // --- The delete-always contract ---
+    // --- Service removal follows the outcome (BRICK-W3) ---
 
-    /// A stop or disarm that cannot be proven no longer aborts the cleanup before
-    /// `service.delete()`: the outcome still blocks (exit 3, state files preserved), but the
-    /// SCM registration was deleted first, so `sc query TonoService` reports 1060 and no
-    /// orphaned auto-start service outlives the removed binaries.
+    /// A stop or disarm that cannot be proven blocks (exit 3, state files preserved).
     #[test]
-    fn blocking_error_stays_blocking_after_the_service_was_deleted() {
+    fn blocking_error_stays_blocking() {
         let outcome = final_cleanup_outcome(Some(anyhow::anyhow!("disarm unproven")), None, None);
         assert!(matches!(outcome, CleanupOutcome::StillProtected(_)));
         let code = cleanup_exit_code(&outcome);
         assert_eq!(code, EXIT_STILL_PROTECTED);
         assert!(!uninstall_may_continue(code));
+    }
+
+    /// BRICK-W3: a blocking result never reaches the step that deletes the SCM registration and
+    /// the ProgramData Service binary, so the product keeps a release path while protection may
+    /// still be active.
+    #[test]
+    fn still_protected_keeps_the_service_registration_and_binary() {
+        let mut removal_ran = false;
+        let outcome = remove_service_unless_still_protected(
+            CleanupOutcome::StillProtected(anyhow::anyhow!("filters present")),
+            || {
+                removal_ran = true;
+                None
+            },
+        );
+        assert!(matches!(outcome, CleanupOutcome::StillProtected(_)));
+        assert!(!removal_ran, "StillProtected must not remove the Service");
     }
 
     /// Blocking beats cosmetic: when the machine could not be proven safe, a delete or binary
