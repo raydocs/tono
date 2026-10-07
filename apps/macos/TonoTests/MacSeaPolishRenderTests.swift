@@ -300,7 +300,13 @@ final class MacSeaPolishRenderTests: XCTestCase {
         let target = registration.target
         let expectedID = target.windowID
         let requestedSize = try XCTUnwrap((window as? MacSeaPolishWindow)?.requestedSize)
-        XCTAssertNotNil(window.toolbar, "whole-window evidence must retain the native split-view toolbar")
+        // A fixed AppKit surface can have real titlebar controls without an
+        // NSToolbar. Verify the visible native chrome, not that internal object.
+        for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            let button = try XCTUnwrap(window.standardWindowButton(type))
+            XCTAssertFalse(button.isHidden)
+            XCTAssertTrue(button.window === window)
+        }
         XCTAssertEqual(expectedID, CGWindowID(window.windowNumber))
         XCTAssertEqual(registration.windowServerFrame.size, requestedSize)
         XCTAssertEqual(window.frame.size, requestedSize)
