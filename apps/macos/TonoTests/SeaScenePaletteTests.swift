@@ -5,7 +5,7 @@ import XCTest
 
 @MainActor
 final class SeaScenePaletteTests: XCTestCase {
-    func testBackingScaleChangeRebakesContentsAtUnchangedPointSize() async throws {
+    func testBackingScaleChangeRebakesContentsAtUnchangedPointSize() throws {
         let view = SeaSceneNativeView(frame: NSRect(x: 0, y: 0, width: 320, height: 200))
         let window = SeaScaleFixtureWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -18,7 +18,6 @@ final class SeaScenePaletteTests: XCTestCase {
         window.fixtureScale = 2
         view.viewDidChangeBackingProperties()
         view.layout()
-        try await Task.sleep(for: .milliseconds(300))
         XCTAssertFalse(scene.sublayers?.first === original)
         XCTAssertEqual(scene.contentsScale, 2)
         let grain = try XCTUnwrap(scene.sublayers?.first(where: { $0.name == "grain" }))
