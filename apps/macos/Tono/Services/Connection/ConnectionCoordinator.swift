@@ -22,6 +22,14 @@ final class ConnectionCoordinator {
     /// the intent until the user connects again, so wake and network-change
     /// recovery cannot turn it into a reconnect (X1-2).
     private var disconnectQueueReleaseIntent = false
+    enum ReleaseDisposition: Equatable { case preserve, automatic, ordinaryQuit, explicit }
+    // Explicit release survives an overlapping Quit, including its initial
+    // preserve teardown. Only a newly admitted Connect retires this choice.
+    private var explicitReleaseDominatesQuit = false
+
+    func resolvedReleaseDisposition(_ requested: ReleaseDisposition) -> ReleaseDisposition {
+        requested == .ordinaryQuit && explicitReleaseDominatesQuit ? .explicit : requested
+    }
     // A completed switch/reload keeps the protection generation but retires
     // any health proof started on the previous runtime.
     private(set) var routeOperationGeneration: UInt64 = 0
@@ -63,11 +71,14 @@ final class ConnectionCoordinator {
     func enqueueDisconnect(
         waitingFor pendingTasks: [Task<Void, Never>] = [],
         releaseIntent: Bool = false,
+        releaseDisposition: ReleaseDisposition? = nil,
         operation: @escaping @MainActor (Int) async -> Void
     ) {
         cancelDeferredConnect()
         disconnectRequestID &+= 1
         let requestID = disconnectRequestID
+        let disposition = releaseDisposition ?? (releaseIntent ? .explicit : .preserve)
+        if disposition == .explicit { explicitReleaseDominatesQuit = true }
         disconnectQueueReleaseIntent = releaseIntent
         let previousDisconnect = disconnectSequence
         disconnectSequence = Task {
@@ -89,6 +100,18 @@ final class ConnectionCoordinator {
             disconnectQueueReleaseIntent = false
         }
         update()
+    }
+
+    /// A release request can arrive while Quit awaits helper IPC. Drain the
+    /// newest queue tail too, so termination cannot exit before that user's
+    /// explicit Restore finishes removing the narrow layer.
+    func finishPendingDisconnect() async {
+        var observedRequest: Int
+        repeat {
+            observedRequest = disconnectRequestID
+            let pending = disconnectSequence
+            await pending?.value
+        } while observedRequest != disconnectRequestID
     }
 
     /// A Connect click during teardown is still a connection intent, not an
@@ -210,6 +233,7 @@ final class ConnectionCoordinator {
         // that could not confirm PF was released. A connect refused by
         // `prepare` is not, so the intent survives it.
         disconnectQueueReleaseIntent = false
+        explicitReleaseDominatesQuit = false
 
         let currentGeneration = protectionOperationGeneration
         connectAttemptID = attemptID
@@ -234,6 +258,7 @@ final class ConnectionCoordinator {
     /// enqueues teardown on disconnectSequence, ensures serialized execution, and notifies completion.
     func executeDisconnect(
         releaseKillSwitch: Bool,
+        releaseDisposition: ReleaseDisposition? = nil,
         pendingTasks: [Task<Void, Never>],
         prepare: () -> Void,
         operation: @escaping @MainActor (Int) async -> Void
@@ -247,6 +272,7 @@ final class ConnectionCoordinator {
         enqueueDisconnect(
             waitingFor: pendingTasks,
             releaseIntent: releaseKillSwitch,
+            releaseDisposition: releaseDisposition,
             operation: operation
         )
     }

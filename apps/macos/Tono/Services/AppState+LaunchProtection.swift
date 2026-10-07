@@ -1,6 +1,17 @@
 import Foundation
 
 extension AppState {
+    func refreshSelectiveAIRecovery() async {
+        guard !isConnected, !isConnecting, !isDisconnecting,
+              !nativeUpdatePending, !RuntimeCleanup.nativeUpdatePending,
+              !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
+        let generation = connectionCoordinator.protectionOperationGeneration
+        guard let pending = try? await networkProtection.selectiveAIRecoveryPending(),
+              !Task.isCancelled, !isConnected, !isConnecting, !isDisconnecting,
+              connectionCoordinator.protectionOperationGeneration == generation else { return }
+        selectiveAIRecoveryPending = pending
+    }
+
     /// Launch recovery's verdict on a barrier an earlier session left behind.
     /// Only a helper-confirmed barrier becomes Protected Offline, the same
     /// state an in-session failure publishes; a stored intent the helper did

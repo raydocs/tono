@@ -864,6 +864,9 @@ final class SocketServer {
             case ("GET", "/killswitch/status"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
                 sendResponse(client, status: 200, object: killSwitch.status())
+            case ("GET", "/killswitch/ai-recovery"):
+                guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
+                sendResponse(client, status: 200, object: try killSwitch.selectiveAIRecoveryStatus())
             case ("GET", "/killswitch/health"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
                 sendResponse(client, status: 200, object: killSwitch.health())
@@ -875,6 +878,16 @@ final class SocketServer {
                     commitAllowed: { transitionGate.isAwake() }
                 )
                 recordSessionOwner(owner)
+                sendResponse(client, status: 200, object: response)
+            case ("POST", "/killswitch/quit"):
+                guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
+                let response = try transitionGate.whileAwake {
+                    guard !core.status().running else {
+                        throw HelperFailure.invalid("Core must be stopped before Quit release.")
+                    }
+                    return try killSwitch.releaseForQuit()
+                }
+                clearSessionOwner()
                 sendResponse(client, status: 200, object: response)
             case ("POST", "/killswitch/disarm"), ("POST", "/killswitch/release"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }

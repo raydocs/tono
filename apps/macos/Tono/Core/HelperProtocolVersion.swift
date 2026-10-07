@@ -401,7 +401,9 @@ nonisolated enum HelperProtocolVersion {
     ///   snapshot validated before stopping, never a second user-file copy.
     /// - 4.52.41 → 4.52.42: failed update-store startup reads protection intent
     ///   only under the root update lock; blocked consumed attempts allow repair.
-    static let current = "4.52.42"
+    /// - 4.52.42 → 4.52.43: normal Quit retains the narrow AI recovery floor;
+    ///   explicit Restore fully removes it, with authenticated floor readback.
+    static let current = "4.52.43"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

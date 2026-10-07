@@ -769,10 +769,12 @@ extension AppState {
         releaseKillSwitch: Bool = false,
         afterUnarmedConnectFailure: Bool = false,
         exhaustedTunnelLoss: Bool = false,
-        automaticFailureRelease: Bool = false
+        automaticFailureRelease: Bool = false,
+        ordinaryQuit: Bool = false
     ) {
         if nativeUpdatePending || RuntimeCleanup.nativeUpdateBlocksConnect
             || (releaseKillSwitch && RuntimeCleanup.nativeUpdatePending) {
+            if ordinaryQuit { return } // The native executor owns teardown.
             if releaseKillSwitch, !exhaustedTunnelLoss {
                 disconnectPendingNativeUpdate(preserveAIHold: automaticFailureRelease)
             }
@@ -802,9 +804,13 @@ extension AppState {
                 || AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
                 || HelperManager.hasInstalledHelperArtifact
         let networkProtection = self.networkProtection
+        let releaseDisposition: ConnectionCoordinator.ReleaseDisposition = !releaseKillSwitch ? .preserve
+            : ordinaryQuit ? .ordinaryQuit
+            : (automaticFailureRelease || afterUnarmedConnectFailure) ? .automatic : .explicit
 
         connectionCoordinator.executeDisconnect(
             releaseKillSwitch: releaseKillSwitch,
+            releaseDisposition: releaseDisposition,
             pendingTasks: pendingTasks,
             prepare: { [weak self] in
                 guard let self else { return }
@@ -1033,10 +1039,14 @@ extension AppState {
             if helperReadyForRelease {
                 do {
                     if disarming {
-                        if automaticFailureRelease || afterUnarmedConnectFailure {
-                            try await networkProtection.releaseAfterFailure()
-                        } else {
-                            try await networkProtection.disarm()
+                        // Read the live queue choice after Core/DNS proof;
+                        // Restore may have arrived while either IPC awaited.
+                        let disposition = self?.connectionCoordinator
+                            .resolvedReleaseDisposition(releaseDisposition) ?? releaseDisposition
+                        switch disposition {
+                        case .ordinaryQuit: try await networkProtection.releaseForQuit()
+                        case .automatic: try await networkProtection.releaseAfterFailure()
+                        case .explicit, .preserve: try await networkProtection.disarm()
                         }
                         transitionLeavesProtectionBlocked = false
                     } else {
@@ -1101,6 +1111,11 @@ extension AppState {
                 transitionError = cleanupErrors.isEmpty ? nil : cleanupErrors.joined(separator: " ")
             }
 
+            var selectiveRecoveryPending: Bool?
+            if disarming, !transitionLeavesProtectionBlocked,
+               ordinaryQuit || self?.selectiveAIRecoveryPending == true {
+                selectiveRecoveryPending = try? await networkProtection.selectiveAIRecoveryPending()
+            }
             await MainActor.run {
                 guard let self else { return }
                 self.connectionCoordinator.completeDisconnect(
@@ -1108,6 +1123,9 @@ extension AppState {
                     releaseUnconfirmed: releaseKillSwitch && transitionLeavesProtectionBlocked
                 ) {
                     self.isProtectionBlocked = transitionLeavesProtectionBlocked
+                    if let selectiveRecoveryPending {
+                        self.selectiveAIRecoveryPending = selectiveRecoveryPending
+                    }
                     if releaseKillSwitch, !transitionLeavesProtectionBlocked {
                         self.protectedDNSService = nil
                         self.recoveryCause = nil
@@ -1135,17 +1153,30 @@ extension AppState {
     )
 }
 
-    func disconnectAndWait(releaseKillSwitch: Bool = false) async {
-        disconnect(releaseKillSwitch: releaseKillSwitch)
+    /// Local update gates can outlive a retired transaction. Only a fresh
+    /// authenticated no-pending verdict permits ordinary Quit to retire them;
+    /// an unreadable or actually pending update keeps its existing owner.
+    func disconnectForOrdinaryQuit() async {
+        let generation = connectionCoordinator.protectionOperationGeneration
+        guard let pending = try? await networkProtection.pendingNativeUpdate(),
+              !Task.isCancelled,
+              connectionCoordinator.protectionOperationGeneration == generation,
+              !pending else { return }
+        nativeUpdatePending = false
+        RuntimeCleanup.nativeUpdatePending = false
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        await disconnectAndWait(releaseKillSwitch: true, ordinaryQuit: true)
+    }
+
+    func disconnectAndWait(releaseKillSwitch: Bool = false, ordinaryQuit: Bool = false) async {
+        disconnect(releaseKillSwitch: releaseKillSwitch, ordinaryQuit: ordinaryQuit)
         // A joined Restore may follow the automatic release as a second task.
         while releaseKillSwitch, let task = nativeUpdateDisconnectTask { await task.value }
-        let pending = self.connectionCoordinator.disconnectSequence
-        _ = await pending?.value
+        await self.connectionCoordinator.finishPendingDisconnect()
     }
 
     func finishPendingDisconnect() async {
-        let pending = self.connectionCoordinator.disconnectSequence
-        _ = await pending?.value
+        await self.connectionCoordinator.finishPendingDisconnect()
     }
 
     func onCoreStarted(api: CoreControllerClient) async -> Bool {
@@ -2075,6 +2106,7 @@ extension AppState {
     /// emergency recovery path. Only an authenticated helper response that
     /// confirms both armed=false and wanted=false may clear Protected Offline.
     func reconcileExternalProtectionState() {
+        Task { [weak self] in await self?.refreshSelectiveAIRecovery() }
         if isProtectionUnconfirmed {
             // Launch could not confirm the barrier; a helper that answers
             // now resolves it to Protected Offline or released.

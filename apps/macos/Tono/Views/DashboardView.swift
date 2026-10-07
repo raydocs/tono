@@ -27,6 +27,7 @@ struct DashboardView: View {
             if showsSeaAppearance { seaDashboard } else { legacyDashboard }
         }
         .modifier(SeaPageAppearance())
+        .task { await appState.refreshSelectiveAIRecovery() }
         .background {
             if showsSeaAppearance && !sceneInWindow {
                 SeaScene(phase: seaPhase, motionEnabled: SeaAppearance.animates(
@@ -170,6 +171,15 @@ struct DashboardView: View {
                         Text(UpdateHandoffStore.incompleteUpdateCopy)
                             .font(.system(size: 13)).foregroundStyle(SeaTheme.warm)
                             .accessibilityIdentifier("updateIncompleteNotice")
+                    }
+                    if appState.selectiveAIRecoveryPending && !appState.isConnected {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("AI recovery rules may still be active. Restore internet to remove them.")
+                                .font(.callout).foregroundStyle(SeaTheme.warm)
+                            Button("Restore normal internet") { appState.restoreInternet() }
+                                .buttonStyle(SeaHomePillStyle(primary: false))
+                        }
+                        .accessibilityIdentifier("selectiveAIRecoveryNotice")
                     }
                     if appState.isConnecting { seaStageDots }
                     HStack(spacing: 12) {

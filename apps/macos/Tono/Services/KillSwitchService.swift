@@ -340,6 +340,24 @@ nonisolated enum KillSwitchService {
         }
     }
 
+    /// Quit is not explicit Restore: retain only an existing armed/floor
+    /// intent, decided atomically by the authenticated helper.
+    static func releaseForQuit() throws {
+        let core = HelperManager.coreStatus()
+        guard core.verified, !core.running else {
+            throw Error.commandFailed("Core stop could not be confirmed before Quit.")
+        }
+        do {
+            _ = try HelperManager.restoreProtectedDNSIfConfigured()
+            try HelperManager.releaseKillSwitchForQuit()
+            isArmed = false
+        } catch HelperIPCError.forbidden {
+            throw Error.helperRejected
+        } catch {
+            throw Error.commandFailed(error.localizedDescription)
+        }
+    }
+
     /// Set when the helper reports it self-healed PF from persisted state,
     /// which deliberately omits session direct endpoints. The owner of the
     /// live session must re-arm with its exceptions and only then clear this.

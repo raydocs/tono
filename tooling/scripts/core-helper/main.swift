@@ -2031,6 +2031,16 @@ if CommandLine.arguments.dropFirst() == ["--update-install-policy-self-test"] {
     if allowed { print("PASS update ordinary-install policy") }
     exit(allowed ? 0 : 1)
 }
+if CommandLine.arguments.dropFirst() == ["--quit-ai-hold-self-test"] {
+    let armed = KillSwitchManager.quitPreservesAIHold(broadProtection: true, disposition: nil, removalPending: false)
+    let retained = KillSwitchManager.quitPreservesAIHold(broadProtection: false, disposition: true, removalPending: false)
+    let idle = KillSwitchManager.quitPreservesAIHold(broadProtection: false, disposition: nil, removalPending: false)
+    let restored = KillSwitchManager.quitPreservesAIHold(broadProtection: false, disposition: false, removalPending: false)
+    let removing = KillSwitchManager.quitPreservesAIHold(broadProtection: true, disposition: true, removalPending: true)
+    let passed = armed && retained && !idle && !restored && !removing
+    if passed { print("PASS ordinary Quit selective AI disposition") }
+    exit(passed ? 0 : 1)
+}
 if CommandLine.arguments.dropFirst() == ["--version"] {
     print(helperVersion)
     exit(0)

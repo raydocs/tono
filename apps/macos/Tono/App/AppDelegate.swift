@@ -8,6 +8,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var appState: AppState?
     var accountSession: AccountSession?
     private var runtimeStopped = false
+    private var ordinaryQuit = true
     private var signalTerminationStarted = false
     private var terminationCleanupStarted = false
     private var terminationCompletionSent = false
@@ -253,6 +254,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// release already stopped the core, restored DNS and disarmed PF — but it
     /// means the fast path is a live one, not only the first-launch chooser's.
     func terminateForRelaunch() {
+        ordinaryQuit = false
         let runtimeMayOwnNetwork = (appState?.isConnected ?? false)
             || (appState?.isConnecting ?? false)
             || KillSwitchService.isArmed
@@ -347,13 +349,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Release only as the last ordered operation. AppState restores DNS,
         // confirms the core has stopped, and only then disarms PF.
         if let appState {
-            await appState.disconnectAndWait(releaseKillSwitch: true)
+            if ordinaryQuit {
+                await appState.disconnectForOrdinaryQuit()
+            } else {
+                await appState.disconnectAndWait(releaseKillSwitch: true)
+            }
         } else {
             // Launch-time termination can occur before AppState is attached.
             do {
-                _ = try await PrivilegedRuntimeCoordinator.shared
-                    .restoreProtectedDNSIfConfigured()
-                try await PrivilegedRuntimeCoordinator.shared.disarmKillSwitch()
+                let coordinator = PrivilegedRuntimeCoordinator.shared
+                try await coordinator.repairHelperForExplicitReleaseIfNeeded()
+                try await coordinator.stopCore()
+                let core = await coordinator.coreStatus()
+                guard core.verified, !core.running, !Task.isCancelled else { return }
+                _ = try await coordinator.restoreProtectedDNSIfConfigured()
+                if ordinaryQuit {
+                    try await PrivilegedRuntimeCoordinator.shared.releaseKillSwitchForQuit()
+                } else {
+                    try await PrivilegedRuntimeCoordinator.shared.disarmKillSwitch()
+                }
             } catch {
                 // Never open PF when DNS recovery could not be proven.
             }
