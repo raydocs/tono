@@ -93,9 +93,10 @@ export async function runHousekeepingRetention(e: Env, t: number) {
     e.DB.prepare('DELETE FROM failure_alert_sends WHERE sent_at <= ?').bind(diagnosticsKeep).run());
   // Individual report ids are bounded retry evidence, not the billing ledger.
   // usage_report_sources retains the monotonic per-node totals, so deleting old
-  // ids cannot lower or double-count usage; a stale replay is ignored by that
-  // source's total/observed_at guards. While an id is retained, its replay is
-  // also kept out of the fold by V1_USAGE_REPORT_NOT_SUPERSEDED above.
+  // ids cannot lower usage. A stale v2 replay is ignored by that source's
+  // observed_at watermark. A legacy v1 replay is kept out of the fold by
+  // V1_USAGE_REPORT_NOT_SUPERSEDED above only while the ids it needs are
+  // retained; once pruned, a pre-reset v1 replay can be billed again (#816).
   await cronStep('usage report retention', () => e.DB.prepare(
     `DELETE FROM usage_reports WHERE report_id IN (
        SELECT report_id FROM usage_reports
