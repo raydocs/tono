@@ -138,22 +138,10 @@ enum UpdateExecutor {
         }
     }
 
-    /// A consumed attempt blocked before replacement cannot be resumed by the
-    /// executor. Other unfinished attempts retain their replacement owner.
-    static func allowsOrdinaryInstall(execution: UpdateStorage.Execution?,
-                                      phase: UpdateContractV1.Phase?,
-                                      blocked: Bool = false,
-                                      disconnectRequested: Bool = false) -> Bool {
-        guard let execution else { return true }
-        if execution == .replacing || execution == .rollingBack { return false }
-        if phase == .committed { return true }
-        return execution == .consumed && (blocked || disconnectRequested)
-    }
-
+    /// Ordinary repair must not replace components while a pending attempt
+    /// still owns its captured originals. Explicit retirement is separate.
     static func allowsOrdinaryInstall(_ attempt: UpdateStorage.Attempt?) -> Bool {
-        allowsOrdinaryInstall(execution: attempt?.execution, phase: attempt?.receipt.phase,
-                              blocked: attempt?.receipt.blockedReason != nil,
-                              disconnectRequested: attempt?.disconnectRequested == true)
+        attempt == nil || attempt?.receipt.phase == .committed
     }
 
     static func run() -> Bool {

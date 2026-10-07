@@ -2,7 +2,7 @@ import XCTest
 @testable import Tono
 
 final class BRICKM1OrdinaryInstallGuardTests: XCTestCase {
-    func testBlockedConsumedUpdateAllowsRepairWithoutAllowingReplacement() throws {
+    func testPendingAttemptRefusesOrdinaryInstall() throws {
         let helper = try XCTUnwrap(Bundle.main.resourceURL)
             .appendingPathComponent("tono-core-helper")
         XCTAssertTrue(FileManager.default.isExecutableFile(atPath: helper.path))

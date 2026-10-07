@@ -1978,16 +1978,56 @@ if CommandLine.arguments.dropFirst() == ["--update-self-test"] {
     exit(runUpdateSelfTests() ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--update-install-policy-self-test"] {
-    let allowed = UpdateExecutor.allowsOrdinaryInstall(
-        execution: .consumed, phase: .installationAuthorized, blocked: true)
-        && UpdateExecutor.allowsOrdinaryInstall(
-            execution: .consumed, phase: .installationAuthorized, disconnectRequested: true)
-        && !UpdateExecutor.allowsOrdinaryInstall(
-            execution: .consumed, phase: .installationAuthorized)
-        && !UpdateExecutor.allowsOrdinaryInstall(
-            execution: .replacing, phase: .committed, blocked: true)
-        && !UpdateExecutor.allowsOrdinaryInstall(
-            execution: .rollingBack, phase: .committed, disconnectRequested: true)
+    let components = UpdateContractV1.Components(
+        appSha256: String(repeating: "a", count: 64),
+        coreSha256: String(repeating: "b", count: 64),
+        privilegedSha256: String(repeating: "c", count: 64))
+    let manifest = UpdateContractV1.ReleaseManifest(
+        appVersion: "0.0.75", buildCommit: String(repeating: "d", count: 40),
+        kind: "tonoUpdateManifest", protocolVersion: 1, releaseId: "install-policy-test",
+        releaseSequence: 14, targets: [
+            .init(artifactSha256: String(repeating: "e", count: 64), artifactSizeBytes: 3,
+                  components: components, id: .macosArm64),
+            .init(artifactSha256: String(repeating: "f", count: 64), artifactSizeBytes: 3,
+                  components: components, id: .windowsX86_64)])
+    guard let manifestBytes = try? UpdateContractV1.canonical(manifest),
+          let manifestHash = try? manifest.sha256() else { exit(1) }
+    func witness(_ execution: UpdateStorage.Execution,
+                 _ phase: UpdateContractV1.Phase) -> UpdateStorage.Attempt {
+        let receipt = UpdateContractV1.Receipt(
+            attemptId: String(repeating: "a", count: 64), blockedReason: nil,
+            createdAtUnix: 1, expiresAtUnix: 172_801, initiatingGeneration: 1,
+            installedLocationSha256: UpdateTransaction.location, kind: "tonoUpdateReceipt",
+            manifestSha256: manifestHash, owner: "uid:501:YY57758GS7:com.raydocs.tono",
+            phase: phase, protocolVersion: 1, requiredRecovery: .unprotected,
+            successorGeneration: [.installedIdentityVerified, .recoveryVerified, .committed].contains(phase) ? 2 : nil,
+            targetId: .macosArm64, updatedAtUnix: 1)
+        return UpdateStorage.Attempt(
+            manifest: manifestBytes, signature: Data(repeating: 0, count: 64), receipt: receipt,
+            initiatingToken: Data("initiator".utf8), initiatingBoot: "test",
+            successorToken: phase == .installedIdentityVerified || phase == .committed ? Data("successor".utf8) : nil,
+            successorBoot: phase == .installedIdentityVerified || phase == .committed ? "test" : nil,
+            execution: execution, originalComponents: components,
+            requiresTUN: false, disconnectRequested: false, disconnectVerified: false)
+    }
+    var blocked = witness(.consumed, .installationAuthorized)
+    blocked.receipt.blockedReason = .installationUncertain
+    var requested = witness(.consumed, .installationAuthorized)
+    requested.disconnectRequested = true
+    var verified = requested
+    verified.disconnectVerified = true
+    let allowed = UpdateExecutor.allowsOrdinaryInstall(nil)
+        && UpdateExecutor.allowsOrdinaryInstall(witness(.replaced, .committed))
+        && !UpdateExecutor.allowsOrdinaryInstall(witness(.reserved, .preparing))
+        && !UpdateExecutor.allowsOrdinaryInstall(witness(.staged, .preparing))
+        && !UpdateExecutor.allowsOrdinaryInstall(witness(.consumed, .installationAuthorized))
+        && !UpdateExecutor.allowsOrdinaryInstall(blocked)
+        && !UpdateExecutor.allowsOrdinaryInstall(requested)
+        && !UpdateExecutor.allowsOrdinaryInstall(verified)
+        && !UpdateExecutor.allowsOrdinaryInstall(witness(.replacing, .installationAuthorized))
+        && !UpdateExecutor.allowsOrdinaryInstall(witness(.rollingBack, .installationAuthorized))
+        && !UpdateExecutor.allowsOrdinaryInstall(witness(.rolledBack, .installationAuthorized))
+        && !UpdateExecutor.allowsOrdinaryInstall(witness(.replaced, .installedIdentityVerified))
     if allowed { print("PASS update ordinary-install policy") }
     exit(allowed ? 0 : 1)
 }
