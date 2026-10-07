@@ -6668,6 +6668,24 @@ ${nameLine}
     }
   });
 
+  it('deletes a queued tailnet node on the cron tick while enrollment is paused', async () => {
+    (env as unknown as Env).TAILSCALE_ENROLLMENT_ENABLED = 'false';
+    await env.DB.prepare(
+      `INSERT INTO revocation_jobs(id, device_id, tailscale_node_id, created_at, reason)
+       VALUES('paused-job', 'gone-device', 'paused-node', 1, 'device_revoked')`,
+    ).run();
+    const context = createExecutionContext();
+    await worker.scheduled(createScheduledController(), env as unknown as Env, context);
+    await waitOnExecutionContext(context);
+    expect(tailscaleRequests.some((request) =>
+      request.startsWith('DELETE ') && request.includes('/device/paused-node'),
+    )).toBe(true);
+    const job = await env.DB.prepare(
+      "SELECT completed_at FROM revocation_jobs WHERE id = 'paused-job'",
+    ).first<any>();
+    expect(job.completed_at).toBeTypeOf('number');
+  });
+
   it('reopens a revocation job with a fresh attempt stamp so failing work cannot delay it', async () => {
     const originalFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
     const attempts: string[] = [];
