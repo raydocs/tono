@@ -21,6 +21,8 @@ ManifestDPIAwareness PerMonitorV2
 !include "FileAssociation.nsh"
 !include "Win\COM.nsh"
 !include "Win\Propkey.nsh"
+; tauri-bundler 2.12 (cli 2.12.1): utils.nsh's CheckIfAppIsRunning uses the Restart Manager.
+!include "Win\RestartManager.nsh"
 !include "WinVer.nsh"
 !include "LogicLib.nsh"
 !include "StrFunc.nsh"
@@ -1246,7 +1248,7 @@ Section Install
     !insertmacro NSIS_HOOK_PREINSTALL
   !endif
 
-  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
   ; Ensure startup folders exist. `$SMSTARTUP` follows the shell context and the machine's real
   ; ProgramData location, which a hardcoded English C:-rooted path does not.
@@ -1588,7 +1590,7 @@ Section Uninstall
     !insertmacro NSIS_HOOK_PREUNINSTALL
   !endif
 
-  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
   ${If} $UpdateMode <> 1
     StrCpy $TonoUninstallScope "--final-uninstall"
   ${EndIf}

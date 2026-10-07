@@ -1,9 +1,16 @@
-## 2026-10-07 · macOS release 工作流补 hosted-window 验收标志（7502 候选重出）
-- 归属：SHIP_PLAN G1/G2 候选构建；macOS 发布工作流，不改 app 源码。老板 2026-10-07「把能合并的合并出候选」（[decision 071](../decisions/071-2026-10-07-sound-default-on-0076-candidates-0075-polish-a.md)）。
-- 来源：main `f73300c13` → 本 PR；`release/macos`、`release/windows`、`stability/desktop-0.0.75-20261005` 已于 2026-10-07 16:2x UTC 快进到 `f73300c13`，合入后再快进到本 PR 的 merge SHA。
-- 缺陷修复：无产品缺陷。
+## 2026-10-07 · 7502 候选两端构建失败的修复（macOS release 测试标志、Windows NSIS 模板）
+- 归属：SHIP_PLAN G1/G2 候选构建；macOS 发布工作流与 Windows 安装器模板，不改 app 运行时源码。老板 2026-10-07「把能合并的合并出候选」（[decision 071](../decisions/071-2026-10-07-sound-default-on-0076-candidates-0075-polish-a.md)）。
+- 来源：main `f73300c13` → 本 PR（#1431）；`release/macos`、`release/windows`、`stability/desktop-0.0.75-20261005` 已于 2026-10-07 16:2x UTC 快进到 `f73300c13`，合入后再快进到本 PR 的 merge SHA。
+- 缺陷修复：无产品缺陷；两项都是构建链漂移。
 - 新增/优化：无。
-- 工程与测试：#1426 的海景截图测试（`MacUsabilityRenderTests` 14 个 fixture、`MacSeaPolishRenderTests`）在没有 `TEST_RUNNER_TONO_HOSTED_WINDOW_DIAGNOSTIC=1` 时 fail-closed（`XCTFail("… exact-window native acceptance unavailable")`）。`macos-ci.yml` 两处 XCTest 步骤设了它，`macos-release.yml` 的「TonoTests XCTest target」步骤没有，所以 main 上 ci-gate 全绿、而第一条 7502 候选 [run 37651992656](https://github.com/raydocs/tono/actions/runs/37651992656) 在 build job 的 XCTest 步失败（642 tests，14 failures，全部是该消息），未签名、未产包。修法：release 工作流该步骤加同一个 `env`，与 `macos-ci.yml` 一致；不跳过、不放宽任何测试。
-- 验证：失败证据 = 上面 run 的 `--log-failed`（14 条 `MacUsabilityRenderTests.swift:560` 同一消息）。本 PR 的证明是合入后重新派发的 macOS release run 通过同一步骤；PR 自身的 ci-gate 对 `.github/workflows/macos-release.yml` 没有被调用的工作流（BUILD_AND_TEST「release or promote workflows need no called workflow」），不构成该步骤通过的证据。MacBook 不跑 xcodebuild。
-- 候选/发布：无新包。7502 的 macOS 构建失败；配对的 Windows [run 37651997330](https://github.com/raydocs/tono/actions/runs/37651997330)（`windows-release` 环境按 decision 023 于 2026-10-07T16:36Z 自批准，source `f73300c13`、sequence 7502）不作为候选使用：合入后两端从同一 merge SHA 以序列 7503 重出，Windows `v0.0.75` 草稿会被后一次 run 覆盖。客户 feed、tag、草稿 publish 均未动。
-- 剩余限制：`macos-release.yml` 的测试步骤与 `macos-ci.yml` 是两份手写副本，这次的漂移就是这样产生的；合并为一个 reusable workflow 留作后续工程项，不在本 PR 做。
+- 工程与测试：
+  - macOS：#1426 的 `MacUsabilityRenderTests` 14 个原生窗口 fixture 在没有 `TEST_RUNNER_TONO_HOSTED_WINDOW_DIAGNOSTIC=1` 时 fail-closed（`MacUsabilityRenderTests.swift:560` `XCTFail("… exact-window native acceptance unavailable")`；`MacSeaPolishRenderTests` 的两处是 `XCTSkipUnless`，缺标志时跳过而不是失败）。`macos-ci.yml` 两处 XCTest 步骤设了它，`macos-release.yml` 的「TonoTests XCTest target」步骤没有，所以 main 上 ci-gate 全绿、而 7502 的 macOS 候选 [run 37651992656](https://github.com/raydocs/tono/actions/runs/37651992656) 在 build job 的 XCTest 步失败（642 tests，14 failures，全部是该消息），未签名、未产包。修法：release 工作流该步骤加同一个 `env`；不跳过、不放宽任何测试。
+  - Windows：7502 的 Windows 候选 [run 37651997330](https://github.com/raydocs/tono/actions/runs/37651997330) 在 `build-draft` 的 `makensis` 失败：`!insertmacro: macro named "RestartManager_StartSession" not found!` → `Error in macro CheckIfAppIsRunning on macroline 11`。根因是 [2026-10-06 依赖升级](2026-10-06-deps-windows.md) 把 `@tauri-apps/cli` 2.11.5 → 2.12.1：tauri-bundler 2.12 的 `utils.nsh` 里 `CheckIfAppIsRunning` 改用 Windows Restart Manager（参数从 exe 文件名改为完整路径），上游模板 `installer.nsi` 同时加了 `!include "Win\RestartManager.nsh"` 并把两处调用改为 `"$INSTDIR\${MAINBINARYNAME}.exe"`；我们在 `tauri.windows.conf.json` 用自定义模板 `packages/windows/installer.nsi`，没有跟上这两处。修法：按上游 `tauri-cli-v2.12.1` 模板补 include 与两处调用参数（安装与卸载各一处），其余不动。7501（cli 2.11.5）正常，因此之前没有暴露。`apps/windows/service/resources/installer.nsi` 不用 `utils.nsh`，不受影响。
+- 验证：
+  - 失败证据：两条 run 的 `--log-failed`。
+  - MacBook：`node --test apps/windows/app/scripts/windows-packaging.test.mjs` 对改后模板 38/38 通过（该测试读取 `installer.nsi` 检查打包守卫，不编译 NSIS）。
+  - 两项修复的证明都是合入后重新派发的 release run 通过对应步骤：PR 的 ci-gate 对 `.github/workflows/macos-release.yml` 没有被调用的工作流（BUILD_AND_TEST「release or promote workflows need no called workflow」），Windows CI 不跑 `tauri build`；两者都不构成这两步通过的证据。MacBook 不跑 xcodebuild / cargo / makensis。
+- 候选/发布：无新包。7502 两端均失败、无包、无签名；Windows `windows-release` 环境已按 decision 023 于 2026-10-07T16:36Z 自批准（run 37651997330，source `f73300c13`、sequence 7502），该 run 失败在环境之后的构建步，`v0.0.75` 草稿仍是 7501 的资产（2026-10-06T08:06Z）。合入后两端从同一 merge SHA 以序列 7503 重出。客户 feed、tag、草稿 publish 均未动。
+- 剩余限制：
+  - `macos-release.yml` 与 `macos-ci.yml` 是两份手写的 XCTest 步骤副本；自定义 NSIS 模板与 tauri-bundler 的 `utils.nsh` 是另一对需要手工同步的副本。两处漂移都只在候选流程里暴露。后续工程项：release 工作流复用 CI 的测试 job；在 `windows-packaging.test.mjs` 或依赖升级清单里加一条「`@tauri-apps/cli` 升级必须对照上游 `installer.nsi` 模板 diff」。本 PR 不做。
+  - Restart Manager 路径的实际行为（安装/卸载时 Tono 正在运行 → 提示并关闭）没有实机证据，归 G1/G2 的 Windows 验收。
