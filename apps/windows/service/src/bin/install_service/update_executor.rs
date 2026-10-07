@@ -706,7 +706,14 @@ fn execute(recovery: bool) -> Result<(), Error> {
                 std::thread::sleep(Duration::from_millis(100));
             }
             match restore_predecessor_after_unready_replacement(&service, &a, &plan_path) {
-                Ok(settled) => {
+                Ok(None) => {
+                    // A later target App adopted it once the Service did answer: keep it running.
+                    eprintln!(
+                        "replacement Service readiness timed out, but a successor adopted it; kept: {start_error:#}"
+                    );
+                    return Ok(());
+                }
+                Ok(Some(settled)) => {
                     let error = start_error.context(
                         "the replacement Service did not become ready; the previous installation was restored and restarted",
                     );
@@ -816,18 +823,23 @@ fn start_service_if_stopped(service: &platform_lib::service::Service) -> Result<
 /// start or become ready, then start the predecessor through the selective rollback finalizer.
 /// The replacement Service is stopped with SCM recovery suppressed before any file moves, and the
 /// stopped Service's owner lock is held across the restore. Non-strict protection is released only
-/// while the Service is stopped; strict keeps its block. `Err` means the predecessor is not
-/// running; `Ok` carries the network release outcome.
+/// while the Service is stopped; strict keeps its block. Eligibility is read under the store lock
+/// before anything is stopped, and the lock is held from there on, so a successor cannot adopt or
+/// commit in between: `Ok(None)` means one already did and nothing was touched. `Err` means the
+/// predecessor is not running; `Ok(Some)` carries the network release outcome.
 fn restore_predecessor_after_unready_replacement(
     service: &platform_lib::service::Service,
     a: &tx::Attempt,
     plan_path: &Path,
-) -> Result<Result<(), Error>, Error> {
+) -> Result<Option<Result<(), Error>>, Error> {
     let repair = tono_service_protocol::acquire_service_repair_gate()?
         .context("repair already running during the unready replacement rollback")?;
+    let mut store = open_waiting()?;
+    if !unadopted_replacement(store.consumed_attempt()?) {
+        return Ok(None);
+    }
     suppress_windows_service_recovery(service)?;
     stop_windows_service(service)?;
-    let mut store = open_waiting()?;
     {
         let _owner = shared::block_on_abandoning(tono_service_protocol::acquire_service_owner())??
             .context("Service still owns the unready replacement")?;
@@ -861,7 +873,12 @@ fn restore_predecessor_after_unready_replacement(
         },
     );
     restored?;
-    Ok(settled)
+    Ok(Some(settled))
+}
+
+/// Published and recorded `Replaced`, but no successor has adopted it yet.
+fn unadopted_replacement(a: &tx::Attempt) -> bool {
+    a.execution == tx::Execution::Replaced && a.receipt.phase == Phase::InstallationAuthorized
 }
 
 /// BRICK-W6: restore every member of a published plan whose replacement Service never became
@@ -876,8 +893,7 @@ fn roll_back_unready_replacement(
 ) -> Result<(), Error> {
     let a = store.consumed_attempt()?.clone();
     ensure!(
-        a.execution == tx::Execution::Replaced
-            && a.receipt.phase == Phase::InstallationAuthorized,
+        unadopted_replacement(&a),
         "only an unadopted replacement can be rolled back for readiness"
     );
     let restored = (|| -> Result<(), Error> {

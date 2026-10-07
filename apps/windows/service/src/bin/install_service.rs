@@ -1446,45 +1446,108 @@ fn recover_unpublished_previous_service(
     collected_failures("failed to recover the unchanged previous Service", failures)
 }
 
+/// #815: the Service-only repair's own copy of the executable it replaces. Its names are not
+/// update scratch, so a copy an interrupted repair left behind never makes `--replace-runtime`,
+/// the native update or the next repair refuse; the next repair just replaces it, and the
+/// uninstall sweeps it.
+#[cfg(windows)]
+const REPAIR_PREVIOUS_SUFFIX: &str = ".repair-previous";
+#[cfg(windows)]
+const REPAIR_RESTORE_SUFFIX: &str = ".repair-restore";
+
+#[cfg(windows)]
+struct RepairPredecessor {
+    target: PathBuf,
+    copy: PathBuf,
+    restore: PathBuf,
+    digest: [u8; 32],
+}
+
+#[cfg(windows)]
+impl RepairPredecessor {
+    /// A verified copy of the installed executable, or `None` when there is none to keep (a
+    /// missing executable is what a repair exists for).
+    fn keep(target: &Path) -> Result<Option<Self>, Error> {
+        match std::fs::symlink_metadata(target) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            _ => ensure_ordinary_windows_entry(target, false)?,
+        }
+        let kept = Self {
+            target: target.to_owned(),
+            copy: path_with_suffix(target, REPAIR_PREVIOUS_SUFFIX),
+            restore: path_with_suffix(target, REPAIR_RESTORE_SUFFIX),
+            digest: sha256(target)?,
+        };
+        kept.discard()?;
+        copy_ordinary_file_exclusive(target, &kept.copy)?;
+        ensure!(
+            sha256(&kept.copy)? == kept.digest,
+            "the copy of the previous Service executable does not match it"
+        );
+        Ok(Some(kept))
+    }
+
+    /// Put the previous bytes back through a fresh restore file, keeping the copy until done.
+    fn restore(&self) -> Result<(), Error> {
+        remove_ordinary_file_if_exists(&self.restore)?;
+        copy_ordinary_file_exclusive(&self.copy, &self.restore)?;
+        publish_staged_binary_immediately(&self.restore, &self.target).with_context(|| {
+            format!("failed to restore the previous Service executable at {:?}", self.target)
+        })?;
+        ensure!(
+            sha256(&self.target)? == self.digest,
+            "the restored Service executable failed hash verification"
+        );
+        Ok(())
+    }
+
+    fn discard(&self) -> Result<(), Error> {
+        remove_ordinary_file_if_exists(&self.copy)?;
+        remove_ordinary_file_if_exists(&self.restore)
+    }
+}
+
 /// #815: a Service-only repair whose published replacement did not start or become ready puts the
 /// previous executable back before restarting. `stop` stops the replacement and proves its owner
 /// is gone; `restart` restores SCM recovery and starts what is installed when the Service was
-/// running before. A restore that fails still restarts (the old best effort) and keeps the
-/// recovery copy; a restored predecessor leaves none behind to refuse the next repair.
+/// running before. It runs even when the stop or the restore failed (the old best effort, with
+/// the replacement in place), and the copy is removed either way, so the repair stays re-runnable.
 #[cfg(windows)]
 fn restore_predecessor_after_failed_start<Owner>(
     start_error: Error,
-    predecessor: Option<&mut CoordinatedBinaryReplacement>,
+    predecessor: Option<&RepairPredecessor>,
     stop: impl FnOnce() -> Result<Owner, Error>,
-    restart: impl FnOnce(Owner) -> Result<(), Error>,
+    restart: impl FnOnce(Option<Owner>) -> Result<(), Error>,
 ) -> Error {
-    eprintln!("replacement Service did not become ready; restoring the previous executable: {start_error:#}");
-    let owner = match stop() {
-        Ok(owner) => owner,
-        Err(error) => {
-            return start_error.context(format!(
-                "the replacement Service could not be stopped to restore the previous executable: {error:#}"
-            ));
-        }
-    };
-    let restored = match predecessor {
-        Some(predecessor) => predecessor.rollback().map(|()| predecessor),
-        None => Err(anyhow::anyhow!(
-            "no previous Service executable existed to restore"
-        )),
+    eprintln!(
+        "replacement Service did not become ready; restoring the previous executable: {start_error:#}"
+    );
+    let (owner, restored) = match stop() {
+        Ok(owner) => (
+            Some(owner),
+            predecessor.map_or_else(
+                || Err(anyhow::anyhow!("no previous Service executable existed to restore")),
+                RepairPredecessor::restore,
+            ),
+        ),
+        Err(error) => (
+            None,
+            Err(error.context("the replacement Service could not be stopped")),
+        ),
     };
     let restarted = restart(owner);
+    if let Some(predecessor) = predecessor
+        && let Err(error) = predecessor.discard()
+    {
+        eprintln!("could not remove the previous Service executable copy: {error:#}");
+    }
     match (restored, restarted) {
-        (Ok(predecessor), Ok(())) => {
-            predecessor.cleanup();
+        (Ok(()), Ok(())) => {
             start_error.context("the previous Service executable was restored and restarted")
         }
-        (Ok(predecessor), Err(error)) => {
-            predecessor.cleanup();
-            start_error.context(format!(
-                "the previous Service executable was restored but did not restart: {error:#}"
-            ))
-        }
+        (Ok(()), Err(error)) => start_error.context(format!(
+            "the previous Service executable was restored but did not restart: {error:#}"
+        )),
         (Err(error), restarted) => start_error.context(format!(
             "the previous Service executable could not be restored ({error:#}); restart: {}",
             restarted.map_or_else(|error| format!("{error:#}"), |()| "ok".to_owned())
@@ -2413,16 +2476,8 @@ fn main() -> anyhow::Result<()> {
             // would abort the install on top of a half-swapped binary.
             match service.change_config(&service_info) {
                 Ok(()) => {
-                    // #815: keep the predecessor until the replacement proves ready. Only a
-                    // missing executable, which is what a repair exists for, has none to keep.
-                    let mut predecessor = match std::fs::symlink_metadata(&target) {
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-                        _ => Some(CoordinatedBinaryReplacement::prepare(
-                            &staged,
-                            &target,
-                            sha256(&staged)?,
-                        )?),
-                    };
+                    // #815: keep the predecessor until the replacement proves ready.
+                    let predecessor = RepairPredecessor::keep(&target)?;
                     let publish_outcome = publish_staged_binary(&staged, &target)?;
                     if publish_outcome == PublishOutcome::Published {
                         // A blind restart now runs the replacement; it is not a rollback.
@@ -2435,30 +2490,33 @@ fn main() -> anyhow::Result<()> {
                         if let Err(start_error) = started {
                             return Err(restore_predecessor_after_failed_start(
                                 start_error,
-                                predecessor.as_mut(),
+                                predecessor.as_ref(),
                                 || {
                                     suppress_windows_service_recovery(&service)?;
                                     stop_windows_service(&service)?;
                                     acquire_windows_replacement_owner()
                                 },
-                                |owner| {
+                                |mut owner| {
                                     recover_unpublished_previous_service(
                                         &service,
                                         was_active,
-                                        &mut Some(owner),
+                                        &mut owner,
                                     )
                                 },
                             ));
                         }
-                        if let Some(predecessor) = &predecessor {
-                            predecessor.cleanup();
+                        if let Some(predecessor) = &predecessor
+                            && let Err(error) = predecessor.discard()
+                        {
+                            eprintln!("could not remove the previous Service executable copy: {error:#}");
                         }
                         return Ok(());
                     }
-                    // The swap is queued for reboot: the old binary stays in place, and its
-                    // recovery copy would outlive the queued rename.
-                    if let Some(predecessor) = &predecessor {
-                        predecessor.cleanup_with_staged_retained(true);
+                    // The swap is queued for reboot and the old binary stays in place.
+                    if let Some(predecessor) = &predecessor
+                        && let Err(error) = predecessor.discard()
+                    {
+                        eprintln!("could not remove the previous Service executable copy: {error:#}");
                     }
                     configure_windows_service_recovery(&service)?;
                     service.start(&Vec::<&OsStr>::new())?;
@@ -2931,9 +2989,7 @@ mod tests {
         let staged = target.with_extension("exe.next");
         std::fs::write(&target, b"old-service").unwrap();
         std::fs::write(&staged, b"new-service").unwrap();
-        let mut predecessor =
-            CoordinatedBinaryReplacement::prepare(&staged, &target, sha256(&staged).unwrap())
-                .unwrap();
+        let predecessor = RepairPredecessor::keep(&target).unwrap().unwrap();
         assert_eq!(
             publish_staged_binary(&staged, &target).unwrap(),
             PublishOutcome::Published
@@ -2943,12 +2999,13 @@ mod tests {
         let events = std::cell::RefCell::new(Vec::new());
         let error = restore_predecessor_after_failed_start(
             anyhow::anyhow!("service IPC did not become protocol-ready"),
-            Some(&mut predecessor),
+            Some(&predecessor),
             || {
                 events.borrow_mut().push("stop".to_owned());
                 Ok(())
             },
-            |()| {
+            |owner| {
+                assert!(owner.is_some(), "the stopped Service's owner is held across the restore");
                 let installed = std::fs::read(&target).unwrap();
                 events
                     .borrow_mut()
@@ -2959,7 +3016,7 @@ mod tests {
 
         assert_eq!(*events.borrow(), ["stop", "restart old-service"]);
         assert_eq!(std::fs::read(&target).unwrap(), b"old-service");
-        assert!(!predecessor.backup.exists() && !predecessor.restore.exists());
+        assert!(!predecessor.copy.exists() && !predecessor.restore.exists());
         assert!(format!("{error:#}").contains("protocol-ready"));
     }
 
