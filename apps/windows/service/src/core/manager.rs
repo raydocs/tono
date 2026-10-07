@@ -811,6 +811,8 @@ impl CoreManager {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let watchdog_config = watchdog_config();
         let arm_epoch = crate::core::windows_kill_switch::core_arm_epoch();
+        // The sing-box document the current process runs (#1258).
+        let mut running_document = crate::core::sing_box_fake_ip::started_document(&config).await;
 
         let handle = tokio::spawn(async move {
             let mut recovery_exhausted = false;
@@ -961,11 +963,33 @@ impl CoreManager {
                         // Watchdog restart is not successor recovery authority.
                         break 'watchdog;
                     }
-                    let args = core_args(&config);
+                    // #1258: sing-box's fake-IP table died with the process. Restarting on the
+                    // same range would hand addresses apps still cache to other names.
+                    let respawn = match crate::core::sing_box_fake_ip::respawn_config(
+                        &config,
+                        &mut running_document,
+                    )
+                    .await
+                    {
+                        Ok(respawn) => respawn,
+                        Err(error) => {
+                            error!(
+                                "Refusing Core respawn on the exited process's fake-IP slot: {error:#}"
+                            );
+                            consecutive_attempt += 1;
+                            let now = Instant::now();
+                            restart_timestamps.retain(|timestamp| {
+                                now.duration_since(*timestamp) < watchdog_config.restart_window
+                            });
+                            restart_timestamps.push(now);
+                            continue;
+                        }
+                    };
+                    let args = core_args(&respawn);
                     match run_with_logging(
-                        &config.core_config.core_path,
+                        &respawn.core_config.core_path,
                         &args,
-                        &config.log_config,
+                        &respawn.log_config,
                         &owner,
                     )
                     .await

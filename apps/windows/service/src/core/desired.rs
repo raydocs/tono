@@ -267,6 +267,11 @@ pub async fn restore_desired_state() -> Result<bool> {
         "Restoring core from desired state generation {}",
         state.generation
     );
+    // #1258: the replayed process must not allocate fake IPs from its predecessor's slot.
+    if let Err(error) = crate::core::sing_box_fake_ip::move_kept_document(&config).await {
+        set_core_lifecycle_state(ServiceLifecycleState::Fatal);
+        return Err(error);
+    }
     if let Err(error) = CORE_MANAGER
         .lock()
         .await

@@ -381,6 +381,8 @@ async fn restart_still_wanted_core(owner: &AuthenticatedOwner) -> AnyResult<()> 
     let config = state
         .last_clash_config
         .context("desired state has no core config to bring back")?;
+    // #1258: the restarted process must not allocate fake IPs from its predecessor's slot.
+    crate::core::sing_box_fake_ip::move_kept_document(&config).await?;
     CORE_MANAGER
         .lock()
         .await

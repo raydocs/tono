@@ -954,7 +954,10 @@ pub(super) fn destination_key_for(
         [only]
             if only.eq_ignore_ascii_case(RUNTIME_CONFIG_FILE_NAME)
                 || only.eq_ignore_ascii_case(SING_BOX_RUNTIME_CONFIG_FILE_NAME)
-                || only.eq_ignore_ascii_case(super::staging::MANIFEST_FILE_NAME) =>
+                || only.eq_ignore_ascii_case(super::staging::MANIFEST_FILE_NAME)
+                || crate::core::sing_box_fake_ip::SERVICE_WRITTEN_FILE_NAMES
+                    .iter()
+                    .any(|name| only.eq_ignore_ascii_case(name)) =>
         {
             Err(invalid_asset(format!(
                 "runtime asset destination {only:?} is owned by the runtime generation"
