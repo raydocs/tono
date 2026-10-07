@@ -1219,32 +1219,45 @@ async fn enter_protecting_owner_lifecycle(
 /// where it is built today.
 struct OwnerLifecycleGuard {
     _lifecycle: MutexGuard<'static, ()>,
-    /// `None` only for a Release whose gate could not be prepared or locked (see
-    /// [`owner_lifecycle_repair_gate`]).
+    /// `None` only for a Release whose gate could not be prepared and whose existing lock file
+    /// could not be opened or locked either (see [`owner_lifecycle_repair_gate`]).
     #[cfg(windows)]
     _repair: Option<crate::ServiceRepairGate>,
 }
 
 /// The repair-gate verdict for [`enter_owner_lifecycle`]. A gate another process holds refuses
-/// every route: an installer owns the lifecycle. An I/O or ACL error taking the gate (preparing
-/// `ProgramData\Tono` and `bin`, opening or locking `.repair.lock`) proves no installer
-/// (H-IPC-2), so `ReleaseKillSwitch` proceeds without it, still fenced by the read-only
-/// `release_admission` and the owner check that follow (R681-release-gate-writes): refusing it
-/// kept an armed machine off the network on a ProgramData write failure. Every other route still
-/// refuses on that error, under its real cause.
+/// every route: an installer owns the lifecycle. Every route but `ReleaseKillSwitch` also refuses,
+/// under its real cause, when taking the gate fails (preparing `ProgramData\Tono` and `bin` with
+/// their DACL, or creating, opening or locking `.repair.lock`).
+///
+/// R681-release-gate-writes: refusing Release on such a write failure kept an armed machine off
+/// the network. Release instead runs `probe`, which opens the existing `.repair.lock` without
+/// those writes and locks it: an installer holding the gate holds that file locked, so a held
+/// probe still refuses. Only when the probe cannot open or lock the file either does Release
+/// proceed without the gate, still fenced by the read-only `release_admission` and the owner
+/// check that follow (the SCM stop and abandoned-Connect cleanup make the same H-IPC-2 call).
 #[cfg(any(windows, test))]
 fn owner_lifecycle_repair_gate<T>(
     gate: AnyResult<Option<T>>,
     release: bool,
+    probe: impl FnOnce() -> AnyResult<Option<T>>,
 ) -> std::result::Result<Option<T>, String> {
+    const INSTALLER_OWNS: &str = "native installer owns the lifecycle";
     match gate {
         Ok(Some(guard)) => Ok(Some(guard)),
-        Ok(None) => Err("native installer owns the lifecycle".to_owned()),
+        Ok(None) => Err(INSTALLER_OWNS.to_owned()),
         Err(error) if release => {
-            warn!(
-                "Service repair gate unavailable; no installer holds it, so Release proceeds under the update evidence: {error:#}"
-            );
-            Ok(None)
+            warn!("Service repair gate unavailable; probing the existing lock for Release: {error:#}");
+            match probe() {
+                Ok(Some(guard)) => Ok(Some(guard)),
+                Ok(None) => Err(INSTALLER_OWNS.to_owned()),
+                Err(probe_error) => {
+                    warn!(
+                        "Existing repair gate cannot be opened or locked either; Release proceeds under the update evidence: {probe_error:#}"
+                    );
+                    Ok(None)
+                }
+            }
         }
         Err(error) => {
             warn!("service repair gate unavailable: {error:#}");
@@ -1266,6 +1279,7 @@ async fn enter_owner_lifecycle(
     let repair = match owner_lifecycle_repair_gate(
         crate::acquire_service_repair_gate(),
         matches!(gate, OwnerLifecycleGate::ArmedPolicyRelease),
+        crate::core::repair::probe_service_repair_gate,
     ) {
         Ok(repair) => repair,
         Err(refusal) => return ControlFlow::Break(service_unavailable(refusal)),
