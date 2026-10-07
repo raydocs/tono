@@ -5700,6 +5700,7 @@ ${nameLine}
     const validToken = await oidcToken('google', challenge.nonce, {
       subject: 'google-user-1',
       email,
+      hd: 'example.com',
     });
     const verified = await api('auth/oidc/verify', json({
       provider: 'google',
@@ -5756,11 +5757,13 @@ ${nameLine}
     expect((await googleVerify('google-gmail-subject', gmail)).status).toBe(200);
     expect(await linkedSubjects(gmail)).toEqual(['google-gmail-subject']);
 
-    // A claim for an unmanaged address with no account still creates one.
+    // Nor may such a claim pre-create the account a later email-code sign-in
+    // for that address would land on.
     const fresh = `google-fresh-${++sequence}@example.com`;
-    const created = await googleVerify('google-fresh-subject', fresh);
-    expect(created.status).toBe(200);
-    expect((await created.json() as any).user.email).toBe(fresh);
+    const notCreated = await googleVerify('google-fresh-subject', fresh);
+    expect(notCreated.status).toBe(401);
+    expect((await notCreated.json() as any).error.code).toBe('EMAIL_OWNERSHIP_UNVERIFIED');
+    expect(await env.DB.prepare('SELECT 1 FROM users WHERE email = ?').bind(fresh).first()).toBeNull();
   });
 
   it('keeps a sign-in challenge retryable when the provider key response body fails', async () => {
@@ -5862,6 +5865,7 @@ ${nameLine}
       const validToken = await oidcToken('google', challenge.nonce, {
         subject: 'google-toctou-subject',
         email,
+        hd: 'example.com',
       });
 
       // Park the victim inside verifyOidcIdToken's signature check. The victim

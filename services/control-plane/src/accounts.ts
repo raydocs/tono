@@ -54,25 +54,12 @@ async function ensureEmailIdentity(e: Env, user: Row, emailAddr: string, t = now
   }
 }
 
-function emailOwnershipUnverified(): ApiError {
-  return new ApiError(
-    401,
-    'EMAIL_OWNERSHIP_UNVERIFIED',
-    'Sign in with an email code; this provider cannot vouch for the mailbox',
-  );
-}
-
 export async function accountForVerifiedEmail(
   e: Env,
   emailAddr: string,
-  // createOnly: the claim may only create the account for this address, never
-  // select an existing one (checked again after the insert, so a concurrent
-  // email-code sign-up cannot be linked either).
-  { createOnly = false } = {},
 ): Promise<Row> {
   let user = await e.DB.prepare('SELECT * FROM users WHERE email = ?').bind(emailAddr).first<Row>();
   if (user) {
-    if (createOnly) throw emailOwnershipUnverified();
     if (ineligible(user)) throw new ApiError(403, 'USER_DISABLED', 'User is disabled');
     await ensureEmailIdentity(e, user, emailAddr);
     return user;
@@ -105,7 +92,6 @@ export async function accountForVerifiedEmail(
     }
     throw new ApiError(401, 'AUTHENTICATION_FAILED', 'Authentication could not be completed');
   }
-  if (createOnly && user.id !== userId) throw emailOwnershipUnverified();
   if (ineligible(user)) throw new ApiError(403, 'USER_DISABLED', 'User is disabled');
   await ensureEmailIdentity(e, user, emailAddr, t);
   return user;
@@ -133,12 +119,19 @@ export async function accountForOidcIdentity(
     );
   }
   // A Google account backed by an unmanaged external mailbox still asserts
-  // email_verified after that mailbox is reassigned, so its claim may create
-  // an account but may not take over the one the current mailbox owner signed
-  // up with (#789).
-  const user = await accountForVerifiedEmail(e, identity.email, {
-    createOnly: identity.provider === 'google' && !googleAuthoritativeForEmail(identity),
-  });
+  // email_verified after that mailbox is reassigned, so its claim can neither
+  // take over the account the current mailbox owner signed up with nor
+  // pre-create the account that owner's email-code sign-in would land on
+  // (#789, decision 072). Such users sign in with an email code.
+  if (identity.provider === 'google' && !googleAuthoritativeForEmail(identity)) {
+    throw new ApiError(
+      401,
+      'EMAIL_OWNERSHIP_UNVERIFIED',
+      'Sign in with an email code; this provider cannot vouch for the mailbox',
+    );
+  }
+
+  const user = await accountForVerifiedEmail(e, identity.email);
   const t = now();
   try {
     await e.DB.prepare(
