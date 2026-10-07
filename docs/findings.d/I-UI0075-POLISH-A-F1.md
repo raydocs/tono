@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| I-UI0075-POLISH-A-F1 | 海景首页过渡同时叠印新旧标题或副标题 | in-PR | [#1426](https://github.com/raydocs/tono/pull/1426) | 低·实测 | 4570901eb 的[原生回归](https://github.com/raydocs/tono/actions/runs/37596390930)通过；root逐看三段0/1六张原图均单字串，[规格作者复判](https://github.com/raydocs/tono/pull/1426#issuecomment-6034801982)接受。7957497e代码续审PASSED（评审未独立看图，视觉证据另列）；尚未合 main，真机/签名候选验证留 G1。 |
+| I-UI0075-POLISH-A-F1 | 海景首页过渡同时叠印新旧标题或副标题 | fixed(c8911d9c) | [#1426](https://github.com/raydocs/tono/pull/1426) | 低·实测 | 4570901eb 的[原生回归](https://github.com/raydocs/tono/actions/runs/37596390930)通过；root逐看三段0/1六张原图均单字串，[规格作者复判](https://github.com/raydocs/tono/pull/1426#issuecomment-6034801982)接受。7957497e代码续审PASSED（评审未独立看图，视觉证据另列）；已合入 main `c8911d9c5`（#1426 合并提交）；真机/签名候选验证留 G1。 |
 
 - 来源：规格作者 [A 帧评审](https://github.com/raydocs/tono/pull/1426#issuecomment-6034002168)，不是 owner 验收。
 - 0527cd5d0 的 CI 全绿但首张原生证据否定了双分支曲线方案：第 0 帧改善，第 1 帧仍有祖先整层动画造成的重影；原图保留，不记为已修。
