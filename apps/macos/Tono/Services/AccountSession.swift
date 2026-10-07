@@ -75,6 +75,9 @@ final class AccountSession {
     var devices: [TonoDevice] = []
     var authMethods: TonoAuthMethodsResponse?
     var emailChallenge: TonoEmailChallengeResponse?
+    /// A credential write can fail after verification succeeds. Keep its
+    /// localized explanation while the account returns to signedOut.
+    var signInError: String?
     /// Device management reports here instead of through `fail`: a failed
     /// revoke is not an authentication or runtime failure, and must not take
     /// the tunnel, the background tasks and the whole window with it.

@@ -48,8 +48,8 @@ extension AccountSession {
             try keychain.discardSessionCopiedFromAnotherMac(
                 currentAnchor: KeychainStore.hardwareAnchor()
             )
-            // Retry after sign-in's keychain write failure must keep using
-            // the adopted token in memory and retry its persistence first.
+            // Only a credential acknowledged by Keychain can restore a
+            // sign-in. Rotated tokens remain retryable in memory separately.
             guard try await api.hasRestorableSession() else {
                 deactivateAppRoutingResearch()
                 // No account owns this launch, so the cache loaded from disk a
@@ -329,6 +329,7 @@ extension AccountSession {
     }
 
     private func performEmailCodeRequest(email: String, deviceName: String) async {
+        signInError = nil
         guard TonoAccountRules.validEmail(email) else {
             state = .error(String(localized: "Enter a valid email address."))
             return
@@ -870,6 +871,7 @@ extension AccountSession {
     private func performAuthentication(_ operation: @MainActor () async throws -> TonoAuthResponse) async {
         await abandonDiagnosticsLogUploader()
         state = .authenticating
+        signInError = nil
         // A failed revoke from the device-limit list belongs to the attempt
         // that raised it, not to the one starting here.
         deviceActionError = nil
@@ -917,6 +919,16 @@ extension AccountSession {
                     confirm: true
                 )
             }
+        } catch let error as TonoAPIClient.APIError
+            where error == .credentialPersistence || error == .credentialRecoveryRecord {
+            // Verification succeeded, but no durable session exists. Clear
+            // the prior presentation without touching network protection.
+            let resumeProtection = shouldResumeProtection
+            deactivateAppRoutingResearch()
+            clearAccount()
+            shouldResumeProtection = resumeProtection
+            signInError = error.errorDescription
+            state = .signedOut
         } catch { await fail(error) }
     }
 
