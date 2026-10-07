@@ -1389,11 +1389,56 @@ pub(super) fn apply_snapshot(snapshot: &DnsSnapshot) -> Result<Vec<(String, bool
 /// [`all_loopback`], and the only evidence the snapshot-less recovery path has. Deliberately
 /// checks every value of both families: one leftover `ProfileNameServer` is enough to leave
 /// the machine resolving through a core that is no longer running.
+///
+/// The registry is only the additional check. On the restore path those values are what
+/// [`apply_snapshot`] itself just wrote, so reading them back proves the write, not that the
+/// DNS Client adopted it (BRICK-W7). The proof is the effective per-adapter resolver list from
+/// `GetAdaptersAddresses`: an active adapter that still lists a Tono resolver there answers
+/// "yes" whatever its registry says. A failed effective read is an error — unproven for the
+/// caller — never "nothing found".
 pub(super) fn any_loopback(guids: &[String]) -> Result<bool> {
     for guid in guids {
         let adapter = read_adapter(guid, None)?;
         if super::adapter_reads_as_tono_dns(&adapter) {
             return Ok(true);
+        }
+    }
+    if guids.is_empty() {
+        return Ok(false);
+    }
+    effective_lists_tono_dns(guids, &active_adapters_read(true)?)
+}
+
+/// Whether any of `guids` that is active right now still resolves through Tono in its
+/// effective list, per family and with the registry's own predicates: the current TUN endpoint
+/// anywhere (no user owns it; ahead of a public server it is dead once the core stops —
+/// `adapter_contains_current_protected_dns`), or a family whose whole list is Tono-owned,
+/// legacy loopback included (`is_tono_dns_value`). A user's own local resolver mixed with a
+/// public fallback (`127.0.0.1, 1.1.1.1`) is a correctly restored list, not Tono's. An adapter
+/// that is not active has no running resolver to prove (the registry check above still covers
+/// it); an active one whose list was not read is an error, never an empty list.
+fn effective_lists_tono_dns(guids: &[String], active: &[ActiveAdapter]) -> Result<bool> {
+    let parse = |value: &str| value.parse::<std::net::IpAddr>().ok();
+    let current = parse(super::PROTECTED_DNS_V4);
+    let tono = [super::PROTECTED_DNS_V4, super::LOOPBACK_V4, super::LOOPBACK_V6].map(parse);
+    for adapter in active
+        .iter()
+        .filter(|adapter| guids.iter().any(|guid| guid.eq_ignore_ascii_case(&adapter.guid)))
+    {
+        let servers = adapter.dns_servers.as_ref().with_context(|| {
+            format!("effective DNS servers of {} were not read", adapter.guid)
+        })?;
+        for ipv6 in [false, true] {
+            let family: Vec<_> = servers
+                .iter()
+                .filter(|server| server.is_ipv6() == ipv6)
+                .map(|server| Some(*server))
+                .collect();
+            if family.contains(&current)
+                || (!family.is_empty() && family.iter().all(|server| tono.contains(server)))
+            {
+                return Ok(true);
+            }
         }
     }
     Ok(false)
