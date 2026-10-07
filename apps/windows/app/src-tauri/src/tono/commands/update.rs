@@ -352,11 +352,15 @@ pub async fn adopt() -> Result<Option<Protection>> {
             // The refusal may be about the request (a manual installer lease, the store or
             // repair lock, the App image), not about an attempt. Ask the Service's read-only
             // update status; anything but a certain "none pending" keeps recovery incomplete.
-            let pending = crate::core::service::tono_service_status_snapshot()
-                .await
-                .ok()
-                .and_then(|snapshot| snapshot.update_attempt_pending);
-            INCOMPLETE.store(incomplete_after_refused_adopt(pending), Ordering::Release);
+            // Hold INSTALL across the read and the store: an install running beside this
+            // restore set INCOMPLETE for its own Prepare, which this older answer must not clear.
+            if let Ok(_install) = INSTALL.try_lock() {
+                let pending = crate::core::service::tono_service_status_snapshot()
+                    .await
+                    .ok()
+                    .and_then(|snapshot| snapshot.update_attempt_pending);
+                INCOMPLETE.store(incomplete_after_refused_adopt(pending), Ordering::Release);
+            }
             return Err(error);
         }
     };

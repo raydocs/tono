@@ -6,4 +6,5 @@
 - 工程与测试：一条 `#[test] a_non_update_adopt_refusal_with_nothing_pending_is_not_incomplete`（`tono/commands/update.rs`）：只读状态为「无挂起」时被拒后的 INCOMPLETE 为 false，「有挂起」和读不出时为 true。旧代码没有该判断，Adopt 被拒一律保持 true。四处测试里的 `ServiceStatusSnapshot` 字面量补上新字段。
 - 验证：MacBook 不跑 cargo（老板规则）；证明是本 PR 精确 head 上的 `ci-gate`（Windows App 与 Service `cargo test`）。未实机复现。
 - 候选/发布：无新包，仅源码。
+- 续记 2026-10-07：jev-route 评审 `35ad76d0`（opus + codex，high）PASSED，0 阻断；两条 minor 一轮修复：opus:F1（`/status` 每 2 秒无锁打开 `state.json`，可能让写方 `MoveFileExW` 替换失败）→ Service 只在无缓存时读存储，`update::request` 每次返回后按应答回填缓存、被拒后清空（只有 Prepare 能新建挂起尝试，而它在 `request` 里；其他写方只会结束尝试，过期的「真」仍是未完成）；codex:F1（Adopt 被拒后的清除可与同进程安装竞争，覆盖其 Prepare 置的 true）→ 清除时 `INSTALL.try_lock()`，安装在跑就不清，持锁跨读取与写入（这一瞬间点安装会得到「已有更新请求在运行」）。
 - 剩余限制：只改启动 Adopt 被拒后的标志；状态轮询不会据此改写 INCOMPLETE。手动安装租约仍挡 Adopt 本身（只是不再显示未完成）。Restore internet 的 Status 探测在活租约下仍失败（BRICK-W5 其余项）。未实机。
