@@ -830,6 +830,30 @@ fn windows_recovery_state_present() -> bool {
         || may_exist(&paths.pid_file_path())
 }
 
+/// Files the installer publishes beside `tono-service.exe` that the uninstall sweeps.
+/// Both digest pins (`install_service.rs` `publish_core_digest_pin` /
+/// `publish_sing_box_digest_pin`) and their `.tmp` staging names are listed; #1319 was the
+/// sing-box pair surviving uninstall.
+#[cfg(any(windows, test))]
+const INSTALL_DIR_SWEEP: &[&str] = &[
+    "core-sha256.txt",
+    "core-sha256.txt.tmp",
+    "sing-box-sha256.txt",
+    "sing-box-sha256.txt.tmp",
+    "control-plane-pins.json",
+    "control-plane-pins.json.tmp",
+    // Update scratch. A coordinated replacement that fails past the publish point can
+    // leave these behind deliberately, and `ensure_update_scratch_absent` then refuses
+    // every subsequent `--replace-runtime` upgrade before it does any other work. If the
+    // uninstall does not sweep them, uninstalling is not a way out either: the fresh
+    // install that follows runs in ServiceOnly mode and skips the guard, so the dead end
+    // only reappears at the next upgrade. The suffixes mirror install_service.rs:686-692.
+    "tono-service.exe.next",
+    "tono-service.exe.rollback",
+    "tono-service.exe.restore",
+    "tono-service.exe.publish",
+];
+
 /// Best-effort binary removal; runs only after the disarm was proven (or nothing was armed),
 /// so a failure is cosmetic. Uses the plain paths accessor: an uninstall must not recreate or
 /// re-ACL the install directory just to look inside it.
@@ -842,22 +866,7 @@ fn remove_windows_service_binary() -> Result<(), Error> {
             anyhow::anyhow!("Failed to remove service binary {target:?}: {error}")
         })?;
     }
-    for name in [
-        "core-sha256.txt",
-        "core-sha256.txt.tmp",
-        "control-plane-pins.json",
-        "control-plane-pins.json.tmp",
-        // Update scratch. A coordinated replacement that fails past the publish point can
-        // leave these behind deliberately, and `ensure_update_scratch_absent` then refuses
-        // every subsequent `--replace-runtime` upgrade before it does any other work. If the
-        // uninstall does not sweep them, uninstalling is not a way out either: the fresh
-        // install that follows runs in ServiceOnly mode and skips the guard, so the dead end
-        // only reappears at the next upgrade. The suffixes mirror install_service.rs:686-692.
-        "tono-service.exe.next",
-        "tono-service.exe.rollback",
-        "tono-service.exe.restore",
-        "tono-service.exe.publish",
-    ] {
+    for name in INSTALL_DIR_SWEEP {
         let leftover = install_dir.join(name);
         if leftover.try_exists().unwrap_or(true) {
             let _ = std::fs::remove_file(&leftover);
@@ -1050,7 +1059,19 @@ mod tests {
         cleanup_exit_code, cleanup_fast_path_allowed, final_cleanup_outcome,
         final_uninstall_cleanup, poll_until, uninstall_may_continue, with_resolver_rule_proof,
     };
+    use super::INSTALL_DIR_SWEEP;
     use std::cell::Cell;
+
+    /// #1319: every digest pin the installer publishes beside the Service binary, and its
+    /// `.tmp` staging name, is swept on uninstall. The sing-box pair was missing.
+    #[test]
+    fn uninstall_sweeps_every_published_digest_pin() {
+        for pin in ["core-sha256.txt", "sing-box-sha256.txt"] {
+            assert!(INSTALL_DIR_SWEEP.contains(&pin), "{pin} not swept");
+            let staged = format!("{pin}.tmp");
+            assert!(INSTALL_DIR_SWEEP.contains(&staged.as_str()), "{staged} not swept");
+        }
+    }
 
     /// BRICK-W4: a continuing outcome (exit 0, 2 or 4) is only possible once Tono's NRPT
     /// catch-all is proven gone. A rule that remains turns it into the blocking outcome, so the
