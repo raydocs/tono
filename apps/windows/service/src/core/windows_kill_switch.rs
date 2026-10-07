@@ -101,6 +101,11 @@ struct IntentRecord {
     /// consumes the record. The app treats `wanted: false` plus this flag as "reconnect".
     #[serde(default)]
     reconnect_after_release: bool,
+    /// The owner whose session the crash window released: the only caller that is told to
+    /// reconnect (#1291). Kept apart from `owner_key` so the tombstone itself stays ownerless.
+    /// `None` with the flag set is a legacy or ownerless record that no App may honor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reconnect_owner_key: Option<String>,
     /// Durable secondary-layer disposition for an automatic release. `None` is a legacy
     /// record whose existing hold is left alone; this never authorizes a broad WFP block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -361,6 +366,31 @@ static WANTED_CORE_DEADLINE: Lazy<Mutex<Option<std::time::Instant>>> = Lazy::new
 /// In-memory copy of a crash-window tombstone's reconnect flag. Status reports it after
 /// `ARMED` is cleared; the on-disk tombstone restores it across a Service restart.
 static RECONNECT_AFTER_RELEASE: AtomicBool = AtomicBool::new(false);
+
+/// The owner the in-memory reconnect flag is owed to (#1291). Written together with
+/// `RECONNECT_AFTER_RELEASE` under this lock by `publish_reconnect`.
+static RECONNECT_OWNER: Mutex<Option<String>> = Mutex::new(None);
+
+fn reconnect_owner_guard() -> std::sync::MutexGuard<'static, Option<String>> {
+    RECONNECT_OWNER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Publish the crash-window reconnect flag and the owner it is owed to.
+fn publish_reconnect(reconnect: bool, owner: Option<String>) {
+    let mut recorded = reconnect_owner_guard();
+    *recorded = if reconnect { owner } else { None };
+    RECONNECT_AFTER_RELEASE.store(reconnect, Ordering::Release);
+}
+
+/// Publish the reconnect disposition a released record carries.
+fn publish_reconnect_from(intent: &IntentRecord) {
+    publish_reconnect(
+        intent.reconnect_after_release,
+        intent.reconnect_owner_key.clone(),
+    );
+}
 
 /// WFP is already gone but the crash-window tombstone write failed. The watchdog retries
 /// the write without reinstalling the block.
@@ -641,9 +671,9 @@ fn spawn_startup_release_retry() {
                 remove_all_filters_unlocked().await?;
                 sweep_legacy_sublayers_unlocked().await;
                 let reconnect = intent.as_ref().is_some_and(|intent| intent.reconnect_after_release);
-                if reconnect {
+                if let Some(intent) = intent.as_ref().filter(|_| reconnect) {
                     // A retry must retain the same crash-reconnect intent as normal startup.
-                    RECONNECT_AFTER_RELEASE.store(true, Ordering::Release);
+                    publish_reconnect_from(intent);
                 }
                 if !reconnect && follow_up != Some(true) {
                     match tokio::fs::remove_file(intent_path()).await {
@@ -826,13 +856,16 @@ fn disarmed_tombstone() -> IntentRecord {
         owner_key: None,
         strict_kill_switch: false,
         reconnect_after_release: false,
+        reconnect_owner_key: None,
         apply_narrow_after_release: Some(false),
     }
 }
 
-fn crash_recovery_tombstone() -> IntentRecord {
+/// `reconnect_owner` is the released session's owner; only that owner is told to reconnect.
+fn crash_recovery_tombstone(reconnect_owner: Option<String>) -> IntentRecord {
     let mut tombstone = disarmed_tombstone();
     tombstone.reconnect_after_release = true;
+    tombstone.reconnect_owner_key = reconnect_owner;
     tombstone.apply_narrow_after_release = Some(true);
     tombstone
 }
@@ -1663,6 +1696,7 @@ pub(crate) async fn arm_bootstrap(
             owner_key: Some(owner_key.to_owned()),
             strict_kill_switch: false,
             reconnect_after_release: false,
+            reconnect_owner_key: None,
             apply_narrow_after_release: None,
         },
         tun_luid: None,
@@ -1676,7 +1710,7 @@ pub(crate) async fn arm_bootstrap(
     // floor if this process dies during the following transaction.
     atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?).await?;
     CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
-    RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
+    publish_reconnect(false, None);
     *armed_guard() = Some(armed.clone());
     note_fresh_arm_core_window(&armed.intent);
     record_outcome(install_unlocked(&armed).await)
@@ -3185,7 +3219,7 @@ async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
         clear_wanted_core_window();
         // This successful release supersedes any older crash-record retry.
         CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
-        RECONNECT_AFTER_RELEASE.store(tombstone.reconnect_after_release, Ordering::Release);
+        publish_reconnect_from(&tombstone);
         return Ok(());
     };
     // DNS-before-disarm invariant (identical to the macOS helper): the network may open only
@@ -3252,7 +3286,7 @@ async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
     }
     clear_wanted_core_window();
     CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
-    RECONNECT_AFTER_RELEASE.store(tombstone.reconnect_after_release, Ordering::Release);
+    publish_reconnect_from(&tombstone);
     Ok(())
 }
 
@@ -3281,12 +3315,15 @@ async fn release_unproven_wanted_session_unlocked() -> Result<()> {
         "wanted-session core window could not remove WFP; the block stays until the next tick",
     )?;
     clear_wanted_core_window();
-    *armed_guard() = None;
+    // The reconnect is owed to the owner of the released session only (#1291).
+    let released_owner = armed_guard()
+        .take()
+        .and_then(|armed| armed.intent.owner_key);
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
-    RECONNECT_AFTER_RELEASE.store(true, Ordering::Release);
+    publish_reconnect(true, released_owner.clone());
     // WFP is already gone. Recovery keeps only the narrow AI hold installed above;
     // its best-effort installation cannot refuse or undo the general release.
-    let tombstone = crash_recovery_tombstone();
+    let tombstone = crash_recovery_tombstone(released_owner);
     let result = match atomic_write(&intent_path(), &serde_json::to_vec_pretty(&tombstone)?).await {
         Ok(()) => {
             CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
@@ -3322,7 +3359,7 @@ async fn retry_crash_tombstone_unlocked() {
         CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
         return;
     }
-    let tombstone = crash_recovery_tombstone();
+    let tombstone = crash_recovery_tombstone(reconnect_owner_guard().clone());
     match serde_json::to_vec_pretty(&tombstone) {
         Ok(encoded) => match atomic_write(&intent_path(), &encoded).await {
             Ok(()) => CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release),
@@ -3642,6 +3679,7 @@ fn emergency_armed() -> Armed {
             owner_key: None,
             strict_kill_switch: true,
             reconnect_after_release: false,
+            reconnect_owner_key: None,
             apply_narrow_after_release: None,
         },
         tun_luid: None,
@@ -3670,7 +3708,7 @@ pub async fn restore_on_service_start() -> Result<()> {
     let _operation = WFP_OPERATION.lock().await;
     RESTORE_WAS_LOCKED.store(false, Ordering::Release);
     clear_wanted_core_window();
-    RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
+    publish_reconnect(false, None);
     STARTUP_UNVERIFIED_BARRIER.store(false, Ordering::Release);
     STARTUP_SETTLED.store(false, Ordering::Release);
     match tokio::fs::read(intent_path()).await {
@@ -3810,7 +3848,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                 if intent.reconnect_after_release {
                     // Keep the crash-window tombstone so a later Service start still tells the
                     // app to reconnect. A user-disconnect tombstone is consumed as before.
-                    RECONNECT_AFTER_RELEASE.store(true, Ordering::Release);
+                    publish_reconnect_from(&intent);
                 }
                 if !intent.reconnect_after_release && follow_up != Some(true) {
                     match tokio::fs::remove_file(intent_path()).await {
@@ -4437,10 +4475,12 @@ async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
         owner_key: None,
         strict_kill_switch: false,
         reconnect_after_release: false,
+        reconnect_owner_key: None,
         apply_narrow_after_release: None,
     });
     tombstone.wanted = false;
     tombstone.reconnect_after_release = false;
+    tombstone.reconnect_owner_key = None;
     tombstone.apply_narrow_after_release = Some(apply_narrow);
     tombstone.updated_at = now_unix();
     let tombstone_error =
@@ -4619,6 +4659,42 @@ pub(crate) async fn status() -> KillSwitchStatus {
     }
 }
 
+/// `status()` as `caller_key` may see it. A crash-window reconnect is reported only to the
+/// owner whose session was released (#1291): another signed-in user's App must not
+/// auto-connect from it and take the machine's protection over.
+pub(crate) async fn status_for(caller_key: &str) -> KillSwitchStatus {
+    let mut status = status().await;
+    if status.reconnect_after_release && !reconnect_owed_to(caller_key) {
+        status.reconnect_after_release = false;
+    }
+    status
+}
+
+/// Whether the reported reconnect flag is owed to `caller_key`. An ownerless flag (a legacy
+/// tombstone, or the release of an intent that recorded no owner) is owed to nobody: the first
+/// caller it would have been reported to clears it, and the clear is logged.
+fn reconnect_owed_to(caller_key: &str) -> bool {
+    let armed_owner = { armed_guard().clone() }
+        .filter(|armed| !armed.intent.wanted && armed.intent.reconnect_after_release)
+        .map(|armed| armed.intent.reconnect_owner_key);
+    if let Some(owner) = armed_owner {
+        return owner.as_deref() == Some(caller_key);
+    }
+    let recorded = reconnect_owner_guard();
+    match recorded.as_deref() {
+        Some(owner) => owner == caller_key,
+        None => {
+            if RECONNECT_AFTER_RELEASE.swap(false, Ordering::AcqRel) {
+                tracing::warn!(
+                    "Windows kill switch: cleared a crash-window reconnect flag that names no \
+                     owner; no App reconnects from it (#1291)"
+                );
+            }
+            false
+        }
+    }
+}
+
 /// Pending-update recovery has the same selective disposition as ordinary automatic cleanup.
 #[cfg(any(windows, test))]
 pub(crate) async fn release_for_update_disconnect(apply_narrow: bool) -> Result<KillSwitchStatus> {
@@ -4632,9 +4708,9 @@ pub(crate) async fn release_for_update_disconnect(apply_narrow: bool) -> Result<
 
 /// `/status` aggregate: present only where the WFP backend exists; the macOS fields stay the
 /// source of truth there.
-pub(crate) async fn status_snapshot() -> Option<KillSwitchStatus> {
+pub(crate) async fn status_snapshot(caller_key: &str) -> Option<KillSwitchStatus> {
     if cfg!(windows) {
-        Some(status().await)
+        Some(status_for(caller_key).await)
     } else {
         None
     }
@@ -4770,6 +4846,7 @@ mod tests {
             owner_key: None,
             strict_kill_switch: false,
             reconnect_after_release: false,
+            reconnect_owner_key: None,
             apply_narrow_after_release: None,
         }
     }
@@ -5288,7 +5365,7 @@ mod tests {
         RESTORE_WAS_LOCKED.store(false, Ordering::Release);
         RESTORED_BARRIER_UNPROVEN.store(false, Ordering::Release);
         clear_wanted_core_window();
-        RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
+        publish_reconnect(false, None);
         CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
         CORE_REPLAY_EXPECTED.store(false, Ordering::Release);
         #[cfg(test)]
@@ -5761,7 +5838,7 @@ mod tests {
     #[serial]
     async fn legacy_crash_reconnect_tombstone_replays_the_ai_hold() -> Result<()> {
         cleanup().await;
-        let mut legacy = serde_json::to_value(crash_recovery_tombstone())?;
+        let mut legacy = serde_json::to_value(crash_recovery_tombstone(None))?;
         legacy.as_object_mut().unwrap().remove("apply_narrow_after_release");
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&legacy)?).await?;
         restore_on_service_start().await?;
@@ -5770,6 +5847,41 @@ mod tests {
         cleanup().await;
         assert!(held, "legacy crash reconnect intent still requests the automatic AI hold");
         assert!(reconnect);
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn crash_window_reconnect_is_reported_only_to_the_released_owner() -> Result<()> {
+        cleanup().await;
+        let mut intent = valid_intent(KillSwitchStatusMode::Locked, true);
+        intent.owner_key = Some("owner-alice".to_owned());
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+        restore_on_service_start().await?;
+        assert!(
+            !status().await.wanted,
+            "no Core and no replay releases Alice's session"
+        );
+
+        // Bob's App gets no reconnect, so it never connects on Bob's account and takes over;
+        // his read neither consumes nor clears the flag Alice's App is owed.
+        let bob = status_for("owner-bob").await.reconnect_after_release;
+        let alice = status_for("owner-alice").await.reconnect_after_release;
+        let on_disk: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+        cleanup().await;
+        assert!(
+            !bob,
+            "another signed-in user's App must not be told to reconnect"
+        );
+        assert!(
+            alice,
+            "the released owner is still told to reconnect after Bob's read"
+        );
+        assert_eq!(on_disk.reconnect_owner_key.as_deref(), Some("owner-alice"));
+        assert_eq!(
+            on_disk.owner_key, None,
+            "the tombstone itself stays ownerless"
+        );
         Ok(())
     }
 
@@ -6130,7 +6242,7 @@ mod tests {
     #[serial]
     async fn startup_release_retry_preserves_the_crash_reconnect_marker() -> Result<()> {
         cleanup().await;
-        let intent = crash_recovery_tombstone();
+        let intent = crash_recovery_tombstone(None);
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
         let failures = SimulatedStateFailures::arm_removal();
 
@@ -6596,6 +6708,7 @@ mod tests {
             owner_key: None,
             strict_kill_switch: false,
             reconnect_after_release: false,
+            reconnect_owner_key: None,
             apply_narrow_after_release: None,
         };
         apply_learned_bootstrap_pins(&mut intent);

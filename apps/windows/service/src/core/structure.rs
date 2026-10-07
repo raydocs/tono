@@ -563,6 +563,7 @@ pub struct KillSwitchStatus {
     pub last_error: Option<String>,
     /// The Service opened the network because a restored wanted session never proved Core.
     /// Older payloads omit it and read as false, so a user disconnect does not reconnect.
+    /// Over IPC it is true only for the owner whose session was released (#1291).
     #[serde(default)]
     pub reconnect_after_release: bool,
 }
