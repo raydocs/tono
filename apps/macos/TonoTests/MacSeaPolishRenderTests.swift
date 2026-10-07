@@ -227,6 +227,10 @@ final class MacSeaPolishRenderTests: XCTestCase {
         // The hosted display is 1024 wide. Capture the native window surface at
         // the requested size, not a display-constrained or content-autosized proxy.
         host.sizingOptions = []
+        // This full-size manual host contains a native NavigationSplitView,
+        // which owns the toolbar inset. Do not reserve that container inset
+        // a second time at the hosting boundary.
+        host.safeAreaRegions = []
         window.contentView = host
         recordGeometry(window, stage: "mounted-before-toolbar-layout")
         window.setFrame(CGRect(x: 80, y: 80, width: size.width, height: size.height), display: false)
