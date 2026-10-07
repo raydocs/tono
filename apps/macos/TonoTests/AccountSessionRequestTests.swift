@@ -1697,6 +1697,34 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertTrue(nextRelaunchRestorable)
     }
 
+    func testRecoveryRecordWriteFailureIsNotReportedAsAKeychainRefusal() async throws {
+        let directory = Self.offlineGrantDirectory("recovery-record-refusal")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let notADirectory = directory.appendingPathComponent("not-a-directory")
+        try Data("file".utf8).write(to: notADirectory)
+        let writes = PathCallCounter()
+        let removals = PathCallCounter()
+        let store = KeychainStore(
+            service: "app.tono.tests.recovery-record.\(UUID().uuidString)",
+            suppressionDirectory: notADirectory,
+            copyMatching: { _, _ in errSecItemNotFound },
+            updateItem: { _, _ in writes.record(); return errSecInteractionNotAllowed },
+            deleteItem: { _ in removals.record(); return errSecSuccess }
+        )
+        let api = TonoAPIClient(keychain: store, offlineGate: OfflineGrantGate(directory: directory))
+        let user = try JSONDecoder().decode(TonoUser.self, from: Data(Self.originalUser.utf8))
+        do {
+            try await api.adopt(TonoAuthResponse(accessToken: "new-access", refreshToken: "new-refresh", user: user, device: nil, enrollment: nil))
+            XCTFail("An unwritable recovery record must fail signed out")
+        } catch {
+            XCTAssertEqual(error as? TonoAPIClient.APIError, .credentialRecoveryRecord)
+        }
+        XCTAssertEqual(writes.count, 0, "filesystem refusal happens before a credential replacement")
+        XCTAssertEqual(removals.count, 1, "prior credential deletion is still attempted")
+        let restorable = try await api.hasRestorableSession()
+        XCTAssertFalse(restorable)
+    }
+
     func testCancelledAuthenticationDoesNotAdoptLateCredentials() async throws {
         let (account, transport, host, _) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }

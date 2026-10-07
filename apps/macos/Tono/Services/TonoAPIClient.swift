@@ -90,6 +90,7 @@ actor TonoAPIClient {
         /// a launch without a cached catalog waits and asks again soon.
         case exitIdentityPropagating
         case credentialPersistence
+        case credentialRecoveryRecord
 
         var errorDescription: String? {
             switch self {
@@ -107,6 +108,7 @@ actor TonoAPIClient {
             case .clockSkew: CertificateClock.userMessage
             case .exitIdentityPropagating: String(localized: "Tono is still preparing this Mac's secure identity. Try again in a minute.")
             case .credentialPersistence: String(localized: "Tono could not save your sign-in in Keychain. You are signed out. Check that your login keychain is unlocked, then try again.")
+            case .credentialRecoveryRecord: String(localized: "Tono could not update its sign-in recovery record. You are signed out. Check available disk space and Tono's Application Support folder permissions, then try again.")
             }
         }
 
@@ -399,17 +401,22 @@ actor TonoAPIClient {
         accessTokenExpiry = nil
         unpersistedRefreshToken = nil
         failedAdoption = true
-        do {
-            // Record suppression before touching Keychain. If replacement and
-            // deletion both fail, the old item remains unreadable on relaunch.
-            try keychain.suppressRefreshTokenRestoration()
-            try keychain.set(refresh, for: .refreshToken)
-            try keychain.clearRefreshTokenSuppression()
-        } catch {
-            // A failed replacement may leave the previous account's durable
-            // credential. Neither account can own this failed sign-in.
+        // Record suppression before touching Keychain. If replacement and
+        // deletion both fail, the old item remains unreadable on relaunch.
+        do { try keychain.suppressRefreshTokenRestoration() }
+        catch {
+            try? keychain.remove(.refreshToken)
+            throw APIError.credentialRecoveryRecord
+        }
+        do { try keychain.set(refresh, for: .refreshToken) }
+        catch {
             try? keychain.remove(.refreshToken)
             throw APIError.credentialPersistence
+        }
+        do { try keychain.clearRefreshTokenSuppression() }
+        catch {
+            try? keychain.remove(.refreshToken)
+            throw APIError.credentialRecoveryRecord
         }
         failedAdoption = false
         accessToken = auth.accessToken

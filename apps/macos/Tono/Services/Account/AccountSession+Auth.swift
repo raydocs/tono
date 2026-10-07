@@ -919,14 +919,15 @@ extension AccountSession {
                     confirm: true
                 )
             }
-        } catch TonoAPIClient.APIError.credentialPersistence {
+        } catch let error as TonoAPIClient.APIError
+            where error == .credentialPersistence || error == .credentialRecoveryRecord {
             // Verification succeeded, but no durable session exists. Clear
             // the prior presentation without touching network protection.
             let resumeProtection = shouldResumeProtection
             deactivateAppRoutingResearch()
             clearAccount()
             shouldResumeProtection = resumeProtection
-            signInError = TonoAPIClient.APIError.credentialPersistence.errorDescription
+            signInError = error.errorDescription
             state = .signedOut
         } catch { await fail(error) }
     }
