@@ -56,6 +56,37 @@ final class SeaScenePaletteTests: XCTestCase {
         XCTAssertTrue(CATransform3DIsIdentity(scene.sublayerTransform))
     }
 
+    func testLiveResizeKeepsCachedSceneCoverageAtTheWindowOrigin() throws {
+        let view = SeaSceneNativeView(frame: NSRect(x: 0, y: 0, width: 320, height: 200))
+        defer { view.stop() }
+        view.layout()
+        let scene = try XCTUnwrap(view.layer?.sublayers?.first)
+        let grain = try XCTUnwrap(scene.sublayers?.first(where: { $0.name == "grain" }))
+        view.viewWillStartLiveResize()
+        view.setFrameSize(CGSize(width: 640, height: 400))
+        view.layout()
+        XCTAssertTrue(scene.sublayers?.contains(where: { $0 === grain }) == true)
+        let growingCoverage = grain.convert(grain.bounds, to: scene)
+        XCTAssertEqual(growingCoverage.minX, view.bounds.minX, accuracy: 0.000001)
+        XCTAssertEqual(growingCoverage.minY, view.bounds.minY, accuracy: 0.000001)
+        XCTAssertEqual(growingCoverage.maxX, view.bounds.maxX, accuracy: 0.000001)
+        XCTAssertEqual(growingCoverage.maxY, view.bounds.maxY, accuracy: 0.000001)
+        view.viewDidEndLiveResize()
+        let rebuiltGrain = try XCTUnwrap(scene.sublayers?.first(where: { $0.name == "grain" }))
+        XCTAssertFalse(rebuiltGrain === grain)
+        XCTAssertTrue(CATransform3DIsIdentity(scene.sublayerTransform))
+        view.viewWillStartLiveResize()
+        view.setFrameSize(CGSize(width: 160, height: 100))
+        view.layout()
+        let shrinkingCoverage = rebuiltGrain.convert(rebuiltGrain.bounds, to: scene)
+        XCTAssertEqual(shrinkingCoverage.minX, view.bounds.minX, accuracy: 0.000001)
+        XCTAssertEqual(shrinkingCoverage.minY, view.bounds.minY, accuracy: 0.000001)
+        XCTAssertEqual(shrinkingCoverage.maxX, view.bounds.maxX, accuracy: 0.000001)
+        XCTAssertEqual(shrinkingCoverage.maxY, view.bounds.maxY, accuracy: 0.000001)
+        view.viewDidEndLiveResize()
+        XCTAssertTrue(CATransform3DIsIdentity(scene.sublayerTransform))
+    }
+
     func testPhaseChangeWhilePausedHasNoTransitionToReplay() throws {
         let view = SeaSceneNativeView(frame: NSRect(x: 0, y: 0, width: 320, height: 200))
         defer { view.stop() }

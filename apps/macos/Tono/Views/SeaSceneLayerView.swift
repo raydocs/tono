@@ -47,6 +47,7 @@ final class SeaSceneNativeView: NSView {
         super.init(frame: frame)
         wantsLayer = true
         layerUsesCoreImageFilters = true
+        scene.anchorPoint = .zero
         scene.masksToBounds = true
         layer?.addSublayer(scene)
     }
