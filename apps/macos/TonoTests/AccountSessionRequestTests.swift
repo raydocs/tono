@@ -1617,6 +1617,49 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "test-only-refresh")
     }
 
+    func testFailedSignInKeychainWriteDiscardsBothAccounts() async throws {
+        let refusal = RefuseOneTokenWrite("new-refresh")
+        var disarms = 0
+        let (account, transport, host, _) = fixture(
+            killSwitchDisarmConsumer: { disarms += 1 },
+            keychainUpdate: { refusal.update($0, $1) }
+        )
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        try await adoptTestAccount(account)
+        account.shouldResumeProtection = true
+        let newUser = try JSONDecoder().decode(TonoUser.self, from: Data(#"{"id":"replacement","email":"new@example.test"}"#.utf8))
+
+        await account.authenticate {
+            TonoAuthResponse(
+                accessToken: "new-access", refreshToken: "new-refresh",
+                user: newUser, device: nil, enrollment: nil
+            )
+        }
+
+        XCTAssertEqual(account.state, .signedOut)
+        XCTAssertNil(account.user)
+        XCTAssertEqual(account.signInError, TonoAPIClient.APIError.credentialPersistence.errorDescription)
+        XCTAssertNil(try testKeychain(host).string(for: .refreshToken))
+        let restorable = try await account.api.hasRestorableSession()
+        let digest = await account.api.currentRefreshTokenDigest()
+        XCTAssertFalse(restorable)
+        XCTAssertNil(digest)
+        let requests = PathCallCounter()
+        HeldAccountProtocol.install(host) { request in
+            requests.record()
+            request.respond(status: 200, body: #"{"user":{"id":"replacement","email":"new@example.test"}}"#)
+        }
+        do {
+            _ = try await account.api.me()
+            XCTFail("The failed adoption must not retain an access token")
+        } catch {
+            XCTAssertEqual(error as? TonoAPIClient.APIError, .unauthorized)
+        }
+        XCTAssertEqual(requests.count, 0)
+        XCTAssertTrue(account.shouldResumeProtection)
+        XCTAssertEqual(disarms, 0)
+    }
+
     func testCancelledAuthenticationDoesNotAdoptLateCredentials() async throws {
         let (account, transport, host, _) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }

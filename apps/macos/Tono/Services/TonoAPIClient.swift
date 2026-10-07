@@ -89,6 +89,7 @@ actor TonoAPIClient {
         /// is not yet acknowledged by every served exit. Transient by design;
         /// a launch without a cached catalog waits and asks again soon.
         case exitIdentityPropagating
+        case credentialPersistence
 
         var errorDescription: String? {
             switch self {
@@ -105,6 +106,7 @@ actor TonoAPIClient {
             case .invalidOrExpiredCode: String(localized: "That code is wrong or expired. Request a new one.")
             case .clockSkew: CertificateClock.userMessage
             case .exitIdentityPropagating: String(localized: "Tono is still preparing this Mac's secure identity. Try again in a minute.")
+            case .credentialPersistence: String(localized: "Tono could not save your sign-in in Keychain. You are signed out. Check that your login keychain is unlocked, then try again.")
             }
         }
 
@@ -152,6 +154,9 @@ actor TonoAPIClient {
     private var prefersPinnedAddresses = false
     private let keychain: KeychainStore
     private var accessToken: String?
+    /// A failed initial credential write must not fall back to a previous
+    /// account's still-readable keychain item in this process.
+    private var failedAdoption = false
     private var refreshTask: (id: UUID, task: Task<String, Error>)?
     private var logoutTask: (id: UUID, generation: UInt64, task: Task<Void, Never>)?
     private var credentialGeneration: UInt64 = 0
@@ -390,21 +395,21 @@ actor TonoAPIClient {
         retireCredentialGeneration()
         // Nothing the server told the previous identity applies to this one.
         offlineGate.adoptNewIdentity()
-        accessToken = auth.accessToken
-        accessTokenExpiry = Self.expiry(ofJWT: auth.accessToken)
+        accessToken = nil
+        accessTokenExpiry = nil
+        unpersistedRefreshToken = nil
+        failedAdoption = true
         do {
             try keychain.set(refresh, for: .refreshToken)
-            // A rotated-but-unpersisted token from the previous session
-            // outranks the keychain copy wherever it is read, so leaving it
-            // would write the old account's credential back over this one.
-            unpersistedRefreshToken = nil
         } catch {
-            // The keychain still holds the previous account's token. Keeping
-            // the adopted one in memory is what makes it outrank that copy;
-            // clearing it here would be an irreversible sign-in failure.
-            unpersistedRefreshToken = refresh
-            throw error
+            // A failed replacement may leave the previous account's durable
+            // credential. Neither account can own this failed sign-in.
+            try? keychain.remove(.refreshToken)
+            throw APIError.credentialPersistence
         }
+        failedAdoption = false
+        accessToken = auth.accessToken
+        accessTokenExpiry = Self.expiry(ofJWT: auth.accessToken)
     }
 
     /// `exp` from a JWT payload, or nil when the token is not a readable JWT.
@@ -545,11 +550,11 @@ actor TonoAPIClient {
     /// `.unauthorized` without asking the server, which suspends or signs out
     /// an account the server never refused.
     private func currentRefreshToken() throws -> String? {
-        try unpersistedRefreshToken ?? keychain.string(for: .refreshToken)
+        guard !failedAdoption else { return nil }
+        return try unpersistedRefreshToken ?? keychain.string(for: .refreshToken)
     }
 
-    /// Retry after a failed sign-in write must keep the adopted session, even
-    /// if the keychain still cannot acknowledge its refresh token.
+    /// A launch restores only a credential this process has not discarded.
     func hasRestorableSession() throws -> Bool {
         retryRefreshTokenPersistence()
         return try currentRefreshToken() != nil
@@ -1098,7 +1103,7 @@ actor TonoAPIClient {
     /// rotated token that is only in memory would leave a grant no relaunch
     /// could match, and a logout in progress owns these credentials.
     func recordOfflineGrant(accountId: String, confirmed digests: InstalledCatalogDigests) {
-        guard unpersistedRefreshToken == nil, !isLoggingOut,
+        guard !failedAdoption, unpersistedRefreshToken == nil, !isLoggingOut,
               let token = try? keychain.string(for: .refreshToken) else { return }
         offlineGate.writeGrant(OfflineGrant(
             accountId: accountId,
