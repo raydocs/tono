@@ -1389,6 +1389,35 @@ test('Support WebRTC check link is granted to the webview opener and nothing wid
   assert.equal(scope.test('https://example.com/'), false)
 })
 
+test('the forked NSIS template is synced with the installed @tauri-apps/cli', () => {
+  // The bundler supplies utils.nsh at build time; cli 2.12.1 changed CheckIfAppIsRunning
+  // to the Restart Manager and the 7502 candidate died in makensis because the fork had
+  // not followed (#1431). Moving the cli pin without re-diffing the template fails here.
+  const packageJson = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+  )
+  const cliVersion = packageJson.devDependencies['@tauri-apps/cli']
+  const synced = installerSource.match(
+    /^; TEMPLATE_SYNCED_WITH_TAURI_CLI (\S+)$/m,
+  )
+  assert.ok(synced, 'installer.nsi must carry a TEMPLATE_SYNCED_WITH_TAURI_CLI marker')
+  assert.equal(
+    synced[1],
+    cliVersion,
+    `@tauri-apps/cli is ${cliVersion} but installer.nsi was last synced with ${synced[1]}; diff the upstream template and update the marker`,
+  )
+  // The 2.12 contract the sync covers: Restart Manager include + executable paths.
+  assert.match(installerSource, /^!include "Win\\RestartManager\.nsh"$/m)
+  const calls = installerSource.match(/!insertmacro CheckIfAppIsRunning .*$/gm)
+  assert.equal(calls.length, 2)
+  for (const call of calls) {
+    assert.equal(
+      call,
+      '!insertmacro CheckIfAppIsRunning "$INSTDIR\\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"',
+    )
+  }
+})
+
 test('prebuild.mjs parses, so the candidate build can run it', async () => {
   const { spawnSync } = await import('node:child_process')
   const { fileURLToPath } = await import('node:url')
