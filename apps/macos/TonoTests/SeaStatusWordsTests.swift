@@ -3,6 +3,18 @@ import XCTest
 
 @MainActor
 final class SeaStatusWordsTests: XCTestCase {
+    func testSequentialHeaderNeverShowsOutgoingAndIncomingWordsTogether() {
+        for frame in 0...240 {
+            let progress = Double(frame) / 240
+            let incoming = SeaHomeHeaderTransition.opacity(at: progress)
+            let outgoing = SeaHomeHeaderTransition.opacity(at: 1 - progress)
+            XCTAssertEqual(incoming * outgoing, 0,
+                           "title and subtitle groups must not cross-fade readable words")
+        }
+        XCTAssertEqual(SeaHomeHeaderTransition.opacity(at: 0), 0)
+        XCTAssertEqual(SeaHomeHeaderTransition.opacity(at: 1), 1)
+    }
+
     func testSupportUnknownProtectionOverridesResidualSnapshotClaims() {
         let app = AppState()
         app.isConnected = true

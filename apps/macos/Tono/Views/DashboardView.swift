@@ -350,8 +350,6 @@ struct DashboardView: View {
                 .font(.system(size: 56, weight: .light)).tracking(1.12)
                 .lineLimit(1).minimumScaleFactor(0.65)
                 .shadow(color: Color(hex: "0C060A").opacity(0.45), radius: 18, y: 2)
-                .id(seaStatusKey)
-                .transition(reduceMotion ? .opacity : TonoMotion.textSwapTransition)
                 .foregroundStyle(SeaTheme.text)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
@@ -360,8 +358,10 @@ struct DashboardView: View {
                 .frame(maxWidth: 400, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .id(seaStatusKey + "\n" + seaSummary)
+        .transition(reduceMotion ? .identity : SeaHomeHeaderTransition.transition)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(TonoMotion.textSwap(reduceMotion: reduceMotion), value: seaStatusKey)
+        .animation(TonoMotion.textSwap(reduceMotion: reduceMotion), value: seaStatusKey + "\n" + seaSummary)
     }
 
     private var seaSummary: String {
@@ -1131,6 +1131,30 @@ private struct DashboardStatCard: View {
                     lineWidth: 0.5
                 )
         }
+    }
+}
+
+/// The incoming and outgoing groups traverse the same curve in opposite
+/// directions. Only its upper half is visible, so the old words disappear
+/// before the new words arrive, including when just the subtitle changes.
+struct SeaHomeHeaderTransition: AnimatableModifier {
+    var progress: Double
+
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    static func opacity(at progress: Double) -> Double {
+        min(1, max(0, progress * 2 - 1))
+    }
+
+    static var transition: AnyTransition {
+        .modifier(active: Self(progress: 0), identity: Self(progress: 1))
+    }
+
+    func body(content: Content) -> some View {
+        content.opacity(Self.opacity(at: progress))
     }
 }
 
