@@ -272,10 +272,8 @@ final class MacSeaPolishRenderTests: XCTestCase {
         let target = registration.target
         let expectedID = target.windowID
         let requestedSize = try XCTUnwrap((window as? MacSeaPolishWindow)?.requestedSize)
-        XCTAssertTrue(target.isOnScreen)
         XCTAssertEqual(expectedID, CGWindowID(window.windowNumber))
-        XCTAssertEqual(target.frame, registration.windowServerFrame)
-        XCTAssertEqual(target.frame.size, requestedSize)
+        XCTAssertEqual(registration.windowServerFrame.size, requestedSize)
         XCTAssertEqual(window.frame.size, requestedSize)
         let filter = SCContentFilter(desktopIndependentWindow: target)
         let config = SCStreamConfiguration()
@@ -296,7 +294,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
         try data.write(to: folder.appendingPathComponent(name + ".png"), options: .atomic)
         let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
         attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
-        let receipt = "source=first own-PID native window PNG; windowID=\(expectedID) ownerPID=\(pid) frame=\(target.frame) requested=\(requestedSize) dimensions=\(image.width)x\(image.height) registrationAttempts=\(registration.attempts) metadataBeforeImage=true language=\(Locale.preferredLanguages) lowPower=\(ProcessInfo.processInfo.isLowPowerModeEnabled) accessibilitySource=shared-presentation-inputs-not-host-OS-mutation\n"
+        let receipt = "source=first own-PID native window PNG; windowID=\(expectedID) ownerPID=\(pid) windowServerOnScreen=true windowServerFrame=\(registration.windowServerFrame) SCFrame=\(target.frame) SCOnScreen=\(target.isOnScreen) requested=\(requestedSize) dimensions=\(image.width)x\(image.height) registrationAttempts=\(registration.attempts) metadataBeforeImage=true language=\(Locale.preferredLanguages) lowPower=\(ProcessInfo.processInfo.isLowPowerModeEnabled) accessibilitySource=shared-presentation-inputs-not-host-OS-mutation\n"
         try receipt.write(to: folder.appendingPathComponent(name + ".txt"), atomically: true, encoding: .utf8)
         return image
     }
@@ -328,6 +326,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
             let frame = (info?[kCGWindowBounds as String] as? [String: Any]).flatMap {
                 CGRect(dictionaryRepresentation: $0 as CFDictionary)
             }
+            last = "SC exactID present=false, WindowServer=\(String(describing: frame)), AppKit=\(window.frame) visible=\(window.isVisible)"
             if let target = content.windows.first(where: { $0.windowID == id && $0.owningApplication?.processID == pid }) {
                 last = "SC onScreen=\(target.isOnScreen) frame=\(target.frame), WindowServer=\(String(describing: frame)), AppKit=\(window.frame)"
                 if window.isVisible, window.frame.size == size, CGWindowID(window.windowNumber) == id,
@@ -340,22 +339,29 @@ final class MacSeaPolishRenderTests: XCTestCase {
             }
             await settle(0.1)
         }
-        throw NSError(domain: "MacSeaPolishRender", code: 4,
-            userInfo: [NSLocalizedDescriptionKey: "exact own-PID window \(window.windowNumber) not published at \(size) after \(attempts) metadata requests: \(last)"])
+        let message = "exact own-PID window \(window.windowNumber) not published at \(size) after \(attempts) metadata requests: \(last)"
+        print("polish native registration FAILED: \(message)")
+        try? message.write(to: folder.appendingPathComponent("polish-a-registration-failure-\(window.windowNumber).txt"), atomically: true, encoding: .utf8)
+        throw NativePolishWindowRegistrationError(message: message)
     }
 
-    func testRegistrationRejectsUnpublishedAndForeignWindowMetadata() {
+    func testRegistrationRequiresWindowServerProofForRedactedSCMetadata() {
         let frame = CGRect(x: 80, y: 80, width: 920, height: 600)
-        func matches(id: CGWindowID = 10, pid: pid_t = 20, visible: Bool = true, candidate: CGRect? = nil) -> Bool {
+        func matches(id: CGWindowID = 10, pid: pid_t = 20, visible: Bool = true,
+                     candidate: CGRect? = nil, published: CGRect? = nil, missing: Bool = false) -> Bool {
             NativePolishWindowRegistration.matches(windowID: id, ownerPID: pid, onScreen: visible,
-                frame: candidate ?? frame, windowServerFrame: frame,
+                frame: candidate ?? frame, windowServerFrame: missing ? nil : published ?? frame,
                 expectedID: 10, expectedPID: 20, expectedSize: frame.size)
         }
         XCTAssertTrue(matches())
+        XCTAssertTrue(matches(visible: false, candidate: .zero), "current-process SC metadata may be redacted; WindowServer must prove this exact surface")
+        XCTAssertFalse(matches(visible: false, candidate: .zero, missing: true))
+        XCTAssertFalse(matches(visible: false, candidate: .zero, published: .zero))
         XCTAssertFalse(matches(candidate: .zero))
         XCTAssertFalse(matches(visible: false))
         XCTAssertFalse(matches(id: 11))
         XCTAssertFalse(matches(pid: 21))
+        XCTAssertFalse(matches(published: CGRect(x: 80, y: 80, width: 920, height: 604)))
     }
 }
 
@@ -369,7 +375,16 @@ private enum NativePolishWindowRegistration {
     static func matches(windowID: CGWindowID, ownerPID: pid_t?, onScreen: Bool,
                         frame: CGRect, windowServerFrame: CGRect?, expectedID: CGWindowID,
                         expectedPID: pid_t, expectedSize: CGSize) -> Bool {
-        windowID == expectedID && ownerPID == expectedPID && onScreen
-            && frame.size == expectedSize && frame == windowServerFrame
+        guard windowID == expectedID, ownerPID == expectedPID,
+              let windowServerFrame, windowServerFrame.size == expectedSize else { return false }
+        // SCShareableContent.h documents redacted current-process information
+        // without TCC. The exact own-ID WindowServer query above independently
+        // requires own PID + onScreen=true; zero SC geometry is not that proof.
+        return (onScreen && frame == windowServerFrame) || (!onScreen && frame == .zero)
     }
+}
+
+private struct NativePolishWindowRegistrationError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
 }
