@@ -2403,6 +2403,32 @@ rules: []
     expect((await send('invalid-protocol', 5_001, seeded + 201, 3)).status).toBe(400);
   });
 
+  it('does not refold a replayed legacy v1 report after a counter reset (#816)', async () => {
+    const seeded = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      `INSERT INTO users(id,email,password_hash,password_salt,status,usage_bytes,created_at,updated_at)
+       VALUES('usr_v1_replay','v1-replay@example.com','h','s','active',0,?,?)`,
+    ).bind(seeded, seeded).run();
+    const send = (reportId: string, totalBytes: number, observedAt: number) =>
+      api('home/usage', json({ reports: [{
+        reportId,
+        userId: 'usr_v1_replay',
+        sourceId: 'exit-default',
+        protocolVersion: 1,
+        totalBytes,
+        observedAt,
+      }] }, EXIT_NODE_TOKENS['exit-default']));
+    const counted = async () => Number((await env.DB.prepare(
+      "SELECT usage_reported_bytes FROM users WHERE id = 'usr_v1_replay'",
+    ).first<any>())?.usage_reported_bytes ?? -1);
+
+    expect((await send('v1-high', 900, seeded)).status).toBe(200);
+    expect((await send('v1-reset', 120, seeded + 60)).status).toBe(200);
+    expect(await counted()).toBe(1_020);
+    expect((await send('v1-high', 900, seeded)).status).toBe(200);
+    expect(await counted()).toBe(1_020);
+  });
+
   it('lets a billing cycle be reset without the next report undoing it', async () => {
     const t = Math.floor(Date.now() / 1000);
     await (env as unknown as Env).DB.prepare(
