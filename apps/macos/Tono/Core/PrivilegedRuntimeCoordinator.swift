@@ -166,6 +166,14 @@ actor PrivilegedRuntimeCoordinator {
         try KillSwitchService.disarm(preserveAIHold: preserveAIHold)
     }
 
+    func releaseKillSwitchForQuit() throws {
+        try KillSwitchService.releaseForQuit()
+    }
+
+    func selectiveAIRecoveryPending() throws -> Bool {
+        try HelperManager.selectiveAIRecoveryPending()
+    }
+
     func restrictKillSwitchToBootstrap() throws {
         try KillSwitchService.restrictToBootstrap()
     }

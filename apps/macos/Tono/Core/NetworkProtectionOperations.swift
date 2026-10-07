@@ -27,6 +27,15 @@ struct NetworkProtectionOperations {
     var releaseAfterFailure: () async throws -> Void = {
         try await PrivilegedRuntimeCoordinator.shared.disarmKillSwitch(preserveAIHold: true)
     }
+    var pendingNativeUpdate: () async throws -> Bool = {
+        try await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate()?.pending ?? false
+    }
+    var releaseForQuit: () async throws -> Void = {
+        try await PrivilegedRuntimeCoordinator.shared.releaseKillSwitchForQuit()
+    }
+    var selectiveAIRecoveryPending: () async throws -> Bool = {
+        try await PrivilegedRuntimeCoordinator.shared.selectiveAIRecoveryPending()
+    }
     var restrictToBootstrap: () async throws -> Void = {
         try await PrivilegedRuntimeCoordinator.shared.restrictKillSwitchToBootstrap()
     }

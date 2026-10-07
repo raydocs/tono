@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| MAC-QUIT-AI-HOLD | Normal macOS Quit fully releases the selective AI hold, requiring reconciliation with the current stop safety requirement | open | hunt/sol-r3quit-ai-hold-decision | 高·已确认（P1，代码路径） | Decision item: explicit Disconnect deliberately fully releases under the existing design; runtime unchanged, native PF/DNS behavior not executed. |
+| MAC-QUIT-AI-HOLD | Normal macOS Quit fully releases the selective AI hold, requiring reconciliation with the current stop safety requirement | in-PR | 修复 [#1445](https://github.com/raydocs/tono/pull/1445)；decision 073 provisional | 高·已确认（P1，代码路径） | 本轮普通 Quit 武装/retain-ai 保留窄层，显式 Disconnect/Restore 完全释放并优先于重叠 Quit；次启可观察/移除。托管 XCTest/评审待验；原生 PF/DNS/签名候选未执行，未合 main，不能标 fixed。 |
 
 Reverified on `origin/main` **72a9c98db24f5b3f5ad30a1be7191ce17a0df0be**.
 Ownership: SHIP_PLAN §2 item 10. This is the previously reported M5/M7 finding,
@@ -70,3 +70,5 @@ No helper source or contract changed; no protocol bump or contract regeneration.
 Rejected hypotheses: the watchdog reinstates the AI hold after successful Quit
 (its state-file guard prevents that), and Windows connected explicit Quit already
 uses an AI-preserving disposition (it passes `false`; automatic stop is separate).
+
+2026-10-07 续修：上述原始源码追踪保留为历史。当前实现依据 [decision 073](../decisions/073-2026-10-07-normal-quit-retains-ai-floor.md)，原 `Decision required` 已以 provisional 严格选择回应，并非 owner 实机验收。

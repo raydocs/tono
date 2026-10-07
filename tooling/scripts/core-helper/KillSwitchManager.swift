@@ -697,6 +697,36 @@ final class KillSwitchManager {
         lock.lock()
         defer { lock.unlock() }
 
+        return try disarmLocked(preserveAIHold: preserveAIHold)
+    }
+
+    static func quitPreservesAIHold(broadProtection: Bool, disposition: Bool?, removalPending: Bool) -> Bool {
+        !removalPending && (broadProtection || disposition == true)
+    }
+
+    func releaseForQuit() throws -> [String: Any] {
+        lock.lock()
+        defer { lock.unlock() }
+        var broadProtection = Self.stateFileExists()
+        if !broadProtection { broadProtection = try Self.effectiveStatus() }
+        let preserve = Self.quitPreservesAIHold(
+            broadProtection: broadProtection,
+            disposition: try? Self.selectiveRecoveryDisposition(),
+            removalPending: Self.selectiveRemovalPending()
+        )
+        return try disarmLocked(preserveAIHold: preserve)
+    }
+
+    /// This reports recovery intent, never a claim that all AI traffic is
+    /// protected. The selective installer is deliberately best effort.
+    func selectiveAIRecoveryStatus() throws -> [String: Any] {
+        lock.lock()
+        defer { lock.unlock() }
+        let retained = try Self.selectiveRecoveryDisposition() == true
+        return ["ok": true, "aiRecoveryPending": retained || Self.selectiveRemovalPending()]
+    }
+
+    private func disarmLocked(preserveAIHold: Bool) throws -> [String: Any] {
         // The anchor flush below opens egress before later steps can still
         // throw. Any arm after a half-completed disarm must therefore take
         // the full state flush — direct PF states established during the open

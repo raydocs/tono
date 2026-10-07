@@ -28,6 +28,7 @@ nonisolated struct HelperManager {
         let configPath: String?
         let armed: Bool?
         let wantArmed: Bool?
+        let aiRecoveryPending: Bool?
         let live: Bool?
         let healed: Bool?
         /// Set by the helper's PF liveness supervisor after it had to reinstall
@@ -871,6 +872,18 @@ nonisolated struct HelperManager {
         let path = preserveAIHold ? "/killswitch/release" : "/killswitch/disarm"
         let result = try sendRequest(method: "POST", path: path)
         _ = try requireKillSwitchSuccess(result, operation: "disarm")
+    }
+
+    static func releaseKillSwitchForQuit() throws {
+        let result = try sendRequest(method: "POST", path: "/killswitch/quit")
+        _ = try requireKillSwitchSuccess(result, operation: "quit release")
+    }
+
+    static func selectiveAIRecoveryPending() throws -> Bool {
+        let result = try sendRequest(method: "GET", path: "/killswitch/ai-recovery")
+        let reply = try requireSuccess(result, operation: "AI recovery status")
+        guard let pending = reply.aiRecoveryPending else { throw HelperIPCError.invalidResponse }
+        return pending
     }
 
     static func killSwitchStatus() throws -> (

@@ -8,11 +8,14 @@ enum GateProtectionNotice: Equatable {
     case blocking
     /// A stored fail-closed intent that no helper answer has confirmed.
     case unconfirmed
+    case selectiveRecovery
 
     var message: LocalizedStringKey {
         switch self {
         case .blocking:
             "Kill Switch is blocking direct Internet from an earlier session."
+        case .selectiveRecovery:
+            "AI recovery rules may still be active. Restore internet to remove them."
         case .unconfirmed:
             "Protection from an earlier session could not be confirmed. Direct Internet may still be blocked."
         }
@@ -22,6 +25,7 @@ enum GateProtectionNotice: Equatable {
         switch self {
         case .blocking: "shield.slash"
         case .unconfirmed: "exclamationmark.shield"
+        case .selectiveRecovery: "shield.lefthalf.filled"
         }
     }
 }
@@ -39,6 +43,7 @@ extension AppState {
         // The stored intent keeps the escape hatch reachable on a path that
         // has published no verdict, without claiming a block nobody confirmed.
         if isProtectionUnconfirmed || KillSwitchService.isArmed { return .unconfirmed }
+        if selectiveAIRecoveryPending { return .selectiveRecovery }
         return nil
     }
 }
