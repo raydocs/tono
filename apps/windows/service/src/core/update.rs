@@ -448,13 +448,23 @@ pub(crate) async fn request(
     owner: &AuthenticatedOwner,
     request: UpdateRequest,
 ) -> Result<UpdateStatus> {
-    let result = transact(owner, request).await;
     // The answer reflects the store this request held; a refusal may have written it anyway.
-    *PENDING_FOR_STATUS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
-        result.as_ref().ok().map(|status| {
-            status.receipt.as_ref().is_some_and(|r| r.phase != Phase::Committed)
-        });
+    // A dropped (IPC timeout) or panicking request may have persisted a Prepare, so the guard
+    // clears the cache unless the request returned.
+    let mut refresh = StatusCacheRefresh(None);
+    let result = transact(owner, request).await;
+    refresh.0 = result.as_ref().ok().map(|status| {
+        status.receipt.as_ref().is_some_and(|r| r.phase != Phase::Committed)
+    });
     result
+}
+
+struct StatusCacheRefresh(Option<bool>);
+
+impl Drop for StatusCacheRefresh {
+    fn drop(&mut self) {
+        *PENDING_FOR_STATUS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = self.0;
+    }
 }
 
 async fn transact(
