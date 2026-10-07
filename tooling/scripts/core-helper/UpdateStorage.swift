@@ -68,9 +68,48 @@ final class UpdateStorage {
     deinit { close(lockFD) }
 
     func locked<T>(_ body: () throws -> T) throws -> T {
+        try Self.withLock(lockFD, body)
+    }
+
+    /// Recovery after normal store opening fails may still inspect saved
+    /// protection intent, but only while holding the same trusted root lock.
+    /// Do not create or repair any parent directory in this path.
+    static func withRootLockForStartup<T>(_ body: () throws -> T) throws -> T {
+        _ = try secureMetadata("/Library", type: mode_t(S_IFDIR), owner: 0)
+        _ = try secureMetadata("/Library/Application Support", type: mode_t(S_IFDIR), owner: 0)
+        _ = try secureMetadata("/Library/Application Support/Tono", type: mode_t(S_IFDIR), owner: 0)
+        let rootMetadata = try secureMetadata(directory, type: mode_t(S_IFDIR), owner: 0)
+        let rootFD = open(directory, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard rootFD >= 0 else { throw HelperFailure.system("Update directory is unavailable.") }
+        defer { close(rootFD) }
+        var openedRoot = stat()
+        guard fstat(rootFD, &openedRoot) == 0,
+              openedRoot.st_dev == rootMetadata.st_dev,
+              openedRoot.st_ino == rootMetadata.st_ino,
+              fileType(openedRoot) == mode_t(S_IFDIR),
+              openedRoot.st_uid == 0, openedRoot.st_mode & 0o022 == 0 else {
+            throw HelperFailure.invalid("Update directory changed or is unsafe.")
+        }
+        let fd = openat(rootFD, "lock", O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw HelperFailure.system("Update lock is unavailable.") }
+        defer { close(fd) }
+        var openedLock = stat()
+        var linkedLock = stat()
+        guard fstat(fd, &openedLock) == 0,
+              fstatat(rootFD, "lock", &linkedLock, AT_SYMLINK_NOFOLLOW) == 0,
+              openedLock.st_dev == linkedLock.st_dev,
+              openedLock.st_ino == linkedLock.st_ino,
+              fileType(openedLock) == mode_t(S_IFREG),
+              openedLock.st_uid == 0, openedLock.st_mode & 0o022 == 0 else {
+            throw HelperFailure.invalid("Update lock changed or is unsafe.")
+        }
+        return try withLock(fd, body)
+    }
+
+    private static func withLock<T>(_ fd: Int32, _ body: () throws -> T) throws -> T {
         // launchctl bootout must be able to stop a daemon waiting behind the
         // executor. A blocking flock would otherwise deadlock that bootout.
-        while flock(lockFD, LOCK_EX | LOCK_NB) != 0 {
+        while flock(fd, LOCK_EX | LOCK_NB) != 0 {
             guard errno == EWOULDBLOCK || errno == EINTR else {
                 throw HelperFailure.system("Update lock unavailable or helper stopping.")
             }
@@ -82,7 +121,7 @@ final class UpdateStorage {
             }
             usleep(50_000)
         }
-        defer { flock(lockFD, LOCK_UN) }
+        defer { flock(fd, LOCK_UN) }
         return try body()
     }
 
