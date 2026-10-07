@@ -1,0 +1,11 @@
+## 2026-10-07 · Windows 启动 Adopt 被非更新原因拒绝时不再留下「更新恢复未完成」（BRICK-W10）
+- 归属：docs/SHIP_PLAN.md §2 item 10（0.0.75 修复批，老板 2026-10-07）；`apps/windows/service` 状态快照与 `apps/windows/app` 启动更新接管。
+- 来源：main `de62eb2a5` → 本 PR（分支 `claude/win-adopt-incomplete-readonly-status-20261007`）；未合 main。
+- 缺陷修复：App 启动时 `adopt()`（`tono/commands/update.rs`）先把 INCOMPLETE 置 true 再发写路径的 `Adopt`；Service 因手动安装租约、更新存储打不开/被锁、修复锁被占或 App 镜像无法证明而拒绝时，标志一直为 true，没有进行中的更新也显示「更新恢复未完成」并拒绝退出（日志 `Protected update adoption not established: <reason>`）。改后：Service 的 `/status` 快照新增 `update_attempt_pending`，由新函数 `attempt_pending_read_only()`（`core/update.rs`）用 BRICK-W5 d 的只读 `read_store_state()` 回答「更新存储里是否有未提交的尝试」——不取租约、不取存储锁或修复锁、不写 DACL；读不出时为空。Adopt 被拒后 App 读这个字段，只有确定的「没有挂起尝试」才清除 INCOMPLETE；读失败、旧 Service 没有该字段（空）或字段为真时照旧保持未完成（「未知即未完成」不变）。
+- 新增/优化：`ServiceStatusSnapshot.update_attempt_pending: Option<bool>`（`serde(default)`，空时不序列化）。旧 Service 不带该字段 → 空 → 未完成；旧 App 忽略该字段。属加性字段，按现有惯例（`desired_state_unknown`、`successor_relaunched` 等）不升 `PROTOCOL_REVISION`。
+- 工程与测试：一条 `#[test] a_non_update_adopt_refusal_with_nothing_pending_is_not_incomplete`（`tono/commands/update.rs`）：只读状态为「无挂起」时被拒后的 INCOMPLETE 为 false，「有挂起」和读不出时为 true。旧代码没有该判断，Adopt 被拒一律保持 true。四处测试里的 `ServiceStatusSnapshot` 字面量补上新字段。
+- 验证：MacBook 不跑 cargo（老板规则）；证明是本 PR 精确 head 上的 `ci-gate`（Windows App 与 Service `cargo test`）。未实机复现。
+- 候选/发布：无新包，仅源码。
+- 续记 2026-10-07：jev-route 评审 `35ad76d0`（opus + codex，high）PASSED，0 阻断；两条 minor 一轮修复：opus:F1（`/status` 每 2 秒无锁打开 `state.json`，可能让写方 `MoveFileExW` 替换失败）→ Service 只在无缓存时读存储，`update::request` 每次返回后按应答回填缓存、被拒后清空（只有 Prepare 能新建挂起尝试，而它在 `request` 里；其他写方只会结束尝试，过期的「真」仍是未完成）；codex:F1（Adopt 被拒后的清除可与同进程安装竞争，覆盖其 Prepare 置的 true）→ 清除时 `INSTALL.try_lock()`，安装在跑就不清，持锁跨读取与写入（这一瞬间点安装会得到「已有更新请求在运行」）。
+- 续记 2026-10-07（二）：复审 `2463305e` PASSED，0 阻断，停止规则已满足；opus:F1 / codex:F1（请求被 IPC 超时丢弃或 panic 时缓存不回写，Prepare 已落盘时仍报旧的「无挂起」）→ 改为 drop 守卫，请求没有正常返回就清空缓存。codex:F2（启动后首次与请求被拒后的那一次读取仍无锁打开 `state.json`）记为剩余限制。
+- 剩余限制：Service 启动后首次及每次更新请求被拒后，`/status` 仍有一次无锁读取 `state.json`（与 `release_admission` 同类），理论上可与写方替换撞上；只改启动 Adopt 被拒后的标志；状态轮询不会据此改写 INCOMPLETE。手动安装租约仍挡 Adopt 本身（只是不再显示未完成）。Restore internet 的 Status 探测在活租约下仍失败（BRICK-W5 其余项）。未实机。

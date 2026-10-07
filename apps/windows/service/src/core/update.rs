@@ -153,6 +153,33 @@ fn release_admission_at(
     Ok(())
 }
 
+/// The read-only update status `/status` publishes (BRICK-W10): whether the retained update
+/// state records an attempt that is not committed. No lease, lock or DACL write, so a manual
+/// installer lease, a held repair lock or an unprovable App image cannot turn this into a
+/// refusal. `None` when the evidence cannot be read: unknown, never absence.
+///
+/// `/status` is polled every few seconds without the store lock, and a reader's open handle can
+/// make the writer's `MoveFileExW` replace of `state.json` fail. So the store is read only when
+/// nothing is cached; [`request`] replaces the cache with each answer it returns and clears it
+/// after a refusal. Only Prepare, inside [`request`], creates a pending attempt; other writers
+/// (executor, recovery, installer) can only end one, which leaves a stale `true`: still
+/// incomplete, never a missed attempt.
+pub(crate) fn attempt_pending_read_only() -> Option<bool> {
+    let mut cached = PENDING_FOR_STATUS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if cached.is_none() {
+        *cached = match read_store_state() {
+            Ok(state) => Some(state.pending()),
+            Err(error) => {
+                tracing::warn!("update state unreadable for status; reporting it as unknown: {error:#}");
+                None
+            }
+        };
+    }
+    *cached
+}
+
+static PENDING_FOR_STATUS: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
+
 /// The manual installer lease check for update requests. Only `Status`, the read the App sends
 /// before its release, passes a conclusively dead holder (Service half of BRICK-W2); every other
 /// request refuses any lease.
@@ -418,6 +445,29 @@ fn save_prepared_attempt(store: &mut Store, next: State) -> Result<()> {
 }
 
 pub(crate) async fn request(
+    owner: &AuthenticatedOwner,
+    request: UpdateRequest,
+) -> Result<UpdateStatus> {
+    // The answer reflects the store this request held; a refusal may have written it anyway.
+    // A dropped (IPC timeout) or panicking request may have persisted a Prepare, so the guard
+    // clears the cache unless the request returned.
+    let mut refresh = StatusCacheRefresh(None);
+    let result = transact(owner, request).await;
+    refresh.0 = result.as_ref().ok().map(|status| {
+        status.receipt.as_ref().is_some_and(|r| r.phase != Phase::Committed)
+    });
+    result
+}
+
+struct StatusCacheRefresh(Option<bool>);
+
+impl Drop for StatusCacheRefresh {
+    fn drop(&mut self) {
+        *PENDING_FOR_STATUS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = self.0;
+    }
+}
+
+async fn transact(
     owner: &AuthenticatedOwner,
     request: UpdateRequest,
 ) -> Result<UpdateStatus> {

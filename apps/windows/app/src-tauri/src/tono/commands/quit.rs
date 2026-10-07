@@ -544,6 +544,7 @@ mod quit_tests {
                 reconnect_after_release: false,
             }),
             network_events: Default::default(),
+            update_attempt_pending: None,
         };
         assert!(
             !quit_needs_service_release(false, Some(&snapshot)),
