@@ -81,11 +81,23 @@ pub(crate) fn retained_document(document: &[u8], leave: &[&[u8]]) -> Vec<u8> {
     })
 }
 
-/// The file the watchdog restarts from. Nothing else writes it: the IPC handlers and the replay
-/// write `config_path`, and a watchdog that rewrote that file could put the exited document back
-/// over one a replacement had just written there.
-pub(crate) fn respawn_path(config_path: &str) -> PathBuf {
-    Path::new(config_path).with_extension("respawn.json")
+/// The watchdog's own copy, next to `config.json`. Nothing else in the Service writes it: the IPC
+/// handlers and the replay write `config.json`, and a watchdog that rewrote that file could put
+/// the exited document back over one a replacement had just written there.
+const RESPAWN_CONFIG_FILE_NAME: &str = "config.respawn.json";
+
+/// Files the Service writes into a sing-box runtime generation besides `config.json`: the
+/// watchdog's copy and the temporaries `sing_box_direct::write_document` stages both through.
+/// A runtime asset may not claim them (`runtime_generation::assets::destination_key_for`), or a
+/// staged bundle could put an unadmitted document where the watchdog starts it.
+pub(crate) const SERVICE_WRITTEN_FILE_NAMES: &[&str] = &[
+    RESPAWN_CONFIG_FILE_NAME,
+    "config.json.sing-next",
+    "config.respawn.json.sing-next",
+];
+
+fn respawn_path(config_path: &str) -> PathBuf {
+    Path::new(config_path).with_file_name(RESPAWN_CONFIG_FILE_NAME)
 }
 
 /// What the watchdog's last restart ran, or nothing.
@@ -95,19 +107,41 @@ pub(crate) async fn respawned_document(config_path: &str) -> Vec<u8> {
         .unwrap_or_default()
 }
 
-/// The watchdog's restart of the process that ran the document at `exited`: that document a
-/// slot back, in the watchdog's own file. A mihomo config is returned as it is.
-pub(crate) async fn respawn_config(config: &ClashConfig, exited: &str) -> Result<ClashConfig> {
+/// The document a just-started sing-box process runs, read while the starter still holds the
+/// manager, so a replacement that writes `config.json` later cannot pass for it. Nothing for
+/// mihomo.
+pub(crate) async fn started_document(config: &ClashConfig) -> Option<Vec<u8>> {
+    if !is_sing_box_core_path(&config.core_config.core_path) {
+        return None;
+    }
+    tokio::fs::read(&config.core_config.config_path).await.ok()
+}
+
+/// The watchdog's restart of the process that ran `exited` (its file, when the start could not
+/// be read): that document a slot back, admitted again, in the watchdog's own file. `exited`
+/// then holds what the restart runs. A mihomo config is returned as it is.
+pub(crate) async fn respawn_config(
+    config: &ClashConfig,
+    exited: &mut Option<Vec<u8>>,
+) -> Result<ClashConfig> {
     let mut respawn = config.clone();
     if !is_sing_box_core_path(&config.core_config.core_path) {
         return Ok(respawn);
     }
-    let document = tokio::fs::read(exited)
-        .await
-        .with_context(|| format!("failed to read the exited sing-box config {exited}"))?;
+    let document = match exited.as_ref() {
+        Some(document) => document.clone(),
+        None => tokio::fs::read(&config.core_config.config_path)
+            .await
+            .context("failed to read the exited sing-box config")?,
+    };
+    let moved = retained_document(&document, &[]);
+    let text = std::str::from_utf8(&moved).context("the sing-box config is not UTF-8")?;
+    crate::core::sing_box_runtime::admit_owned_runtime(text)
+        .map_err(|error| anyhow::anyhow!("the restarted sing-box config is refused: {error}"))?;
     let path = respawn_path(&config.core_config.config_path);
-    crate::core::sing_box_direct::write_document(&path, &retained_document(&document, &[])).await?;
+    crate::core::sing_box_direct::write_document(&path, &moved).await?;
     respawn.core_config.config_path = path.to_string_lossy().into_owned();
+    *exited = Some(moved);
     Ok(respawn)
 }
 

@@ -1087,6 +1087,10 @@ mod tests {
             "CONFIG.YAML",
             ".runtime-manifest.json",
             ".Runtime-Manifest.JSON",
+            "config.respawn.json",
+            "Config.Respawn.JSON",
+            "config.json.sing-next",
+            "config.respawn.json.sing-next",
         ] {
             assert!(
                 destination_key(Path::new(reserved)).is_err(),

@@ -811,6 +811,8 @@ impl CoreManager {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let watchdog_config = watchdog_config();
         let arm_epoch = crate::core::windows_kill_switch::core_arm_epoch();
+        // The sing-box document the current process runs (#1258).
+        let mut running_document = crate::core::sing_box_fake_ip::started_document(&config).await;
 
         let handle = tokio::spawn(async move {
             let mut recovery_exhausted = false;
@@ -818,8 +820,6 @@ impl CoreManager {
             let mut shutdown_rx = shutdown_rx;
             let mut restart_timestamps: Vec<Instant> = Vec::new();
             let mut consecutive_attempt = 0u32;
-            // The config file the current process was started from (#1258).
-            let mut running_document = config.core_config.config_path.clone();
 
             'watchdog: loop {
                 let Some(mut current_guard) = child_guard.take() else {
@@ -967,7 +967,7 @@ impl CoreManager {
                     // same range would hand addresses apps still cache to other names.
                     let respawn = match crate::core::sing_box_fake_ip::respawn_config(
                         &config,
-                        &running_document,
+                        &mut running_document,
                     )
                     .await
                     {
@@ -995,7 +995,6 @@ impl CoreManager {
                     .await
                     {
                         Ok(mut new_guard) => {
-                            running_document = respawn.core_config.config_path;
                             let new_pid = new_guard.id();
                             if let Err(error) = secure_core_ipc_for(&config, &owner, new_pid).await
                             {
