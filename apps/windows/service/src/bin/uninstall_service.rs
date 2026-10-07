@@ -868,6 +868,9 @@ const INSTALL_DIR_SWEEP: &[&str] = &[
     "tono-service.exe.rollback",
     "tono-service.exe.restore",
     "tono-service.exe.publish",
+    // The Service-only repair's copy of the executable it replaces (#815).
+    "tono-service.exe.repair-previous",
+    "tono-service.exe.repair-restore",
 ];
 
 /// Best-effort binary removal; runs only after the disarm was proven (or nothing was armed),

@@ -639,10 +639,8 @@ fn execute(recovery: bool) -> Result<(), Error> {
         // This marker cannot turn uncertain execution into another install grant.
         let _ = store.execution(tx::Execution::Uncertain);
     }
-    // Resume the durable successor even when the restarted Service is slow or
-    // failed to become ready: a suspended child dropped at this point would
-    // terminate the registered successor of a complete, verified installation
-    // and leave the next recovery a state it would otherwise roll back.
+    // A Service that did not start or become ready does not keep the publication:
+    // it is rolled back below (BRICK-W6) and its suspended successor never runs.
     let rolled_back = store.attempt()?.execution == tx::Execution::RolledBack;
     let finalizer = if rolled_back {
         Some(store.rollback_finalizer()?)
@@ -692,6 +690,50 @@ fn execute(recovery: bool) -> Result<(), Error> {
             release,
             restart,
         ),
+    };
+
+    // BRICK-W6: the new bytes are published and recorded `Replaced`, but the replacement Service
+    // did not start or become ready. No IPC path could ever adopt, commit or release this
+    // attempt, and boot recovery keeps a verified target, so it stayed pending past its receipt
+    // expiry. Put the predecessor back and start it instead.
+    let (outcome, restart) = match (outcome, restart) {
+        (Ok(Some(successor)), Err(start_error)) => {
+            let pid = successor.pid;
+            // Never resumed: dropping it terminates the successor before its image is restored.
+            drop(successor);
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while native::image(pid).is_ok() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            match restore_predecessor_after_unready_replacement(&service, &a, &plan_path) {
+                Ok(None) => {
+                    // A later target App adopted it once the Service did answer: keep it running.
+                    eprintln!(
+                        "replacement Service readiness timed out, but a successor adopted it; kept: {start_error:#}"
+                    );
+                    return Ok(());
+                }
+                Ok(Some(settled)) => {
+                    let error = start_error.context(
+                        "the replacement Service did not become ready; the previous installation was restored and restarted",
+                    );
+                    return Err(match settled {
+                        Ok(()) => error,
+                        Err(release) => error.context(format!(
+                            "network release after the rollback failed: {release:#}"
+                        )),
+                    });
+                }
+                // Not restored: the stopped-Service release below still runs for non-strict.
+                Err(restore_error) => (
+                    Ok(None),
+                    Err(start_error.context(format!(
+                        "restoring the previous installation also failed: {restore_error:#}"
+                    ))),
+                ),
+            }
+        }
+        other => other,
     };
 
     let strict = restart.is_err() && native::strict_kill_switch_intent_on_disk();
@@ -775,6 +817,103 @@ fn start_service_if_stopped(service: &platform_lib::service::Service) -> Result<
         }
     }
     Ok(())
+}
+
+/// BRICK-W6: put the previous installation back after a published replacement's Service did not
+/// start or become ready, then start the predecessor through the selective rollback finalizer.
+/// The replacement Service is stopped with SCM recovery suppressed before any file moves, and the
+/// stopped Service's owner lock is held across the restore. Non-strict protection is released only
+/// while the Service is stopped; strict keeps its block. Eligibility is read under the store lock
+/// before anything is stopped, and the lock is held from there on, so a successor cannot adopt or
+/// commit in between: `Ok(None)` means one already did and nothing was touched. `Err` means the
+/// predecessor is not running; `Ok(Some)` carries the network release outcome.
+fn restore_predecessor_after_unready_replacement(
+    service: &platform_lib::service::Service,
+    a: &tx::Attempt,
+    plan_path: &Path,
+) -> Result<Option<Result<(), Error>>, Error> {
+    let repair = tono_service_protocol::acquire_service_repair_gate()?
+        .context("repair already running during the unready replacement rollback")?;
+    let mut store = open_waiting()?;
+    if !unadopted_replacement(store.consumed_attempt()?) {
+        return Ok(None);
+    }
+    suppress_windows_service_recovery(service)?;
+    stop_windows_service(service)?;
+    {
+        let _owner = shared::block_on_abandoning(tono_service_protocol::acquire_service_owner())??
+            .context("Service still owns the unready replacement")?;
+        let service_path = tono_service_protocol::service_paths()
+            .install_dir()
+            .join("tono-service.exe");
+        roll_back_unready_replacement(&mut store, plan_path, || {
+            native::components(&a.install_root, &service_path)
+        })?;
+    }
+    let finalizer = store.rollback_finalizer()?;
+    let (settled, restored) = finalizer.finish(
+        false,
+        || {
+            shared::block_on_abandoning(async {
+                let _owner = tono_service_protocol::acquire_service_owner()
+                    .await?
+                    .context("Service still owns the unready replacement rollback")?;
+                if native::strict_kill_switch_intent_on_disk() {
+                    return Ok(());
+                }
+                tono_service_protocol::emergency_disarm_windows_kill_switch_applying_narrow().await
+            })?
+        },
+        || {
+            configure_windows_service_recovery(service)?;
+            drop(store);
+            drop(repair);
+            start_service_if_stopped(service)?;
+            wait_for_service_ready()
+        },
+    );
+    restored?;
+    Ok(Some(settled))
+}
+
+/// Published and recorded `Replaced`, but no successor has adopted it yet.
+fn unadopted_replacement(a: &tx::Attempt) -> bool {
+    a.execution == tx::Execution::Replaced && a.receipt.phase == Phase::InstallationAuthorized
+}
+
+/// BRICK-W6: restore every member of a published plan whose replacement Service never became
+/// ready, prove the retained original identity, and end the attempt `RolledBack`: the selective
+/// rollback finalizer then restarts the predecessor, and a verified Disconnect retires the record
+/// with no receipt-expiry check. Only a replacement no successor adopted qualifies. A restore that
+/// does not converge leaves `Uncertain`, which boot recovery classifies again.
+fn roll_back_unready_replacement(
+    store: &mut tx::Store,
+    plan_path: &Path,
+    installed: impl FnOnce() -> Result<Components, Error>,
+) -> Result<(), Error> {
+    let a = store.consumed_attempt()?.clone();
+    ensure!(
+        unadopted_replacement(&a),
+        "only an unadopted replacement can be rolled back for readiness"
+    );
+    let restored = (|| -> Result<(), Error> {
+        let mut plan: Plan = serde_json::from_slice(&std::fs::read(plan_path)?)?;
+        ensure!(
+            plan.attempt_id == a.receipt.attempt_id,
+            "replacement plan belongs to a different attempt"
+        );
+        rollback_plan(&mut plan)?;
+        ensure!(
+            installed()? == a.old_components,
+            "rollback identity mismatch"
+        );
+        Ok(())
+    })();
+    if let Err(error) = restored {
+        let _ = store.execution(tx::Execution::Uncertain);
+        return Err(error);
+    }
+    store.execution(tx::Execution::RolledBack)
 }
 
 /// The physical publication boundary. Durable consume must already have won,
@@ -1584,6 +1723,140 @@ mod tests {
                 prepared.err().unwrap()
             );
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// BRICK-W6: a complete publication recorded `Replaced` whose Service never became ready
+    /// restores every member, ends `RolledBack` for the rollback finalizer, and a verified
+    /// Disconnect after the receipt expired still retires it instead of a dead pending record.
+    #[test]
+    fn update_unready_replacement_restores_the_predecessor_and_ends_rolled_back() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-update-unready-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let mut store = tx::Store::open(&root).unwrap();
+        let names = ["Tono.exe", "tono-core.exe", "tono-service.exe"];
+        for name in names {
+            std::fs::write(root.join(name), format!("old-{name}")).unwrap();
+            std::fs::write(root.join(format!("{name}.next")), format!("new-{name}")).unwrap();
+        }
+        let measured = || -> Result<Components, Error> {
+            Ok(Components {
+                app_sha256: tx::file_digest(&root.join("Tono.exe"))?,
+                core_sha256: tx::file_digest(&root.join("tono-core.exe"))?,
+                privileged_sha256: tx::file_digest(&root.join("tono-service.exe"))?,
+                sing_box_sha256: String::new(),
+            })
+        };
+        let original = measured().unwrap();
+        let manifest = ReleaseManifest::decode(include_bytes!(
+            "../../../../../../tooling/scripts/tests/fixtures/update-protocol-v1/manifest.json"
+        ))
+        .unwrap();
+        let mut receipt = Receipt::decode(include_bytes!("../../../../../../tooling/scripts/tests/fixtures/update-protocol-v1/windows-receipt.json"), &manifest).unwrap();
+        receipt.installed_location_sha256 = tx::location_digest(&root);
+        let owner = "windows:fixture-owner";
+        let peer = tx::Image {
+            pid: 11,
+            started_at: 10,
+            path: root.join("Tono.exe"),
+            sha256: "0".repeat(64),
+        };
+        let executor = tx::Image {
+            pid: 22,
+            started_at: 20,
+            path: root.join("executor.exe"),
+            sha256: "e".repeat(64),
+        };
+        let attempt_id = receipt.attempt_id.clone();
+        store
+            .save(tx::State {
+                consumed_sequence: 73,
+                generation: 91,
+                manual_installer: None,
+                attempt: Some(tx::Attempt {
+                    old_components: original.clone(),
+                    manifest,
+                    receipt,
+                    initiating_image: peer.clone(),
+                    successor_image: None,
+                    install_root: root.clone(),
+                    execution: tx::Execution::Staged,
+                    executor: Some(executor.clone()),
+                    disconnect: None,
+                    publication_clock: None,
+                }),
+            })
+            .unwrap();
+        let mut members = Vec::new();
+        for name in names {
+            let staged = root.join(format!("{name}.next"));
+            members.push(
+                CoordinatedBinaryReplacement::prepare(
+                    &staged,
+                    &root.join(name),
+                    sha256(&staged).unwrap(),
+                )
+                .unwrap(),
+            );
+        }
+        let mut plan = Plan {
+            attempt_id,
+            members,
+        };
+        store
+            .observe(
+                owner,
+                &peer,
+                91,
+                1_900_000_001,
+                Observation::PreparationVerified {
+                    artifact_sha256: "b".repeat(64),
+                    protection: Protection::Unprotected,
+                },
+            )
+            .unwrap();
+        store.execution(tx::Execution::Launching).unwrap();
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let plan_path = root.join("replacement.json");
+        publish_plan(
+            &store,
+            &mut plan,
+            &plan_path,
+            CoordinatedBinaryReplacement::publish,
+        )
+        .unwrap();
+        assert_ne!(measured().unwrap(), original, "the publication completed");
+        // The executor recorded its successor; then the Service readiness wait failed.
+        store.execution(tx::Execution::Replaced).unwrap();
+
+        roll_back_unready_replacement(&mut store, &plan_path, measured).unwrap();
+
+        for name in names {
+            assert_eq!(
+                std::fs::read(root.join(name)).unwrap(),
+                format!("old-{name}").into_bytes()
+            );
+        }
+        assert_eq!(store.attempt().unwrap().execution, tx::Execution::RolledBack);
+        assert!(
+            store.rollback_finalizer().is_ok() && store.independent_recovery_pending().unwrap(),
+            "the finalizer must still restart the predecessor"
+        );
+        let expired = store.attempt().unwrap().receipt.expires_at_unix + 1;
+        store.request_disconnect(owner, &peer, expired).unwrap();
+        store
+            .verify_disconnect(owner, &peer, expired + 1, Protection::Unprotected)
+            .unwrap();
+        store.retire_rolled_back(owner, &peer).unwrap();
+        assert!(!store.pending(), "an expired receipt must not strand the attempt");
+        drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }
 

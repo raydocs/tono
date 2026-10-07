@@ -1,0 +1,14 @@
+## 2026-10-07 · Windows Service 替换在就绪前保留前任，失败即恢复
+- 归属：SHIP_PLAN §2 item 10（0.0.75 修复批次）；Windows `apps/windows/service`（原生更新执行器、仅 Service 修复）。
+- 来源：`origin/main` f2cb79522 → 分支 `claude/win-service-replace-rollback-20261007`，PR [#1443](https://github.com/raydocs/tono/pull/1443)；未合 main。
+- 缺陷修复：
+  - BRICK-W6：原生更新发布后，新 Service 启动或就绪失败时，执行器原先照样恢复后继 App、记录停在 `Replaced`，开机恢复把已验证目标当作完成保留，尝试一直 pending，48 小时收据过期后 Connect 被拒。现在：不再恢复后继，终止它；停掉新 Service（先关 SCM 自动重启），在停止后的 owner 锁下用现有 `rollback_plan` 恢复全部计划成员、核对原始身份、记 `RolledBack`；再由现有回滚收尾只为非严格模式释放网络并启动前任。`RolledBack` 可由已验证的 Disconnect 退役，不看收据有效期。
+  - #815：仅 Service 修复原先先停掉可用 Service、立刻覆盖可执行文件，失败守卫只重试启动新文件。现在发布前把前任复制成 `tono-service.exe.repair-previous` 并校验（不用更新 scratch 的 `.rollback` 名，中断留下的副本不会让 `--replace-runtime`、原生更新或下次修复拒绝；下次修复直接替换，卸载清扫）；新 Service 启动或就绪失败时停掉它、放回前任并按原运行状态重启，副本随后删除。停不下或恢复失败时仍尽力重启已装文件。推迟到重启的发布保持原行为。
+  - 非严格用户的 WFP（#815 的问题，读码回答，未改 WFP 语义）：仅 Service 修复只在 `manual_gate` 通过后运行，该门在存在任何 Tono 残留过滤器或 owner 仍要 Core 时拒绝，停/恢复/重启 Service 不新增过滤器，所以失败的修复不会留下持久 WFP 阻断。
+- 新增/优化：无。
+- 工程与测试：两条回归各一：`update_executor::tests::update_unready_replacement_restores_the_predecessor_and_ends_rolled_back`、`tests::service_repair_restores_the_previous_executable_when_the_replacement_is_not_ready`。
+- 验证：本机（MacBook）按所有者规则不跑 `cargo`，Rust 编译与两条测试本机未执行；由 PR 上 `ci-gate`（Windows CI）证明。
+- 候选/发布：无新包，仅源码。
+- 剩余限制：任何启动/就绪失败（含超过 20 秒就绪窗口的慢启动）都会回滚；回滚资格在停 Service 之前于 store 锁下判定，期间已被后继 Adopt 的安装保留不动；执行器恢复连第一步都做不到时仍保留旧死路，开机恢复不探测就绪；仅 Service 修复不回退 `change_config` 和此前写入的摘要 pin，停不下或恢复失败时仍运行新文件；未实机复现。
+- 2026-10-07 续记（jev-route 5de575f1 PASSED，3 条 minor 一轮修复）：回滚资格在停 Service 前、持 store 锁判定；仅 Service 修复改用独立副本名并在任何结局删除，停不下时仍尽力重启；卸载清扫新增两个副本名。
+- 2026-10-07 续记（jev-route 0d5639cf PASSED，停止规则满足）：仍开 R1443-codex-F1（后继 Adopt 且记录被 Disconnect 退役后，执行器仍可能停掉可用 Service 的窄竞态），见 `docs/findings.d/R1443-codex-F1.md`。
