@@ -1,0 +1,15 @@
+## 2026-10-07 · control-plane 开发依赖安全告警清零（undici、source-map-js）；glib 告警说明
+- 归属：运维计划（依赖维护，不是发布门）；`services/control-plane` 的开发/测试工具链。老板 2026-10-07「确定没有遗漏的升级」。
+- 来源：main `a990641df` → 本 PR。
+- 缺陷修复：无。
+- 新增/优化：无运行时改动。Worker 打包不含 `undici`、`source-map-js`（两者只在 vitest / miniflare / vite / postcss 的开发树里）。
+- 工程与测试：
+  - Dependabot 开放告警 9 条（2026-09-30 / 10-06 建）：npm `undici` 6 条（#8 #9 #10 #11 #14 #15，含 high GHSA-w293-vg96-wgc3 TLS 校验绕过；修复版 7.29.1）、npm `source-map-js` 1 条（#26 high GHSA-68fv-2mgg-jv7q；修复版 1.2.2）、cargo `glib` 2 条（#1 #5 medium GHSA-wrw7-89jp-8q8g；修复版 0.20.0）。
+  - `source-map-js` 1.2.1 → 1.2.2：`npm update source-map-js --package-lock-only`，只动锁文件。
+  - `undici` 7.29.0 → 7.29.1：`miniflare 5.20260815.0-alpha`（`@cloudflare/vitest-pool-workers` 0.22.0 的依赖）把 `undici` 精确钉在 7.29.0，`npm update` 无效；最新的 `@cloudflare/vitest-pool-workers` 0.23.0 仍依赖同一个 miniflare，所以上游升级也解不开。`wrangler` 4.148.0 自带的 miniflare 5.20261006 已用 7.29.1。处理：`package.json` 加作用域 override `"@cloudflare/vitest-pool-workers": { "undici": "7.29.1" }`（只覆盖测试池这一棵子树，补丁级差异），锁文件重算后根 `undici` 为 7.29.1，wrangler 的嵌套副本去重。等 vitest-pool-workers 跟上 miniflare 后删掉这条 override。
+  - `glib` 0.18.5（`apps/windows/app/Cargo.lock`、`apps/windows/crates/tono-plugin-core/Cargo.lock`）：由 `tauri 2.12.1` 的 Linux 栈（`gtk` / `gdk` / `webkit2gtk` 0.18 系列）钉住，glib 0.20 需要整套 gtk-rs 0.20，不是 `cargo update` 能做的，要等 tauri/wry 上游。这些 crate 只在 Linux 目标编译，Windows 安装包里没有它们的代码。两条告警保持开放，不 dismiss，下次 tauri 升级时复查。
+- 验证：
+  - MacBook：锁文件里 `node_modules/undici` 7.29.1、`node_modules/source-map-js` 1.2.2、`node_modules/jsdom/node_modules/undici` 8.11.2（不在告警范围）。本工作区的 `node_modules` 是指向维护者 checkout 的符号链接，没有装新版本，所以没有在本机跑 `npm test`。
+  - 证明在 hosted `services-ci.yml`（`npm ci` + 完整 Worker 测试，1002 条）在本 PR 精确 head 上通过；override 若让 vitest 池失败，CI 会红，届时撤回 override、只保留 source-map-js。
+- 候选/发布：仅源码。7503 候选（`a990641df`）不含本项；本项不影响桌面包，也不需要重出候选；生产 Worker 不因开发依赖变化重新部署。
+- 剩余限制：`glib` 两条等上游；`undici` 的 override 是临时措施，vitest-pool-workers 升级后删除。brew 侧 `chatgpt` cask 有 26.1002 新版，但 LCU 0.9.7 对当前 26.930 / CUA 0.0.27 已是「未测试配对」，再升只会换一个未测试配对，未动。
