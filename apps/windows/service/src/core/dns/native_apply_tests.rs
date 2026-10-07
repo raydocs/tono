@@ -1119,3 +1119,34 @@ async fn effective_resolver_policy_drift_cannot_read_as_healthy() -> Result<()> 
     );
     Ok(())
 }
+
+/// BRICK-W7: the restore proof's live half must come from the resolver list the DNS Client
+/// actually uses, not from the registry values the restore itself just wrote back.
+#[test]
+#[serial_test::serial]
+fn restore_proof_reads_the_effective_resolver_not_the_restored_registry() -> Result<()> {
+    use super::super::{
+        any_loopback, collect_adapters,
+        test_io::{self, Fixture},
+    };
+    use crate::core::dns as facade;
+    // Registry: exactly the saved originals. Effective list: still the TUN resolver.
+    let stale = effective(&entry(1), [198, 18, 0, 2], false);
+    let guids = vec![stale.guid.clone()];
+    let fixture = Fixture::new(vec![stale])?;
+    let current = collect_adapters()?;
+    assert!(facade::registry_restore_matches(&fixture.originals, &current));
+    let live = any_loopback(&guids)?;
+    assert!(live, "a restored registry must not hide an effective Tono resolver");
+    assert!(!facade::restore_is_proven(&fixture.originals, &current, Some(live)));
+
+    // An effective list that could not be read is unproven, never "nothing found".
+    test_io::with(|io| io.adapters[0].dns_servers = None);
+    assert!(any_loopback(&guids).is_err());
+
+    // Positive control: once the DNS Client uses the user's own servers again, it proves.
+    test_io::with(|io| io.adapters[0].dns_servers = Some(vec!["9.9.9.9".parse().unwrap()]));
+    let live = any_loopback(&guids)?;
+    assert!(facade::restore_is_proven(&fixture.originals, &current, Some(live)));
+    Ok(())
+}

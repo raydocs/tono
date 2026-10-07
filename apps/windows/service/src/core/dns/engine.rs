@@ -1389,10 +1389,45 @@ pub(super) fn apply_snapshot(snapshot: &DnsSnapshot) -> Result<Vec<(String, bool
 /// [`all_loopback`], and the only evidence the snapshot-less recovery path has. Deliberately
 /// checks every value of both families: one leftover `ProfileNameServer` is enough to leave
 /// the machine resolving through a core that is no longer running.
+///
+/// The registry is only the additional check. On the restore path those values are what
+/// [`apply_snapshot`] itself just wrote, so reading them back proves the write, not that the
+/// DNS Client adopted it (BRICK-W7). The proof is the effective per-adapter resolver list from
+/// `GetAdaptersAddresses`: an active adapter that still lists a Tono resolver there answers
+/// "yes" whatever its registry says. A failed effective read is an error — unproven for the
+/// caller — never "nothing found".
 pub(super) fn any_loopback(guids: &[String]) -> Result<bool> {
     for guid in guids {
         let adapter = read_adapter(guid, None)?;
         if super::adapter_reads_as_tono_dns(&adapter) {
+            return Ok(true);
+        }
+    }
+    if guids.is_empty() {
+        return Ok(false);
+    }
+    effective_lists_tono_dns(guids, &active_adapters_read(true)?)
+}
+
+/// Whether any of `guids` that is active right now has a Tono-owned resolver — the current
+/// TUN endpoint or a legacy loopback value — anywhere in its effective list. Any occurrence
+/// counts: a Tono address ahead of a public one is dead once the core stops. An adapter that
+/// is not active has no running resolver to prove (the registry check above still covers it);
+/// an active one whose list was not read is an error, never an empty list.
+fn effective_lists_tono_dns(guids: &[String], active: &[ActiveAdapter]) -> Result<bool> {
+    let tono: Vec<std::net::IpAddr> =
+        [super::PROTECTED_DNS_V4, super::LOOPBACK_V4, super::LOOPBACK_V6]
+            .iter()
+            .filter_map(|value| value.parse().ok())
+            .collect();
+    for adapter in active
+        .iter()
+        .filter(|adapter| guids.iter().any(|guid| guid.eq_ignore_ascii_case(&adapter.guid)))
+    {
+        let servers = adapter.dns_servers.as_ref().with_context(|| {
+            format!("effective DNS servers of {} were not read", adapter.guid)
+        })?;
+        if servers.iter().any(|server| tono.contains(server)) {
             return Ok(true);
         }
     }
