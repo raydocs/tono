@@ -53,7 +53,8 @@ final class SeaControlsTests: XCTestCase {
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
-        window.orderFront(nil)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
         host.layoutSubtreeIfNeeded()
         return window
     }
@@ -61,8 +62,11 @@ final class SeaControlsTests: XCTestCase {
     private func element(named name: String, in host: NSView) async throws -> any NSAccessibilityProtocol {
         // Only the fixture's untyped child tree; no system AX permission or
         // typed navigation-order bridge (which older SwiftUI hosts can crash).
-        for _ in 0..<20 {
+        var diagnostics: [String] = []
+        for _ in 0..<40 {
             var queue: [AnyObject] = [host]
+            if let window = host.window { queue.insert(window, at: 0) }
+            diagnostics = []
             var visited = Set<ObjectIdentifier>()
             while !queue.isEmpty, visited.count < 128 {
                 let next = queue.removeFirst()
@@ -72,13 +76,22 @@ final class SeaControlsTests: XCTestCase {
                 let label = full?.accessibilityLabel()
                     ?? (object?.accessibilityAttributeValue(.description) as? String)
                     ?? (object?.accessibilityAttributeValue(.title) as? String)
-                if label == name, let full { return full }
+                let value = full?.accessibilityValue() as? String
+                    ?? (object?.accessibilityAttributeValue(.value) as? String)
+                diagnostics.append("type=\(type(of: next)) label=\(label ?? "") value=\(value ?? "") full=\(full != nil)")
+                if label == name || value == name, let full { return full }
                 let children = full?.accessibilityChildren()
                     ?? (object?.accessibilityAttributeValue(.children) as? [Any]) ?? []
                 queue += children.compactMap { $0 as? NSObject }
             }
             try await Task.sleep(for: .milliseconds(25))
         }
+        let raw = diagnostics.joined(separator: "\n")
+        let attachment = XCTAttachment(string: raw)
+        attachment.name = "sea-controls-AX-\(name)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        print("SeaControls AX \(name):\n\(raw)")
         XCTFail("Native accessible control missing: \(name)")
         throw NSError(domain: "SeaControlsTests", code: 1)
     }
