@@ -13,22 +13,46 @@ struct RouteChoicesView: View {
            owner == ManagedExitCatalogOwnership.currentAccount {
             let region = appState.routePreferences.preferredRegion(owner: owner)
             let regions = appState.routePreferenceRegions
-            VStack(alignment: .leading, spacing: 6) {
-                Picker("Fixed recommendation region", selection: Binding(
-                    get: { appState.routePreferences.preferredRegion(owner: owner) ?? "" },
-                    set: { value in
-                        guard account?.user?.id == owner, account?.isReady == true else { return }
-                        appState.setPreferredRouteRegion(value.isEmpty ? nil : value, owner: owner)
-                    }
-                )) {
-                    Text("Any region").tag("")
-                    ForEach(regions, id: \.self) { Text(verbatim: $0).tag($0) }
-                    if let region, !regions.contains(region) {
-                        Text("Saved region unavailable").tag(region)
-                    }
+            let regionSelection = Binding(
+                get: { appState.routePreferences.preferredRegion(owner: owner) ?? "" },
+                set: { value in
+                    guard account?.user?.id == owner, account?.isReady == true else { return }
+                    appState.setPreferredRouteRegion(value.isEmpty ? nil : value, owner: owner)
                 }
-                .pickerStyle(.menu)
-                .font(.system(size: 12))
+            )
+            VStack(alignment: .leading, spacing: 6) {
+                if seaAppearance {
+                    Menu {
+                        Button("Any region") { regionSelection.wrappedValue = "" }
+                        ForEach(regions, id: \.self) { option in
+                            Button { regionSelection.wrappedValue = option } label: { Text(verbatim: option) }
+                        }
+                        if let region, !regions.contains(region) {
+                            Button("Saved region unavailable") { regionSelection.wrappedValue = region }
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text(region.map { regions.contains($0) ? $0 : String(localized: "Saved region unavailable") }
+                                 ?? String(localized: "Any region"))
+                            SeaChevron(expanded: false)
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .buttonStyle(SeaButtonStyle(variant: .quiet, size: .row))
+                    .accessibilityLabel("Fixed recommendation region")
+                    .accessibilityValue(region.map { regions.contains($0) ? $0 : String(localized: "Saved region unavailable") }
+                                        ?? String(localized: "Any region"))
+                } else {
+                    Picker("Fixed recommendation region", selection: regionSelection) {
+                        Text("Any region").tag("")
+                        ForEach(regions, id: \.self) { Text(verbatim: $0).tag($0) }
+                        if let region, !regions.contains(region) {
+                            Text("Saved region unavailable").tag(region)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .font(.system(size: 12))
+                }
                 Text("Recommendations only. Manual choices and the connected exit do not change.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
                 if region != nil, appState.routeRecommendationNodes(owner: owner).isEmpty {
@@ -44,6 +68,7 @@ struct RouteChoicesView: View {
                         stale = false
                         showingConfirmation = proposal != nil
                     }
+                    .modifier(SeaActionStyle(variant: .quiet, legacy: .plain))
                 }
                 if stale {
                     Text("The account, catalog, route preference, or connection changed. Review a fresh recommendation.")

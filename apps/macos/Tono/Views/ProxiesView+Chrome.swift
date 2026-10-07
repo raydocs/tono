@@ -47,14 +47,14 @@ extension ProxiesView {
                             // and users concluded testing was broken when the
                             // other cards stayed unmeasured.
                             Text("Test current exit")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: showsSeaAppearance ? 15 : 12, weight: showsSeaAppearance ? .medium : .semibold))
                         }
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
+                        .foregroundStyle(showsSeaAppearance ? SeaTheme.text : Color.primary)
+                        .padding(.horizontal, showsSeaAppearance ? 0 : 16)
+                        .padding(.vertical, showsSeaAppearance ? 0 : 8)
                         .contentShape(Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .modifier(SeaActionStyle(variant: .quiet, legacy: .plain))
                     .fixedSize()
                     .disabled(
                         isTesting
@@ -62,10 +62,7 @@ extension ProxiesView {
                             || appState.isDisconnecting
                             || appState.switchingNodeId != nil
                     )
-                    .glassEffect(
-                        .regular.tint(.white.opacity(0.08)),
-                        in: Capsule()
-                    )
+                    .modifier(ProxiesLegacyGlass(enabled: !showsSeaAppearance))
                 }
             }
         }
@@ -111,14 +108,11 @@ extension ProxiesView {
                                 .font(.system(size: 10, weight: .semibold))
                         }
                         Text(isRefreshingCatalog ? "Refreshing…" : "Refresh")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 15, weight: .medium))
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
                     .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.tint(.white.opacity(0.08)), in: Capsule())
+                .buttonStyle(SeaButtonStyle(variant: .quiet, size: .row))
                 .disabled(isRefreshingCatalog || accountSession.state != .ready)
             }
 
@@ -274,5 +268,14 @@ extension ProxiesView {
                 }
             }
         }
+    }
+}
+
+private struct ProxiesLegacyGlass: ViewModifier {
+    let enabled: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled { content.glassEffect(.regular.tint(.white.opacity(0.08)), in: Capsule()) }
+        else { content }
     }
 }

@@ -221,7 +221,7 @@ struct DashboardView: View {
                         Button { showsSeaDetails = true } label: {
                             HStack(spacing: 6) {
                                 Text("Details")
-                                Image(systemName: "chevron.up").font(.system(size: 10))
+                                SeaChevron(expanded: true)
                             }
                             .font(.system(size: 13)).foregroundStyle(SeaTheme.muted)
                         }
@@ -341,7 +341,7 @@ struct DashboardView: View {
                     SeaHomeLatencyReading(sample: appState.proxyService.lastExitSample,
                         name: name, failed: runtime?.lastTestFailed == true)
                 } else { Text("No server selected") }
-                Image(systemName: "chevron.down").accessibilityHidden(true)
+                SeaChevron(expanded: true)
             }
             .font(.system(size: 13)).foregroundStyle(SeaTheme.text)
         }
@@ -661,7 +661,7 @@ struct DashboardView: View {
             Image(systemName: systemImage)
                 .font(.system(size: 9, weight: .bold))
             Text(formatSpeed(speed))
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: showsSeaAppearance ? .default : .monospaced)).monospacedDigit()
         }
         .foregroundStyle(.secondary)
         .lineLimit(1)
@@ -847,7 +847,7 @@ private struct ConnectionProgressCard: View {
                         Text("STEP \(elapsedSeconds(since: stageStartedAt, now: now))s")
                     }
                 }
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.system(size: 10, weight: .semibold, design: seaAppearance ? .default : .monospaced)).monospacedDigit()
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
@@ -957,7 +957,7 @@ private struct ConnectionProgressCard: View {
                     Button("Cancel and restore internet") {
                         appState.restoreInternet()
                     }
-                    .buttonStyle(.bordered)
+                    .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .bordered))
                     .controlSize(.small)
                 }
             } else if appState.isProtectionBlocked {
@@ -967,7 +967,7 @@ private struct ConnectionProgressCard: View {
                         : "Retry now") {
                         appState.retryProtectedConnectionNow()
                     }
-                    .buttonStyle(GateProminentButtonStyle())
+                    .modifier(SeaActionStyle(variant: .primary, size: .row, legacy: .gatePrimary))
                     .controlSize(.small)
                     .disabled(!appState.isTonoReady || appState.isDisconnecting)
                 }
@@ -976,7 +976,7 @@ private struct ConnectionProgressCard: View {
                     Button("Restore internet") {
                         appState.restoreInternet()
                     }
-                    .buttonStyle(.bordered)
+                    .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .bordered))
                     .controlSize(.small)
                 }
 
@@ -984,7 +984,7 @@ private struct ConnectionProgressCard: View {
                     Button("Try backup channel") {
                         appState.tryBackupChannelManually()
                     }
-                    .buttonStyle(.bordered)
+                    .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .bordered))
                     .controlSize(.small)
                 }
             } else if ReleasedConnectFailureActions.shouldOfferRetryAndRoute(
@@ -997,7 +997,7 @@ private struct ConnectionProgressCard: View {
                     Button("Retry now") {
                         appState.connect()
                     }
-                    .buttonStyle(GateProminentButtonStyle())
+                    .modifier(SeaActionStyle(variant: .primary, size: .row, legacy: .gatePrimary))
                     .controlSize(.small)
                     .disabled(!appState.isTonoReady || appState.isDisconnecting)
                 }
@@ -1005,21 +1005,21 @@ private struct ConnectionProgressCard: View {
                 Button("Choose another route") {
                     appState.selectedPage = .proxies
                 }
-                .buttonStyle(.bordered)
+                .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .bordered))
                 .controlSize(.small)
 
                 if appState.shouldOfferManualBackupChannel() {
                     Button("Try backup channel") {
                         appState.tryBackupChannelManually()
                     }
-                    .buttonStyle(.bordered)
+                    .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .bordered))
                     .controlSize(.small)
                 }
             } else if appState.shouldOfferManualBackupChannel() {
                 Button("Try backup channel") {
                     appState.tryBackupChannelManually()
                 }
-                .buttonStyle(.bordered)
+                .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .bordered))
                 .controlSize(.small)
             }
 

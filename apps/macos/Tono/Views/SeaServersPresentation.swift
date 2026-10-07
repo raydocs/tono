@@ -24,8 +24,7 @@ extension ProxiesView {
                         .buttonStyle(.plain).accessibilityLabel("Clear search")
                 }
             }
-            .font(.system(size: 14)).padding(12)
-            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+            .modifier(SeaFieldSurface(focused: isSearchFocused))
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     regionFilterChip(nil)
@@ -34,9 +33,9 @@ extension ProxiesView {
                     Button { seaFavoritesOnly.toggle() } label: {
                         Label("Favorites", systemImage: seaFavoritesOnly ? "star.fill" : "star")
                             .font(.system(size: 12, weight: .medium)).padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(seaFavoritesOnly ? SeaTheme.cool.opacity(0.14) : .clear, in: Capsule())
+                            .background(seaFavoritesOnly ? seaAccent.opacity(0.14) : .clear, in: Capsule())
                     }
-                    .buttonStyle(.plain).foregroundStyle(SeaTheme.cool)
+                    .buttonStyle(.plain).foregroundStyle(seaAccent)
                     .accessibilityAddTraits(seaFavoritesOnly ? [.isSelected] : [])
                 }
             }
@@ -125,7 +124,7 @@ extension ProxiesView {
                     if switching {
                         ProgressView().controlSize(.small)
                     } else {
-                        if selected { Text("Selected").font(.system(size: 11)).foregroundStyle(SeaTheme.cool) }
+                        if selected { SeaTag(title: "Selected") }
                         NodeLatencyBadge(latency: runtime?.latency ?? 0, didFail: runtime?.lastTestFailed == true)
                     }
                 }
@@ -137,7 +136,7 @@ extension ProxiesView {
                 isSwitching: switching, latency: runtime?.latency ?? 0, didFail: runtime?.lastTestFailed == true))
         }
         .padding(.horizontal, 12).padding(.vertical, 4)
-        .background(selected ? SeaTheme.cool.opacity(0.10) : .white.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+        .background(selected ? seaAccent.opacity(0.10) : .white.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
         .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(selected ? 0.16 : 0.04), lineWidth: 1) }
     }
 }

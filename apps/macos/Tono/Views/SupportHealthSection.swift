@@ -19,14 +19,13 @@ struct SupportHealthSection: View {
             if seaEnabled {
                 HStack(spacing: 10) {
                     Button(checking ? String(localized: "Checking…") : String(localized: "Check this Mac"), action: runCheck)
-                        .buttonStyle(GateProminentButtonStyle())
-                        .controlSize(.small)
+                        .buttonStyle(SeaButtonStyle(variant: .primary))
                         .disabled(checking)
                         .accessibilityIdentifier("localHealthCheck")
                     Button(reportCopied ? String(localized: "Copied") : String(localized: "Copy for support"), action: copyReport)
-                        .buttonStyle(.bordered)
+                        .buttonStyle(SeaButtonStyle(variant: .quiet))
                     Button("Upload diagnostics") { previewReport() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(SeaButtonStyle(variant: .quiet))
                         .disabled(!canPreviewReport)
                 }
             } else {
@@ -88,6 +87,7 @@ struct SupportHealthSection: View {
                 VStack(spacing: 16) {
                     Text("The account changed. Close this preview and check again.")
                     Button("Close") { showingReport = false }
+                        .modifier(SeaActionStyle(variant: .quiet, legacy: .plain))
                 }.padding(24)
             }
         }
@@ -141,11 +141,10 @@ struct LocalHealthResults: View {
                         HStack(spacing: 7) {
                             Text(finding.title).font(.system(size: 12, weight: .semibold))
                             if seaEnabled {
-                                Text(finding.status == .observed ? String(localized: "Observed")
-                                     : finding.status == .attention ? String(localized: "Needs attention")
-                                     : String(localized: "Unknown"))
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(finding.status == .attention ? Color.orange : SeaTheme.cool)
+                                SeaTag(title: LocalizedStringKey(finding.status == .observed ? "Observed"
+                                     : finding.status == .attention ? "Needs attention" : "Unknown"),
+                                       kind: finding.status == .observed ? .good
+                                           : finding.status == .attention ? .attention : .neutral)
                             }
                         }
                         Text(finding.detail).font(.system(size: 11)).foregroundStyle(.secondary)
@@ -196,6 +195,7 @@ struct SupportReportConfirmationView: View {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(receipt.copyText, forType: .string)
                 }
+                .modifier(SeaActionStyle(variant: .quiet, legacy: .plain))
             } else if !canSend {
                 Text("The connection changed. Close this preview and check again before sending.")
                     .foregroundStyle(.orange)
@@ -204,6 +204,7 @@ struct SupportReportConfirmationView: View {
             }
             HStack {
                 Button("Close", action: close)
+                    .modifier(SeaActionStyle(variant: .quiet, legacy: .plain))
                 Spacer()
                 if receipt == nil {
                     Button(sending ? String(localized: "Sending…") : String(localized: "Send this report"), action: confirm)

@@ -108,7 +108,7 @@ struct WelcomeIntroView: View {
                         }
                         .padding(28)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(SeaTheme.panel,
+                        .background(SeaTheme.opaquePanel,
                                     in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -132,14 +132,14 @@ struct WelcomeIntroView: View {
                             Spacer()
                             if seaStep != .routes {
                                 Button("Skip") { finish() }
-                                    .buttonStyle(.link)
+                                    .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .link))
                             }
                             Button {
                                 if let next = seaStep.next { seaStep = next } else { finish() }
                             } label: {
                                 if seaStep == .routes { Text("Get started") } else { Text("Next") }
                             }
-                            .buttonStyle(GateProminentButtonStyle())
+                            .modifier(SeaActionStyle(variant: .primary, legacy: .gatePrimary))
                             .frame(width: 150)
                             .keyboardShortcut(.defaultAction)
                         }
@@ -212,7 +212,7 @@ struct WelcomeIntroView: View {
             Button(action: finish) {
                 Text("Get started →")
             }
-            .buttonStyle(GateProminentButtonStyle())
+            .modifier(SeaActionStyle(variant: .primary, legacy: .gatePrimary))
             .keyboardShortcut(.defaultAction)
             .frame(maxWidth: 320)
         }

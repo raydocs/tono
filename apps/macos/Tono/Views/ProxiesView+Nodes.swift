@@ -591,7 +591,7 @@ extension ProxiesView {
             .padding(.horizontal, 8)
             .padding(.vertical, 7)
             .background(
-                isOn ? TonoBrand.accent.opacity(0.14) : .clear,
+                isOn ? (showsSeaAppearance ? seaAccent : TonoBrand.accent).opacity(0.14) : .clear,
                 in: Capsule()
             )
         }

@@ -39,19 +39,31 @@ enum ProgressPillPhase: Equatable {
 /// Reduce Motion keeps the text and drops the sweep. Never runs unless
 /// `phase == .sending`.
 struct ProgressPillButtonStyle: ButtonStyle {
+    @SeaAppearancePreference private var seaAppearance
     var phase: ProgressPillPhase = .idle
+    var seaPrimary = true
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    @ViewBuilder
     func makeBody(configuration: Configuration) -> some View {
-        ActionSurface(
-            configuration: configuration,
-            compact: false,
-            isEnabled: isEnabled,
-            reduceMotion: reduceMotion
-        ) {
-            if phase == .sending && !reduceMotion {
-                ProgressPillSweep()
+        if seaAppearance {
+            SeaButtonStyle(variant: seaPrimary ? .primary : .quiet).makeBody(configuration: configuration)
+                .overlay {
+                    if phase == .sending && !reduceMotion {
+                        ProgressPillSweep().clipShape(Capsule()).allowsHitTesting(false)
+                    }
+                }
+        } else {
+            ActionSurface(
+                configuration: configuration,
+                compact: false,
+                isEnabled: isEnabled,
+                reduceMotion: reduceMotion
+            ) {
+                if phase == .sending && !reduceMotion {
+                    ProgressPillSweep()
+                }
             }
         }
     }
