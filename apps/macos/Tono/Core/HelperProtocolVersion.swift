@@ -399,7 +399,9 @@ nonisolated enum HelperProtocolVersion {
     ///   itself (MAC-ORPHAN-OWNER-RELAUNCH).
     /// - 4.52.40 → 4.52.41: Core replacement launches the root-owned config
     ///   snapshot validated before stopping, never a second user-file copy.
-    static let current = "4.52.41"
+    /// - 4.52.41 → 4.52.42: failed update-store startup reads protection intent
+    ///   only under the root update lock; blocked consumed attempts allow repair.
+    static let current = "4.52.42"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

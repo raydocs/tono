@@ -90,10 +90,9 @@ enum UpdateExecutor {
     /// Called before constructing CoreManager or restoring normal desired
     /// state. A corrupt ledger stops launch. The default failure action
     /// releases a saved kill switch; it does not install one (BRICK-M13).
-    /// Intent is still read where the old install ran, including under the
-    /// update lock when the store opened, so tests can see that read. A Mac
-    /// that was never connected is not blocked by a store it cannot read
-    /// (BRICK-M1).
+    /// Intent is read only under the update lock, including when normal store
+    /// opening failed but the existing root directory and lock are secure.
+    /// A Mac that was never connected is not blocked by a store it cannot read.
     /// A stop request that arrives while this daemon waits behind the update
     /// lock is not corruption: that SIGTERM is our own update executor's
     /// `launchctl bootout` (the spin guard exists precisely so a bootout can
@@ -103,32 +102,58 @@ enum UpdateExecutor {
     static func startup(storage: UpdateStorage? = nil,
                         protectionWanted: () -> Bool = KillSwitchManager.stateFileExists,
                         emergencyBlock: () throws -> Void = armEmergencyBlock) throws -> Bool {
-        var secured = false
         do {
-            let storage = try storage ?? UpdateStorage()
-            return try storage.locked {
+            let openedStorage: UpdateStorage
+            do { openedStorage = try storage ?? UpdateStorage() }
+            catch {
+                let openingError = error
+                // An unsafe or missing directory/lock is not authority for a
+                // lockless read. Preserve the original startup failure.
                 do {
-                    guard let attempt = try storage.load().attempt, attempt.receipt.phase != .committed else { return false }
+                    try UpdateStorage.withRootLockForStartup {
+                        if protectionWanted() { try? emergencyBlock() }
+                    }
+                } catch HelperFailure.stopping { return true }
+                catch { }
+                throw openingError
+            }
+            return try openedStorage.locked {
+                do {
+                    guard let attempt = try openedStorage.load().attempt, attempt.receipt.phase != .committed else { return false }
                     if attempt.execution == .consumed && (attempt.receipt.blockedReason != nil || attempt.disconnectRequested) { return false }
                     if [.consumed, .replacing, .rollingBack].contains(attempt.execution) {
-                        try launch(storage: storage, attempt: attempt)
+                        try launch(storage: openedStorage, attempt: attempt)
                         return true
                     }
                     return false
                 } catch HelperFailure.stopping(let message) {
                     throw HelperFailure.stopping(message)
                 } catch {
-                    secured = true
                     if protectionWanted() { try? emergencyBlock() }
                     throw error
                 }
             }
         } catch HelperFailure.stopping {
             return true
-        } catch {
-            if !secured, protectionWanted() { try? emergencyBlock() }
-            throw error
         }
+    }
+
+    /// A consumed attempt blocked before replacement cannot be resumed by the
+    /// executor. Other unfinished attempts retain their replacement owner.
+    static func allowsOrdinaryInstall(execution: UpdateStorage.Execution?,
+                                      phase: UpdateContractV1.Phase?,
+                                      blocked: Bool = false,
+                                      disconnectRequested: Bool = false) -> Bool {
+        guard let execution else { return true }
+        if execution == .replacing || execution == .rollingBack { return false }
+        if phase == .committed { return true }
+        return execution == .consumed && (blocked || disconnectRequested)
+    }
+
+    static func allowsOrdinaryInstall(_ attempt: UpdateStorage.Attempt?) -> Bool {
+        allowsOrdinaryInstall(execution: attempt?.execution, phase: attempt?.receipt.phase,
+                              blocked: attempt?.receipt.blockedReason != nil,
+                              disconnectRequested: attempt?.disconnectRequested == true)
     }
 
     static func run() -> Bool {

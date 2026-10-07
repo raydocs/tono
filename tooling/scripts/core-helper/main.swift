@@ -1944,7 +1944,7 @@ func updateAllowsOrdinaryInstall() -> Bool {
         let storage = try UpdateStorage()
         return try storage.locked {
             let attempt = try storage.load().attempt
-            return attempt == nil || attempt?.receipt.phase == .committed
+            return UpdateExecutor.allowsOrdinaryInstall(attempt)
         }
     } catch { return false }
 }
@@ -1958,7 +1958,7 @@ if CommandLine.arguments.dropFirst() == ["--update-install-guard"] {
         let storage = try UpdateStorage()
         let status = try storage.locked { () throws -> Int32 in
             let attempt = try storage.load().attempt
-            guard attempt == nil || attempt?.receipt.phase == .committed else {
+            guard UpdateExecutor.allowsOrdinaryInstall(attempt) else {
                 throw HelperFailure.invalid("Pending update prevents helper repair.")
             }
             let installer = Process()
@@ -1976,6 +1976,20 @@ if CommandLine.arguments.dropFirst() == ["--update-executor"] {
 }
 if CommandLine.arguments.dropFirst() == ["--update-self-test"] {
     exit(runUpdateSelfTests() ? 0 : 1)
+}
+if CommandLine.arguments.dropFirst() == ["--update-install-policy-self-test"] {
+    let allowed = UpdateExecutor.allowsOrdinaryInstall(
+        execution: .consumed, phase: .installationAuthorized, blocked: true)
+        && UpdateExecutor.allowsOrdinaryInstall(
+            execution: .consumed, phase: .installationAuthorized, disconnectRequested: true)
+        && !UpdateExecutor.allowsOrdinaryInstall(
+            execution: .consumed, phase: .installationAuthorized)
+        && !UpdateExecutor.allowsOrdinaryInstall(
+            execution: .replacing, phase: .committed, blocked: true)
+        && !UpdateExecutor.allowsOrdinaryInstall(
+            execution: .rollingBack, phase: .committed, disconnectRequested: true)
+    if allowed { print("PASS update ordinary-install policy") }
+    exit(allowed ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--version"] {
     print(helperVersion)
