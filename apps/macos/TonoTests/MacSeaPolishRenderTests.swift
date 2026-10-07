@@ -227,11 +227,15 @@ final class MacSeaPolishRenderTests: XCTestCase {
         // The hosted display is 1024 wide. Capture the native window surface at
         // the requested size, not a display-constrained or content-autosized proxy.
         host.sizingOptions = []
-        // This full-size manual host contains a native NavigationSplitView,
-        // which owns the toolbar inset. Do not reserve that container inset
-        // a second time at the hosting boundary.
-        host.safeAreaRegions = []
-        window.contentView = host
+        // Top-level NSHostingView also updates NSWindow sizing. A manual
+        // fixed-surface fixture does not own the production WindowGroup's
+        // sizing policy; mount the unchanged view into a normal AppKit surface.
+        let surface = NSView(frame: CGRect(origin: .zero, size: size))
+        host.frame = surface.bounds
+        host.autoresizingMask = [.width, .height]
+        surface.addSubview(host)
+        window.hostedView = host
+        window.contentView = surface
         recordGeometry(window, stage: "mounted-before-toolbar-layout")
         window.setFrame(CGRect(x: 80, y: 80, width: size.width, height: size.height), display: false)
         window.orderFront(nil)
@@ -265,8 +269,8 @@ final class MacSeaPolishRenderTests: XCTestCase {
     }
 
     private func recordGeometry(_ window: NSWindow, stage: String) {
-        let host = window.contentView
-        let line = "stage=\(stage) windowID=\(window.windowNumber) frame=\(window.frame) contentRect=\(window.contentRect(forFrameRect: window.frame)) layoutRect=\(window.contentLayoutRect) minSize=\(window.minSize) contentMinSize=\(window.contentMinSize) contentMaxSize=\(window.contentMaxSize) hostFrame=\(String(describing: host?.frame)) hostBounds=\(String(describing: host?.bounds)) hostFitting=\(String(describing: host?.fittingSize)) safeArea=\(String(describing: host?.safeAreaInsets)) toolbar=\(window.toolbar != nil) toolbarStyle=\(window.toolbarStyle.rawValue)\n"
+        let host = (window as? MacSeaPolishWindow)?.hostedView
+        let line = "stage=\(stage) windowID=\(window.windowNumber) frame=\(window.frame) contentRect=\(window.contentRect(forFrameRect: window.frame)) layoutRect=\(window.contentLayoutRect) minSize=\(window.minSize) contentMinSize=\(window.contentMinSize) contentMaxSize=\(window.contentMaxSize) surfaceFrame=\(String(describing: window.contentView?.frame)) hostFrame=\(String(describing: host?.frame)) hostBounds=\(String(describing: host?.bounds)) hostFitting=\(String(describing: host?.fittingSize)) safeArea=\(String(describing: host?.safeAreaInsets)) toolbar=\(window.toolbar != nil) toolbarStyle=\(window.toolbarStyle.rawValue)\n"
         let url = folder.appendingPathComponent("polish-a-window-geometry-\(window.windowNumber).txt")
         let previous = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
         try? (previous + line).write(to: url, atomically: true, encoding: .utf8)
@@ -296,9 +300,12 @@ final class MacSeaPolishRenderTests: XCTestCase {
         let target = registration.target
         let expectedID = target.windowID
         let requestedSize = try XCTUnwrap((window as? MacSeaPolishWindow)?.requestedSize)
+        XCTAssertNotNil(window.toolbar, "whole-window evidence must retain the native split-view toolbar")
         XCTAssertEqual(expectedID, CGWindowID(window.windowNumber))
         XCTAssertEqual(registration.windowServerFrame.size, requestedSize)
         XCTAssertEqual(window.frame.size, requestedSize)
+        let host = try XCTUnwrap((window as? MacSeaPolishWindow)?.hostedView)
+        XCTAssertEqual(host.frame, window.contentView?.bounds, "unchanged production view must fill the actual native surface")
         let filter = SCContentFilter(desktopIndependentWindow: target)
         let config = SCStreamConfiguration()
         config.width = Int(requestedSize.width)
@@ -319,7 +326,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
         try data.write(to: folder.appendingPathComponent(name + ".png"), options: .atomic)
         let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
         attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
-        let receipt = "source=first own-PID native window PNG; windowID=\(expectedID) ownerPID=\(pid) windowServerOnScreen=true windowServerFrame=\(registration.windowServerFrame) SCFrame=\(target.frame) SCOnScreen=\(target.isOnScreen) requested=\(requestedSize) dimensions=\(image.width)x\(image.height) registrationAttempts=\(registration.attempts) metadataBeforeImage=true language=\(Locale.preferredLanguages) lowPower=\(ProcessInfo.processInfo.isLowPowerModeEnabled) accessibilitySource=shared-presentation-inputs-not-host-OS-mutation\n"
+        let receipt = "source=first own-PID native window PNG; mount=fixed-AppKit-surface-not-production-WindowGroup-sizing windowID=\(expectedID) ownerPID=\(pid) windowServerOnScreen=true windowServerFrame=\(registration.windowServerFrame) SCFrame=\(target.frame) SCOnScreen=\(target.isOnScreen) requested=\(requestedSize) hostFrame=\(host.frame) sceneBounds=\(String(describing: findScene(host)?.bounds)) toolbar=\(window.toolbar != nil) dimensions=\(image.width)x\(image.height) registrationAttempts=\(registration.attempts) metadataBeforeImage=true language=\(Locale.preferredLanguages) lowPower=\(ProcessInfo.processInfo.isLowPowerModeEnabled) accessibilitySource=shared-presentation-inputs-not-host-OS-mutation\n"
         try receipt.write(to: folder.appendingPathComponent(name + ".txt"), atomically: true, encoding: .utf8)
         return image
     }
@@ -395,6 +402,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
 @MainActor
 private final class MacSeaPolishWindow: NSWindow {
     var requestedSize = CGSize.zero
+    weak var hostedView: NSView?
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 }
 
