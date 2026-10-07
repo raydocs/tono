@@ -228,13 +228,16 @@ final class MacSeaPolishRenderTests: XCTestCase {
         // the requested size, not a display-constrained or content-autosized proxy.
         host.sizingOptions = []
         window.contentView = host
+        recordGeometry(window, stage: "mounted-before-toolbar-layout")
         window.setFrame(CGRect(x: 80, y: 80, width: size.width, height: size.height), display: false)
         window.orderFront(nil)
         host.layoutSubtreeIfNeeded()
         // NavigationSplitView installs its toolbar during the first layout;
         // AppKit may preserve the content size by growing the outer frame then.
-        window.setFrame(CGRect(x: 80, y: 80, width: size.width, height: size.height), display: true)
+        recordGeometry(window, stage: "after-toolbar-first-layout")
+        sizeNativeWindow(window, outerSize: size)
         host.layoutSubtreeIfNeeded()
+        recordGeometry(window, stage: "after-AppKit-content-size-layout")
         // Toolbar installation and WindowServer registration are asynchronous.
         // Wait for published metadata, never retry/replace a captured image.
         _ = try await registeredWindow(window)
@@ -247,6 +250,23 @@ final class MacSeaPolishRenderTests: XCTestCase {
         window.orderOut(nil)
         window.contentView = nil
         window.close()
+    }
+
+    private func sizeNativeWindow(_ window: NSWindow, outerSize: CGSize) {
+        // Use the instance conversion after its native toolbar is installed;
+        // frame/content chrome is not a hard-coded correction in points.
+        let outer = CGRect(origin: window.frame.origin, size: outerSize)
+        let content = window.contentRect(forFrameRect: outer)
+        window.setContentSize(content.size)
+    }
+
+    private func recordGeometry(_ window: NSWindow, stage: String) {
+        let host = window.contentView
+        let line = "stage=\(stage) windowID=\(window.windowNumber) frame=\(window.frame) contentRect=\(window.contentRect(forFrameRect: window.frame)) layoutRect=\(window.contentLayoutRect) minSize=\(window.minSize) contentMinSize=\(window.contentMinSize) contentMaxSize=\(window.contentMaxSize) hostFrame=\(String(describing: host?.frame)) hostBounds=\(String(describing: host?.bounds)) hostFitting=\(String(describing: host?.fittingSize)) safeArea=\(String(describing: host?.safeAreaInsets)) toolbar=\(window.toolbar != nil) toolbarStyle=\(window.toolbarStyle.rawValue)\n"
+        let url = folder.appendingPathComponent("polish-a-window-geometry-\(window.windowNumber).txt")
+        let previous = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        try? (previous + line).write(to: url, atomically: true, encoding: .utf8)
+        print("polish native geometry: \(line)", terminator: "")
     }
 
     private func findScene(_ view: NSView) -> SeaSceneNativeView? {
@@ -288,6 +308,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
                 else { complete(.failure(NSError(domain: "MacSeaPolishRender", code: 2))) }
             }
         }
+        XCTAssertEqual(window.frame.size, requestedSize, "native surface must not resize during capture")
         XCTAssertEqual(image.width, config.width)
         XCTAssertEqual(image.height, config.height)
         let data = try XCTUnwrap(NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]))
@@ -307,8 +328,10 @@ final class MacSeaPolishRenderTests: XCTestCase {
         while CACurrentMediaTime() < deadline {
             attempts += 1
             if window.frame.size != size {
-                window.setFrame(CGRect(origin: window.frame.origin, size: size), display: true)
+                recordGeometry(window, stage: "registration-\(attempts)-before-size")
+                sizeNativeWindow(window, outerSize: size)
                 await settle(0.1)
+                recordGeometry(window, stage: "registration-\(attempts)-after-size")
             }
             let id = CGWindowID(window.windowNumber)
             let content: SCShareableContent = try await nativeWindowRequest("polish window registration", timeout: max(0.1, deadline - CACurrentMediaTime())) { complete in
