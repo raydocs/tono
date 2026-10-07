@@ -1,5 +1,10 @@
 Unicode true
 ManifestDPIAware true
+; Forked from tauri-bundler's installer.nsi. The bundler still supplies utils.nsh at build
+; time, so a @tauri-apps/cli upgrade must be diffed against the upstream template of the
+; new version (crates/tauri-bundler/src/bundle/windows/nsis/) before the version below moves.
+; windows-packaging.test.mjs fails when package.json's @tauri-apps/cli no longer matches.
+; TEMPLATE_SYNCED_WITH_TAURI_CLI 2.12.1
 ; Add in `dpiAwareness` `PerMonitorV2` to manifest for Windows 10 1607+ (note this should not affect lower versions since they should be able to ignore this and pick up `dpiAware` `true` set by `ManifestDPIAware true`)
 ; Currently undocumented on NSIS's website but is in the Docs folder of source tree, see
 ; https://github.com/kichik/nsis/blob/5fc0b87b819a9eec006df4967d08e522ddd651c9/Docs/src/attributes.but#L286-L300
