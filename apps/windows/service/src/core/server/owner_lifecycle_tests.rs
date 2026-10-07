@@ -438,3 +438,33 @@ fn scm_stop_releases_when_the_repair_gate_cannot_be_opened() {
     );
     assert!(super::installer_holds_repair_gate::<()>(&Ok(None)), "a gate held elsewhere still fences stop");
 }
+
+/// R681-release-gate-writes: a ProgramData DACL or `.repair.lock` write failure must not refuse
+/// Release; it falls back to the existing lock (held by an installer: still refused) and reaches
+/// the read-only release admission when that cannot be checked either. Other routes still refuse.
+#[test]
+fn release_reaches_admission_when_the_repair_gate_cannot_be_prepared() {
+    let failed = || -> anyhow::Result<Option<()>> {
+        Err(anyhow::anyhow!("failed to reset the ProgramData\\Tono DACL"))
+    };
+    assert!(
+        matches!(super::owner_lifecycle_repair_gate(failed(), true, failed), Ok(None)),
+        "a gate write failure is not an installer; Release must reach its admission"
+    );
+    assert!(
+        matches!(super::owner_lifecycle_repair_gate(failed(), true, || Ok(Some(()))), Ok(Some(()))),
+        "Release holds the existing lock when only the preparation failed"
+    );
+    assert!(
+        super::owner_lifecycle_repair_gate(failed(), true, || Ok(None)).is_err(),
+        "an installer holding the existing lock still fences Release"
+    );
+    assert!(
+        super::owner_lifecycle_repair_gate(failed(), false, || Ok(Some(()))).is_err(),
+        "non-release routes still refuse on a gate write failure"
+    );
+    assert!(
+        super::owner_lifecycle_repair_gate::<()>(Ok(None), true, || Ok(Some(()))).is_err(),
+        "a gate held by an installer still fences Release"
+    );
+}

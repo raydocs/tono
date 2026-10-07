@@ -17,7 +17,31 @@ pub fn acquire_service_repair_gate() -> Result<Option<ServiceRepairGate>> {
         .truncate(false)
         .open(&path)
         .with_context(|| format!("failed to open service repair gate {path:?}"))?;
+    lock_service_repair_gate(file, &path)
+}
 
+/// R681-release-gate-writes: the gate for a Release whose [`acquire_service_repair_gate`] failed.
+/// It opens the existing `.repair.lock` without preparing the directories (no DACL reset) and
+/// without creating it, and locks it the same way. An installer holding the gate holds this file
+/// open and locked, so `Ok(None)` still means an installer owns the lifecycle; a missing file
+/// means no installer has ever taken the gate there.
+#[cfg(windows)]
+pub(crate) fn probe_service_repair_gate() -> Result<Option<ServiceRepairGate>> {
+    let path = crate::core::paths::service_paths()
+        .install_dir()
+        .join(".repair.lock");
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .with_context(|| format!("failed to open existing service repair gate {path:?}"))?;
+    lock_service_repair_gate(file, &path)
+}
+
+fn lock_service_repair_gate(
+    file: File,
+    path: &std::path::Path,
+) -> Result<Option<ServiceRepairGate>> {
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd as _;
