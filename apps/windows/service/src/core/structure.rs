@@ -903,6 +903,12 @@ pub struct ServiceStatusSnapshot {
     /// Network/power event feed (Windows netmon); zeroed where no monitor exists.
     #[serde(default)]
     pub network_events: NetworkEventsStatus,
+    /// Whether the Windows update store records an attempt that is not committed, read from the
+    /// retained update state without its lock, a lease or a write (BRICK-W10). `None` when the
+    /// Service could not read it, runs on another platform, or predates the field: unknown, never
+    /// absence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_attempt_pending: Option<bool>,
 }
 
 /// Whether an already-running Windows Core is safe to preserve until `StartClash` replaces it.

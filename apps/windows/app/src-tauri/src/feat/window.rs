@@ -954,6 +954,7 @@ mod tests {
                 reconnect_after_release: false,
             }),
             network_events: Default::default(),
+            update_attempt_pending: None,
         };
         assert_eq!(
             classify_service_refusal(false, Some(&snapshot)),
@@ -1017,6 +1018,7 @@ mod tests {
                 reconnect_after_release: false,
             }),
             network_events: Default::default(),
+            update_attempt_pending: None,
         };
         let mut second = first.clone();
         second.snapshot_generation = 6;

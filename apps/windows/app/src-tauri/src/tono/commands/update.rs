@@ -346,7 +346,20 @@ pub async fn adopt() -> Result<Option<Protection>> {
     INCOMPLETE.store(true, Ordering::Release);
     let adopted = request(UpdateRequest::Adopt).await;
     record_adoption(adopted.as_ref().ok().map(|status| status.successor_relaunched));
-    let status = adopted?;
+    let status = match adopted {
+        Ok(status) => status,
+        Err(error) => {
+            // The refusal may be about the request (a manual installer lease, the store or
+            // repair lock, the App image), not about an attempt. Ask the Service's read-only
+            // update status; anything but a certain "none pending" keeps recovery incomplete.
+            let pending = crate::core::service::tono_service_status_snapshot()
+                .await
+                .ok()
+                .and_then(|snapshot| snapshot.update_attempt_pending);
+            INCOMPLETE.store(incomplete_after_refused_adopt(pending), Ordering::Release);
+            return Err(error);
+        }
+    };
     let Some(receipt) = status.receipt.filter(|r| r.phase != Phase::Committed) else {
         return Ok(None);
     };
@@ -354,6 +367,13 @@ pub async fn adopt() -> Result<Option<Protection>> {
         request(UpdateRequest::Commit).await?;
     }
     Ok(Some(receipt.required_recovery))
+}
+
+/// INCOMPLETE after the Service refused Adopt (BRICK-W10). `read_only_pending` is `/status`'s
+/// `update_attempt_pending`: `None` when the read failed or the Service predates it. Only a
+/// certain "no attempt pending" clears the flag; unknown stays incomplete.
+fn incomplete_after_refused_adopt(read_only_pending: Option<bool>) -> bool {
+    read_only_pending != Some(false)
 }
 
 pub async fn disconnect_if_pending(apply_narrow: bool) -> Result<Option<tono_service_protocol::KillSwitchStatus>> {
@@ -471,6 +491,15 @@ mod update_quiesce_tests {
         fsm.connect_succeeded().unwrap();
         assert!(!quiesce_connection_after_update(&mut fsm, None, true, Some(8), 8));
         assert!(fsm.status().is_connected);
+    }
+
+    /// BRICK-W10: a refusal for a reason that is not an update (manual lease, store or repair
+    /// lock, App image) used to leave "update recovery incomplete" set with nothing pending.
+    #[test]
+    fn a_non_update_adopt_refusal_with_nothing_pending_is_not_incomplete() {
+        assert!(!incomplete_after_refused_adopt(Some(false)));
+        assert!(incomplete_after_refused_adopt(Some(true)));
+        assert!(incomplete_after_refused_adopt(None), "an unreadable status cleared the flag");
     }
 
     #[test]

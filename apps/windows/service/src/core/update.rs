@@ -153,6 +153,21 @@ fn release_admission_at(
     Ok(())
 }
 
+/// The read-only update status `/status` publishes (BRICK-W10): whether the retained update
+/// state records an attempt that is not committed. No lease, lock or DACL write, so a manual
+/// installer lease, a held repair lock or an unprovable App image cannot turn this into a
+/// refusal. `None` when the evidence cannot be read: unknown, never absence.
+pub(crate) fn attempt_pending_read_only() -> Option<bool> {
+    match read_store_state() {
+        Ok(state) => Some(state.pending()),
+        Err(error) => {
+            // Debug, not warn: `/status` is polled every few seconds.
+            tracing::debug!("update state unreadable for status; reporting it as unknown: {error:#}");
+            None
+        }
+    }
+}
+
 /// The manual installer lease check for update requests. Only `Status`, the read the App sends
 /// before its release, passes a conclusively dead holder (Service half of BRICK-W2); every other
 /// request refuses any lease.

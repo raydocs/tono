@@ -54,6 +54,10 @@ pub async fn service_status_snapshot(owner: &AuthenticatedOwner) -> Result<Servi
     let network_events = crate::core::netmon::status();
     #[cfg(not(windows))]
     let network_events = crate::core::structure::NetworkEventsStatus::default();
+    #[cfg(windows)]
+    let update_attempt_pending = crate::core::update::attempt_pending_read_only();
+    #[cfg(not(windows))]
+    let update_attempt_pending = None;
     let (snapshot_generation, active_operation) = crate::core::operation::snapshot();
     Ok(ServiceStatusSnapshot {
         snapshot_generation,
@@ -78,6 +82,7 @@ pub async fn service_status_snapshot(owner: &AuthenticatedOwner) -> Result<Servi
         macos_kill_switch_mode: kill_switch_mode,
         kill_switch: windows_kill_switch,
         network_events,
+        update_attempt_pending,
     })
 }
 

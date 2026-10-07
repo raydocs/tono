@@ -1990,6 +1990,7 @@ mod tests {
                     reconnect_after_release: false,
                 }),
                 network_events: Default::default(),
+                update_attempt_pending: None,
             },
             DnsProtectionStatus {
                 enabled: true,

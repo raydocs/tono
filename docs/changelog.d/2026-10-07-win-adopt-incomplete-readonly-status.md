@@ -1,0 +1,9 @@
+## 2026-10-07 · Windows 启动 Adopt 被非更新原因拒绝时不再留下「更新恢复未完成」（BRICK-W10）
+- 归属：docs/SHIP_PLAN.md §2 item 10（0.0.75 修复批，老板 2026-10-07）；`apps/windows/service` 状态快照与 `apps/windows/app` 启动更新接管。
+- 来源：main `de62eb2a5` → 本 PR（分支 `claude/win-adopt-incomplete-readonly-status-20261007`）；未合 main。
+- 缺陷修复：App 启动时 `adopt()`（`tono/commands/update.rs`）先把 INCOMPLETE 置 true 再发写路径的 `Adopt`；Service 因手动安装租约、更新存储打不开/被锁、修复锁被占或 App 镜像无法证明而拒绝时，标志一直为 true，没有进行中的更新也显示「更新恢复未完成」并拒绝退出（日志 `Protected update adoption not established: <reason>`）。改后：Service 的 `/status` 快照新增 `update_attempt_pending`，由新函数 `attempt_pending_read_only()`（`core/update.rs`）用 BRICK-W5 d 的只读 `read_store_state()` 回答「更新存储里是否有未提交的尝试」——不取租约、不取存储锁或修复锁、不写 DACL；读不出时为空。Adopt 被拒后 App 读这个字段，只有确定的「没有挂起尝试」才清除 INCOMPLETE；读失败、旧 Service 没有该字段（空）或字段为真时照旧保持未完成（「未知即未完成」不变）。
+- 新增/优化：`ServiceStatusSnapshot.update_attempt_pending: Option<bool>`（`serde(default)`，空时不序列化）。旧 Service 不带该字段 → 空 → 未完成；旧 App 忽略该字段。属加性字段，按现有惯例（`desired_state_unknown`、`successor_relaunched` 等）不升 `PROTOCOL_REVISION`。
+- 工程与测试：一条 `#[test] a_non_update_adopt_refusal_with_nothing_pending_is_not_incomplete`（`tono/commands/update.rs`）：只读状态为「无挂起」时被拒后的 INCOMPLETE 为 false，「有挂起」和读不出时为 true。旧代码没有该判断，Adopt 被拒一律保持 true。四处测试里的 `ServiceStatusSnapshot` 字面量补上新字段。
+- 验证：MacBook 不跑 cargo（老板规则）；证明是本 PR 精确 head 上的 `ci-gate`（Windows App 与 Service `cargo test`）。未实机复现。
+- 候选/发布：无新包，仅源码。
+- 剩余限制：只改启动 Adopt 被拒后的标志；状态轮询不会据此改写 INCOMPLETE。手动安装租约仍挡 Adopt 本身（只是不再显示未完成）。Restore internet 的 Status 探测在活租约下仍失败（BRICK-W5 其余项）。未实机。
