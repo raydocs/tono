@@ -26,6 +26,26 @@ final class SeaScenePaletteTests: XCTestCase {
         XCTAssertEqual(view.bounds.size, CGSize(width: 320, height: 200))
     }
 
+    func testBackingScaleRebakeUsesNewBoundsBeforeTheNextLayout() throws {
+        let view = SeaSceneNativeView(frame: NSRect(x: 0, y: 0, width: 320, height: 200))
+        let window = SeaScaleFixtureWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer { view.stop(); window.contentView = nil; window.close() }
+        view.layout()
+        let scene = try XCTUnwrap(view.layer?.sublayers?.first)
+        view.setFrameSize(CGSize(width: 360, height: 240))
+        window.fixtureScale = 2
+        view.viewDidChangeBackingProperties()
+        let grain = try XCTUnwrap(scene.sublayers?.first(where: { $0.name == "grain" }))
+        XCTAssertEqual(scene.bounds.size, view.bounds.size)
+        XCTAssertEqual(grain.frame.size, view.bounds.size)
+        XCTAssertEqual((try XCTUnwrap(grain.contents) as! CGImage).width, 720)
+        view.layout()
+        XCTAssertTrue(scene.sublayers?.contains(where: { $0 === grain }) == true,
+                      "the following layout must reuse the correctly sized density bake")
+    }
+
     func testResizeReusesTheTreeUntilLiveResizeEndsOrLayoutSettles() async throws {
         let view = SeaSceneNativeView(frame: NSRect(x: 0, y: 0, width: 320, height: 200))
         defer { view.stop() }

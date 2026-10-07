@@ -73,7 +73,12 @@ final class SeaSceneNativeView: NSView {
         // Display density is not a drag-size change. Rebuild it now so a
         // queued layout/debounce cannot leave the old-density bitmap in use.
         if lastBackingScale != (window?.backingScaleFactor ?? 2) {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            scene.isGeometryFlipped = !(layer?.contentsAreFlipped() ?? false)
+            scene.frame = bounds
             rebuildRendererIfNeeded()
+            CATransaction.commit()
         }
         needsLayout = true
     }
