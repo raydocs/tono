@@ -1,0 +1,17 @@
+## 2026-10-07 · 控制面：Google 登录只在 Google 对邮箱有权威时才能关联到已有账号（#789）
+- 归属：[docs/ops/plan-2026-09-11.md](../ops/plan-2026-09-11.md) 控制面加固；不是 0.0.75 发布门槛（Google 登录在 `wrangler.jsonc` 里仍是关闭的，`GOOGLE_CLIENT_ID: ""`）。
+- 来源：main `30ee93a93` → PR #1435。issue #789（GPT-6.1 Sol bug hunt n05-1 / n07-1，P2 潜伏）；finding 分片 [issue-789](../findings.d/issue-789.md)。
+- 缺陷修复：未关联的 Google `sub` 带着 `email` + `email_verified=true` 登录时，原来直接按邮箱选中已有 Tono 账号并插入 `auth_identities` 关联。Google 账号若绑定的是非托管外部邮箱，在邮箱易主之后仍会断言 `email_verified`，前任邮箱主人可借此接管现任主人用邮箱验证码注册的账号。现在 `accountForOidcIdentity` 只在 Google 对该地址有权威时才允许选中已有账号：域名是 `gmail.com` / `googlemail.com`，或 `hd` 声明存在且等于地址域名（`src/oidc.ts` `googleAuthoritativeForEmail`，`verifyOidcIdToken` 新增 `hostedDomain`）。否则返回 `401 EMAIL_OWNERSHIP_UNVERIFIED`，不写任何关联；用新声明创建全新账号的路径不变。`accountForVerifiedEmail` 新增 `createOnly`：已有用户直接拒绝，`INSERT OR IGNORE` 之后再比对插入的行 id，并发的邮箱验证码注册也不会被关联。Apple 路径不变。
+- 新增/优化：无。
+- 工程与测试：
+  - 账号解析函数（`ineligible`、`directSignupAllowed`、`ensureEmailIdentity`、`accountForVerifiedEmail`、`accountForOidcIdentity`）从 `index.ts` 搬到 `src/accounts.ts`，`test/index-size.txt` 棘轮 3783 → 3632；搬动的代码除上述改动外无行为变化。
+  - `test/worker.test.ts` 新增一条 `it`（#789）：非托管地址无 `hd` / 外域 `hd` → 401 `EMAIL_OWNERSHIP_UNVERIFIED` 且无关联；`hd` 匹配 → 关联；Gmail 无 `hd` → 关联；无账号的非托管地址仍创建账号。
+- 验证：
+  - 旧源码上该测试红（`expected 200 to be 401`），修后绿。
+  - MacBook：`npm test` 44 文件 / 1003 用例通过；`npm run typecheck` 通过（unchecked-index 520 ≤ 基线 521）。
+  - 合入后由 services-ci 复跑；控制面需要部署才生效（本 PR 不部署；Google 登录关闭，部署可随下一批）。
+- 候选/发布：无。
+- 剩余限制：
+  - 拒绝只是「请用邮箱验证码登录」，不是登录流程内的邮箱挑战；之后非 Workspace 的非托管地址账号没有办法再关联 Google（没有关联接口）。Google 登录关闭期间可接受；开启前若需要支持这类地址，要加显式关联流程。
+  - 客户端对新错误码显示通用 401 文案，本 PR 不改客户端。
+  - Google 对非托管外部地址如何维护 `email_verified` 未在线核实（issue 的依赖项）；修法按最坏情况处理。
