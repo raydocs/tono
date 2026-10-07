@@ -702,6 +702,57 @@ class ReporterTests(unittest.TestCase):
         self.assertEqual(source_totals, {"user-one": 125})
         self.assertEqual(observed_at, 1_700_000_000)
 
+    def test_retired_peer_baselines_beyond_inventory_limit_do_not_stop_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "state" / "state.json"
+            environment = {
+                "TONO_API_BASE_URL": "https://api.example.com",
+                "HOME_AGENT_TOKEN": "test-home-agent-token-with-32-characters",
+                "TONO_SOURCE_ID": "home-exit-one",
+                "STATE_PATH": str(path),
+            }
+            # Retired devices keep their baselines; only one peer is current.
+            reporter.save_state(
+                path,
+                {
+                    "sourceId": "home-exit-one",
+                    "totals": {"user-old": 7},
+                    "pendingReports": [],
+                    "peerCounters": {
+                        f"retired-{index}": {"userId": "user-old", "lastRawBytes": 7}
+                        for index in range(reporter.MAX_INVENTORY_DEVICES)
+                    },
+                },
+            )
+            delivered: list[dict] = []
+
+            def accept(_base: str, _token: str, reports: list[dict]) -> None:
+                delivered.extend(report.copy() for report in reports)
+
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(
+                reporter,
+                "fetch_inventory",
+                return_value=({"public-new": "user-new"}, {}, 1_700_000_000),
+            ), mock.patch.object(
+                reporter,
+                "read_tailscale_peer_counters",
+                return_value={"stable-new": ("public-new", 500)},
+            ), mock.patch.object(
+                reporter, "post_reports", side_effect=accept
+            ), mock.patch.object(
+                reporter, "acknowledge_metering", create=True
+            ) as metering_ack:
+                reporter.main()
+
+            self.assertEqual(
+                [(report["userId"], report["totalBytes"]) for report in delivered],
+                [("user-new", 500)],
+            )
+            metering_ack.assert_called_once()
+            saved = reporter.load_state(path)
+            self.assertEqual(saved["peerCounters"]["stable-new"]["lastRawBytes"], 500)
+            self.assertEqual(len(saved["peerCounters"]), reporter.MAX_INVENTORY_DEVICES + 1)
+
     def test_duplicate_pending_report_ids_are_rejected(self) -> None:
         report = {
             "reportId": "same-report",
