@@ -11,3 +11,4 @@
 - 候选/发布：无新包，仅源码。
 - 剩余限制：任何启动/就绪失败（含超过 20 秒就绪窗口的慢启动）都会回滚；回滚资格在停 Service 之前于 store 锁下判定，期间已被后继 Adopt 的安装保留不动；执行器恢复连第一步都做不到时仍保留旧死路，开机恢复不探测就绪；仅 Service 修复不回退 `change_config` 和此前写入的摘要 pin，停不下或恢复失败时仍运行新文件；未实机复现。
 - 2026-10-07 续记（jev-route 5de575f1 PASSED，3 条 minor 一轮修复）：回滚资格在停 Service 前、持 store 锁判定；仅 Service 修复改用独立副本名并在任何结局删除，停不下时仍尽力重启；卸载清扫新增两个副本名。
+- 2026-10-07 续记（jev-route 0d5639cf PASSED，停止规则满足）：仍开 R1443-codex-F1（后继 Adopt 且记录被 Disconnect 退役后，执行器仍可能停掉可用 Service 的窄竞态），见 `docs/findings.d/R1443-codex-F1.md`。
