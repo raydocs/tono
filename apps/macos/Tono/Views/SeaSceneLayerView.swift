@@ -47,6 +47,7 @@ final class SeaSceneNativeView: NSView {
         super.init(frame: frame)
         wantsLayer = true
         layerUsesCoreImageFilters = true
+        scene.anchorPoint = .zero
         scene.masksToBounds = true
         layer?.addSublayer(scene)
     }
@@ -69,6 +70,16 @@ final class SeaSceneNativeView: NSView {
 
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
+        // Display density is not a drag-size change. Rebuild it now so a
+        // queued layout/debounce cannot leave the old-density bitmap in use.
+        if lastBackingScale != (window?.backingScaleFactor ?? 2) {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            scene.isGeometryFlipped = !(layer?.contentsAreFlipped() ?? false)
+            scene.frame = bounds
+            rebuildRendererIfNeeded()
+            CATransaction.commit()
+        }
         needsLayout = true
     }
 

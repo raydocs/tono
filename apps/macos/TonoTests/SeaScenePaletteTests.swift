@@ -5,7 +5,7 @@ import XCTest
 
 @MainActor
 final class SeaScenePaletteTests: XCTestCase {
-    func testBackingScaleChangeRebakesContentsAtUnchangedPointSize() async throws {
+    func testBackingScaleChangeRebakesContentsAtUnchangedPointSize() throws {
         let view = SeaSceneNativeView(frame: NSRect(x: 0, y: 0, width: 320, height: 200))
         let window = SeaScaleFixtureWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -18,13 +18,32 @@ final class SeaScenePaletteTests: XCTestCase {
         window.fixtureScale = 2
         view.viewDidChangeBackingProperties()
         view.layout()
-        try await Task.sleep(for: .milliseconds(300))
         XCTAssertFalse(scene.sublayers?.first === original)
         XCTAssertEqual(scene.contentsScale, 2)
         let grain = try XCTUnwrap(scene.sublayers?.first(where: { $0.name == "grain" }))
         XCTAssertEqual(grain.contentsScale, 2)
         XCTAssertEqual((try XCTUnwrap(grain.contents) as! CGImage).width, 640)
         XCTAssertEqual(view.bounds.size, CGSize(width: 320, height: 200))
+    }
+
+    func testBackingScaleRebakeUsesNewBoundsBeforeTheNextLayout() throws {
+        let view = SeaSceneNativeView(frame: NSRect(x: 0, y: 0, width: 320, height: 200))
+        let window = SeaScaleFixtureWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer { view.stop(); window.contentView = nil; window.close() }
+        view.layout()
+        let scene = try XCTUnwrap(view.layer?.sublayers?.first)
+        view.setFrameSize(CGSize(width: 360, height: 240))
+        window.fixtureScale = 2
+        view.viewDidChangeBackingProperties()
+        let grain = try XCTUnwrap(scene.sublayers?.first(where: { $0.name == "grain" }))
+        XCTAssertEqual(scene.bounds.size, view.bounds.size)
+        XCTAssertEqual(grain.frame.size, view.bounds.size)
+        XCTAssertEqual((try XCTUnwrap(grain.contents) as! CGImage).width, 720)
+        view.layout()
+        XCTAssertTrue(scene.sublayers?.contains(where: { $0 === grain }) == true,
+                      "the following layout must reuse the correctly sized density bake")
     }
 
     func testResizeReusesTheTreeUntilLiveResizeEndsOrLayoutSettles() async throws {
@@ -53,6 +72,37 @@ final class SeaScenePaletteTests: XCTestCase {
         let finalSky = try XCTUnwrap(scene.sublayers?.first)
         XCTAssertEqual(finalSky.bounds.width, 370)
         XCTAssertEqual(finalSky.bounds.height, 132, accuracy: 0.000001)
+        XCTAssertTrue(CATransform3DIsIdentity(scene.sublayerTransform))
+    }
+
+    func testLiveResizeKeepsCachedSceneCoverageAtTheWindowOrigin() throws {
+        let view = SeaSceneNativeView(frame: NSRect(x: 0, y: 0, width: 320, height: 200))
+        defer { view.stop() }
+        view.layout()
+        let scene = try XCTUnwrap(view.layer?.sublayers?.first)
+        let grain = try XCTUnwrap(scene.sublayers?.first(where: { $0.name == "grain" }))
+        view.viewWillStartLiveResize()
+        view.setFrameSize(CGSize(width: 640, height: 400))
+        view.layout()
+        XCTAssertTrue(scene.sublayers?.contains(where: { $0 === grain }) == true)
+        let growingCoverage = grain.convert(grain.bounds, to: scene)
+        XCTAssertEqual(growingCoverage.minX, view.bounds.minX, accuracy: 0.000001)
+        XCTAssertEqual(growingCoverage.minY, view.bounds.minY, accuracy: 0.000001)
+        XCTAssertEqual(growingCoverage.maxX, view.bounds.maxX, accuracy: 0.000001)
+        XCTAssertEqual(growingCoverage.maxY, view.bounds.maxY, accuracy: 0.000001)
+        view.viewDidEndLiveResize()
+        let rebuiltGrain = try XCTUnwrap(scene.sublayers?.first(where: { $0.name == "grain" }))
+        XCTAssertFalse(rebuiltGrain === grain)
+        XCTAssertTrue(CATransform3DIsIdentity(scene.sublayerTransform))
+        view.viewWillStartLiveResize()
+        view.setFrameSize(CGSize(width: 160, height: 100))
+        view.layout()
+        let shrinkingCoverage = rebuiltGrain.convert(rebuiltGrain.bounds, to: scene)
+        XCTAssertEqual(shrinkingCoverage.minX, view.bounds.minX, accuracy: 0.000001)
+        XCTAssertEqual(shrinkingCoverage.minY, view.bounds.minY, accuracy: 0.000001)
+        XCTAssertEqual(shrinkingCoverage.maxX, view.bounds.maxX, accuracy: 0.000001)
+        XCTAssertEqual(shrinkingCoverage.maxY, view.bounds.maxY, accuracy: 0.000001)
+        view.viewDidEndLiveResize()
         XCTAssertTrue(CATransform3DIsIdentity(scene.sublayerTransform))
     }
 
