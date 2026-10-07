@@ -3,7 +3,7 @@
 
 Requires Pillow for diagnostic contact sheets. Means/differences use every source
 pixel, not a hand-picked region. Sky/water split is the spec's 55% window horizon.
-Exit 2 means a transition does not meet strict monotonic / <=2 plateau frames.
+Exit 2 means evidence does not meet MAC-POLISH-SPEC §4 (2026-10-07 erratum).
 """
 import argparse
 import json
@@ -20,17 +20,37 @@ def luminance(image):
                for channel, weight in enumerate((0.2126, 0.7152, 0.0722)))
 
 
-def series(files, direction):
-    values = [luminance(Image.open(path)) for path in files]
+def transition_metrics(values, direction, night_reference=None):
     deltas = [b - a for a, b in zip(values, values[1:])]
     plateau = maximum = 1
     for delta in deltas:
         plateau = plateau + 1 if abs(delta) < 1e-12 else 1
         maximum = max(maximum, plateau)
-    return dict(files=[p.name for p in files], meanLinearLuminance=values,
-                adjacentDeltas=deltas, direction=direction,
-                strictlyMonotonicNoTolerance=all(direction * d >= 0 for d in deltas),
-                longestEqualPlateauFrames=maximum)
+    result = dict(meanLinearLuminance=values, adjacentDeltas=deltas, direction=direction,
+                  strictlyMonotonicNoTolerance=all(direction * d >= 0 for d in deltas),
+                  longestEqualPlateauFrames=maximum)
+    if direction > 0:
+        accepted = result['strictlyMonotonicNoTolerance'] and maximum <= 2
+    else:
+        tolerance = 1 / 255
+        drop = values[0] - values[-1]
+        largest = max(0, max(-d for d in deltas))
+        reference_delta = None if night_reference is None else abs(values[-1] - night_reference)
+        result.update(plannedSpanMilliseconds=6000, nonIncreaseTolerance=tolerance,
+                      nonIncreasingWithinTolerance=all(d <= tolerance for d in deltas),
+                      plateauAllowedByDesign=True, firstToLastDrop=drop,
+                      largestSingleFrameDrop=largest, largestDropFraction=largest / drop if drop > 0 else None,
+                      maximumDropFraction=0.25, nightReferenceLuminance=night_reference,
+                      lastFrameNightDelta=reference_delta)
+        accepted = (result['nonIncreasingWithinTolerance'] and drop > 0 and largest <= 0.25 * drop
+                    and reference_delta is not None and reference_delta <= tolerance)
+    result['acceptance'] = 'PASS' if accepted else 'FAIL'
+    return result
+
+
+def series(files, direction, night_reference=None):
+    values = [luminance(Image.open(path)) for path in files]
+    return dict(files=[p.name for p in files], **transition_metrics(values, direction, night_reference))
 
 
 def contact_sheet(files, out, columns=4, width=460):
@@ -64,7 +84,7 @@ def main():
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     report = {'source': 'first native PNG bytes, unmodified', 'metric': 'full-frame linear sRGB Rec.709 luminance',
-              'skyDecorationChangesAllowed': True, 'transitions': {}, 'water': {}}
+              'specErratum': '2026-10-07', 'skyDecorationChangesAllowed': True, 'transitions': {}, 'water': {}}
     accepted = True
     for name, direction in [('rise', 1), ('arrival', 1), ('set', -1)]:
         files = [args.input / f'polish-a-{name}-{index:02d}.png' for index in range(16)]
@@ -72,8 +92,9 @@ def main():
             report['transitions'][name] = {'acceptance': 'MISSING FRAMES'}
             accepted = False
             continue
-        result = series(files, direction)
-        result['acceptance'] = 'PASS' if result['strictlyMonotonicNoTolerance'] and result['longestEqualPlateauFrames'] <= 2 else 'FAIL'
+        reference = args.input / 'polish-a-set-night-reference.png'
+        night = luminance(Image.open(reference)) if name == 'set' and reference.exists() else None
+        result = series(files, direction, night)
         accepted &= result['acceptance'] == 'PASS'
         report['transitions'][name] = result
         contact_sheet(files, args.output / f'{name}-16-native-frames.png')
@@ -98,6 +119,9 @@ def main():
     (args.output / 'metrics.json').write_text(json.dumps(report, indent=2) + '\n')
     for name, data in report['transitions'].items():
         print(name, data.get('acceptance'), data.get('meanLinearLuminance', []))
+        if name == 'set':
+            print('set criteria', json.dumps({k: data.get(k) for k in (
+                'nonIncreasingWithinTolerance', 'largestDropFraction', 'lastFrameNightDelta', 'nonIncreaseTolerance')}))
     for name, data in report['water'].items():
         print('water', name, json.dumps(data))
     print('CPU budget is NOT inferred from pixels; inspect polish-a-motion-receipt.txt and its host architecture/power mode.')

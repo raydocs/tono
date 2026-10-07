@@ -369,8 +369,9 @@ final class MacUsabilityRenderTests: XCTestCase {
             else { defaults.removeObject(forKey: SeaAppearance.enabledKey) }
         }
         defaults.set(false, forKey: SeaAppearance.enabledKey)
+        // Use the same bounded raster-edge contract as the other native sea surfaces.
         try await capture("dashboard-sea-production-stored-off", width: 660, height: 540,
-                          annotate: false, darkAppearance: true,
+                          annotate: false, darkAppearance: true, nativeOpacity: .isolatedSubpixelEdges,
                           nativeLabels: ["Not connected", "Connect", "Details"]) {
             ZStack { MeshGradientBackground(); DashboardView() }
                 .modifier(SeaPageAppearance()).environment(app).environment(account)

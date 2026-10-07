@@ -32,7 +32,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
                 set(state, app: fixture.app)
                 // An initial Full mount has the real destination plus live loops, not a
                 // Reduce Motion stand-in or a manufactured wait for an earlier transition.
-                let (window, _) = makeWindow(size: size, app: fixture.app, account: fixture.account)
+                let (window, _) = try await makeWindow(size: size, app: fixture.app, account: fixture.account)
                 defer { close(window) }
                 await settle(0.3)
                 try await capture("polish-a-\(language)-\(Int(size.width))-\(state)", window: window)
@@ -40,7 +40,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
             set("idle", app: fixture.app)
             for page in [AppPage.proxies, .activity, .logs, .support, .settings] {
                 fixture.app.selectedPage = page
-                let (window, _) = makeWindow(size: size, app: fixture.app, account: fixture.account)
+                let (window, _) = try await makeWindow(size: size, app: fixture.app, account: fixture.account)
                 defer { close(window) }
                 await settle(0.5)
                 try await capture("polish-a-\(language)-\(Int(size.width))-page-\(page.rawValue)", window: window)
@@ -50,7 +50,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
         set("connected", app: fixture.app)
         for option in ["reduce-motion", "reduce-transparency", "increase-contrast"] {
             fixture.app.selectedPage = .dashboard
-            let (window, _) = makeWindow(size: CGSize(width: 920, height: 600), app: fixture.app,
+            let (window, _) = try await makeWindow(size: CGSize(width: 920, height: 600), app: fixture.app,
                 account: fixture.account, reduceMotion: option == "reduce-motion",
                 reduceTransparency: option == "reduce-transparency", highContrast: option == "increase-contrast")
             defer { close(window) }
@@ -76,7 +76,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
         }
         let fixture = try makeFixture()
         defer { fixture.clean() }
-        let (window, host) = makeWindow(size: CGSize(width: 920, height: 600), app: fixture.app, account: fixture.account)
+        let (window, host) = try await makeWindow(size: CGSize(width: 920, height: 600), app: fixture.app, account: fixture.account)
         defer { close(window) }
         var receipt = ["source=first native own-PID ScreenCaptureKit window; PNGs unmodified",
                        "quality=Full skyDecorationsMayChange=true lowPower=\(ProcessInfo.processInfo.isLowPowerModeEnabled)",
@@ -93,6 +93,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
         for state in ["idle", "connected"] {
             set(state, app: fixture.app)
             await settle(7)
+            try await capture("polish-a-water-\(state)-preflight", window: window)
             let t = CACurrentMediaTime(), cpu = cpuTime()
             await settle(5)
             let percent = 100 * (cpuTime() - cpu) / (CACurrentMediaTime() - t)
@@ -117,9 +118,10 @@ final class MacSeaPolishRenderTests: XCTestCase {
         XCTAssertEqual(scene.layer?.sublayers?.first?.speed, 1)
         for (name, from, to, duration) in [("rise", "idle", "connecting-middle", 2.6),
                                           ("arrival", "connecting-late", "connected", 2.6),
-                                          ("set", "connected", "idle", 6.6)] {
+                                          ("set", "connected", "idle", 6.0)] {
             set(from, app: fixture.app)
             await settle(7)
+            try await capture("polish-a-\(name)-preflight", window: window)
             let start = CACurrentMediaTime()
             set(to, app: fixture.app)
             for index in 0..<16 {
@@ -128,6 +130,11 @@ final class MacSeaPolishRenderTests: XCTestCase {
                 let timestamp = CACurrentMediaTime() - start
                 try await capture("polish-a-\(name)-\(String(format: "%02d", index))", window: window)
                 receipt.append("frame transition=\(name) index=\(index) beforeCaptureSeconds=\(timestamp) afterCaptureSeconds=\(CACurrentMediaTime() - start)")
+            }
+            if name == "set" {
+                await settle(max(0, start + 7 - CACurrentMediaTime()))
+                try await capture("polish-a-set-night-reference", window: window)
+                receipt.append("setNightReferenceSeconds=\(CACurrentMediaTime() - start) phase=night canonicalNightHandoffSeconds=6")
             }
         }
         // Navigation hides, but does not replace, the scene or replay its phase transition.
@@ -193,7 +200,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
 
     private func makeWindow(size: CGSize, app: AppState, account: AccountSession,
                             reduceMotion: Bool = false, reduceTransparency: Bool = false,
-                            highContrast: Bool = false) -> (NSWindow, NSView) {
+                            highContrast: Bool = false) async throws -> (NSWindow, NSView) {
         let root = ContentView().environment(app).environment(account)
             .environmentObject(AppUpdater(enabled: false))
             .environment(\.seaAppearanceOverride, true)
@@ -204,6 +211,9 @@ final class MacSeaPolishRenderTests: XCTestCase {
             .environment(\.locale, Locale(identifier: Locale.preferredLanguages.first ?? "en"))
         let window = MacSeaPolishWindow(contentRect: CGRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        window.requestedSize = size
+        var ready = false
+        defer { if !ready { close(window) } }
         window.setFrame(CGRect(x: 80, y: 80, width: size.width, height: size.height), display: false)
         window.title = "Tono"
         window.titlebarAppearsTransparent = true
@@ -225,7 +235,11 @@ final class MacSeaPolishRenderTests: XCTestCase {
         // AppKit may preserve the content size by growing the outer frame then.
         window.setFrame(CGRect(x: 80, y: 80, width: size.width, height: size.height), display: true)
         host.layoutSubtreeIfNeeded()
+        // Toolbar installation and WindowServer registration are asynchronous.
+        // Wait for published metadata, never retry/replace a captured image.
+        _ = try await registeredWindow(window)
         XCTAssertEqual(window.frame.size, size, "whole-window evidence must use its requested native dimensions")
+        ready = true
         return (window, host)
     }
 
@@ -254,21 +268,19 @@ final class MacSeaPolishRenderTests: XCTestCase {
     @discardableResult
     private func capture(_ name: String, window: NSWindow) async throws -> CGImage {
         let pid = ProcessInfo.processInfo.processIdentifier
-        let expectedID = CGWindowID(window.windowNumber)
-        let shareable: SCShareableContent = try await nativeWindowRequest("polish current-process windows", timeout: 10) { complete in
-            SCShareableContent.getCurrentProcessShareableContent { content, error in
-                if let error { complete(.failure(error)) }
-                else if let content { complete(.success(content)) }
-                else { complete(.failure(NSError(domain: "MacSeaPolishRender", code: 1))) }
-            }
-        }
-        let target = try XCTUnwrap(shareable.windows.first { $0.windowID == expectedID && $0.owningApplication?.processID == pid })
+        let registration = try await registeredWindow(window)
+        let target = registration.target
+        let expectedID = target.windowID
+        let requestedSize = try XCTUnwrap((window as? MacSeaPolishWindow)?.requestedSize)
         XCTAssertTrue(target.isOnScreen)
-        XCTAssertEqual(target.frame.size, window.frame.size)
+        XCTAssertEqual(expectedID, CGWindowID(window.windowNumber))
+        XCTAssertEqual(target.frame, registration.windowServerFrame)
+        XCTAssertEqual(target.frame.size, requestedSize)
+        XCTAssertEqual(window.frame.size, requestedSize)
         let filter = SCContentFilter(desktopIndependentWindow: target)
         let config = SCStreamConfiguration()
-        config.width = Int(window.frame.width)
-        config.height = Int(window.frame.height)
+        config.width = Int(requestedSize.width)
+        config.height = Int(requestedSize.height)
         config.showsCursor = false
         config.ignoreShadowsSingleWindow = true
         let image: CGImage = try await nativeWindowRequest("polish exact window image", timeout: 10) { complete in
@@ -284,13 +296,80 @@ final class MacSeaPolishRenderTests: XCTestCase {
         try data.write(to: folder.appendingPathComponent(name + ".png"), options: .atomic)
         let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
         attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
-        let receipt = "source=first own-PID native window PNG; windowID=\(expectedID) ownerPID=\(pid) frame=\(target.frame) dimensions=\(image.width)x\(image.height) language=\(Locale.preferredLanguages) lowPower=\(ProcessInfo.processInfo.isLowPowerModeEnabled) accessibilitySource=shared-presentation-inputs-not-host-OS-mutation\n"
+        let receipt = "source=first own-PID native window PNG; windowID=\(expectedID) ownerPID=\(pid) frame=\(target.frame) requested=\(requestedSize) dimensions=\(image.width)x\(image.height) registrationAttempts=\(registration.attempts) metadataBeforeImage=true language=\(Locale.preferredLanguages) lowPower=\(ProcessInfo.processInfo.isLowPowerModeEnabled) accessibilitySource=shared-presentation-inputs-not-host-OS-mutation\n"
         try receipt.write(to: folder.appendingPathComponent(name + ".txt"), atomically: true, encoding: .utf8)
         return image
+    }
+
+    private func registeredWindow(_ window: NSWindow) async throws -> (target: SCWindow, windowServerFrame: CGRect, attempts: Int) {
+        let size = try XCTUnwrap((window as? MacSeaPolishWindow)?.requestedSize)
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let deadline = CACurrentMediaTime() + 5
+        var attempts = 0, last = "unpublished"
+        while CACurrentMediaTime() < deadline {
+            attempts += 1
+            if window.frame.size != size {
+                window.setFrame(CGRect(origin: window.frame.origin, size: size), display: true)
+                await settle(0.1)
+            }
+            let id = CGWindowID(window.windowNumber)
+            let content: SCShareableContent = try await nativeWindowRequest("polish window registration", timeout: max(0.1, deadline - CACurrentMediaTime())) { complete in
+                SCShareableContent.getCurrentProcessShareableContent { content, error in
+                    if let error { complete(.failure(error)) }
+                    else if let content { complete(.success(content)) }
+                    else { complete(.failure(NSError(domain: "MacSeaPolishRender", code: 1))) }
+                }
+            }
+            let info = (CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]])?.first {
+                ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id
+                    && ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid
+                    && ($0[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue == true
+            }
+            let frame = (info?[kCGWindowBounds as String] as? [String: Any]).flatMap {
+                CGRect(dictionaryRepresentation: $0 as CFDictionary)
+            }
+            if let target = content.windows.first(where: { $0.windowID == id && $0.owningApplication?.processID == pid }) {
+                last = "SC onScreen=\(target.isOnScreen) frame=\(target.frame), WindowServer=\(String(describing: frame)), AppKit=\(window.frame)"
+                if window.isVisible, window.frame.size == size, CGWindowID(window.windowNumber) == id,
+                   NativePolishWindowRegistration.matches(windowID: target.windowID,
+                    ownerPID: target.owningApplication?.processID, onScreen: target.isOnScreen,
+                    frame: target.frame, windowServerFrame: frame,
+                    expectedID: id, expectedPID: pid, expectedSize: size), let frame {
+                    return (target, frame, attempts)
+                }
+            }
+            await settle(0.1)
+        }
+        throw NSError(domain: "MacSeaPolishRender", code: 4,
+            userInfo: [NSLocalizedDescriptionKey: "exact own-PID window \(window.windowNumber) not published at \(size) after \(attempts) metadata requests: \(last)"])
+    }
+
+    func testRegistrationRejectsUnpublishedAndForeignWindowMetadata() {
+        let frame = CGRect(x: 80, y: 80, width: 920, height: 600)
+        func matches(id: CGWindowID = 10, pid: pid_t = 20, visible: Bool = true, candidate: CGRect? = nil) -> Bool {
+            NativePolishWindowRegistration.matches(windowID: id, ownerPID: pid, onScreen: visible,
+                frame: candidate ?? frame, windowServerFrame: frame,
+                expectedID: 10, expectedPID: 20, expectedSize: frame.size)
+        }
+        XCTAssertTrue(matches())
+        XCTAssertFalse(matches(candidate: .zero))
+        XCTAssertFalse(matches(visible: false))
+        XCTAssertFalse(matches(id: 11))
+        XCTAssertFalse(matches(pid: 21))
     }
 }
 
 @MainActor
 private final class MacSeaPolishWindow: NSWindow {
+    var requestedSize = CGSize.zero
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
+}
+
+private enum NativePolishWindowRegistration {
+    static func matches(windowID: CGWindowID, ownerPID: pid_t?, onScreen: Bool,
+                        frame: CGRect, windowServerFrame: CGRect?, expectedID: CGWindowID,
+                        expectedPID: pid_t, expectedSize: CGSize) -> Bool {
+        windowID == expectedID && ownerPID == expectedPID && onScreen
+            && frame.size == expectedSize && frame == windowServerFrame
+    }
 }

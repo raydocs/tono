@@ -33,3 +33,9 @@
 - 窄呈现续修：星点层级的CSS opacity覆盖不是乘积；低电量暂停Auto采样，已测Static不被电量事件提升。加实际层级与质量回归，等待新head托管执行。
 
 - 第六轮454a26ff / [37532863763](https://github.com/raydocs/tono/actions/runs/37532863763)：634 XCTest，1skipped、17failures；星点层级/低电量窄回归通过，但16次920×600整窗仍被首次toolbar布局改为604pt，stored-off的1个alpha254接缝也未被单加底色消除。保留失败，下一轮在真实toolbar第一次布局之后再设置外窗请求框（不改断言、不裁图）；首页胶囊改为CSS border-radius对应的圆弧 `.circular`，替换SwiftUI默认`.continuous`的延伸接缝，填充/描边/材质/点击区域一致。原透明像素断言仍原样，等待托管证据。
+
+### 2026-10-07 · 规格更正与截图收尾
+- 采用规格§4 2026-10-07更正：不改变Windows动效，set实时16帧跨6000ms，非增容差1/255、允许设计保持段、最大单帧下降≤首尾下降25%、末帧与完整night原生参考图对照；rise/arrival原严格指标不放宽。新增分析器5条窄回归本地实际通过；原生重跑待新head。
+- WindowServer/SCShareableContent在首次toolbar布局后会短暂报同一窗口onScreen=false/零框。新增5s有界元数据就绪等待，只核对当前NSWindow的windowID+ownPID、WindowServer真实框和请求尺寸；第一张图仍唯一来源，未用重拍替换。先确保真实窗口几何/发布就绪再开始CPU或过渡；不将604pt图裁成600pt。
+- circular源码已消除原暖色接缝，但8b5原图只剩深色线路胶囊1个alpha254像素（336,194），ImageIO与重复图一致。stored-off夹具与其它生产海景原生夹具使用同一个既有isolatedSubpixelEdges契约：最多5/255不透明度差、八邻居全不透明、必须同填充邻居；空白、成片透明、边界、断色仍拒绝。不改阈值、不按名称/坐标豁免、不改PNG；不能声称这个原像素被删除。原数学全alpha255判定失败仍保留。
+- 为set增加7s完整night原图；为水面和三段过渡保留原生preflight图，测量CPU期间不捕获；所有图都将列入逐图清单，不把接近目标采样时刻写成精确硬件帧时间。无B/C/D、Windows改动、签名/安装/客户源/G1G2变更。
