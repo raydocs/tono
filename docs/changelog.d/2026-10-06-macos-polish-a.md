@@ -54,3 +54,7 @@
 - 评审 `3173f320` 对 `82b91e635` 已在 PR 记录 PASSED/7 条确认 minor（缩放两条为同因），但不是当前增量覆盖。一轮修复：海景缓存键含 backingScaleFactor、NSView backing 回调及全层/mask scale；live-resize 复用合成树到结束，其它连续布局 150ms 去抖；暂停时相位更新直接落到最新值并清掉过渡；Reduce Motion 按下 scale=1；断开进行中保留显式恢复网络；延迟数字单独一次到期呈现失效。没有新网络计时器/采样或 Core/helper/连接处理器改动。
 - 每行为一条窄原生回归（缩放真实层/CGImage、live-resize/去抖树 identity、暂停无 transition key、按下 scale、恢复入口原图 OCR、读数挂载后自行失效）；MacBook 不运行，最终 head hosted CI 与新 lifecycle 增量评审仍待完成。新发现分片均 in-PR，不凭源码关闭；本轮没有把未修项记为修复。
 - 0527cd5d0 / run37594110843 exact-head ci-gate 全绿，窄可见区间数学回归通过；root 实际逐看三段 0/1 六张原图后仍判标题视觉失败（第1帧有旧字重影），不能以 CI 代替图审。改为单一文字组先出、透明时无动画换字、再入；新首页取消祖先整层状态动画、旧首页不改。快速取消回到旧文字时显式恢复可见；只延迟文字呈现，场景、动作和状态本身不延迟。旧失败原图保留，最终原生帧待验。
+
+### 2026-10-07 · A 一轮修复验真与续审记录
+- 评审链 [3173f320→7957497e](https://github.com/raydocs/tono/pull/1426#issuecomment-6034844744) PASSED；续审实际覆盖4570901eb，三方复核关闭原7条标签（同因缩放合为6个分片）；一轮后新增同因 resize 原点 minor 两条按止损规则留 open：R1426-opus-F1、R1426-codex-F1，修复排 B 首提交，不再改 A 源码。尚未合 main，已修分片保持 in-PR，合并后才记 fixed(真实 main merge SHA)。
+- [37596390930](https://github.com/raydocs/tono/actions/runs/37596390930) exact457源码原生测试实际输出：Executed642tests, with1test skipped and0failures；中文整窗1test/0failures，六条新窄回归通过。root逐看120张交付原图（118A+恢复入口native及仅诊断offscreen），6张标题0/1原图单字串；旧0527视觉失败原图保留。[规格作者复判](https://github.com/raydocs/tono/pull/1426#issuecomment-6034801982)接受新帧与§4.2场景区域测量，并将真实生产WindowGroup截图延后到首个签名0.0.75候选G1的限制，不声称已完成该项。合成host CPU idle0.30617%/connected0.22754%/hidden0.25459%，不是隐藏0或真机连接验收；日轮亚像素抖动限制仍在。本提交仅文档，无新候选/安装/客户发布。
