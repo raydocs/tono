@@ -13,4 +13,6 @@
 - 验证：本机未运行 `cargo test`（所有者规则，MacBook 不跑 Rust），只由 PR 上的 ci-gate（Windows CI「Test native DNS apply orchestration」）证明。
 - 候选/发布：无新包，仅源码。
 - 剩余限制：不加「期望服务器必须出现」的门（恢复模式的精确性由注册表读回负责，DHCP 可能换序或加服务器，强加会让 Disconnect 永久被拒）；
-  未实机验证（移动宽带、静态 DNS 适配器）。
+  未实机验证（移动宽带、静态 DNS 适配器）；评审 `fb08bc2f` 的 minor 未修：保存值本身是纯本地解析器的适配器仍由
+  `adapters_owing_live_proof` 整体豁免实时证明（连 `198.18.0.2` 也不查），记在 BRICK-W7 片段。
+- 评审：jev-route `fcc0e36e`（BLOCKED，1 major 已修）→ `fb08bc2f`（PASSED，1 minor 记为未结）。
