@@ -1073,7 +1073,8 @@ mod tests {
         DNS_STILL_ON_LOOPBACK_MARKER, EXIT_COSMETIC_FAILURE, EXIT_RESTORED_AUTOMATIC,
         EXIT_STILL_PROTECTED, WFP_REMOVED_CONTINUE_MARKER, classify_disarm_failure,
         cleanup_exit_code, cleanup_fast_path_allowed, final_cleanup_outcome,
-        final_uninstall_cleanup, poll_until, uninstall_may_continue, with_resolver_rule_proof,
+        final_uninstall_cleanup, poll_until, remove_service_unless_still_protected,
+        uninstall_may_continue, with_resolver_rule_proof,
     };
     use super::INSTALL_DIR_SWEEP;
     use std::cell::Cell;
