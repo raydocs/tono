@@ -142,7 +142,8 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     ControlFlow::Break(response) => return response,
                 };
             // Status must remain readable while Start/Stop/DNS/WFP owns the lifecycle writer.
-            let mut status = windows_kill_switch::status().await;
+            // The crash-window reconnect flag is reported only to its owner (#1291).
+            let mut status = windows_kill_switch::status_for(&owner.key).await;
             // Whether the machine is protected is not a secret from the local users who share
             // it; which exit node it is protected *towards* is. The active-owner read is
             // deliberately lock-free, like the rest of this route, and mirrors what `/status`
