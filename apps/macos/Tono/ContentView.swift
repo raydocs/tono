@@ -2,21 +2,39 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SeaDisplayPreferences private var displayPreferences
+    private var reduceMotion: Bool { displayPreferences.reduceMotion }
+    @SeaAppearancePreference private var seaAppearance
     @State private var columnVisibility: NavigationSplitViewVisibility = .doubleColumn
 
     var body: some View {
         @Bindable var appState = appState
 
         ZStack {
-            MeshGradientBackground()
+            if seaAppearance {
+                // Stable identity across navigation: returning Home resumes, never replays a rise.
+                SeaScene(phase: SeaPresentationPhase.resolve(
+                    status: MenuBarProtectionStatus(appState).kind,
+                    disconnecting: appState.isDisconnecting,
+                    failed: appState.lastConnectionFailure != nil),
+                    motionEnabled: true,
+                    progress: appState.isConnecting ? SeaSceneParameters.progress(for: appState.connectionStage) : nil,
+                    active: appState.selectedPage == .dashboard)
+                    .ignoresSafeArea()
+                    .opacity(appState.selectedPage == .dashboard ? 1 : 0)
+                SeaSecondaryScene()
+                    .ignoresSafeArea()
+                    .opacity(appState.selectedPage == .dashboard ? 0 : 1)
+            } else {
+                MeshGradientBackground()
+            }
 
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView(selectedPage: $appState.selectedPage)
                     .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
             } detail: {
                 VStack(spacing: 0) {
-                    if appState.isProtectionBlocked {
+                    if appState.isProtectionBlocked && (!seaAppearance || appState.selectedPage != .dashboard) {
                         ProtectedOfflineBanner()
                             .transition(.move(edge: .top).combined(with: .opacity))
                     }
@@ -52,7 +70,7 @@ struct ContentView: View {
                             .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                         }
                     }
-                    .frame(minWidth: 660, minHeight: 540)
+                    .frame(minWidth: 660, minHeight: 500)
                     .animation(
                         TonoMotion.easeOut(0.18, reduceMotion: reduceMotion),
                         value: appState.errorMessage != nil
@@ -68,6 +86,8 @@ struct ContentView: View {
                 )
             }
             .navigationSplitViewStyle(.balanced)
+            .toolbarBackground(.hidden, for: .windowToolbar)
+            .environment(\.seaSceneInWindow, seaAppearance)
         }
     }
 }

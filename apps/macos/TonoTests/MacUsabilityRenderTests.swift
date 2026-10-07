@@ -67,7 +67,7 @@ private final class NativeWindowRequestCompletion<Value>: @unchecked Sendable {
 }
 
 @MainActor
-private func nativeWindowRequest<Value>(
+func nativeWindowRequest<Value>(
     _ name: String, timeout: TimeInterval,
     start: (@escaping (Result<Value, Error>) -> Void) -> Void
 ) async throws -> Value {
@@ -369,8 +369,9 @@ final class MacUsabilityRenderTests: XCTestCase {
             else { defaults.removeObject(forKey: SeaAppearance.enabledKey) }
         }
         defaults.set(false, forKey: SeaAppearance.enabledKey)
+        // Use the same bounded raster-edge contract as the other native sea surfaces.
         try await capture("dashboard-sea-production-stored-off", width: 660, height: 540,
-                          annotate: false, darkAppearance: true,
+                          annotate: false, darkAppearance: true, nativeOpacity: .isolatedSubpixelEdges,
                           nativeLabels: ["Not connected", "Connect", "Details"]) {
             ZStack { MeshGradientBackground(); DashboardView() }
                 .modifier(SeaPageAppearance()).environment(app).environment(account)
@@ -388,13 +389,29 @@ final class MacUsabilityRenderTests: XCTestCase {
         let account = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
         try await capture("dashboard-sea-unconfirmed-failure-minimum", width: 660, height: 540,
                           annotate: false, darkAppearance: true,
-                          nativeLabels: ["Protection status unconfirmed", "Restore internet"]) {
+                          nativeLabels: ["Protection status unconfirmed", "Restore normal internet"]) {
             ZStack { MeshGradientBackground(); DashboardView() }
                 .modifier(SeaPageAppearance()).environment(app).environment(account)
         }
         XCTAssertFalse(app.isProtectionBlocked)
         XCTAssertTrue(app.isProtectionUnconfirmed)
         XCTAssertNil(app.connectionCoordinator.connectTask)
+    }
+
+    func testDisconnectingSeaHomeKeepsNativeRestoreActionVisible() async throws {
+        let app = AppState()
+        app.isDisconnecting = true
+        app.isProtectionBlocked = true
+        let account = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        try await capture("dashboard-sea-disconnecting-restore-minimum", width: 660, height: 540,
+                          annotate: false, darkAppearance: true,
+                          nativeLabels: ["Disconnecting…", "Restore normal internet"]) {
+            ZStack { MeshGradientBackground(); DashboardView() }
+                .modifier(SeaPageAppearance()).environment(app).environment(account)
+        }
+        XCTAssertTrue(app.isDisconnecting)
+        XCTAssertTrue(app.isProtectionBlocked)
+        XCTAssertNil(app.connectionCoordinator.connectTask, "rendering the recovery entry never invokes a handler")
     }
 
     func testSeaMenuKeepsTheDegradedExitAdvisoryVisible() async throws {
@@ -534,7 +551,7 @@ final class MacUsabilityRenderTests: XCTestCase {
             if hostedDiagnostic == "1" {
                 let paused = name == "dashboard-sea-blocked-paused-recovery-minimum"
                 let labels = nativeLabels ?? ["Protected, not connected",
-                    paused ? "Repair and reconnect" : "Retry now", "Restore internet"]
+                    paused ? "Repair and reconnect" : "Retry now", "Restore normal internet"]
                 await captureNativeWindowAcceptance(name, window: window, host: host, folder: folder,
                     width: Int(width), height: Int(height), requiredLabels: labels,
                     requiredIdentifiers: nativeIdentifiers.isEmpty && paused ? ["protectedRecoveryFeedback"] : nativeIdentifiers, requiredRecoveryFeedback: requiredRecoveryFeedback,
