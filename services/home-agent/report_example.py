@@ -25,7 +25,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-MAX_STATE_BYTES = 1024 * 1024
+# Sized for MAX_RETAINED_PEER_BASELINES worst-case entries (about 7.5 MB with
+# 200-character stable IDs and 100-character user IDs) plus totals and queue.
+MAX_STATE_BYTES = 16 * 1024 * 1024
 MAX_RESPONSE_BYTES = 64 * 1024
 MAX_INVENTORY_RESPONSE_BYTES = 512 * 1024
 MAX_SAFE_INTEGER = (1 << 53) - 1
@@ -34,6 +36,10 @@ MAX_USERS_PER_REQUEST = 100
 # Same permanent refusals as the exit agent. A timeout or 5xx stays queued.
 REJECTED_REPORT_STATUSES = frozenset({400, 409, 413, 422})
 MAX_INVENTORY_DEVICES = 2_000
+# Lifetime bound for persisted peer baselines. Baselines of retired peers are
+# never evicted (a returning peer would re-bill its raw history), so this is
+# deliberately far above the per-observation inventory bound.
+MAX_RETAINED_PEER_BASELINES = 20_000
 MAX_TAILSCALE_STATUS_BYTES = 4 * 1024 * 1024
 DEFAULT_STATE = "/Library/Application Support/Tono/HomeAgent/state.json"
 # Zone browser-integrity rejects a bare urllib UA with CF 403/1010; same
@@ -148,7 +154,7 @@ def validate_state(value: Any) -> dict[str, Any]:
         not isinstance(totals, dict)
         or not isinstance(pending, list)
         or not isinstance(peer_counters, dict)
-        or len(peer_counters) > MAX_INVENTORY_DEVICES
+        or len(peer_counters) > MAX_RETAINED_PEER_BASELINES
         or (source is not None and not isinstance(source, str))
         or (isinstance(source, str) and not SOURCE_ID_PATTERN.fullmatch(source))
         or (
@@ -225,7 +231,7 @@ def load_state(path: Path) -> dict[str, Any]:
             or info.st_mode & 0o077
             or info.st_size > MAX_STATE_BYTES
         ):
-            raise RuntimeError("state file must be owned by this service, mode 0600, and at most 1 MiB")
+            raise RuntimeError("state file must be owned by this service, mode 0600, and at most 16 MiB")
         with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
             descriptor = -1
             return validate_state(json.load(handle))
@@ -238,7 +244,7 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
     ensure_private_parent(path.parent)
     payload = json.dumps(validate_state(state), indent=2, sort_keys=True).encode("utf-8")
     if len(payload) > MAX_STATE_BYTES:
-        raise RuntimeError("state exceeds 1 MiB")
+        raise RuntimeError("state exceeds 16 MiB")
     descriptor, temporary_name = tempfile.mkstemp(prefix=".state-", dir=path.parent)
     try:
         os.fchmod(descriptor, 0o600)
@@ -490,11 +496,18 @@ def attribute_peer_counters(
     }
 
     persisted = state["peerCounters"]
+    unretained = 0
     for stable_id, (public_key, raw_total) in raw_counters.items():
         user_id = mapping.get(public_key)
         if user_id is None:
             continue
         previous = persisted.get(stable_id)
+        if previous is None and len(persisted) >= MAX_RETAINED_PEER_BASELINES:
+            # No baseline can be kept, so charging it now would charge the
+            # same raw history again next round. Leave it unbilled and keep
+            # reporting every peer that already has a baseline.
+            unretained += 1
+            continue
         if previous is not None and previous["userId"] != user_id:
             raise RuntimeError("a persisted stable node ID changed users")
         last_raw = int(previous["lastRawBytes"]) if previous is not None else 0
@@ -509,6 +522,12 @@ def attribute_peer_counters(
             "userId": user_id,
             "lastRawBytes": raw_total,
         }
+    if unretained:
+        print(
+            f"warning: {unretained} new peers left unmetered; "
+            f"{MAX_RETAINED_PEER_BASELINES} peer baselines are already retained",
+            file=sys.stderr,
+        )
     return observed
 
 
