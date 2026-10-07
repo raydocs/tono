@@ -63,7 +63,9 @@
   （#1419 升级后的版本）。脚本实跑：typecheck 通过、44 个文件 / 1002 个 Worker 测试通过、策略签名契约、控制台构建、release-center check 通过；
   两次迁移检查均「No migrations to apply」。API Worker version `561a77e6-af76-45a7-b943-ac71203fe090`（20:53:49 UTC，100%，tag `main-94817af4f896`），
   Admin `c31d9002-bf2a-436b-b716-30578a433dfe`（20:53:58 UTC，100%，同 tag）。相对上一个生产版本 `574debe1`，Worker 源码变化只有 #1415（共享后台
-  `PUT exit-catalog` 与 relist 的客户端准入检查）；#1419 只动开发依赖与 lockfile。
+  `PUT exit-catalog` 与 relist 的客户端准入检查）；#1419 只动开发依赖与 lockfile。补记（2026-10-07，来自 #1428 评审 01995766 的
+  missing_context）：Admin Worker 由 `console:build` 打包 ops-console，所以这次 Admin 版本也带上了 #1420（ops-console 依赖，framer-motion/motion
+  13→14）的产物；API Worker 不含它。
 - 生产核对：`/api/v1/system/version` 返回完整 `94817af4f896c0b0f629506471a877a89a6dcc3a`；`/api/v1/system/pulse` 为 `ok:true`、`cronAgeSec:197`、同一 SHA；
   匿名 `/ops2/` 仍为 401。
 - 候选/发布：无客户端包、客户发布或更新源变更。
