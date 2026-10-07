@@ -227,7 +227,7 @@ function base64URL(value: Uint8Array): string {
 async function oidcToken(
   provider: 'apple' | 'google',
   nonce: string,
-  options: { subject?: string; email?: string; audience?: string } = {},
+  options: { subject?: string; email?: string; audience?: string; hd?: string } = {},
 ) {
   const timestamp = Math.floor(Date.now() / 1_000);
   const header = base64URL(new TextEncoder().encode(JSON.stringify({
@@ -241,6 +241,7 @@ async function oidcToken(
     sub: options.subject ?? `${provider}-subject-${sequence}`,
     email: options.email ?? `${provider}-${sequence}@example.com`,
     email_verified: true,
+    ...(options.hd ? { hd: options.hd } : {}),
     nonce,
     iat: timestamp,
     exp: timestamp + 300,
@@ -5717,6 +5718,49 @@ ${nameLine}
       "SELECT user_id, email FROM auth_identities WHERE provider = 'google' AND subject = ?",
     ).bind('google-user-1').first<any>();
     expect(identity.email).toBe(email);
+  });
+
+  it('lets Google link an existing account only when Google is authoritative for the mailbox (#789)', async () => {
+    const googleVerify = async (subject: string, email: string, hd?: string) => {
+      const challengeResponse = await api('auth/oidc/challenge', json({
+        provider: 'google', deviceName: 'Google Mac', installationId: `google-link-${subject}`,
+      }));
+      const challenge = await challengeResponse.json() as any;
+      const idToken = await oidcToken('google', challenge.nonce, { subject, email, hd });
+      return api('auth/oidc/verify', json({ provider: 'google', challengeId: challenge.challengeId, idToken }));
+    };
+    const linkedSubjects = async (email: string) => (await env.DB.prepare(
+      "SELECT subject FROM auth_identities WHERE provider = 'google' AND email = ?",
+    ).bind(email).all<any>()).results.map((row) => row.subject);
+
+    // An email-code account at an unmanaged address: a Google claim without hd
+    // (or with a foreign hd) cannot take it over, and nothing is linked.
+    const external = await createAccount('google-external');
+    const refused = await googleVerify('google-external-subject', external.email);
+    expect(refused.status).toBe(401);
+    expect((await refused.json() as any).error.code).toBe('EMAIL_OWNERSHIP_UNVERIFIED');
+    expect((await googleVerify('google-external-subject', external.email, 'other.example')).status).toBe(401);
+    expect(await linkedSubjects(external.email)).toEqual([]);
+
+    // The same account links once the hd claim matches the address domain.
+    expect((await googleVerify('google-external-subject', external.email, 'example.com')).status).toBe(200);
+    expect(await linkedSubjects(external.email)).toEqual(['google-external-subject']);
+
+    // A Gmail account links without hd.
+    const gmail = `google-gmail-${++sequence}@gmail.com`;
+    await env.DB.prepare('INSERT INTO signup_allowlist(email, created_at) VALUES(?, ?)')
+      .bind(gmail, Math.floor(Date.now() / 1000)).run();
+    expect((await emailSignIn({
+      email: gmail, deviceName: 'Primary Mac', installationId: 'google-gmail-installation',
+    })).status).toBe(200);
+    expect((await googleVerify('google-gmail-subject', gmail)).status).toBe(200);
+    expect(await linkedSubjects(gmail)).toEqual(['google-gmail-subject']);
+
+    // A claim for an unmanaged address with no account still creates one.
+    const fresh = `google-fresh-${++sequence}@example.com`;
+    const created = await googleVerify('google-fresh-subject', fresh);
+    expect(created.status).toBe(200);
+    expect((await created.json() as any).user.email).toBe(fresh);
   });
 
   it('keeps a sign-in challenge retryable when the provider key response body fails', async () => {

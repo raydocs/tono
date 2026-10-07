@@ -14,6 +14,8 @@ export interface OidcIdentity {
   subject: string;
   email?: string;
   emailVerified: boolean;
+  /** Google Workspace hosted domain (`hd`), lower-cased; absent for consumer and unmanaged accounts. */
+  hostedDomain?: string;
   nonce: string;
 }
 
@@ -159,6 +161,28 @@ function normalizedEmail(value: unknown): string | undefined {
   return normalized;
 }
 
+function normalizedHostedDomain(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized.length < 3 || normalized.length > 253 || !/^[a-z0-9.-]+\.[a-z0-9-]+$/.test(normalized)) {
+    return undefined;
+  }
+  return normalized;
+}
+
+/**
+ * Whether Google itself is the authority for the mailbox behind a verified
+ * `email` claim: consumer Gmail addresses, or a Workspace account whose `hd`
+ * equals the address domain. A Google account backed by an unmanaged external
+ * address keeps asserting `email_verified` after the mailbox changes hands.
+ */
+export function googleAuthoritativeForEmail(identity: Pick<OidcIdentity, 'email' | 'hostedDomain'>): boolean {
+  const domain = identity.email?.slice(identity.email.lastIndexOf('@') + 1);
+  if (!domain) return false;
+  if (domain === 'gmail.com' || domain === 'googlemail.com') return true;
+  return identity.hostedDomain !== undefined && identity.hostedDomain === domain;
+}
+
 export async function verifyOidcIdToken(
   provider: OidcProvider,
   token: string,
@@ -247,6 +271,7 @@ export async function verifyOidcIdToken(
     subject: claims.sub,
     email,
     emailVerified,
+    hostedDomain: provider === 'google' ? normalizedHostedDomain(claims.hd) : undefined,
     nonce: claims.nonce,
   };
 }
