@@ -16,6 +16,12 @@ enum SeaTheme {
     static let tertiary = text.opacity(0.56)
     static let subtle = text.opacity(0.42)
     static let opaquePanel = Color(hex: "17151C")
+    // Reduce Transparency fills: each control's translucent fill flattened onto
+    // the opaque panel, so controls stay visible instead of matching the panel.
+    static let opaqueQuiet = Color(hex: "2A282E")
+    static let opaqueTrack = Color(hex: "232127")
+    static let opaqueGood = Color(hex: "2A3231")
+    static let opaqueAttention = Color(hex: "41352D")
     static let danger = Color(hex: "FF9A8A")
     static let good = Color(hex: "BFECC9")
     static let attention = Color(hex: "FFD9A0")

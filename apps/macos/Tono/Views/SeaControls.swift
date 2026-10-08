@@ -61,11 +61,13 @@ private struct SeaStyledButton: View {
                 if variant == .primary {
                     Capsule().fill(SeaTheme.primaryGradient)
                 } else if variant == .quiet {
-                    Capsule().fill(display.reduceTransparency ? SeaTheme.opaquePanel : .white.opacity(0.08))
+                    Capsule().fill(display.reduceTransparency ? SeaTheme.opaqueQuiet : .white.opacity(0.08))
                 }
             }
             .overlay {
-                if display.contrast == .increased {
+                // Text and danger actions have no surface; a tight stroke
+                // around bare words would read as a broken button.
+                if display.contrast == .increased && (variant == .primary || variant == .quiet) {
                     Capsule().strokeBorder(foreground.opacity(0.45), lineWidth: 1)
                 }
             }
@@ -160,7 +162,7 @@ struct SeaChoice: View {
                 }
             }
             .padding(3)
-            .background(display.reduceTransparency ? SeaTheme.opaquePanel : .white.opacity(0.05), in: Capsule())
+            .background(display.reduceTransparency ? SeaTheme.opaqueTrack : .white.opacity(0.05), in: Capsule())
             .overlay { if display.contrast == .increased { Capsule().strokeBorder(accent.opacity(0.45), lineWidth: 1) } }
             .accessibilityRepresentation {
                 Picker(label, selection: $selection) {
@@ -204,7 +206,7 @@ struct SeaMenuButton<Items: View>: View {
         .foregroundStyle(SeaTheme.text)
         .padding(.horizontal, 14)
         .frame(minHeight: SeaControlSize.row.height)
-        .background(display.reduceTransparency ? SeaTheme.opaquePanel : .white.opacity(0.08), in: Capsule())
+        .background(display.reduceTransparency ? SeaTheme.opaqueQuiet : .white.opacity(0.08), in: Capsule())
         .overlay { if display.contrast == .increased { Capsule().strokeBorder(accent.opacity(0.45), lineWidth: 1) } }
         .fixedSize()
     }
@@ -317,10 +319,17 @@ struct SeaTag: View {
         case .attention: Color(hex: "FFC878").opacity(0.18)
         }
     }
+    private var opaqueFill: Color {
+        switch kind {
+        case .neutral, .danger: SeaTheme.opaqueQuiet
+        case .good: SeaTheme.opaqueGood
+        case .attention: SeaTheme.opaqueAttention
+        }
+    }
     var body: some View {
         title.font(.system(size: 12)).monospacedDigit().foregroundStyle(foreground)
             .padding(.horizontal, 10).padding(.vertical, 4)
-            .background(display.reduceTransparency ? SeaTheme.opaquePanel : fill, in: Capsule())
+            .background(display.reduceTransparency ? opaqueFill : fill, in: Capsule())
             .overlay {
                 if display.contrast == .increased {
                     Capsule().strokeBorder(foreground.opacity(0.45), lineWidth: 1)
