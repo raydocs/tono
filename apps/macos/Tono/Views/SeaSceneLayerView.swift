@@ -48,12 +48,10 @@ final class SeaSceneNativeView: NSView {
     var trafficSource: (() -> SeaTrafficSample?)?
     private var water: SeaWaterRenderer?
     private var waterUnavailable = false
-    private var waterLink: CADisplayLink?
     private var waterCovering = false
     private var waterLastTick: Double?
     private var waterClock = 0.0
     private var traffic = SeaWaterTraffic()
-    private lazy var waterTarget = SeaSceneWaterTarget(view: self)
 
     /// Real-time water is the Full tier only; Lite, Static, Reduce Motion, low
     /// power, reduced transparency/contrast and any Metal failure keep layer water.
@@ -220,6 +218,7 @@ final class SeaSceneNativeView: NSView {
             if let made = SeaWaterRenderer() {
                 made.onFirstPresent = { [weak self] in self?.waterDidPresent() }
                 made.onFailure = { [weak self] in self?.waterFailed() }
+                made.frameUniforms = { [weak self] time in self?.waterUniforms(at: time) }
                 water = made
             } else {
                 waterUnavailable = true
@@ -234,15 +233,11 @@ final class SeaSceneNativeView: NSView {
         CATransaction.setDisableActions(true)
         placeWater()
         CATransaction.commit()
-        if run, waterLink == nil {
-            let link = displayLink(target: waterTarget, selector: #selector(SeaSceneWaterTarget.tick(_:)))
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+        if run, let water, !water.running {
             waterLastTick = nil
-            waterLink = link
-            link.add(to: .main, forMode: .common)
-        } else if !run, let link = waterLink {
-            link.invalidate()
-            waterLink = nil
+            water.start()
+        } else if !run {
+            water?.stop()
         }
     }
 
@@ -267,15 +262,15 @@ final class SeaSceneNativeView: NSView {
         reconcileWater()
     }
 
-    func drawWater(_ link: CADisplayLink) {
-        guard let renderer, let water, metalWaterWanted else { return }
-        let dt = waterLastTick.map { min(0.1, max(0, link.timestamp - $0)) } ?? 0
-        waterLastTick = link.timestamp
+    private func waterUniforms(at time: Double) -> SeaWaterUniforms? {
+        guard let renderer, let water, metalWaterWanted else { return nil }
+        let dt = waterLastTick.map { min(0.1, max(0, time - $0)) } ?? 0
+        waterLastTick = time
         // An hour of visible time keeps Float phases precise.
         waterClock = (waterClock + dt).truncatingRemainder(dividingBy: 3600)
         traffic.advance(phase == .day ? trafficSource?() : nil, dt: dt)
-        water.draw(SeaWaterUniforms(inputs: renderer.waterInputs(), drawable: water.layer.drawableSize,
-                                    time: waterClock, traffic: traffic))
+        return SeaWaterUniforms(inputs: renderer.waterInputs(), drawable: water.layer.drawableSize,
+                                time: waterClock, traffic: traffic)
     }
 
     private var sceneIsVisible: Bool {
@@ -330,8 +325,7 @@ final class SeaSceneNativeView: NSView {
         resizeTask = nil
         qualityDisplayLink?.invalidate()
         qualityDisplayLink = nil
-        waterLink?.invalidate()
-        waterLink = nil
+        water?.stop()
         water?.layer.removeFromSuperlayer()
         water = nil
         observers.forEach(NotificationCenter.default.removeObserver)

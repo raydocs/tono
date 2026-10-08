@@ -101,17 +101,23 @@ struct SeaWaterUniforms {
 /// Real-time water for Full quality: a port of the approved WebGL shader.
 /// Any Metal failure leaves the layer water in place.
 @MainActor
-final class SeaWaterRenderer {
+final class SeaWaterRenderer: NSObject, CAMetalDisplayLinkDelegate {
     let layer = CAMetalLayer()
     var onFirstPresent: (() -> Void)?
     var onFailure: (() -> Void)?
+    /// Called on the main thread for each frame with its target time; nil skips the frame.
+    var frameUniforms: ((Double) -> SeaWaterUniforms?)?
     private let queue: any MTLCommandQueue
     private var pipeline: (any MTLRenderPipelineState)?
     private var awaitingPresent = true
+    private var link: CAMetalDisplayLink?
+
+    var running: Bool { link != nil }
 
     init?() {
         guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else { return nil }
         self.queue = queue
+        super.init()
         layer.name = "water-metal"
         layer.device = device
         layer.pixelFormat = .bgra8Unorm
@@ -144,9 +150,33 @@ final class SeaWaterRenderer {
     /// Restart the "first frame on screen" handshake (after the water was off).
     func resetPresentation() { awaitingPresent = true }
 
-    func draw(_ uniforms: SeaWaterUniforms) {
+    /// A Metal display link hands out drawables when they are free, so the main
+    /// thread never blocks in `nextDrawable()` while the compositor holds them.
+    func start() {
+        guard link == nil else { return }
+        let link = CAMetalDisplayLink(metalLayer: layer)
+        link.delegate = self
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+        link.preferredFrameLatency = 2
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    func stop() {
+        link?.invalidate()
+        link = nil
+    }
+
+    nonisolated func metalDisplayLink(_ link: CAMetalDisplayLink, needsUpdate update: CAMetalDisplayLink.Update) {
+        // Added to the main run loop, so this arrives on the main thread.
+        MainActor.assumeIsolated {
+            self.render(update.drawable, at: update.targetPresentationTimestamp)
+        }
+    }
+
+    private func render(_ drawable: any CAMetalDrawable, at time: Double) {
         guard let pipeline, !layer.isHidden, layer.drawableSize.width > 1,
-              let drawable = layer.nextDrawable(), let buffer = queue.makeCommandBuffer() else { return }
+              let uniforms = frameUniforms?(time), let buffer = queue.makeCommandBuffer() else { return }
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = drawable.texture
         pass.colorAttachments[0].loadAction = .dontCare
@@ -384,9 +414,3 @@ extension AppState {
     }
 }
 
-@MainActor
-final class SeaSceneWaterTarget: NSObject {
-    weak var view: SeaSceneNativeView?
-    init(view: SeaSceneNativeView) { self.view = view }
-    @objc func tick(_ link: CADisplayLink) { view?.drawWater(link) }
-}
