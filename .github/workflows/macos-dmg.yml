@@ -7,8 +7,8 @@ name: macOS disk image
 on:
   workflow_dispatch:
     inputs:
-      release_run_id:
-        description: Successful macos-release.yml run on release/macos that built the accepted zip
+      source:
+        description: The accepted zip's source - a successful macos-release.yml run id on release/macos (artifacts expire after 7 days), or its published tag tono-macos-<version>-build<n>
         required: true
         type: string
       zip_sha256:
@@ -26,7 +26,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: macos-dmg-${{ inputs.release_run_id }}
+  group: macos-dmg-${{ inputs.source }}
   cancel-in-progress: false
 
 jobs:
@@ -39,15 +39,27 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Fetch the accepted zip from the release run
+      - name: Fetch the accepted zip
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+          SOURCE: ${{ inputs.source }}
           ZIP_SHA256: ${{ inputs.zip_sha256 }}
         run: |
           set -euo pipefail
-          case "$RELEASE_RUN_ID" in ''|*[!0-9]*) echo "FATAL: release_run_id must be a run number" >&2; exit 1 ;; esac
           printf '%s' "$ZIP_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "FATAL: zip_sha256 must be 64 hex digits" >&2; exit 1; }
+          if printf '%s' "$SOURCE" | grep -Eq '^tono-macos-[0-9]+\.[0-9]+\.[0-9]+-build[0-9]+$'; then
+            # The published tag keeps the accepted zip after the run's artifacts expire.
+            release=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$SOURCE")
+            printf '%s\n' "$release" | jq -e '.draft == false' > /dev/null \
+              || { echo "FATAL: $SOURCE is a draft release" >&2; exit 1; }
+            name=$(printf '%s\n' "$release" | jq -er '[.assets[].name | select(test("^Tono-[0-9.]+-build[0-9]+-arm64\\.zip$"))] | if length == 1 then .[0] else error("expected one release zip") end')
+            gh release download "$SOURCE" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir "$RUNNER_TEMP/accepted"
+            echo "ZIP_PATH=$RUNNER_TEMP/accepted/$name" >> "$GITHUB_ENV"
+            echo "SOURCE_SHA=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SOURCE" --jq .sha)" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          RELEASE_RUN_ID=$SOURCE
+          case "$RELEASE_RUN_ID" in ''|*[!0-9]*) echo "FATAL: source must be a run number or a tono-macos-<version>-build<n> tag" >&2; exit 1 ;; esac
           run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID")
           printf '%s\n' "$run" | jq -c '{id, path, event, head_branch, head_sha, conclusion}'
           printf '%s\n' "$run" | jq -e '.path == ".github/workflows/macos-release.yml" and .event == "workflow_dispatch"
@@ -98,14 +110,14 @@ jobs:
         env:
           TONO_MACOS_SIGNING_IDENTITY: ${{ inputs.sign && secrets.MACOS_DEVELOPER_ID_APPLICATION_IDENTITY || '' }}
           ZIP_SHA256: ${{ inputs.zip_sha256 }}
-          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+          SOURCE: ${{ inputs.source }}
         run: |
           set -euo pipefail
           if [ -z "$TONO_MACOS_SIGNING_IDENTITY" ]; then unset TONO_MACOS_NOTARY_PROFILE; fi
           tooling/scripts/make-macos-dmg.sh "$ZIP_PATH" "$ZIP_SHA256" "$RUNNER_TEMP/dmg"
           {
             echo "### macOS disk image"
-            echo "- source run: $RELEASE_RUN_ID at \`$SOURCE_SHA\`"
+            echo "- source: $SOURCE at \`$SOURCE_SHA\`"
             echo "- accepted zip sha256: \`$ZIP_SHA256\`"
             echo "- image: \`$(cd "$RUNNER_TEMP/dmg" && shasum -a 256 ./*.dmg)\`"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -113,7 +125,7 @@ jobs:
       - name: Upload the disk image
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: macos-dmg-${{ inputs.release_run_id }}
+          name: macos-dmg-${{ inputs.sign && 'signed' || 'unsigned' }}-${{ inputs.source }}
           path: ${{ runner.temp }}/dmg/
           if-no-files-found: error
           retention-days: 7

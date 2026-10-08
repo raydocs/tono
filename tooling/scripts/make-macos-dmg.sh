@@ -82,7 +82,14 @@ manifest() {
 prove_contents() {
   mkdir -p "$mount_point"
   hdiutil attach -quiet -nobrowse -readonly -noautoopen -mountpoint "$mount_point" "$dmg"
-  if ! diff <(manifest "$work/extracted") <(manifest "$mount_point") > "$work/manifest.diff"; then
+  # Files, not process substitution: a manifest that fails must fail the proof.
+  manifest "$work/extracted" > "$work/expected.manifest"
+  manifest "$mount_point" > "$work/actual.manifest"
+  if ! grep -q '^f [0-7]* Tono.app/Contents/MacOS/Tono ' "$work/expected.manifest"; then
+    echo "FATAL: the accepted app manifest is incomplete" >&2
+    exit 1
+  fi
+  if ! diff "$work/expected.manifest" "$work/actual.manifest" > "$work/manifest.diff"; then
     cat "$work/manifest.diff" >&2
     echo "FATAL: the Tono.app in $dmg is not the accepted zip's Tono.app" >&2
     exit 1
@@ -98,10 +105,12 @@ prove_contents() {
 }
 
 prove_contents
-echo "app tree in $dmg matches $base.zip ($(manifest "$work/extracted" | wc -l | tr -d ' ') paths)"
+echo "app tree in $dmg matches $base.zip ($(wc -l < "$work/expected.manifest" | tr -d ' ') paths)"
 
 if [ -z "${TONO_MACOS_SIGNING_IDENTITY-}" ] || [ -z "${TONO_MACOS_NOTARY_PROFILE-}" ]; then
-  echo "unsigned dry run: $dmg (no signing identity or notary profile)"
+  # Never leave an unsigned image under the name customers download.
+  mv "$dmg" "$out_dir/$base-unsigned.dmg"
+  echo "unsigned dry run: $out_dir/$base-unsigned.dmg (no signing identity or notary profile)"
   exit 0
 fi
 
