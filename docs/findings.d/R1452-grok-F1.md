@@ -1,0 +1,3 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| R1452-grok-F1 | 捕获旧凭据做尽力撤销时，若 access logout 未成功会先走会轮换 refresh 的 `auth/refresh`；轮换后若 2 秒预算已取消或 `credentialGeneration` 已变则直接 return，后继 refresh 未注销 | open | [#1452](https://github.com/raydocs/tono/pull/1452)（已合 main `e0179bd55`）；[#901](https://github.com/raydocs/tono/issues/901) | 低 | main 续批评审 `fcf80837`（`53676e913...e0179bd55`，triple/high）grok:F1，Codex 验证 confirmed minor。位置 `apps/macos/Tono/Services/TonoAPIClient.swift:603`。影响：服务端撤销是尽力而为（decision 074 把本地恢复以「已采用」标记为前提，设备侧不会再恢复旧 token），未注销的后继 refresh 只存在于服务端会话表里，客户端未持有；不是泄漏、不是跨账号混用。按停止规则（minor 一轮后记开放）记开放，下一轮修 Keychain 路径时一并处理：轮换后无条件注销后继，或撤销改用不轮换的接口。 |
