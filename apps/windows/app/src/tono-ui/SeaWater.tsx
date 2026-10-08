@@ -264,9 +264,11 @@ const start = (scene: HTMLElement, canvas: HTMLCanvasElement) => {
     const phase = phaseOf(scene)
     const target = PALETTE[phase]
     const k = 1 - Math.exp(-dt / 1.1)
-    for (const key of COLOR_KEYS)
-      for (let i = 0; i < 3; i++)
-        current[key][i] += (target[key][i] - current[key][i]) * k
+    for (const key of COLOR_KEYS) {
+      const [r, g, b] = current[key]
+      const [tr, tg, tb] = target[key]
+      current[key] = [r + (tr - r) * k, g + (tg - g) * k, b + (tb - b) * k]
+    }
     current.haze += (target.haze - current.haze) * k
     const traffic = readSeaTraffic(now) * LIVE[phase]
     rough += (0.18 + 0.7 * traffic - rough) * (1 - Math.exp(-dt / 1.4))
