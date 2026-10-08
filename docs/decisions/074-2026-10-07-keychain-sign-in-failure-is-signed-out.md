@@ -3,5 +3,5 @@
 - Chosen: #901 按 AGENTS 更严、不泄漏选择：初始登录凭据写入失败不保留内存 token，不保持登录。先记录不含秘密的持久恢复拒绝，再替换 Keychain 凭据；只在新凭据持久化成功且拒绝记录清除成功后接受会话。失败清内存、尽力删除 prior token、清账户并显示已登出及准确下一步提示；不自动释放网络保护。新进程读拒绝标记或其读取出错都不能恢复旧账户。
 - Rejected: 首次登录仅保留内存 token 等后续再写；失败后回退旧账户；为清登录 UI 自动解除 PF/DNS；把恢复记录失败误称为 Keychain 拒绝。
 - Why stricter: 2026-10-07 Claude ribboneel 转述 owner「都修复完了发新版」并指定严格回滚。该转述不是 owner 本人直接确认的具体产品选择，因此记录 provisional，owner 可否决。内存凭据不得在持久化失败后绕过账户隔离。
-- Applied in: [#1446](https://github.com/raydocs/tono/pull/1446)，Plan: SHIP_PLAN §2 item 10。旋转 token 的已有恢复路径不改。
+- Applied in: [#1446](https://github.com/raydocs/tono/pull/1446)；major 续修 [#1452](https://github.com/raydocs/tono/pull/1452)，Plan: SHIP_PLAN §2 item 10。旋转 token 的已有恢复路径不改。
 - Limits: 原 #1446 的“双拒绝后可恢复旧 token”限制已被批次评审 c7ed2f9b 判为 major（跨账号风险），不能作为止损豁免；见 R1446-grok-F1。本次续修要求匹配当前 Keychain token 的成功采纳凭据，缺失不恢复；既有凭据的持久拒绝必须先于服务端验证/设备重绑定，写失败即不发送新的登录。仅非秘密摘要记录，旧版本未记录成功凭据的会话需重新登录，不做宽松迁移。旋转 token 的成功持久化同步更新凭据；同账号内存旋转重试保持。失败尽力走现有认证 logout 撤销捕获的旧凭据，不以网络撤销是否成功作为本地恢复放行条件。若准备阶段的持久写失败，旧成功凭据可能仍在，但新登录回调未执行、服务端未重绑定；不将其冒称“已接受新账号后的安全回退”。真实设备/断电级持久性留 G1/G2，不称源码测试为安装验收。
