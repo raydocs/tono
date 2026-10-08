@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import test from 'node:test'
 
-import { assertServed, GeneratorRefusal } from '../generate-release-center.mjs'
+import { assertServed, GeneratorRefusal, renderCards } from '../generate-release-center.mjs'
 
 // A local origin, because the point of these cases is what happens when the
 // bucket does *not* answer the way the manifest claims, and that is not a state
@@ -76,4 +76,15 @@ test('refuses an origin that cannot be reached at all', async () => {
   await withOrigin((_req, res) => res.end(), async (url) => { dead = url })
   const message = await refusal(assertServed(dead, 1024))
   assert.match(message, /could not be reached/)
+})
+
+test('a macOS release with a disk image offers the image, not the Sparkle zip', () => {
+  const copy = { title: 't', lede: 'l', bullets: [] }
+  const zip = { url: 'https://releases.afk.ccwu.cc/download/Tono-0.0.75-build75-arm64.zip' }
+  const html = renderCards({
+    macos: { build: 75, copy, artifact: zip, diskImage: { url: zip.url.replace(/zip$/, 'dmg') } },
+    windows: { version: '0.0.75', copy, artifact: { url: 'https://releases.afk.ccwu.cc/download/Tono_0.0.75_x64-setup.exe' } },
+  })
+  assert.match(html, /href="https:\/\/releases\.afk\.ccwu\.cc\/download\/Tono-0\.0\.75-build75-arm64\.dmg">下载 Build 75 安装包/)
+  assert.doesNotMatch(html, /arm64\.zip/)
 })

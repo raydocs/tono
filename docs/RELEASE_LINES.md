@@ -140,6 +140,12 @@ has not yet run end to end.
    --target <sha> <accepted zip>`, after checking the zip's SHA-256 against the owner's
    evidence. Confirm it is not a draft and that
    `gh api repos/raydocs/tono/commits/<tag> --jq .sha` is the built SHA.
+   Then dispatch `macos-dmg.yml` with that tag (or the run id while its artifacts
+   last) and the accepted zip's SHA-256: it
+   wraps the zip's Tono.app, unchanged and proven file for file, in the signed,
+   notarized first-install disk image (a drag-to-Applications window). Download its
+   artifact and `gh release upload <tag> <name>.dmg`. Sparkle keeps the zip; the
+   release centre links the image for first installs once the tag carries it.
 3. `node tooling/scripts/upload-release-asset.mjs --tag <tag>`, run from the root of
    the checkout bound to the `tono` wrangler profile.
 4. `node tooling/scripts/publish-macos-appcast.mjs` with the argv of the workflow's
@@ -151,7 +157,7 @@ has not yet run end to end.
 
 The proven path is `tooling/scripts/release-macos.sh --version <v> --build <n>
 --release-sequence <n> --publish --lifecycle-token <token>`, which does steps 2–5
-except the deploy. It refuses a missing or invalid sequence and checks that the
+except the deploy and the disk image (dispatch `macos-dmg.yml` with the tag it creates). It refuses a missing or invalid sequence and checks that the
 bundle it publishes carries that sequence. It
 builds and packages natively, so it runs on the Mac Studio, never the MacBook. Its
 bytes are a new candidate, so it does not publish an accepted workflow candidate; use
