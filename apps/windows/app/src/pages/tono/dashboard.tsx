@@ -31,6 +31,7 @@ import { GlassCard } from '@/tono-ui/GlassCard'
 import { OpenDnsSettingsButton } from '@/tono-ui/OpenDnsSettingsButton'
 import { PageHeader } from '@/tono-ui/PageHeader'
 import { hasLiveProtection } from '@/tono-ui/protection-evidence'
+import { publishSeaTraffic } from '@/tono-ui/sea-traffic'
 import { SupportReportAction } from '@/tono-ui/SupportReportAction'
 import {
   TONO_COLORS,
@@ -616,6 +617,11 @@ const DashboardPage = () => {
     enabled: connected,
     generation: status?.controllerGeneration,
   })
+  // The sea's water sparkle follows live throughput (decision 077).
+  const liveBytes =
+    connected && trafficLive ? (traffic?.up ?? 0) + (traffic?.down ?? 0) : null
+  useEffect(() => publishSeaTraffic(liveBytes), [liveBytes])
+  useEffect(() => () => publishSeaTraffic(null), [])
   const [trafficWaited, setTrafficWaited] = useState(false)
   if (trafficWaited && (!connected || trafficLive)) {
     setTrafficWaited(false)

@@ -6,6 +6,7 @@ import {
   type CSSProperties,
 } from 'react'
 
+import { SeaWaterCanvas } from './SeaWater'
 import { useSceneQuality } from './useSceneQuality'
 
 import './tokens/motion.css'
@@ -548,6 +549,9 @@ export const SeaScene = ({
             }}
           />
         </div>
+        {quality === 'full' && !isStatic && hasSize && (
+          <SeaWaterCanvas sceneRef={sceneRef} running={!isHidden} />
+        )}
       </div>
       <div
         className="sea-horizon"
