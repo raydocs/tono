@@ -6,3 +6,5 @@
 - 工程与测试修正：`generate-release-center.test.mjs` 新增一条（带 DMG 时链接 DMG、不出现 zip），旧代码上失败、新代码上通过。DMG 工作流的实际签名/公证运行结果见下方续记。
 - 新记录：MAC-RENAMED-BUNDLE-NO-UPDATE、MAC-0067-HELPER-HANDOFF-UNTESTED（open）。
 - 包：无新 app 候选；DMG 是 7505 zip 的第二个容器。
+
+续记 2026-10-08：试跑 run [37724515691](https://github.com/raydocs/tono/actions/runs/37724515691)（临时分支 `claude/macos-dmg-trial-20261008` 加 push 触发，不合并）对 7505 macOS run 37718593498 的 zip（d249cd51…faa0）生成 `Tono-0.0.75-build75-arm64.dmg`，sha256 `cf2108453d4150865f62cc722ae043f71d0a99f40c2610845cd3e54ea8500b08`。公证 8d821035-3e1f-4236-90eb-321291e35d41 Accepted；本机 `stapler validate` 通过，`spctl -a -t open --context context:primary-signature` 判定 Notarized Developer ID；挂载后窗口布局（660×400 背景、Tono 与「应用程序」两个图标、箭头、中英文说明）与设计一致。脚本内的逐文件比对在签名前后各跑一次，均通过。正式发布用的 DMG 在本 PR 合入后从 main 上的工作流重新生成。
