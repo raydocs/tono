@@ -75,12 +75,13 @@ final class SeaControlsTests: XCTestCase {
                 let object = next as? NSObject
                 let labels = [full?.accessibilityLabel(),
                     modernValue("accessibilityLabel", of: object) as? String,
+                    modernValue("accessibilityTitle", of: object) as? String,
                     object?.accessibilityAttributeValue(.description) as? String,
                     object?.accessibilityAttributeValue(.title) as? String,
                     full?.accessibilityValue() as? String,
                     modernValue("accessibilityValue", of: object) as? String]
                     .compactMap { $0 }
-                diagnostics.append("type=\(type(of: next)) labels=\(labels) full=\(full != nil) modernChildren=\(object?.responds(to: NSSelectorFromString("accessibilityChildren")) == true)")
+                diagnostics.append("type=\(type(of: next)) labels=\(labels) full=\(full != nil) modernChildren=\(object?.responds(to: NSSelectorFromString("accessibilityChildren")) == true) rawNavigation=\(object?.responds(to: NSSelectorFromString("accessibilityChildrenInNavigationOrder")) == true)")
                 if labels.contains(name), let object { return object }
                 var children = full?.accessibilityChildren() ?? []
                 if children.isEmpty {
@@ -89,6 +90,11 @@ final class SeaControlsTests: XCTestCase {
                 if children.isEmpty {
                     children = object?.accessibilityAttributeValue(.children) as? [Any] ?? []
                 }
+                // The public navigation getter can expose represented controls
+                // when ordinary children only contain reparenting proxies. Read
+                // its raw NSArray: the SDK's narrower imported element array
+                // previously trapped when SwiftUI returned role-based segments.
+                children += modernValue("accessibilityChildrenInNavigationOrder", of: object) as? [Any] ?? []
                 queue += children.compactMap { $0 as? NSObject }
             }
             try await Task.sleep(for: .milliseconds(25))
