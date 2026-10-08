@@ -9,4 +9,4 @@
 - 工程与测试：新增一条 XCTest（`testWaterTrafficRisesWithLiveRatesThenDecaysOnceTheReadingFreezes`）。
 - 验证：见 PR 的 ci-gate / macOS CI 结果与渲染截图核对；本机（MacBook）不跑 xcodebuild。
 - 候选/发布：仅源码，无新候选。
-- 剩余限制：真机（ProMotion 屏、低端机）上的 GPU 占用与观感未测；CI 截图来自托管虚拟机的 WindowServer。
+- 剩余限制：真机（ProMotion 屏、低端机）上的 GPU 占用与观感未测；CI 截图来自托管虚拟机的 WindowServer。CI 合成宿主上可见状态的进程 CPU（单核百分比）由 main 的约 0.26% 升到约 6–7%（空闲 6.0%、已连接 7.2%），隐藏时与 main 相同（约 0.20%）；这是实时渲染的代价，不是真机验收数据。
