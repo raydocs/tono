@@ -5,6 +5,6 @@
 - 既有凭据：服务端验证/账户重绑定回调前先持久写拒绝，失败就不发送新登录；既有摘要不会因一次失败写入被假定消失。没有摘要的旧版本会话需重新登录，不做宽松迁移。持久写失败发生在准备阶段时，新登录未被服务端接受；不得冒称为新账号采纳后的旧账号回退。
 - 撤销：采纳失败尽力使用捕获旧 access/refresh 和现有认证 auth/logout，必要时先刷新其旧会话；不读取当前可恢复会话、不把旧响应作为新账号 offline verdict。控制面 revoked_token_hash 为 exit_nodes 字段，未发明新 refresh 撤销接口。
 - 工程与测试：一条窄 XCTest 注入记录写入和删除同时拒绝，证明旧条目确实仍在、拒绝文件确实不存在、fresh client 不恢复/不取得 digest/不发旧账号请求、旧凭据撤销被尝试；并证明旧有效摘要下拒绝写失败不会执行服务端验证回调，仍登出且不释放保护。既有拒绝测试只补真实旧 logout 的模拟响应，不改断言。旋转持久化同步更新摘要，保持同账号内存重试。
-- 一轮评审修复：Jev 3c29e3f0 三方 PASSED（Codex gpt-6.1-sol/high），0 major；[R1452-opus-F1](../findings.d/R1452-opus-F1.md)（opus:F1 confirmed minor）的远端撤销等待收敛为 2 秒合作式取消预算并排空，同一窄 XCTest 再持有响应证明本地失败会返回；opus:F2 升级/PF/取码路径提示已补 decision074 与 PR 限制。增量续审和新精确 head CI 待验。
-- 验证：本机 git diff --check/范围核对；MacBook 未跑 XCTest/Keychain/PF/DNS/原生构建。新精确 head CI 与独立 Jev review 待验，不声称旧代码红测已执行。
+- 一轮评审修复：Jev 3c29e3f0 三方 PASSED（Codex gpt-6.1-sol/high），0 major；[R1452-opus-F1](../findings.d/R1452-opus-F1.md)（opus:F1 confirmed minor）的远端撤销等待收敛为 2 秒合作式取消预算并排空，同一窄 XCTest 再持有响应证明本地失败会返回；opus:F2 升级/PF/取码路径提示已补 decision074 与 PR 限制。增量续审 f5c2d4d9 在源码 head `8139c5f0ea26079f594b7d51172e8c18440e5637` PASSED，复核关闭 opus:F1，0 新发现，stop rule 一轮/0 剩余；最终精确记录 head CI 待验，结果留 PR 评论，不再为填 CI 改 head。
+- 验证：本机 git diff --check/范围核对；MacBook 未跑 XCTest/Keychain/PF/DNS/原生构建。最终记录 head CI 待验；独立 Jev 覆盖 base53676e913→c454602e→8139c5f0（本记录提交仅文档，由 root 检查，源码/测试 blob 不变），不声称旧代码红测已执行。
 - 候选/发布：只源码，不改 Helper/release 线，不合并/部署/签名/发包/安装/tag；B 已暂停。G1/G2/断电级持久性待真机，不将源码证据当用户验收。
