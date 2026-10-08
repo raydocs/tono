@@ -215,7 +215,7 @@ final class SeaSceneNativeView: NSView {
     /// Runs the water's display link only while visible, active, unpaused and Full.
     private func reconcileWater() {
         if metalWaterWanted && water == nil {
-            if let made = SeaWaterRenderer() {
+            if let made = SeaWaterRenderer.make() {
                 made.onFirstPresent = { [weak self] in self?.waterDidPresent() }
                 made.onFailure = { [weak self] in self?.waterFailed() }
                 made.frameUniforms = { [weak self] time in self?.waterUniforms(at: time) }

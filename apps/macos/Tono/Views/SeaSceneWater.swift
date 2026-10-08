@@ -114,8 +114,13 @@ final class SeaWaterRenderer: NSObject, CAMetalDisplayLinkDelegate {
 
     var running: Bool { link != nil }
 
-    init?() {
+    /// Nil without a Metal device or command queue; the layer water then stays.
+    static func make() -> SeaWaterRenderer? {
         guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else { return nil }
+        return SeaWaterRenderer(device: device, queue: queue)
+    }
+
+    private init(device: any MTLDevice, queue: any MTLCommandQueue) {
         self.queue = queue
         super.init()
         layer.name = "water-metal"
