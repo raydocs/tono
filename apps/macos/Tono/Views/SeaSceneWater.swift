@@ -130,6 +130,9 @@ final class SeaWaterRenderer: NSObject, CAMetalDisplayLinkDelegate {
         layer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
         layer.contentsGravity = .resize
         layer.maximumDrawableCount = 3
+        // Not opaque: until the first drawable lands the layer has no contents,
+        // and the layer water beneath must show through, never a blank rect.
+        layer.isOpaque = false
         layer.isHidden = true
         Self.compile(device: device) { [weak self] state in
             Task { @MainActor in self?.compiled(state) }
