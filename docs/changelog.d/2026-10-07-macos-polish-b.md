@@ -11,3 +11,4 @@
 - 剩余限制：本阶段不能要求B合并。真实生产WindowGroup/B 控件的签名设备验证属于未来 0.0.76 验收，不能用 0.0.75/7504 的签名候选替代；A记录的合成CPU/日轮亚像素/固定窗夹具限制保留；A的八个旧发现状态由Claude处理，不修改。
 
 - 2026-10-07 恢复：rebase 到 main53676e913（helper4.52.43），保留 Quit/Keychain/海景修复；本轮不改保护/账户/路由/Helper 逻辑，不动 release 线。此前255450cf/run37658469827仍在两个AX案例失败（不是已绿），原始代理无label/modernchildren。新增读取公开导航顺序 getter 的原始 id/NSArray，绕开SDK较窄元素数组的Swift强制桥接，并兼容公开title；不查私有proxy字段/类型，不手改绑定、不跳过测试、不降低press/setter/名称断言。新托管结果未出，不声称修复通过。
+- 恢复后的 M4 呈现集成：main 新增/保留的账户保护通知 Restore 按钮纳入共用 quiet/32pt 样式；原 automatic fallback、触发 handler、disabled 门槛、通知判定与文案完全不改。新增 shared style 的 automatic legacy 分支仅用于保留原语义，不改生产保护或登录逻辑。
