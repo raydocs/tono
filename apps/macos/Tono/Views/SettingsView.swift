@@ -121,8 +121,8 @@ struct SettingsView: View {
 
             if let launchAtStartupMessage {
                 Text(launchAtStartupMessage)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.orange)
+                    .font(.system(size: seaEnabled ? 12 : 11))
+                    .foregroundStyle(seaEnabled ? SeaTheme.attention : Color.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -224,10 +224,10 @@ struct SettingsView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Tono")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: seaEnabled ? 15 : 14, weight: seaEnabled ? .regular : .semibold))
                     Text(versionLabel)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: seaEnabled ? 12 : 11)).monospacedDigit()
+                        .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
                 }
             }
 
@@ -235,7 +235,7 @@ struct SettingsView: View {
 
             HStack {
                 Text("Updates")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: seaEnabled ? 15 : 13, weight: seaEnabled ? .regular : .medium))
                 Spacer()
                 Button("Check for Updates") {
                     updater.checkForUpdates()
@@ -263,7 +263,8 @@ struct SettingsView: View {
     private var privacyCard: some View {
         SettingsCard(icon: "hand.raised", title: "Privacy") {
             Text("Help fix problems")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13, weight: seaEnabled ? .regular : .semibold))
+                .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.primary)
 
             if AccountSession.isInternalBuild() {
                 SettingToggleRow(
@@ -405,10 +406,10 @@ struct SettingsView: View {
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Research programs")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: seaEnabled ? 15 : 13, weight: seaEnabled ? .regular : .medium))
                     Text("Off by default. These only help Tono improve routing.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: seaEnabled ? 12 : 11))
+                        .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

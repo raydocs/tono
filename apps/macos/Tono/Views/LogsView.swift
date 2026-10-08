@@ -29,6 +29,14 @@ struct LogsView: View {
         }
     }
 
+    private func seaLevelTint(_ level: String?) -> Color {
+        switch level?.lowercased() {
+        case "error": SeaTheme.danger
+        case "warning": SeaTheme.attention
+        default: SeaTheme.muted
+        }
+    }
+
     private func levelTitle(_ level: String?) -> LocalizedStringKey {
         switch level?.lowercased() {
         case "error": "Error"
@@ -49,6 +57,19 @@ struct LogsView: View {
             // Log container
             VStack(spacing: 0) {
                 // Table header
+                if seaEnabled {
+                    // No all-caps eyebrow: a 12 pt tertiary header over a hairline.
+                    HStack(spacing: 0) {
+                        Text("Time").frame(width: 100, alignment: .leading)
+                        Text("Level").frame(width: 80, alignment: .leading)
+                        Text("Message").frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .font(.system(size: 12))
+                    .foregroundStyle(SeaTheme.tertiary)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+                } else {
                 HStack(spacing: 0) {
                     Text("TIME")
                         .frame(width: 100, alignment: .leading)
@@ -65,6 +86,7 @@ struct LogsView: View {
                 .background(.white.opacity(colorScheme == .dark ? 0.06 : 0.15))
 
                 Divider().opacity(0.3)
+                }
 
                 // Log entries
                 ScrollViewReader { proxy in
@@ -90,27 +112,29 @@ struct LogsView: View {
                 // Empty state
                 if filteredLogs.isEmpty {
                     VStack(spacing: 8) {
-                        Image(systemName: "doc.text.magnifyingglass")
-                            .font(.system(size: 32))
-                            .foregroundStyle(.secondary)
+                        if !seaEnabled {
+                            Image(systemName: "doc.text.magnifyingglass")
+                                .font(.system(size: 32))
+                                .foregroundStyle(.secondary)
+                        }
                         Text(LocalizedStringKey(appState.isConnected ? "No logs matching filter" : "Connect to see logs"))
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: seaEnabled ? 14 : 13))
+                            .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
                         if !appState.isConnected {
                             // Runtime logs only exist while the core runs, but
                             // helper, Kill Switch, and reconnect events keep
                             // recording locally — the file that matters when
                             // diagnosing why a connection never came up.
                             Text("System events (helper, Kill Switch, reconnects) are kept in the local audit log.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.tertiary)
+                                .font(.system(size: seaEnabled ? 12 : 11))
+                                .foregroundStyle(seaEnabled ? AnyShapeStyle(SeaTheme.tertiary) : AnyShapeStyle(.tertiary))
                             Button("Show Audit Log in Finder") {
                                 let url = LocalTrafficAudit.shared.prepareForReveal()
                                 NSWorkspace.shared.activateFileViewerSelecting([url])
                             }
-                            .buttonStyle(.plain)
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(seaEnabled ? seaAccent : TonoBrand.accent)
+                            .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .plain))
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -135,8 +159,8 @@ struct LogsView: View {
         HStack(alignment: .center) {
             HStack(spacing: 10) {
                 Text("Logs")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .font(.system(size: seaEnabled ? 28 : 24, weight: seaEnabled ? .light : .semibold))
+                    .foregroundStyle(seaEnabled ? SeaTheme.text : Color.primary)
 
                 if seaEnabled {
                     SeaTag(title: "\(appState.logEntries.count) entries")
@@ -209,7 +233,7 @@ struct LogsView: View {
                     .foregroundStyle(seaEnabled ? SeaTheme.danger : Color(hex: "FF6E52"))
                     .padding(.horizontal, seaEnabled ? 0 : 12)
                     .padding(.vertical, seaEnabled ? 0 : 6)
-                    .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
+                    .background(seaEnabled ? .clear : .white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
                     .overlay(Capsule().strokeBorder(Color(hex: "FF6E52").opacity(seaEnabled ? 0 : 0.3), lineWidth: 0.5))
                     .contentShape(Capsule())
                 }
@@ -221,7 +245,18 @@ struct LogsView: View {
 
     // MARK: - Level Filter
 
-    private var levelFilterRow: some View {
+    @ViewBuilder private var levelFilterRow: some View {
+        if seaEnabled {
+            SeaTabs(label: "Level", selection: Binding(
+                get: { levelFilter?.capitalized ?? "All" },
+                set: { levelFilter = $0 == "All" ? nil : $0.lowercased() }),
+                options: ["All"] + Self.knownLevels.map(\.capitalized))
+        } else {
+            legacyLevelFilterRow
+        }
+    }
+
+    private var legacyLevelFilterRow: some View {
         HStack(spacing: 3) {
             levelFilterChip(nil)
             ForEach(Self.knownLevels, id: \.self) { level in
@@ -270,21 +305,28 @@ struct LogsView: View {
     private func logRow(_ entry: LogEntry) -> some View {
         HStack(spacing: 0) {
             Text(entry.formattedTime)
-                .font(.system(size: 11, design: seaEnabled ? .default : .monospaced)).monospacedDigit()
-                .foregroundStyle(.secondary)
+                .font(.system(size: seaEnabled ? 12 : 11, design: seaEnabled ? .default : .monospaced)).monospacedDigit()
+                .foregroundStyle(seaEnabled ? SeaTheme.tertiary : Color.secondary)
                 .frame(width: 100, alignment: .leading)
 
+            if seaEnabled {
+                Text(levelTitle(entry.level))
+                    .font(.system(size: 12))
+                    .foregroundStyle(seaLevelTint(entry.level))
+                    .frame(width: 80, alignment: .leading)
+            } else {
             Text(entry.level.uppercased())
-                .font(.system(size: 10, weight: .semibold, design: seaEnabled ? .default : .monospaced))
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(levelTint(entry.level))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(levelTint(entry.level).opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
                 .frame(width: 80, alignment: .leading)
+            }
 
             Text(entry.message)
-                .font(.system(size: 12, design: seaEnabled ? .default : .monospaced))
-                .foregroundStyle(.primary)
+                .font(.system(size: seaEnabled ? 13 : 12, design: seaEnabled ? .default : .monospaced))
+                .foregroundStyle(seaEnabled ? SeaTheme.text : Color.primary)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }

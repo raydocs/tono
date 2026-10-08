@@ -331,6 +331,7 @@ struct LoginView: View {
                                     .contentShape(Rectangle())
                                 }
                                 .font(.caption)
+                                .modifier(SeaDisclosureTreatment())
                                 .disabled(locked)
                                 Label {
                                     Text("Your email is only used to sign in. Traffic logs are never uploaded unless you turn that on in Settings.")
@@ -465,6 +466,7 @@ struct LoginView: View {
                             .foregroundStyle(.secondary)
                     }
                     Button("Retry") { Task { await session.retryRestore() } }
+                        .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic))
                         .disabled(locked || error == nil)
                     if error != nil {
                         // A launch failure at the gate is exactly when runtime

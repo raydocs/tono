@@ -205,6 +205,7 @@ struct DashboardView: View {
                         DisclosureGroup("View steps", isExpanded: $showsSeaSteps) {
                             ConnectionProgressCard(appState: appState, primaryActionInHeader: true, homePresentation: true)
                         }
+                        .disclosureGroupStyle(SeaDisclosureStyle())
                         .font(.system(size: 13)).frame(maxWidth: 520, alignment: .leading)
                     } else if showsConnectionDetails {
                         ConnectionProgressCard(appState: appState, primaryActionInHeader: true, homePresentation: true)
@@ -241,7 +242,9 @@ struct DashboardView: View {
                     HStack {
                         SeaPageHeading(title: "Details")
                         Spacer()
-                        Button("Close") { showsSeaDetails = false }.keyboardShortcut(.cancelAction)
+                        Button("Close") { showsSeaDetails = false }
+                            .buttonStyle(SeaButtonStyle(variant: .quiet, size: .row))
+                            .keyboardShortcut(.cancelAction)
                     }
                     if let name = appState.activeNode?.name ?? appState.proxyService.activeNodeName {
                         ActiveNodeCard(nodeName: name,

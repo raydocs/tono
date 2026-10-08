@@ -282,11 +282,11 @@ extension ProxiesView {
                 Spacer(minLength: 0)
                 if node.latency > 0 {
                     Text(LatencyLevel.spokenTitle(for: node.latency, kind: .exit))
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 10)).monospacedDigit()
                         .foregroundStyle(Color(hex: LatencyLevel.level(for: node.latency, kind: .exit).color))
                 } else if node.lastTestFailed {
                     Text("Timeout")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 10)).monospacedDigit()
                         .foregroundStyle(TonoStatus.error.opacity(0.7))
                 }
             }

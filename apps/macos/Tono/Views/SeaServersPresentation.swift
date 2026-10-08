@@ -68,7 +68,7 @@ extension ProxiesView {
     private func seaServerGroup(_ title: String, nodes: [ProxyNode]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(LocalizedStringKey(title)).font(.system(size: 11, weight: .medium)).tracking(1.1)
+                Text(LocalizedStringKey(title)).font(.system(size: 13))
                 Text("\(nodes.count)").monospacedDigit()
             }
             .foregroundStyle(SeaTheme.muted).accessibilityAddTraits(.isHeader)
@@ -109,7 +109,7 @@ extension ProxiesView {
                 HStack(spacing: 12) {
                     Text(node.flag).font(.system(size: 20)).frame(width: 30).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(nodeRouteTitle(node)).font(.system(size: 14, weight: .medium)).lineLimit(1)
+                        Text(nodeRouteTitle(node)).font(.system(size: 15)).lineLimit(1)
                         HStack(spacing: 6) {
                             Text(nodeListRegionLabel(nodeListRegionCode(flag: node.flag, name: node.name)))
                             Text(node.protocolType.uppercased())
@@ -118,7 +118,7 @@ extension ProxiesView {
                                 Text(recent.at, format: .dateTime.hour().minute())
                             }
                         }
-                        .font(.system(size: 10)).foregroundStyle(SeaTheme.muted).lineLimit(1)
+                        .font(.system(size: 12)).monospacedDigit().foregroundStyle(SeaTheme.muted).lineLimit(1)
                     }
                     Spacer(minLength: 8)
                     if switching {

@@ -89,10 +89,17 @@ struct ContentView: View {
             .toolbarBackground(.hidden, for: .windowToolbar)
             .environment(\.seaSceneInWindow, seaAppearance)
         }
-        .environment(\.seaAccent, SeaPresentationPhase.resolve(
+        .environment(\.seaAccent, seaAccent)
+        // The one accent also drives system-drawn details inside sea pages
+        // (text caret, progress, focus), instead of the macOS blue.
+        .tint(seaAppearance ? seaAccent : nil)
+    }
+
+    private var seaAccent: Color {
+        SeaPresentationPhase.resolve(
             status: MenuBarProtectionStatus(appState).kind,
             disconnecting: appState.isDisconnecting,
-            failed: appState.lastConnectionFailure != nil) == .day ? SeaTheme.warm : SeaTheme.cool)
+            failed: appState.lastConnectionFailure != nil) == .day ? SeaTheme.warm : SeaTheme.cool
     }
 }
 

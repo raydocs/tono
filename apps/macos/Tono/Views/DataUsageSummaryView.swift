@@ -113,7 +113,7 @@ public struct DataUsageSummaryView: View {
                 }
 
                 Text(Self.formatBytes(session.upload))
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                    .font(.system(size: 12, weight: .regular)).monospacedDigit()
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
@@ -128,7 +128,7 @@ public struct DataUsageSummaryView: View {
                 }
 
                 Text(Self.formatBytes(session.download))
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                    .font(.system(size: 12, weight: .regular)).monospacedDigit()
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
@@ -146,7 +146,7 @@ public struct DataUsageSummaryView: View {
                 }
 
                 Text(Self.formatBytes(session.total))
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 12, weight: .semibold)).monospacedDigit()
                     .foregroundStyle(TonoBrand.accent)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }

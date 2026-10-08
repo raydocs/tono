@@ -72,6 +72,7 @@ struct AccountBlockedView: View {
             .disabled(rechecking)
 
             Button("Sign Out", role: .destructive) { Task { await session.logout() } }
+                .modifier(SeaActionStyle(variant: .danger, legacy: .automatic))
 
             // Renewing a plan needs a browser, and this screen is reachable
             // with protection armed and no exit running.

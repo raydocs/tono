@@ -324,7 +324,7 @@ struct ActivityView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(appState.proxyService.activeNodeName.map(nodeCityTitle)
                          ?? String(localized: "No exit selected"))
-                        .font(.system(size: 17, weight: .medium))
+                        .font(.system(size: 17))
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     latencyRefreshButton
@@ -341,7 +341,7 @@ struct ActivityView: View {
                 if appState.connectionsFeedLive {
                     let count = appState.connections.count
                     Text("\(count) current connections")
-                        .font(.system(size: 15, weight: .medium))
+                        .font(.system(size: 15)).monospacedDigit()
                     if appState.connectionsDisplayLimited {
                         Text("Route counts show the newest \(ConnectionActivityPresentation.maxDisplayed) connections only.")
                             .font(.system(size: 10))
@@ -353,15 +353,15 @@ struct ActivityView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(SeaTheme.muted)
                 }
-                Divider()
+                Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
                 Text("Traffic by route · this session")
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .foregroundStyle(SeaTheme.muted)
                 RouteSplitBar(split: appState.appTrafficLedger.overall, height: 7)
                 Text(activityBytes(appState.appTrafficLedger.overall.total))
-                    .font(.system(size: 12, weight: .medium)).monospacedDigit()
+                    .font(.system(size: 15)).monospacedDigit()
                 Text("Session bytes include closed connections; they are not current traffic.")
-                    .font(.system(size: 10))
+                    .font(.system(size: 12))
                     .foregroundStyle(SeaTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -379,11 +379,11 @@ struct ActivityView: View {
 
     private func seaRate(_ title: LocalizedStringKey, value: Int64) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.system(size: 11)).foregroundStyle(SeaTheme.muted)
+            Text(title).font(.system(size: 12)).foregroundStyle(SeaTheme.muted)
             Text(appState.trafficFeedLive ? "\(activityBytes(value))/s" : "—")
-                .font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                .font(.system(size: 15)).monospacedDigit()
             Text(appState.trafficFeedLive ? "Live" : "No live reading")
-                .font(.system(size: 10)).foregroundStyle(SeaTheme.muted)
+                .font(.system(size: 12)).foregroundStyle(SeaTheme.tertiary)
         }
     }
 
@@ -551,7 +551,7 @@ struct ActivityView: View {
             Circle().fill(tint).frame(width: 6, height: 6)
             Text(label).font(.system(size: 10)).foregroundStyle(.secondary)
             Text(activityBytes(bytes))
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.system(size: 10, weight: .medium)).monospacedDigit()
                 .foregroundStyle(.tertiary)
         }
     }
@@ -590,6 +590,12 @@ struct ActivityView: View {
 
     private var sectionPicker: some View {
         HStack(spacing: 6) {
+            if seaEnabled {
+                SeaChoice(label: "Activity", selection: Binding(
+                    get: { section.rawValue },
+                    set: { section = Section(rawValue: $0) ?? .apps }),
+                    options: Section.allCases.map(\.rawValue))
+            } else {
             ForEach(Section.allCases, id: \.self) { candidate in
                 Button {
                     withAnimation(.easeInOut(duration: 0.18)) { section = candidate }
@@ -610,6 +616,7 @@ struct ActivityView: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+            }
             }
 
             if section == .connections {
@@ -796,7 +803,7 @@ struct ActivityView: View {
 
     private var timelineLine: some View {
         LinearGradient(
-            colors: [TonoBrand.accent, .secondary.opacity(0.3)],
+            colors: [seaEnabled ? seaAccent : TonoBrand.accent, .secondary.opacity(0.3)],
             startPoint: .top,
             endPoint: .bottom
         )
@@ -837,7 +844,15 @@ struct ActivityView: View {
         }
     }
 
-    private var filterPills: some View {
+    @ViewBuilder private var filterPills: some View {
+        if seaEnabled {
+            SeaTabs(label: "Route", selection: $selectedFilter, options: filters)
+        } else {
+            legacyFilterPills
+        }
+    }
+
+    private var legacyFilterPills: some View {
         HStack(spacing: 6) {
             ForEach(filters, id: \.self) { filter in
                 Button {
@@ -1017,7 +1032,7 @@ private struct LogEntryRow: View {
                     HStack(spacing: 6) {
                         if let processName = entry.processName {
                             Text(processName)
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(.system(size: seaEnabled ? 15 : 13, weight: seaEnabled ? .regular : .semibold))
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
                                 .layoutPriority(1)
@@ -1028,7 +1043,7 @@ private struct LogEntryRow: View {
                                 .truncationMode(.middle)
                         } else {
                             Text(entry.domain)
-                                .font(.system(size: 13, weight: .semibold, design: seaEnabled ? .default : .monospaced))
+                                .font(.system(size: seaEnabled ? 15 : 13, weight: seaEnabled ? .regular : .semibold, design: seaEnabled ? .default : .monospaced))
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
@@ -1036,9 +1051,9 @@ private struct LogEntryRow: View {
                     }
 
                     Button("Why this route?") { explainsRoute = true }
-                        .buttonStyle(.plain)
                         .font(.system(size: 10))
                         .foregroundStyle(TonoBrand.accent)
+                        .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .plain))
                         .popover(isPresented: $explainsRoute) {
                             ActivityRoutingDetails(entries: [entry])
                         }
@@ -1050,9 +1065,10 @@ private struct LogEntryRow: View {
                         .filter { !$0.isEmpty }
                         .joined(separator: " • ")
                     )
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: seaEnabled ? 12 : 10, weight: seaEnabled ? .regular : .medium))
+                        .monospacedDigit()
                         .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
+                        .textCase(seaEnabled ? nil : .uppercase)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

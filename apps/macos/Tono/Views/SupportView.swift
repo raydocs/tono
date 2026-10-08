@@ -77,8 +77,9 @@ struct SupportView: View {
                         }
                         VStack(alignment: .leading, spacing: 14) {
                             Text("Support tools")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundStyle(SeaTheme.text)
+                                .font(.system(size: 13))
+                                .foregroundStyle(SeaTheme.muted)
+                                .accessibilityAddTraits(.isHeader)
                             terminalEnvCard
                             webrtcCard
                         }
@@ -165,7 +166,7 @@ struct SupportView: View {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 11))
                     Text(String(localized: "Refresh"))
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: seaEnabled ? 15 : 12, weight: .medium))
                 }
                 .foregroundStyle(seaEnabled ? SeaTheme.text : Color.primary)
                 .padding(.horizontal, seaEnabled ? 0 : 12)
@@ -281,7 +282,7 @@ struct SupportView: View {
             icon: "terminal",
             title: String(localized: "Claude Code / Terminal Environment Diagnostics")
         ) {
-            HStack {
+            HStack(alignment: seaEnabled ? .firstTextBaseline : .center) {
                 Text(
                     terminalEnvReport == nil
                         ? String(localized: "Checking terminal proxy sources…")
@@ -291,21 +292,25 @@ struct SupportView: View {
                         ? String(localized: "Residual HTTP_PROXY environment variables detected. This often causes terminal tools (like Claude Code CLI) to fail with connection refused.")
                         : String(localized: "System environment variables are clean. Terminal traffic is transparently routed via Tono TUN virtual adapter. Claude Code, git, npm, and pip work out-of-the-box without manual proxy configuration.")
                 )
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .font(.system(size: seaEnabled ? 12 : 11))
+                .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
                 Spacer()
 
-                Text(
-                    terminalEnvReport == nil
-                        ? String(localized: "Checking…")
-                        : isIncomplete
-                        ? String(localized: "Scan Incomplete")
-                        : hasConflict
-                        ? String(localized: "Proxy Residue Detected")
-                        : String(localized: "Environment Ready")
-                )
+                let status = terminalEnvReport == nil
+                    ? String(localized: "Checking…")
+                    : isIncomplete
+                    ? String(localized: "Scan Incomplete")
+                    : hasConflict
+                    ? String(localized: "Proxy Residue Detected")
+                    : String(localized: "Environment Ready")
+                if seaEnabled {
+                    SeaTag(verbatim: status, kind: terminalEnvReport == nil ? .neutral
+                        : isIncomplete ? .attention : hasConflict ? .danger : .good)
+                        .fixedSize()
+                } else {
+                Text(status)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(statusColor)
                 .padding(.horizontal, 8)
@@ -314,6 +319,7 @@ struct SupportView: View {
                     statusColor.opacity(0.12),
                     in: RoundedRectangle(cornerRadius: 6)
                 )
+                }
             }
 
             if hasConflict {
@@ -994,11 +1000,27 @@ struct SupportCard<Content: View>: View {
 // MARK: - Summary Row
 
 private struct SupportRow: View {
+    @SeaAppearancePreference private var seaEnabled
     let label: String
     let value: String
     var monospaced = false
 
     var body: some View {
+        if seaEnabled {
+            // Key-value row: secondary key, regular value, tabular figures.
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                Text(label)
+                    .font(.system(size: 13))
+                    .foregroundStyle(SeaTheme.muted)
+                    .frame(width: 150, alignment: .leading)
+                Text(value)
+                    .font(.system(size: 13)).monospacedDigit()
+                    .foregroundStyle(SeaTheme.text)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
         HStack(alignment: .firstTextBaseline, spacing: 16) {
             Text(label)
                 .font(.system(size: 12))
@@ -1011,6 +1033,7 @@ private struct SupportRow: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        }
         }
     }
 }

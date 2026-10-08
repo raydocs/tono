@@ -17,6 +17,8 @@ enum SeaTheme {
     static let subtle = text.opacity(0.42)
     static let opaquePanel = Color(hex: "17151C")
     static let danger = Color(hex: "FF9A8A")
+    static let good = Color(hex: "BFECC9")
+    static let attention = Color(hex: "FFD9A0")
     static let primaryGradient = LinearGradient(
         stops: [.init(color: Color(hex: "FFE9C4"), location: 0),
                 .init(color: Color(hex: "FFB877"), location: 0.6),

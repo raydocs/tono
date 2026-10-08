@@ -39,20 +39,20 @@ struct SupportHealthSection: View {
             }
             if changedDuringCheck {
                 Text("The account or connection changed during the check. Check again for a consistent snapshot.")
-                    .font(.system(size: 12)).foregroundStyle(.orange)
+                    .font(.system(size: 12)).foregroundStyle(seaEnabled ? SeaTheme.attention : Color.orange)
             }
             if seaEnabled, let check,
                (check.owner != account?.user?.id
                 || check.accountRevision != account?.accountReadRevision) {
                 Text("The account changed. Check again for a current health result.")
-                    .font(.system(size: 12)).foregroundStyle(.orange)
+                    .font(.system(size: 12)).foregroundStyle(seaEnabled ? SeaTheme.attention : Color.orange)
             }
             if let check, check.owner == account?.user?.id,
                check.accountRevision == account?.accountReadRevision {
                 if seaEnabled,
                    check.generation != appState.connectionCoordinator.protectionOperationGeneration {
                     Text("The connection changed since this check. Results may be stale; check again before sending.")
-                        .font(.system(size: 12)).foregroundStyle(.orange)
+                        .font(.system(size: 12)).foregroundStyle(seaEnabled ? SeaTheme.attention : Color.orange)
                 }
                 LocalHealthResults(check: check)
                 if !seaEnabled {
@@ -127,19 +127,19 @@ struct LocalHealthResults: View {
             Text(check.observedAt, format: .dateTime.hour().minute().second())
                 .font(.system(size: 11)).foregroundStyle(.secondary)
             Text("Connection snapshot: \(check.request.report.uiState)")
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: seaEnabled ? 12 : 11, design: seaEnabled ? .default : .monospaced))
             if let category = check.request.report.error {
                 Text("Last failure category: \(category)")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: seaEnabled ? 12 : 11, design: seaEnabled ? .default : .monospaced))
             }
             ForEach(check.findings) { finding in
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: finding.status == .observed ? "checkmark.circle" : finding.status == .attention ? "exclamationmark.circle" : "questionmark.circle")
-                        .foregroundStyle(finding.status == .attention ? Color.orange : Color.secondary)
+                        .foregroundStyle(finding.status == .attention ? (seaEnabled ? SeaTheme.attention : Color.orange) : Color.secondary)
                         .accessibilityLabel(finding.status == .observed ? String(localized: "Observed") : finding.status == .attention ? String(localized: "Needs attention") : String(localized: "Unknown"))
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 7) {
-                            Text(finding.title).font(.system(size: 12, weight: .semibold))
+                            Text(finding.title).font(.system(size: seaEnabled ? 13 : 12, weight: seaEnabled ? .regular : .semibold))
                             if seaEnabled {
                                 SeaTag(title: LocalizedStringKey(finding.status == .observed ? "Observed"
                                      : finding.status == .attention ? "Needs attention" : "Unknown"),
@@ -169,6 +169,7 @@ struct BuildIdentityDetails: View {
 }
 
 struct SupportReportConfirmationView: View {
+    @SeaAppearancePreference private var seaEnabled
     let draft: SupportReportDraft
     let receipt: SupportReportReceipt?
     let sending: Bool
@@ -179,7 +180,8 @@ struct SupportReportConfirmationView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Preview support report").font(.title2.bold())
+            Text("Preview support report")
+                .font(seaEnabled ? .system(size: 22, weight: .light) : .title2.bold())
             Text("Only the JSON below will be sent to Tono support under the account that collected it. It contains no raw logs, tokens, IP addresses, process names, or browsing history. Build and attempt details stay local beside the receipt.")
                 .font(.system(size: 12)).foregroundStyle(.secondary)
             ScrollView {
@@ -188,7 +190,7 @@ struct SupportReportConfirmationView: View {
             }.frame(minHeight: 180, maxHeight: 260)
             if let receipt {
                 Label(receipt.server.referenceCode, systemImage: "checkmark.circle")
-                    .font(.headline).textSelection(.enabled)
+                    .font(seaEnabled ? .system(size: 15).monospacedDigit() : .headline).textSelection(.enabled)
                 Text("Support received this report. Keep the reference code.")
                     .font(.system(size: 12))
                 Button("Copy receipt and local identity") {
@@ -198,9 +200,9 @@ struct SupportReportConfirmationView: View {
                 .modifier(SeaActionStyle(variant: .quiet, legacy: .plain))
             } else if !canSend {
                 Text("The connection changed. Close this preview and check again before sending.")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(seaEnabled ? SeaTheme.attention : Color.orange)
             } else if let error {
-                Text(error).font(.system(size: 12)).foregroundStyle(.orange)
+                Text(error).font(.system(size: 12)).foregroundStyle(seaEnabled ? SeaTheme.attention : Color.orange)
             }
             HStack {
                 Button("Close", action: close)
