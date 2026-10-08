@@ -1777,6 +1777,24 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(revocations.count, 2)
         XCTAssertEqual(disarms, 0)
         XCTAssertTrue(account.shouldResumeProtection)
+
+        let heldRevocations = PathCallCounter()
+        HeldAccountProtocol.install(host) { _ in heldRevocations.record() }
+        let reportedFailure = expectation(description: "local refusal returns without the full network resource timeout")
+        let failedAuthentication = Task {
+            await account.authenticate { verifications.record(); return response }
+            reportedFailure.fulfill()
+        }
+        await fulfillment(of: [reportedFailure], timeout: 5)
+        // If the deadline regresses, keep the failed assertion but release
+        // the fixture's held request so the test cannot hang the whole suite.
+        transport.invalidateAndCancel()
+        await failedAuthentication.value
+        XCTAssertEqual(heldRevocations.count, 1)
+        XCTAssertEqual(verifications.count, 0)
+        XCTAssertEqual(account.state, .signedOut)
+        XCTAssertEqual(account.signInError, TonoAPIClient.APIError.credentialRecoveryRecord.errorDescription)
+        XCTAssertEqual(disarms, 0)
     }
 
     func testRecoveryRecordWriteFailureIsNotReportedAsAKeychainRefusal() async throws {

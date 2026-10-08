@@ -159,7 +159,7 @@ actor TonoAPIClient {
     /// A failed credential adoption must not use either account's credentials
     /// in this process; the durable marker also blocks old-item restoration.
     private var failedAdoption = false
-    private struct RetiredCredential {
+    nonisolated private struct RetiredCredential: Sendable {
         let refresh: String?
         let bearer: String?
     }
@@ -576,6 +576,19 @@ actor TonoAPIClient {
     }
 
     private func revokeCapturedCredential(_ previous: RetiredCredential, generation: UInt64) async {
+        guard !Task.isCancelled else { return }
+        // Best-effort remote cleanup must not hold the local failure screen
+        // through the transport's full resource timeout. Cancel and drain it
+        // here, rather than leave a logout racing the next authentication.
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await self.performCapturedCredentialRevocation(previous, generation: generation) }
+            group.addTask { try? await Task.sleep(for: .seconds(2)) }
+            _ = await group.next()
+            group.cancelAll()
+        }
+    }
+
+    private func performCapturedCredentialRevocation(_ previous: RetiredCredential, generation: UInt64) async {
         guard let refresh = previous.refresh, !refresh.isEmpty,
               generation == credentialGeneration, !Task.isCancelled else { return }
         do {
