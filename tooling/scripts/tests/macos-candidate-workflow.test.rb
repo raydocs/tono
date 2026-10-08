@@ -103,6 +103,12 @@ abort "0.0.75 source must pass the second candidate gate:\n#{output}" unless sta
 _, status = Open3.capture2e(environment.merge('GITHUB_SHA' => '0' * 40), '/bin/bash', '-c', source_gate, chdir: root)
 abort 'candidate gate accepted a different source checkout' if status.success?
 
+# The XCTest target executes the embedded helper; the committed binary is stale, so the
+# current helper must be built first (run 37714743032 lost the 7504 candidate to it).
+helper_index = build_steps.index { |step| step['run'].to_s.include?('tooling/scripts/build-core-helper.sh') }
+xctest_index = build_steps.index { |step| step['name'] == 'TonoTests XCTest target' }
+abort 'the release XCTest step must run after build-core-helper.sh' unless helper_index && xctest_index && helper_index < xctest_index
+
 manifest_step = build_steps.find { |step| step['name'] == 'Record signed candidate provenance without update authority' }
 abort 'candidate provenance must stay candidate-only' unless manifest_step['if'] == "github.event_name == 'workflow_dispatch' && inputs.candidate_only"
 signing_index = build_steps.index { |step| step['name'] == 'Build, sign and notarize the release archive' }

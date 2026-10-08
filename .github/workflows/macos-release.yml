@@ -149,10 +149,15 @@ jobs:
         with:
           name: sing-box-darwin-arm64
           path: apps/macos/Tono/Resources
-      - name: Verify unsigned sing-box input
+      - name: Verify unsigned sing-box input and build the current helper
+        # Same as macos-ci.yml: the TonoTests XCTest target runs the embedded
+        # tono-core-helper, and the committed binary is stale relative to the
+        # helper sources (run 37714743032 lost the 7504 candidate to it). The
+        # package step rebuilds the helper again before signing.
         run: |
           chmod +x apps/macos/Tono/Resources/sing-box
           sh tooling/scripts/verify-macos-sing-box.sh
+          tooling/scripts/build-core-helper.sh
 
       - name: Resolve the release keychain path
         # A workflow-env value is never shell-expanded, and the runner context
