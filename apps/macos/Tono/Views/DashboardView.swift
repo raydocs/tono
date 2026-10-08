@@ -32,7 +32,8 @@ struct DashboardView: View {
             if showsSeaAppearance && !sceneInWindow {
                 SeaScene(phase: seaPhase, motionEnabled: SeaAppearance.animates(
                     seaMotionMode, reduceMotion: reduceMotion
-                ), progress: appState.isConnecting ? SeaSceneParameters.progress(for: appState.connectionStage) : nil)
+                ), progress: appState.isConnecting ? SeaSceneParameters.progress(for: appState.connectionStage) : nil,
+                   traffic: { [appState] in appState.seaTrafficSample })
             }
         }
         .contentShape(Rectangle())

@@ -65,6 +65,16 @@ final class SeaSceneParametersTests: XCTestCase {
         XCTAssertEqual(probe.elapsed, elapsed, "there is no lasting per-frame sample after the bounded probe")
     }
 
+    @MainActor
+    func testWaterTrafficRisesWithLiveRatesThenDecaysOnceTheReadingFreezes() {
+        var traffic = SeaWaterTraffic()
+        for frame in 0..<120 { traffic.advance(.init(up: 0, down: 2_000_000 + Int64(frame / 60)), dt: 1.0 / 60) }
+        XCTAssertGreaterThan(traffic.level, 0.5)
+        XCTAssertLessThanOrEqual(traffic.level, 1)
+        for _ in 0..<600 { traffic.advance(.init(up: 0, down: 2_000_001), dt: 1.0 / 60) }
+        XCTAssertLessThan(traffic.level, 0.05, "a reading frozen past the 1 s feed cadence is stale and decays")
+    }
+
     func testLowPowerPausesAutomaticSamplingWithoutPromotingMeasuredStatic() {
         let probe = SeaSceneQualityProbe()
         XCTAssertTrue(probe.canSample(preference: "Auto", reduceMotion: false, lowPower: false))

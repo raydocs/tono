@@ -12,9 +12,11 @@ struct SeaSceneLayerView: NSViewRepresentable {
     let reduceMotion: Bool
     let decorations: Bool
     let active: Bool
+    var traffic: (() -> SeaTrafficSample?)? = nil
 
     func makeNSView(context: Context) -> SeaSceneNativeView { SeaSceneNativeView() }
     func updateNSView(_ view: SeaSceneNativeView, context: Context) {
+        view.trafficSource = traffic
         view.configure(phase: phase, progress: progress, preference: preference,
                        reduceMotion: reduceMotion, decorations: decorations, active: active)
     }
@@ -42,6 +44,20 @@ final class SeaSceneNativeView: NSView {
     private var paused = false
     private var selectedQuality = SeaSceneQuality.static
     private lazy var probeTarget = SeaSceneProbeTarget(view: self)
+    /// Read by the water's display link only; no subscription, no SwiftUI state per frame.
+    var trafficSource: (() -> SeaTrafficSample?)?
+    private var water: SeaWaterRenderer?
+    private var waterUnavailable = false
+    private var waterLink: CADisplayLink?
+    private var waterCovering = false
+    private var waterLastTick: Double?
+    private var waterClock = 0.0
+    private var traffic = SeaWaterTraffic()
+    private lazy var waterTarget = SeaSceneWaterTarget(view: self)
+
+    /// Real-time water is the Full tier only; Lite, Static, Reduce Motion, low
+    /// power, reduced transparency/contrast and any Metal failure keep layer water.
+    private var metalWaterWanted: Bool { selectedQuality == .full && decorations && !waterUnavailable }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -140,6 +156,7 @@ final class SeaSceneNativeView: NSView {
         renderer = SeaSceneLayers(root: scene, size: bounds.size, backingScale: scale)
         renderer?.apply(phase: phase, progress: progress, animated: false)
         renderer?.setQuality(selectedQuality, decorations: decorations, phase: phase)
+        placeWater()
         CATransaction.commit()
     }
 
@@ -194,6 +211,71 @@ final class SeaSceneNativeView: NSView {
         selectedQuality = quality
         renderer?.setQuality(quality, decorations: decorations, phase: phase)
         if quality == .static { renderer?.apply(phase: phase, progress: progress, animated: false) }
+        reconcileWater()
+    }
+
+    /// Runs the water's display link only while visible, active, unpaused and Full.
+    private func reconcileWater() {
+        if metalWaterWanted && water == nil {
+            if let made = SeaWaterRenderer() {
+                made.onFirstPresent = { [weak self] in self?.waterDidPresent() }
+                made.onFailure = { [weak self] in self?.waterFailed() }
+                water = made
+            } else {
+                waterUnavailable = true
+            }
+        }
+        let run = metalWaterWanted && sceneIsVisible && !paused && renderer != nil
+        if !metalWaterWanted && (waterCovering || water?.layer.isHidden == false) {
+            waterCovering = false
+            water?.resetPresentation()
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        placeWater()
+        CATransaction.commit()
+        if run, waterLink == nil {
+            let link = displayLink(target: waterTarget, selector: #selector(SeaSceneWaterTarget.tick(_:)))
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+            waterLastTick = nil
+            waterLink = link
+            link.add(to: .main, forMode: .common)
+        } else if !run, let link = waterLink {
+            link.invalidate()
+            waterLink = nil
+        }
+    }
+
+    private func placeWater() {
+        guard let renderer else { return }
+        renderer.placeMetalWater(water?.layer, live: metalWaterWanted, covering: waterCovering)
+        water?.resize(to: renderer.waterSize, backingScale: window?.backingScaleFactor ?? 2)
+    }
+
+    private func waterDidPresent() {
+        guard metalWaterWanted, !waterCovering else { return }
+        waterCovering = true
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        placeWater()
+        CATransaction.commit()
+    }
+
+    private func waterFailed() {
+        waterUnavailable = true
+        waterCovering = false
+        reconcileWater()
+    }
+
+    func drawWater(_ link: CADisplayLink) {
+        guard let renderer, let water, metalWaterWanted else { return }
+        let dt = waterLastTick.map { min(0.1, max(0, link.timestamp - $0)) } ?? 0
+        waterLastTick = link.timestamp
+        // An hour of visible time keeps Float phases precise.
+        waterClock = (waterClock + dt).truncatingRemainder(dividingBy: 3600)
+        traffic.advance(phase == .day ? trafficSource?() : nil, dt: dt)
+        water.draw(SeaWaterUniforms(inputs: renderer.waterInputs(), drawable: water.layer.drawableSize,
+                                    time: waterClock, traffic: traffic))
     }
 
     private var sceneIsVisible: Bool {
@@ -248,6 +330,10 @@ final class SeaSceneNativeView: NSView {
         resizeTask = nil
         qualityDisplayLink?.invalidate()
         qualityDisplayLink = nil
+        waterLink?.invalidate()
+        waterLink = nil
+        water?.layer.removeFromSuperlayer()
+        water = nil
         observers.forEach(NotificationCenter.default.removeObserver)
         observers.removeAll()
         scene.removeAllAnimations()
@@ -277,6 +363,7 @@ private final class SeaSceneLayers {
     private var decorated: Bool?
     private var lastPhase: SeaPresentationPhase?
     private var loopPhase: SeaPresentationPhase?
+    private let sunGrainMask = CALayer()
 
     init(root: CALayer, size: CGSize, backingScale: CGFloat) {
         self.root = root
@@ -302,10 +389,61 @@ private final class SeaSceneLayers {
             colors: ["FFD6AA60", "FF966420", "00000000"], stops: [0, 0.45, 1],
             center: CGPoint(x: size.width * 0.673913, y: 9), radius: CGSize(width: 260 * unit, height: 9))
         horizon.opacity = 0
+        // A thin warm haze band on the sea line, brighter under the sun.
+        let haze = layer("horizon-haze", parent: horizon,
+            frame: CGRect(x: 0, y: 9 - 34 * unit, width: size.width, height: 68 * unit))
+        linear("horizon-haze-band", parent: haze, colors: ["FFC8A000", "FFC8A01F", "FFD2AA33", "FFC8A014", "FFC8A000"],
+            stops: [0, 0.44, 0.5, 0.6, 1])
+        radial("horizon-haze-sun", parent: haze, frame: haze.bounds,
+            colors: ["FFDCB066", "FFB07A26", "FFB07A00"], stops: [0, 0.5, 1],
+            center: CGPoint(x: size.width * 0.673913, y: 34 * unit), radius: CGSize(width: 320 * unit, height: 30 * unit))
         let grain = image("grain", parent: root, frame: root.bounds,
             name: "grain", tile: CGSize(width: 220, height: 220), luminance: false)
         grain.opacity = 0.5
         grain.compositingFilter = CIFilter(name: "CIOverlayBlendMode")
+        // The connected sun is clean light: no grain over its disk.
+        let clear = Self.color("FFFFFF").copy(alpha: 0)!
+        sunGrainMask.contentsScale = scale
+        sunGrainMask.frame = root.bounds
+        sunGrainMask.contents = Self.radialImage(size: size, scale: scale, colors: [clear, clear, Self.color("FFFFFF")],
+            stops: [0, 0.55, 1], center: CGPoint(x: size.width * 0.673913, y: size.height * 0.55 - 145 * unit),
+            radius: CGSize(width: 150 * unit, height: 150 * unit))
+    }
+
+    /// Full-quality water drawn by Metal sits where the layer water is, under
+    /// the horizon haze and grain. The layer water is hidden only once Metal
+    /// has a frame on screen; until then (or on any Metal failure) it shows.
+    func placeMetalWater(_ metal: CALayer?, live: Bool, covering: Bool) {
+        if let metal {
+            // A rebuilt scene removes every root sublayer, so re-insert above its new water.
+            if metal.superlayer !== root {
+                metal.removeFromSuperlayer()
+                root.insertSublayer(metal, above: water)
+            }
+            metal.frame = water.frame
+            metal.isHidden = !live
+        }
+        water.isHidden = metal != nil && live && covering
+    }
+
+    var waterSize: CGSize { water.bounds.size }
+
+    /// The water's reflection follows what the sky layers show right now,
+    /// including mid-transition presentation values.
+    func waterInputs() -> SeaWaterInputs {
+        func value(_ name: String, _ key: String, _ fallback: Double) -> Double {
+            guard let layer = named[name] else { return fallback }
+            return ((layer.presentation() ?? layer).value(forKeyPath: key) as? NSNumber)?.doubleValue ?? fallback
+        }
+        let height = max(1, Double(size.height))
+        let unit = Double(self.unit)
+        let sunCenter = value("sun-track", "position.y", Double(sky.bounds.height) - 145 * unit)
+        return SeaWaterInputs(
+            sunHeight: (Double(sky.bounds.height) - sunCenter) / height,
+            sunRadius: 95 * unit * value("sun-track", "transform.scale", 1) / height,
+            moonHeight: 168 * unit / height, moonRadius: 19 * unit / height,
+            glow: value("sun-glow", "opacity", 0), red: value("sun-red", "opacity", 1),
+            stars: value("stars-0", "opacity", 0), moon: value("moon", "opacity", 0))
     }
 
     private func buildSky() {
@@ -356,11 +494,13 @@ private final class SeaSceneLayers {
         top.mask = gradientMask(frame: top.bounds, stops: [0, 0.454545, 0.606061, 1], values: [1, 1, 0, 0])
         night.compositingFilter = CIFilter(name: "CIAdditionCompositing")
         let day = layer("sky-day", parent: sky)
-        linear("day-linear", parent: day, colors: ["00000000", "00000000", "FFAC6266"], stops: [0, 0.42, 1])
+        // Light pass (decision 077): warmer low sky, hotter sun light, cool blue-grey zenith (no violet).
+        linear("day-linear", parent: day, colors: ["FFB46A00", "FFB46A00", "FFB46A70"], stops: [0, 0.46, 1])
         radial("day-light", parent: day, frame: day.bounds,
-            colors: ["FFB4648C", "E260463D", "00000000"], stops: [0, 0.46, 1],
+            colors: ["FFC0749E", "E8684A3D", "E8684A00"], stops: [0, 0.46, 1],
             center: CGPoint(x: size.width * 0.673913, y: sky.bounds.height - 134 * unit),
             radius: CGSize(width: 440 * unit, height: 310 * unit))
+        linear("day-zenith", parent: day, colors: ["1C2640D9", "2B3048A6", "3A304A33", "3A304A00"], stops: [0, 0.2, 0.4, 0.54])
 
         let moon = layer("moon", parent: sky,
             frame: CGRect(x: size.width * 0.8108696 - 70 * unit, y: sky.bounds.height - 238 * unit,
@@ -398,6 +538,9 @@ private final class SeaSceneLayers {
             let cloud = image("cloud-\(index)", parent: sky,
                 frame: CGRect(x: 0, y: sky.bounds.height - bottom - height, width: size.width * 0.6, height: height),
                 name: "cloud-\(index)")
+            // Only the cloud's upper edge catches the low sun; it fades with the day.
+            let rim = linear("cloud-\(index)-rim", parent: cloud, colors: ["FFE0A8", "FF9C5C"], stops: [0, 1])
+            rim.mask = rimMask("cloud-\(index)", size: cloud.bounds.size)
             loops.append((cloud, "cloud-drift", keyframes("transform.translation.x",
                 values: [-size.width * 0.65, size.width], times: [0, 1], duration: duration, delay: delay), true))
         }
@@ -414,10 +557,11 @@ private final class SeaSceneLayers {
             times: [0, 0.5, 1], duration: 2.4), true))
         let sunGlow = layer("sun-glow", parent: motion)
         let pulse = layer("sun-glow-pulse", parent: sunGlow)
-        radial("sun-glow-wide", parent: pulse, frame: pulse.bounds.insetBy(dx: -250 * unit, dy: -250 * unit),
-            colors: ["FFAA6080", "FFAA6052", "F0605429", "00000000"], stops: [0, 0.27, 0.58, 0.72])
-        radial("sun-glow-edge", parent: pulse, frame: pulse.bounds.insetBy(dx: -10 * unit, dy: -10 * unit),
-            colors: ["FFE9C280", "FFE9C280", "FFCB7F66", "00000000"], stops: [0, 0.85, 0.91, 1])
+        radial("sun-glow-wide", parent: pulse, frame: pulse.bounds.insetBy(dx: -300 * unit, dy: -300 * unit),
+            colors: ["FFB86A8C", "FFA45C4D", "F0605426", "F060540D", "F0605400"], stops: [0, 0.22, 0.5, 0.64, 0.78])
+        // A soft over-exposed bloom replaces the old hard rim ring.
+        radial("sun-glow-edge", parent: pulse, frame: pulse.bounds.insetBy(dx: -46 * unit, dy: -46 * unit),
+            colors: ["FFF2D6B3", "FFF2D6B3", "FFD7975C", "FFB26A1F", "FFB26A00"], stops: [0, 0.64, 0.76, 0.88, 1])
         disk("sun", parent: motion, mirrored: false)
     }
 
@@ -539,9 +683,10 @@ private final class SeaSceneLayers {
             base.setAffineTransform(CGAffineTransform(scaleX: 1, y: -1))
             red.setAffineTransform(CGAffineTransform(scaleX: 1, y: -1))
         } else {
-            radial("sun-rim", parent: body, frame: body.bounds,
-                colors: ["00000000", "00000000", "FFD59A99", "FFE6BFCF"],
-                stops: [0, 1 - 8 / 95, 1 - 2 / 95, 1])
+            // Broad over-exposed core with a faint warm limb, instead of a hard rim.
+            radial("sun-core", parent: body, frame: body.bounds,
+                colors: ["FFF9EAB8", "FFF4D8A0", "FFEFC85C", "FFE8B81A", "FFE8B800", "C2463414", "9A2C3038"],
+                stops: [0, 0.34, 0.52, 0.66, 0.74, 0.9, 1])
         }
     }
 
@@ -554,6 +699,9 @@ private final class SeaSceneLayers {
         radial(prefix + "-radial", parent: group, frame: group.bounds,
             colors: [night ? "9DACFA9E" : "FF96549E", "00000000"], stops: [0, 1],
             center: CGPoint(x: size.width * 0.673913, y: sky.bounds.height), radius: CGSize(width: 540 * unit, height: 210 * unit))
+        if !night {
+            linear(prefix + "-zenith", parent: group, colors: ["0D1530CC", "141A3666", "141A3600"], stops: [0, 0.22, 0.4])
+        }
         return group
     }
 
@@ -604,6 +752,11 @@ private final class SeaSceneLayers {
             opacity(prefix + "-shade", p.shade, sunTime)
             if prefix != "sun" { opacity(prefix + "-body", phase == .dusk || phase == .blocked ? 0.9 : phase == .dawn ? 0.62 : 0.6, skyTime) }
         }
+        // The hot core gives way as the red, failed sun fades in.
+        opacity("sun-core", 1 - 0.8 * p.red, animated ? 2.2 : 0)
+        opacity("cloud-1-rim", p.day * 0.9, dayTime)
+        opacity("cloud-2-rim", p.day * 0.6, dayTime)
+        named["grain"]?.mask = phase == .day ? sunGrainMask : nil
         change("sun-glow", "transform.scale.y", p.diskShape, duration: sunTime, ease: ease, sunset: phase == .night, shape: true)
         opacity("sun-glow", p.glow, dayTime)
         opacity("halo", phase == .dawn ? 1 : 0, animated ? 0.8 : 0)
@@ -806,6 +959,21 @@ private final class SeaSceneLayers {
         mask.contentsScale = scale
         mask.frame = CGRect(origin: .zero, size: size)
         mask.contents = Self.texture(name, size: size, scale: scale, tile: tile, luminance: true)
+        return mask
+    }
+
+    /// CSS `mask: cloud, cloud 0 3px; mask-composite: subtract` -> the cloud's top edge only.
+    private func rimMask(_ asset: String, size: CGSize) -> CALayer {
+        let mask = CALayer()
+        mask.contentsScale = scale
+        mask.frame = CGRect(origin: .zero, size: size)
+        guard let source = NSImage(named: NSImage.Name("sea-" + asset))?.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let context = Self.context(size: size, scale: scale) else { return mask }
+        context.scaleBy(x: scale, y: scale)
+        context.draw(source, in: CGRect(origin: .zero, size: size))
+        context.setBlendMode(.destinationOut)
+        context.draw(source, in: CGRect(x: 0, y: -3, width: size.width, height: size.height))
+        mask.contents = context.makeImage()
         return mask
     }
 
