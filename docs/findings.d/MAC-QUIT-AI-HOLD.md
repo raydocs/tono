@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| MAC-QUIT-AI-HOLD | Normal macOS Quit fully releases the selective AI hold, requiring reconciliation with the current stop safety requirement | in-PR | 修复 [#1445](https://github.com/raydocs/tono/pull/1445)；decision 073 provisional | 高·已确认（P1，代码路径） | 本轮普通 Quit 武装/retain-ai 保留窄层，显式 Disconnect/Restore 完全释放并优先于重叠 Quit；次启可观察/移除。托管 XCTest/评审待验；原生 PF/DNS/签名候选未执行，未合 main，不能标 fixed。 |
+| MAC-QUIT-AI-HOLD | Normal macOS Quit fully releases the selective AI hold, requiring reconciliation with the current stop safety requirement | fixed(53676e913) | 修复 [#1445](https://github.com/raydocs/tono/pull/1445)；decision 073 provisional | 高·已确认（P1，代码路径） | 本轮普通 Quit 武装/retain-ai 保留窄层，显式 Disconnect/Restore 完全释放并优先于重叠 Quit；次启可观察/移除。托管 XCTest/评审待验；原生 PF/DNS/签名候选未执行，未合 main，不能标 fixed。 |
 
 Reverified on `origin/main` **72a9c98db24f5b3f5ad30a1be7191ce17a0df0be**.
 Ownership: SHIP_PLAN §2 item 10. This is the previously reported M5/M7 finding,

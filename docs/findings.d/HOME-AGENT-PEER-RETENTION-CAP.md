@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| HOME-AGENT-PEER-RETENTION-CAP | 累积保留的历史 peer 基线超过 2,000 后，新的用量报告无法保存和发送 | in-PR | [R3-E2T2 audit](../agent-reports/R3-E2T2-codex-sol-20260930.md)；[#1439](https://github.com/raydocs/tono/pull/1439) | 中·已确认 | P2；reporter 尚未部署。安全清理需要计数连续性设计，不能直接删除离线 peer 后重新计费其历史流量。#1439：终身基线上限独立为 20,000（状态文件 16 MiB），不删除基线；达到上限后新 peer 不计费只告警（少计不多计） |
+| HOME-AGENT-PEER-RETENTION-CAP | 累积保留的历史 peer 基线超过 2,000 后，新的用量报告无法保存和发送 | fixed(489a4d677) | [R3-E2T2 audit](../agent-reports/R3-E2T2-codex-sol-20260930.md)；[#1439](https://github.com/raydocs/tono/pull/1439) | 中·已确认 | P2；reporter 尚未部署。安全清理需要计数连续性设计，不能直接删除离线 peer 后重新计费其历史流量。#1439：终身基线上限独立为 20,000（状态文件 16 MiB），不删除基线；达到上限后新 peer 不计费只告警（少计不多计） |
 
 `services/home-agent/report_example.py:148` 将当前 inventory 的数量限制用于永久保存的 `peerCounters`。`:488–507` 只添加或更新基线，不删除历史 stable ID。因此正常设备退役/重新注册可让只有一个当前 peer 的状态累积到 2,001 条。
 
