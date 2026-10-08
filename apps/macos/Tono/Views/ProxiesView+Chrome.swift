@@ -27,12 +27,7 @@ extension ProxiesView {
 
                 if appState.isConnected {
                     Button {
-                        guard !isTesting else { return }
-                        isTesting = true
-                        Task {
-                            await appState.testSelectedExitLatency()
-                            isTesting = false
-                        }
+                        testCurrentExit()
                     } label: {
                         HStack(spacing: 5) {
                             if isTesting {
@@ -65,6 +60,15 @@ extension ProxiesView {
                     .modifier(ProxiesLegacyGlass(enabled: !showsSeaAppearance))
                 }
             }
+        }
+    }
+
+    func testCurrentExit() {
+        guard !isTesting else { return }
+        isTesting = true
+        Task {
+            await appState.testSelectedExitLatency()
+            isTesting = false
         }
     }
 

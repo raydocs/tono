@@ -85,40 +85,31 @@ struct WelcomeIntroView: View {
 
                         Spacer(minLength: 24)
 
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("HOW TONO WORKS")
-                                .font(.caption.weight(.semibold)).tracking(1.3)
-                                .foregroundStyle(SeaTheme.cool)
+                        // No card: the line sits on the scene at the bottom
+                        // left like the home title, with a soft shadow for
+                        // the bright day sky.
+                        VStack(alignment: .leading, spacing: 12) {
                             Text(seaStep.title)
-                                .font(.system(size: 36, weight: .light)).tracking(-0.7)
+                                .font(.system(size: 40, weight: .light)).tracking(-0.8)
                                 .accessibilityAddTraits(.isHeader)
                             Text(seaStep.detail)
-                                .font(.body)
-                                .foregroundStyle(SeaTheme.muted)
+                                .font(.system(size: 15))
+                                .foregroundStyle(SeaTheme.text.opacity(0.86))
                                 .fixedSize(horizontal: false, vertical: true)
-                            if seaStep == .routes {
-                                Label("Tono picks your route", systemImage: "network")
-                                    .font(.callout.weight(.medium))
-                                    .padding(.horizontal, 14).padding(.vertical, 9)
-                                    .background(.white.opacity(0.10), in: Capsule())
-                            }
                             Text("Illustration only · not your current connection status")
-                                .font(.callout).foregroundStyle(SeaTheme.muted)
+                                .font(.system(size: 11)).foregroundStyle(SeaTheme.tertiary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        .padding(28)
+                        .frame(maxWidth: 520, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(SeaTheme.opaquePanel,
-                                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                .strokeBorder(.white.opacity(0.16), lineWidth: 1)
-                        }
+                        .shadow(color: .black.opacity(0.35), radius: 12, y: 2)
+                        .id(seaStep)
+                        .transition(reduceMotion ? .opacity : TonoMotion.textSwapTransition)
 
                         HStack(spacing: 10) {
                             ForEach(SeaIntroStep.allCases, id: \.self) { step in
                                 Button {
-                                    seaStep = step
+                                    withAnimation(TonoMotion.textSwap(reduceMotion: reduceMotion)) { seaStep = step }
                                 } label: {
                                     Circle()
                                         .fill(step == seaStep ? SeaTheme.warm : SeaTheme.muted.opacity(0.5))
@@ -135,7 +126,9 @@ struct WelcomeIntroView: View {
                                     .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .link))
                             }
                             Button {
-                                if let next = seaStep.next { seaStep = next } else { finish() }
+                                if let next = seaStep.next {
+                                    withAnimation(TonoMotion.textSwap(reduceMotion: reduceMotion)) { seaStep = next }
+                                } else { finish() }
                             } label: {
                                 if seaStep == .routes { Text("Get started") } else { Text("Next") }
                             }

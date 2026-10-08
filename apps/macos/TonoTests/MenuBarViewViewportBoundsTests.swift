@@ -6,8 +6,8 @@ final class MenuBarViewViewportBoundsTests: XCTestCase {
     func testMenuBarViewDefaultWidth() {
         let view = MenuBarView()
         _ = view
-        // MenuBarView is 280pt wide fixed popover
-        XCTAssertEqual(MenuBarView.popoverWidth, 280)
+        // MenuBarView is 300pt wide fixed popover (sea tray width)
+        XCTAssertEqual(MenuBarView.popoverWidth, 300)
     }
 
     func testPopoverHeightClampingAcrossScreenSizes() {

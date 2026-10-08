@@ -604,7 +604,7 @@ extension ProxiesView {
 
         return nodes.filter { node in
             let matchesFilter = regionFilter == nil
-                || nodeListRegionCode(flag: node.flag, name: node.name) == regionFilter
+                || listRegionCode(node) == regionFilter
             if ProxyNode.hy2UdpIsVendorBlocked(node.name) { return false }
 
             guard !query.isEmpty else { return matchesFilter }

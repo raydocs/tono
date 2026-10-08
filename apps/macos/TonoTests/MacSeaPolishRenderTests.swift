@@ -60,6 +60,53 @@ final class MacSeaPolishRenderTests: XCTestCase {
                 try await capture("polish-a-\(language)-\(option)-\(page.rawValue)", window: window)
             }
         }
+        try await capturePolishCSurfaces(language: language, fixture: fixture)
+    }
+
+    /// Package C surfaces outside ContentView: sign-in (plain and with the kill
+    /// switch holding), the intro, and the menu bar panel at its content height.
+    private func capturePolishCSurfaces(language: String, fixture: FixtureState) async throws {
+        func styled<V: View>(_ view: V) -> AnyView {
+            AnyView(view.modifier(SeaPageAppearance())
+                .environment(\.seaAppearanceOverride, true)
+                .environment(\.colorScheme, .dark)
+                .environment(\.locale, Locale(identifier: Locale.preferredLanguages.first ?? "en")))
+        }
+        let login = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        login.state = .signedOut
+        login.authMethods = .init(email: .init(enabled: true, clientId: nil),
+            apple: .init(enabled: false, clientId: nil), google: .init(enabled: false, clientId: nil))
+        set("idle", app: fixture.app)
+        for held in [false, true] {
+            fixture.app.isProtectionBlocked = held
+            let (window, _) = try await makeNativeWindow(size: CGSize(width: 920, height: 600),
+                root: styled(LoginView(session: login).environment(fixture.app)))
+            defer { close(window) }
+            await settle(0.5)
+            try await capture("polish-c-\(language)-login\(held ? "-held" : "")", window: window)
+        }
+        fixture.app.isProtectionBlocked = false
+        do {
+            let (window, _) = try await makeNativeWindow(size: CGSize(width: 920, height: 600), root: styled(WelcomeIntroView()))
+            defer { close(window) }
+            await settle(0.5)
+            try await capture("polish-c-\(language)-intro", window: window)
+        }
+        for state in ["idle", "connected"] {
+            set(state, app: fixture.app)
+            let panel = styled(MenuBarView().environment(fixture.app).environment(fixture.account))
+            let measure = NSHostingView(rootView: panel)
+            let height = max(120, min(480, ceil(measure.fittingSize.height)))
+            let (window, _) = try await makeNativeWindow(size: CGSize(width: MenuBarView.popoverWidth, height: height), root: panel)
+            defer { close(window) }
+            // A panel has no traffic lights; hide the fixture window's own.
+            for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                window.standardWindowButton(kind)?.isHidden = true
+            }
+            await settle(0.4)
+            try await capture("polish-c-\(language)-menubar-\(state)", window: window)
+        }
+        set("idle", app: fixture.app)
     }
 
     func testFullTransitionsWaterAndProcessCPU() async throws {

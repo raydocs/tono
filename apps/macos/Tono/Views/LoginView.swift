@@ -9,6 +9,7 @@ struct LoginView: View {
     @Environment(AppState.self) private var appState
     @SeaAppearancePreference private var seaAppearance
     @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults) private var seaMotionMode = "Auto"
+    @SeaDisplayPreferences private var seaDisplay
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var email = ""
@@ -102,7 +103,9 @@ struct LoginView: View {
                          motionEnabled: SeaAppearance.animates(seaMotionMode, reduceMotion: reduceMotion))
                     .ignoresSafeArea()
                 ScrollView(.vertical) {
-                    VStack(alignment: .leading, spacing: 30) {
+                    // Extra room below lifts the card above the horizon
+                    // instead of cutting it through its middle.
+                    VStack(alignment: .leading, spacing: 24) {
                         HStack(spacing: 10) {
                             Image("TonoMark").resizable().scaledToFit()
                                 .frame(width: 30, height: 30).accessibilityHidden(true)
@@ -110,15 +113,25 @@ struct LoginView: View {
                         }
                         .foregroundStyle(SeaTheme.text)
                         signInForm
+                        GateProtectionSection(session: session, disabled: locked, seaStandalone: true)
                     }
-                    .frame(maxWidth: 460, alignment: .leading)
+                    .frame(maxWidth: 420, alignment: .leading)
                     .padding(.horizontal, 32)
-                    .padding(.vertical, 40)
+                    .padding(.top, 32)
+                    .padding(.bottom, 32 + min(140, proxy.size.height * 0.18))
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: proxy.size.height, alignment: .center)
                 }
             }
         }
+    }
+
+    /// Dark glass over the night sky; solid when transparency is reduced or
+    /// contrast is increased.
+    private var seaCardFill: Color {
+        seaDisplay.reduceTransparency || seaDisplay.contrast == .increased
+            ? SeaTheme.opaquePanel
+            : SeaTheme.opaquePanel.opacity(0.78)
     }
 
     private var originalSignIn: some View {
@@ -191,11 +204,14 @@ struct LoginView: View {
 
     private var signInForm: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(LocalizedStringKey(showsCodeStep ? "02 / CHECK YOUR EMAIL" : "01 / SIGN IN"))
-                .font(.caption.weight(.semibold)).tracking(1)
-                .foregroundStyle(.secondary)
+            if !seaAppearance {
+                Text(LocalizedStringKey(showsCodeStep ? "02 / CHECK YOUR EMAIL" : "01 / SIGN IN"))
+                    .font(.caption.weight(.semibold)).tracking(1)
+                    .foregroundStyle(.secondary)
+            }
             Text(LocalizedStringKey(showsCodeStep ? "Open your inbox" : "Sign in to Tono"))
-                .font(.system(size: 28, weight: .semibold))
+                .font(.system(size: 28, weight: seaAppearance ? .light : .semibold))
+                .tracking(seaAppearance ? -0.5 : 0)
                 .accessibilityAddTraits(.isHeader)
             Text(LocalizedStringKey(showsCodeStep
                  ? "Find the latest email from Tono, then return here and paste the six-digit code. Tono verifies it automatically."
@@ -339,7 +355,7 @@ struct LoginView: View {
                                     Image(systemName: "lock.fill")
                                 }
                                 .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(seaAppearance ? AnyShapeStyle(SeaTheme.tertiary) : AnyShapeStyle(.secondary))
                                 .fixedSize(horizontal: false, vertical: true)
                             }
                             if showsCodeStep {
@@ -482,12 +498,15 @@ struct LoginView: View {
                     }
                 }
                 // The dashboard needs .ready, so this is the explicit escape
-                // hatch for a fail-closed host stuck at sign-in.
-                GateProtectionSection(session: session, disabled: locked)
+                // hatch for a fail-closed host stuck at sign-in. Sea draws it
+                // as its own row under the card.
+                if !seaAppearance {
+                    GateProtectionSection(session: session, disabled: locked)
+                }
             }
         }
         .padding(28)
-        .background(seaAppearance ? SeaTheme.opaquePanel
+        .background(seaAppearance ? seaCardFill
                     : (colorScheme == .dark ? Color(hex: "1B1C36") : .white),
                     in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {

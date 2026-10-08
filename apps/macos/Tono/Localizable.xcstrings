@@ -1,6 +1,34 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "stepName.preparing": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "preparing protection"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "准备保护"}}}},
+    "stepName.preparingHelper": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "preparing the secure helper"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "准备安全组件"}}}},
+    "stepName.startingKillSwitch": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "starting the Kill Switch"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "开启断网保护"}}}},
+    "stepName.startingTunnel": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "starting the protected tunnel"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "启动保护隧道"}}}},
+    "stepName.lockingTraffic": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "locking traffic to the tunnel"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "锁定流量到隧道"}}}},
+    "stepName.applyingCloudPolicy": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "applying secure app routing"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "应用安全应用分流"}}}},
+    "stepName.securingDNS": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "securing DNS"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "保护 DNS"}}}},
+    "stepName.checkingExit": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "checking the exit"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "检查安全出口"}}}},
+    "stepName.verifyingTraffic": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "verifying traffic protection"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "验证流量保护"}}}},
+    "Stopped while %@": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Stopped while %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "在「%@」这一步没通过"}}}},
+    "Direct internet is available.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Direct internet is available."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "直连网络可用。"}}}},
+    "Support code %@": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Support code %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "支持码 %@"}}}},
+    "Test current": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Test current"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "测试当前线路"}}}},
+    "Server filter": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Server filter"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "线路筛选"}}}},
+    "All servers": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "All servers"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "全部线路"}}}},
+    "Other regions": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Other regions"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "其他地区"}}}},
+    "About recommendations": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "About recommendations"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "关于推荐"}}}},
+    "No recommendation right now.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "No recommendation right now."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "暂无推荐。"}}}},
+    "Catalog choice, not tested. Nothing was switched.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Catalog choice, not tested. Nothing was switched."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "目录推荐，尚未测试。没有切换任何线路。"}}}},
+    "Connected successfully in the last 24 hours.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Connected successfully in the last 24 hours."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "过去 24 小时内连接成功。"}}}},
+    "Use": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Use"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "使用"}}}},
+    "Exit": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Exit"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "出口"}}}},
+    "%lld apps": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "%lld apps"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "%lld 个应用"}}}},
+    "Closes these connections only. Tono stays connected.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Closes these connections only. Tono stays connected."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "只关闭这些连接，Tono 保持连接。"}}}},
+    "Advanced": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Advanced"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "高级"}}}},
+    "Read-only checks; nothing is changed or sent. Upload diagnostics shows a preview first and sends only after you confirm.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Read-only checks; nothing is changed or sent. Upload diagnostics shows a preview first and sends only after you confirm."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "只读检查，不会改动或发送任何内容。上传诊断会先显示预览，你确认后才发送。"}}}},
+    "Restoring internet turns protection off.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Restoring internet turns protection off."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "恢复正常网络会关闭保护。"}}}},
+    "Switch server": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Switch server"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "切换线路"}}}},
     "Tono could not update its sign-in recovery record. You are signed out. Check available disk space and Tono's Application Support folder permissions, then try again.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Tono could not update its sign-in recovery record. You are signed out. Check available disk space and Tono's Application Support folder permissions, then try again."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "Tono 无法更新登录恢复记录，现已退出登录。请检查可用磁盘空间及 Tono 的 Application Support 文件夹权限，然后重试。"}}}},
     "AI recovery rules may still be active. Restore internet to remove them.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "AI recovery rules may still be active. Restore internet to remove them."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "AI 恢复规则可能仍在生效。恢复互联网可移除这些规则。"}}}},
     "Your Mac, appearance, privacy, and app information.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Your Mac, appearance, privacy, and app information."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "这台 Mac 的偏好、外观、隐私与应用信息。"}}}},
@@ -5304,7 +5332,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "搜索节点"
+            "value": "搜索线路"
           }
         }
       }

@@ -56,10 +56,42 @@ extension AppState {
 struct GateProtectionSection: View {
     let session: AccountSession
     var disabled = false
+    /// Sea sign-in: its own row under the card, the consequence in the
+    /// sentence rather than in parentheses on the button.
+    var seaStandalone = false
     @Environment(AppState.self) private var appState
+    @SeaDisplayPreferences private var display
 
     var body: some View {
-        if let notice = appState.gateProtectionNotice {
+        if seaStandalone, let notice = appState.gateProtectionNotice {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: notice.symbolName)
+                    .foregroundStyle(SeaTheme.attention)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(notice.message)
+                    Text("Restoring internet turns protection off.")
+                }
+                    .font(.system(size: 12))
+                    .foregroundStyle(SeaTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button("Restore internet") {
+                    Task { await session.restoreDirectInternet() }
+                }
+                .disabled(disabled)
+                .buttonStyle(SeaButtonStyle(variant: .quiet, size: .row))
+                .fixedSize()
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .background(display.reduceTransparency || display.contrast == .increased
+                        ? SeaTheme.opaquePanel : SeaTheme.opaquePanel.opacity(0.78),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(.white.opacity(display.contrast == .increased ? 0.45 : 0.10), lineWidth: 1)
+            }
+        } else if !seaStandalone, let notice = appState.gateProtectionNotice {
             Divider().padding(.vertical, 4)
             Label(notice.message, systemImage: notice.symbolName)
                 .font(.caption)
