@@ -304,6 +304,7 @@ async function buildModel(repoRoot, log) {
   const previousManifest = JSON.parse(readFileSync(join(repoRoot, MANIFEST_PATH), 'utf8'))
   const knownArtifacts = [
     previousManifest.platforms?.macos?.current?.artifact,
+    previousManifest.platforms?.macos?.current?.diskImage,
     previousManifest.platforms?.windows?.current?.artifact,
   ].filter(Boolean)
 
@@ -313,6 +314,18 @@ async function buildModel(repoRoot, log) {
   const macCommit = commitForTag(macTag)
   const macDigest = await digestFor(feed.url, feed.size, knownArtifacts)
   if (macDigest.downloaded) log(`  hashed ${feed.url.split('/').pop()}`)
+  // A first install gets the disk image when the release carries one: its
+  // window says to drag Tono onto Applications, and Tono runs only from there.
+  // Sparkle keeps the zip. The image is served from the bucket like the zip.
+  const dmgName = feed.url.split('/').pop().replace(/\.zip$/, '.dmg')
+  const dmgAsset = macRelease.assets.find((asset) => asset.name === dmgName)
+  let diskImage = null
+  if (dmgAsset) {
+    const url = `${DOWNLOAD_BASE}${dmgName}`
+    const digest = await digestFor(url, dmgAsset.size, knownArtifacts)
+    if (digest.downloaded) log(`  hashed ${dmgName}`)
+    diskImage = { name: dmgName, url, size: dmgAsset.size, sha256: digest.sha256 }
+  }
 
   const channel = readWindowsChannel(repoRoot)
   const channelVersion = channel.version
@@ -366,6 +379,7 @@ async function buildModel(repoRoot, log) {
         size: feed.size,
         sha256: macDigest.sha256,
       },
+      diskImage,
       copy: copyFor(
         `apps/macos/release-notes/build${feed.build}.zh.md`,
         `apps/macos/release-notes/build${feed.build}.md`,
@@ -412,7 +426,7 @@ async function buildModel(repoRoot, log) {
 
 // ---------------------------------------------------------------- rendering
 
-function renderCard(platform, label, model, extraNote) {
+function renderCard(platform, label, model, extraNote, download = model.artifact) {
   const bullets = model.copy.bullets
     .map((bullet) => `            <li>${renderInline(bullet)}</li>`)
     .join('\n')
@@ -423,13 +437,15 @@ function renderCard(platform, label, model, extraNote) {
           <ul>
 ${bullets}
           </ul>
-          <a class="text-link" href="${escapeHtml(model.artifact.url)}">下载 ${escapeHtml(extraNote)} →</a>
+          <a class="text-link" href="${escapeHtml(download.url)}">下载 ${escapeHtml(extraNote)} →</a>
         </article>`
 }
 
 export function renderCards(model) {
   return [
-    renderCard('macos', 'macOS', model.macos, `Build ${model.macos.build} ZIP`),
+    model.macos.diskImage
+      ? renderCard('macos', 'macOS', model.macos, `Build ${model.macos.build} 安装包`, model.macos.diskImage)
+      : renderCard('macos', 'macOS', model.macos, `Build ${model.macos.build} ZIP`),
     '',
     renderCard('windows', 'Windows', model.windows, `Windows ${model.windows.version}`),
   ].join('\n')
@@ -539,6 +555,7 @@ export function renderManifest(model) {
           helperContract: model.macos.helperContract,
           knownLimitations: model.macos.copy.limitations,
           artifact: { ...model.macos.artifact, sparkleEdSignature: model.macos.edSignature },
+          ...(model.macos.diskImage ? { diskImage: model.macos.diskImage } : {}),
           releaseURL: model.macos.releaseURL,
         },
       },
