@@ -149,9 +149,13 @@ struct SeaChoice: View {
                             .background {
                                 if selection == option {
                                     Capsule().fill(.white.opacity(0.12))
-                                        .overlay { Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 1) }
+                                        .overlay {
+                                            Capsule().strokeBorder(LinearGradient(colors: [.white.opacity(0.12), .clear],
+                                                startPoint: .top, endPoint: .center), lineWidth: 1)
+                                        }
                                 }
                             }
+                            .contentShape(Capsule())
                     }.buttonStyle(.plain)
                 }
             }
@@ -164,22 +168,31 @@ struct SeaChoice: View {
                 }.pickerStyle(.segmented)
             }
         } else {
-            Menu {
-                ForEach(options, id: \.self) { option in
-                    Button { selection = option } label: {
-                        if selection == option { Label(LocalizedStringKey(option), systemImage: "checkmark") }
-                        else { Text(LocalizedStringKey(option)) }
+            // A quiet capsule that opens a menu: the borderless menu draws only
+            // its title, so the capsule and the one shared chevron sit around it
+            // instead of the platform pop-up arrow.
+            HStack(spacing: 8) {
+                Menu {
+                    ForEach(options, id: \.self) { option in
+                        Button { selection = option } label: {
+                            if selection == option { Label(LocalizedStringKey(option), systemImage: "checkmark") }
+                            else { Text(LocalizedStringKey(option)) }
+                        }
                     }
+                } label: {
+                    Text(LocalizedStringKey(selection)).font(.system(size: 13))
                 }
-            } label: {
-                HStack(spacing: 8) {
-                    Text(LocalizedStringKey(selection))
-                    SeaChevron(expanded: false)
-                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .accessibilityLabel(label)
+                SeaChevron(expanded: true).allowsHitTesting(false)
             }
-            .menuStyle(.borderlessButton)
-            .buttonStyle(SeaButtonStyle(size: .row))
-            .accessibilityLabel(label)
+            .foregroundStyle(SeaTheme.text)
+            .padding(.horizontal, 14)
+            .frame(minHeight: SeaControlSize.row.height)
+            .background(display.reduceTransparency ? SeaTheme.opaquePanel : .white.opacity(0.08), in: Capsule())
+            .overlay { if display.contrast == .increased { Capsule().strokeBorder(accent.opacity(0.45), lineWidth: 1) } }
         }
     }
 }
@@ -251,10 +264,25 @@ struct SeaChevron: View {
     var expanded: Bool
     @SeaDisplayPreferences private var display
     var body: some View {
-        Image(systemName: "chevron.right").font(.system(size: 6, weight: .regular))
+        // The Windows summary marker: a 6 pt corner of two 1.5 pt strokes at
+        // 72 % of the text colour, pointing right and turning down when open.
+        SeaChevronShape()
+            .stroke(style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+            .frame(width: 6, height: 9)
+            .opacity(0.72)
             .rotationEffect(.degrees(expanded ? 90 : 0))
             .animation(display.reduceMotion ? nil : .easeOut(duration: 0.14), value: expanded)
             .accessibilityHidden(true)
+    }
+}
+
+private struct SeaChevronShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX + 1, y: rect.minY + 1))
+        path.addLine(to: CGPoint(x: rect.maxX - 1, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.minX + 1, y: rect.maxY - 1))
+        return path
     }
 }
 
