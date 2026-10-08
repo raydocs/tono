@@ -108,11 +108,14 @@ extension ProxiesView {
                                 .font(.system(size: 10, weight: .semibold))
                         }
                         Text(isRefreshingCatalog ? "Refreshing…" : "Refresh")
-                            .font(.system(size: 15, weight: .medium))
+                            .font(.system(size: showsSeaAppearance ? 15 : 11, weight: showsSeaAppearance ? .medium : .semibold))
                     }
+                    .padding(.horizontal, showsSeaAppearance ? 0 : 10)
+                    .padding(.vertical, showsSeaAppearance ? 0 : 7)
                     .contentShape(Capsule())
                 }
-                .buttonStyle(SeaButtonStyle(variant: .quiet, size: .row))
+                .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .plain))
+                .modifier(ProxiesLegacyGlass(enabled: !showsSeaAppearance))
                 .disabled(isRefreshingCatalog || accountSession.state != .ready)
             }
 

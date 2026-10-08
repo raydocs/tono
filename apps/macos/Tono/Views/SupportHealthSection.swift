@@ -87,7 +87,7 @@ struct SupportHealthSection: View {
                 VStack(spacing: 16) {
                     Text("The account changed. Close this preview and check again.")
                     Button("Close") { showingReport = false }
-                        .modifier(SeaActionStyle(variant: .quiet, legacy: .plain))
+                        .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic))
                 }.padding(24)
             }
         }
@@ -197,7 +197,7 @@ struct SupportReportConfirmationView: View {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(receipt.copyText, forType: .string)
                 }
-                .modifier(SeaActionStyle(variant: .quiet, legacy: .plain))
+                .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic))
             } else if !canSend {
                 Text("The connection changed. Close this preview and check again before sending.")
                     .foregroundStyle(seaEnabled ? SeaTheme.attention : Color.orange)
@@ -206,7 +206,7 @@ struct SupportReportConfirmationView: View {
             }
             HStack {
                 Button("Close", action: close)
-                    .modifier(SeaActionStyle(variant: .quiet, legacy: .plain))
+                    .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic))
                 Spacer()
                 if receipt == nil {
                     Button(sending ? String(localized: "Sending…") : String(localized: "Send this report"), action: confirm)

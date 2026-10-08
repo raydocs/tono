@@ -290,7 +290,7 @@ struct ActivityView: View {
                     ($0.processName ?? AppTrafficLedger.unattributed) == explainingApp
                 })
                 Button("Close") { explainingApp = nil }
-                    .modifier(SeaActionStyle(variant: .quiet, legacy: .plain)).padding(16)
+                    .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic)).padding(16)
             }
         }
         .onChange(of: appState.trafficStats.downloadSpeed) { _, _ in

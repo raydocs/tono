@@ -67,7 +67,7 @@ struct RouteChoicesView: View {
                         stale = false
                         showingConfirmation = proposal != nil
                     }
-                    .modifier(SeaActionStyle(variant: .quiet, legacy: .plain))
+                    .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic))
                 }
                 if stale {
                     Text("The account, catalog, route preference, or connection changed. Review a fresh recommendation.")

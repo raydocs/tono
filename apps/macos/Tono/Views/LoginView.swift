@@ -309,7 +309,7 @@ struct LoginView: View {
                 Button("Retry Tono connection") { Task { await session.retryRuntime() } }
                     .modifier(SeaActionStyle(variant: .primary, legacy: .gatePrimary))
                 Button("Sign Out", role: .destructive) { Task { await session.logout() } }
-                    .modifier(SeaActionStyle(variant: .danger))
+                    .modifier(SeaActionStyle(variant: .danger, legacy: .automatic))
             } else {
                 if let methods {
                     // Email is the primary task. Alternate providers remain
