@@ -16,6 +16,7 @@ nonisolated struct KeychainStore: Sendable {
     private let copyMatching: @Sendable (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus
     private let updateItem: @Sendable (CFDictionary, CFDictionary) -> OSStatus
     private let deleteItem: @Sendable (CFDictionary) -> OSStatus
+    private let writeRecoveryRecord: @Sendable (String, URL) throws -> Void
     init(
         service: String = Bundle.main.bundleIdentifier.map { "\($0).tono" } ?? "app.tono.account",
         suppressionDirectory: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -28,6 +29,9 @@ nonisolated struct KeychainStore: Sendable {
         },
         deleteItem: @escaping @Sendable (CFDictionary) -> OSStatus = {
             SecItemDelete($0)
+        },
+        writeRecoveryRecord: @escaping @Sendable (String, URL) throws -> Void = {
+            try RuntimeCleanup.writeSynced($0, to: $1)
         }
     ) {
         self.service = service
@@ -35,6 +39,7 @@ nonisolated struct KeychainStore: Sendable {
         self.copyMatching = copyMatching
         self.updateItem = updateItem
         self.deleteItem = deleteItem
+        self.writeRecoveryRecord = writeRecoveryRecord
     }
 
     func data(for key: Key) throws -> Data? {
@@ -79,7 +84,7 @@ nonisolated struct KeychainStore: Sendable {
     }
 
     func suppressRefreshTokenRestoration() throws {
-        try RuntimeCleanup.writeSynced("signed-out", to: suppressionURL)
+        try writeRecoveryRecord("signed-out", suppressionURL)
     }
 
     func isRefreshTokenRestorationSuppressed() throws -> Bool {
@@ -95,6 +100,38 @@ nonisolated struct KeychainStore: Sendable {
     func clearRefreshTokenSuppression() throws {
         do { try FileManager.default.removeItem(at: suppressionURL) }
         catch let error as CocoaError where error.code == .fileNoSuchFile { return }
+    }
+
+    private var adoptionURL: URL { suppressionURL.appendingPathExtension("accepted") }
+
+    private func adoptionProof(for refresh: String) -> String {
+        "adopted-v1:" + SHA256.hash(data: Data("tono-adopted-refresh:\(service):\(refresh)".utf8))
+            .map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Recovery is opt-in, bound to the token actually committed to Keychain.
+    /// A token from an older build has no proof and must sign in again.
+    func recordAcceptedRefreshToken(_ refresh: String) throws {
+        try writeRecoveryRecord(adoptionProof(for: refresh), adoptionURL)
+    }
+
+    func hasAcceptedRefreshToken(_ refresh: String) throws -> Bool {
+        let descriptor = Darwin.open(adoptionURL.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard descriptor >= 0 else {
+            if errno == ENOENT || errno == ENOTDIR || errno == ELOOP { return false }
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        defer { Darwin.close(descriptor) }
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        let expected = Data(adoptionProof(for: refresh).utf8)
+        guard metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG), metadata.st_uid == geteuid(),
+              metadata.st_mode & 0o022 == 0, metadata.st_size == off_t(expected.count) else { return false }
+        var bytes = [UInt8](repeating: 0, count: expected.count)
+        let count = bytes.withUnsafeMutableBytes { Darwin.read(descriptor, $0.baseAddress, $0.count) }
+        return count == expected.count && Data(bytes) == expected
     }
     func installationId() throws -> String {
         if let existing = try string(for: .installationId) { return existing }
