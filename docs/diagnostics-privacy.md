@@ -3,11 +3,15 @@
 Clients upload failure and session facts without a support request. This is the
 channel that stays on. It is not the raw network log.
 
-Raw logs (`POST /api/v1/diagnostics/logs`) still contain hostnames and process
-paths. Migration `0036` keeps them behind `diagnostics_log_access`: an operator
-must open a short window for one device. Do not auto-grant that window, and do
-not treat `{ stored: false, reason: "not_enabled" }` as a reason to drop the
-privacy-safe channel below.
+Raw logs (`POST /api/v1/diagnostics/logs`) contain hostnames and process
+paths. Since decision [076](decisions/076-2026-10-08-raw-network-logs-stored-by-default.md)
+the server stores every upload from a signed-in device; the client's own upload
+switch (on by default, stated in Settings and Support) is what decides whether
+they leave the device. The `diagnostics_log_access` window no longer gates
+ingest. Segments are kept 14 days (`DIAGNOSTICS_LOG_RETENTION_SECONDS`), each
+at most 2 MiB gzip, rate-limited per user, and deleted with the account. The
+per-day destination and process rollups parsed from them are kept 90 days
+(`retainTrafficDaily`) and are not removed by account deletion.
 
 ## Why the snapshot was off
 
