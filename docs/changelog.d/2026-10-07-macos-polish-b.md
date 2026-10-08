@@ -12,3 +12,9 @@
 
 - 2026-10-07 恢复：rebase 到 main53676e913（helper4.52.43），保留 Quit/Keychain/海景修复；本轮不改保护/账户/路由/Helper 逻辑，不动 release 线。此前255450cf/run37658469827仍在两个AX案例失败（不是已绿），原始代理无label/modernchildren。新增读取公开导航顺序 getter 的原始 id/NSArray，绕开SDK较窄元素数组的Swift强制桥接，并兼容公开title；不查私有proxy字段/类型，不手改绑定、不跳过测试、不降低press/setter/名称断言。新托管结果未出，不声称修复通过。
 - 恢复后的 M4 呈现集成：main 新增/保留的账户保护通知 Restore 按钮纳入共用 quiet/32pt 样式；原 automatic fallback、触发 handler、disabled 门槛、通知判定与文案完全不改。新增 shared style 的 automatic legacy 分支仅用于保留原语义，不改生产保护或登录逻辑。
+
+- 2026-10-08 续记（Claude 接手，Codex 不可用）：新分支 claude/macos-polish-b-20261008 rebase 到 origin/main，草稿 PR 取代 #1429；未改 Codex 分支/工作树。
+- AX 失败根因：托管 runner 没有辅助客户端，SwiftUI 不生成懒加载 AX 树（run37705768424 只到 NSAccessibilityReparentingCellProxy）。两条 AX 遍历用例改为真实 NSEvent 点击，断言原绑定/原 setter 被写入（选择写一次）；不跳过、不降断言。AX 语义（名称/值/角色）在托管 CI 上仍未验证，记为限制。
+- B 页面补完：日志级别、活动路线筛选改为文字标签页（SeaTabs）；>4 项选择与路线区域菜单改为 SeaMenuButton；新增 SeaTheme.good/attention 与 SeaTag danger；单一 1.5pt 线条 chevron；日志/支持/设置/账户/活动/路线/服务器页按 sea 字号与颜色 token 调整，数字用 monospacedDigit；登录重试、账户门登出、详情关闭、查看步骤纳入共用样式。仅呈现，动作/绑定/文案逻辑不变。
+- 新增文案（en+zh 同步）：Time/时间、Level/级别、Message/消息、Recommended/推荐、Route/路线。
+- 验证：MacBook 不运行原生构建/测试；结果以新 head 的托管 ci-gate 与逐图检查为准，见 PR。
