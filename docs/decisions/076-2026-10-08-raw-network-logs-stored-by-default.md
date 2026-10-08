@@ -15,7 +15,11 @@
 - Why: the gate stored nothing (`diagnostics_log_access` had 0 rows in
   production on 2026-10-08), so field problems that leave no failure event
   were invisible. What it widens: hostnames and process paths of devices whose
-  switch is on now reach R2 and the parsed traffic tables for 14 days.
+  switch is on now reach R2 for 14 days, and their per-day eTLD+1 / process
+  rollups (`traffic_destination_daily`, `service_usage_daily`,
+  `direct_candidate_daily`, `ops_traffic_segments`) for 90 days
+  (`retainTrafficDaily`). Those rollups have no foreign key to `users` and are
+  not removed when an account is deleted; they age out at 90 days.
 - Applied in: [diagnostics-privacy.md](../diagnostics-privacy.md),
   [ingest-limits.md](../ops/ingest-limits.md); changelog
   [2026-10-08-cp-raw-logs-stored-by-default.md](../changelog.d/2026-10-08-cp-raw-logs-stored-by-default.md).

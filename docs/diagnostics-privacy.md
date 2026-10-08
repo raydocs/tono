@@ -9,7 +9,9 @@ the server stores every upload from a signed-in device; the client's own upload
 switch (on by default, stated in Settings and Support) is what decides whether
 they leave the device. The `diagnostics_log_access` window no longer gates
 ingest. Segments are kept 14 days (`DIAGNOSTICS_LOG_RETENTION_SECONDS`), each
-at most 2 MiB gzip, rate-limited per user, and deleted with the account.
+at most 2 MiB gzip, rate-limited per user, and deleted with the account. The
+per-day destination and process rollups parsed from them are kept 90 days
+(`retainTrafficDaily`) and are not removed by account deletion.
 
 ## Why the snapshot was off
 

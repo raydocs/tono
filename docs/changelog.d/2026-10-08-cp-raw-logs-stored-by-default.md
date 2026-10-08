@@ -6,4 +6,4 @@
 - 工程与测试：`worker.test.ts` 用 `stores a raw log segment from a device no operator opened a window for` 替换 `acknowledges disabled raw logs…`，并从开窗口测试里删去「过期窗口不存」的断言。文档：[diagnostics-privacy.md](../diagnostics-privacy.md)、[ingest-limits.md](../ops/ingest-limits.md)。
 - 验证：MacBook，`services/control-plane`：`npx tsc --noEmit` 通过；`npx vitest run test/worker.test.ts test/ingest-budgets.test.ts test/ops-ingest-hooks.test.ts test/ops-api.test.ts` 4 files / 283 tests passed；新测试在旧 `routes.ts` 上失败（`expected 200 to be 201`）。
 - 候选/发布：无新包。客户端不变；已发布客户端收到 201 后会结束空探测、开始上传积压日志。
-- 剩余限制：客户端注释仍写「服务器不开窗口就不存」（`log_upload.rs`、`DiagnosticsLogUploader.swift`），行为不受影响，未改。R2 用量随上传设备数增长，未设总量上限，只有每用户限流和 14 天保留。
+- 剩余限制：解析出的按天域名/进程汇总表（`traffic_destination_daily` 等）保留 90 天，没有指向 `users` 的外键，删号时不删，只靠 90 天过期（复审 17af398d 次要发现，文档已改为如实描述，代码未改）。客户端注释仍写「服务器不开窗口就不存」（`log_upload.rs`、`DiagnosticsLogUploader.swift`），行为不受影响，未改。R2 用量随上传设备数增长，未设总量上限，只有每用户限流和 14 天保留。
