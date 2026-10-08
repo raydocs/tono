@@ -876,6 +876,7 @@ extension AccountSession {
         // that raised it, not to the one starting here.
         deviceActionError = nil
         do {
+            try await api.prepareForAuthentication()
             let response = try await operation()
             try Task.checkCancellation()
             try await api.adopt(response)

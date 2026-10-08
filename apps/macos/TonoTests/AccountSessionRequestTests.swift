@@ -1644,6 +1644,10 @@ final class AccountSessionRequestTests: XCTestCase {
         try await adoptTestAccount(account)
         account.shouldResumeProtection = true
         let newUser = try JSONDecoder().decode(TonoUser.self, from: Data(#"{"id":"replacement","email":"new@example.test"}"#.utf8))
+        HeldAccountProtocol.install(host) { request in
+            // Failed adoption now also retires the captured previous session.
+            request.respond(status: request.request.url?.path.hasSuffix("auth/logout") == true ? 204 : 401, body: "{}")
+        }
 
         await account.authenticate {
             TonoAuthResponse(
@@ -1695,6 +1699,84 @@ final class AccountSessionRequestTests: XCTestCase {
         )
         let nextRelaunchRestorable = try await nextRelaunch.hasRestorableSession()
         XCTAssertTrue(nextRelaunchRestorable)
+    }
+
+    func testDualCredentialRefusalCannotRestoreAnUnadoptedTokenOrSendAnUnsafeReplacement() async throws {
+        let directory = Self.offlineGrantDirectory("dual-credential-refusal")
+        let credentials = directory.appendingPathComponent("credentials", isDirectory: true)
+        let grants = directory.appendingPathComponent("offline", isDirectory: true)
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        let service = "app.tono.tests.dual-refusal.\(UUID().uuidString)"
+        let previous = "previous-refresh-fixture-only"
+        let copy: @Sendable (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus = { query, item in
+            guard (query as NSDictionary)[kSecAttrAccount as String] as? String == "refreshToken" else { return errSecItemNotFound }
+            item?.pointee = Data(previous.utf8) as CFData
+            return errSecSuccess
+        }
+        let removals = PathCallCounter()
+        let revocations = PathCallCounter()
+        HeldAccountProtocol.install(host) { request in
+            if request.request.url?.path.hasSuffix("auth/refresh") == true {
+                request.respond(status: 200, body: #"{"accessToken":"retired-access","refreshToken":"retired-successor-fixture-only"}"#)
+            } else if request.request.url?.path.hasSuffix("auth/logout") == true {
+                revocations.record()
+                request.respond(status: 204, body: "")
+            } else { request.respond(status: 500, body: "{}") }
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let refused = KeychainStore(service: service, suppressionDirectory: credentials,
+            copyMatching: copy, updateItem: { _, _ in errSecInteractionNotAllowed },
+            deleteItem: { _ in removals.record(); return errSecInteractionNotAllowed },
+            writeRecoveryRecord: { _, _ in throw POSIXError(.EROFS) })
+        let readable = KeychainStore(service: service, suppressionDirectory: credentials, copyMatching: copy)
+        let replacement = try JSONDecoder().decode(TonoUser.self, from: Data(#"{"id":"replacement","email":"replacement@example.test"}"#.utf8))
+        let response = TonoAuthResponse(accessToken: "new-access", refreshToken: "new-refresh-fixture-only",
+                                        user: replacement, device: nil, enrollment: nil)
+        let api = TonoAPIClient(baseURL: URL(string: "https://\(host)")!, keychain: refused,
+            session: transport, offlineGate: OfflineGrantGate(directory: grants))
+        do {
+            try await api.adopt(response)
+            XCTFail("A refusal-marker failure must not adopt the server's answer")
+        } catch { XCTAssertEqual(error as? TonoAPIClient.APIError, .credentialRecoveryRecord) }
+        XCTAssertEqual(removals.count, 1)
+        XCTAssertEqual(try readable.string(for: .refreshToken), previous, "deletion really refused; the old item remains")
+        XCTAssertFalse(try readable.isRefreshTokenRestorationSuppressed(), "denial persistence really failed")
+        XCTAssertEqual(revocations.count, 1, "the captured prior session was retired using the existing endpoint")
+        let relaunched = TonoAPIClient(baseURL: URL(string: "https://\(host)")!, keychain: readable,
+            session: transport, offlineGate: OfflineGrantGate(directory: grants))
+        let restored = try await relaunched.hasRestorableSession()
+        XCTAssertFalse(restored, "no successful-adoption proof means no recovery, even after storage is readable")
+        let digest = await relaunched.currentRefreshTokenDigest()
+        XCTAssertNil(digest)
+        do { _ = try await relaunched.me(); XCTFail("no old-account request may be admitted") }
+        catch { XCTAssertEqual(error as? TonoAPIClient.APIError, .unauthorized) }
+        XCTAssertEqual(revocations.count, 1)
+
+        // A prior successful proof is not assumed erased by a refused write:
+        // the verification callback must be stopped before it can rebind a device.
+        try readable.recordAcceptedRefreshToken(previous)
+        let existing = TonoAPIClient(baseURL: URL(string: "https://\(host)")!, keychain: refused,
+            session: transport, offlineGate: OfflineGrantGate(directory: grants))
+        let previouslyAccepted = try await existing.hasRestorableSession()
+        XCTAssertTrue(previouslyAccepted)
+        var disarms = 0
+        let account = AccountSession(api: existing, keychain: refused, sidecar: TonoSidecarService(),
+            descriptorConsumer: { _ in }, killSwitchDisarmConsumer: { disarms += 1 })
+        account.shouldResumeProtection = true
+        let verifications = PathCallCounter()
+        await account.authenticate { verifications.record(); return response }
+        XCTAssertEqual(verifications.count, 0, "durable denial must precede the server-mutating callback")
+        XCTAssertEqual(account.state, .signedOut)
+        XCTAssertEqual(account.signInError, TonoAPIClient.APIError.credentialRecoveryRecord.errorDescription)
+        XCTAssertEqual(revocations.count, 2)
+        XCTAssertEqual(disarms, 0)
+        XCTAssertTrue(account.shouldResumeProtection)
     }
 
     func testRecoveryRecordWriteFailureIsNotReportedAsAKeychainRefusal() async throws {

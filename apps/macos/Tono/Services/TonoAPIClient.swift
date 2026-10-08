@@ -159,6 +159,12 @@ actor TonoAPIClient {
     /// A failed credential adoption must not use either account's credentials
     /// in this process; the durable marker also blocks old-item restoration.
     private var failedAdoption = false
+    private struct RetiredCredential {
+        let refresh: String?
+        let bearer: String?
+    }
+    private var authenticationPrepared = false
+    private var authenticationRetiredCredential: RetiredCredential?
     private var refreshTask: (id: UUID, task: Task<String, Error>)?
     private var logoutTask: (id: UUID, generation: UInt64, task: Task<Void, Never>)?
     private var credentialGeneration: UInt64 = 0
@@ -389,11 +395,34 @@ actor TonoAPIClient {
         )
     }
 
-    func adopt(_ auth: TonoAuthResponse) throws {
+    /// Invalidate recovery before the verification callback can rebind a device
+    /// server-side. A failure here aborts authentication before that mutation.
+    func prepareForAuthentication() async throws {
+        try Task.checkCancellation()
+        let previous = authenticationRetiredCredential ?? captureCredentialForRevocation()
+        retireCredentialGeneration()
+        offlineGate.withdrawAcceptance()
+        offlineGate.leaveOffline()
+        accessToken = nil
+        accessTokenExpiry = nil
+        unpersistedRefreshToken = nil
+        failedAdoption = true
+        do { try keychain.suppressRefreshTokenRestoration() }
+        catch {
+            try? keychain.remove(.refreshToken)
+            await revokeCapturedCredential(previous, generation: credentialGeneration)
+            throw APIError.credentialRecoveryRecord
+        }
+        authenticationPrepared = true
+        authenticationRetiredCredential = previous
+    }
+
+    func adopt(_ auth: TonoAuthResponse) async throws {
         try Task.checkCancellation()
         guard let refresh = auth.refreshToken, !refresh.isEmpty else {
             throw APIError.invalidResponse
         }
+        let previous = authenticationRetiredCredential ?? captureCredentialForRevocation()
         retireCredentialGeneration()
         // Nothing the server told the previous identity applies to this one.
         offlineGate.adoptNewIdentity()
@@ -406,16 +435,22 @@ actor TonoAPIClient {
         do { try keychain.suppressRefreshTokenRestoration() }
         catch {
             try? keychain.remove(.refreshToken)
+            await revokeCapturedCredential(previous, generation: credentialGeneration)
             throw APIError.credentialRecoveryRecord
         }
         do { try keychain.set(refresh, for: .refreshToken) }
         catch {
             try? keychain.remove(.refreshToken)
+            await revokeCapturedCredential(previous, generation: credentialGeneration)
             throw APIError.credentialPersistence
         }
-        do { try keychain.clearRefreshTokenSuppression() }
+        do {
+            try keychain.recordAcceptedRefreshToken(refresh)
+            try keychain.clearRefreshTokenSuppression()
+        }
         catch {
             try? keychain.remove(.refreshToken)
+            await revokeCapturedCredential(previous, generation: credentialGeneration)
             throw APIError.credentialRecoveryRecord
         }
         failedAdoption = false
@@ -527,9 +562,41 @@ actor TonoAPIClient {
 
     private func retireCredentialGeneration() {
         credentialGeneration &+= 1
+        authenticationPrepared = false
+        authenticationRetiredCredential = nil
         refreshTask?.task.cancel()
         refreshTask = nil
         isLoggingOut = false
+    }
+
+    /// Captured only for best-effort deletion, never for ordinary admission.
+    private func captureCredentialForRevocation() -> RetiredCredential {
+        RetiredCredential(refresh: unpersistedRefreshToken ?? (try? keychain.string(for: .refreshToken)),
+                          bearer: accessToken)
+    }
+
+    private func revokeCapturedCredential(_ previous: RetiredCredential, generation: UInt64) async {
+        guard let refresh = previous.refresh, !refresh.isEmpty,
+              generation == credentialGeneration, !Task.isCancelled else { return }
+        do {
+            if let bearer = previous.bearer {
+                do {
+                    _ = try await sendData("auth/logout", method: "POST",
+                        body: TonoCoding.encoder().encode(TonoLogoutRequest(refreshToken: refresh)),
+                        bearer: bearer, session: .noSession)
+                    return
+                } catch APIError.unauthorized { }
+            }
+            guard generation == credentialGeneration, !Task.isCancelled else { return }
+            let renewed: TonoTokenResponse = try await publicRequest("auth/refresh",
+                body: TonoRefreshRequest(refreshToken: refresh), session: .noSession)
+            guard generation == credentialGeneration, !Task.isCancelled else { return }
+            _ = try await sendData("auth/logout", method: "POST",
+                body: TonoCoding.encoder().encode(TonoLogoutRequest(refreshToken: renewed.refreshToken)),
+                bearer: renewed.accessToken, session: .noSession)
+        } catch {
+            // Local recovery remains denied even when the server is unreachable.
+        }
     }
 
     private func requireCredentialGeneration(_ generation: UInt64) throws {
@@ -563,7 +630,9 @@ actor TonoAPIClient {
     private func currentRefreshToken() throws -> String? {
         guard !failedAdoption else { return nil }
         guard try !keychain.isRefreshTokenRestorationSuppressed() else { return nil }
-        return try unpersistedRefreshToken ?? keychain.string(for: .refreshToken)
+        if let pending = unpersistedRefreshToken { return pending }
+        guard let stored = try keychain.string(for: .refreshToken) else { return nil }
+        return try keychain.hasAcceptedRefreshToken(stored) ? stored : nil
     }
 
     /// A launch restores only a credential this process has not discarded.
@@ -575,7 +644,9 @@ actor TonoAPIClient {
     private func retryRefreshTokenPersistence() {
         if let pending = unpersistedRefreshToken,
            (try? keychain.set(pending, for: .refreshToken)) != nil {
-            unpersistedRefreshToken = nil
+            if (try? keychain.recordAcceptedRefreshToken(pending)) != nil {
+                unpersistedRefreshToken = nil
+            }
         }
     }
 
@@ -624,6 +695,7 @@ actor TonoAPIClient {
             accessTokenExpiry = Self.expiry(ofJWT: response.accessToken)
             do {
                 try keychain.set(response.refreshToken, for: .refreshToken)
+                try keychain.recordAcceptedRefreshToken(response.refreshToken)
                 unpersistedRefreshToken = nil
             } catch {
                 // The server has already rotated; dropping the new token here
@@ -667,6 +739,7 @@ actor TonoAPIClient {
         try await send(path, method: "GET", body: nil, bearer: nil, session: .noSession)
     }
     private func publicAuthRequest<Body: Encodable>(_ path: String, body: Body) async throws -> TonoAuthResponse {
+        if !authenticationPrepared { try await prepareForAuthentication() }
         let envelope: TonoAuthEnvelope = try await publicRequest(path, body: body)
         return envelope.auth
     }
