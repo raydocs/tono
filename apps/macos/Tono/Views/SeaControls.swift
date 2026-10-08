@@ -78,7 +78,7 @@ private struct SeaStyledButton: View {
     }
 }
 
-enum SeaLegacyButtonStyle { case plain, bordered, prominent, gatePrimary, gateSecondary, link, borderless }
+enum SeaLegacyButtonStyle { case automatic, plain, bordered, prominent, gatePrimary, gateSecondary, link, borderless }
 
 struct SeaActionStyle: ViewModifier {
     var variant: SeaButtonVariant = .quiet
@@ -90,6 +90,7 @@ struct SeaActionStyle: ViewModifier {
         if sea { content.buttonStyle(SeaButtonStyle(variant: variant, size: size)) }
         else {
             switch legacy {
+            case .automatic: content.buttonStyle(.automatic)
             case .plain: content.buttonStyle(.plain)
             case .bordered: content.buttonStyle(.bordered)
             case .prominent: content.buttonStyle(.borderedProminent)
