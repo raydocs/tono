@@ -8527,31 +8527,17 @@ ${nameLine}
     return expiresAt;
   };
 
-  it('acknowledges disabled raw logs without parsing or writing the upload', async () => {
-    const account = await createAccount('log-disabled');
-    await env.DB.prepare('DELETE FROM rate_limits').run();
-    const response = await logUpload(
-      account.accessToken,
-      new TextEncoder().encode('not gzip and deliberately not parsed'),
-      { 'X-Tono-Log-Session': '../../not-validated' },
-    );
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      segment: { id: 'not-stored', receivedAt: expect.any(Number) },
-      stored: false,
-      reason: 'not_enabled',
-    });
+  it('stores a raw log segment from a device no operator opened a window for', async () => {
+    const account = await createAccount('log-default-store');
+    const response = await logUpload(account.accessToken, await gzip('{"kind":"connection_opened"}\n'));
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ stored: true });
     expect(await env.DB.prepare(
       'SELECT COUNT(*) AS n FROM diagnostics_log_objects WHERE user_id = ?',
-    ).bind(account.user.id).first()).toMatchObject({ n: 0 });
-    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM rate_limits').first())
-      .toMatchObject({ n: 0 });
-    expect((await (env as unknown as Env).DIAGNOSTICS_LOGS.list({
-      prefix: `logs/${account.user.id}/`,
-    })).objects).toHaveLength(0);
+    ).bind(account.user.id).first()).toMatchObject({ n: 1 });
   });
 
-  it('authorizes, expires, disables, and audits a bounded per-device raw-log window', async () => {
+  it('authorizes, disables, and audits a bounded per-device raw-log window', async () => {
     const account = await createAccount('log-access');
     const path = `users/${account.user.id}/devices/${account.device.id}/diagnostics-logs`;
     const expiresAt = Math.floor(Date.now() / 1000) + 3600;
@@ -8593,12 +8579,6 @@ ${nameLine}
       "SELECT COUNT(*) AS n FROM ops_audit WHERE action = 'diagnostics-logs.enable'",
     ).first()).toMatchObject({ n: 1 });
 
-    await env.DB.prepare(
-      'UPDATE diagnostics_log_access SET expires_at = ? WHERE device_id = ?',
-    ).bind(Math.floor(Date.now() / 1000) - 1, account.device.id).run();
-    const expired = await logUpload(account.accessToken, await gzip('{"expired":true}\n'));
-    expect(expired.status).toBe(200);
-    expect(await expired.json()).toMatchObject({ stored: false, reason: 'not_enabled' });
     expect((await admin(path, undefined, 'GET')).status).toBe(200);
     const disabled = await admin(path, undefined, 'DELETE');
     expect(disabled.status).toBe(200);

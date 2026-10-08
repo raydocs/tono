@@ -524,26 +524,11 @@ export async function telemetryRoutes(
   // client only sends it while its own upload setting is on, and the Settings
   // and Support copy states plainly that it leaves the device. The body is gzip
   // rather than JSON; metadata rides in headers so the payload is stored exactly
-  // as received.
+  // as received. Stored by default (owner decision 076): the user's switch is
+  // the consent, not an operator window. Retention, size and rate caps below
+  // still bound it.
   if (p === '/api/v1/diagnostics/logs' && m === 'POST') {
     const a = await auth(req, e);
-    const receivedAt = now();
-    const access = await e.DB.prepare(
-      `SELECT 1 FROM diagnostics_log_access
-       WHERE user_id = ? AND device_id = ? AND expires_at > ?`,
-    ).bind(a.userId, a.deviceId, receivedAt).first<Row>();
-    if (!access) {
-      // Old clients advance their local cursor only after decoding the existing
-      // segment receipt. Preserve that successful shape while making the
-      // no-store decision before metadata validation, body reads, rate-limit
-      // counters, R2, or the D1 object index. The additive fields are ignored by
-      // shipped decoders and make the decision visible to newer tooling.
-      return Response.json({
-        segment: { id: 'not-stored', receivedAt },
-        stored: false,
-        reason: 'not_enabled',
-      });
-    }
     const meta = diagnosticsLogMetadata(req);
     const payload = await binaryBody(req, DIAGNOSTICS_LOG_MAX_BYTES);
     // Cheap shape check with real value: it catches a client that uploads plain
