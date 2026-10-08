@@ -27,6 +27,7 @@ import {
   hy2UdpIsVendorBlocked,
   isHy2CatalogName,
   nodeCityLabel,
+  byRegionCode,
   nodeCode,
   nodeDisplayName,
   nodeProtocolKey,
@@ -124,7 +125,7 @@ export const SeaLines = ({
         .filter((server) => !hy2UdpIsVendorBlocked(server.name))
         .map((server) => nodeCode(server.name)),
     ),
-  ].sort()
+  ].sort(byRegionCode)
   const query = search.trim().toLowerCase()
   const visible = (servers ?? []).filter((server) => {
     if (hy2UdpIsVendorBlocked(server.name)) return false

@@ -134,6 +134,10 @@ export const nodeCode = (wireName: string) => {
   return 'GL'
 }
 
+/** Region chip order: named countries alphabetically, the catch-all "GL" last. */
+export const byRegionCode = (a: string, b: string) =>
+  Number(a === 'GL') - Number(b === 'GL') || a.localeCompare(b)
+
 export const nodeProtocolKey = (wireName: string): TranslationKey =>
   isHy2CatalogName(wireName)
     ? 'tono.nodes.protocol.backup'

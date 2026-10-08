@@ -429,7 +429,7 @@
   "progress": {
     "total": "TOTAL {{elapsed}}",
     "tryBadge": "TRY {{count}}",
-    "failedAt": "Failed at {{stage}}",
+    "failedAt": "Stopped while {{stage}}",
     "unknownStage": "Unknown stage",
     "statusTitle": "This route did not pass the connection check",
     "statusBody": "The connection didn't complete.",
@@ -477,6 +477,17 @@
       "securingDNS": "Securing and verifying DNS…",
       "checkingExit": "Checking final exit…",
       "verifyingTraffic": "Verifying the connection…"
+    },
+    "stepNames": {
+      "preparing": "preparing",
+      "preparingService": "preparing the service",
+      "startingKillSwitch": "enabling protection",
+      "startingTunnel": "starting the tunnel",
+      "lockingTraffic": "locking traffic",
+      "applyingCloudPolicy": "applying routing",
+      "securingDNS": "securing DNS",
+      "checkingExit": "checking the exit",
+      "verifyingTraffic": "verifying the connection"
     }
   },
   "nodes": {

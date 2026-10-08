@@ -250,11 +250,12 @@ export const SeaActivity = ({
           }}
         />
       )}
-      {connected && (
+      {/* An empty list has nothing to close; a dead red action read as broken. */}
+      {connected && rows.length > 0 && (
         <footer>
           <SeaButton
             variant="danger"
-            disabled={!rows.length || closingAll}
+            disabled={closingAll}
             onClick={onCloseAll}
           >
             {t(

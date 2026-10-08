@@ -65,16 +65,26 @@ const STARS = (() => {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
     return seed / 4294967296
   }
-  return Array.from({ length: 200 }, (_, index) => ({
-    id: `star-${index}`,
-    x: 3 + random() * 94,
-    y: 8 + random() * 72,
-    tier: index % 11 < 6 ? 0 : index % 11 < 9 ? 1 : 2,
-    twinkle: index % 3 === 0,
-    duration: 3 + random() * 6,
-    delay: -random() * 9,
-    color: ['#b8caff', '#f4eee2', '#ffe0b0'][index % 3],
-  }))
+  // Sky percent. A bright star beside a glyph reads as stray punctuation
+  // ("Tono." / "? ."), so the title chrome and the copy column keep only the
+  // faint tier (1.5px reads as a full stop at 44px type too).
+  const behindText = (x: number, y: number) =>
+    (y < 16 && (x < 52 || x > 84)) || (x < 50 && y > 22)
+  return Array.from({ length: 200 }, (_, index) => {
+    const x = 3 + random() * 94
+    const y = 8 + random() * 72
+    const tier = index % 11 < 6 ? 0 : index % 11 < 9 ? 1 : 2
+    return {
+      id: `star-${index}`,
+      x,
+      y,
+      tier: behindText(x, y) ? 0 : tier,
+      twinkle: index % 3 === 0,
+      duration: 3 + random() * 6,
+      delay: -random() * 9,
+      color: ['#b8caff', '#f4eee2', '#ffe0b0'][index % 3],
+    }
+  })
 })()
 
 const Glints = ({ tone, full }: { tone: 'sun' | 'moon'; full: boolean }) => (

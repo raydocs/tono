@@ -20,7 +20,10 @@ import {
   type TonoConnectStep,
   type TonoUiState,
 } from '@/services/tono'
-import { CONNECT_STAGE_LABEL_KEYS } from '@/tono-ui/connect-stages'
+import {
+  CONNECT_STAGE_LABEL_KEYS,
+  CONNECT_STAGE_NAME_KEYS,
+} from '@/tono-ui/connect-stages'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { OpenDnsSettingsButton } from '@/tono-ui/OpenDnsSettingsButton'
 import { SupportReportAction } from '@/tono-ui/SupportReportAction'
@@ -259,7 +262,7 @@ export const ConnectProgressCard = ({
 
   const failedStepLabel = progress?.failedStage
     ? t(
-        CONNECT_STAGE_LABEL_KEYS[progress.failedStage] ??
+        CONNECT_STAGE_NAME_KEYS[progress.failedStage] ??
           'tono.progress.unknownStage',
       )
     : null
@@ -321,7 +324,7 @@ export const ConnectProgressCard = ({
             fontSize: 11,
             fontWeight: 600,
             letterSpacing: 0.2,
-            fontFamily: TONO_MONO_STACK,
+            fontFamily: homePresentation ? undefined : TONO_MONO_STACK,
             color: text.tertiary,
           }}
         >
@@ -339,11 +342,15 @@ export const ConnectProgressCard = ({
             style={{
               fontSize: 11,
               fontWeight: 600,
-              fontFamily: TONO_MONO_STACK,
+              fontFamily: homePresentation ? undefined : TONO_MONO_STACK,
               borderRadius: 6,
               padding: '3px 8px',
-              color: TONO_COLORS.protectedOffline,
-              background: hex(TONO_COLORS.protectedOffline, 0.15),
+              ...(homePresentation
+                ? { color: text.secondary, background: '#ffffff10' }
+                : {
+                    color: TONO_COLORS.protectedOffline,
+                    background: hex(TONO_COLORS.protectedOffline, 0.15),
+                  }),
             }}
           >
             {t('tono.progress.tryBadge', {
@@ -388,8 +395,12 @@ export const ConnectProgressCard = ({
       )}
 
       {highlightedSteps.map((step) => {
+        // A failed step is no longer "in progress…"; name it plainly.
         const stepLabel = t(
-          CONNECT_STAGE_LABEL_KEYS[step.key] ?? 'tono.progress.unknownStage',
+          (step.state === 'failed'
+            ? CONNECT_STAGE_NAME_KEYS[step.key]
+            : CONNECT_STAGE_LABEL_KEYS[step.key]) ??
+            'tono.progress.unknownStage',
         )
         return (
           <div
@@ -427,7 +438,7 @@ export const ConnectProgressCard = ({
               <span
                 style={{
                   fontSize: 11,
-                  fontFamily: TONO_MONO_STACK,
+                  fontFamily: homePresentation ? undefined : TONO_MONO_STACK,
                   color: text.secondary,
                   flexShrink: 0,
                 }}
@@ -502,9 +513,7 @@ export const ConnectProgressCard = ({
             <div
               style={{ fontSize: 12, lineHeight: 1.5, color: text.secondary }}
             >
-              {t('tono.progress.failedAt', {
-                stage: failedStepLabel.replace(/(?:\.{3}|…)+\s*$/, ''),
-              })}
+              {t('tono.progress.failedAt', { stage: failedStepLabel })}
             </div>
           )}
           {!homePresentation && isEncryptedDnsFailure(progress?.error) && (

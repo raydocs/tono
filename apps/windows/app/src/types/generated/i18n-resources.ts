@@ -1441,6 +1441,17 @@ export interface TranslationResources {
         retryNow: string
         statusBody: string
         statusTitle: string
+        stepNames: {
+          applyingCloudPolicy: string
+          checkingExit: string
+          lockingTraffic: string
+          preparing: string
+          preparingService: string
+          securingDNS: string
+          startingKillSwitch: string
+          startingTunnel: string
+          verifyingTraffic: string
+        }
         steps: {
           applyingCloudPolicy: string
           checkingExit: string

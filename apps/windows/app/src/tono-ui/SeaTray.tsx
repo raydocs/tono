@@ -54,9 +54,7 @@ export const SeaTray = ({
       aria-label="Tono"
       data-ground={tone}
     >
-      <span className="sea-tray-mark" aria-hidden="true">
-        {phase === 'idle' ? '☾' : '●'}
-      </span>
+      <span className="sea-tray-mark" data-phase={phase} aria-hidden="true" />
       <h1>{title}</h1>
       <p title={subtitle}>{subtitle}</p>
       {(traffic || ai) && (
@@ -81,7 +79,9 @@ export const SeaTray = ({
       </button>
       <fieldset className="sea-tray-choices">
         <legend className="tono-sr-only">{t('tono.tray.pickNode')}</legend>
-        {quick.map((server) => (
+        {/* The flyout is a fixed 232px window: a backup row or an error
+            takes the place of a quick pick so the footer never scrolls away. */}
+        {quick.slice(0, Math.max(0, 2 - (backup ? 1 : 0) - (error ? 1 : 0))).map((server) => (
           <button
             type="button"
             className="sea-tray-quick"

@@ -463,7 +463,8 @@ const LoginPage = () => {
           }}
         >
           {internetRecovery}
-          <TonoLogo connected={false} size={56} />
+          {/* The sea scene behind the card is the brand; the violet mark is legacy. */}
+          {!newAppearance && <TonoLogo connected={false} size={56} />}
           <h1 className="tono-page-title" style={{ color: text.primary }}>
             {suspendedTitle}
           </h1>
@@ -475,8 +476,13 @@ const LoginPage = () => {
           <SupportContact email={email} extra={suspendedTitle} />
           <button
             type="button"
-            className="tono-link"
-            style={{ fontSize: 13, color: TONO_COLORS.accent }}
+            className={newAppearance ? 'sea-button' : 'tono-link'}
+            data-variant={newAppearance ? 'primary' : undefined}
+            style={
+              newAppearance
+                ? { minWidth: 160 }
+                : { fontSize: 13, color: TONO_COLORS.accent }
+            }
             onClick={() => {
               setSuspendedDismissed(true)
               setVerifySuspended(false)
@@ -566,35 +572,58 @@ const LoginPage = () => {
               alignItems: 'center',
               justifyContent: 'space-between',
               gap: 10,
-              borderRadius: 10,
-              padding: '10px 12px',
-              fontSize: 12,
-              color: 'var(--tono-text-error)',
-              background: `${TONO_COLORS.error}1F`,
+              ...(newAppearance
+                ? { textAlign: 'left' }
+                : {
+                    borderRadius: 10,
+                    padding: '10px 12px',
+                    fontSize: 12,
+                    color: 'var(--tono-text-error)',
+                    background: `${TONO_COLORS.error}1F`,
+                  }),
             }}
           >
             <span>
               <strong>{t('tono.login.restoreFailed.title')}</strong>{' '}
               {t('tono.login.restoreFailed.description')}
             </span>
-            <button
-              type="button"
-              className="tono-button"
-              style={{
-                padding: '6px 10px',
-                fontSize: 12,
-                color: '#fff',
-                background: TONO_COLORS.error,
-                flexShrink: 0,
-              }}
-              onClick={handleRetryRestore}
-              disabled={retrying}
-            >
-              {retrying ? '…' : t('tono.login.restoreFailed.retry')}
-            </button>
+            {newAppearance ? (
+              <span style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                <SupportContact
+                  compact
+                  extra={t('tono.login.restoreFailed.title')}
+                />
+                <button
+                  type="button"
+                  className="sea-button"
+                  data-variant="primary"
+                  style={{ minHeight: 32, padding: '6px 14px', fontSize: 12 }}
+                  onClick={handleRetryRestore}
+                  disabled={retrying}
+                >
+                  {retrying ? '…' : t('tono.login.restoreFailed.retry')}
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="tono-button"
+                style={{
+                  padding: '6px 10px',
+                  fontSize: 12,
+                  color: '#fff',
+                  background: TONO_COLORS.error,
+                  flexShrink: 0,
+                }}
+                onClick={handleRetryRestore}
+                disabled={retrying}
+              >
+                {retrying ? '…' : t('tono.login.restoreFailed.retry')}
+              </button>
+            )}
           </div>
         )}
-        {restoreFailed && (
+        {restoreFailed && !newAppearance && (
           <SupportContact extra={t('tono.login.restoreFailed.title')} />
         )}
 

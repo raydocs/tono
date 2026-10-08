@@ -36,6 +36,10 @@
   color: var(--sea-text);
   font-variant-numeric: tabular-nums;
 }
+/* Chinese copy otherwise strands one character ("密 / 码。") on a narrow line. */
+:is([data-sea-appearance="true"], [data-sea-ui="true"]) :is(p, h1, h2, h3) {
+  text-wrap: pretty;
+}
 [data-sea-tone="warm"] {
   --sea-accent: #ffd58e;
 }

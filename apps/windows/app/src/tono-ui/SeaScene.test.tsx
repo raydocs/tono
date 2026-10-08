@@ -283,9 +283,9 @@ it('keeps separate brightness-tier star groups mounted during dawn and reversal'
   const groups = [...container.querySelectorAll('.sea-stars')]
   const stars = [...container.querySelectorAll('.sea-star')]
   expect(groups).toHaveLength(3)
-  expect(groups[0]?.querySelectorAll('.sea-star-tier-0')).toHaveLength(30)
-  expect(groups[1]?.querySelectorAll('.sea-star-tier-1')).toHaveLength(15)
-  expect(groups[2]?.querySelectorAll('.sea-star-tier-2')).toHaveLength(9)
+  expect(groups[0]?.querySelectorAll('.sea-star-tier-0')).toHaveLength(42)
+  expect(groups[1]?.querySelectorAll('.sea-star-tier-1')).toHaveLength(8)
+  expect(groups[2]?.querySelectorAll('.sea-star-tier-2')).toHaveLength(4)
   rerender(<SeaScene phase="connecting" progress={0.5} />)
   groups.forEach((group, index) => {
     expect(container.querySelectorAll('.sea-stars')[index]).toBe(group)

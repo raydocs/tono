@@ -17,6 +17,7 @@
     linear-gradient(#160e15, #2a161b);
 }
 .sea-tray[data-ground="ember"] {
+  --sea-accent: #ffc4a0;
   background:
     radial-gradient(110% 100% at 85% 130%, #e6503c42, transparent 65%),
     linear-gradient(#130c14, #23131a);
@@ -36,7 +37,33 @@
 }
 .sea-tray-mark {
   float: right;
-  font-size: 22px;
+  width: 14px;
+  height: 14px;
+  margin: 6px 4px 0 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 35%, #fff6de, #ffd58e 55%, #ff9e63);
+  box-shadow: 0 0 12px #ffb87766;
+}
+.sea-tray-mark[data-phase="idle"] {
+  /* A drawn crescent: the text glyph rendered as a thin font-dependent outline. */
+  width: 16px;
+  height: 16px;
+  margin: 5px 3px 0 0;
+  background: none;
+  box-shadow:
+    inset -6px 3px 0 0 #f4eee2,
+    4px -2px 12px -4px #f4eee233;
+  transform: rotate(-18deg);
+}
+.sea-tray-mark[data-phase="failed"] {
+  background: radial-gradient(circle at 50% 35%, #ffb08a, #e85a44);
+  box-shadow: 0 0 10px #e85a4455;
+}
+.sea-tray > .sea-button[data-variant="text"] {
+  display: block;
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 12px;
   color: var(--sea-accent);
 }
 .sea-tray-info {
