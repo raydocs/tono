@@ -1,11 +1,11 @@
 // Live throughput for the sea's water sparkle (decision 077). The dashboard's
 // existing traffic subscription writes it; the water renderer reads it once per
-// frame. No React state, no second subscription.
+// frame. No React state, no second subscription. The feed skips duplicate
+// samples, so a steady rate is never stale: the writer clears it with `null`
+// when the tunnel stops being live or the dashboard unmounts.
 const FULL_SCALE_KIB = 20 * 1024 // 20 MiB/s reads as a full glitter path
-const STALE_MS = 4000
 
 let level = 0
-let at = Number.NEGATIVE_INFINITY
 
 /** Log scale, 0–1: a page load is visible, a large download saturates. */
 export const seaTrafficLevel = (bytesPerSecond: number) =>
@@ -19,19 +19,11 @@ export const seaTrafficLevel = (bytesPerSecond: number) =>
   )
 
 /** `null` when there is no live tunnel throughput (not connected, no frame yet). */
-export const publishSeaTraffic = (
-  bytesPerSecond: number | null,
-  now = performance.now(),
-) => {
-  if (bytesPerSecond === null || !Number.isFinite(bytesPerSecond)) {
-    level = 0
-    at = Number.NEGATIVE_INFINITY
-    return
-  }
-  level = seaTrafficLevel(bytesPerSecond)
-  at = now
+export const publishSeaTraffic = (bytesPerSecond: number | null) => {
+  level =
+    bytesPerSecond === null || !Number.isFinite(bytesPerSecond)
+      ? 0
+      : seaTrafficLevel(bytesPerSecond)
 }
 
-/** A writer that stopped (page left, socket dropped) reads as a calm sea. */
-export const readSeaTraffic = (now = performance.now()) =>
-  now - at > STALE_MS ? 0 : level
+export const readSeaTraffic = () => level

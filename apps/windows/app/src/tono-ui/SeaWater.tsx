@@ -270,7 +270,7 @@ const start = (scene: HTMLElement, canvas: HTMLCanvasElement) => {
       current[key] = [r + (tr - r) * k, g + (tg - g) * k, b + (tb - b) * k]
     }
     current.haze += (target.haze - current.haze) * k
-    const traffic = readSeaTraffic(now) * LIVE[phase]
+    const traffic = readSeaTraffic() * LIVE[phase]
     rough += (0.18 + 0.7 * traffic - rough) * (1 - Math.exp(-dt / 1.4))
     spark += (traffic - spark) * (1 - Math.exp(-dt / 0.6))
 
