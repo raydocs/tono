@@ -88,6 +88,31 @@ nonisolated enum KillSwitchService {
         isArmed && !armedWithTunnel
     }
 
+    /// Helper IPC behind `refreshStatus` and `reconcileTunnelState`; tests
+    /// replace it.
+    nonisolated(unsafe) static var statusReport: () throws -> (
+        armed: Bool, wanted: Bool, live: Bool, healed: Bool, tunnelArmed: Bool?
+    ) = { try HelperManager.killSwitchStatusReport() }
+
+    /// Takes the helper's word on the tunnel over the local record, which only
+    /// sees the arms this app issued: update preparation arms without a
+    /// tunnel from inside the helper. Only while the helper holds armed
+    /// intent; an older helper that does not say leaves the record alone.
+    private static func adoptTunnelState(
+        _ status: (armed: Bool, wanted: Bool, live: Bool, healed: Bool, tunnelArmed: Bool?)
+    ) {
+        guard status.wanted || status.armed, let tunnelArmed = status.tunnelArmed else { return }
+        armedWithTunnel = tunnelArmed
+    }
+
+    /// Re-reads the helper's tunnel state after an operation the helper ran on
+    /// its own (native update prepare/execute, success or failure). Errors
+    /// leave the record as it was.
+    static func reconcileTunnelState() {
+        guard let status = try? statusReport() else { return }
+        adoptTunnelState(status)
+    }
+
     static var isHelperInstalled: Bool {
         HelperManager.isHelperRunning()
     }
@@ -396,8 +421,9 @@ nonisolated enum KillSwitchService {
     /// connect/disconnect operation raced this IPC round trip.
     static func refreshStatus() -> StatusObservation {
         do {
-            let status = try HelperManager.killSwitchStatus()
+            let status = try statusReport()
             if status.healed { needsSessionExceptionReassert = true }
+            adoptTunnelState(status)
             return .confirmed(
                 requiresProtectionRecovery: status.armed || status.wanted
             )

@@ -27,7 +27,7 @@
   relays are also exit nodes, so the tunnel arm, which withdraws the relay permit, spares from its host-wide state kill a
   relay address the Core still dials as its exit (a relay connection open at that moment can then outlive the permit;
   it carries TLS to the API or release host only, and no new one is admitted). The app goes to the relays first, and
-  only there, while armed without a tunnel (`KillSwitchService.isArmedWithoutTunnel`, set from each committed arm):
+  only there, while armed without a tunnel (`KillSwitchService.isArmedWithoutTunnel`, set from each committed arm and re-read from the helper's `tunnelArmed` status on every status refresh and after native update prepare/execute, since update preparation arms without a tunnel inside the helper):
   `TonoAPIClient` skips the system resolver and the pinned path, the updater's release-host GETs and package download go
   to the relays directly; TLS names the real host and uses default certificate validation. Unarmed and connected path
   orders are unchanged.

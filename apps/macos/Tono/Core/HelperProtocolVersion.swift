@@ -412,7 +412,8 @@ nonisolated enum HelperProtocolVersion {
     ///   interactive user only) instead of the API host's Cloudflare anycast
     ///   addresses, which are never permitted; connected, none. A tunnel arm
     ///   spares a relay address the Core still dials as its exit from the
-    ///   targeted state kill (H1-F5, decision 086).
+    ///   targeted state kill, and `/killswitch/status` reports `tunnelArmed`
+    ///   (H1-F5, decision 086).
     static let current = "4.52.45"
 }
 

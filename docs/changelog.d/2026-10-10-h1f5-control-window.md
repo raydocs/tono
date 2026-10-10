@@ -7,7 +7,7 @@
   （`ControlPlaneRelays`：`179.253.233.220:2053`、`179.255.154.17:2053`，TCP，`user <uid>`，标签 `tono-api-relay`，去掉 root）；
   Cloudflare 地址（内置、学到、解析到的）在任何 armed 状态都不放行；已连接仍无控制面放行。离开旧规则时按地址杀掉
   Cloudflare 状态；隧道 arm 撤回中继放行时，只放过 Core 正在作为出口拨的那个中继地址。app 在无隧道 armed 时
-  （`KillSwitchService.isArmedWithoutTunnel`）控制面请求只走中继，更新器的发布主机 GET 与包下载也直接走中继；TLS 仍以真实
+  （`KillSwitchService.isArmedWithoutTunnel`：每次 arm 记录，并在状态刷新及原生更新 prepare/execute 之后按 helper 报告的 `tunnelArmed` 校正）控制面请求只走中继，更新器的发布主机 GET 与包下载也直接走中继；TLS 仍以真实
   主机名作 SNI、默认证书校验。未 armed 与已连接时路径顺序不变。≤ 15 s 窗口方案放弃：macOS PF 没有内核级放行到期
   （xnu 源码核查，见决定 [086](../decisions/086-2026-10-10-h1f5-control-window.md)），两版用户态窗口实现存档于
   `amp/a30-userspace-window-archive`（`d62b5ba2`）。
@@ -17,7 +17,7 @@
   无 Cloudflare 地址、无 root；已连接无放行；旧规则的 Cloudflare 状态被杀；隧道 arm 杀中继状态但放过同时是出口的
   中继）；既有自测改断言中继放行、隧道规则禁止中继与 API 地址、新增无隧道规则的 PF 解析；`--lifecycle-self-test` 用真实
   pfctl 加载无隧道规则并读回中继放行。XCTest `testArmedWithoutATunnelTheRequestGoesToTheRelayOnly`；更新器测试显式
-  传入未 armed。`tooling/ops/relay/test_relay_stream_conf.py` 静态校验 SNI 白名单只有 api/releases、默认拒绝、只监听
+  传入未 armed；评审 M1 后新增 `testAFailedUpdateAfterPreparationSendsTheNextRequestToTheRelayOnly`、`testArmedWithoutATunnelBothRelaysDownFailsWithoutAnyOtherPath`（helper `/killswitch/status` 新增 `tunnelArmed`）。`tooling/ops/relay/test_relay_stream_conf.py` 静态校验 SNI 白名单只有 api/releases、默认拒绝、只监听
   2053、TLS 不终止（services-ci 改为 discover 跑该目录全部测试）。CONTRACT.sha256 更新。
 - 验证：Linux orb：`python3 -m unittest discover -s tooling/ops/relay -p 'test_*.py'`（3 项通过）、
   `apps/macos/scripts/test_build_source.py`（2 项通过）、CONTRACT 哈希经 `build-core-helper.sh` 自身校验；只读实测两个中继：
