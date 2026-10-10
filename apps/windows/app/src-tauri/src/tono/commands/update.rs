@@ -76,24 +76,59 @@ fn client() -> Result<reqwest::Client> {
     Ok(builder().build()?)
 }
 
-/// Index + 1 of the relay that last carried an update GET, or 0. Process memory only.
-static PREFERRED_RELAY: AtomicUsize = AtomicUsize::new(0);
-
-/// One update GET: direct first, then through the Tono relays (decision 077).
-async fn get(client: &reqwest::Client, url: &str, timeout: Option<Duration>) -> Result<reqwest::Response> {
-    get_with_relays(client, url, timeout, &bootstrap::api_relays(), builder, &PREFERRED_RELAY).await
+/// One update GET: through the relay the API transport last reached first, when there is one,
+/// then direct, then through the Tono relays (decision 077). `preferred` is the API
+/// transport's relay preference (`TonoTransport::preferred_relay`), so a device whose sign-in
+/// went through a relay does not pay the dead direct path before every update request.
+async fn get(
+    client: &reqwest::Client,
+    url: &str,
+    timeout: Option<Duration>,
+    preferred: &AtomicUsize,
+) -> Result<reqwest::Response> {
+    get_with_relays(client, url, timeout, &bootstrap::api_relays(), builder, preferred).await
 }
 
-/// GET `url` through `direct`; when that failed before any response arrived, send the same GET
-/// once through each relay in order (the one that last answered first) until one answers.
+/// GET `url` through `relay`: the relayed client resolves the URL's own host to the relay
+/// socket and keeps every setting of `builder`, so SNI and the certificate check are those of
+/// the direct path. The URL carries the relay's port and the override carries the same one, as
+/// in the API transport. `None` when the URL cannot carry a port.
+async fn get_via_relay(
+    url: &reqwest::Url,
+    host: &str,
+    relay: SocketAddr,
+    timeout: Option<Duration>,
+    builder: &impl Fn() -> reqwest::ClientBuilder,
+) -> Result<Option<Result<reqwest::Response, reqwest::Error>>> {
+    let mut relayed = url.clone();
+    if relayed.set_port(Some(relay.port())).is_err() {
+        return Ok(None);
+    }
+    let client = builder()
+        .connect_timeout(RELAY_CONNECT_TIMEOUT)
+        .resolve(host, relay)
+        .build()?;
+    Ok(Some(with_timeout(client.get(relayed.as_str()), timeout).send().await))
+}
+
+fn with_timeout(request: reqwest::RequestBuilder, timeout: Option<Duration>) -> reqwest::RequestBuilder {
+    match timeout {
+        Some(limit) => request.timeout(limit),
+        None => request,
+    }
+}
+
+/// GET `url`. When `preferred` names a relay (index + 1; the API transport sets it when one of
+/// this process's requests went through that relay), the GET goes there first, as the API
+/// transport's own requests do; a failure that delivered nothing clears the preference and the
+/// GET goes on as below. Then `direct`; when that failed before any response arrived, the same
+/// GET goes once through each relay not yet tried, in order, until one answers, and the one
+/// that answered becomes the preference.
 ///
-/// The relay passes the TLS session through unterminated: the relayed client resolves the
-/// URL's own host to the relay socket and keeps every setting of `builder`, so SNI and the
-/// certificate check are those of the direct path. The URL carries the relay's port and the
-/// override carries the same one, as in the API transport. Only the transport is changed: what
+/// The relay passes the TLS session through unterminated. Only the transport is changed: what
 /// comes back is checked exactly as a direct answer is (signature by the Service, size here).
 /// An HTTP status is an answer and is never re-sent. The relays sit outside the WFP bootstrap
-/// permit, so while protection is armed this attempt fails like any other blocked address.
+/// permit, so while protection is armed a relay attempt fails like any other blocked address.
 async fn get_with_relays(
     direct: &reqwest::Client,
     url: &str,
@@ -102,57 +137,62 @@ async fn get_with_relays(
     builder: impl Fn() -> reqwest::ClientBuilder,
     preferred: &AtomicUsize,
 ) -> Result<reqwest::Response> {
-    let prepare = |client: &reqwest::Client, url: &str| {
-        let request = client.get(url);
-        match timeout {
-            Some(limit) => request.timeout(limit),
-            None => request,
-        }
-    };
-    let direct_error = match prepare(direct, url).send().await {
-        Ok(response) => return Ok(response),
-        Err(error) => error,
-    };
-    // The transport's rule for an undelivered GET (`should_retry_transport`).
-    if !should_retry_transport(HttpMethod::Get, classify(&direct_error)) || relays.is_empty() {
-        return Err(direct_error.into());
-    }
     let parsed = reqwest::Url::parse(url)?;
-    let Some(host) = parsed.host_str() else {
-        return Err(direct_error.into());
-    };
+    let host = parsed.host_str().map(str::to_owned);
+    let mut failures = Vec::new();
+    let mut tried = None;
     let first = preferred
         .load(Ordering::Relaxed)
         .checked_sub(1)
         .filter(|index| *index < relays.len());
-    let order = first
-        .into_iter()
-        .chain((0..relays.len()).filter(|index| Some(*index) != first));
-    let mut failures = Vec::new();
-    for index in order {
+    if let (Some(index), Some(host)) = (first, host.as_deref()) {
         let relay = relays[index];
-        let mut relayed = parsed.clone();
-        if relayed.set_port(Some(relay.port())).is_err() {
-            continue;
+        tried = Some(index);
+        match get_via_relay(&parsed, host, relay, timeout, &builder).await? {
+            Some(Ok(response)) => return Ok(response),
+            Some(Err(error)) => {
+                // The transport's rule for an undelivered GET (`should_retry_transport`), and the
+                // API transport's reaction to it: forget the relay and take the usual path.
+                if !should_retry_transport(HttpMethod::Get, classify(&error)) {
+                    return Err(error.into());
+                }
+                failures.push(format!("relay {relay}: {error}"));
+            }
+            None => {}
         }
-        let client = builder()
-            .connect_timeout(RELAY_CONNECT_TIMEOUT)
-            .resolve(host, relay)
-            .build()?;
-        match prepare(&client, relayed.as_str()).send().await {
-            Ok(response) => {
+        preferred.store(0, Ordering::Relaxed);
+    }
+    let direct_error = match with_timeout(direct.get(url), timeout).send().await {
+        Ok(response) => return Ok(response),
+        Err(error) => error,
+    };
+    // The transport's rule for an undelivered GET (`should_retry_transport`).
+    if !should_retry_transport(HttpMethod::Get, classify(&direct_error)) {
+        return Err(direct_error.into());
+    }
+    let Some(host) = host.as_deref() else {
+        return Err(direct_error.into());
+    };
+    for index in (0..relays.len()).filter(|index| Some(*index) != tried) {
+        let relay = relays[index];
+        match get_via_relay(&parsed, host, relay, timeout, &builder).await? {
+            Some(Ok(response)) => {
                 preferred.store(index + 1, Ordering::Relaxed);
                 return Ok(response);
             }
-            Err(error) => failures.push(format!("relay {relay}: {error}")),
+            Some(Err(error)) => failures.push(format!("relay {relay}: {error}")),
+            None => {}
         }
     }
     preferred.store(0, Ordering::Relaxed);
+    if failures.is_empty() {
+        return Err(direct_error.into());
+    }
     Err(anyhow::Error::new(direct_error).context(failures.join("; ")))
 }
 
-async fn bounded(client: &reqwest::Client, url: &str, limit: usize) -> Result<String> {
-    let mut response = get(client, url, Some(Duration::from_secs(30)))
+async fn bounded(client: &reqwest::Client, url: &str, limit: usize, preferred: &AtomicUsize) -> Result<String> {
+    let mut response = get(client, url, Some(Duration::from_secs(30)), preferred)
         .await?
         .error_for_status()?;
     let mut bytes = Vec::new();
@@ -171,16 +211,21 @@ pub struct Offer {
 }
 
 #[tauri::command]
-pub async fn tono_check_update() -> Result<Option<Offer>, String> {
+pub async fn tono_check_update(state: tauri::State<'_, Arc<TonoState>>) -> Result<Option<Offer>, String> {
     async {
         let client = client()?;
-        let manifest = bounded(&client, DISCOVERY_URL, 16_384).await?;
+        // The sign-in's relay preference: a device whose API requests reach only a relay
+        // starts its update GETs there too (decision 077).
+        let api = state.lock().await.client.clone();
+        let preferred = api.transport().preferred_relay();
+        let manifest = bounded(&client, DISCOVERY_URL, 16_384, preferred).await?;
         let decoded = ReleaseManifest::decode(manifest.as_bytes())?;
         let hash = decoded.sha256()?;
         let signature = bounded(
             &client,
             &format!("{RELEASE_ROOT}/{hash}/manifest.windows-x86_64.sig"),
             4096,
+            preferred,
         )
         .await?;
         // Service verifies the signature and compiled/durable floor even when
@@ -242,10 +287,12 @@ pub async fn tono_install_update(
             .write(true)
             .open(&path)
             .await?;
+        let api = state.lock().await.client.clone();
         let mut response = get(
             &client()?,
             &format!("{RELEASE_ROOT}/{manifest_sha256}/package.windows-x86_64.exe"),
             None,
+            api.transport().preferred_relay(),
         )
         .await?
         .error_for_status()?;
@@ -682,5 +729,62 @@ mod update_relay_tests {
             "the relayed GET must keep the release hostname, got {host:?}"
         );
         assert_eq!(preferred.load(Ordering::Relaxed), 2, "the relay that answered is remembered");
+    }
+
+    /// Backlog A1: once a sign-in went through a relay, the update GET starts at that relay
+    /// instead of first paying the direct path (about 21 s of SYN retries on a dead Windows
+    /// route). The direct path here answers, so a GET that tried it first reads "direct".
+    #[tokio::test]
+    async fn a_relay_that_carried_the_sign_in_is_the_first_hop_of_an_update_get() {
+        fn serve(body: &'static str) -> SocketAddr {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            let address = listener.local_addr().expect("addr");
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    use std::io::{BufRead as _, BufReader, Write as _};
+                    let Ok(mut stream) = stream else { continue };
+                    let Ok(clone) = stream.try_clone() else { continue };
+                    let mut reader = BufReader::new(clone);
+                    let mut line = String::new();
+                    while reader.read_line(&mut line).unwrap_or(0) > 0 && line != "\r\n" && line != "\n" {
+                        line.clear();
+                    }
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = stream.flush();
+                    let _ = stream.shutdown(std::net::Shutdown::Write);
+                }
+            });
+            address
+        }
+        let direct_address = serve("direct");
+        let relay = serve("relay");
+        let direct = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .resolve("releases.test", direct_address)
+            .build()
+            .expect("direct client");
+        // What the API transport leaves after a sign-in through the second relay.
+        let preferred = AtomicUsize::new(2);
+        let response = get_with_relays(
+            &direct,
+            "http://releases.test/desktop/v1/latest/manifest.json",
+            Some(Duration::from_secs(5)),
+            &[SocketAddr::from(([127, 0, 0, 1], 1)), relay],
+            || reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()),
+            &preferred,
+        )
+        .await
+        .expect("the preferred relay must carry the GET");
+        assert_eq!(
+            response.text().await.expect("body"),
+            "relay",
+            "the update GET went to the direct path before the relay the sign-in used"
+        );
+        assert_eq!(preferred.load(Ordering::Relaxed), 2, "an answering relay stays preferred");
     }
 }

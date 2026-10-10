@@ -372,6 +372,14 @@ impl TonoTransport {
             .store(port, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// The relay preference (`preferred_relay`), shared with the updater's GETs so an update
+    /// check on a device whose sign-in went through a relay goes there first instead of paying
+    /// the dead direct path again. Both sides index `bootstrap::api_relays()` and clear it on a
+    /// provably undelivered relay failure.
+    pub(crate) fn preferred_relay(&self) -> &std::sync::atomic::AtomicUsize {
+        &self.preferred_relay
+    }
+
     /// How many responses have delivered a status line so far (#582).
     pub fn answers_seen(&self) -> u64 {
         self.answers.load(std::sync::atomic::Ordering::Acquire)
