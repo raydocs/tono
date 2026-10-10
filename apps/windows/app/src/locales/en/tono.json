@@ -283,6 +283,20 @@
       "signInNotSaved": "Sign-in didn't complete.",
       "clockSkew": "Sign-in didn't complete.",
       "serverError": "Sign-in didn't complete."
+    },
+    "paths": {
+      "title": "Paths tried",
+      "system_dns": "System DNS",
+      "pinned": "Pinned address",
+      "relay": "Tono relay",
+      "kind": {
+        "dns": "Name lookup failed",
+        "connect": "Couldn't connect",
+        "tls": "Secure connection failed",
+        "timeout": "Timed out",
+        "other": "Failed"
+      },
+      "elapsed": "{{seconds}} s"
     }
   },
   "pill": {

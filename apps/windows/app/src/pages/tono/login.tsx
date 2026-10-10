@@ -35,6 +35,12 @@ import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { TonoLogo } from '@/tono-ui/TonoLogo'
 import { WelcomeHeroTile } from '@/tono-ui/WelcomeHeroTile'
 
+import { LoginPathFailures } from './login-path-failures'
+import {
+  type ControlPlanePathFailure,
+  controlPlanePathFailures,
+  controlPlanePathsSummary,
+} from './login-paths'
 import './sea-welcome.css'
 
 const RESEND_COUNTDOWN = 60
@@ -73,42 +79,44 @@ const AUTH_ERROR_CODES = new Set([
   'TONO_CLOCK_SKEW',
 ])
 
+const rawAuthError = (error: unknown) =>
+  error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : ''
+
+/** The transport part of an unreachable sign-in, after its stable code. */
+const authTransportText = (raw: string) =>
+  raw.match(
+    /^TONO_(?:AUTH_[A-Z0-9_]+|CLOCK_SKEW): could not reach Tono: ([\s\S]*)$/,
+  )?.[1]
+
+/** Every control-plane path the failed request tried, or none. */
+const authPathFailures = (error: unknown) => {
+  const transport = authTransportText(rawAuthError(error))
+  return transport ? controlPlanePathFailures(transport) : []
+}
+
 // Copy-to-support gets only fixed labels and allowlisted tokens, never the
 // backend error chain (which may contain request URLs or other private data).
 const authSupportSummary = (
   stage: 'send-code' | 'verify-code',
   error: unknown,
 ) => {
-  const raw =
-    error instanceof Error
-      ? error.message
-      : typeof error === 'string'
-        ? error
-        : ''
+  const raw = rawAuthError(error)
   const foundCode = stableTonoErrorCode(raw)
   const code =
     foundCode && AUTH_ERROR_CODES.has(foundCode) ? foundCode : '(none)'
   const lines = [`Auth stage: ${stage}`, `Error code: ${code}`]
-  const transport = raw.match(
-    /^TONO_(?:AUTH_[A-Z0-9_]+|CLOCK_SKEW): could not reach Tono: ([\s\S]*)$/,
-  )?.[1]
+  const transport = authTransportText(raw)
   if (transport) {
-    const pinned = transport.match(
-      /^pinned\[(?:TONO_CLOCK_SKEW: )?(dns|connect|tls|timeout|other): /,
-    )?.[1]
-    const resolved = transport.match(
-      /\]; system-dns\[(?:TONO_CLOCK_SKEW: )?(dns|connect|tls|timeout|other): /,
-    )?.[1]
-    const relay = transport.match(
-      /\]; relay\[[^\]]*?: (?:TONO_CLOCK_SKEW: )?(dns|connect|tls|timeout|other): /,
-    )?.[1]
+    const paths = controlPlanePathFailures(transport)
     const direct = transport.match(
       /^(?:TONO_CLOCK_SKEW: )?(dns|connect|tls|timeout|other): /,
     )?.[1]
-    if (pinned) {
-      lines.push(
-        `Transport: pinned=${pinned}${resolved ? `, system-dns=${resolved}` : ''}${relay ? `, relay=${relay}` : ''}`,
-      )
+    if (paths.length > 0) {
+      lines.push(`Paths: ${controlPlanePathsSummary(paths)}`)
     } else if (direct) {
       lines.push(`Transport: ${direct}`)
     }
@@ -141,6 +149,7 @@ const LoginPage = () => {
   const [authFailureSummary, setAuthFailureSummary] = useState<string | null>(
     null,
   )
+  const [authPaths, setAuthPaths] = useState<ControlPlanePathFailure[]>([])
   const [restoreInternetError, setRestoreInternetError] = useState<
     string | null
   >(null)
@@ -192,6 +201,7 @@ const LoginPage = () => {
     setCode('')
     setError(null)
     setAuthFailureSummary(null)
+    setAuthPaths([])
     setRejectedAttempt(0)
     autoSubmittedCodeRef.current = null
   }
@@ -202,6 +212,7 @@ const LoginPage = () => {
     if (!EMAIL_PATTERN.test(trimmed)) {
       setError(t('tono.login.invalidEmail'))
       setAuthFailureSummary(null)
+      setAuthPaths([])
       return
     }
     authRequestPendingRef.current = true
@@ -209,6 +220,7 @@ const LoginPage = () => {
     setSending(true)
     setError(null)
     setAuthFailureSummary(null)
+    setAuthPaths([])
     setSuspendedDismissed(false)
     setVerifySuspended(false)
     try {
@@ -220,6 +232,7 @@ const LoginPage = () => {
     } catch (error) {
       setError(formatTonoActionError(error, t))
       setAuthFailureSummary(authSupportSummary('send-code', error))
+      setAuthPaths(authPathFailures(error))
     } finally {
       authRequestPendingRef.current = false
       setSending(false)
@@ -232,12 +245,14 @@ const LoginPage = () => {
     if (!/^\d{6}$/.test(trimmedCode)) {
       setError(t('tono.login.invalidCode'))
       setAuthFailureSummary(null)
+      setAuthPaths([])
       return
     }
     authRequestPendingRef.current = true
     setVerifying(true)
     setError(null)
     setAuthFailureSummary(null)
+    setAuthPaths([])
     try {
       const account = await tonoSignInVerify(email.trim(), trimmedCode)
       if (account.suspended) {
@@ -259,6 +274,7 @@ const LoginPage = () => {
       }
       setError(formatTonoActionError(error, t))
       setAuthFailureSummary(authSupportSummary('verify-code', error))
+      setAuthPaths(authPathFailures(error))
     } finally {
       authRequestPendingRef.current = false
       setVerifying(false)
@@ -295,6 +311,7 @@ const LoginPage = () => {
     setRetrying(true)
     setError(null)
     setAuthFailureSummary(null)
+    setAuthPaths([])
     try {
       await tonoRetryRestore()
       await mutateTonoStatus()
@@ -316,6 +333,7 @@ const LoginPage = () => {
       await mutateTonoStatus()
       setError(null)
       setAuthFailureSummary(null)
+      setAuthPaths([])
     } catch (error) {
       setRestoreInternetError(formatTonoActionError(error, t))
     } finally {
@@ -720,6 +738,7 @@ const LoginPage = () => {
                 setEmail(event.target.value)
                 setError(null)
                 setAuthFailureSummary(null)
+                setAuthPaths([])
               }}
               disabled={
                 sending ||
@@ -917,6 +936,9 @@ const LoginPage = () => {
           >
             {error}
           </p>
+        )}
+        {errorOffersSupport && authPaths.length > 0 && (
+          <LoginPathFailures paths={authPaths} />
         )}
         {errorOffersSupport && (
           <SupportContact

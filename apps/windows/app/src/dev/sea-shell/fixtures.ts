@@ -169,6 +169,11 @@ export const tonoUpdateRoutePreferences = async (
 
 // Sign-in fixture uses no credentials or network; only synthetic status events.
 export const tonoSignInStart = async () => {
+  // Every control-plane path failed: the transport's combined message, synthetic detail only.
+  if (params.has('unreachable'))
+    throw new Error(
+      'TONO_AUTH_UNREACHABLE: could not reach Tono: pinned[10012ms connect: synthetic]; system_dns[30001ms timeout: synthetic]; relay[4003ms 192.0.2.1:2053: connect: synthetic; 192.0.2.2:2053: connect: synthetic]',
+    )
   window.dispatchEvent(
     new CustomEvent('preview-home-state', {
       detail: { accountState: 'authenticating' },

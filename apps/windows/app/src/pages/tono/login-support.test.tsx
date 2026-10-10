@@ -57,6 +57,11 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+// The transport's combined message (`tono_core::auth::path_failure`), with private detail
+// after each classification word that must never reach the screen or the clipboard.
+const UNREACHABLE_ERROR =
+  'TONO_AUTH_UNREACHABLE: could not reach Tono: pinned[10012ms connect: error sending request for url (https://example.invalid/auth?token=private-token)]; system_dns[30001ms timeout: request timed out]; relay[4003ms 179.253.233.220:2053: connect: error sending request for url (https://example.invalid:2053/auth?token=private-token); 179.255.154.17:2053: connect: refused]'
+
 const supportHeader = `Tono ${version}\nemail person@example.com\nstatus notConnected`
 
 function renderLogin() {
@@ -85,9 +90,7 @@ async function waitForResend() {
 
 describe('login support diagnostics', () => {
   it('copies send and verify classifications through the real UI and clears them on retry and reset', async () => {
-    mocks.invoke.mockRejectedValueOnce(
-      'TONO_AUTH_UNREACHABLE: could not reach Tono: pinned[connect: error sending request for url (https://example.invalid/auth?token=private-token)]; system-dns[timeout: request timed out]; relay[179.253.233.220:2053: connect: error sending request for url (https://example.invalid:2053/auth?token=private-token)]',
-    )
+    mocks.invoke.mockRejectedValueOnce(UNREACHABLE_ERROR)
     renderLogin()
     await act(async () =>
       fireEvent.click(screen.getByRole('button', { name: 'Send code' })),
@@ -99,7 +102,7 @@ describe('login support diagnostics', () => {
       `${enTono.login.errors.unreachable} (TONO_AUTH_UNREACHABLE)`,
     )
     expect(await copyForSupport()).toBe(
-      `${supportHeader}\nAuth stage: send-code\nError code: TONO_AUTH_UNREACHABLE\nTransport: pinned=connect, system-dns=timeout, relay=connect`,
+      `${supportHeader}\nAuth stage: send-code\nError code: TONO_AUTH_UNREACHABLE\nPaths: pinned[10012ms connect]; system_dns[30001ms timeout]; relay[4003ms connect]`,
     )
 
     await act(async () =>
@@ -158,5 +161,24 @@ describe('login support diagnostics', () => {
     expect(
       screen.queryByRole('button', { name: 'Copy for support' }),
     ).toBeNull()
+  })
+
+  it('lists every path the failed sign-in tried with its reason and elapsed time', async () => {
+    mocks.invoke.mockRejectedValueOnce(UNREACHABLE_ERROR)
+    renderLogin()
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Send code' })),
+    )
+    const list = screen.getByLabelText(enTono.login.paths.title)
+    const rows = Array.from(list.children, (row) =>
+      Array.from(row.children, (cell) => cell.textContent).join(' | '),
+    )
+    expect(rows).toEqual([
+      `${enTono.login.paths.pinned} | ${enTono.login.paths.kind.connect} | 10.0 s`,
+      `${enTono.login.paths.system_dns} | ${enTono.login.paths.kind.timeout} | 30.0 s`,
+      `${enTono.login.paths.relay} | ${enTono.login.paths.kind.connect} | 4.0 s`,
+    ])
+    expect(document.body.textContent).not.toContain('private-token')
+    expect(document.body.textContent).not.toContain('179.253.233.220')
   })
 })

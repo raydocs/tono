@@ -91,6 +91,17 @@ pub fn should_retry_transport(method: HttpMethod, kind: TransportKind) -> bool {
     }
 }
 
+/// One control-plane path's part of the combined failure message when no path answered.
+///
+/// The macOS client's wording (#1464), `label[detail]` joined by `; `, with the time that path
+/// took in front of the detail: `pinned[10012ms connect: ...]`. `label` is the path's
+/// `X-Tono-Path` value (`system_dns`, `pinned`, `relay`). The sign-in screen lists each path
+/// from the label, the elapsed time and the leading classification word only; the rest of the
+/// detail (which can carry request URLs) is never shown or copied there.
+pub fn path_failure(label: &str, elapsed: Duration, detail: &str) -> String {
+    format!("{label}[{}ms {detail}]", elapsed.as_millis())
+}
+
 /// Interval between a failed attempt and its single retry (500 ms; there
 /// is no `waitsForConnectivity` equivalent — this partially covers it).
 pub const TRANSPORT_RETRY_DELAY: Duration = Duration::from_millis(500);
@@ -1850,6 +1861,27 @@ mod tests {
             user: serde_json::from_str(user_json()).unwrap(),
             device: None,
         }
+    }
+
+    /// The sign-in screen's per-path list reads this exact shape (`login-paths.ts` in the app):
+    /// the macOS label, the elapsed milliseconds, then the detail as the transport wrote it.
+    #[test]
+    fn each_path_failure_carries_its_label_and_elapsed_time() {
+        let combined = [
+            path_failure("pinned", Duration::from_millis(10_012), "connect: refused"),
+            path_failure("system_dns", Duration::from_millis(30_001), "timeout: timed out"),
+            path_failure(
+                "relay",
+                Duration::from_micros(4_003_900),
+                "179.253.233.220:2053: connect: refused",
+            ),
+        ]
+        .join("; ");
+        assert_eq!(
+            combined,
+            "pinned[10012ms connect: refused]; system_dns[30001ms timeout: timed out]; \
+             relay[4003ms 179.253.233.220:2053: connect: refused]"
+        );
     }
 
     // ---- account rules ----
