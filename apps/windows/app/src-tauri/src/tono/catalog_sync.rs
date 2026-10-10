@@ -142,6 +142,9 @@ pub fn seed_from_cache(inner: &mut TonoInner) {
     inner.routing = sanitized_routing(cached.response.routing.as_ref(), &inner.nodes);
     enforce_selection_survival(inner);
     let _ = ensure_usable_selection(inner);
+    // A17: the remembered hy2 choices travel with this cache. The cached
+    // `hy2AutoSwitch` is not trusted; the permission waits for a live 200.
+    connection::restore_hy2_choices(inner);
 }
 
 /// Drop the signed-out account's catalog from memory and disk. The body is
@@ -153,6 +156,7 @@ pub(crate) fn discard_account_catalog(inner: &mut TonoInner) {
     inner.nodes = Vec::new();
     inner.routing = None;
     inner.catalog_tracker = tono_core::CatalogTracker::new();
+    connection::forget_hy2_choices(inner);
     // An offline verification described this catalog. The grant file stays: it binds the
     // discarded session's token hash and this catalog's digests, so no later session matches it.
     inner.offline.leave_offline();
@@ -345,9 +349,15 @@ where
                 revision: response.revision,
                 node_count,
             });
+            connection::note_hy2_catalog(&mut inner, response.hy2_auto_switch);
             (true, true)
         }
-        Ok(_) => (false, true),
+        // A17: `hy2AutoSwitch` is outside the install key, so an unchanged
+        // install still carries the current permission.
+        Ok(_) => {
+            connection::note_hy2_catalog(&mut inner, response.hy2_auto_switch);
+            (false, true)
+        }
         // Benign out-of-order delivery (tono-core L5): never an error.
         Err(CatalogError::StaleRevision) => (false, false),
         Err(err) => return Err(SyncFailure::Failed(err.to_string())),
@@ -1199,6 +1209,7 @@ mod tests {
             updated_at: None,
             routing: None,
             routing_sha256: None,
+            hy2_auto_switch: false,
         }
     }
 

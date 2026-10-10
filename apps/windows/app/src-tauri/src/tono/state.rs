@@ -352,6 +352,9 @@ pub struct TonoInner {
     /// In-memory sticky dial. Never persisted and never applied while the
     /// barrier is up. See `tono_core::heal`.
     pub heal: tono_core::heal::Session,
+    /// A17 same-node hy2 auto-switch: counters, backoff, and the remembered
+    /// choices persisted next to the catalog cache. See `tono_core::hy2_switch`.
+    pub hy2_switch: tono_core::hy2_switch::Hy2AutoSwitch,
     /// Cloud WeChat-DIRECT policy (Build 28): monotonic tracker plus the
     /// latest validated document. The cache shares the catalog's directory
     /// and safety checks (`managed-traffic-policy.json`).
@@ -818,6 +821,7 @@ impl TonoState {
                 next_retry_at_ms: None,
                 catalog_failover_tried: std::collections::BTreeSet::new(),
                 heal: tono_core::heal::Session::for_preferred("", "none"),
+                hy2_switch: Default::default(),
                 policy_tracker: tono_core::policy::PolicyTracker::new(),
                 traffic_policy: None,
                 pending_policy_change: None,

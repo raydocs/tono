@@ -33,6 +33,9 @@ pub(crate) use reconnect::crash_recovery_reconnect_allowed;
 mod switch;
 mod direct;
 mod heal;
+pub(crate) use heal::{
+    forget_hy2_choices, note_hy2_catalog, note_manual_selection, restore_hy2_choices,
+};
 mod platform;
 mod unarmed_probe;
 mod core_select;
@@ -426,6 +429,8 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
             revision,
         );
         let route_owner = crate::tono::route_preferences::PreferenceContext::capture(&inner);
+        // A17: under the admission lock, before this attempt can publish Connected.
+        inner.hy2_switch.note_admitted(&node);
         (record, admitted_generation, cancellation, account_owner, route_owner)
     };
     drop(admission);
@@ -436,6 +441,8 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
         transport: node.catalog_transport(),
     });
 
+    // A17: the node this attempt really dials; a withdrawn automatic hop falls back below.
+    let mut dialed = node.name.clone();
     let outcome = async {
         // A residential Web guarantee requires Mihomo to see protected hostnames. Browser-owned DoH
         // (and ECH layered on it) can hide that identity, so prove Chrome/Edge's effective managed +
@@ -484,10 +491,24 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
             return Attempt::Failed { generation, error, account_owner };
         }
 
+        // A17: the grant may have been withdrawn while this attempt waited. Re-check an
+        // automatic hy2 hop right before the tunnel starts; if it no longer holds, dial the
+        // selected Reality block instead (with its own pre-tunnel TCP proof).
+        let fallback = match heal::recheck_auto_hop(state, selected_node.as_deref(), &node).await {
+            Ok(fallback) => fallback,
+            Err(error) => return Attempt::Failed { generation, error, account_owner },
+        };
+        if let Some(reality) = &fallback {
+            dialed = reality.name.clone();
+            if let Err(error) = unarmed_probe::tcp_proof_before_tunnel(state, reality).await {
+                return Attempt::Failed { generation, error, account_owner };
+            }
+        }
+        let stage_node = fallback.as_ref().unwrap_or(&node);
         match run_stages(
             state,
             app,
-            &node,
+            stage_node,
             &nodes,
             routing.as_ref(),
             generation,
@@ -513,6 +534,8 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
         }
     }
     .await;
+    // A17: count a TCP failure of the selected node, or settle its automatic hy2 hop.
+    heal::note_hy2_outcome(state, selected_node.as_deref(), &dialed, (account_owner.0, generation), &outcome).await;
     if let Attempt::Failed { error, .. } = &outcome {
         retain_attempt_failure(state, generation, &attempt_record, error).await;
     }
