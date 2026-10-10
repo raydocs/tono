@@ -94,6 +94,16 @@ nonisolated enum KillSwitchService {
         isArmed && !armedWithTunnel
     }
 
+    /// Decision 091: whether a tunnel carries the control plane right now,
+    /// that is, protection is armed with a tunnel. Otherwise (signed out,
+    /// first sign-in, disconnected, bootstrap, Protected Offline, drop
+    /// recovery) `TonoAPIClient` sends control-plane requests to the Tono
+    /// relays only. An arm recorded before the tunnel flag existed reads as a
+    /// tunnel (`armedWithTunnel`), so an older helper keeps the old order.
+    static var tunnelCarriesControlPlane: Bool {
+        isArmed && armedWithTunnel
+    }
+
     /// Helper IPC behind `refreshStatus` and `reconcileTunnelState`; tests
     /// replace it.
     nonisolated(unsafe) static var statusReport: () throws -> (
