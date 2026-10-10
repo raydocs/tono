@@ -1,4 +1,5 @@
 import XCTest
+import Network
 import Security
 @testable import Tono
 
@@ -220,6 +221,122 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(systemRequests.count, 1, "the second request goes to the relay first")
         XCTAssertEqual(pinnedAttempts.count, 1, "the dead pins are not paid again once the relay answered")
         AppProfile.defaults.removeObject(forKey: TonoAPIClient.preferredPathKey(forHost: host))
+    }
+
+    /// Decision 080: an attempt names the paths its request already lost, so
+    /// the control plane can count failures per path; a request that lost
+    /// none sends the header empty, which marks this client as reporting. The
+    /// first-try request crosses a real URLSession to a loopback listener, so
+    /// the empty header is proven on the wire, not only on the URLRequest.
+    func testEachAttemptNamesThePathsItsRequestAlreadyLost() async throws {
+        let key = TonoAPIClient.preferredPathKey(forHost: "localhost")
+        AppProfile.defaults.removeObject(forKey: key)
+        defer { AppProfile.defaults.removeObject(forKey: key) }
+        let heads = PathHeaderLog()
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        let listener = try NWListener(using: parameters)
+        let queue = DispatchQueue(label: "net.tono.tests.path-failed")
+        let ready = expectation(description: "loopback control plane is ready")
+        listener.stateUpdateHandler = { state in
+            if case .ready = state { ready.fulfill() }
+        }
+        listener.newConnectionHandler = { connection in
+            connection.start(queue: queue)
+            Self.answerSignInStart(on: connection, log: heads)
+        }
+        defer {
+            listener.stateUpdateHandler = nil
+            listener.newConnectionHandler = nil
+            listener.cancel()
+        }
+        listener.start(queue: queue)
+        await fulfillment(of: [ready], timeout: 3)
+        let port = try XCTUnwrap(listener.port)
+        let transport = URLSession(configuration: .ephemeral)
+        defer { transport.invalidateAndCancel() }
+        let pinnedHeaders = PathHeaderLog()
+        func client(port: UInt16) -> TonoAPIClient {
+            TonoAPIClient(
+                // The unqualified localhost name permits this HTTP-only
+                // loopback fixture (DEBUG only), as in NativeUpdateDownloadTests.
+                baseURL: URL(string: "http://localhost:\(port)")!,
+                keychain: testKeychain("localhost-080-\(port)"), session: transport,
+                offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+                pinnedPath: ControlPlanePath(label: "pinned") { request, _ in
+                    pinnedHeaders.record(
+                        "\(request.value(forHTTPHeaderField: TonoAPIClient.pathHeader) ?? "-") "
+                            + "lost=\(request.value(forHTTPHeaderField: TonoAPIClient.pathFailedHeader) ?? "absent")"
+                    )
+                    return ControlPlaneAnswer(
+                        status: 202,
+                        body: Data(#"{"challengeId":"c-080b","expiresIn":600,"message":"sent"}"#.utf8),
+                        bodyFailure: nil
+                    )
+                }
+            )
+        }
+        let start = TonoEmailStartRequest(
+            email: "lost-paths@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+        )
+
+        // The system resolver answers the first try: nothing was lost.
+        let answered = try await client(port: port.rawValue).startEmailSignIn(start).challengeId
+        // Nothing listens on loopback port 1: the system resolver is refused
+        // before any byte is sent, and the pinned addresses carry the request.
+        let fellBack = try await client(port: 1).startEmailSignIn(start).challengeId
+
+        XCTAssertEqual([answered, fellBack], ["c-080a", "c-080b"])
+        XCTAssertEqual(
+            heads.entries, ["system_dns lost="],
+            "a first-try success sends the header, present and empty, on the wire"
+        )
+        XCTAssertEqual(
+            pinnedHeaders.entries, ["pinned lost=system_dns"],
+            "the request that lost the system resolver names it"
+        )
+    }
+
+    /// Reads one request to the end of its body and records its
+    /// `X-Tono-Path` and `X-Tono-Path-Failed` values as the wire carried
+    /// them, then answers a sign-in start.
+    private nonisolated static func answerSignInStart(
+        on connection: NWConnection, log: PathHeaderLog, received: Data = Data()
+    ) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 4_096) { data, _, complete, error in
+            guard error == nil, let data, !data.isEmpty, received.count + data.count <= 16_384 else {
+                connection.cancel()
+                return
+            }
+            var request = received
+            request.append(data)
+            guard let end = request.range(of: Data("\r\n\r\n".utf8)) else {
+                if complete { connection.cancel() } else { answerSignInStart(on: connection, log: log, received: request) }
+                return
+            }
+            let lines = String(decoding: request[..<end.lowerBound], as: UTF8.self)
+                .components(separatedBy: "\r\n")
+            func header(_ name: String) -> String? {
+                for line in lines {
+                    guard let colon = line.firstIndex(of: ":"),
+                          line[..<colon].lowercased() == name else { continue }
+                    return line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                }
+                return nil
+            }
+            let length = header("content-length").flatMap(Int.init) ?? 0
+            guard request.count - end.upperBound >= length else {
+                if complete { connection.cancel() } else { answerSignInStart(on: connection, log: log, received: request) }
+                return
+            }
+            log.record("\(header("x-tono-path") ?? "-") lost=\(header("x-tono-path-failed") ?? "absent")")
+            let body = #"{"challengeId":"c-080a","expiresIn":600,"message":"sent"}"#
+            let response = "HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\n"
+                + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+            connection.send(content: Data(response.utf8), isComplete: true, completion: .contentProcessed { _ in
+                connection.cancel()
+            })
+        }
     }
 
     /// Decision 077: the path that answered is remembered in the app profile,
@@ -2378,6 +2495,20 @@ final class AccountSessionRequestTests: XCTestCase {
 }
 
 /// How often one control-plane path was entered (#584).
+/// What a control-plane path saw, in order.
+nonisolated private final class PathHeaderLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [String] = []
+    func record(_ entry: String) {
+        lock.lock(); defer { lock.unlock() }
+        recorded.append(entry)
+    }
+    var entries: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return recorded
+    }
+}
+
 nonisolated private final class PathCallCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var value = 0

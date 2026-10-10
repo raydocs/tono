@@ -183,6 +183,17 @@ actor TonoAPIClient {
     /// plane can tell a relayed request from one that arrived through an exit
     /// node (decision 077). Values are the path labels.
     static let pathHeader = "X-Tono-Path"
+    /// Decision 080: the paths this request already lost on its walk, in
+    /// attempt order, comma-separated, on every attempt; present and empty
+    /// when none was, which marks this client as reporting. Labels only:
+    /// no address, timing, error text or account value.
+    static let pathFailedHeader = "X-Tono-Path-Failed"
+    /// The labels the control plane reads in either header; any other label
+    /// (a test path's) is never reported as lost. Six labels and their
+    /// commas fit in 43 characters, under the server's 96.
+    nonisolated private static let reportablePathLabels: Set<String> = [
+        "pinned", "system_dns", "relay", "doh", "alt_port", "tunnel",
+    ]
     private let keychain: KeychainStore
     private var accessToken: String?
     /// A failed credential adoption must not use either account's credentials
@@ -1200,7 +1211,10 @@ actor TonoAPIClient {
         let maximumResponseBytes = 2 * 1024 * 1024
         let fallbacks = [pinnedPath, relayPath].compactMap { $0 }
         guard !fallbacks.isEmpty else {
-            let answer = try await systemPath.exchange(request, maximumResponseBytes)
+            var attempt = request
+            attempt.setValue(systemPath.label, forHTTPHeaderField: Self.pathHeader)
+            attempt.setValue("", forHTTPHeaderField: Self.pathFailedHeader)
+            let answer = try await systemPath.exchange(attempt, maximumResponseBytes)
             return (answer, systemPath.label)
         }
         // A path that answered where the ones before it could not goes in
@@ -1224,11 +1238,14 @@ actor TonoAPIClient {
         // Every path's failure, `label[detail]`, so the reported error names
         // them all, as the Windows transport's combined message does.
         var failures: [String] = []
+        // Decision 080: the labels of the paths lost so far, each once.
+        var lostPaths: [String] = []
         for (index, path) in order.enumerated() {
             if index > 0 { try Self.requireCurrent(requestIsCurrent) }
             let startedAt = Date()
             var attempt = request
             attempt.setValue(path.label, forHTTPHeaderField: Self.pathHeader)
+            attempt.setValue(lostPaths.joined(separator: ","), forHTTPHeaderField: Self.pathFailedHeader)
             do {
                 let answer = try await path.exchange(attempt, maximumResponseBytes)
                 if answer.bodyFailure != nil {
@@ -1248,6 +1265,9 @@ actor TonoAPIClient {
                 if CertificateClock.isDateFailure(error) { clockFailure = error }
                 if NetworkInterception.isTrustFailure(error) { sawRefusedCertificate = true }
                 failures.append("\(path.label)[\(Self.failureDetail(error))]")
+                if Self.reportablePathLabels.contains(path.label), !lostPaths.contains(path.label) {
+                    lostPaths.append(path.label)
+                }
                 guard index + 1 < order.count,
                       !(error is ControlPlaneExchangeError),
                       !Self.isCancellation(error),
