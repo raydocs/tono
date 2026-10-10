@@ -1,6 +1,6 @@
 ## 2026-10-10 · Windows 自愈：hy2 拨号失败先回同节点 Reality，不再因错误文本是超时就换节点
 - 归属：ops 计划（[plan-2026-09-11](../ops/plan-2026-09-11.md)），中国大陆连通性审计（Windows）检查项 2；`apps/windows/crates/tono-core/src/heal.rs`。
-- 来源：基线 origin/main 3d973f95；分支 `amp/win-heal-hy2-to-reality`；未合 main。
+- 来源：基线 origin/main 3d973f95；分支 `amp/win-heal-hy2-to-reality`，PR [#1536](https://github.com/raydocs/tono/pull/1536)；未合 main。
 - 缺陷修复（[WIN-HEAL-HY2-SKIPS-OWN-REALITY](../findings.d/WIN-HEAL-HY2-SKIPS-OWN-REALITY.md)）：hy2 拨号在丢 UDP 的网络上失败时错误多为超时（`Tcp` 类），
   `transport_matches` 只在 QUIC 类失败时认可「换回 TCP」，同节点 Reality 又与 hy2 块地址、端口、SNI 相同，于是被排除，自愈换到另一节点。
   现在当前拨号是 hy2 时，任何非鉴权失败都认可换回同节点 Reality（排第 0）。TCP 拨号失败的排序不变。
