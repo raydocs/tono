@@ -86,7 +86,7 @@ async function waitForResend() {
 describe('login support diagnostics', () => {
   it('copies send and verify classifications through the real UI and clears them on retry and reset', async () => {
     mocks.invoke.mockRejectedValueOnce(
-      'TONO_AUTH_UNREACHABLE: could not reach Tono: pinned[connect: error sending request for url (https://example.invalid/auth?token=private-token)]; system-dns[timeout: request timed out]',
+      'TONO_AUTH_UNREACHABLE: could not reach Tono: pinned[connect: error sending request for url (https://example.invalid/auth?token=private-token)]; system-dns[timeout: request timed out]; relay[179.253.233.220:2053: connect: error sending request for url (https://example.invalid:2053/auth?token=private-token)]',
     )
     renderLogin()
     await act(async () =>
@@ -99,7 +99,7 @@ describe('login support diagnostics', () => {
       `${enTono.login.errors.unreachable} (TONO_AUTH_UNREACHABLE)`,
     )
     expect(await copyForSupport()).toBe(
-      `${supportHeader}\nAuth stage: send-code\nError code: TONO_AUTH_UNREACHABLE\nTransport: pinned=connect, system-dns=timeout`,
+      `${supportHeader}\nAuth stage: send-code\nError code: TONO_AUTH_UNREACHABLE\nTransport: pinned=connect, system-dns=timeout, relay=connect`,
     )
 
     await act(async () =>

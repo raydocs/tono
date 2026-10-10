@@ -99,12 +99,15 @@ const authSupportSummary = (
     const resolved = transport.match(
       /\]; system-dns\[(?:TONO_CLOCK_SKEW: )?(dns|connect|tls|timeout|other): /,
     )?.[1]
+    const relay = transport.match(
+      /\]; relay\[[^\]]*?: (?:TONO_CLOCK_SKEW: )?(dns|connect|tls|timeout|other): /,
+    )?.[1]
     const direct = transport.match(
       /^(?:TONO_CLOCK_SKEW: )?(dns|connect|tls|timeout|other): /,
     )?.[1]
     if (pinned) {
       lines.push(
-        `Transport: pinned=${pinned}${resolved ? `, system-dns=${resolved}` : ''}`,
+        `Transport: pinned=${pinned}${resolved ? `, system-dns=${resolved}` : ''}${relay ? `, relay=${relay}` : ''}`,
       )
     } else if (direct) {
       lines.push(`Transport: ${direct}`)
