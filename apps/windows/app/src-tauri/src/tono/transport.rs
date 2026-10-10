@@ -1,8 +1,9 @@
 //! `tono_core::HttpTransport` over the app's reqwest stack:
 //! redirects disabled, cookies disabled, 30 s connect / 45 s total timeouts (the
-//! mainland-link budget; the pinned attempt connects within 10 s so its fallback still fits the
-//! launch restore budget), and a 2 MiB response cap. The Bearer token is computed by
-//! `ApiClient` and carried on the request; this layer only passes it through.
+//! mainland-link budget; the pinned and system-resolved attempts each connect within 10 s, so
+//! the relays after them still fit the launch restore budget), and a 2 MiB response cap. The
+//! Bearer token is computed by `ApiClient` and carried on the request; this layer only passes
+//! it through.
 //!
 //! F1: the API hostname is DNS-pinned to the bootstrap IPs (see
 //! `tono::bootstrap`). Pinning is safe because TLS/SNI still validates the
@@ -338,6 +339,12 @@ pub struct TonoTransport {
     /// blocking, this attempt simply fails too: DNS is unavailable, and the WFP
     /// permit covers the pinned addresses only. It can add a success; it cannot
     /// take one away.
+    ///
+    /// Its connect budget is the pinned one (`system_dns_builder`), whether it runs before the
+    /// pins (the #583 preference) or after them. A poisoned answer that points at a dropped
+    /// address, or a resolver that never answers, used to hold the walk for the full 30 s
+    /// here, so the relays started 40 s in: past the 30 s launch restore budget, which then
+    /// expired inside this attempt and never reached a relay.
     resolved: reqwest::Client,
     /// The alternate HTTPS port that last worked, or 0.
     ///
@@ -351,10 +358,6 @@ pub struct TonoTransport {
     /// relay first. Process memory only, like `alternate_port`, seeded at most by a pre-login
     /// probe (backlog A4).
     preference: PathPreference,
-    /// `resolved` with the pinned attempt's connect budget, used only while the system-resolved
-    /// preference is set, so a resolver that has become a blackhole costs 10 s before the pins,
-    /// not 30 s.
-    resolved_first: reqwest::Client,
     /// Responses whose status line arrived (#582). Launch restore reads it around a budget
     /// timeout: an unchanged count is the only proof that the control plane gave no answer.
     answers: std::sync::atomic::AtomicU64,
@@ -489,7 +492,7 @@ impl PathPreference {
 
 impl TonoTransport {
     pub fn new() -> Result<Self> {
-        let resolved = Self::builder()
+        let resolved = Self::system_dns_builder()
             .build()
             .context("failed to build the Tono HTTP fallback client")?;
         Ok(Self {
@@ -498,13 +501,12 @@ impl TonoTransport {
             alternate_port: std::sync::atomic::AtomicU16::new(0),
             preference: PathPreference::default(),
             answers: std::sync::atomic::AtomicU64::new(0),
-            resolved_first: Self::pinned_builder()
-                .build()
-                .context("failed to build the Tono HTTP preferred-fallback client")?,
             tunnel_port: std::sync::atomic::AtomicU16::new(0),
-            relays: Self::build_relays(bootstrap::API_HOST, &bootstrap::api_relays(), || {
-                Self::builder().connect_timeout(RELAY_CONNECT_TIMEOUT)
-            })?,
+            relays: Self::build_relays(
+                bootstrap::API_HOST,
+                &bootstrap::api_relays(),
+                Self::relay_builder,
+            )?,
             path_failure_sink: None,
         })
     }
@@ -573,6 +575,18 @@ impl TonoTransport {
     /// How many responses have delivered a status line so far (#582).
     pub fn answers_seen(&self) -> u64 {
         self.answers.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// The system-resolved attempt: the pinned connect budget too. reqwest's connect budget
+    /// covers name resolution, TCP and the TLS handshake, so a poisoned or silent resolver
+    /// costs at most this before the walk moves on (`resolved`).
+    fn system_dns_builder() -> reqwest::ClientBuilder {
+        Self::pinned_builder()
+    }
+
+    /// One relay attempt: `RELAY_CONNECT_TIMEOUT`.
+    fn relay_builder() -> reqwest::ClientBuilder {
+        Self::builder().connect_timeout(RELAY_CONNECT_TIMEOUT)
     }
 
     /// Rebuild the pinned client from the current compiled + learned set.
@@ -645,10 +659,6 @@ impl TonoTransport {
                 .context("failed to build the resolving test client")?,
             alternate_port: std::sync::atomic::AtomicU16::new(0),
             answers: std::sync::atomic::AtomicU64::new(0),
-            resolved_first: quick()
-                .resolve_to_addrs(host, resolved)
-                .build()
-                .context("failed to build the preferred resolving test client")?,
             tunnel_port: std::sync::atomic::AtomicU16::new(0),
             path_failure_sink: None,
         })
@@ -1183,7 +1193,7 @@ impl TonoTransport {
         let mut resolved_failed = None;
         if self.preference.resolved_first() {
             let mut lease = PreferenceLease { preference: &self.preference, answered: false };
-            match self.attempt(&self.resolved_first, &request, AttemptPath::SystemDns).await {
+            match self.attempt(&self.resolved, &request, AttemptPath::SystemDns).await {
                 Err(ApiError::Transport { kind, message })
                     if should_retry_transport(request.method, kind) =>
                 {
@@ -1943,11 +1953,10 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             client: tokio::sync::RwLock::new(
                 TonoTransport::pinned_builder().resolve_to_addrs(host, &dead).build().unwrap(),
             ),
-            resolved: TonoTransport::builder().resolve_to_addrs(host, &live).build().unwrap(),
+            resolved: TonoTransport::system_dns_builder().resolve_to_addrs(host, &live).build().unwrap(),
             alternate_port: std::sync::atomic::AtomicU16::new(0),
             preference: super::PathPreference::default(),
             answers: std::sync::atomic::AtomicU64::new(0),
-            resolved_first: TonoTransport::pinned_builder().resolve_to_addrs(host, &live).build().unwrap(),
             tunnel_port: std::sync::atomic::AtomicU16::new(0),
             relays: Vec::new(),
             path_failure_sink: None,
@@ -1973,11 +1982,10 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             client: tokio::sync::RwLock::new(
                 TonoTransport::pinned_builder().resolve_to_addrs(host, &live).build().unwrap(),
             ),
-            resolved: TonoTransport::builder().resolve_to_addrs(host, &dead).build().unwrap(),
+            resolved: TonoTransport::system_dns_builder().resolve_to_addrs(host, &dead).build().unwrap(),
             alternate_port: std::sync::atomic::AtomicU16::new(0),
             preference: super::PathPreference::new(true, 0),
             answers: std::sync::atomic::AtomicU64::new(0),
-            resolved_first: TonoTransport::pinned_builder().resolve_to_addrs(host, &dead).build().unwrap(),
             tunnel_port: std::sync::atomic::AtomicU16::new(0),
             relays: Vec::new(),
             path_failure_sink: None,
@@ -2000,6 +2008,83 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             started.elapsed() < Duration::from_secs(5),
             "after a cancelled preferred attempt the next request waited {:?} before the pins",
             started.elapsed()
+        );
+    }
+
+    /// Mainland faults, simulated: the pins drop packets, the system resolver points at a dropped
+    /// address (a poisoned answer and a silent resolver look the same to the walk), and the
+    /// first relay is dead. A sign-in POST must still reach the second relay inside the launch
+    /// restore budget, through clients built with the production budgets. Before, the
+    /// system-resolved attempt alone held the walk for 30 s, so the first relay started 40 s in
+    /// and a launch restore expired before any relay was tried.
+    #[tokio::test]
+    async fn a_dead_direct_path_and_a_dead_first_relay_leave_the_second_relay_inside_the_restore_budget() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        if blackhole_is_intercepted() {
+            eprintln!("skipped: a tunnel is completing the blackhole connect; run without a VPN, as CI does");
+            return;
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut header = Vec::new();
+                    while !header.ends_with(b"\r\n\r\n") {
+                        let Ok(byte) = stream.read_u8().await else { return };
+                        header.push(byte);
+                    }
+                    // Drain the body so closing the socket cannot reset the reply.
+                    let head = String::from_utf8_lossy(&header).to_ascii_lowercase();
+                    let length = head
+                        .lines()
+                        .find_map(|line| line.strip_prefix("content-length:"))
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    let mut body = vec![0; length];
+                    if stream.read_exact(&mut body).await.is_err() {
+                        return;
+                    }
+                    let _ = stream
+                        .write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                        .await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+        let host = "localhost";
+        let dead = std::net::SocketAddr::from(([10, 255, 255, 1], port));
+        let live = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        let transport = TonoTransport {
+            client: tokio::sync::RwLock::new(
+                TonoTransport::pinned_builder().resolve_to_addrs(host, &[dead]).build().unwrap(),
+            ),
+            resolved: TonoTransport::system_dns_builder().resolve_to_addrs(host, &[dead]).build().unwrap(),
+            alternate_port: std::sync::atomic::AtomicU16::new(0),
+            preference: super::PathPreference::default(),
+            answers: std::sync::atomic::AtomicU64::new(0),
+            tunnel_port: std::sync::atomic::AtomicU16::new(0),
+            relays: TonoTransport::build_relays(host, &[dead, live], TonoTransport::relay_builder).unwrap(),
+            path_failure_sink: None,
+        };
+        let started = std::time::Instant::now();
+        let response = transport
+            .send(ApiRequest {
+                method: HttpMethod::Post,
+                url: format!("http://{host}:{port}/api/v1/auth/email/start"),
+                bearer: None,
+                json_body: Some("{}".to_string()),
+                binary_body: None,
+                headers: Vec::new(),
+            })
+            .await
+            .expect("the second relay carries the sign-in");
+        let elapsed = started.elapsed();
+        assert_eq!(response.status, 202);
+        assert_eq!(transport.preference.relay(), 2, "the relay that answered is the next request's first hop");
+        assert!(
+            elapsed < crate::tono::commands::RESTORE_TRANSACTION_TIMEOUT,
+            "the second relay answered after {elapsed:?}; a launch restore would have expired first"
         );
     }
 
