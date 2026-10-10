@@ -8,3 +8,4 @@
 - 验证：Linux 不执行 xcodebuild/Swift；结构/翻译检查与 hosted macos-26 的编译、XCTest、窗口截图分别记录，不以结构检查替代运行结果。
 - 候选/发布：仅源码，无新候选、无更新源或发布操作。
 - 剩余限制：真实 macOS Login Items 批准/取消、失去回执、VoiceOver/全键盘控制、语言重开与保护释放需要最终原生设备包验收；此处合成 IO 的原生窗口截图不代表这些检查已通过。
+- 2026-10-10 续修：独立 Sol 对 [e1d5118c](https://github.com/raydocs/tono/commit/e1d5118c99cf94c020de5683e607e379e925c2f9) 源码评审 PASS（无 major，1 minor）：failed 后刷新仍返回 unavailable 不得清锁。已定点保留失败，只有可确认的 enabled/notRegistered/requiresApproval 状态才能结束失败；同一回归增加 unavailable→页面重挂→仍拒第二写→显式可确认刷新。新准确 head 的复核/CI/截图仍待结果，不沿用原 head。

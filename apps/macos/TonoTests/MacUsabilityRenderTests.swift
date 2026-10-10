@@ -152,6 +152,16 @@ final class MacUsabilityRenderTests: XCTestCase {
         // A recreated production SettingsView's onAppear must preserve failure.
         try await render("settings-general-error", labels: ["Could not confirm this change.", "Refresh status"])
         XCTAssertNotNil(preference.error)
+        actual = .notFound
+        preference.refresh() // Unavailable is not a successful recovery read.
+        XCTAssertNotNil(preference.error)
+        XCTAssertFalse(preference.canChange)
+        actual = .notRegistered
+        try await render("settings-general-error-after-unavailable", labels: ["Could not confirm this change.", "Refresh status"])
+        preference.setEnabled(true)
+        XCTAssertFalse(preference.isUpdating)
+        XCTAssertNotNil(preference.error)
+        XCTAssertFalse(preference.canChange)
         preference.refresh()
         XCTAssertFalse(preference.enabled)
         XCTAssertTrue(preference.canChange)

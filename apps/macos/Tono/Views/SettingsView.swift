@@ -37,7 +37,9 @@ final class LoginItemPreference {
         let current = readStatus()
         if current != status { saved = false }
         status = current
-        error = nil
+        if current == .enabled || current == .notRegistered || current == .requiresApproval {
+            error = nil
+        }
     }
 
     func setEnabled(_ enabled: Bool) {
