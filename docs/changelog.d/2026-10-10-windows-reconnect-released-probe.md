@@ -1,6 +1,6 @@
 ## 2026-10-10 · Windows 受保护重连失败并释放网络后，交给无隧道探测继续恢复
 - 归属：ops 计划（[plan-2026-09-11](../ops/plan-2026-09-11.md)），中国大陆连通性审计（Windows）；`apps/windows/app/src-tauri/src/tono/connection/`。
-- 来源：基线 origin/main 3d973f95；分支 `amp/win-reconnect-released-probe`；未合 main。
+- 来源：基线 origin/main 3d973f95；分支 `amp/win-reconnect-released-probe`，PR [#1524](https://github.com/raydocs/tono/pull/1524)；未合 main。
 - 缺陷修复（[WIN-RECONNECT-RELEASED-NO-RETRY](../findings.d/WIN-RECONNECT-RELEASED-NO-RETRY.md)）：重连阶梯（启动续连、Retry now）、换节点重建和策略重建的重连
   一旦失败，`fail_connect` 按非严格计划释放原网络；阶梯只在保护还在时给下一次延迟，于是直接结束，且不像用户连接的 fail-open 和健康检查释放那样
   启动无隧道探测，电脑一直断开。现在这三处失败后若网络已释放（`failure_released_the_network`），启动 `unarmed_probe::spawn_after_release`；保护还在时照旧走阶梯。
