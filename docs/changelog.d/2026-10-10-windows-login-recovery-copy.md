@@ -1,6 +1,6 @@
 ## 2026-10-10 · Windows 登录失败文案：说清卡在哪、怎么办；保护拦网时说清登录要关保护及其影响
 - 归属：ops 计划（[plan-2026-09-11](../ops/plan-2026-09-11.md)），中国大陆连通性审计（Windows）检查项 3、4；`apps/windows/app/src/locales/{en,zh}/tono.json`。
-- 来源：基线 origin/main 3d973f95；分支 `amp/win-login-recovery-copy`；未合 main。
+- 来源：基线 origin/main 3d973f95；分支 `amp/win-login-recovery-copy`，PR [#1530](https://github.com/raydocs/tono/pull/1530)；未合 main。
 - 缺陷修复（[WIN-LOGIN-COPY-NO-HINT](../findings.d/WIN-LOGIN-COPY-NO-HINT.md)）：
   - `login.errors`：连不上登录服务器（`TONO_AUTH_DNS/TCP/TLS/TIMEOUT/QUIC/UNREACHABLE/LOCAL_CONFLICT`）改为说明是这个网络连不上 Tono 登录服务器、确认能上网、等一分钟重试、一直失败复制详情给客服；
     设备数满、时钟不对（en/zh）及英文验证码过期、保存失败、服务繁忙补回可操作的说明（中文已有的三条不动）。支持码照旧附在句末。
