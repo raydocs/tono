@@ -50,7 +50,8 @@ final class UserConnectSessionTests: XCTestCase {
 
         // A heal or automatic re-arm goes straight to the arm: no new session.
         KillSwitchService.armIPC.deliver = { _ in
-            (armed: true, wanted: true, live: true, healed: false, flushedStates: false, killedHosts: 0)
+            (armed: true, wanted: true, live: true, healed: false, flushedStates: false, killedHosts: 0,
+             localNetworkDevices: LocalNetworkDevicesSync.desired.allow)
         }
         try KillSwitchService.arm(helperPrepared: true, reviewedBundleDirect: false)
         XCTAssertEqual(begun, 1)
