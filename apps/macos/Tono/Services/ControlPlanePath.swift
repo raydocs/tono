@@ -198,10 +198,11 @@ nonisolated enum ControlPlaneHandshake {
 
 /// H1-F5 (owner decision 079, D4-A): the helper's PF permit for the API
 /// host's pinned addresses exists only while a control-plane exchange runs.
-/// `TonoAPIClient` opens a window right before an exchange and returns it the
-/// moment the exchange completes or fails; the helper closes it on its own at
-/// `ControlWindowLeases.hardCap` (15 s) if the lease never comes back.
-/// Overlapping exchanges each hold their own lease on one shared window.
+/// `TonoAPIClient` opens a window right before each path attempt (system
+/// resolver, pinned) and returns it the moment the attempt completes or
+/// fails; the helper closes it on its own `ControlWindowLeases.hardCap`
+/// (15 s) after it opened, whatever its leases. Overlapping attempts each
+/// hold their own lease on one shared window, which joining never extends.
 ///
 /// Best effort on purpose: a helper that does not answer leaves the exchange
 /// to the ruleset as it stands, which fails closed while armed.

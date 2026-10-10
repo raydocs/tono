@@ -407,10 +407,12 @@ nonisolated enum HelperProtocolVersion {
     ///   among the current Network Location's services, preferring the
     ///   primary service ID; an ambiguous name refuses (R3-O5). While a
     ///   legacy name-only snapshot is on disk, enable keeps the old lookup.
-    /// - 4.52.44 → 4.52.45: the Tono API host's `tono-control` permit renders
-    ///   only inside a control window (`/killswitch/control-window`, returned
-    ///   through `/killswitch/control-window/close`), never beside a tunnel,
-    ///   and for at most 15 s (H1-F5, decision 079 D4-A).
+    /// - 4.52.44 → 4.52.45: the Tono API host's `tono-control` permit moves to
+    ///   the child anchor `tono.killswitch/control`, loaded only inside a
+    ///   control window (`/killswitch/control-window`, returned through
+    ///   `/killswitch/control-window/close`, one per path attempt), never
+    ///   beside a tunnel, for at most 15 s, and withdrawn by flushing that
+    ///   child (H1-F5, decision 079 D4-A, decision 086).
     static let current = "4.52.45"
 }
 

@@ -6,17 +6,11 @@ extension KillSwitchManager {
     static func writeRules(
         state: KillSwitchState,
         allowedUID: uid_t,
-        physicalInterfaces: [String]? = nil,
-        controlWindowOpen: Bool = false
+        physicalInterfaces: [String]? = nil
     ) throws -> String {
         let rules = physicalInterfaces.map {
-            renderRules(
-                state: state, allowedUID: allowedUID, physicalInterfaces: $0,
-                controlWindowOpen: controlWindowOpen
-            )
-        } ?? renderRules(
-            state: state, allowedUID: allowedUID, controlWindowOpen: controlWindowOpen
-        )
+            renderRules(state: state, allowedUID: allowedUID, physicalInterfaces: $0)
+        } ?? renderRules(state: state, allowedUID: allowedUID)
         // Detach the boot load before the rule file holds a block. A throw
         // leaves the previous file in place.
         _ = try ensureMainHook()
@@ -144,22 +138,99 @@ extension KillSwitchManager {
         return !Set(current).isSubset(of: Set(loaded))
     }
 
-    /// Whether the Tono API host's control permit renders: only inside an
-    /// open control window (H1-F5, decision 079 D4-A) and only without a
-    /// tunnel. With a tunnel up the app's control-plane traffic is routed into
-    /// it and needs no physical-interface permit.
-    static func controlWindowRenders(state: KillSwitchState, controlWindowOpen: Bool) -> Bool {
-        controlWindowOpen && state.tunnelInterfaces.isEmpty
+    /// The Tono API host's addresses: every resolved host but the Tailscale
+    /// control hosts. Sorted and unique.
+    static func controlWindowAddresses(state: KillSwitchState) -> [String] {
+        Array(Set(
+            state.resolvedHosts
+                .filter { !KillSwitchManager.defaultHosts.contains($0.key) }
+                .flatMap { $0.value }
+        )).sorted()
     }
 
-    /// `controlWindowOpen` defaults to closed, so every render that does not
-    /// ask for the window (boot restore, heal, power transition, emergency)
-    /// omits the Tono API host's addresses.
+    /// Whether this state takes a control window: armed without a tunnel and
+    /// with API addresses to permit. Only then does the parent reference the
+    /// child anchor.
+    static func controlWindowApplies(to state: KillSwitchState) -> Bool {
+        state.tunnelInterfaces.isEmpty && !controlWindowAddresses(state: state).isEmpty
+    }
+
+    /// The child anchor's ruleset while a window is open: the same permit
+    /// lines, word for word, the parent rendered for the API host before
+    /// decision 086. Nothing else; no block, because the parent's still
+    /// follows the anchor reference.
+    static func renderControlWindowRules(state: KillSwitchState, allowedUID: uid_t) -> String {
+        let api = state.resolvedHosts.filter { !KillSwitchManager.defaultHosts.contains($0.key) }
+        return (["# Managed by Tono Kill Switch — control window (H1-F5)"]
+            + controlPermitLines(api, allowedUID: allowedUID)
+            + [""]).joined(separator: "\n")
+    }
+
+    /// `tono-control` permits for these hosts' addresses, TCP 443.
+    static func controlPermitLines(
+        _ hosts: [String: [String]], allowedUID: uid_t
+    ) -> [String] {
+        var controlEndpoints = Set<KillSwitchEndpoint>()
+        for addresses in hosts.values {
+            for address in addresses {
+                controlEndpoints.insert(
+                    .init(address: address, transport: "tcp", port: 443)
+                )
+            }
+        }
+        return controlEndpoints.sorted(by: {
+            ($0.transport, $0.port, $0.address) < ($1.transport, $1.port, $1.address)
+        }).map { endpoint in
+            // Restricted to two UIDs: root (the helper's DERP map refresh) and
+            // the interactive user the app runs as (control-plane recovery while
+            // the tunnel is down). Without a `user` clause — the only exception
+            // family that lacked one — *any* local process, including other
+            // local users', could send to these addresses on 443 outside the
+            // tunnel.
+            //
+            // This is a UID boundary, not an app boundary. PF's `user` matches
+            // the socket owner's UID and PF has no process or code-signing
+            // condition, so every process the interactive user runs matches it
+            // exactly as the signed app does. The control plane is fronted by
+            // shared anycast addresses and the edge routes by SNI, so such a
+            // process can still reach an unrelated origin on these addresses
+            // from the physical interface while the API host's permit is
+            // loaded. The bound is these pinned addresses and TCP 443 only, and
+            // for the API host (decision 079 D4-A, decision 086) a control
+            // window of at most `ControlWindowLeases.hardCap` seconds. Binding
+            // it to the app requires the bootstrap requests to be issued by root
+            // (the helper) or a dedicated identity and this rule to match only
+            // that; see #331 for the design.
+            let family = endpoint.address.contains(":") ? "inet6" : "inet"
+            return "pass out quick \(family) proto \(endpoint.transport) " +
+                "to \(endpoint.address) port \(endpoint.port) " +
+                "user { 0, \(allowedUID) } keep state (if-bound) label \"tono-control\""
+        }
+    }
+
+    /// Kills every state to these addresses, by destination; a kill that
+    /// fails falls back to the machine-wide flush, as `ensureAnchorLoaded`'s
+    /// targeted disposal does.
+    static func killStates(toHosts hosts: [String]) throws {
+        for host in hosts {
+            let wildcard = host.contains(":") ? "::/0" : "0.0.0.0/0"
+            let killed = try run("/sbin/pfctl", ["-k", wildcard, "-k", host])
+            guard killed.status == 0 else {
+                let flushed = try run("/sbin/pfctl", ["-F", "states"])
+                guard flushed.status == 0 else {
+                    throw HelperFailure.system(
+                        flushed.message.isEmpty ? "PF state flush failed." : flushed.message
+                    )
+                }
+                return
+            }
+        }
+    }
+
     static func renderRules(
         state: KillSwitchState,
         allowedUID: uid_t,
-        physicalInterfaces: [String] = KillSwitchManager.physicalEgressInterfaces(),
-        controlWindowOpen: Bool = false
+        physicalInterfaces: [String] = KillSwitchManager.physicalEgressInterfaces()
     ) -> String {
         var lines = [
             "# Managed by Tono Kill Switch — do not edit",
@@ -395,57 +466,22 @@ extension KillSwitchManager {
             )
         }
 
-        var controlEndpoints = Set<KillSwitchEndpoint>()
-        let apiWindowRenders = controlWindowRenders(
-            state: state, controlWindowOpen: controlWindowOpen
-        )
-        for (host, addresses) in state.resolvedHosts {
-            // H1-F5 (decision 079, D4-A): the Tono API host sits on shared
-            // anycast, so its permit exists only for the seconds of a
-            // control-plane exchange the app announced (`ControlWindowLeases`)
-            // and never while a tunnel carries that traffic instead. The
-            // Tailscale control hosts keep their permit as before: tailscaled
-            // holds a long-lived control connection, as root, to its own hosts.
-            guard KillSwitchManager.defaultHosts.contains(host) || apiWindowRenders else {
-                continue
-            }
-            for address in addresses {
-                controlEndpoints.insert(
-                    .init(address: address, transport: "tcp", port: 443)
-                )
-            }
+        // H1-F5 (decision 079, D4-A; decision 086): the Tono API host sits on
+        // shared anycast, so its permit is no longer part of this ruleset. It
+        // lives in the child anchor referenced here, at the position it used
+        // to occupy, and is loaded only while the app holds a control window
+        // (`ControlWindowController`, at most `ControlWindowLeases.hardCap`
+        // seconds). The reference is rendered only without a tunnel: with one
+        // up the app's control-plane traffic is routed into it, and the child
+        // is never evaluated. The Tailscale control hosts keep their permit
+        // here as before: tailscaled holds a long-lived control connection.
+        if controlWindowApplies(to: state) {
+            lines.append("anchor \"\(killSwitchControlAnchorName)\" all")
         }
-        for endpoint in controlEndpoints.sorted(by: {
-            ($0.transport, $0.port, $0.address) < ($1.transport, $1.port, $1.address)
-        }) {
-            // Restricted to two UIDs: root (the helper's DERP map refresh) and
-            // the interactive user the app runs as (control-plane recovery while
-            // the tunnel is down). Without a `user` clause — the only exception
-            // family that lacked one — *any* local process, including other
-            // local users', could send to these addresses on 443 outside the
-            // tunnel.
-            //
-            // This is a UID boundary, not an app boundary. PF's `user` matches
-            // the socket owner's UID and PF has no process or code-signing
-            // condition, so every process the interactive user runs matches it
-            // exactly as the signed app does. The control plane is fronted by
-            // shared anycast addresses and the edge routes by SNI, so such a
-            // process can still reach an unrelated origin on these addresses
-            // from the physical interface, including in Protected Offline. The
-            // bound is these pinned addresses and TCP 443 only. Binding it to
-            // the app requires the bootstrap requests to be issued by root (the
-            // helper) or a dedicated identity and this rule to match only that;
-            // see #331 for the design. Decision 079 (D4-A) keeps the UID
-            // boundary and bounds the API addresses in time instead: they
-            // render only inside a control window of at most
-            // `ControlWindowLeases.hardCap` seconds (H1-F5, a known risk).
-            let family = endpoint.address.contains(":") ? "inet6" : "inet"
-            lines.append(
-                "pass out quick \(family) proto \(endpoint.transport) " +
-                "to \(endpoint.address) port \(endpoint.port) " +
-                "user { 0, \(allowedUID) } keep state (if-bound) label \"tono-control\""
-            )
-        }
+        lines.append(contentsOf: controlPermitLines(
+            state.resolvedHosts.filter { KillSwitchManager.defaultHosts.contains($0.key) },
+            allowedUID: allowedUID
+        ))
         for endpoint in state.derpEndpoints.sorted(by: {
             ($0.transport, $0.port, $0.address) < ($1.transport, $1.port, $1.address)
         }) {

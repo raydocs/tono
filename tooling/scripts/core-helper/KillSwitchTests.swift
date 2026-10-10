@@ -309,6 +309,51 @@ extension KillSwitchManager {
             check("standalone-emergency-main-written", false)
         }
 
+        // 8b. H1-F5 (decision 086): the control window's child anchor. The
+        //     bootstrap parent references it where the API permit used to
+        //     sit; the child loads that permit; flushing the child (the whole
+        //     withdrawal, no file write) leaves the parent and its block alone.
+        let childAnchor = testAnchor + "/" + killSwitchControlAnchorName
+        defer { _ = try? run("/sbin/pfctl", ["-a", childAnchor, "-F", "rules"]) }
+        let bootstrapState = KillSwitchState(
+            armed: true, tailscaleBootstrapEnabled: false, apiHosts: ["api.example.com"],
+            exitHints: [], tunnelInterfaces: [],
+            resolvedHosts: ["api.example.com": ["1.1.1.1"]],
+            pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+            derpEndpoints: [], cachedDERPEndpoints: [], proxyTargets: [],
+            sessionDirectEndpoints: [], reviewedBundleDirectEnabled: false
+        )
+        func childRules() -> String? {
+            guard let shown = try? run("/sbin/pfctl", ["-a", childAnchor, "-sr"]),
+                  shown.status == 0 else { return nil }
+            return String(data: shown.output, encoding: .utf8)
+        }
+        let childFile = scratch + ".control"
+        defer { try? FileManager.default.removeItem(atPath: childFile) }
+        // A flush before anything was ever loaded must succeed: the helper
+        // does exactly that at every start.
+        check("child-flush-before-load",
+              (try? run("/sbin/pfctl", ["-a", childAnchor, "-F", "rules"]))?.status == 0)
+        if let parent = load(renderRules(state: bootstrapState, allowedUID: 501,
+                                         physicalInterfaces: physicalInterfaces)),
+           (try? Data(renderControlWindowRules(state: bootstrapState, allowedUID: 501).utf8)
+                .write(to: URL(fileURLWithPath: childFile))) != nil {
+            check("parent-references-child", parent.contains("anchor \"control\""))
+            check("parent-has-no-api-permit", !parent.contains("to 1.1.1.1"))
+            let loaded = try? run("/sbin/pfctl", ["-a", childAnchor, "-f", childFile])
+            check("child-loads", loaded?.status == 0)
+            check("child-holds-api-permit", childRules()?.contains("to 1.1.1.1") == true)
+            let flushed = try? run("/sbin/pfctl", ["-a", childAnchor, "-F", "rules"])
+            check("child-flushes", flushed?.status == 0)
+            check("child-empty-after-flush", childRules().map { !$0.contains("to 1.1.1.1") } == true)
+            let parentAfter = (try? run("/sbin/pfctl", ["-a", testAnchor, "-sr"]))
+                .flatMap { String(data: $0.output, encoding: .utf8) } ?? ""
+            check("child-flush-keeps-parent-block", parentAfter.contains("block drop out quick all"))
+            check("child-flush-keeps-parent-reference", parentAfter.contains("anchor \"control\""))
+        } else {
+            check("child-anchor-rulesets-load", false)
+        }
+
         // 9. The helper holds a PF enable reference of its own. Before, it ran
         //    `pfctl -e` only when PF was off, so when another program had
         //    enabled PF first the helper held nothing, and that program's
@@ -1047,9 +1092,10 @@ extension KillSwitchManager {
                 sessionDirectEndpoints: directEndpoints,
                 reviewedBundleDirectEnabled: true
             )
-            // Inside an open control window, the only time the API host's
-            // permit renders (H1-F5).
-            let rules = renderRules(state: state, allowedUID: 501, controlWindowOpen: true)
+            let rules = renderRules(state: state, allowedUID: 501)
+            // H1-F5 (decision 086): the API host's permit, as the control
+            // window's child anchor loads it.
+            let controlRules = renderControlWindowRules(state: state, allowedUID: 501)
             // The same session once its TUN is up: the only state in which the
             // reviewed-bundle permit may render.
             let tunneledRules = renderRules(
@@ -1090,9 +1136,7 @@ extension KillSwitchManager {
             reviewedBundleDirectEnabled: false
                 ),
                 allowedUID: 501,
-                physicalInterfaces: ["en0", "en7"],
-                // Even an open window renders no API permit beside a tunnel.
-                controlWindowOpen: true
+                physicalInterfaces: ["en0", "en7"]
             )
             let inactiveState = KillSwitchState(
                 armed: true,
@@ -1197,7 +1241,9 @@ extension KillSwitchManager {
                     "port { 80, 443, 8000, 8080 } user root keep state (if-bound)",
             ]
             let required = [
-                "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound)",
+                // H1-F5: the API host's permit sits in the child anchor; the
+                // parent references it where the permit used to be.
+                "anchor \"control\" all",
                 "to 8.8.8.8 port 443 user root keep state (if-bound)",
                 "proto udp",
                 "to 8.8.4.4 port 8443 user root keep state (if-bound)",
@@ -1233,6 +1279,13 @@ extension KillSwitchManager {
             ]
             let ruleShapesHold = required.allSatisfy(rules.contains)
                 && !forbidden.contains(where: rules.contains)
+                && !rules.contains("to 1.1.1.1 port 443")
+                && controlRules.contains(
+                    "pass out quick inet proto tcp to 1.1.1.1 port 443 user { 0, 501 } "
+                        + "keep state (if-bound) label \"tono-control\""
+                )
+                && !forbidden.contains(where: controlRules.contains)
+                && !controlRules.contains("block")
             let bundleShapesHold = bundleRequired.allSatisfy(tunneledRules.contains)
                 && !forbidden.contains(where: tunneledRules.contains)
             // #586: the connect's first arm runs before the TUN exists, where
@@ -1449,8 +1502,9 @@ extension KillSwitchManager {
                 // A session that did not ask for it must not inherit the permit.
                 "port { 80, 443, 8000, 8080 }",
                 // H1-F5: with a tunnel up the API host's traffic uses it, so
-                // its physical-interface permit never renders, window or not.
+                // neither its permit nor the child anchor reference renders.
                 "to 1.1.1.1 port 443",
+                "anchor \"control\"",
             ]
             let cloudShapesHold = cloudRequired.allSatisfy(cloudRules.contains)
                 && !cloudForbidden.contains(where: cloudRules.contains)
@@ -1476,11 +1530,16 @@ extension KillSwitchManager {
                 && installedHosts.contains(killSwitchHostsEndMarker)
                 && removedHosts.isEmpty
             // Reported, not silently folded in: a skip must not read as a pass.
-            // The tunneled set holds every line of `rules` but the API host's
-            // permit, plus the bundle permit; `rules` carries that permit.
+            // `rules` carries the child anchor reference (H1-F5) and
+            // `controlRules` the permit the child loads; the tunneled set holds
+            // every other line of `rules` plus the bundle permit.
             let armedParse = pfSyntaxAccepts(tunneledRules)
             let bootstrapParse = pfSyntaxAccepts(cloudRules)
-            let windowParse = pfSyntaxAccepts(rules)
+            let windowParse: Bool? = {
+                guard let parent = pfSyntaxAccepts(rules),
+                      let child = pfSyntaxAccepts(controlRules) else { return nil }
+                return parent && child
+            }()
             let pfParses: Bool
             switch (armedParse, bootstrapParse, windowParse) {
             case (nil, _, _), (_, nil, _), (_, _, nil):
@@ -1905,38 +1964,15 @@ extension KillSwitchManager {
         return agreedFiltering(first: .success(false), confirmDown: { throw Unreadable() }) == nil
     }
 
-    /// H1-F5 (decision 079, D4-A): the Tono API host's permit exists only
-    /// while a control-plane exchange holds the window. Present during the
-    /// exchange, absent after it succeeded, after it failed (the app returns
-    /// the lease either way), and after the hard cap with the lease still out.
-    /// Overlapping exchanges share the window; joining never extends it.
+    /// H1-F5 (decision 079 D4-A, decision 086): the Tono API host's permit
+    /// exists only while a control-plane attempt holds the window. Present
+    /// during the attempt, absent after it succeeded, after it failed (the app
+    /// returns the lease either way) and after the hard cap with the lease
+    /// still out. An expired window's permit is withdrawn before a new window
+    /// starts. A withdrawal is a child-anchor flush and a state kill: it writes
+    /// no file, and when it fails it is retried and never reaches the parent
+    /// ruleset or a release.
     static func runControlWindowSelfTest() -> Bool {
-        let bootstrap = KillSwitchState(
-            armed: true,
-            tailscaleBootstrapEnabled: true,
-            apiHosts: ["api.example.com"],
-            exitHints: [],
-            tunnelInterfaces: [],
-            resolvedHosts: [
-                "api.example.com": ["1.1.1.1"],
-                "controlplane.tailscale.com": ["9.9.9.9"],
-            ],
-            pinnedHosts: ["api.example.com": ["1.1.1.1"]],
-            derpEndpoints: [],
-            cachedDERPEndpoints: [],
-            proxyTargets: [],
-            sessionDirectEndpoints: [],
-            reviewedBundleDirectEnabled: false
-        )
-        let apiPermit = "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound) label \"tono-control\""
-        let tailscalePermit = "to 9.9.9.9 port 443 user { 0, 501 } keep state (if-bound) label \"tono-control\""
-        var window = ControlWindowLeases()
-        func rendered(at now: TimeInterval) -> String {
-            renderRules(
-                state: bootstrap, allowedUID: 501, physicalInterfaces: ["en0"],
-                controlWindowOpen: window.isOpen(at: now)
-            )
-        }
         var failures: [String] = []
         func check(_ name: String, _ ok: Bool) {
             if !ok { failures.append(name) }
@@ -1944,87 +1980,153 @@ extension KillSwitchManager {
         let cap = ControlWindowLeases.hardCap
         check("cap-is-at-most-15s", cap > 0 && cap <= 15)
 
-        // Closed: the API permit is absent, Tailscale's control host is not
-        // windowed, and the block is still the last word.
-        let closed = rendered(at: 0)
-        check("closed-has-no-api-permit", !closed.contains(apiPermit))
-        check("closed-keeps-tailscale-control", closed.contains(tailscalePermit))
-        check("closed-fails-closed", closed.contains("block drop out quick all"))
-
-        // One exchange that succeeds.
-        guard let first = try? window.open(at: 100) else { return false }
-        let during = rendered(at: 101)
-        check("present-during-exchange", during.contains(apiPermit))
-        check("same-permit-as-before",
-              during.contains("pass out quick inet proto tcp " + apiPermit))
-        window.close(first.lease)
-        check("absent-after-success", !rendered(at: 102).contains(apiPermit))
-        // Closing withdraws by address, so a flow opened inside the window by
-        // any process of the user is killed with it.
-        check(
-            "close-kills-api-states",
-            stateDisposal(replacing: passRules(in: during), with: passRules(in: closed))
-                == .targeted(["1.1.1.1"])
+        // Rendering: the parent references the child where the permit sat; the
+        // child holds exactly that permit; a tunnel takes neither.
+        let bootstrap = KillSwitchState(
+            armed: true, tailscaleBootstrapEnabled: true, apiHosts: ["api.example.com"],
+            exitHints: [], tunnelInterfaces: [],
+            resolvedHosts: [
+                "api.example.com": ["1.1.1.1"],
+                "controlplane.tailscale.com": ["9.9.9.9"],
+            ],
+            pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+            derpEndpoints: [], cachedDERPEndpoints: [], proxyTargets: [],
+            sessionDirectEndpoints: [], reviewedBundleDirectEnabled: false
         )
-        check("open-keeps-states",
-              stateDisposal(replacing: passRules(in: closed), with: passRules(in: during)) == .keep)
-
-        // One exchange that fails: the lease comes back the same way.
-        guard let failed = try? window.open(at: 200) else { return false }
-        check("present-during-failing-exchange", rendered(at: 200.5).contains(apiPermit))
-        window.close(failed.lease)
-        check("absent-after-failure", !rendered(at: 201).contains(apiPermit))
-
-        // Overlapping exchanges: the permit stays until the last returns, and
-        // joining does not move the deadline.
-        guard let a = try? window.open(at: 300), let b = try? window.open(at: 310) else { return false }
-        check("join-keeps-deadline", a.deadline == b.deadline && a.deadline == 300 + cap)
-        window.close(a.lease)
-        check("present-while-another-exchange-runs", rendered(at: 311).contains(apiPermit))
-        window.close(b.lease)
-        check("absent-after-last-exchange", !rendered(at: 312).contains(apiPermit))
-
-        // Hard cap: a lease never returned (a hung exchange, a crashed app)
-        // loses the permit at the cap, and its late return cannot close a
-        // later window.
-        guard let hung = try? window.open(at: 400) else { return false }
-        check("present-before-cap", rendered(at: 400 + cap - 0.001).contains(apiPermit))
-        check("absent-at-cap", !rendered(at: 400 + cap).contains(apiPermit))
-        check("cap-expires-leases", window.expireIfDue(at: 400 + cap) && window.leases.isEmpty)
-        guard let next = try? window.open(at: 500) else { return false }
-        window.close(hung.lease)
-        check("stale-lease-cannot-close-new-window", window.isOpen(at: 501))
-        window.close(next.lease)
-        check("new-window-closes", !window.isOpen(at: 502))
-
-        // With a tunnel up the API host's traffic uses it: no permit even
-        // inside a window.
         let tunneled = KillSwitchState(
-            armed: true,
-            tailscaleBootstrapEnabled: bootstrap.tailscaleBootstrapEnabled,
-            apiHosts: bootstrap.apiHosts,
-            exitHints: [],
-            tunnelInterfaces: ["utun199"],
-            resolvedHosts: bootstrap.resolvedHosts,
-            pinnedHosts: bootstrap.pinnedHosts,
-            derpEndpoints: [],
-            cachedDERPEndpoints: [],
-            proxyTargets: [],
-            sessionDirectEndpoints: [],
-            reviewedBundleDirectEnabled: false
+            armed: true, tailscaleBootstrapEnabled: true, apiHosts: ["api.example.com"],
+            exitHints: [], tunnelInterfaces: ["utun199"],
+            resolvedHosts: bootstrap.resolvedHosts, pinnedHosts: bootstrap.pinnedHosts,
+            derpEndpoints: [], cachedDERPEndpoints: [], proxyTargets: [],
+            sessionDirectEndpoints: [], reviewedBundleDirectEnabled: false
         )
-        check(
-            "no-api-permit-beside-a-tunnel",
-            !renderRules(
-                state: tunneled, allowedUID: 501, physicalInterfaces: ["en0"],
-                controlWindowOpen: true
-            ).contains(apiPermit)
+        let apiPermit = "pass out quick inet proto tcp to 1.1.1.1 port 443 "
+            + "user { 0, 501 } keep state (if-bound) label \"tono-control\""
+        let tailscalePermit = "to 9.9.9.9 port 443 user { 0, 501 } keep state (if-bound) label \"tono-control\""
+        let parent = renderRules(state: bootstrap, allowedUID: 501, physicalInterfaces: ["en0"])
+        let child = renderControlWindowRules(state: bootstrap, allowedUID: 501)
+        check("parent-has-no-api-permit", !parent.contains("to 1.1.1.1"))
+        check("parent-references-child", parent.contains("anchor \"control\" all"))
+        check("parent-keeps-tailscale-control", parent.contains(tailscalePermit))
+        check("child-reference-precedes-block", {
+            guard let reference = parent.range(of: "anchor \"control\""),
+                  let block = parent.range(of: "block drop out quick all") else { return false }
+            return reference.lowerBound < block.lowerBound
+        }())
+        check("child-holds-only-the-api-permit",
+              child.split(separator: "\n").filter { !$0.hasPrefix("#") } == [Substring(apiPermit)])
+        check("addresses-are-the-api-host", controlWindowAddresses(state: bootstrap) == ["1.1.1.1"])
+        check("tunnel-takes-no-window", !controlWindowApplies(to: tunneled)
+              && !renderRules(state: tunneled, allowedUID: 501, physicalInterfaces: ["en0"])
+                .contains("anchor \"control\""))
+
+        // The controller against a fake kernel. `log` is every PF effect in
+        // order; `kernel` is whether the child holds the permit.
+        var log: [String] = []
+        var kernel = false
+        var loadFails = false
+        var flushFails = false
+        let pf = ControlPermitPF(
+            load: { _ in
+                // The load writes the child's rule file first.
+                if loadFails { log.append("load-failed"); throw HelperFailure.system("ENOSPC") }
+                log.append("load")
+                kernel = true
+            },
+            flush: {
+                if flushFails { log.append("flush-failed"); throw HelperFailure.system("pfctl") }
+                log.append("flush")
+                kernel = false
+            },
+            killStates: { log.append("kill " + $0.joined(separator: ",")) }
         )
+        let controller = ControlWindowController(pf: pf)
+        func open(_ now: TimeInterval) -> (lease: Int, deadline: TimeInterval)? {
+            try? controller.open(at: now, rules: child, addresses: ["1.1.1.1"])
+        }
+
+        // One attempt that answers.
+        guard let first = open(100) else { return false }
+        check("present-during-attempt", kernel && controller.permit == .present)
+        check("withdrawn-after-success", controller.close(first.lease, at: 101) && !kernel)
+        check("withdrawal-kills-api-states", log == ["load", "flush", "kill 1.1.1.1"])
+
+        // One attempt that fails: the lease comes back the same way.
+        guard let failed = open(200) else { return false }
+        check("present-during-failing-attempt", kernel)
+        check("withdrawn-after-failure", controller.close(failed.lease, at: 200.5) && !kernel)
+
+        // Overlapping attempts share the window; joining keeps the deadline.
+        guard let a = open(300), let b = open(310) else { return false }
+        check("join-keeps-deadline", a.deadline == b.deadline && a.deadline == 300 + cap)
+        _ = controller.close(a.lease, at: 311)
+        check("present-while-another-attempt-runs", kernel)
+        _ = controller.close(b.lease, at: 312)
+        check("absent-after-last-attempt", !kernel)
+
+        // Hard cap: a lease never returned loses the permit at the cap.
+        guard let hung = open(400) else { return false }
+        check("present-before-cap", controller.settle(at: 400 + cap - 0.001) && kernel)
+        check("absent-at-cap", controller.settle(at: 400 + cap) && !kernel)
+        guard let later = open(500) else { return false }
+        _ = controller.close(hung.lease, at: 501)
+        check("stale-lease-cannot-close-new-window", controller.window.isOpen(at: 501) && kernel)
+        _ = controller.close(later.lease, at: 502)
+
+        // M2: a request after the cap, before any timer ran: the old permit
+        // (and its states) is withdrawn before the new window loads, and the
+        // new window gets a fresh deadline.
+        log.removeAll()
+        guard open(600) != nil else { return false }
+        guard let reopened = open(600 + cap + 1) else { return false }
+        check("expired-window-withdrawn-before-reopen",
+              log == ["load", "flush", "kill 1.1.1.1", "load"])
+        check("reopen-has-fresh-deadline", reopened.deadline == 600 + cap + 1 + cap)
+        _ = controller.close(reopened.lease, at: 600 + cap + 2)
+
+        // M1: file writes failing (the load's rule file) do not stop a
+        // withdrawal, which writes nothing.
+        guard let loaded = open(700) else { return false }
+        loadFails = true
+        check("withdrawn-while-writes-fail", controller.close(loaded.lease, at: 701) && !kernel)
+        // A load that fails opens nothing for the app, and the lease it kept
+        // is withdrawn at the cap whatever the load may have committed.
+        check("failed-load-opens-nothing", open(702) == nil && !kernel)
+        check("failed-load-withdrawn-at-cap",
+              controller.settle(at: 702 + cap) && controller.permit == .absent && !kernel)
+        loadFails = false
+
+        // M3: a withdrawal that fails is retried and reported; it never does
+        // anything but flush and kill, so it cannot release the main block.
+        // Reopening is refused until the stale permit is gone.
+        guard let stuck = open(800) else { return false }
+        flushFails = true
+        log.removeAll()
+        check("failed-withdrawal-reported", !controller.close(stuck.lease, at: 801))
+        check("failed-withdrawal-kept-as-unknown", kernel && controller.permit == .unknown)
+        check("failed-withdrawal-counted", controller.withdrawFailures == 1)
+        check("reopen-refused-while-stale-permit", open(802) == nil)
+        check("failed-withdrawal-only-retries-flush",
+              log.allSatisfy { $0 == "flush-failed" } && log.count == 2)
+        flushFails = false
+        check("retry-withdraws", controller.settle(at: 803) && !kernel
+              && controller.permit == .absent && controller.withdrawFailures == 0)
+        check("retry-kills-states", log.last == "kill 1.1.1.1")
+
+        // Sleep or release ends every window at once.
+        guard open(900) != nil else { return false }
+        check("close-all-withdraws", controller.closeAll(at: 901) && !kernel)
+
+        // Helper start: whatever an earlier process left is flushed.
+        let restarted = ControlWindowController(pf: pf)
+        kernel = true
+        restarted.assumeLoaded(addresses: ["1.1.1.1"])
+        check("start-flushes-leftover", restarted.settle(at: 0) && !kernel)
 
         // Bounded lease count.
         var crowded = ControlWindowLeases()
-        for _ in 0..<ControlWindowLeases.maximumLeases { _ = try? crowded.open(at: 600) }
-        check("lease-count-bounded", (try? crowded.open(at: 600)) == nil)
+        for _ in 0..<ControlWindowLeases.maximumLeases { _ = try? crowded.open(at: 1_000) }
+        check("lease-count-bounded", (try? crowded.open(at: 1_000)) == nil)
 
         if !failures.isEmpty {
             FileHandle.standardError.write(Data(

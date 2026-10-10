@@ -222,9 +222,56 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertFalse(window.isOpen, "the window is returned once the exchange failed")
         XCTAssertEqual(window.closes, window.opens)
 
-        XCTAssertGreaterThanOrEqual(window.opens, 2, "each exchange opens its own window")
+        XCTAssertGreaterThanOrEqual(window.opens, 2, "each path attempt opens its own window")
         XCTAssertFalse(window.observations.isEmpty)
         XCTAssertTrue(window.observations.allSatisfy { $0 }, "every path ran inside an open window")
+    }
+
+    /// H1-F5 (decision 086): a slow first path does not starve the pinned
+    /// path. The system resolver attempt runs past the 15 s cap (fake clock);
+    /// the pinned attempt after it gets a fresh window of its own instead of
+    /// running on the expired one, and the sign-in answers.
+    func testASlowFirstPathDoesNotStarveThePinnedPathOfItsControlWindow() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        let window = ControlWindowRecorder()
+        HeldAccountProtocol.install(host) { request in
+            window.advance(ControlWindowRecorder.hardCap + 5)
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer {
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            AppProfile.defaults.removeObject(forKey: TonoAPIClient.preferredPathKey(forHost: host))
+        }
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                window.observeExchange()
+                return ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-slow","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
+            },
+            controlWindow: ControlPlaneWindow(
+                open: { window.open() },
+                close: { window.close($0) }
+            )
+        )
+
+        let answered = try await api.startEmailSignIn(TonoEmailStartRequest(
+            email: "slow@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+        )).challengeId
+
+        XCTAssertEqual(answered, "c-slow")
+        XCTAssertEqual(window.observations, [true], "the pinned path ran inside a live window")
+        XCTAssertEqual(window.opens, 2, "the system and pinned attempts each opened a window")
+        XCTAssertEqual(window.closes, 2)
+        XCTAssertFalse(window.isOpen)
     }
 
     /// Decision 077: when the system resolver and the pinned addresses both
@@ -2569,10 +2616,15 @@ nonisolated private final class PathHeaderLog: @unchecked Sendable {
     }
 }
 
-/// Stands in for the helper's control window (H1-F5): leases, and whether one
-/// was out each time a path ran.
+/// Stands in for the helper's control window (H1-F5, decision 086) on a fake
+/// clock: leases join an open window without extending it, a window closes
+/// with its last lease or 15 s after it opened, and each path records whether
+/// a live (unexpired) window covered it.
 nonisolated private final class ControlWindowRecorder: @unchecked Sendable {
+    static let hardCap: TimeInterval = 15
     private let lock = NSLock()
+    private var now: TimeInterval = 0
+    private var deadline: TimeInterval?
     private var held: Set<Int> = []
     private var lastLease = 0
     private var opened = 0
@@ -2581,6 +2633,11 @@ nonisolated private final class ControlWindowRecorder: @unchecked Sendable {
 
     func open() -> Int? {
         lock.lock(); defer { lock.unlock() }
+        if let deadline, now >= deadline || held.isEmpty {
+            held.removeAll()
+            self.deadline = nil
+        }
+        if deadline == nil { deadline = now + Self.hardCap }
         lastLease += 1
         opened += 1
         held.insert(lastLease)
@@ -2590,11 +2647,18 @@ nonisolated private final class ControlWindowRecorder: @unchecked Sendable {
     func close(_ lease: Int) {
         lock.lock(); defer { lock.unlock() }
         if held.remove(lease) != nil { closed += 1 }
+        if held.isEmpty { deadline = nil }
+    }
+
+    /// Time passing inside a path attempt.
+    func advance(_ seconds: TimeInterval) {
+        lock.lock(); defer { lock.unlock() }
+        now += seconds
     }
 
     func observeExchange() {
         lock.lock(); defer { lock.unlock() }
-        seen.append(!held.isEmpty)
+        seen.append(!held.isEmpty && deadline.map { now < $0 } == true)
     }
 
     var isOpen: Bool { lock.lock(); defer { lock.unlock() }; return !held.isEmpty }

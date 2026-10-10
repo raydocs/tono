@@ -159,12 +159,12 @@ actor TonoAPIClient {
     /// the system resolver and the pinned addresses both fail before any
     /// status line.
     private let relayPath: ControlPlanePath?
-    /// H1-F5 (decision 079): brackets each exchange so the helper's PF permit
+    /// H1-F5 (decision 079, 086): brackets each path attempt so the helper's PF permit
     /// for the API host exists only while one runs. nil for injected
     /// sessions (tests) unless one is passed.
     private let controlWindow: ControlPlaneWindow?
     /// The session behind `systemPath`, flushed before an exchange that runs
-    /// in a control window (see `exchangeInControlWindow`).
+    /// in a control window (see `attemptInControlWindow`).
     private let systemSession: URLSession
     /// #584: the label of a later path that answered where the paths before
     /// it failed, so later requests try it first. Cleared when a preferred
@@ -1081,7 +1081,7 @@ actor TonoAPIClient {
             let answer: ControlPlaneAnswer
             let pathLabel: String
             do {
-                (answer, pathLabel) = try await exchangeInControlWindow(
+                (answer, pathLabel) = try await exchangeOverPaths(
                     request,
                     method: method,
                     auditDetails: auditDetails,
@@ -1201,38 +1201,33 @@ actor TonoAPIClient {
         throw APIError.transport("Retry attempts exhausted.")
     }
 
-    /// H1-F5 (decision 079, D4-A): one exchange inside the helper's control
-    /// window. The window opens right before the first path is tried and is
-    /// returned as soon as the exchange answers, fails or is cancelled; the
-    /// helper withdraws it at its hard cap if the return never arrives.
-    private func exchangeInControlWindow(
+    /// H1-F5 (decision 079 D4-A, decision 086): one path attempt inside the
+    /// helper's control window. Each attempt takes its own lease right before
+    /// it starts and returns it as soon as it answers, fails or is cancelled,
+    /// so a slow attempt never leaves the next path running on a window that
+    /// is about to close: the next attempt opens a fresh one (the helper never
+    /// extends a window). The relays are not in the permit and take none.
+    private func attemptInControlWindow(
+        _ path: ControlPlanePath,
         _ request: URLRequest,
-        method: String,
-        auditDetails: [String: String],
-        requestIsCurrent: (@Sendable () -> Bool)?
-    ) async throws -> (ControlPlaneAnswer, String) {
-        guard let controlWindow else {
-            return try await exchangeOverPaths(
-                request, method: method, auditDetails: auditDetails,
-                requestIsCurrent: requestIsCurrent
-            )
+        maximumResponseBytes: Int
+    ) async throws -> ControlPlaneAnswer {
+        guard let controlWindow, path.label != relayPath?.label else {
+            return try await path.exchange(request, maximumResponseBytes)
         }
         let lease = await controlWindow.open()
-        if lease != nil {
+        if lease != nil, path.label == systemPath.label {
             // Closing a window kills every state to the API addresses, so a
             // connection pooled in an earlier window is dead without a reset:
             // reusing it would stall until the request timeout. Start on a
             // new connection. Only while a window is in use (bootstrap), never
-            // on a tunnel.
+            // on a tunnel; the pinned path always dials a new connection.
             await systemSession.flush()
         }
         do {
-            let exchanged = try await exchangeOverPaths(
-                request, method: method, auditDetails: auditDetails,
-                requestIsCurrent: requestIsCurrent
-            )
+            let answer = try await path.exchange(request, maximumResponseBytes)
             if let lease { await controlWindow.close(lease) }
-            return exchanged
+            return answer
         } catch {
             if let lease { await controlWindow.close(lease) }
             throw error
@@ -1262,7 +1257,9 @@ actor TonoAPIClient {
             var attempt = request
             attempt.setValue(systemPath.label, forHTTPHeaderField: Self.pathHeader)
             attempt.setValue("", forHTTPHeaderField: Self.pathFailedHeader)
-            let answer = try await systemPath.exchange(attempt, maximumResponseBytes)
+            let answer = try await attemptInControlWindow(
+                systemPath, attempt, maximumResponseBytes: maximumResponseBytes
+            )
             return (answer, systemPath.label)
         }
         // A path that answered where the ones before it could not goes in
@@ -1295,7 +1292,9 @@ actor TonoAPIClient {
             attempt.setValue(path.label, forHTTPHeaderField: Self.pathHeader)
             attempt.setValue(lostPaths.joined(separator: ","), forHTTPHeaderField: Self.pathFailedHeader)
             do {
-                let answer = try await path.exchange(attempt, maximumResponseBytes)
+                let answer = try await attemptInControlWindow(
+                    path, attempt, maximumResponseBytes: maximumResponseBytes
+                )
                 if answer.bodyFailure != nil {
                     // A body that failed after the status line, or was
                     // cancelled, neither keeps nor earns the preference.
