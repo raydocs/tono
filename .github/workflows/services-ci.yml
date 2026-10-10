@@ -61,6 +61,7 @@ on:
       - tooling/scripts/tests/publish-managed-catalog.test.rb
       - tooling/scripts/provision-reality-node.rb
       - tooling/scripts/tests/provision-reality-node.test.rb
+      - tooling/ops/hy2/**
       - .github/workflows/services-ci.yml
       # desktop-update-sign-workflow.test.mjs guards this file; run it on every edit.
       - .github/workflows/desktop-update-sign.yml
@@ -173,6 +174,9 @@ jobs:
 
       - name: Node rollback metadata fixtures
         run: python3 tooling/scripts/remote/test_node_rollback.py
+
+      - name: hy2 carrier and handshake probes
+        run: python3 -m unittest discover -s tooling/ops/hy2 -p 'test_*.py'
 
   ops-contract:
     runs-on: ubuntu-24.04

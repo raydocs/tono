@@ -65,6 +65,7 @@ const SERVICES_PATHS = [
   'tooling/scripts/tests/publish-managed-catalog.test.rb',
   'tooling/scripts/provision-reality-node.rb',
   'tooling/scripts/tests/provision-reality-node.test.rb',
+  'tooling/ops/hy2/**',
   '.github/workflows/services-ci.yml',
   '.github/workflows/desktop-update-sign.yml',
 ]
