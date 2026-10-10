@@ -66,4 +66,4 @@
   change Windows policy; macOS off is stricter than Windows.
 - Known limits: a reboot during the fault follows the existing boot policy (the leftover block is released at helper
   start); a daemon startup failure also releases as before. No real-hardware evidence yet.
-- Applied in: PR #1506, backlog A29, branch `amp/a29-lan-devices-toggle` (helper 4.52.48).
+- Applied in: PR #1506, backlog A29, branch `amp/a29-lan-devices-toggle` (helper 4.52.49).

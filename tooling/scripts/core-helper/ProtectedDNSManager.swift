@@ -1249,31 +1249,116 @@ final class ProtectedDNSManager {
         return services
     }
 
-    private static func runNetworkSetup(_ arguments: [String]) throws -> CommandResult {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
-        process.arguments = arguments
-        process.environment = [
-            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-            "LC_ALL": "C",
-        ]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+    /// The fallback when System Configuration cannot answer, including a
+    /// non-blocking `SCPreferencesLock` that found another writer: so this
+    /// is the moment `networksetup` is most likely to wait on that writer.
+    /// It used to be waited on without limit, on the helper's single
+    /// request/watchdog thread under the update lock: a wedged child held
+    /// Disconnect, every other request and the core-down release with it.
+    /// Bounded like `pfctl` (R609-F2); a child past the deadline is a
+    /// failed command, and its output is drained while it runs.
+    private static func runNetworkSetup(
+        _ arguments: [String],
+        executable: String = "/usr/sbin/networksetup",
+        deadline: TimeInterval = KillSwitchManager.helperCommandDeadline
+    ) throws -> CommandResult {
+        let result: HelperCommandResult
         do {
-            try process.run()
-            process.waitUntilExit()
+            result = try KillSwitchManager.run(
+                executable, arguments, deadline: deadline,
+                environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"]
+            )
+        } catch let failure as HelperFailure {
+            throw failure
         } catch {
             throw HelperFailure.system("Could not run the protected DNS command.")
         }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard data.count <= 64 * 1024 else {
+        guard result.output.count <= 64 * 1024 else {
             throw HelperFailure.system("Protected DNS command output is too large.")
         }
         return .init(
-            status: process.terminationStatus,
-            output: String(decoding: data, as: UTF8.self)
+            status: result.status,
+            output: String(decoding: result.output, as: UTF8.self)
         )
+    }
+
+    /// A child that ignores SIGTERM stands in for a wedged `networksetup`:
+    /// the call must fail within its deadline plus the TERM and KILL waits.
+    /// #1542 review F1: a launch that stalls before `Process.run()` returns a
+    /// PID. The command fails at its deadline, measured from before the
+    /// launch, and the child that starts after it is terminated rather than
+    /// left running or read as the outcome.
+    static func runStalledLaunchDeadlineSelfTest() -> Bool {
+        final class Ended: @unchecked Sendable {
+            let semaphore = DispatchSemaphore(value: 0)
+        }
+        let ended = Ended()
+        let started = clock_gettime_nsec_np(CLOCK_MONOTONIC)
+        do {
+            _ = try KillSwitchManager.run(
+                "/bin/sleep", ["30"], deadline: 1,
+                ended: { ended.semaphore.signal() },
+                launch: { process in
+                    usleep(2_500_000)
+                    try process.run()
+                }
+            )
+            return false
+        } catch {
+            let elapsed = clock_gettime_nsec_np(CLOCK_MONOTONIC) - started
+            // Failed at the deadline, not after the stalled launch returned.
+            guard elapsed < 2_000_000_000 else { return false }
+        }
+        // The late child is terminated and reaped, not left for 30 s.
+        return ended.semaphore.wait(timeout: .now() + 5) == .success
+    }
+
+    /// #1542 review F2: a mutating command whose launch was abandoned must
+    /// never take effect, even if the launch completes later. The process is
+    /// spawned at once but the launch only reports after the deadline (the
+    /// child-before-report order), and the stale command would write
+    /// `released` 1.5 s in, after a newer owner wrote `protected` at the
+    /// deadline. Without the admission gate the stale write lands first and
+    /// this fails; with it, the marker still says `protected`.
+    static func runAbandonedLaunchNeverExecutesSelfTest() -> Bool {
+        let marker = NSTemporaryDirectory() + "tono-abandoned-launch-\(UUID().uuidString)"
+        defer { unlink(marker) }
+        final class Ended: @unchecked Sendable {
+            let semaphore = DispatchSemaphore(value: 0)
+        }
+        let ended = Ended()
+        do {
+            _ = try KillSwitchManager.run(
+                "/bin/sh", ["-c", "sleep 1.5; printf released > \"$1\"", "sh", marker], deadline: 1,
+                ended: { ended.semaphore.signal() },
+                launch: { process in
+                    try process.run()
+                    usleep(2_000_000)
+                }
+            )
+            return false
+        } catch {}
+        guard FileManager.default.createFile(atPath: marker, contents: Data("protected".utf8)) else { return false }
+        // The late launch settles: its shell sees end-of-file and exits.
+        guard ended.semaphore.wait(timeout: .now() + 5) == .success else { return false }
+        // Past the stale command's own 1.5 s, had it been executed.
+        usleep(1_000_000)
+        return (try? String(contentsOfFile: marker, encoding: .utf8)) == "protected"
+    }
+
+    static func runNetworkSetupDeadlineSelfTest() -> Bool {
+        let started = clock_gettime_nsec_np(CLOCK_MONOTONIC)
+        do {
+            _ = try runNetworkSetup(
+                ["-c", "trap '' TERM; exec /bin/sleep 30"],
+                executable: "/bin/sh",
+                deadline: 1
+            )
+            return false
+        } catch {
+            let elapsed = clock_gettime_nsec_np(CLOCK_MONOTONIC) - started
+            return elapsed < 6_000_000_000
+        }
     }
 
     private static func parseDNSOutput(_ output: String) throws -> [String] {
@@ -2105,6 +2190,9 @@ final class ProtectedDNSManager {
                 && runRenamedServiceStatusSelfTest()
                 && runLegacySnapshotLookupSelfTest()
                 && runServerCountCapSelfTest()
+                && runNetworkSetupDeadlineSelfTest()
+                && runStalledLaunchDeadlineSelfTest()
+                && runAbandonedLaunchNeverExecutesSelfTest()
         } catch {
             return false
         }

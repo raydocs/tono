@@ -422,10 +422,17 @@ nonisolated enum HelperProtocolVersion {
     ///   (another provider than the DMIT pair, decision 089), joins
     ///   `ControlPlaneRelays`, so armed without a tunnel PF admits it like the
     ///   other two (TCP 2053, the interactive user only).
-    /// - 4.52.47 → 4.52.48: the arm request gained optional
+    /// - 4.52.47 → 4.52.48: the `networksetup` fallback of the DNS manager
+    ///   runs under the same 15 s deadline as `pfctl` instead of being waited
+    ///   on without limit on the single request/watchdog thread
+    ///   (MAC-HELPER-NETWORKSETUP-UNBOUNDED), and every bounded helper
+    ///   command's deadline now starts before its launch: a launch that stalls
+    ///   before returning a PID fails at the deadline and a child that starts
+    ///   late is terminated (#1542 review F1).
+    /// - 4.52.48 → 4.52.49: the arm request gained optional
     ///   `allowLocalNetworkDevices` (D7, JSON boolean only). Absent means off: while a tunnel is
     ///   up the anchor renders no `tono-lan`, `tono-linklocal`,
-    ///   `tono-multicast` or `tono-ssdp` pass. True renders the 4.52.47 rules.
+    ///   `tono-multicast` or `tono-ssdp` pass. True renders the 4.52.48 rules.
     ///   The app sends the field only when the setting is on, so an older
     ///   daemon never sees it unless the user turned it on. Off also drops
     ///   root's reviewed-bundle web ports to local ranges (`tono-bundle-local`).
@@ -436,7 +443,7 @@ nonisolated enum HelperProtocolVersion {
     ///   `KILLSWITCH_LOCAL_NETWORK_FAULT[_STOP_CORE]`). While that fault is
     ///   held, no failed arm releases, whatever its tunnel, and an
     ///   abandoned prompt-free helper upgrade does not disarm it.
-    static let current = "4.52.48"
+    static let current = "4.52.49"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
