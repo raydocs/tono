@@ -77,6 +77,8 @@ on:
       - tooling/scripts/provision-reality-node.rb
       - tooling/scripts/tests/provision-reality-node.test.rb
       - tooling/ops/hy2/**
+      # The mainland acceptance tool's result classification.
+      - tooling/ops/cn-acceptance/**
       - .github/workflows/services-ci.yml
       # desktop-update-sign-workflow.test.mjs guards this file; run it on every edit.
       - .github/workflows/desktop-update-sign.yml
@@ -204,6 +206,9 @@ jobs:
         # Default certificate verification is the point of the probe: an
         # untrusted certificate through the relay must report a failure.
         run: python3 tooling/ops/relay/test_relay_probe.py
+
+      - name: Mainland acceptance tool classification
+        run: python3 -m unittest discover -s tooling/ops/cn-acceptance -p 'test_*.py'
 
       - name: Node install validator
         # Stubbed node root: a broken install must fail each check, and no

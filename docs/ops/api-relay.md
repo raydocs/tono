@@ -17,6 +17,18 @@ Both are exit nodes; `tono-xray` owns 443 and is never touched. Admitted SNIs:
 `api.afk.ccwu.cc` (control plane), `releases.afk.ccwu.cc` (installers). Anything else is
 sent to a closed port.
 
+### Common-failure risk (open)
+
+Both relays sit at one provider in one city: ipinfo on 2026-10-10 reports **AS906 DMIT Cloud
+Services, Los Angeles** for 179.253.233.220 and for 179.255.154.17 (hostname `host-by.dmit.com`,
+same postal code). Different hosts protect against one VM failing, not against a DMIT network or
+data-centre outage, a DMIT route change towards Chinese carriers, or a block of DMIT's address
+space; any of those takes both relays down together, and clients fall back to today's
+behaviour (no relay). Owner action: add a relay on a different provider and region
+(different ASN, ideally not Los Angeles) and list it in all four places below. Nothing has been
+bought or deployed for this. Finding [API-RELAY-SAME-PROVIDER](../findings.d/API-RELAY-SAME-PROVIDER.md).
+A field check of both relays from a mainland network: [cn-acceptance.md](cn-acceptance.md) (3c, 4.x).
+
 The same list is compiled into the clients and the control plane; change all four together:
 `apps/windows/service/src/lib.rs` (`API_RELAYS`, re-exported by the Windows app's
 `bootstrap.rs` and rendered into WFP rule C; a change there changes the kill switch permit
