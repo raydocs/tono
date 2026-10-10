@@ -7,6 +7,7 @@ import {
   type CustomerVerdict,
   type FunnelStage,
 } from './contract';
+import { ApiError } from '../errors';
 import type { Cursor } from './http';
 import { HEARTBEAT_FRESH_SECONDS } from './verdict-customers';
 
@@ -27,6 +28,35 @@ function col(alias: string | undefined, name: string): string {
   return alias ? `${alias}.${name}` : name;
 }
 
+/**
+ * With `q`, a row whose address or WeChat id equals it exactly sorts first
+ * (rank 0, everyone else 1). The rank then leads the cursor's sort key.
+ */
+function exactRankSql(q: string): { sql: string; binds: unknown[] } {
+  return {
+    sql: `(CASE WHEN LOWER(email) = ? OR LOWER(COALESCE(wechat_id, '')) = ? THEN 0 ELSE 1 END)`,
+    binds: [q, q],
+  };
+}
+
+/** The cursor sort key: the address, led by the exact-match rank under `q`. */
+export function customerSortKey(rank: unknown, email: string): string {
+  return rank === 0 || rank === 1 ? `${rank}${email}` : email;
+}
+
+function cursorSql(filter: CustomerListFilter, cursor: Cursor): { sql: string; binds: unknown[] } {
+  const after = '(email > ? OR (email = ? AND id > ?))';
+  if (!filter.q) return { sql: after, binds: [cursor.sortKey, cursor.sortKey, cursor.id] };
+  const rank = cursor.sortKey.charAt(0);
+  if (rank !== '0' && rank !== '1') throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid cursor');
+  const email = cursor.sortKey.slice(1);
+  const r = exactRankSql(filter.q);
+  return {
+    sql: `(${r.sql} > ? OR (${r.sql} = ? AND ${after}))`,
+    binds: [...r.binds, Number(rank), ...r.binds, Number(rank), email, email, cursor.id],
+  };
+}
+
 function filterSql(
   filter: CustomerListFilter,
   cursor: Cursor | null,
@@ -35,8 +65,10 @@ function filterSql(
   const clauses: string[] = [];
   const binds: unknown[] = [];
   if (cursor) {
-    clauses.push(`(${col(alias, 'email')} > ? OR (${col(alias, 'email')} = ? AND ${col(alias, 'id')} > ?))`);
-    binds.push(cursor.sortKey, cursor.sortKey, cursor.id);
+    // Only the page read passes a cursor, and it reads users unaliased.
+    const after = cursorSql(filter, cursor);
+    clauses.push(after.sql);
+    binds.push(...after.binds);
   }
   if (filter.q) {
     clauses.push(
@@ -79,10 +111,14 @@ export async function loadCustomerPage(
     const counted = await firstRow<{ c: number }>(
       db, `SELECT COUNT(*) AS c FROM users ${count.sql}`, count.binds,
     );
+    const rank = filter.q ? exactRankSql(filter.q) : null;
     const users = await allRows(
       db,
-      `SELECT * FROM users ${page.sql} ORDER BY email ASC, id ASC LIMIT ?`,
-      [...page.binds, limit + 1],
+      rank
+        ? `SELECT *, ${rank.sql} AS exact_rank FROM users ${page.sql}
+           ORDER BY exact_rank ASC, email ASC, id ASC LIMIT ?`
+        : `SELECT * FROM users ${page.sql} ORDER BY email ASC, id ASC LIMIT ?`,
+      rank ? [...rank.binds, ...page.binds, limit + 1] : [...page.binds, limit + 1],
     );
     return { users, total: Number(counted?.c ?? 0) };
   } catch (error) {

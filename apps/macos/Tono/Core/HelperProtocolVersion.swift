@@ -407,7 +407,22 @@ nonisolated enum HelperProtocolVersion {
     ///   among the current Network Location's services, preferring the
     ///   primary service ID; an ambiguous name refuses (R3-O5). While a
     ///   legacy name-only snapshot is on disk, enable keeps the old lookup.
-    /// - 4.52.44 → 4.52.45: operator release (R3-O4, decision 084). A
+    /// - 4.52.44 → 4.52.45: armed without a tunnel, the control-plane permit is
+    ///   the compiled Tono relays (`ControlPlaneRelays`, TCP 2053, the
+    ///   interactive user only) instead of the API host's Cloudflare anycast
+    ///   addresses, which are never permitted; connected, none. A tunnel arm
+    ///   spares a relay address the Core still dials as its exit from the
+    ///   targeted state kill, and `/killswitch/status` reports `tunnelArmed`
+    ///   (H1-F5, decision 086).
+    /// - 4.52.45 → 4.52.46: the idle loop's 10 s protection check runs on the
+    ///   monotonic clock, so a wall clock set back no longer holds the
+    ///   core-down release, the orphaned-session releases and PF supervision
+    ///   for the length of the step (MAC-HELPER-WATCHDOG-WALLCLOCK).
+    /// - 4.52.46 → 4.52.47: a third Tono API relay, `154.84.56.196:2053`
+    ///   (another provider than the DMIT pair, decision 089), joins
+    ///   `ControlPlaneRelays`, so armed without a tunnel PF admits it like the
+    ///   other two (TCP 2053, the interactive user only).
+    /// - 4.52.47 → 4.52.48: operator release (R3-O4, decision 084). A
     ///   persisted target (`secured <n>` / `released <n>`) joins the helper's
     ///   state: `--emergency-disarm` sets `released` in memory first and
     ///   persists it within a bounded budget under the target lock, boots the
@@ -422,7 +437,7 @@ nonisolated enum HelperProtocolVersion {
     ///   newer `secured` generation, and arms carry it. AI sinkholes and
     ///   blackhole routes are removed, never reinstalled, while released.
     ///   Every wait of the command is bounded (MAC-EMERGENCY-UNBOUNDED-WAITS).
-    static let current = "4.52.45"
+    static let current = "4.52.48"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

@@ -58,6 +58,12 @@ actor PrivilegedRuntimeCoordinator {
         try KillSwitchService.beginSession()
     }
 
+    /// Decision 086: re-read the helper's tunnel state after it armed on its
+    /// own (native update preparation), so control-plane routing follows it.
+    func reconcileKillSwitchTunnelState() {
+        KillSwitchService.reconcileTunnelState()
+    }
+
     func daemonRejectsClient() -> Bool {
         HelperManager.daemonRejectsClient()
     }

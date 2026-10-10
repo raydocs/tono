@@ -43,34 +43,89 @@ nonisolated struct ControlPlanePath: Sendable {
     /// request and nothing that identifies the user or the device. Nil when
     /// the path cannot be probed; the pre-login probe then says nothing.
     var handshake: (@Sendable () async -> Bool)? = nil
+    /// The same exchange, given up with `URLError(.timedOut)` when no status
+    /// line has arrived within the budget (the last argument, seconds). Only
+    /// the system resolver has one: its `URLSession` otherwise waits out its
+    /// own 30 s request and 45 s resource timeouts on an address that drops
+    /// every packet. The walk uses it for a read with another path behind it,
+    /// never for a mutating request, which may already have arrived.
+    var exchangeWithinHeadBudget: (@Sendable (URLRequest, Int, TimeInterval) async throws -> ControlPlaneAnswer)? = nil
+
+    /// How long a read waits for the system resolver's status line before
+    /// the walk hands it to the next path. A healthy cross-border answer
+    /// takes a few seconds; a resolver answer that leads nowhere would
+    /// otherwise hold the pinned addresses and the relays back for 45 s.
+    static let systemHeadBudget: TimeInterval = 15
 
     /// The system resolver, through the control-plane `URLSession`.
     nonisolated static func systemResolver(_ session: URLSession) -> ControlPlanePath {
-        ControlPlanePath(label: "system_dns") { request, maximumResponseBytes in
-            let (bytes, response) = try await session.bytes(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                throw ControlPlaneExchangeError.invalidResponse
-            }
-            let declared = http.value(forHTTPHeaderField: "Content-Length").flatMap(Int.init)
-            if let declared, declared < 0 || declared > maximumResponseBytes {
-                throw ControlPlaneExchangeError.invalidResponse
-            }
-            var data = Data()
-            data.reserveCapacity(min(declared ?? 0, maximumResponseBytes))
-            do {
-                for try await byte in bytes {
-                    guard data.count < maximumResponseBytes else {
-                        throw ControlPlaneExchangeError.invalidResponse
-                    }
-                    data.append(byte)
-                }
-            } catch let error as ControlPlaneExchangeError {
-                throw error
-            } catch {
-                return ControlPlaneAnswer(status: http.statusCode, body: data, bodyFailure: error)
-            }
-            return ControlPlaneAnswer(status: http.statusCode, body: data, bodyFailure: nil)
+        var path = ControlPlanePath(label: "system_dns") { request, maximumResponseBytes in
+            try await systemExchange(session, request, maximumResponseBytes, headArrived: nil)
         }
+        path.exchangeWithinHeadBudget = { request, maximumResponseBytes, budget in
+            let deadline = HeadDeadline()
+            let work = Task {
+                try await systemExchange(
+                    session, request, maximumResponseBytes, headArrived: { deadline.headArrived() }
+                )
+            }
+            let timer = Task {
+                // Cancelled once the exchange is over: nothing to give up.
+                do { try await Task.sleep(for: .seconds(budget)) } catch { return }
+                if deadline.expireUnlessHeadArrived() { work.cancel() }
+            }
+            defer { timer.cancel() }
+            do {
+                return try await withTaskCancellationHandler {
+                    try await work.value
+                } onCancel: {
+                    work.cancel()
+                }
+            } catch {
+                guard deadline.expired else { throw error }
+                // Nothing came back in time; for a read that is a reason to
+                // try the next path, like any other transport failure.
+                throw URLError(.timedOut, userInfo: [
+                    NSLocalizedDescriptionKey: "system_dns: no status line within \(Int(budget.rounded(.up))) s",
+                ])
+            }
+        }
+        return path
+    }
+
+    /// One exchange over `session`. `headArrived`, when given, is called as
+    /// soon as the status line and headers are in; false means the head
+    /// budget already ran out and the exchange stops there.
+    nonisolated private static func systemExchange(
+        _ session: URLSession,
+        _ request: URLRequest,
+        _ maximumResponseBytes: Int,
+        headArrived: (@Sendable () -> Bool)?
+    ) async throws -> ControlPlaneAnswer {
+        let (bytes, response) = try await session.bytes(for: request)
+        if let headArrived, !headArrived() { throw CancellationError() }
+        guard let http = response as? HTTPURLResponse else {
+            throw ControlPlaneExchangeError.invalidResponse
+        }
+        let declared = http.value(forHTTPHeaderField: "Content-Length").flatMap(Int.init)
+        if let declared, declared < 0 || declared > maximumResponseBytes {
+            throw ControlPlaneExchangeError.invalidResponse
+        }
+        var data = Data()
+        data.reserveCapacity(min(declared ?? 0, maximumResponseBytes))
+        do {
+            for try await byte in bytes {
+                guard data.count < maximumResponseBytes else {
+                    throw ControlPlaneExchangeError.invalidResponse
+                }
+                data.append(byte)
+            }
+        } catch let error as ControlPlaneExchangeError {
+            throw error
+        } catch {
+            return ControlPlaneAnswer(status: http.statusCode, body: data, bodyFailure: error)
+        }
+        return ControlPlaneAnswer(status: http.statusCode, body: data, bodyFailure: nil)
     }
 
     /// The pinned addresses for `baseURL`'s host, or nil when it has none.
@@ -121,21 +176,21 @@ nonisolated struct ControlPlanePath: Sendable {
     /// the Windows client's `bootstrap::API_RELAYS`). Each is an nginx
     /// `ssl_preread` listener that admits only this host's SNI and forwards
     /// the unterminated TLS session to the Cloudflare edge, so the client
-    /// validates the same certificate it does on every other path. Not in
-    /// the PF bootstrap permit: while protection is armed the relay is
-    /// blocked like any other non-permitted address.
-    /// Kept in step with the Windows client's `bootstrap::API_RELAYS` and the
-    /// control plane's `api-relays.ts`. The same relays admit the release
-    /// host's SNI, which the updater's metadata GETs use (backlog A2).
+    /// validates the same certificate it does on every other path. Decision
+    /// 086 (H1-F5, Option A): while protection is armed without a tunnel the
+    /// helper's PF permits only these endpoints for the control plane, so
+    /// then they are the only path (`TonoAPIClient`); while connected PF
+    /// permits none of them. The list is `ControlPlaneRelays`, compiled into
+    /// the helper too. The same relays admit the release host's SNI, which
+    /// the updater's metadata GETs use (backlog A2).
     static let apiRelays: [String: [ControlPlaneEndpoint]] = [
         "api.afk.ccwu.cc": relayEndpoints,
         "releases.afk.ccwu.cc": relayEndpoints,
     ]
 
-    private static let relayEndpoints = [
-        ControlPlaneEndpoint(address: "179.253.233.220", port: 2053), // Los Angeles · Westwood
-        ControlPlaneEndpoint(address: "179.255.154.17", port: 2053), // Los Angeles · Mesa
-    ]
+    private static let relayEndpoints = ControlPlaneRelays.endpoints.map {
+        ControlPlaneEndpoint(address: $0.address, port: $0.port)
+    }
 
     /// The relays for `baseURL`'s host, or nil when it has none. Only the
     /// production API and release hosts have relays; a debug base URL never
@@ -150,7 +205,7 @@ nonisolated struct ControlPlanePath: Sendable {
                 label: "relay",
                 host: host,
                 endpoints: endpoints,
-                connectBudget: PinnedControlPlaneExchange.relayConnectBudget,
+                connectBudget: PinnedControlPlaneExchange.relayWalkBudget(endpoints.count),
                 userAgent: userAgent,
                 maximumResponseBytes: maximumResponseBytes
             )
@@ -174,6 +229,37 @@ nonisolated struct ControlPlanePath: Sendable {
     static var userAgent: String {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
         return "Tono/\(build)"
+    }
+}
+
+/// Which of the head and the head budget came first, for one system
+/// resolver exchange (`ControlPlanePath.exchangeWithinHeadBudget`).
+nonisolated private final class HeadDeadline: @unchecked Sendable {
+    private let lock = NSLock()
+    // Guarded by `lock`.
+    private var arrived = false
+    private var didExpire = false
+
+    /// The head is in; false when the budget ran out first.
+    func headArrived() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !didExpire else { return false }
+        arrived = true
+        return true
+    }
+
+    /// The budget ran out; true when no head had arrived, so the exchange
+    /// is to be given up.
+    func expireUnlessHeadArrived() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !arrived else { return false }
+        didExpire = true
+        return true
+    }
+
+    var expired: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return didExpire
     }
 }
 
@@ -305,10 +391,20 @@ nonisolated enum PinnedControlPlaneExchange {
     /// this, whether they are the fallback or, once preferred, stand in front
     /// of the system resolver.
     static let connectBudget: TimeInterval = 10
-    /// Connect budget across the relays (decision 077), the last path: a
-    /// dead relay must not stretch a failed sign-in much further. The
-    /// Windows client gives its relays 4 s.
+    /// Connect budget, TCP and TLS, of one relay (decision 077), the last
+    /// path: a dead relay must not stretch a failed sign-in much further.
+    /// The updater's package GET gives each relay this; the Windows client
+    /// gives each relay 4 s.
     static let relayConnectBudget: TimeInterval = 5
+
+    /// Connect budget of a whole walk over `count` relays: `relayConnectBudget`
+    /// each, so a relay that drops packets costs at most that and the next
+    /// one still gets a full share (decision 089: three relays, at most 15 s).
+    /// A relay that fails sooner leaves the rest of its share to the ones
+    /// after it (`send` splits what remains evenly).
+    static func relayWalkBudget(_ count: Int) -> TimeInterval {
+        relayConnectBudget * Double(max(count, 1))
+    }
     /// One whole exchange, like the session's `timeoutIntervalForResource`.
     static let exchangeBudget: TimeInterval = 45
 

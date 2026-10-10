@@ -417,6 +417,58 @@ it('new-look quick switch calls the existing native selection once without dupli
   expect(mocks.tonoConnect).not.toHaveBeenCalled()
 })
 
+it('new-look connected tray trades one quick pick for the live-rate line, so the fixed flyout never scrolls', async () => {
+  setNewAppearance(true)
+  const picks = ['Buffalo · Niagara', 'Singapore · Harbor']
+  mocks.status = makeStatus({
+    uiState: 'connected',
+    routePreferenceScope: 'tray-test',
+  })
+  mocks.live = true
+  mocks.cached = true
+  mocks.tonoServers.mockResolvedValue([
+    ...catalogWithHy2(),
+    ...picks.map((name, index) => ({
+      name,
+      server: `203.0.113.${11 + index}`,
+      port: 443,
+      available: true,
+      selected: false,
+    })),
+  ])
+  mocks.tonoRoutePreferences.mockResolvedValue({
+    scope: 'tray-test',
+    catalogRevision: 1,
+    favorites: picks,
+    fixedRegion: null,
+    recent: [],
+  })
+  render(<TrayPanel />, { wrapper: freshSWR })
+  const group = screen.getByRole('group', { name: 'Switch server' })
+  expect(
+    await within(group).findByRole('button', { name: 'Buffalo' }),
+  ).toBeTruthy()
+  expect(screen.getByText(/↑ 4\.00 KB\/s/)).toBeTruthy()
+  expect(within(group).getAllByRole('button')).toHaveLength(1)
+})
+
+it('new-look server picker closes on Escape and restores keyboard focus without changing the route', async () => {
+  setNewAppearance(true)
+  render(<TrayPanel />, { wrapper: freshSWR })
+  const summary = screen.getByText('Switch server', { selector: 'summary' })
+  const details = summary.closest('details')
+  if (!details) throw new Error('missing server picker')
+  details.open = true
+  const route = await within(details).findByRole('button', { name: 'Tokyo' })
+  route.focus()
+  fireEvent.keyDown(route, { key: 'Escape' })
+  expect(details.open).toBe(false)
+  expect(document.activeElement).toBe(summary)
+  expect(mocks.tonoSelectServer).not.toHaveBeenCalled()
+  expect(mocks.tonoConnect).not.toHaveBeenCalled()
+  expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
+})
+
 it('new-look connecting action cancels through the existing Disconnect command once', async () => {
   setNewAppearance(true)
   // No barrier is held here; with one held the flyout offers no cancel (next test).

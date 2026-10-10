@@ -57,12 +57,31 @@ export const followupCopy = {
     alternative: (node: string) => `建议先在客户端里换到 ${node}，引擎现在对它的判断是正常。`,
     alternativeNone: '现在没有判定正常的替代节点可以推荐，我们会先处理这台机器。',
     question: (question: string) => `想请您确认一件事：${question}`,
+    carrier: (carrier: string) => `我们看到这次连接是从 ${carrier} 的网络发起的。`,
+    versionBehind: (running: string, latest: string) =>
+      `这台设备上的客户端是 ${running}，最新版是 ${latest}，麻烦先更新到最新版再试一次。`,
+    versionCurrent: (running: string) => `这台设备上的客户端是 ${running}，已经是最新版。`,
+    versionNoRelease: (running: string) => `这台设备上的客户端是 ${running}。`,
+    versionUnknown: '麻烦告诉我们客户端「关于」里显示的版本号。',
+    switchedTo: (node: string) => `失败之后这台设备已经换到 ${node}，换过之后还有没有同样的问题？`,
+    switchedNo: (node: string) => `这台设备现在还选着 ${node}，还没有换过节点。`,
   },
+  /** 草稿的三段；每段可以在页面上勾掉，勾掉的那段整段不进剪贴板。 */
+  replySection: {
+    confirmed: '我们这边已经确认的：',
+    pending: '还需要和您确认的：',
+    suggestion: '建议：',
+  } as const,
+  replySectionToggle: {
+    confirmed: '已确认',
+    pending: '待确认',
+    suggestion: '建议',
+  } as const,
   replyQuestion: {
     CATALOG_STALE: '在客户端里刷新一次节点列表之后，还连不连得上？',
-    TLS_HANDSHAKE_TIMEOUT: '换到上面这个节点之后，是不是还卡在同一个地方？',
+    TLS_HANDSHAKE_TIMEOUT: '换到下面建议的节点之后，是不是还卡在同一个地方？',
     REALITY_AUTH_FAIL: '这台设备最近有没有重装过客户端或者换过登录邮箱？',
     DNS_FAIL: '换一个网络（比如手机热点）之后还连不连得上？',
-    other: '换到上面这个节点之后，还连不连得上？',
+    other: '换到下面建议的节点之后，还连不连得上？',
   } as const,
 } as const;

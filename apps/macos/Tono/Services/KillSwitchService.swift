@@ -75,6 +75,50 @@ nonisolated enum KillSwitchService {
         set { AppProfile.defaults.set(newValue, forKey: stateKey) }
     }
 
+    private static let tunnelStateKey = "Tono_killSwitchArmedWithTunnel"
+
+    /// Whether the last committed arm carried a tunnel interface. Decision
+    /// 086: armed without one, the helper's PF permits the control plane only
+    /// through the Tono relays, so `TonoAPIClient` and the updater go there
+    /// first instead of waiting out paths PF drops. Unknown (no arm recorded
+    /// since this flag existed) reads as a tunnel: the usual path order still
+    /// reaches the relays last, while relays alone fail when a tunnel is up.
+    static var armedWithTunnel: Bool {
+        get { AppProfile.defaults.object(forKey: tunnelStateKey) as? Bool ?? true }
+        set { AppProfile.defaults.set(newValue, forKey: tunnelStateKey) }
+    }
+
+    /// Armed with no tunnel: bootstrap, Protected Offline, or a restriction
+    /// to bootstrap. The control plane is reachable only through the relays.
+    static var isArmedWithoutTunnel: Bool {
+        isArmed && !armedWithTunnel
+    }
+
+    /// Helper IPC behind `refreshStatus` and `reconcileTunnelState`; tests
+    /// replace it.
+    nonisolated(unsafe) static var statusReport: () throws -> (
+        armed: Bool, wanted: Bool, live: Bool, healed: Bool, tunnelArmed: Bool?
+    ) = { try HelperManager.killSwitchStatusReport() }
+
+    /// Takes the helper's word on the tunnel over the local record, which only
+    /// sees the arms this app issued: update preparation arms without a
+    /// tunnel from inside the helper. Only while the helper holds armed
+    /// intent; an older helper that does not say leaves the record alone.
+    private static func adoptTunnelState(
+        _ status: (armed: Bool, wanted: Bool, live: Bool, healed: Bool, tunnelArmed: Bool?)
+    ) {
+        guard status.wanted || status.armed, let tunnelArmed = status.tunnelArmed else { return }
+        armedWithTunnel = tunnelArmed
+    }
+
+    /// Re-reads the helper's tunnel state after an operation the helper ran on
+    /// its own (native update prepare/execute, success or failure). Errors
+    /// leave the record as it was.
+    static func reconcileTunnelState() {
+        guard let status = try? statusReport() else { return }
+        adoptTunnelState(status)
+    }
+
     static var isHelperInstalled: Bool {
         HelperManager.isHelperRunning()
     }
@@ -158,6 +202,8 @@ nonisolated enum KillSwitchService {
                     ]
                 )
             }
+            // nil keeps the helper's previous interfaces, and so this flag.
+            if let tunnelInterfaces { armedWithTunnel = !tunnelInterfaces.isEmpty }
             isArmed = true
         } catch HelperIPCError.forbidden {
             throw Error.helperRejected
@@ -406,8 +452,9 @@ nonisolated enum KillSwitchService {
     /// connect/disconnect operation raced this IPC round trip.
     static func refreshStatus() -> StatusObservation {
         do {
-            let status = try HelperManager.killSwitchStatus()
+            let status = try statusReport()
             if status.healed { needsSessionExceptionReassert = true }
+            adoptTunnelState(status)
             return .confirmed(
                 requiresProtectionRecovery: status.armed || status.wanted
             )

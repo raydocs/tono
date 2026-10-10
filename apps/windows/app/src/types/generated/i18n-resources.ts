@@ -1628,15 +1628,27 @@ export interface TranslationResources {
           title: string
         }
         general: {
+          effectHint: string
           language: string
+          languageHint: string
           launchAtStartup: string
           launchAtStartupHint: string
+          readFailed: string
+          reload: string
+          saveFailed: string
           title: string
         }
         preferences: {
           title: string
         }
         privacy: {
+          effectHint: string
+          readFailed: string
+          reading: string
+          reload: string
+          saved: string
+          saveFailed: string
+          saving: string
           title: string
         }
         title: string
