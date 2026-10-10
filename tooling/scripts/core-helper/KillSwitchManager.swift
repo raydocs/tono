@@ -101,6 +101,37 @@ final class HelperCommandOutput: @unchecked Sendable {
     }
 }
 
+/// The launch of one bounded helper command, settled once: launched, failed,
+/// or abandoned because its deadline passed while `Process.run()` had not yet
+/// returned. A launch that returns after it was abandoned terminates its own
+/// child (#1542 review F1): nobody is waiting for it, and its exit status must
+/// never be read as the command's outcome.
+final class HelperCommandLaunch: @unchecked Sendable {
+    enum Outcome { case launched, failed(any Error), abandoned }
+    private let lock = NSLock()
+    private let settled = DispatchSemaphore(value: 0)
+    private var outcome: Outcome?
+
+    /// The launch thread reports. False when the caller had already given up.
+    func report(_ result: Outcome) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if case .abandoned = outcome { return false }
+        outcome = result
+        settled.signal()
+        return true
+    }
+
+    /// The caller waits until `end`; past it, the launch is abandoned unless it
+    /// settled in the meantime.
+    func wait(until end: DispatchTime) -> Outcome {
+        _ = settled.wait(timeout: end)
+        lock.lock(); defer { lock.unlock() }
+        if let outcome { return outcome }
+        outcome = .abandoned
+        return .abandoned
+    }
+}
+
 final class KillSwitchManager {
     /// Ceiling for the persisted recovery pin set of a single host. Well under
     /// the 128-address limit `validateAddresses` enforces when those pins are
