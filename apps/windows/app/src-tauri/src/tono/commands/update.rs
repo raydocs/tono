@@ -64,11 +64,20 @@ pub async fn request(request: UpdateRequest) -> Result<UpdateStatus> {
     Ok(status)
 }
 
+/// No byte for this long fails the read, as on macOS (`NativeUpdateDownload.idleBudget`). A
+/// transfer whose link died under a sleep or a network change then stops in a minute and resumes
+/// (`download_resuming`) instead of holding the install until the 600 s request cap.
+const IDLE_BUDGET: Duration = Duration::from_secs(60);
+
+/// How many times a package download that stopped mid-transfer picks up where it stopped.
+const DOWNLOAD_RESUMES: u32 = 3;
+
 fn builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .https_only(true)
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
+        .read_timeout(IDLE_BUDGET)
         .timeout(Duration::from_secs(600))
 }
 
@@ -98,6 +107,7 @@ async fn get_via_relay(
     host: &str,
     relay: SocketAddr,
     timeout: Option<Duration>,
+    from: Option<u64>,
     builder: &impl Fn() -> reqwest::ClientBuilder,
 ) -> Result<Option<Result<reqwest::Response, reqwest::Error>>> {
     let mut relayed = url.clone();
@@ -108,12 +118,18 @@ async fn get_via_relay(
         .connect_timeout(RELAY_CONNECT_TIMEOUT)
         .resolve(host, relay)
         .build()?;
-    Ok(Some(with_timeout(client.get(relayed.as_str()), timeout).send().await))
+    Ok(Some(prepared(client.get(relayed.as_str()), timeout, from).send().await))
 }
 
-fn with_timeout(request: reqwest::RequestBuilder, timeout: Option<Duration>) -> reqwest::RequestBuilder {
-    match timeout {
+/// `request` with its own total `timeout`, when given, and asking only for the bytes from
+/// `from` on, when given (a resumed package download).
+fn prepared(request: reqwest::RequestBuilder, timeout: Option<Duration>, from: Option<u64>) -> reqwest::RequestBuilder {
+    let request = match timeout {
         Some(limit) => request.timeout(limit),
+        None => request,
+    };
+    match from {
+        Some(offset) => request.header(reqwest::header::RANGE, format!("bytes={offset}-")),
         None => request,
     }
 }
@@ -137,6 +153,19 @@ async fn get_with_relays(
     builder: impl Fn() -> reqwest::ClientBuilder,
     preferred: &PathPreference,
 ) -> Result<reqwest::Response> {
+    get_with_relays_from(direct, url, timeout, relays, builder, preferred, None).await
+}
+
+/// [`get_with_relays`] for the bytes from `from` on (`Range`), when given.
+async fn get_with_relays_from(
+    direct: &reqwest::Client,
+    url: &str,
+    timeout: Option<Duration>,
+    relays: &[SocketAddr],
+    builder: impl Fn() -> reqwest::ClientBuilder,
+    preferred: &PathPreference,
+    from: Option<u64>,
+) -> Result<reqwest::Response> {
     let parsed = reqwest::Url::parse(url)?;
     let host = parsed.host_str().map(str::to_owned);
     let mut failures = Vec::new();
@@ -148,7 +177,7 @@ async fn get_with_relays(
     if let (Some(index), Some(host)) = (first, host.as_deref()) {
         let relay = relays[index];
         tried = Some(index);
-        match get_via_relay(&parsed, host, relay, timeout, &builder).await? {
+        match get_via_relay(&parsed, host, relay, timeout, from, &builder).await? {
             Some(Ok(response)) => return Ok(response),
             Some(Err(error)) => {
                 // The transport's rule for an undelivered GET (`should_retry_transport`), and the
@@ -162,7 +191,7 @@ async fn get_with_relays(
         }
         preferred.set_relay(0);
     }
-    let direct_error = match with_timeout(direct.get(url), timeout).send().await {
+    let direct_error = match prepared(direct.get(url), timeout, from).send().await {
         Ok(response) => return Ok(response),
         Err(error) => error,
     };
@@ -175,7 +204,7 @@ async fn get_with_relays(
     };
     for index in (0..relays.len()).filter(|index| Some(*index) != tried) {
         let relay = relays[index];
-        match get_via_relay(&parsed, host, relay, timeout, &builder).await? {
+        match get_via_relay(&parsed, host, relay, timeout, from, &builder).await? {
             Some(Ok(response)) => {
                 preferred.set_relay(index + 1);
                 return Ok(response);
@@ -189,6 +218,103 @@ async fn get_with_relays(
         return Err(direct_error.into());
     }
     Err(anyhow::Error::new(direct_error).context(failures.join("; ")))
+}
+
+/// What a package download reports to the progress channel.
+enum DownloadEvent {
+    /// The first response arrived.
+    Started,
+    /// This many more bytes were written.
+    Chunk(usize),
+}
+
+/// Stream the package at `url` into `sink`: exactly `expected` bytes, the signed size.
+///
+/// A transfer that stops after its response started (a reset, a stall past `IDLE_BUDGET`, the
+/// request cap, a body that ends short) asks again, through the same path walk and so first
+/// through the relay the API last reached, for the bytes not yet written (`Range: bytes=<n>-`),
+/// up to `DOWNLOAD_RESUMES` times. A resumed answer counts only as `206` for exactly that offset
+/// and the signed size, so what is on disk stays one contiguous copy. Before, any stop after the
+/// first byte failed the install and the next try started again from zero, on the same flaky
+/// cross-border link. Nothing here is trusted: the Service checks the size and SHA-256 against
+/// the signed manifest before anything runs.
+#[allow(clippy::too_many_arguments)]
+async fn download_resuming(
+    direct: &reqwest::Client,
+    url: &str,
+    relays: &[SocketAddr],
+    builder: impl Fn() -> reqwest::ClientBuilder,
+    preferred: &PathPreference,
+    expected: u64,
+    sink: &mut (impl tokio::io::AsyncWrite + Unpin),
+    mut progress: impl FnMut(DownloadEvent) -> Result<()>,
+) -> Result<()> {
+    let mut written = 0u64;
+    let mut resumes = 0u32;
+    loop {
+        let from = (written > 0).then_some(written);
+        let mut response = get_with_relays_from(direct, url, None, relays, &builder, preferred, from)
+            .await?
+            .error_for_status()?;
+        match from {
+            None => progress(DownloadEvent::Started)?,
+            Some(offset) => ensure!(
+                resumed_at(&response, offset, expected),
+                "package resume was not answered from byte {offset}"
+            ),
+        }
+        let stopped = loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => {
+                    written += chunk.len() as u64;
+                    ensure!(written <= expected, "package exceeds signed size");
+                    sink.write_all(&chunk).await?;
+                    progress(DownloadEvent::Chunk(chunk.len()))?;
+                }
+                Ok(None) => break None,
+                Err(error) => break Some(error),
+            }
+        };
+        if stopped.is_none() && written == expected {
+            return Ok(());
+        }
+        if written >= expected || resumes >= DOWNLOAD_RESUMES {
+            return match stopped {
+                Some(error) => Err(error.into()),
+                None => Err(anyhow::anyhow!("package is truncated")),
+            };
+        }
+        resumes += 1;
+        logging!(
+            warn,
+            Type::Tono,
+            "Tono: update download stopped at {written}/{expected} bytes ({}); resuming ({resumes}/{DOWNLOAD_RESUMES})",
+            stopped.map_or_else(|| "body ended early".to_owned(), |error| error.to_string())
+        );
+    }
+}
+
+/// Whether `response` is the `206` for the bytes from `offset` to the end of a file of
+/// `expected` bytes.
+fn resumed_at(response: &reqwest::Response, offset: u64, expected: u64) -> bool {
+    let Some(range) = response
+        .headers()
+        .get(reqwest::header::CONTENT_RANGE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("bytes "))
+    else {
+        return false;
+    };
+    let Some((span, total)) = range.split_once('/') else {
+        return false;
+    };
+    let Some((start, end)) = span.split_once('-') else {
+        return false;
+    };
+    response.status() == reqwest::StatusCode::PARTIAL_CONTENT
+        && start.parse::<u64>().ok() == Some(offset)
+        && end.parse::<u64>().ok() == expected.checked_sub(1)
+        && (total == "*" || total.parse::<u64>().ok() == Some(expected))
 }
 
 async fn bounded(client: &reqwest::Client, url: &str, limit: usize, preferred: &PathPreference) -> Result<String> {
@@ -288,23 +414,27 @@ pub async fn tono_install_update(
             .open(&path)
             .await?;
         let api = state.lock().await.client.clone();
-        let mut response = get(
+        download_resuming(
             &client()?,
             &format!("{RELEASE_ROOT}/{manifest_sha256}/package.windows-x86_64.exe"),
-            None,
+            &bootstrap::api_relays(),
+            builder,
             api.transport().path_preference(),
+            target.artifact_size_bytes,
+            &mut file,
+            |event| {
+                progress.send(match event {
+                    DownloadEvent::Started => serde_json::json!(
+                        {"event":"Started", "data":{"contentLength":target.artifact_size_bytes}}
+                    ),
+                    DownloadEvent::Chunk(length) => serde_json::json!(
+                        {"event":"Progress", "data":{"chunkLength":length}}
+                    ),
+                })?;
+                Ok(())
+            },
         )
-        .await?
-        .error_for_status()?;
-        progress.send(serde_json::json!({"event":"Started", "data":{"contentLength":target.artifact_size_bytes}}))?;
-        let mut size = 0u64;
-        while let Some(chunk) = response.chunk().await? {
-            size += chunk.len() as u64;
-            ensure!(size <= target.artifact_size_bytes, "package exceeds signed size");
-            file.write_all(&chunk).await?;
-            progress.send(serde_json::json!({"event":"Progress", "data":{"chunkLength":chunk.len()}}))?;
-        }
-        ensure!(size == target.artifact_size_bytes, "package is truncated");
+        .await?;
         file.sync_all().await?;
         drop(file);
         progress.send(serde_json::json!({"event":"Finished"}))?;
@@ -729,6 +859,92 @@ mod update_relay_tests {
             "the relayed GET must keep the release hostname, got {host:?}"
         );
         assert_eq!(preferred.relay(), 2, "the relay that answered is remembered");
+    }
+
+    /// A package transfer cut off mid-body (a reset, a stall, a network change; simulated here
+    /// by a server that closes after half the bytes) picks up from the bytes already written
+    /// with `Range`, and the file ends as the one contiguous copy. Before, the install failed and
+    /// the next try started again from byte 0.
+    #[tokio::test]
+    async fn a_package_download_cut_off_mid_body_resumes_from_the_bytes_written() {
+        const PACKAGE: &[u8] = b"0123456789";
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let address = listener.local_addr().expect("addr");
+        // The Range header of every request the server received, empty when absent.
+        let (range_tx, range_rx) = std::sync::mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                use std::io::{BufRead as _, BufReader, Write as _};
+                let Ok(mut stream) = stream else { continue };
+                let Ok(clone) = stream.try_clone() else { continue };
+                let mut reader = BufReader::new(clone);
+                let mut line = String::new();
+                let mut range = String::new();
+                while reader.read_line(&mut line).unwrap_or(0) > 0 && line != "\r\n" && line != "\n" {
+                    if let Some((name, value)) = line.split_once(':')
+                        && name.eq_ignore_ascii_case("range")
+                    {
+                        range = value.trim().to_owned();
+                    }
+                    line.clear();
+                }
+                let _ = range_tx.send(range.clone());
+                if let Some(from) = range.strip_prefix("bytes=").and_then(|v| v.strip_suffix('-')) {
+                    let from: usize = from.parse().expect("offset");
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {from}-{}/{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        PACKAGE.len() - 1,
+                        PACKAGE.len(),
+                        PACKAGE.len() - from
+                    );
+                    let _ = stream.write_all(&PACKAGE[from..]);
+                } else {
+                    // The whole length is announced; half of it arrives, then the link is gone.
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        PACKAGE.len()
+                    );
+                    let _ = stream.write_all(&PACKAGE[..PACKAGE.len() / 2]);
+                }
+                let _ = stream.flush();
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+            }
+        });
+        let direct = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .resolve("releases.test", address)
+            .build()
+            .expect("direct client");
+        let mut written = Vec::new();
+        let (mut started, mut reported) = (0, 0);
+        download_resuming(
+            &direct,
+            &format!("http://releases.test:{}/desktop/v1/package.windows-x86_64.exe", address.port()),
+            &[],
+            || reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()),
+            &PathPreference::default(),
+            PACKAGE.len() as u64,
+            &mut written,
+            |event| {
+                match event {
+                    DownloadEvent::Started => started += 1,
+                    DownloadEvent::Chunk(length) => reported += length,
+                }
+                Ok(())
+            },
+        )
+        .await
+        .expect("the cut-off download must resume");
+        assert_eq!(written, PACKAGE, "the bytes on disk must be one contiguous copy");
+        assert_eq!((started, reported), (1, PACKAGE.len()));
+        assert_eq!(range_rx.recv_timeout(Duration::from_secs(1)).expect("first request"), "");
+        assert_eq!(
+            range_rx.recv_timeout(Duration::from_secs(1)).expect("the resumed request"),
+            format!("bytes={}-", PACKAGE.len() / 2)
+        );
     }
 
     /// Backlog A1: once a sign-in went through a relay, the update GET starts at that relay
