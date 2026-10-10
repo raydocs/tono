@@ -1,6 +1,6 @@
 ## 2026-10-10 · macOS helper 空闲检查改用单调时钟（MAC-HELPER-WATCHDOG-WALLCLOCK）
 - 归属：ops 计划（[plan-2026-09-11](../ops/plan-2026-09-11.md)；所有者要求的 helper 挂起/死锁/永久断网审计）；macOS 特权 helper `tooling/scripts/core-helper/`。
-- 来源：基线 origin/main 598ece8c；分支 `amp/helper-watchdog-monotonic`；未合 main。
+- 来源：基线 origin/main 598ece8c；分支 `amp/helper-watchdog-monotonic`，PR [#1541](https://github.com/raydocs/tono/pull/1541)；未合 main。
 - 缺陷修复：`SocketServer.run` 用 `Date().timeIntervalSince(lastProtectionCheck) >= 10` 决定是否跑保护检查。墙钟往回拨 N 秒后，差值在 N 秒内都是负数，
   这段时间里 Core 已停的拦截释放（约 30 s 门槛）、孤儿 bootstrap/隧道会话释放、PF 监督、App 拉起都不跑；Core 死掉、App 不在时，
   断网时长等于回拨长度。改为 `ProtectionCheckSchedule`：`CLOCK_MONOTONIC`（含睡眠，不会被拨动）计 10 s，读数倒退也立即到期。
