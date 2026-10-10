@@ -132,9 +132,14 @@ nonisolated struct ControlPlanePath: Sendable {
         "releases.afk.ccwu.cc": relayEndpoints,
     ]
 
+    /// Tried in this order. The third is on another provider, network and
+    /// city than the two DMIT nodes (decision 089), so one provider's outage
+    /// does not take every relay with it; it is last so a walk that reaches
+    /// a DMIT relay is unchanged.
     private static let relayEndpoints = [
         ControlPlaneEndpoint(address: "179.253.233.220", port: 2053), // Los Angeles · Westwood
         ControlPlaneEndpoint(address: "179.255.154.17", port: 2053), // Los Angeles · Mesa
+        ControlPlaneEndpoint(address: "38.14.195.144", port: 2053), // San Jose · Uscloud
     ]
 
     /// The relays for `baseURL`'s host, or nil when it has none. Only the
@@ -150,7 +155,7 @@ nonisolated struct ControlPlanePath: Sendable {
                 label: "relay",
                 host: host,
                 endpoints: endpoints,
-                connectBudget: PinnedControlPlaneExchange.relayConnectBudget,
+                connectBudget: PinnedControlPlaneExchange.relayWalkBudget(endpoints.count),
                 userAgent: userAgent,
                 maximumResponseBytes: maximumResponseBytes
             )
@@ -305,10 +310,20 @@ nonisolated enum PinnedControlPlaneExchange {
     /// this, whether they are the fallback or, once preferred, stand in front
     /// of the system resolver.
     static let connectBudget: TimeInterval = 10
-    /// Connect budget across the relays (decision 077), the last path: a
-    /// dead relay must not stretch a failed sign-in much further. The
-    /// Windows client gives its relays 4 s.
+    /// Connect budget, TCP and TLS, of one relay (decision 077), the last
+    /// path: a dead relay must not stretch a failed sign-in much further.
+    /// The updater's package GET gives each relay this; the Windows client
+    /// gives each relay 4 s.
     static let relayConnectBudget: TimeInterval = 5
+
+    /// Connect budget of a whole walk over `count` relays: `relayConnectBudget`
+    /// each, so a relay that drops packets costs at most that and the next
+    /// one still gets a full share (decision 089: three relays, at most 15 s).
+    /// A relay that fails sooner leaves the rest of its share to the ones
+    /// after it (`send` splits what remains evenly).
+    static func relayWalkBudget(_ count: Int) -> TimeInterval {
+        relayConnectBudget * Double(max(count, 1))
+    }
     /// One whole exchange, like the session's `timeoutIntervalForResource`.
     static let exchangeBudget: TimeInterval = 45
 

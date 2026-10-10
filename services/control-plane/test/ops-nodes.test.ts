@@ -146,6 +146,10 @@ describe('ops nodes identity', () => {
         name: 'Los Angeles · Mesa', host: '179.255.154.17', port: 2053, ok: null,
         checkedAt: null, latencyMs: null, error: null, okSince: null, failingSince: null,
       },
+      {
+        name: 'San Jose · Uscloud', host: '38.14.195.144', port: 2053, ok: null,
+        checkedAt: null, latencyMs: null, error: null, okSince: null, failingSince: null,
+      },
     ]);
   });
 });

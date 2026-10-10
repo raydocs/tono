@@ -11,10 +11,14 @@ import { connect as socketConnect } from 'cloudflare:sockets';
 //
 // `exitNodeId` is the `exit_nodes.id` of the exit agent on the same machine:
 // its token is the only credential that may report this relay's end-to-end
-// check (`POST /api/v1/home/relay-probe`, `src/api-relay-report.ts`).
+// check (`POST /api/v1/home/relay-probe`, `src/api-relay-report.ts`). A relay
+// on a host that is not an exit node has none: nothing may report for it, so
+// it is judged on the TCP probe alone (decision 089, docs/ops/api-relay.md).
 export const API_RELAYS: readonly ApiRelay[] = [
   { name: 'Los Angeles · Westwood', host: '179.253.233.220', port: 2053, exitNodeId: 'los-angeles-westwood' },
   { name: 'Los Angeles · Mesa', host: '179.255.154.17', port: 2053, exitNodeId: 'los-angeles-mesa' },
+  // Uscloud (AS402169), San Jose: another provider and city than the DMIT pair; not an exit node.
+  { name: 'San Jose · Uscloud', host: '38.14.195.144', port: 2053 },
 ];
 
 export type ApiRelay = { name: string; host: string; port: number; exitNodeId?: string };

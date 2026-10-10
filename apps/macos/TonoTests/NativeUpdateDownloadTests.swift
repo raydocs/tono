@@ -101,7 +101,7 @@ final class NativeUpdateDownloadTests: XCTestCase {
         XCTAssertEqual((permissions as? NSNumber)?.intValue, 0o600)
         let production = try XCTUnwrap(URL(string: NativeUpdateDownload.origin + "abc/package.macos-arm64.zip"))
         XCTAssertEqual(NativeUpdateDownload.packageRelays(for: production).map(\.label),
-                       ["relay 179.253.233.220:2053", "relay 179.255.154.17:2053"])
+                       ["relay 179.253.233.220:2053", "relay 179.255.154.17:2053", "relay 38.14.195.144:2053"])
 
         // Any status line, an interim 103 included, means the relay saw the
         // GET: a disconnect after it is not sent to the next relay.

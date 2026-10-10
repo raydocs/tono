@@ -33,10 +33,14 @@ pub const API_HOST: &str = "api.afk.ccwu.cc";
 /// `api.afk.ccwu.cc` and `releases.afk.ccwu.cc` and passes the bytes to the
 /// Cloudflare edge: TLS is not terminated there, so the client still validates
 /// Cloudflare's certificate for the hostname, and the relay sees what any router
-/// on the path sees. Two nodes on different hosts (Westwood, Mesa), so one node
-/// going down does not take the fallback with it; the API transport and the
-/// updater both walk them in this order. They are
-/// for the customer whose ISP cannot carry a TLS session to Cloudflare at all
+/// on the path sees. Two DMIT nodes on different hosts (Westwood, Mesa), so one
+/// node going down does not take the fallback with it, then a third on another
+/// provider, network and city (San Jose, Uscloud; decision 089), so one provider
+/// going down does not either. The API transport and the updater both walk them
+/// in this order, `transport::RELAY_CONNECT_TIMEOUT` (4 s) each, so a walk over
+/// three dead relays costs at most 12 s of connecting. Appended last: a remembered
+/// relay is an index into this list, so the first two keep theirs. They are for
+/// the customer whose ISP cannot carry a TLS session to Cloudflare at all
 /// (China Mobile → anycast, 2026-10-10): for that customer the pins, the system
 /// resolver, DoH and the alternate ports all land on the same broken path.
 ///
@@ -44,7 +48,11 @@ pub const API_HOST: &str = "api.afk.ccwu.cc";
 /// Cloudflare-only, so an armed kill switch is not widened. A relay is therefore
 /// usable only while protection is not armed, which is exactly when sign-in and
 /// first catalog fetch happen.
-pub const API_RELAYS: [(&str, u16); 2] = [("179.253.233.220", 2053), ("179.255.154.17", 2053)];
+pub const API_RELAYS: [(&str, u16); 3] = [
+    ("179.253.233.220", 2053), // Los Angeles · Westwood (DMIT)
+    ("179.255.154.17", 2053),  // Los Angeles · Mesa (DMIT)
+    ("38.14.195.144", 2053),   // San Jose (Uscloud, AS402169)
+];
 
 /// Hard cap for `bootstrap_api_hosts` on the wire (F1).
 pub const MAX_BOOTSTRAP_HOSTS: usize = 8;
