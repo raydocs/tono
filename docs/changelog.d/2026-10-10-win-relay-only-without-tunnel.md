@@ -8,7 +8,7 @@
   DNS（10 s）的连接预算才轮到中继；到 Cloudflare 线路不通的客户，第二个中继约 24 s 才开始，第三个中继约 28 s，启动恢复
   30 s 预算里 refresh + `me` 走不完。改后：对生产 API 主机的请求只走中继：上次应答的中继在前，其余按 `API_RELAYS` 顺序，
   每个 `RELAY_CONNECT_TIMEOUT` 4 s 连接、45 s 总时长；不再尝试固定 IP、系统 DNS、DoH、备用端口、已起的本地隧道，所有中继
-  都失败时不回退直连，错误为 `relay[<ip:port>: <阶段>: <原因>; …]`，逐个列出。三个死中继最多 12 s 连接；活的第三个约 8 s
+  都失败时不回退直连，错误以稳定前缀开头，供界面映射：`TONO_RELAYS_UNREACHABLE: relay 1 (<ip:port>) <阶段>: <原因>; relay 2 (…) …`，按 `API_RELAYS` 编号逐个列出（途中失去隧道时其后附 `; pinned[…]`）。三个死中继最多 12 s 连接；活的第三个约 8 s
   内到达。POST/DELETE 只在确证未送达时换下一个中继（`should_retry_transport` 不变）；`ApiClient` 的一次重试仍走中继，不回到
   直连优先；不并行，不新增刷新令牌的并发（`refresh_lock` 单飞不变）。有健康隧道时顺序不变。
 - 新增/优化：状态来源 `control_plane_reach_of`（连接状态机 + Service 最后一次 kill switch 读数）：已连接、连接进行到

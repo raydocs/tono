@@ -502,12 +502,21 @@ struct Relay {
     client: reqwest::Client,
 }
 
-/// A relay attempt that provably delivered nothing: its class, and its text for the combined
-/// error message (`address: phase: cause`).
+/// A relay attempt that provably delivered nothing: its class, its text for the combined error
+/// message of the full walk (`address: phase: cause`), and how it failed (`phase: cause`) for
+/// the relay-only message.
 struct RelayFailure {
     kind: TransportKind,
     text: String,
+    how: String,
 }
+
+/// Decision 091: the stable prefix of the error when no relay answered a relay-only walk, so
+/// the UI can map it. The message is
+/// `TONO_RELAYS_UNREACHABLE: relay 1 (<ip:port>) <phase>: <cause>; relay 2 (…) …`, one entry
+/// per relay tried, numbered by its place in `API_RELAYS`; a walk cut short by a lost tunnel
+/// appends the paths it had lost before (`; pinned[…]`).
+pub(crate) const RELAYS_UNREACHABLE: &str = "TONO_RELAYS_UNREACHABLE";
 
 /// Connect budget of one relay attempt. The relay is on a different network path than
 /// Cloudflare, so it is either reachable within a few round trips or not at all; a long wait
@@ -1091,12 +1100,17 @@ impl TonoTransport {
         index: usize,
     ) -> Result<Result<ApiResponse, ApiError>, RelayFailure> {
         let Some(relay) = self.relays.get(index) else {
-            return Err(RelayFailure { kind: TransportKind::Other, text: "no such relay".to_owned() });
+            return Err(RelayFailure {
+                kind: TransportKind::Other,
+                text: "no such relay".to_owned(),
+                how: "no such relay".to_owned(),
+            });
         };
         let Some(url) = Self::with_port(&request.url, relay.address.port()) else {
             return Err(RelayFailure {
                 kind: TransportKind::Other,
                 text: format!("relay {}: unusable url", relay.address),
+                how: "unusable url".to_owned(),
             });
         };
         let attempt = ApiRequest {
@@ -1110,7 +1124,7 @@ impl TonoTransport {
             }
             Err(ApiError::Transport { kind, message }) => {
                 if should_retry_transport(request.method, kind) {
-                    Err(RelayFailure { kind, text: format!("{}: {message}", relay.address) })
+                    Err(RelayFailure { kind, text: format!("{}: {message}", relay.address), how: message })
                 } else {
                     Ok(Err(ApiError::Transport { kind, message }))
                 }
@@ -1164,10 +1178,11 @@ impl TonoTransport {
     }
 
     /// Decision 091: the relays alone, the one that last answered first, then the rest in the
-    /// compiled order, each once (`skip` already failed earlier in this request). A POST or
-    /// DELETE moves to the next relay only after a failure that proves nothing was delivered.
-    /// When none answers, the error names every relay and how it failed, after `earlier`: the
-    /// paths a walk that started with a tunnel had already lost.
+    /// compiled order, each once (`skip` already failed earlier in this request, with `note`
+    /// saying how). A POST or DELETE moves to the next relay only after a failure that proves
+    /// nothing was delivered. When none answers, the error starts with [`RELAYS_UNREACHABLE`]
+    /// and names every relay and how it failed, then `earlier`: the paths a walk that started
+    /// with a tunnel had already lost.
     async fn send_over_relays(
         &self,
         request: &ApiRequest,
@@ -1197,15 +1212,23 @@ impl TonoTransport {
                     if !note.is_empty() {
                         note.push_str("; ");
                     }
-                    note.push_str(&failure.text);
+                    note.push_str(&Self::relay_entry(&self.relays, index, &failure.how));
                 }
             }
         }
         let separator = if earlier.is_empty() { "" } else { "; " };
         Err(ApiError::Transport {
             kind,
-            message: format!("{earlier}{separator}relay[{note}]"),
+            message: format!("{RELAYS_UNREACHABLE}: {note}{separator}{earlier}"),
         })
+    }
+
+    /// `relay <n> (<ip:port>) <how>`, `n` the relay's place in `API_RELAYS`.
+    fn relay_entry(relays: &[Relay], index: usize, how: &str) -> String {
+        match relays.get(index) {
+            Some(relay) => format!("relay {} ({}) {how}", index + 1, relay.address),
+            None => format!("relay {} {how}", index + 1),
+        }
     }
 
     /// Walk the compiled relays in order. `note` collects the text of every provably
@@ -1424,6 +1447,8 @@ impl TonoTransport {
         // Its failure text joins the combined message below when nothing else answers.
         let mut relay_note = String::new();
         let mut relay_tried = None;
+        // The same failure in the relay-only message's form, should the walk switch to it.
+        let mut relay_entry = String::new();
         let preferred_relay = self.preference.relay();
         if preferred_relay != 0 {
             match self.attempt_one_relay(&request, preferred_relay - 1).await {
@@ -1432,13 +1457,14 @@ impl TonoTransport {
                 Err(failure) => {
                     self.preference.set_relay(0);
                     relay_note = failure.text;
+                    relay_entry = Self::relay_entry(&self.relays, preferred_relay - 1, &failure.how);
                     relay_tried = Some(preferred_relay - 1);
                 }
             }
         }
 
         if self.relays_only(&request).await {
-            return self.send_over_relays(&request, "", relay_note, relay_tried).await;
+            return self.send_over_relays(&request, "", relay_entry, relay_tried).await;
         }
 
         // The resolved client goes first once it has answered in place of dead pins (#583). Its
@@ -1467,7 +1493,7 @@ impl TonoTransport {
                 Some(ApiError::Transport { message, .. }) => format!("system-dns[{message}]"),
                 _ => String::new(),
             };
-            return self.send_over_relays(&request, &earlier, relay_note, relay_tried).await;
+            return self.send_over_relays(&request, &earlier, relay_entry, relay_tried).await;
         }
 
         let pinned = {
@@ -1489,7 +1515,7 @@ impl TonoTransport {
         }
         if resolved_failed.is_none() && self.relays_only(&request).await {
             let earlier = format!("pinned[{message}]");
-            return self.send_over_relays(&request, &earlier, relay_note, relay_tried).await;
+            return self.send_over_relays(&request, &earlier, relay_entry, relay_tried).await;
         }
         let fallback = match resolved_failed {
             // Already tried for this request, just before the pins.
@@ -2638,9 +2664,10 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
                 panic!("expected a transport error");
             };
             assert_eq!(kind, TransportKind::Connect, "{message}");
-            assert!(message.contains("relay["), "{message}");
-            for relay in &closed {
-                assert!(message.contains(&relay.to_string()), "{relay} is not named: {message}");
+            assert!(message.starts_with("TONO_RELAYS_UNREACHABLE: relay 1 ("), "{message}");
+            for (index, relay) in closed.iter().enumerate() {
+                let entry = format!("relay {} ({relay}) connect: ", index + 1);
+                assert!(message.contains(&entry), "{entry} is not named: {message}");
             }
             assert!(!message.contains("pinned[") && !message.contains("system-dns["), "{message}");
             assert_eq!(direct.connections(), 0, "a direct fallback ran after the relays failed");

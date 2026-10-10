@@ -224,7 +224,8 @@ request to the API host goes to the relays only (`transport.rs` `send_over_relay
 that last answered first, then the rest in `API_RELAYS` order, 4 s connect each
 (`RELAY_CONNECT_TIMEOUT`), 45 s total. No pinned, system-resolver, DoH, alternate-port or
 loopback-tunnel attempt, and no direct fallback: when every relay fails, the error is
-`relay[<ip:port>: <phase>: <cause>; …]`, one entry per relay. Three dead relays cost at most
+`TONO_RELAYS_UNREACHABLE: relay 1 (<ip:port>) <phase>: <cause>; relay 2 (…) …`, one entry per
+relay numbered by its place in `API_RELAYS` (a stable prefix the UI maps). Three dead relays cost at most
 12 s of connecting; a live third relay is reached by about 8 s. Connected (or a connect past
 `LockingTraffic`) the order is unchanged and the tunnel carries the direct path. Exceptions:
 armed without a tunnel on a Service below protocol revision 20 (no reported relay permit) and
