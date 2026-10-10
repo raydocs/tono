@@ -218,6 +218,58 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertFalse(text.contains("timeline@example.test"), text)
     }
 
+    /// Decision 086 (H1-F5, Option A): armed without a tunnel, PF admits the
+    /// control plane only through the Tono relays, so a request goes to the
+    /// relay first and only there: the system resolver and the pinned
+    /// Cloudflare addresses are not tried, and no path preference is written.
+    func testArmedWithoutATunnelTheRequestGoesToTheRelayOnly() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        let systemRequests = PathCallCounter()
+        HeldAccountProtocol.install(host) { request in
+            systemRequests.record()
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        let key = TonoAPIClient.preferredPathKey(forHost: host)
+        defer {
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            AppProfile.defaults.removeObject(forKey: key)
+        }
+        let pinnedAttempts = PathCallCounter()
+        let relayAttempts = PathCallCounter()
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                pinnedAttempts.record()
+                throw URLError(.timedOut)
+            },
+            relayPath: ControlPlanePath(label: "relay") { request, _ in
+                relayAttempts.record()
+                XCTAssertEqual(request.value(forHTTPHeaderField: TonoAPIClient.pathHeader), "relay")
+                return ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-086","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
+            },
+            armedWithoutTunnel: { true }
+        )
+
+        let challengeId = try await api.startEmailSignIn(TonoEmailStartRequest(
+            email: "relay-only@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+        )).challengeId
+
+        XCTAssertEqual(challengeId, "c-086")
+        XCTAssertEqual(relayAttempts.count, 1, "the relay carries the request")
+        XCTAssertEqual(systemRequests.count, 0, "the system resolver path is not tried")
+        XCTAssertEqual(pinnedAttempts.count, 0, "the pinned Cloudflare addresses are not tried")
+        XCTAssertNil(AppProfile.defaults.object(forKey: key), "no path preference is written")
+    }
+
     /// Decision 077: when the system resolver and the pinned addresses both
     /// fail before any request byte is sent, the request goes to the Tono
     /// relay outside Cloudflare, exactly once (a sign-in POST), and the relay

@@ -159,6 +159,11 @@ actor TonoAPIClient {
     /// the system resolver and the pinned addresses both fail before any
     /// status line.
     private let relayPath: ControlPlanePath?
+    /// Decision 086: whether protection is armed without a tunnel, when the
+    /// relays are the only control-plane path PF admits. Production reads
+    /// `KillSwitchService.isArmedWithoutTunnel`; an injected session (tests)
+    /// reads false unless a reader is passed.
+    private let armedWithoutTunnel: @Sendable () -> Bool
     /// #584: the label of a later path that answered where the paths before
     /// it failed, so later requests try it first. Cleared when a preferred
     /// attempt fails, is cancelled or its body fails. Kept in the app
@@ -249,7 +254,8 @@ actor TonoAPIClient {
         pinnedPath: ControlPlanePath? = nil,
         relayPath: ControlPlanePath? = nil,
         systemHandshake: (@Sendable () async -> Bool)? = nil,
-        controlPlanePathTimeline: ControlPlanePathTimeline = ControlPlanePathTimeline()
+        controlPlanePathTimeline: ControlPlanePathTimeline = ControlPlanePathTimeline(),
+        armedWithoutTunnel: (@Sendable () -> Bool)? = nil
     ) {
         self.baseURL = baseURL
         self.keychain = keychain
@@ -272,6 +278,10 @@ actor TonoAPIClient {
             ?? (session == nil ? ControlPlanePath.pinnedAddresses(for: baseURL) : nil)
         self.relayPath = relayPath
             ?? (session == nil ? ControlPlanePath.relays(for: baseURL) : nil)
+        let protectionReader: @Sendable () -> Bool = { KillSwitchService.isArmedWithoutTunnel }
+        let fixtureReader: @Sendable () -> Bool = { false }
+        self.armedWithoutTunnel = armedWithoutTunnel
+            ?? (session == nil ? protectionReader : fixtureReader)
         preferredPathKey = Self.preferredPathKey(forHost: baseURL.host ?? "")
         preferredPathLabel = Self.loadPreferredPath(key: preferredPathKey)
     }
@@ -1231,7 +1241,15 @@ actor TonoAPIClient {
         // A path that answered where the ones before it could not goes in
         // front; the rest keep their order behind it.
         var order = [systemPath] + fallbacks
-        let preferred = preferredPathLabel
+        // Decision 086 (H1-F5, Option A): armed without a tunnel, the helper's
+        // PF permits the control plane only through the Tono relays. The
+        // system resolver and the pinned Cloudflare addresses would only wait
+        // out their timeouts against PF, so the relays are the whole walk,
+        // and the remembered preference is neither read nor changed. TLS
+        // still names the API host and is validated by default trust.
+        let relayOnly = relayPath != nil && armedWithoutTunnel()
+        if relayOnly, let relayPath { order = [relayPath] }
+        let preferred = relayOnly ? nil : preferredPathLabel
         let preferredFirst: Bool
         if let preferred, let index = order.firstIndex(where: { $0.label == preferred }), index > 0 {
             order.insert(order.remove(at: index), at: 0)

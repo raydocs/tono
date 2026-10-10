@@ -26,8 +26,16 @@ nonisolated enum NativeUpdateDownload {
     /// `fallbacks(for:)`). Whatever path carries it, the bytes are checked
     /// the same way here, and root verifies the manifest signature.
     static func bounded(
-        _ url: URL, maximum: Int, timeoutInterval: TimeInterval = 30, fallbacks: [ControlPlanePath]? = nil
+        _ url: URL, maximum: Int, timeoutInterval: TimeInterval = 30, fallbacks: [ControlPlanePath]? = nil,
+        armedWithoutTunnel: Bool = KillSwitchService.isArmedWithoutTunnel
     ) async throws -> Data {
+        if armedWithoutTunnel {
+            // Decision 086: armed without a tunnel, PF admits the release host
+            // only through the Tono relays; the direct path and the pinned
+            // Cloudflare addresses would only wait out their timeouts.
+            let relays = (fallbacks ?? Self.fallbacks(for: url)).filter { $0.label == "relay" }
+            return try await fetch(url, maximum: maximum, after: skippedWhileArmedWithoutTunnel, over: relays)
+        }
         let configuration = URLSessionConfiguration.ephemeral
         // The request timeout resets on every received byte. Bound the whole
         // metadata transfer too, so a trickling response cannot hold the updater.
@@ -94,6 +102,13 @@ nonisolated enum NativeUpdateDownload {
         throw failure("Update discovery metadata is unreachable: " + failures.joined(separator: "; "))
     }
 
+    /// Stands in for the direct attempt that is not made while protection is
+    /// armed without a tunnel, so the reported failures still name it.
+    private static let skippedWhileArmedWithoutTunnel = NSError(
+        domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet,
+        userInfo: [NSLocalizedDescriptionKey: "not tried: protection is armed without a tunnel (decision 086)"]
+    )
+
     private static func isCancellation(_ error: any Error) -> Bool {
         error is CancellationError || (error as? URLError)?.code == .cancelled
     }
@@ -109,7 +124,16 @@ nonisolated enum NativeUpdateDownload {
     /// (by default `packageRelays(for:)`), streamed to disk under the same
     /// signed size. Whatever path carries it, root copies and hashes this
     /// exact file against the signed manifest before installing.
-    static func package(at url: URL, size: Int64, relays: [PackagePath]? = nil) async throws -> URL {
+    static func package(
+        at url: URL, size: Int64, relays: [PackagePath]? = nil,
+        armedWithoutTunnel: Bool = KillSwitchService.isArmedWithoutTunnel
+    ) async throws -> URL {
+        if armedWithoutTunnel {
+            // Decision 086: the relays are the only path PF admits here.
+            return try await relayedPackage(
+                url, size: size, after: skippedWhileArmedWithoutTunnel, over: relays ?? packageRelays(for: url)
+            )
+        }
         do {
             return try await NativePackageDownload(url: url, size: size).download()
         } catch let undelivered as NativePackageDownload.Undelivered {

@@ -351,7 +351,14 @@ final class KillSwitchManager {
         // there severs every established flow on the host for no protection
         // gain. Any removed pass rule still forces the full flush.
         let passRules = Self.passRules(in: renderedRules)
-        let disposal = Self.stateDisposal(replacing: lastLoadedPassRules, with: passRules)
+        // Decision 086: a withdrawn Cloudflare API permit (a ruleset from
+        // before it) is killed by address like any other; only a relay
+        // address the Core still dials as its exit is spared.
+        let disposal = Self.sparingSharedRelayHosts(
+            Self.stateDisposal(replacing: lastLoadedPassRules, with: passRules),
+            withdrawn: lastLoadedPassRules?.subtracting(passRules) ?? [],
+            remaining: passRules
+        )
         // The kernel takes the new ruleset part-way through the call below, ahead
         // of the PF enable, the state disposal, and the verification probes that
         // can each still throw. Recording nothing across it is what keeps a
