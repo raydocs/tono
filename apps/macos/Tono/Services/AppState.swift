@@ -248,6 +248,9 @@ final class AppState {
     var proxyRegions: [ProxyRegion] = []
     var selectedNodeId: String? = nil
     var routePreferences = LocalRoutePreferences()
+    /// A17: same-node hy2 after repeated Reality connect failures, when the
+    /// exit catalog permits it. Changes only the dialed selection.
+    @ObservationIgnored var hy2AutoSwitch = Hy2AutoSwitch()
 
     // Rules
     var rules: [RuleItem] = []
@@ -1220,7 +1223,8 @@ final class AppState {
     }
 
     func persistProxySelection(_ target: String?) {
-        if let target = normalizedProxyTarget(target) {
+        // An automatic hy2 dial is a detour of the user's Reality choice.
+        if let target = normalizedProxyTarget(target).map({ hy2AutoSwitch.persistedTarget(for: $0) }) {
             noteCatalogFailoverLanding(on: target)
             AppProfile.defaults.set(target, forKey: SettingsKey.selectedProxyTargetName)
         } else {
