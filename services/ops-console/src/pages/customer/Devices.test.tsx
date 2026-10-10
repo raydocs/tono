@@ -1,6 +1,7 @@
 import { renderToString } from 'react-dom/server';
 import type { CustomerDeviceDto } from '@contract';
 import { copy } from '@/copy/copy';
+import { nowSec } from '@/lib/clock';
 import { Devices } from './Devices';
 
 vi.mock('@/lib/use-resource', () => ({
@@ -14,6 +15,7 @@ it('shows a failed standing read instead of empty history and prevents an unknow
     id: 'existing-device', name: 'MacBook Pro', status: 'active', platform: 'macos',
     lastSeenAt: null, appVersion: '0.0.74', osVersion: '15', selectedServer: 'test',
     createdAt: 1, connected: false, lastFailAt: null, lastFailCode: null, lastFailNode: null,
+    clientPath: null, clientPathAt: null,
   };
   const html = renderToString(<Devices userId="existing-user" devices={[device]} onChanged={() => undefined} />);
   const host = document.createElement('div');
@@ -22,4 +24,16 @@ it('shows a failed standing read instead of empty history and prevents an unknow
   expect(host.textContent).not.toContain(copy.deviceNoAction);
   const toggle = Array.from(host.querySelectorAll('button')).find((button) => button.textContent === copy.deviceLogsOn);
   expect(toggle?.disabled).toBe(true);
+});
+
+it('shows the path the device last reached the control plane by, and how long ago', () => {
+  const device: CustomerDeviceDto = {
+    id: 'relay-device', name: 'MacBook Air', status: 'active', platform: 'macos',
+    lastSeenAt: null, appVersion: '0.0.76', osVersion: '15', selectedServer: null,
+    createdAt: 1, connected: false, lastFailAt: null, lastFailCode: null, lastFailNode: null,
+    clientPath: 'relay', clientPathAt: nowSec() - 180,
+  };
+  const host = document.createElement('div');
+  host.innerHTML = renderToString(<Devices userId="relay-user" devices={[device]} onChanged={() => undefined} />);
+  expect(host.textContent).toContain(`${copy.deviceColumns.path}${copy.devicePath('relay', copy.ago.minutes(3))}`);
 });
