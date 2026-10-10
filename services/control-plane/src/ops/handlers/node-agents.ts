@@ -114,7 +114,8 @@ export async function postNodeAgentToken(req: Request, e: Env, rawName: string, 
 export async function deleteNodeAgentToken(_req: Request, e: Env, rawName: string, actor: Actor): Promise<Response> {
   const name = decodeName(rawName);
   const t = now();
-  await e.DB.batch([
+  // The receipt is read inside the same batch (one transaction) as the revoke.
+  const [, , receipt] = await e.DB.batch([
     e.DB.prepare(
       'UPDATE ops_node_agents SET token_revoked_at = ? WHERE node_name = ? AND token_revoked_at IS NULL',
     ).bind(t, name),
@@ -122,10 +123,9 @@ export async function deleteNodeAgentToken(_req: Request, e: Env, rawName: strin
       e, actor.email, 'node.agent_token.revoke', 'node', name,
       `revoked node agent token for ${name}`, true, auditMeta(actor),
     ),
+    e.DB.prepare('SELECT token_revoked_at FROM ops_node_agents WHERE node_name = ?').bind(name),
   ]);
-  const row = await e.DB.prepare(
-    'SELECT token_revoked_at FROM ops_node_agents WHERE node_name = ?',
-  ).bind(name).first<Row>();
+  const row = (receipt?.results as Row[] | undefined)?.[0];
   if (!row) throw new ApiError(404, 'NOT_FOUND', 'This node has no agent token');
   return jsonNoStore({ node: name, tokenRevokedAt: Number(row.token_revoked_at) });
 }

@@ -30,6 +30,8 @@ from typing import Callable
 AGENT_VERSION = "1.0.0"
 HEARTBEAT_PATH = "/api/v1/node-agent/heartbeat"
 RELAY_CONF = Path("/etc/nginx/tono-relay.stream.conf")
+SYSTEMCTL = "/usr/bin/systemctl"
+CHILD_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C"}
 # The exact token grammar (see the control plane's node-agent.ts). Anything
 # else is refused before it can reach an HTTP header, so a malformed file can
 # never surface the token in an exception message or the journal.
@@ -74,8 +76,17 @@ def api_base(raw: str) -> str:
 
 
 def unit_active(unit: str) -> bool:
+    """Only the exit code is kept. The child gets a fixed minimal environment and
+    no output channel, so nothing in this service's environment (a token pasted
+    into the wrong variable included) can be echoed into the journal by it."""
     return subprocess.run(
-        ["systemctl", "is-active", "--quiet", unit], check=False, timeout=10
+        [SYSTEMCTL, "is-active", "--quiet", unit],
+        check=False,
+        timeout=10,
+        env=CHILD_ENV,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     ).returncode == 0
 
 

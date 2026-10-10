@@ -65,8 +65,9 @@ describe('node agent self-registration', () => {
     expect(await db().prepare('SELECT last_heartbeat_at, roles FROM ops_node_agents WHERE node_name = ?')
       .bind(NODE_A).first()).toEqual({ last_heartbeat_at: null, roles: null });
 
-    expect((await issue(NODE_A, 'DELETE')).status).toBe(200);
-    expect((await issue(NODE_A, 'DELETE')).status).toBe(200);
+    const revoked = await (await issue(NODE_A, 'DELETE')).json() as { tokenRevokedAt: number };
+    expect(revoked.tokenRevokedAt).toBeGreaterThan(0);
+    expect(await (await issue(NODE_A, 'DELETE')).json()).toEqual({ node: NODE_A, tokenRevokedAt: revoked.tokenRevokedAt });
     expect((await issue('Nowhere · None', 'DELETE')).status).toBe(404);
     expect((await heartbeat(reissued, NODE_A)).status).toBe(403);
     expect((await db().prepare(

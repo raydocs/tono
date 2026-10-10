@@ -52,6 +52,29 @@ class NodeAgentTest(unittest.TestCase):
         self.assertNotIn(token[5:], stderr.getvalue())
         self.assertIn("TONO_NODE_AGENT_TOKEN_FILE", stderr.getvalue())
 
+        # A child process sees neither this environment nor the journal: a stub
+        # systemctl that dumps its env and args writes nothing that reaches fd 1/2.
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "systemctl"
+            stub.write_text('#!/bin/sh\nenv >&2\necho "$@"\nexit 0\n')
+            stub.chmod(0o755)
+            with open(Path(tmp) / "fds", "w+b") as sink, mock.patch.object(agent, "SYSTEMCTL", str(stub)), \
+                    mock.patch.dict(os.environ, {"SYSTEMD_LOG_LEVEL": token, "SYSTEMD_LOG_TARGET": token}):
+                saved = [os.dup(1), os.dup(2)]
+                os.dup2(sink.fileno(), 1)
+                os.dup2(sink.fileno(), 2)
+                try:
+                    active = agent.unit_active("tono-xray")
+                finally:
+                    os.dup2(saved[0], 1)
+                    os.dup2(saved[1], 2)
+                    for fd in saved:
+                        os.close(fd)
+                sink.seek(0)
+                leaked = sink.read().decode(errors="replace")
+        self.assertTrue(active)
+        self.assertNotIn(token[5:], leaked)
+
 
 if __name__ == "__main__":
     unittest.main()

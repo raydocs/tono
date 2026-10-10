@@ -36,3 +36,9 @@
 - 续记（2026-10-10，第三轮评审 FAIL：1 major）：`TONO_NODE_AGENT_TOKEN_FILE` 误填成 token 本身时，读失败的拒绝信息带出
   路径值即 token。改后所有拒绝 / 日志行只用固定文案（最多点出变量名与异常类名），不含任何环境变量值、路径、文件内容或
   异常文本；成功行也不再打印节点名与 IP。python 现有测试加：变量填合成 token → 非零退出，stderr 不含 token。
+- 续记（2026-10-10，第四轮评审 FAIL：1 major + 1 minor）：major——`systemctl` 子进程继承整个环境与 stdout/stderr，
+  token 误填进 `SYSTEMD_LOG_LEVEL` / `SYSTEMD_LOG_TARGET` 时会被它回显进日志。改后子进程用绝对路径
+  `/usr/bin/systemctl`、固定参数、最小环境（`PATH`、`LANG=C`），stdin/stdout/stderr 全接 `/dev/null`，只取退出码；
+  脚本里没有别的子进程调用。python 现有测试加：桩 `systemctl` 把环境与参数写到 fd 2，环境里放合成 token，fd 1/2 均不含
+  token。minor——吊销回执改在同一 batch 里读（事务内 SELECT），不再事后另查；现有 `it` 加：两次 `DELETE` 回同一
+  `tokenRevokedAt`。
