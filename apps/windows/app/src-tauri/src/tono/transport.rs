@@ -330,17 +330,13 @@ pub struct TonoTransport {
     /// reset, that failure costs the full connect timeout. A fresh start re-tries 443 first,
     /// so a network that recovers is not stuck on an alternate for ever.
     alternate_port: std::sync::atomic::AtomicU16,
-    /// The system-resolved client answered after the pinned addresses failed (#583).
-    ///
-    /// Later requests try it first. Launch restore sends a token refresh and then `me` inside
-    /// one budget; without this, `me` paid the pinned connect budget a second time before
-    /// reaching the path that had just worked, and the budget ran out before its fallback.
-    /// Cleared when a preferred attempt fails or is cancelled (`PreferenceLease`), after which
-    /// the pinned path runs as usual, so under an armed kill switch (pins permitted, DNS blocked)
-    /// the cost is one failed resolution. Process memory only, like `alternate_port`.
-    prefer_resolved: std::sync::atomic::AtomicBool,
-    /// `resolved` with the pinned attempt's connect budget, used only while `prefer_resolved` is
-    /// set, so a resolver that has become a blackhole costs 10 s before the pins, not 30 s.
+    /// The learned path preferences (`PathPreference`): the system-resolved client first, or a
+    /// relay first. Process memory only, like `alternate_port`, seeded at most by a pre-login
+    /// probe (backlog A4).
+    preference: PathPreference,
+    /// `resolved` with the pinned attempt's connect budget, used only while the system-resolved
+    /// preference is set, so a resolver that has become a blackhole costs 10 s before the pins,
+    /// not 30 s.
     resolved_first: reqwest::Client,
     /// Responses whose status line arrived (#582). Launch restore reads it around a budget
     /// timeout: an unchanged count is the only proof that the control plane gave no answer.
@@ -357,14 +353,6 @@ pub struct TonoTransport {
     /// this exists for sit on the same broken path. The relay passes the TLS session through
     /// unterminated, so the certificate check is the same one as on every other path.
     relays: Vec<Relay>,
-    /// Index + 1 of the relay that last answered, or 0.
-    ///
-    /// Later requests go to it first, like `alternate_port`: for a customer whose Cloudflare
-    /// path drops, every request would otherwise pay the pinned and the resolved connect
-    /// budgets again before reaching the one path that works. Cleared on a provably
-    /// undelivered failure, so a network that recovers goes back to the pins. Process memory
-    /// only.
-    preferred_relay: std::sync::atomic::AtomicUsize,
     /// A19: where path failures go (the audit log, then the periodic timeline). None in tests
     /// that do not ask for it.
     path_failure_sink: Option<PathFailureSink>,
@@ -381,19 +369,104 @@ struct Relay {
 /// here would only delay the remaining fallbacks for a customer who is already waiting.
 pub(crate) const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
 
-/// Holds `prefer_resolved` for one preferred attempt and clears it on drop unless the attempt
-/// was answered. A failure, and a cancellation by an outer deadline (launch restore), both
-/// clear it, so the next request goes to the pins first.
+/// Holds the system-resolved preference for one preferred attempt and clears it on drop unless
+/// the attempt was answered. A failure, and a cancellation by an outer deadline (launch
+/// restore), both clear it, so the next request goes to the pins first.
 struct PreferenceLease<'a> {
-    flag: &'a std::sync::atomic::AtomicBool,
+    preference: &'a PathPreference,
     answered: bool,
 }
 
 impl Drop for PreferenceLease<'_> {
     fn drop(&mut self) {
         if !self.answered {
-            self.flag.store(false, std::sync::atomic::Ordering::Relaxed);
+            self.preference.set_resolved_first(false);
         }
+    }
+}
+
+/// The learned path preferences, behind one lock with a revision (backlog A4).
+///
+/// Every change a request makes (a later path answering, a failed preferred attempt clearing
+/// it, the updater's GETs) and every answer bumps the revision, so a pre-login probe that
+/// started before them cannot overwrite what they learned (`adopt_probe`).
+#[derive(Default)]
+pub(crate) struct PathPreference(std::sync::Mutex<PreferenceState>);
+
+#[derive(Default)]
+struct PreferenceState {
+    revision: u64,
+    /// The system-resolved client answered after the pinned addresses failed (#583).
+    ///
+    /// Later requests try it first. Launch restore sends a token refresh and then `me` inside
+    /// one budget; without this, `me` paid the pinned connect budget a second time before
+    /// reaching the path that had just worked, and the budget ran out before its fallback.
+    /// Cleared when a preferred attempt fails or is cancelled (`PreferenceLease`), after which
+    /// the pinned path runs as usual, so under an armed kill switch (pins permitted, DNS blocked)
+    /// the cost is one failed resolution.
+    resolved_first: bool,
+    /// Index + 1 of the relay that last answered, or 0.
+    ///
+    /// Later requests go to it first, like `alternate_port`: for a customer whose Cloudflare
+    /// path drops, every request would otherwise pay the pinned and the resolved connect
+    /// budgets again before reaching the one path that works. Cleared on a provably
+    /// undelivered failure, so a network that recovers goes back to the pins.
+    relay: usize,
+}
+
+impl PathPreference {
+    #[cfg(test)]
+    pub(crate) fn new(resolved_first: bool, relay: usize) -> Self {
+        Self(std::sync::Mutex::new(PreferenceState { revision: 0, resolved_first, relay }))
+    }
+
+    fn with<T>(&self, change: impl FnOnce(&mut PreferenceState) -> T) -> T {
+        let mut state = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        change(&mut *state)
+    }
+
+    pub(crate) fn relay(&self) -> usize {
+        self.with(|state| state.relay)
+    }
+
+    pub(crate) fn set_relay(&self, relay: usize) {
+        self.with(|state| {
+            state.relay = relay;
+            state.revision = state.revision.wrapping_add(1);
+        });
+    }
+
+    fn resolved_first(&self) -> bool {
+        self.with(|state| state.resolved_first)
+    }
+
+    fn set_resolved_first(&self, resolved_first: bool) {
+        self.with(|state| {
+            state.resolved_first = resolved_first;
+            state.revision = state.revision.wrapping_add(1);
+        });
+    }
+
+    /// A status line arrived: whatever the preferences are now rests on a real answer.
+    fn note_answer(&self) {
+        self.with(|state| state.revision = state.revision.wrapping_add(1));
+    }
+
+    pub(crate) fn revision(&self) -> u64 {
+        self.with(|state| state.revision)
+    }
+
+    /// Set both preferences at once, only if nothing changed them or answered since `revision`.
+    fn adopt_probe(&self, revision: u64, resolved_first: bool, relay: usize) -> bool {
+        self.with(|state| {
+            if state.revision != revision {
+                return false;
+            }
+            state.resolved_first = resolved_first;
+            state.relay = relay;
+            state.revision = state.revision.wrapping_add(1);
+            true
+        })
     }
 }
 
@@ -406,7 +479,7 @@ impl TonoTransport {
             client: tokio::sync::RwLock::new(Self::build_pinned_client()?),
             resolved,
             alternate_port: std::sync::atomic::AtomicU16::new(0),
-            prefer_resolved: std::sync::atomic::AtomicBool::new(false),
+            preference: PathPreference::default(),
             answers: std::sync::atomic::AtomicU64::new(0),
             resolved_first: Self::pinned_builder()
                 .build()
@@ -415,7 +488,6 @@ impl TonoTransport {
             relays: Self::build_relays(bootstrap::API_HOST, &bootstrap::api_relays(), || {
                 Self::builder().connect_timeout(RELAY_CONNECT_TIMEOUT)
             })?,
-            preferred_relay: std::sync::atomic::AtomicUsize::new(0),
             path_failure_sink: None,
         })
     }
@@ -453,38 +525,32 @@ impl TonoTransport {
             .store(port, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// The relay preference (`preferred_relay`), shared with the updater's GETs so an update
+    /// The path preferences, whose relay half is shared with the updater's GETs so an update
     /// check on a device whose sign-in went through a relay goes there first instead of paying
     /// the dead direct path again. Both sides index `bootstrap::api_relays()` and clear it on a
     /// provably undelivered relay failure.
-    pub(crate) fn preferred_relay(&self) -> &std::sync::atomic::AtomicUsize {
-        &self.preferred_relay
+    pub(crate) fn path_preference(&self) -> &PathPreference {
+        &self.preference
     }
 
     /// Backlog A4: put the path a pre-login handshake probe (`path_probe`) reached first, as if
-    /// a request had just answered there. `answers_before` is `answers_seen()` when the probe
-    /// started; once a request has answered since, the preferences already rest on a real answer
-    /// and stay as they are. The pins lead the walk anyway, so reaching them clears both
-    /// preferences. False when nothing was applied.
+    /// a request had just answered there. `revision` is `path_preference().revision()` when the
+    /// probe started; once a request has answered or changed a preference since, the preferences
+    /// rest on that and stay as they are. The pins lead the walk anyway, so reaching them clears
+    /// both preferences. False when nothing was applied.
     pub(crate) fn prefer_probed_path(
         &self,
         path: crate::tono::path_probe::ProbedPath,
-        answers_before: u64,
+        revision: u64,
     ) -> bool {
         use crate::tono::path_probe::ProbedPath;
-        use std::sync::atomic::Ordering;
-        if self.answers_seen() != answers_before {
-            return false;
-        }
         let (resolved_first, relay) = match path {
             ProbedPath::Pinned => (false, 0),
             ProbedPath::SystemDns => (true, 0),
             ProbedPath::Relay(index) if index < self.relays.len() => (false, index + 1),
             ProbedPath::Relay(_) => return false,
         };
-        self.prefer_resolved.store(resolved_first, Ordering::Relaxed);
-        self.preferred_relay.store(relay, Ordering::Relaxed);
-        true
+        self.preference.adopt_probe(revision, resolved_first, relay)
     }
 
     /// How many responses have delivered a status line so far (#582).
@@ -549,7 +615,7 @@ impl TonoTransport {
         };
         Ok(Self {
             relays: Self::build_relays(host, relays, quick)?,
-            preferred_relay: std::sync::atomic::AtomicUsize::new(0),
+            preference: PathPreference::default(),
             client: tokio::sync::RwLock::new(
                 quick()
                     .resolve_to_addrs(host, pinned)
@@ -561,7 +627,6 @@ impl TonoTransport {
                 .build()
                 .context("failed to build the resolving test client")?,
             alternate_port: std::sync::atomic::AtomicU16::new(0),
-            prefer_resolved: std::sync::atomic::AtomicBool::new(false),
             answers: std::sync::atomic::AtomicU64::new(0),
             resolved_first: quick()
                 .resolve_to_addrs(host, resolved)
@@ -667,6 +732,7 @@ impl TonoTransport {
 
         let mut response = builder.send().await.map_err(|err| transport(&err))?;
         self.answers.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        self.preference.note_answer();
         let status = response.status().as_u16();
         if response
             .content_length()
@@ -836,7 +902,6 @@ impl TonoTransport {
         request: &ApiRequest,
         index: usize,
     ) -> Result<Result<ApiResponse, ApiError>, String> {
-        use std::sync::atomic::Ordering;
         let Some(relay) = self.relays.get(index) else {
             return Err("no such relay".to_owned());
         };
@@ -849,7 +914,7 @@ impl TonoTransport {
         };
         match self.attempt(&relay.client, &attempt, AttemptPath::Relay).await {
             Ok(response) => {
-                self.preferred_relay.store(index + 1, Ordering::Relaxed);
+                self.preference.set_relay(index + 1);
                 Ok(Ok(response))
             }
             Err(ApiError::Transport { kind, message }) => {
@@ -1068,16 +1133,13 @@ impl TonoTransport {
         // budgets before every request would make the app unusable rather than merely slow.
         // Its failure text joins the combined message below when nothing else answers.
         let mut relay_note = String::new();
-        let preferred_relay = self
-            .preferred_relay
-            .load(std::sync::atomic::Ordering::Relaxed);
+        let preferred_relay = self.preference.relay();
         if preferred_relay != 0 {
             match self.attempt_one_relay(&request, preferred_relay - 1).await {
                 Ok(result) => return result,
                 // Provably not delivered: forget it, so the pins run as usual below.
                 Err(failure) => {
-                    self.preferred_relay
-                        .store(0, std::sync::atomic::Ordering::Relaxed);
+                    self.preference.set_relay(0);
                     relay_note = failure;
                 }
             }
@@ -1087,8 +1149,8 @@ impl TonoTransport {
         // failure moves on to the pins only when it proves nothing was delivered. Any failure or
         // cancellation clears the preference (`PreferenceLease`).
         let mut resolved_failed = None;
-        if self.prefer_resolved.load(std::sync::atomic::Ordering::Relaxed) {
-            let mut lease = PreferenceLease { flag: &self.prefer_resolved, answered: false };
+        if self.preference.resolved_first() {
+            let mut lease = PreferenceLease { preference: &self.preference, answered: false };
             match self.attempt(&self.resolved_first, &request, AttemptPath::SystemDns).await {
                 Err(ApiError::Transport { kind, message })
                     if should_retry_transport(request.method, kind) =>
@@ -1128,8 +1190,7 @@ impl TonoTransport {
         };
         match fallback {
             Ok(response) => {
-                self.prefer_resolved
-                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                self.preference.set_resolved_first(true);
                 Ok(response)
             }
             // Both paths are named. Which one failed and how is the whole
@@ -1708,7 +1769,7 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             "a relayed attempt must name its path, so the control plane does not take the relay for the device"
         );
         assert_eq!(
-            transport.preferred_relay.load(std::sync::atomic::Ordering::Relaxed),
+            transport.preference.relay(),
             1,
             "the relay that answered is remembered for the next request"
         );
@@ -1781,12 +1842,11 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             ),
             resolved: TonoTransport::builder().resolve_to_addrs(host, &live).build().unwrap(),
             alternate_port: std::sync::atomic::AtomicU16::new(0),
-            prefer_resolved: std::sync::atomic::AtomicBool::new(false),
+            preference: super::PathPreference::default(),
             answers: std::sync::atomic::AtomicU64::new(0),
             resolved_first: TonoTransport::pinned_builder().resolve_to_addrs(host, &live).build().unwrap(),
             tunnel_port: std::sync::atomic::AtomicU16::new(0),
             relays: Vec::new(),
-            preferred_relay: std::sync::atomic::AtomicUsize::new(0),
             path_failure_sink: None,
         };
         let store = std::sync::Arc::new(MemoryCredentialStore::new());
@@ -1812,12 +1872,11 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             ),
             resolved: TonoTransport::builder().resolve_to_addrs(host, &dead).build().unwrap(),
             alternate_port: std::sync::atomic::AtomicU16::new(0),
-            prefer_resolved: std::sync::atomic::AtomicBool::new(true),
+            preference: super::PathPreference::new(true, 0),
             answers: std::sync::atomic::AtomicU64::new(0),
             resolved_first: TonoTransport::pinned_builder().resolve_to_addrs(host, &dead).build().unwrap(),
             tunnel_port: std::sync::atomic::AtomicU16::new(0),
             relays: Vec::new(),
-            preferred_relay: std::sync::atomic::AtomicUsize::new(0),
             path_failure_sink: None,
         };
         let get = || ApiRequest {

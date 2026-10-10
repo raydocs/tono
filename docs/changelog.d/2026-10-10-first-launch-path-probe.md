@@ -25,3 +25,9 @@
 - 剩余限制：没有便宜的网络标识，缓存按 API 主机全局 24 h（换网络后最多付一次偏好失败的连接预算再回到原顺序）；
   只在未登录启动时探测，登出后回到登录页不重探；Windows 的缓存只由探测写，真实请求改的偏好仍只在进程内存；
   握手通不等于 HTTP 通（偏好失败即回退）。实机未测。
+- 续记（2026-10-10，独立评审 PASS + 3 个 MINOR，一轮修完，均为 Windows）：① 探测结果只在采纳成功（未被真实请求取代）后才写
+  `control-plane-path.json`；② `prefer_resolved` / `preferred_relay` 合成一把锁下的 `PathPreference`（带修订号），真实请求的
+  每次应答、改偏好、失败清偏好（含 `PreferenceLease` 与更新器 GET）都加修订号，探测采纳与它们串行；③ 每个握手在自己的线程和
+  current-thread runtime 上跑，5 s 后放弃，platform verifier 同步取证书链再慢也拖不住其它探测或 app worker。
+  `#[test]` 加两行断言：探测开始后有应答，`prefer_probed_path` 被拒、中继偏好不变。临时 crate 复核 `cargo +1.95.0` 编译通过，
+  真实固定 IP 握手 ~130 ms。

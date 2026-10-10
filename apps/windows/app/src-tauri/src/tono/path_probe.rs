@@ -8,10 +8,11 @@
 //! platform verifier, the one reqwest uses for every API request; a certificate that is not
 //! valid for the host fails the probe. Each path has `PROBE_BUDGET`, and the paths run at once.
 //!
-//! The first path in the transport's own order that completed a handshake is kept in
-//! `PROBE_CACHE_FILE` for `PROBE_TTL` (one global record: there is no cheap network identity
-//! here) and seeds the transport's existing preference (`prefer_resolved`, `preferred_relay`)
-//! as if a request had just answered there; the next launch reads the record back. The walk
+//! The first path in the transport's own order that completed a handshake seeds the transport's
+//! existing preference (`PathPreference`) as if a request had just answered there, unless a
+//! request answered or changed it meanwhile; only then is it kept in `PROBE_CACHE_FILE` for
+//! `PROBE_TTL` (one global record: there is no cheap network identity here), which the next
+//! launch reads back. The walk
 //! itself is unchanged: a preferred path that fails hands over to the usual order under the same
 //! retry rule, so a request that may have been delivered is never sent again. The record names a
 //! path, never an address, so it cannot send traffic anywhere the compiled paths do not go.
@@ -102,15 +103,16 @@ pub(crate) fn adopt_cached(transport: &TonoTransport, dir: &Path) -> Option<Prob
 fn adopt_cached_at(transport: &TonoTransport, file: &Path, now_ms: u64) -> Option<ProbedPath> {
     let path = load(file, now_ms)?;
     transport
-        .prefer_probed_path(path, transport.answers_seen())
+        .prefer_probed_path(path, transport.path_preference().revision())
         .then_some(path)
 }
 
-/// Probe every path, keep the result for `PROBE_TTL` and put that path first, unless a request
-/// answered while the probe ran (an answer outranks a handshake). Nothing reached keeps the
+/// Probe every path, put the first one that worked first and keep that for `PROBE_TTL`, unless
+/// a request answered or changed a preference while the probe ran (an answer outranks a
+/// handshake): then neither the preference nor the record changes. Nothing reached keeps the
 /// previous record and preference. Bounded by `PROBE_BUDGET`; never awaited by the UI.
 pub(crate) async fn run_before_sign_in(transport: &TonoTransport, dir: &Path) {
-    let answers = transport.answers_seen();
+    let revision = transport.path_preference().revision();
     let started = std::time::Instant::now();
     let config = match tls_config() {
         Ok(config) => config,
@@ -145,10 +147,13 @@ pub(crate) async fn run_before_sign_in(transport: &TonoTransport, dir: &Path) {
     let Some(path) = verdict else {
         return;
     };
+    if !transport.prefer_probed_path(path, revision) {
+        logging!(info, Type::Tono, "Tono: pre-login path probe superseded by a request; not kept");
+        return;
+    }
     if let Err(error) = store(&cache_file(dir), path, now_ms()) {
         logging!(warn, Type::Tono, "Tono: pre-login path probe result not kept: {error}");
     }
-    transport.prefer_probed_path(path, answers);
 }
 
 /// The platform verifier, as reqwest's own rustls stack uses, over the ring provider.
@@ -167,14 +172,35 @@ fn tls_config() -> Result<Arc<rustls::ClientConfig>, rustls::Error> {
 
 /// TCP, then TLS for `bootstrap::API_HOST`, to `address`; closed without sending a byte of
 /// application data.
+///
+/// The platform verifier checks the chain synchronously inside the handshake (on Windows
+/// `CertGetCertificateChain`, which may fetch over the network for longer than the budget), so
+/// each handshake runs on its own thread with its own runtime and is abandoned after
+/// `PROBE_BUDGET`: a slow check cannot stall the other probes or an app worker.
 async fn handshake(config: &Arc<rustls::ClientConfig>, address: SocketAddr) -> bool {
+    let (done, outcome) = tokio::sync::oneshot::channel();
+    let config = Arc::clone(config);
+    let spawned = std::thread::Builder::new()
+        .name("tono-path-probe".to_owned())
+        .spawn(move || {
+            let reached = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .is_ok_and(|runtime| runtime.block_on(handshake_here(config, address)));
+            let _ = done.send(reached);
+        });
+    if spawned.is_err() {
+        return false;
+    }
+    matches!(tokio::time::timeout(PROBE_BUDGET, outcome).await, Ok(Ok(true)))
+}
+
+/// `handshake` on the calling thread's runtime.
+async fn handshake_here(config: Arc<rustls::ClientConfig>, address: SocketAddr) -> bool {
     let attempt = async {
         let name = rustls::pki_types::ServerName::try_from(bootstrap::API_HOST).ok()?;
         let tcp = tokio::net::TcpStream::connect(address).await.ok()?;
-        tokio_rustls::TlsConnector::from(Arc::clone(config))
-            .connect(name, tcp)
-            .await
-            .ok()
+        tokio_rustls::TlsConnector::from(config).connect(name, tcp).await.ok()
     };
     matches!(tokio::time::timeout(PROBE_BUDGET, attempt).await, Ok(Some(_)))
 }
@@ -273,8 +299,12 @@ mod tests {
         let transport = TonoTransport::with_clients_and_relays("tono-probe.test", &direct, &direct, &relay)
             .expect("transport");
         assert_eq!(adopt_cached_at(&transport, &file, now), Some(ProbedPath::Relay(0)));
+        let probe_started = transport.path_preference().revision();
         let first = transport.send(request.clone()).await.expect("first sign-in");
         assert_eq!(first.body, b"relay", "the first sign-in goes to the relay the probe reached");
+        // A probe that started before that answer cannot overwrite what it taught.
+        assert!(!transport.prefer_probed_path(ProbedPath::Pinned, probe_started));
+        assert_eq!(transport.path_preference().relay(), 1, "the answering relay stays first");
 
         let day_old = now - u64::try_from(PROBE_TTL.as_millis()).expect("ttl") - 60_000;
         store(&file, ProbedPath::Relay(0), day_old).expect("store a day-old probe result");
