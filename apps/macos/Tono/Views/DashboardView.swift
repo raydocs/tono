@@ -95,7 +95,7 @@ struct DashboardView: View {
                                         || appState.isProtectionUnconfirmed {
                                 appState.restoreInternet()
                             } else if newValue {
-                                appState.connect()
+                                appState.connectFromUser()
                             } else {
                                 appState.disconnect(releaseKillSwitch: true)
                             }
@@ -300,7 +300,7 @@ struct DashboardView: View {
             .buttonStyle(SeaHomePillStyle(primary: true))
             .disabled(!appState.isTonoReady || appState.isDisconnecting)
         } else {
-            Button("Retry now") { appState.connect() }
+            Button("Retry now") { appState.connectFromUser() }
                 .buttonStyle(SeaHomePillStyle(primary: true))
                 .disabled(!appState.isTonoReady || appState.isDisconnecting)
                 .modifier(SeaHomeActionShortcut(ownsShortcut: !appState.isProtectionUnconfirmed
@@ -328,7 +328,7 @@ struct DashboardView: View {
         } else if appState.isProtectionBlocked || appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable {
             appState.restoreInternet()
         } else if !appState.isConnected {
-            appState.connect()
+            appState.connectFromUser()
         } else {
             appState.disconnect(releaseKillSwitch: true)
         }
@@ -1064,7 +1064,7 @@ private struct ConnectionProgressCard: View {
             ) {
                 if !primaryActionInHeader {
                     Button("Retry now") {
-                        appState.connect()
+                        appState.connectFromUser()
                     }
                     .modifier(SeaActionStyle(variant: .primary, size: .row, legacy: .gatePrimary))
                     .controlSize(.small)

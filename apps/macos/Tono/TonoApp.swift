@@ -82,7 +82,7 @@ struct TonoApp: App {
                 appState.protectedReconnectPausedForUserAction
             },
             protectedRetryConsumer: {
-                appState.retryProtectedConnectionNow(repairHelper: false)
+                appState.retryProtectedConnectionNow(repairHelper: false, userInitiated: false)
             },
             appRoutingResearchActivationConsumer: {
                 appState.appRoutingResearchActivationChanged()

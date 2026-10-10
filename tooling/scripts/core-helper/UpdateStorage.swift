@@ -67,8 +67,25 @@ final class UpdateStorage {
 
     deinit { close(lockFD) }
 
+    /// The longest any caller waits for the update lock (#1504, owner
+    /// requirement: no unbounded wait in the helper). The longest legitimate
+    /// hold is the administrator install script under `--update-install-guard`
+    /// (`HelperChildDeadline.installScript`) or the executor's `perform`,
+    /// whose children are all bounded; a holder past this is wedged, and the
+    /// waiter fails with `UPDATE_LOCK_TIMEOUT` instead of hanging (an IPC
+    /// request errors, the watchdog skips a pass, recovery proceeds without
+    /// the ledger as it does for an unreadable one).
+    static let lockWaitBudget: TimeInterval = HelperChildDeadline.installScript + 60
+
     func locked<T>(_ body: () throws -> T) throws -> T {
         try Self.withLock(lockFD, body)
+    }
+
+    /// `locked` that gives up after a shorter `budget`. `--emergency-disarm`
+    /// uses it: update cleanup must never hold the network release behind a
+    /// busy lock (decision 084).
+    func locked<T>(within budget: TimeInterval, _ body: () throws -> T) throws -> T {
+        try Self.withLock(lockFD, budget: budget, body)
     }
 
     /// Recovery after normal store opening fails may still inspect saved
@@ -106,7 +123,9 @@ final class UpdateStorage {
         return try withLock(fd, body)
     }
 
-    private static func withLock<T>(_ fd: Int32, _ body: () throws -> T) throws -> T {
+    static func withLock<T>(_ fd: Int32, budget: TimeInterval = UpdateStorage.lockWaitBudget, _ body: () throws -> T) throws -> T {
+        // Monotonic: a wall clock set back must not stretch the wait.
+        let deadline = DispatchTime.now() + max(0, budget)
         // launchctl bootout must be able to stop a daemon waiting behind the
         // executor. A blocking flock would otherwise deadlock that bootout.
         while flock(fd, LOCK_EX | LOCK_NB) != 0 {
@@ -118,6 +137,12 @@ final class UpdateStorage {
             // daemon can exit without arming fail-closed evidence barriers.
             guard helperShutdownRequested == 0 else {
                 throw HelperFailure.stopping("Update lock unavailable or helper stopping.")
+            }
+            if DispatchTime.now() >= deadline {
+                throw HelperFailure.coded(
+                    code: "UPDATE_LOCK_TIMEOUT",
+                    message: "Tono's update lock stayed busy past its time budget."
+                )
             }
             usleep(50_000)
         }

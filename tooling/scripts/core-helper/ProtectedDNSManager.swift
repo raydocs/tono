@@ -139,9 +139,55 @@ final class ProtectedDNSManager {
     }
 
     /// No earlier retirement may suppress recovery of a new DNS override.
-    private func writeManagedDNS(_ servers: [String], _ service: NetworkService) throws {
+    /// `original` is what a 127.0.0.1 write replaces, as the caller captured
+    /// it before writing (the snapshot it just saved); other writes are
+    /// restores and need none.
+    private func writeManagedDNS(_ servers: [String], _ service: NetworkService, original: [String]? = nil) throws {
         try clearCompletedRestore()
-        try Self.writeDNS(servers, on: service)
+        guard servers == [Self.protectedDNSServer] else {
+            try Self.writeDNS(servers, on: service)
+            return
+        }
+        guard let original else {
+            throw HelperFailure.invalid("A protected DNS write needs the servers it replaces.")
+        }
+        try Self.guardedProtectedDNSWrite(
+            on: service,
+            original: original,
+            write: Self.writeDNS,
+            read: Self.readDNS,
+            keepRecovery: { recovery in
+                // Only where nothing records the original any more (the
+                // release's restore removed the snapshot meanwhile).
+                if (try? self.loadSnapshot()) == nil { try? self.save(recovery) }
+            }
+        )
+    }
+
+    /// Every 127.0.0.1 write (enable and the same-owner re-enable) reads the
+    /// target right before and right after itself, whether the write returned
+    /// or threw (System Configuration can commit and then fail to apply).
+    /// A release in between (decision 084, #1504 review F2) puts `original`
+    /// back: the values captured before the write, never re-read, because
+    /// the release's own restore may have removed the snapshot in the
+    /// meantime. If that write does not read back, the original is saved as
+    /// the recovery snapshot again (when none is left), so the released-mode
+    /// watchdog keeps restoring it instead of leaving DNS on a stopped
+    /// listener with no evidence.
+    private static func guardedProtectedDNSWrite(
+        on service: NetworkService,
+        original: [String],
+        allowed: () -> Bool = { HelperTarget.automaticRearmAllowed(HelperTarget.read()) },
+        write: ([String], NetworkService) throws -> Void,
+        read: (NetworkService) throws -> [String],
+        keepRecovery: (Snapshot) -> Void
+    ) throws {
+        try HelperTarget.guardedEffect(allowed: allowed, {
+            try write([protectedDNSServer], service)
+        }, undo: {
+            if (try? write(original, service)) != nil, (try? read(service)) == original { return }
+            keepRecovery(Snapshot(service: service.name, serviceID: service.id, servers: original))
+        })
     }
 
     func enable(service rawService: String) throws -> [String: Any] {
@@ -185,7 +231,7 @@ final class ProtectedDNSManager {
                     previous,
                     services: try Self.allServices(),
                     read: Self.readDNS,
-                    write: writeManagedDNS,
+                    write: { try self.writeManagedDNS($0, $1) },
                     removeSnapshot: removeSnapshot,
                     archiveSnapshot: { try Self.quarantineSnapshot(reason: "superseded") },
                     recordCompletedRestore: recordCompletedRestore
@@ -195,7 +241,7 @@ final class ProtectedDNSManager {
                     previous,
                     service: selected,
                     read: Self.readDNS,
-                    write: writeManagedDNS,
+                    write: { try self.writeManagedDNS($0, $1, original: $2) },
                     save: save,
                     archiveSnapshot: { try Self.quarantineSnapshot(reason: "superseded") }
                 )
@@ -228,7 +274,10 @@ final class ProtectedDNSManager {
         // Persist recovery state before changing the first system setting.
         try save(snapshot)
         do {
-            try writeManagedDNS([Self.protectedDNSServer], selected)
+            // Where it acts: an operator release that landed since the
+            // request was admitted wins (decision 084).
+            try HelperTarget.requireAdmission(sessionGeneration: nil)
+            try writeManagedDNS([Self.protectedDNSServer], selected, original: snapshot.servers)
             guard try Self.readDNS(on: selected) == [Self.protectedDNSServer] else {
                 throw HelperFailure.system("The protected DNS transition did not commit.")
             }
@@ -333,6 +382,43 @@ final class ProtectedDNSManager {
                 throw HelperFailure.invalid("The active resolver still points to the stopped Core.")
             }
         }
+    }
+
+    /// `--emergency-disarm` readback (decision 084): `verifyRestored`'s checks,
+    /// read as a component state. `.present`: a restore is still pending or a
+    /// service or the active resolver still uses the stopped 127.0.0.1.
+    /// A read that fails is `.unknown`, never restored.
+    func operatorResidueReading() -> SelectiveFailOpen.LayerReading {
+        lock.lock()
+        defer { lock.unlock() }
+        let snapshot: Snapshot?
+        do { snapshot = try loadSnapshot() } catch { return .unknown }
+        if snapshot != nil { return .present }
+        var unread = false
+        do {
+            for service in try Self.allServices() {
+                do {
+                    let servers = try Self.readDNS(on: service)
+                    if Self.isStoppedTonoResolver(servers) { return .present }
+                } catch {
+                    unread = true
+                }
+            }
+        } catch {
+            return .unknown
+        }
+        guard let store = SCDynamicStoreCreate(nil, "Tono operator DNS readback" as CFString, nil, nil),
+              let values = SCDynamicStoreCopyMultiple(store, nil,
+                ["State:/Network/Service/.*/DNS", "State:/Network/Global/DNS"] as CFArray) as? [String: Any] else {
+            return .unknown
+        }
+        for case let config as [String: Any] in values.values {
+            if let servers = config[kSCPropNetDNSServerAddresses as String] as? [String],
+               Self.isStoppedTonoResolver(servers) {
+                return .present
+            }
+        }
+        return unread ? .unknown : .absent
     }
 
     /// Whether a DNS server list may be Tono's resolver left behind by a
@@ -494,20 +580,24 @@ final class ProtectedDNSManager {
     /// Re-enabling the same owner is a new DNS transition too. If another
     /// actor selected explicit DNS since the old snapshot, preserve that
     /// choice as the new recovery target before writing Tono's listener.
+    /// `write` gets the servers, the service and the original the snapshot
+    /// now records for it (captured here, before the write, for its undo).
     private static func reenableSameOwner(
         _ previous: Snapshot,
         service: NetworkService,
         read: (NetworkService) throws -> [String],
-        write: ([String], NetworkService) throws -> Void,
+        write: ([String], NetworkService, [String]) throws -> Void,
         save: (Snapshot) throws -> Void,
         archiveSnapshot: () throws -> Void
     ) throws {
         let current = try read(service)
+        var original = previous.servers
         if current != [protectedDNSServer] && current != previous.servers {
             // Archive first: a failed archive/save never changes system DNS,
             // and a retry can still recover whichever snapshot was durable.
             try archiveSnapshot()
             try save(Snapshot(service: service.name, serviceID: service.id, servers: current))
+            original = current
         } else if previous.service != service.name {
             try save(Snapshot(
                 service: service.name,
@@ -515,7 +605,7 @@ final class ProtectedDNSManager {
                 servers: previous.servers
             ))
         }
-        try write([protectedDNSServer], service)
+        try write([protectedDNSServer], service, original)
         guard try read(service) == [protectedDNSServer] else {
             throw HelperFailure.system("The protected DNS transition did not commit.")
         }
@@ -1346,6 +1436,58 @@ final class ProtectedDNSManager {
         return (try? String(contentsOfFile: marker, encoding: .utf8)) == "protected"
     }
 
+    /// #1504 review R5-F1: the Core is launched, not waited on, and must pass
+    /// the same admission gate. A Core-shaped launch (own directory and
+    /// environment, output captured, long-lived) whose `Process.run()`
+    /// returns only after the deadline must never start: the stand-in writes
+    /// its marker the moment it executes, so without the gate the marker
+    /// exists at once; with it, the gate gets end-of-file and never execs.
+    static func runAbandonedCoreLaunchNeverStartsSelfTest() -> Bool {
+        let marker = NSTemporaryDirectory() + "tono-abandoned-core-\(UUID().uuidString)"
+        defer { unlink(marker) }
+        let exited = DispatchSemaphore(value: 0)
+        let child = Process()
+        child.currentDirectoryURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        child.environment = ["HOME": NSTemporaryDirectory(), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+        let output = Pipe()
+        child.standardOutput = output
+        child.standardError = output
+        child.terminationHandler = { _ in exited.signal() }
+        do {
+            try KillSwitchManager.launchAdmitted(
+                child,
+                executable: "/bin/sh",
+                arguments: ["-c", "printf started > \"$1\"; exec /bin/sleep 30", "sh", marker],
+                until: .now() + 1,
+                deadline: 1,
+                launch: { process in
+                    try process.run()
+                    usleep(2_000_000)
+                }
+            )
+            return false
+        } catch {}
+        // The late launch settles: its gate sees end-of-file, it is reaped.
+        guard exited.wait(timeout: .now() + 5) == .success else { return false }
+        usleep(500_000)
+        return !FileManager.default.fileExists(atPath: marker)
+    }
+
+    /// The install guard's script reaches its shell on stdin. Relayed after
+    /// `go` on the admission pipe (never handed to the child directly), it
+    /// still arrives whole, and the gate line is not part of it.
+    static func runAdmittedInputRelaySelfTest() -> Bool {
+        let path = NSTemporaryDirectory() + "tono-admitted-input-\(UUID().uuidString)"
+        defer { unlink(path) }
+        guard FileManager.default.createFile(atPath: path, contents: Data("printf relayed\nexit 7\n".utf8)),
+              let input = FileHandle(forReadingAtPath: path) else { return false }
+        defer { try? input.close() }
+        guard let result = try? KillSwitchManager.run("/bin/sh", [], deadline: 5, standardInput: input) else {
+            return false
+        }
+        return result.status == 7 && String(decoding: result.output, as: UTF8.self) == "relayed"
+    }
+
     static func runNetworkSetupDeadlineSelfTest() -> Bool {
         let started = clock_gettime_nsec_np(CLOCK_MONOTONIC)
         do {
@@ -1763,7 +1905,7 @@ final class ProtectedDNSManager {
                 durable,
                 service: owner,
                 read: { _ in current },
-                write: { servers, _ in
+                write: { servers, _, _ in
                     if durable.servers != ["9.9.9.9"] || archived != [old] {
                         writeBeforeSave = true
                     }
@@ -2141,6 +2283,115 @@ final class ProtectedDNSManager {
         return removed && writes == 2 && active == snapshot.servers
     }
 
+    /// #1504 review F2: a same-owner re-enable, admitted before an operator
+    /// release, stalls before its 127.0.0.1 write lands. Meanwhile the CLI
+    /// restores DNS and removes the snapshot, and the release is on disk.
+    /// When the write lands, the undo must put back the original captured
+    /// before the write (there is no snapshot left to re-read). If that undo
+    /// write fails too, the original is saved as the recovery snapshot again
+    /// so the released-mode watchdog keeps restoring it.
+    static func runPendingDNSWriteAfterReleaseSelfTest() -> Bool {
+        enum Stalled: Error { case undoRefused }
+        let owner = NetworkService(id: "S1", name: "Wi-Fi")
+        let previous = Snapshot(service: "Wi-Fi", serviceID: "S1", servers: ["10.0.0.53"])
+        func run(undoFails: Bool) -> (code: String?, dns: [String], snapshot: Snapshot?) {
+            var dns = [Self.protectedDNSServer]
+            var snapshot: Snapshot? = previous
+            var code: String?
+            let saved = HelperTarget.processOverride
+            HelperTarget.processOverride = HelperTarget(mode: .secured, generation: 5)
+            defer { HelperTarget.processOverride = saved }
+            do {
+                try reenableSameOwner(
+                    previous,
+                    service: owner,
+                    read: { _ in dns },
+                    write: { _, service, original in
+                        try guardedProtectedDNSWrite(
+                            on: service,
+                            original: original,
+                            write: { servers, _ in
+                                if servers == [protectedDNSServer] {
+                                    // Stalled until the CLI restored DNS,
+                                    // removed the snapshot and persisted the
+                                    // release; then the write lands.
+                                    dns = previous.servers
+                                    snapshot = nil
+                                    HelperTarget.processOverride = HelperTarget(mode: .released, generation: 6)
+                                } else if undoFails {
+                                    throw Stalled.undoRefused
+                                }
+                                dns = servers
+                            },
+                            read: { _ in dns },
+                            keepRecovery: { if snapshot == nil { snapshot = $0 } }
+                        )
+                    },
+                    save: { snapshot = $0 },
+                    archiveSnapshot: {}
+                )
+            } catch let failure as HelperFailure {
+                code = failure.code
+            } catch {}
+            return (code, dns, snapshot)
+        }
+        let undone = run(undoFails: false)
+        let kept = run(undoFails: true)
+        guard undone.code == "OPERATOR_RELEASED", undone.dns == previous.servers, undone.snapshot == nil,
+              kept.code == "OPERATOR_RELEASED", kept.dns == [protectedDNSServer],
+              kept.snapshot?.servers == previous.servers, kept.snapshot?.serviceID == "S1" else {
+            print("DNS pending write after release regression FAILED: \(undone) \(kept)")
+            return false
+        }
+        return true
+    }
+
+    /// #1504 review F2: the 127.0.0.1 write commits in System Configuration
+    /// and then fails to apply (throws), while an operator release lands. The
+    /// throw must not skip the post-check: the original goes back and the
+    /// caller gets the release's refusal. Without a release the write's own
+    /// error comes back and nothing is undone here (enable's catch restores).
+    static func runDNSCommitThenApplyFailureSelfTest() -> Bool {
+        enum ApplyFailed: Error { case injected }
+        let owner = NetworkService(id: "S1", name: "Wi-Fi")
+        let original = ["192.0.2.53"]
+        func run(release: Bool) -> (code: String?, applyFailed: Bool, dns: [String]) {
+            var dns = original
+            var code: String?
+            var applyFailed = false
+            let saved = HelperTarget.processOverride
+            HelperTarget.processOverride = HelperTarget(mode: .secured, generation: 5)
+            defer { HelperTarget.processOverride = saved }
+            do {
+                try guardedProtectedDNSWrite(
+                    on: owner,
+                    original: original,
+                    write: { servers, _ in
+                        dns = servers // committed
+                        guard servers == [protectedDNSServer] else { return }
+                        if release { HelperTarget.processOverride = HelperTarget(mode: .released, generation: 6) }
+                        throw ApplyFailed.injected
+                    },
+                    read: { _ in dns },
+                    keepRecovery: { _ in }
+                )
+            } catch let failure as HelperFailure {
+                code = failure.code
+            } catch ApplyFailed.injected {
+                applyFailed = true
+            } catch {}
+            return (code, applyFailed, dns)
+        }
+        let released = run(release: true)
+        let plain = run(release: false)
+        guard released.code == "OPERATOR_RELEASED", released.dns == original,
+              plain.applyFailed, plain.dns == [protectedDNSServer] else {
+            print("DNS commit-then-apply-failure regression FAILED: \(released) \(plain)")
+            return false
+        }
+        return true
+    }
+
     static func runSelfTests() -> Bool {
         do {
             guard try validateService("Wi-Fi") == "Wi-Fi",
@@ -2193,6 +2444,8 @@ final class ProtectedDNSManager {
                 && runNetworkSetupDeadlineSelfTest()
                 && runStalledLaunchDeadlineSelfTest()
                 && runAbandonedLaunchNeverExecutesSelfTest()
+                && runAbandonedCoreLaunchNeverStartsSelfTest()
+                && runAdmittedInputRelaySelfTest()
         } catch {
             return false
         }

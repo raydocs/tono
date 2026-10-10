@@ -443,7 +443,35 @@ nonisolated enum HelperProtocolVersion {
     ///   `KILLSWITCH_LOCAL_NETWORK_FAULT[_STOP_CORE]`). While that fault is
     ///   held, no failed arm releases, whatever its tunnel, and an
     ///   abandoned prompt-free helper upgrade does not disarm it.
-    static let current = "4.52.49"
+    /// - 4.52.49 → 4.52.50: operator release (R3-O4, decision 084). A
+    ///   persisted target (`secured <n>` / `released <n>`) joins the helper's
+    ///   state: `--emergency-disarm` sets `released` in memory first and
+    ///   persists it within a bounded budget under the target lock, boots the
+    ///   daemon out, releases PF first (Tono's anchor only), then DNS, the AI
+    ///   layer and the rest, reads PF / DNS / AI resolvers / AI routes back
+    ///   (failed read = unknown) and restarts the daemon only once its
+    ///   `released` generation reads back from disk.
+    ///   While released (or unreadable) every arm, Core start/sync, DNS
+    ///   enable, PF supervision, power barrier and owner relaunch is refused;
+    ///   only `/session/connect` (the app's explicit user Connect, a
+    ///   compare-and-swap on the generation from `GET /session`) begins a
+    ///   newer `secured` generation, and arms carry it. AI sinkholes and
+    ///   blackhole routes are removed, never reinstalled, while released.
+    ///   Every wait of the command is bounded (MAC-EMERGENCY-UNBOUNDED-WAITS).
+    ///   Every PF block load reads the target before and after itself (a
+    ///   load that threw included) and is undone under a release; a released
+    ///   daemon also releases a block it reads in Tono's anchor without saved
+    ///   intent; a 127.0.0.1 write's undo restores the originals captured
+    ///   before it; repairing an unreadable target is one atomic rename, and a
+    ///   target missing beside a repair's leftovers refuses; every helper
+    ///   child (launchctl, ditto, open, the Core's launch and config check,
+    ///   the install script) and the update lock are bounded, and every one,
+    ///   the Core included, passes #1542's admission gate (the install
+    ///   script's stdin is relayed after `go`). A failed update executor run
+    ///   keeps the block and protected DNS unless an operator release, the
+    ///   attempt's Disconnect or no saved protection asks otherwise, and
+    ///   counts a daemon stopped only on launchd's "no such service".
+    static let current = "4.52.50"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

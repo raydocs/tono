@@ -18,7 +18,7 @@
 | 项 | 状态 | 说明 |
 |---|---|---|
 | 主窗口、托盘 / 菜单栏里始终可见的「退出并恢复网络」 | later；needs-real-hardware | 现有「退出」只是结束进程。菜单栏「恢复网络」只在保护已经挡住时出现。 |
-| 界面或核心卡住时，进程外仍能恢复 | in-PR (#711)；needs-real-hardware | `main` 已有 macOS `sudo …/tono-core-helper --emergency-disarm` / `--emergency-reset`，以及 Windows 开始菜单「Tono — 恢复网络」。Windows 服务还握着 owner lock 时拒绝 disarm。macOS disarm 不先 bootout 守护进程。#711 让坏账本不再挡住紧急恢复，DNS 恢复失败也放行 PF。#710 写明不做外部看门狗（`MAC-HELPER-HANG-WATCHDOG`）。#691 是 NO-GO，不算覆盖。 |
+| 界面或核心卡住时，进程外仍能恢复 | in-PR (#711)；needs-real-hardware | `main` 已有 macOS `sudo …/tono-core-helper --emergency-disarm` / `--emergency-reset`，以及 Windows 开始菜单「Tono — 恢复网络」。Windows 服务还握着 owner lock 时拒绝 disarm。macOS disarm 先在内存锁存「管理员已放行」并有界持久化，再 bootout 守护进程、放行、逐项回读；之后只有用户 Connect 能重新连接，每一步都有时限（R3-O4，决定 084，#1504）。#711 让坏账本不再挡住紧急恢复，DNS 恢复失败也放行 PF。#710 写明不做外部看门狗（`MAC-HELPER-HANG-WATCHDOG`）。#691 是 NO-GO，不算覆盖。 |
 | 全局快捷键 | later；needs-real-hardware | 没有 PR 注册恢复用的全局热键。 |
 | `tono --restore-network` | later | 现有旗是 `--emergency-disarm` / `--emergency-reset`，不是这个命令。 |
 | 桌面快捷方式 | later；needs-real-hardware | 开始菜单快捷方式已在 `main` 的 Windows 安装器里（`done` 只指这段源码）。桌面图标还没有。 |

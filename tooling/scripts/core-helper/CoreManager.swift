@@ -71,23 +71,25 @@ final class CoreManager {
     /// user-writable input. Do not expose raw parser output containing secrets.
     private func checkConfiguration() throws {
         _ = try secureMetadata(mihomoPath, type: mode_t(S_IFREG), owner: 0)
-        let checker = Process()
-        checker.executableURL = URL(fileURLWithPath: mihomoPath)
-        checker.arguments = ["check", "-D", runtimeDirectory, "-c", runtimeConfigPath]
-        checker.currentDirectoryURL = URL(fileURLWithPath: runtimeDirectory)
-        checker.environment = ["HOME": runtimeDirectory, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
-        checker.standardOutput = FileHandle.nullDevice
-        checker.standardError = FileHandle.nullDevice
-        try checker.run()
-        for _ in 0..<100 where checker.isRunning { usleep(50_000) }
-        if checker.isRunning {
-            checker.terminate()
-            for _ in 0..<10 where checker.isRunning { usleep(50_000) }
-            if checker.isRunning { kill(checker.processIdentifier, SIGKILL) }
-            checker.waitUntilExit()
+        // The helper's bounded runner: launch and run end by the deadline, and
+        // a checker that ignores SIGKILL's reaping is abandoned rather than
+        // waited on (its old `waitUntilExit` after the kill had no bound).
+        // The output is read and dropped, never exposed.
+        var launched = false
+        let result: HelperCommandResult
+        do {
+            result = try KillSwitchManager.run(
+                mihomoPath, ["check", "-D", runtimeDirectory, "-c", runtimeConfigPath],
+                deadline: HelperChildDeadline.coreConfigCheck,
+                environment: ["HOME": runtimeDirectory, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"],
+                currentDirectory: runtimeDirectory,
+                started: { _ in launched = true }
+            )
+        } catch {
+            guard launched else { throw error }
             throw HelperFailure.coded(code: "CORE_CONFIG_TIMEOUT", message: "sing-box check timed out.")
         }
-        guard checker.terminationStatus == 0 else {
+        guard result.status == 0 else {
             throw HelperFailure.coded(code: "CORE_CONFIG_REJECTED", message: "sing-box rejected the runtime configuration.")
         }
     }
@@ -130,8 +132,6 @@ final class CoreManager {
         // Recheck the root-owned binary at launch, including after a sync stop.
         _ = try secureMetadata(mihomoPath, type: mode_t(S_IFREG), owner: 0)
         let child = Process()
-        child.executableURL = URL(fileURLWithPath: mihomoPath)
-        child.arguments = ["run", "-D", runtimeDirectory, "-c", configPath]
         child.currentDirectoryURL = URL(fileURLWithPath: runtimeDirectory, isDirectory: true)
         child.environment = [
             // Never give a root process a user-writable HOME. Mihomo receives
@@ -148,7 +148,17 @@ final class CoreManager {
                     "The system is entering sleep; network protection remains fail-closed."
                 )
             }
-            try child.run()
+            // Bounded and admitted like every helper child (#1504 review
+            // R5-F1): a launch still pending at the deadline fails the start,
+            // and its late child gets end-of-file at the admission gate, so
+            // an abandoned Core never starts; it is terminated as well.
+            try KillSwitchManager.launchAdmitted(
+                child,
+                executable: mihomoPath,
+                arguments: ["run", "-D", runtimeDirectory, "-c", configPath],
+                until: .now() + HelperChildDeadline.coreLaunch,
+                deadline: HelperChildDeadline.coreLaunch
+            )
         } catch {
             stopDiagnosticCapture()
             throw error

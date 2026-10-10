@@ -56,6 +56,9 @@ nonisolated struct HelperManager {
         /// instead of written back. A helper without service-ID snapshots
         /// never sends it.
         let originalDNSRestored: Bool?
+        /// `/session/connect` only: the session an explicit user Connect began
+        /// (decision 084). Absent before helper 4.52.50.
+        let sessionGeneration: UInt64?
         /// `/killswitch/status` only (decision 086): whether the saved arm
         /// carries a tunnel. Absent before helper 4.52.45 or without saved
         /// state.
@@ -983,6 +986,40 @@ nonisolated struct HelperManager {
 
     // MARK: - Kill Switch
 
+    /// The helper session the last explicit user Connect began (decision 084).
+    /// Every arm carries it, so the helper refuses an arm of an older session
+    /// and, after `--emergency-disarm`, every arm until the next user Connect
+    /// begins a newer one. In memory only: a relaunched app arms without it,
+    /// which the helper allows unless an operator release holds.
+    nonisolated(unsafe) static var connectSessionGeneration: UInt64?
+
+    /// `GET /session`, then `/session/connect` with the generation it read:
+    /// the helper refuses (`SESSION_SUPERSEDED`) when anything, an operator
+    /// release above all, changed the target in between. Only `AppState`'s
+    /// explicit user Connect calls this; automatic reconnects, heals and wake
+    /// re-arms never do.
+    @discardableResult
+    static func beginConnectSession() throws -> UInt64 {
+        let status = try requireSuccess(try sendRequest(method: "GET", path: "/session"), operation: "session status")
+        guard let current = status.sessionGeneration else { throw HelperIPCError.invalidResponse }
+        let result = try sendJSONObject(
+            method: "POST",
+            path: "/session/connect",
+            object: ["expectedGeneration": NSNumber(value: current)]
+        )
+        let envelope = try requireSuccess(result, operation: "session")
+        guard let generation = envelope.sessionGeneration else { throw HelperIPCError.invalidResponse }
+        connectSessionGeneration = generation
+        return generation
+    }
+
+    /// Helper refusal codes that only a new explicit user Connect resolves:
+    /// automatic loops stop on them (decision 084).
+    static let operatorReleaseCodes: Set<String> = [
+        "OPERATOR_RELEASED", "TARGET_STATE_UNREADABLE", "SESSION_SUPERSEDED",
+        "TARGET_STATE_UNWRITABLE", "TARGET_STATE_BUSY",
+    ]
+
     /// The arm request's "Allow local network devices" field, present only
     /// when the setting is on. A helper before this field rejects any arm
     /// that carries it, so off (the default) sends nothing; a helper that
@@ -1038,6 +1075,9 @@ nonisolated struct HelperManager {
         object["allowSystemResolution"] = allowSystemResolution
         if !bootstrapPins.isEmpty {
             object["bootstrapPins"] = bootstrapPins
+        }
+        if let connectSessionGeneration {
+            object["sessionGeneration"] = NSNumber(value: connectSessionGeneration)
         }
         let result = try sendJSONObject(
             method: "POST",

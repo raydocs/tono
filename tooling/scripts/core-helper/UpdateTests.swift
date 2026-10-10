@@ -344,10 +344,15 @@ func runUpdateSelfTests() -> Bool {
         let path = directory + "/process"
         try FileManager.default.copyItem(atPath: "/bin/sleep", toPath: path)
         let child = Process()
-        child.executableURL = URL(fileURLWithPath: path)
-        child.arguments = ["20"]
-        try child.run()
-        defer { if child.isRunning { child.terminate() }; child.waitUntilExit() }
+        try KillSwitchManager.launchAdmitted(
+            child, executable: path, arguments: ["20"],
+            until: .now() + HelperChildDeadline.selfTestProbe, deadline: HelperChildDeadline.selfTestProbe
+        )
+        defer {
+            if child.isRunning { child.terminate() }
+            for _ in 0..<20 where child.isRunning { usleep(50_000) }
+            if child.isRunning { kill(child.processIdentifier, SIGKILL) }
+        }
         func identities() throws -> (SecCode, SecStaticCode) {
             var dynamic: SecCode?
             var installed: SecStaticCode?
@@ -791,6 +796,52 @@ func runUpdateSelfTests() -> Bool {
         try check(!ProtectedDNSManager.isStoppedTonoResolver(["127.0.0.1", "1.1.1.1"]),
                   "A mixed resolver list counted as Tono's")
         try check(ProtectedDNSManager.isStoppedTonoResolver(["127.0.0.1"]), "Tono's resolver list was not refused")
+    }
+    // #1504 review R5-F3: a protected update whose successor launch (or the
+    // daemon's bootstrap) runs out of time used to reach a catch that
+    // released the installed block and restored DNS unconditionally. Here the
+    // real bounded runner times out on a child that ignores SIGTERM; with no
+    // operator release, no Disconnect and protection saved, nothing releases.
+    test("protected-update-successor-timeout-keeps-block-and-dns") { _ in
+        var released = 0
+        var started = 0
+        var recovery = UpdateExecutor.FailureRecovery()
+        recovery.target = { .recorded(HelperTarget(mode: .secured, generation: 3)) }
+        recovery.disconnectRequested = { false }
+        recovery.protectionSaved = { true }
+        recovery.release = { released += 1 }
+        recovery.markBlocked = { false }
+        recovery.startDaemon = { started += 1 }
+        let outcome = UpdateExecutor.settle(recovery) {
+            try UpdatePackage.run("/bin/sh", ["-c", "trap '' TERM; exec /bin/sleep 30"], deadline: 0.5)
+            return true
+        }
+        try check(!outcome && released == 0 && started == 0,
+                  "A timed-out successor launch released a protected update's block or DNS")
+        try check(!UpdateExecutor.failureMayRelease(target: .unreadable("test"), disconnectRequested: nil,
+                                                    protectionSaved: nil),
+                  "An unknown reading released the network")
+        try check(UpdateExecutor.failureMayRelease(target: .recorded(HelperTarget(mode: .released, generation: 4)),
+                                                   disconnectRequested: false, protectionSaved: true),
+                  "An operator release did not release a failed update")
+    }
+    // #1504 review R5-F4: stopping the daemon before replacement counted any
+    // failed `launchctl print`, a timeout included, as "already absent". Both
+    // calls run out of time here: no answer, so the stop (and with it the
+    // replacement behind it) is refused. Only exit 113 is absent.
+    test("update-stop-without-launchctl-answer-refuses-replacement") { _ in
+        let hung = ["-c", "trap '' TERM; exec /bin/sleep 30"]
+        try refuses {
+            try UpdateExecutor.bootout(UpdateExecutor.daemonLabel) { _ in
+                try UpdatePackage.status("/bin/sh", hung, deadline: 0.3)
+            }
+        }
+        try refuses {
+            try UpdateExecutor.bootout(UpdateExecutor.daemonLabel) { $0[0] == "bootout" ? 3 : 1 }
+        }
+        try UpdateExecutor.bootout(UpdateExecutor.daemonLabel) {
+            $0[0] == "bootout" ? 3 : OperatorDaemonStop.launchctlNoSuchService
+        }
     }
     print("Update production-bound tests: \(16 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
     return failures.isEmpty

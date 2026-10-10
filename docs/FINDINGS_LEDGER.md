@@ -131,7 +131,7 @@
 | R3-O1 | Windows 恢复证明通过后删快照失败即拒绝拆 WFP，重试同样失败（ACL/AV 锁文件） | fixed(cc45bf4f) | [#769](https://github.com/raydocs/tono/pull/769)（[#827](https://github.com/raydocs/tono/pull/827) 已关闭不合） | 低·推导 | 与 WIN-DNS-SNAPSHOT-DELETE-BLOCKS 同根因，由 #769（`fe91aa87`）修：恢复已证明后删快照失败按成功收尾并记 `TONO_DNS_RESTORE_DEGRADED` 告警，不再拒拆 WFP；剩余限制见该分片；待实机（2026-10-10 A15 核对） |
 | R3-O2 | Windows 外层超时丢弃 restore future 时自写窗口提前关闭，自写通知被当外部变化 | fixed(f80951fb) | [#841](https://github.com/raydocs/tono/pull/841) | 低·推导 | 注册表写入在阻塞线程上另持一把自写窗口，直到写入返回；60 秒年龄上限仍会重新发布。异步调用方自己的 guard 超时仍会放下 |
 | R3-O3 | 无快照时把静态 DNS 改为 DHCP 的孤儿修复 | accepted-design | — | 低 | 有意取舍 |
-| R3-O4 | macOS `--emergency-disarm` 不先 bootout daemon，与在线 daemon 双写 | open | 待开 | 低·推导 | 观察项；操作员手动路径 |
+| R3-O4 | macOS `--emergency-disarm` 不先 bootout daemon，与在线 daemon 双写 | in-PR | [#1504](https://github.com/raydocs/tono/pull/1504) | 低·推导 | helper 4.52.50（决定 084，所有者批准的设计）：先在内存锁存 `released`（持久化有界），有界 bootout 后放行，逐项回读（失败为 unknown），`released` 落盘后才重启守护进程，它拒绝一切 arm 但继续清理；只有 App 的用户 Connect（`/session/connect`）开始新代数。第五轮：每次 PF 加载在一个门内前后读目标（含抛错的部分提交），DNS 撤销用写入前捕获的原值，修复读不出的目标不再让它缺失，App 重启请求在 spawn 后再查。第六轮：修复读不出的目标改为一次原子改名，修复残留旁的缺失按读不出拒绝；更新执行器失败只在明确放行意图下放行（决定 092），停守护进程只认「无此服务」。合入后改 fixed(<SHA>)；未实机 |
 | R3-O5 | macOS 按名字取第一个网络服务，多 Network Location 同名时可能写错服务 | fixed(2453dec5) | [#1473](https://github.com/raydocs/tono/pull/1473) | 低·实机 | helper 4.52.44：`/dns/enable` 只在当前 Location 里按名字找，主服务 ID 优先，仍有歧义则拒绝；之后按 ID 读写。#1473 合 main `2453dec5`；待实机（多个同名 Location 的 Mac 上 enable/restore 证据）；磁盘上有旧版仅名字快照时 enable 仍走旧的首个同名匹配（与 main 相同），该设备要等一次正常断开退休旧快照后才生效 |
 | R3-O6 | Windows 卸载器在 owner lock 不可得且无 pid 文件时仍 disarm，可能与存活 Service 并发写 DNS | open | 待开 | 低·推导 | 观察项 |
 | R3-O7 | 无快照守卫只认 TUN 地址，旧版遗留 127.0.0.1 被当作用户本地解析器 | accepted-design | — | 低 | 有意取舍，源码有注释 |

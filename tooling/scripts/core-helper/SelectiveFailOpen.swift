@@ -359,10 +359,16 @@ enum SelectiveFailOpenInstaller {
 
     static func applyBestEffort() {
         guard SelectiveFailOpen.followUp(.crashOrHang) == .apply else { return }
-        writeResolvers()
+        // An operator release is a full release: the AI hold is never
+        // (re)installed while it holds, and one that lands between any two
+        // entries removes what was installed (decision 084). The update
+        // executor's recovery comes through here too.
+        let allowed = { HelperTarget.automaticRearmAllowed(HelperTarget.read()) }
+        var steps: [() -> Void] = [{ writeResolvers(allowed: allowed) }]
         for args in SelectiveFailOpen.routeAddArguments() {
-            runRoute(args, logFailure: true)
+            steps.append { _ = runRoute(args, logFailure: true) }
         }
+        HelperTarget.stepsUnlessReleased(steps, allowed: allowed, undo: { removeBestEffort() })
     }
 
     /// False when a route delete did not finish or a resolver could not be
@@ -453,7 +459,8 @@ enum SelectiveFailOpenInstaller {
     /// survives helper death and repeated apply never snapshots our sinkhole.
     static func writeResolvers(
         directory: String = "/etc/resolver",
-        originalsDirectory: String = originalsPath
+        originalsDirectory: String = originalsPath,
+        allowed: () -> Bool = { true }
     ) {
         do {
             var metadata = stat()
@@ -475,6 +482,8 @@ enum SelectiveFailOpenInstaller {
         let body = Data(SelectiveFailOpen.resolverBody().utf8)
         for suffix in SelectiveFailOpen.suffixes {
             guard SelectiveFailOpen.resolverPath(for: suffix) != nil else { continue }
+            // Each sinkhole file is its own effect (decision 084).
+            guard allowed() else { return }
             let path = directory + "/" + suffix
             let receipt = originalsDirectory + "/" + suffix
             do {

@@ -423,7 +423,7 @@ final class UpdateTransaction {
         let ledger = try storage.load()
         guard let attempt = ledger.attempt, attempt.receipt.phase != .committed else { return }
         if path == "/core/stop" || path == "/dns/restore" { return } // Tightening/cleanup only.
-        if ["/core/start", "/core/sync", "/killswitch/arm", "/dns/enable"].contains(path) {
+        if ["/core/start", "/core/sync", "/killswitch/arm", "/dns/enable", "/session/connect"].contains(path) {
             _ = try bound(ledger, peer: peer, initiating: false)
             guard attempt.receipt.requiredRecovery == .connected else { throw HelperFailure.invalid("Update does not authorize reconnect.") }
             return
