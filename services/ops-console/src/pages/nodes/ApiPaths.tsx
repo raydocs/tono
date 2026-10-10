@@ -45,9 +45,10 @@ function PathTable({ rows }: { rows: readonly ApiPathRowDto[] }) {
       <tbody>
         {rows.map((row) => (
           <tr key={`${row.asn ?? 0}:${row.path}`}>
-            <td className="whitespace-nowrap">
-              {row.asn === null ? words.unknownAsn : words.asn(row.asn)}
-              {row.asOrg ? <span className="ml-2 text-micro text-[var(--muted-foreground)]">{row.asOrg}</span> : null}
+            {/* The organisation wraps under the number so a long name cannot push a phone sideways. */}
+            <td className="break-words">
+              <span className="whitespace-nowrap">{row.asn === null ? words.unknownAsn : words.asn(row.asn)}</span>
+              {row.asOrg ? <span className="block text-micro text-[var(--muted-foreground)]">{row.asOrg}</span> : null}
             </td>
             <td className="whitespace-nowrap">{words.paths[row.path]}</td>
             <td className="num">{formatCount(row.arrived)}</td>
