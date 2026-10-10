@@ -15,6 +15,10 @@ it('lists each API relay with its tone, latency and check age from the committed
   expect(text).toContain(`Los Angeles · Westwood${copy.apiRelays.up}${formatLatency(142)}`);
   expect(text).toContain(`Los Angeles · Mesa${copy.apiRelays.down}`);
   expect(text).toContain(copy.apiRelays.checked(copy.ago.minutes(2)));
+  expect(text).toContain(copy.apiRelays.tcpColumn);
+  expect(text).toContain(`${copy.apiRelays.e2eUp}${formatLatency(418)}${copy.apiRelays.reported(copy.ago.minutes(3))}`);
+  expect(text).toContain(`${copy.apiRelays.e2eDown}${copy.apiRelays.reported(copy.ago.minutes(4))}`);
   expect(host.querySelector('.tone-ok')).not.toBeNull();
   expect(host.querySelector('.tone-sev')?.getAttribute('title')).toBe('tcp connect: timed out after 5000 ms');
+  expect(host.querySelectorAll('.tone-sev')[1]?.getAttribute('title')).toBe('connect: refused');
 });
