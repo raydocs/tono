@@ -33,6 +33,6 @@
 - Third relay: `38.14.195.144:2053` (PR #1538) was not merged when this was applied, so it is not in the list. When
   #1538 merges, add it to `tono_service_protocol::API_RELAYS` (one list; the app picks it up) and to the literal in
   `bootstrap_channel_adds_exactly_the_tono_relays_for_the_tono_app_over_tcp`, and bump `FILTER_NAMESPACE`.
-- Applied in: PR amp/w-a-wfp-relay-permit (filter namespace v14, `…9e0d…`); changelog
+- Applied in: PR [#1539](https://github.com/raydocs/tono/pull/1539) (`amp/w-a-wfp-relay-permit`, filter namespace v14, `…9e0d…`); changelog
   [2026-10-10-win-wfp-relay-permit.md](../changelog.d/2026-10-10-win-wfp-relay-permit.md); finding H1-F5
   (FINDINGS_LEDGER Windows note); runbook [docs/ops/api-relay.md](../ops/api-relay.md).

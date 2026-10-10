@@ -2,7 +2,7 @@
 - 归属：ops 计划 [plan-2026-09-11](../ops/plan-2026-09-11.md)，Amp 待办 2026-10-10（所有者决定 W-A，2026-10-10 直接批准
   「按你说的改」）；Windows Service WFP 规则 C `apps/windows/service/src/core/wfp_model.rs`、共享常量
   `apps/windows/service/src/lib.rs`、Windows 客户端 `apps/windows/app/src-tauri/src/tono/bootstrap.rs`。
-- 来源：基线 f549a28e（main）→ 分支 `amp/w-a-wfp-relay-permit`；PR 待记；未合 main。
+- 来源：基线 f549a28e（main）→ 分支 `amp/w-a-wfp-relay-permit`；PR [#1539](https://github.com/raydocs/tono/pull/1539)；未合 main。
 - 缺陷修复：原失败：保护 armed 而无隧道时（Bootstrap、Blocked / 断网保护、严格模式保持关闭），WFP 规则 C 只放行
   Cloudflare 地址，中继 `IP:2053` 被 Tono 自己的防火墙挡住；对到 Cloudflare 线路不通的客户（决定 077 的场景），这段
   时间登录、续期、取目录都不可能。改后：规则 C 在原有 Cloudflare 条目之外，为每个编译中继渲染一条放行：
