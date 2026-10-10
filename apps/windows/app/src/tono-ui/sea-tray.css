@@ -3,11 +3,20 @@
   height: 100%;
   padding: 16px;
   box-sizing: border-box;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
   color: var(--sea-text);
   background:
     radial-gradient(110% 100% at 85% 130%, #646ac435, transparent 65%),
     linear-gradient(#0d0b14, #171321);
+}
+.sea-tray-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
 }
 .sea-tray[data-ground="warm"] {
   /* The tray scopes its own tokens, so the warm accent is set here too. */
@@ -28,7 +37,7 @@
   margin: 0 28px 4px 0;
   line-height: 1.25;
 }
-.sea-tray > p {
+.sea-tray-content > p {
   margin: 0 0 8px;
   font-size: 12px;
   line-height: 1.45;
@@ -59,7 +68,7 @@
   background: radial-gradient(circle at 50% 35%, #ffb08a, #e85a44);
   box-shadow: 0 0 10px #e85a4455;
 }
-.sea-tray > .sea-button[data-variant="text"] {
+.sea-tray-content > .sea-button[data-variant="text"] {
   display: block;
   min-height: 28px;
   padding: 4px 8px;
@@ -105,12 +114,13 @@
 }
 .sea-tray footer {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   margin-top: 8px;
 }
-.sea-tray footer button {
+.sea-tray footer > button {
   background: none;
   border: 0;
   font: inherit;
@@ -126,8 +136,21 @@
 .sea-tray-all {
   order: 1;
 }
-.sea-tray footer button:last-child {
+.sea-tray footer > button:last-child {
   order: 2;
+}
+
+.sea-tray-picker {
+  position: absolute;
+  inset: 16px 16px 52px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  padding: 8px;
+  border: 1px solid var(--sea-divider);
+  border-radius: 12px;
+  background: var(--tono-surface-dialog);
+  box-shadow: 0 8px 24px #0006;
 }
 
 .sea-tray-choices {

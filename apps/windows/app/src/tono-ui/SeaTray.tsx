@@ -62,49 +62,51 @@ export const SeaTray = ({
       aria-label="Tono"
       data-ground={tone}
     >
-      <span className="sea-tray-mark" data-phase={phase} aria-hidden="true" />
-      <h1>{title}</h1>
-      <p title={subtitle}>{subtitle}</p>
-      {info && (
-        <div className="sea-tray-info">
-          {traffic}
-          {ai && (
-            <span title={t('tono.dashboard.claudeHomeActive')}>
-              {' '}
-              · Claude AI
-            </span>
-          )}
-        </div>
-      )}
-      <button
-        type="button"
-        className="sea-button sea-tray-action"
-        data-variant={quiet ? 'quiet' : 'primary'}
-        disabled={busy}
-        onClick={onAction}
-      >
-        {action}
-      </button>
-      <fieldset className="sea-tray-choices">
-        <legend className="tono-sr-only">{t('tono.tray.pickNode')}</legend>
-        {quick.slice(0, picks).map((server) => (
-          <button
-            type="button"
-            className="sea-tray-quick"
-            key={server.name}
-            onClick={() => onSelect(server.name)}
-          >
-            {nodeCityLabel(server.name, t)}
-            <span aria-hidden="true">→</span>
-          </button>
-        ))}
-      </fieldset>
-      {error && (
-        <p className="sea-tray-error" role="alert">
-          {error}
-        </p>
-      )}
-      {backup}
+      <div className="sea-tray-content">
+        <span className="sea-tray-mark" data-phase={phase} aria-hidden="true" />
+        <h1>{title}</h1>
+        <p title={subtitle}>{subtitle}</p>
+        {info && (
+          <div className="sea-tray-info">
+            {traffic}
+            {ai && (
+              <span title={t('tono.dashboard.claudeHomeActive')}>
+                {' '}
+                · Claude AI
+              </span>
+            )}
+          </div>
+        )}
+        <button
+          type="button"
+          className="sea-button sea-tray-action"
+          data-variant={quiet ? 'quiet' : 'primary'}
+          disabled={busy}
+          onClick={onAction}
+        >
+          {action}
+        </button>
+        <fieldset className="sea-tray-choices">
+          <legend className="tono-sr-only">{t('tono.tray.pickNode')}</legend>
+          {quick.slice(0, picks).map((server) => (
+            <button
+              type="button"
+              className="sea-tray-quick"
+              key={server.name}
+              onClick={() => onSelect(server.name)}
+            >
+              {nodeCityLabel(server.name, t)}
+              <span aria-hidden="true">→</span>
+            </button>
+          ))}
+        </fieldset>
+        {error && (
+          <p className="sea-tray-error" role="alert">
+            {error}
+          </p>
+        )}
+        {backup}
+      </div>
       <footer>
         <div className="sea-tray-all">{picker}</div>
         <button type="button" onClick={onOpen}>

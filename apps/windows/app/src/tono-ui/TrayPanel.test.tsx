@@ -452,6 +452,23 @@ it('new-look connected tray trades one quick pick for the live-rate line, so the
   expect(within(group).getAllByRole('button')).toHaveLength(1)
 })
 
+it('new-look server picker closes on Escape and restores keyboard focus without changing the route', async () => {
+  setNewAppearance(true)
+  render(<TrayPanel />, { wrapper: freshSWR })
+  const summary = screen.getByText('Switch server', { selector: 'summary' })
+  const details = summary.closest('details')
+  if (!details) throw new Error('missing server picker')
+  details.open = true
+  const route = await within(details).findByRole('button', { name: 'Tokyo' })
+  route.focus()
+  fireEvent.keyDown(route, { key: 'Escape' })
+  expect(details.open).toBe(false)
+  expect(document.activeElement).toBe(summary)
+  expect(mocks.tonoSelectServer).not.toHaveBeenCalled()
+  expect(mocks.tonoConnect).not.toHaveBeenCalled()
+  expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
+})
+
 it('new-look connecting action cancels through the existing Disconnect command once', async () => {
   setNewAppearance(true)
   // No barrier is held here; with one held the flyout offers no cancel (next test).
