@@ -1,6 +1,6 @@
 ## 2026-10-10 · Windows 控制面路径链：系统 DNS 一步限 10 s，中继进得了启动恢复预算
 - 归属：ops 计划（[plan-2026-09-11](../ops/plan-2026-09-11.md)），中国大陆连通性审计（Windows）；`apps/windows/app/src-tauri/src/tono/transport.rs`。
-- 来源：基线 origin/main 3d973f95；分支 `amp/win-cn-relay-walk-budget`；未合 main。
+- 来源：基线 origin/main 3d973f95；分支 `amp/win-cn-relay-walk-budget`，PR [#1518](https://github.com/raydocs/tono/pull/1518)；未合 main。
 - 缺陷修复（[WIN-RESTORE-RELAY-UNREACHED](../findings.d/WIN-RESTORE-RELAY-UNREACHED.md)）：固定 IP 丢包时，路径链的系统 DNS 一步仍用 30 s 连接预算；
   DNS 被污染到丢包地址或解析没有应答时，第一个中继 40 s 后才开始，30 s 的启动恢复预算在这一步就到期，恢复从不尝试中继。
   改为系统 DNS 一步与固定 IP 同用 10 s 连接预算（reqwest 的连接预算含解析、TCP、TLS 握手），无论它在固定 IP 之前（#583 偏好）还是之后；
