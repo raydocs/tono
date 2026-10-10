@@ -743,6 +743,47 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertFalse(message.contains(host), "no host name in the copy")
     }
 
+    /// Simulated Protected Offline with both relays down: while the gate's
+    /// fail-closed barrier holds (PF lets only the fixed addresses through),
+    /// a sign-in no route answered says that signing in on this network
+    /// needs protection off, and what that means. The failed sign-in itself
+    /// never releases protection.
+    func testAnUnreachableSignInWhileProtectionHoldsSaysSigningInNeedsProtectionOff() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        defer { AppProfile.defaults.removeObject(forKey: TonoAPIClient.preferredPathKey(forHost: host)) }
+        HeldAccountProtocol.install(host) { request in
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        let keychain = testKeychain(host)
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: keychain, session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in throw URLError(.cannotConnectToHost) },
+            relayPath: ControlPlanePath(label: "relay") { _, _ in throw URLError(.cannotConnectToHost) }
+        )
+        let disarms = PathCallCounter()
+        let account = AccountSession(
+            api: api, keychain: keychain, sidecar: TonoSidecarService(),
+            descriptorConsumer: { _ in },
+            killSwitchDisarmConsumer: { disarms.record() },
+            gateProtectionHoldsConsumer: { true }
+        )
+        account.state = .signedOut
+
+        await account.requestEmailCode(email: "protected@example.test", deviceName: "Test Mac")
+
+        guard case let .error(message) = account.state else {
+            return XCTFail("expected the sign-in error, got: \(account.state)")
+        }
+        XCTAssertTrue(message.contains(ControlPlaneUnreachable.protectedHint), message)
+        XCTAssertTrue(message.contains(ControlPlaneUnreachable.routeName("relay")), message)
+        XCTAssertEqual(disarms.count, 0, "a failed sign-in never turns protection off")
+    }
+
     /// #588: a server certificate this Mac's clock cannot date names the
     /// clock. NTP is blocked while protection is on, so the generic
     /// "could not reach Tono" leaves the user nothing to fix.

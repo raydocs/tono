@@ -47,8 +47,20 @@ nonisolated struct ControlPlaneUnreachable: Equatable, Sendable {
 
     /// What the sign-in screen and the account error say: where it failed
     /// first, then each route as tried, then what to do.
-    var userMessage: String {
-        [headline, triedSentence, hint].joined(separator: " ")
+    var userMessage: String { message(protectionHolds: false) }
+
+    /// `userMessage`, or, while a fail-closed barrier without a tunnel holds
+    /// this Mac (the account gate offers Restore internet), the same failure
+    /// with what that barrier means for signing in: PF lets only Tono's
+    /// fixed addresses through, so the relays and every other route are
+    /// blocked, and signing in on this network needs protection off. Tono
+    /// never turns it off by itself; the user chooses Restore internet.
+    func message(protectionHolds: Bool) -> String {
+        [headline, triedSentence, protectionHolds ? Self.protectedHint : hint].joined(separator: " ")
+    }
+
+    static var protectedHint: String {
+        String(localized: "Protection is on and lets only Tono's fixed addresses through, so Tono's relays and every other route are blocked on this Mac. To sign in on this network, turn protection off with Restore internet: this Mac then uses its normal internet, unprotected, until you connect again. Tono does not turn protection off by itself.")
     }
 
     var headline: String {

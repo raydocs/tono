@@ -119,6 +119,10 @@ final class AccountSession {
     let claudeTrafficResearchConsumer:
         @MainActor () async -> TonoClaudeTrafficResearchSnapshot
     let protectionBlockedConsumer: @MainActor () -> Bool
+    /// Whether a fail-closed barrier without a tunnel may hold this Mac, so
+    /// the account gate offers Restore internet and PF blocks Tono's relays.
+    /// Read only to word an unreachable control plane; never to release.
+    let gateProtectionHoldsConsumer: @MainActor () -> Bool
     /// Whether automatic reconnects are paused until the user acts (a denied
     /// administrator prompt, a failed helper install). No account path may
     /// lift that pause by requesting a resume on its own.
@@ -354,7 +358,8 @@ final class AccountSession {
              AppTrafficLedger.RouteSplit()
          },
          installedCatalogConsumer: @escaping @MainActor () -> InstalledCatalogDigests? = { nil },
-         protectionUnconfirmedConsumer: @escaping @MainActor () -> Bool = { false }) {
+         protectionUnconfirmedConsumer: @escaping @MainActor () -> Bool = { false },
+         gateProtectionHoldsConsumer: @escaping @MainActor () -> Bool = { false }) {
         // Apply the one-shot default-off migration before Settings can present
         // or change the AppStorage value. A later user opt-in then sees the v2
         // marker and is never reset on a subsequent callback or launch.
@@ -384,6 +389,7 @@ final class AccountSession {
         self.routeSplitConsumer = routeSplitConsumer
         self.installedCatalogConsumer = installedCatalogConsumer
         self.protectionUnconfirmedConsumer = protectionUnconfirmedConsumer
+        self.gateProtectionHoldsConsumer = gateProtectionHoldsConsumer
         installConnectFailureReporting()
         installSessionVerdictSink()
     }
