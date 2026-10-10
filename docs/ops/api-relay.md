@@ -167,7 +167,9 @@ Updater: Windows (`commands/update.rs` `get_with_relays`) sends a discovery, sig
 package GET through the relays when the direct GET got no response. macOS does the same:
 `NativeUpdateDownload.bounded` for the manifest and signature GETs (backlog A2), and
 `NativeUpdateDownload.package(at:size:)` for the package, streamed to disk under the signed
-size with the direct download's 60 s idle and 900 s total budgets (A2 follow-up). Any status
+size with the direct download's 60 s idle and 900 s total budgets (A2 follow-up); once the
+signed size is on disk, the 2 s wait for the connection's end decides and the total budget no
+longer fails it (#1516 review M3). Any status
 line is the answer and is not sent again on another path.
 
 ## Rollback
