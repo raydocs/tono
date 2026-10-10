@@ -26,6 +26,7 @@ macOS SwiftUI          Windows Tauri           Ubuntu desktop (Tauri)
 | `services/control-plane/` | Cloudflare Worker, D1, ops console. Entry is `src/index.ts`; extracted so far: `crypto`, `oidc`, `access`, `ops-timeseries`, `ops-usage-hours`, `errors`, `http`, `catalog-yaml`, `scheduled` (the five-minute cron), … |
 | `services/exit-agent/` | VPS Xray roster + metering |
 | `services/home-agent/` | Tailscale home-exit reporter |
+| `services/node-agent/` | Node self-registration heartbeat (IP, roles, version) |
 | `ops-panel/` | SSH quality collector |
 | `tooling/scripts/` | Provision, release, helper build, tests |
 

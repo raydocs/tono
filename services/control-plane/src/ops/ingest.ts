@@ -7,6 +7,7 @@ import { ApiError } from '../errors';
 import { privileged } from '../auth';
 import { body, rejectUnexpectedKeys } from '../request';
 import { completeJob, heartbeatJob, leaseJobs } from './jobs';
+import { nodeAgentRoutes } from './node-agent';
 
 function requireCollector(req: Request, e: Env): Promise<void> {
   if (typeof e.OPS_COLLECTOR_TOKEN !== 'string' || e.OPS_COLLECTOR_TOKEN.length < 32) {
@@ -68,5 +69,6 @@ export async function opsIngestRoutes(
     return Response.json({ job });
   }
 
-  return null;
+  // Node self-registration (A20) has its own per-node token, not the collector's.
+  return nodeAgentRoutes(req, e, p, m);
 }

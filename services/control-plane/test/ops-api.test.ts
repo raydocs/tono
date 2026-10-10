@@ -1390,6 +1390,9 @@ describe('ops v1 api', () => {
       'GET /api/v1/ops/slo',
       'GET /api/v1/ops/api-relays',
       'GET /api/v1/ops/api-paths',
+      'GET /api/v1/ops/node-agents',
+      'POST /api/v1/ops/nodes/{name}/agent-token',
+      'DELETE /api/v1/ops/nodes/{name}/agent-token',
     ];
     expect([...OPS_V1_ROUTES].sort()).toEqual([...tested].sort());
   });
