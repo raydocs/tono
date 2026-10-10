@@ -407,7 +407,11 @@ nonisolated enum HelperProtocolVersion {
     ///   among the current Network Location's services, preferring the
     ///   primary service ID; an ambiguous name refuses (R3-O5). While a
     ///   legacy name-only snapshot is on disk, enable keeps the old lookup.
-    static let current = "4.52.44"
+    /// - 4.52.44 → 4.52.45: the idle loop's 10 s protection check runs on the
+    ///   monotonic clock, so a wall clock set back no longer holds the
+    ///   core-down release, the orphaned-session releases and PF supervision
+    ///   for the length of the step (MAC-HELPER-WATCHDOG-WALLCLOCK).
+    static let current = "4.52.45"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
