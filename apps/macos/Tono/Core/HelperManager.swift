@@ -440,15 +440,49 @@ nonisolated struct HelperManager {
         }
     }
 
-    /// How an abandoned upgrade releases, injectable for the same test.
+    /// How an abandoned upgrade releases, injectable for the same test. It
+    /// is an automatic release of its own, not the user's Disconnect path.
     struct AbandonedUpgradeRelease {
-        var disarm: () throws -> Void = { try KillSwitchService.disarm() }
+        /// The helper's own word on the A29 protected fault, read right before
+        /// any release: true held, false not held (or a helper older than the
+        /// fault), nil when the status cannot be read, which counts as
+        /// possibly held.
+        var helperReportsFault: () -> Bool? = { HelperManager.protectedFaultReport() }
+        /// DNS back and PF disarmed, issued only after the helper said no
+        /// fault is held.
+        var release: () throws -> Void = { try HelperManager.releaseAfterAbandonedUpgrade() }
         var refreshStatus: () -> KillSwitchService.StatusObservation = {
             KillSwitchService.refreshStatus()
         }
-        /// Read at cleanup time: the status query during the preparation
-        /// records a fault the helper reports (`protectedFault`).
+        /// The fault the app already knows.
         var protectedFaultHeld: () -> Bool = { LocalNetworkDevicesSync.holdsProtectedFault }
+    }
+
+    /// Reads `/killswitch/status` for the A29 protected fault. nil when the
+    /// helper does not answer or answers without a readable status: the
+    /// caller must then treat the fault as possibly held. A held fault is
+    /// also recorded for the app.
+    static func protectedFaultReport() -> Bool? {
+        guard let result = try? sendRequest(method: "GET", path: "/killswitch/status"),
+              result.status == 200,
+              let envelope = try? JSONDecoder().decode(Envelope.self, from: result.body),
+              envelope.ok == true else {
+            return nil
+        }
+        if envelope.protectedFault == true {
+            LocalNetworkDevicesSync.recordFault(.helper("reported by the helper"))
+            return true
+        }
+        return false
+    }
+
+    /// The abandoned upgrade's own release: DNS back and PF disarmed, with
+    /// the app's armed intent cleared. Only `cleanUpAbandonedUpgrade` calls
+    /// it, and only after the helper reported no protected fault.
+    static func releaseAfterAbandonedUpgrade() throws {
+        _ = try restoreProtectedDNSIfConfigured()
+        try disarmKillSwitch()
+        KillSwitchService.isArmed = false
     }
 
     /// Recover DNS and stop the Core before launchd replaces an
@@ -478,9 +512,21 @@ nonisolated struct HelperManager {
             }
         }
         if installedVersion != nil {
+            // A29: a prompt-free preparation keeps protected DNS and its
+            // snapshot while a protected fault is held or cannot be ruled
+            // out; PF blocks everything anyway, and the user's Disconnect
+            // restores DNS. Otherwise DNS is recovered as before.
+            let keepsDNS = !administratorPrompt
+                && (operations.release.protectedFaultHeld()
+                    || operations.release.helperReportsFault() != false)
+            var restoreDNS = operations.restoreDNS
+            if keepsDNS {
+                LocalTrafficAudit.shared.recordEvent("helper_upgrade_dns_kept_for_protected_fault")
+                restoreDNS = {}
+            }
             do {
                 try prepareAuthenticatedHelperForReplacement(
-                    restoreDNS: operations.restoreDNS,
+                    restoreDNS: restoreDNS,
                     stopCore: {
                         try operations.stopCore()
                         coreStopped = true
@@ -525,10 +571,11 @@ nonisolated struct HelperManager {
     }
 
     /// Settles an upgrade that stopped the Core and did not replace the
-    /// daemon: release through Disconnect's path, as before. Not while an
-    /// A29 protected fault holds: then the block, the saved intent and the
-    /// DNS snapshot stay, the caller's error still surfaces, and only the
-    /// user's Disconnect or Restore internet releases.
+    /// daemon: an automatic release (DNS back, PF disarmed), as before. Not
+    /// while an A29 protected fault is held or possibly held: the app knows
+    /// it, the helper reports it on a fresh read, or that read fails. Then
+    /// the block and the saved intent stay, the caller's error still
+    /// surfaces, and only the user's Disconnect or Restore internet releases.
     static func cleanUpAbandonedUpgrade(
         coreStopped: Bool,
         succeeded: Bool,
@@ -541,8 +588,18 @@ nonisolated struct HelperManager {
             LocalTrafficAudit.shared.recordEvent("helper_upgrade_abandoned_fault_held")
             return
         }
+        switch operations.helperReportsFault() {
+        case true?:
+            LocalTrafficAudit.shared.recordEvent("helper_upgrade_abandoned_fault_held")
+            return
+        case nil:
+            LocalTrafficAudit.shared.recordEvent("helper_upgrade_abandoned_fault_unknown")
+            return
+        case false?:
+            break
+        }
         do {
-            try operations.disarm()
+            try operations.release()
             LocalTrafficAudit.shared.recordEvent(
                 "helper_upgrade_abandoned_released"
             )

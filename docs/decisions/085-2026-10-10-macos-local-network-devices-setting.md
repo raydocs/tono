@@ -46,7 +46,10 @@
     wake barrier that fails after its load keeps the block instead of releasing it. While a fault is held, no failed
     arm releases, whatever its tunnel (a bootstrap restriction, an arm after a power barrier saved a no-tunnel state,
     a new tunnel's first arm), and an automatic prompt-free helper preparation whose upgrade is abandoned does not
-    disarm it (the block, intent and DNS snapshot stay; the install error surfaces). Without a fault, the first arm
+    release it: that cleanup has its own release, separate from the user's Disconnect, which first reads the
+    helper's status and keeps the block when the fault is reported or the status cannot be read; and while a fault
+    is held or unknown, that preparation leaves protected DNS and its snapshot in place (the install error surfaces;
+    the user's Disconnect restores DNS). Without a fault, the first arm
     of a new session and the abandoned-upgrade release keep today's policy.
   - Rejected: (a) a separate LAN DNS permit — #348 is a block, and the only remaining LAN DNS path was another VPN's
     utun, whose other private traffic off blocks anyway; (b) keeping `tono-multicast` / `tono-ssdp` when off; (c) new MLD,

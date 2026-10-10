@@ -267,75 +267,113 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
         XCTAssertEqual(releases, 1, "the user's Disconnect releases")
         XCTAssertFalse(app.isConnected)
     }
-    /// Prompt-free replacement effects whose silent upgrade fails. The status
-    /// read optionally rediscovers the helper's protected fault, as
-    /// `HelperManager.killSwitchStatus` records it from `protectedFault`.
+    /// Records what a prompt-free replacement did.
+    private final class ReplacementLog {
+        var dnsRestores = 0
+        var coreStops = 0
+        var releases = 0
+    }
+
+    /// Prompt-free replacement effects whose silent upgrade fails. `faultReads`
+    /// answers the helper's fault reads in order (the DNS decision first,
+    /// then the cleanup's read); the last answer repeats. `preflightStatusFails`
+    /// makes the status read after the Core stop throw.
     private func abandonedReplacement(
-        statusReportsFault: Bool,
-        stoppedCore: @escaping () -> Void,
-        disarm: @escaping () -> Void
+        log: ReplacementLog,
+        faultReads: [Bool?],
+        preflightStatusFails: Bool = false
     ) -> HelperManager.ReplacementOperations {
-        HelperManager.ReplacementOperations(
-            restoreDNS: {},
-            stopCore: { stoppedCore() },
+        var reads = faultReads
+        return HelperManager.ReplacementOperations(
+            restoreDNS: { log.dnsRestores += 1 },
+            stopCore: { log.coreStops += 1 },
             killSwitchStatus: {
-                if statusReportsFault {
-                    LocalNetworkDevicesSync.recordFault(.helper("reported by the helper"))
-                }
+                if preflightStatusFails { throw HelperIPCError.emptyResponse }
                 return (armed: true, wanted: true, live: true, healed: false)
             },
             checkResources: {},
             silentUpgrade: { false },
             release: HelperManager.AbandonedUpgradeRelease(
-                disarm: { disarm() },
+                helperReportsFault: {
+                    let answer = reads.first ?? nil
+                    if reads.count > 1 { reads.removeFirst() }
+                    if answer == true {
+                        LocalNetworkDevicesSync.recordFault(.helper("reported by the helper"))
+                    }
+                    return answer
+                },
+                release: { log.releases += 1 },
                 refreshStatus: { .confirmed(requiresProtectionRecovery: false) }
             )
         )
     }
 
-    /// Review F-new (29a81b87): an automatic, prompt-free helper preparation
-    /// (the bootstrap restriction of a preserve teardown) stops the previous
-    /// Core, the helper's status reports the held protected fault, the silent
-    /// upgrade fails and the prompt is withheld. The abandoned-upgrade
-    /// cleanup must not disarm: the fault stays held and the install error
-    /// surfaces.
-    func testAbandonedPromptFreeUpgradeKeepsAHeldProtectedFault() {
-        var stopped = 0
-        var disarms = 0
-        let operations = abandonedReplacement(
-            statusReportsFault: true,
-            stoppedCore: { stopped += 1 },
-            disarm: { disarms += 1 }
-        )
-        XCTAssertThrowsError(try HelperManager.prepareReplacementBeforePrompt(
-            installedVersion: "4.52.47",
-            daemonRejected: false,
-            administratorPrompt: false,
-            operations: operations
-        )) { error in
-            guard case HelperInstallError.installFailed = error else {
-                return XCTFail("the withheld prompt must surface as an install error: \(error)")
-            }
+    private func preparePromptFree(_ operations: HelperManager.ReplacementOperations) -> Error? {
+        do {
+            _ = try HelperManager.prepareReplacementBeforePrompt(
+                installedVersion: "4.52.47",
+                daemonRejected: false,
+                administratorPrompt: false,
+                operations: operations
+            )
+            return nil
+        } catch {
+            return error
         }
-        XCTAssertEqual(stopped, 1, "the previous Core was stopped for the replacement")
-        XCTAssertEqual(disarms, 0, "an abandoned automatic upgrade must not disarm a held fault")
+    }
+
+    /// Review F-new (29a81b87) and M1 (4a55e459): an automatic, prompt-free
+    /// helper preparation (the bootstrap restriction of a preserve teardown)
+    /// while the helper holds a protected fault the app has not learned yet.
+    /// The previous Core is stopped, the silent upgrade fails and the prompt
+    /// is withheld. Protected DNS and its snapshot stay, nothing is released,
+    /// the fault is held and the install error surfaces.
+    func testAbandonedPromptFreeUpgradeKeepsAHeldProtectedFault() {
+        let log = ReplacementLog()
+        let error = preparePromptFree(abandonedReplacement(log: log, faultReads: [true]))
+        guard let error, case HelperInstallError.installFailed = error else {
+            return XCTFail("the withheld prompt must surface as an install error: \(String(describing: error))")
+        }
+        XCTAssertEqual(log.coreStops, 1, "the previous Core was stopped for the replacement")
+        XCTAssertEqual(log.dnsRestores, 0, "protected DNS and its snapshot stay while the fault is held")
+        XCTAssertEqual(log.releases, 0, "an abandoned automatic upgrade must not release a held fault")
         XCTAssertTrue(LocalNetworkDevicesSync.holdsProtectedFault)
     }
 
-    /// Controls for the test above: without a fault the same abandoned
-    /// upgrade still releases as before, and with the fault held the user's
+    /// Review F1 (4a55e459): the status read after the Core stop fails, so
+    /// the preparation throws before the fault is known. The cleanup reads
+    /// the helper again: a fault only discoverable on that later read, or a
+    /// status that stays unreadable, must not be released.
+    func testFailedPreflightStatusNeverReleasesAFaultFoundLaterOrUnknown() {
+        // Not visible on the first read, reported on the cleanup's read.
+        let later = ReplacementLog()
+        XCTAssertNotNil(preparePromptFree(abandonedReplacement(
+            log: later, faultReads: [false, true], preflightStatusFails: true
+        )))
+        XCTAssertEqual(later.coreStops, 1)
+        XCTAssertEqual(later.releases, 0, "a fault found on the later read is not released")
+        XCTAssertTrue(LocalNetworkDevicesSync.holdsProtectedFault)
+
+        // The status never becomes readable: possibly held, so no release,
+        // and protected DNS is kept too.
+        LocalNetworkDevicesSync.resetForTesting()
+        let unknown = ReplacementLog()
+        XCTAssertNotNil(preparePromptFree(abandonedReplacement(
+            log: unknown, faultReads: [nil], preflightStatusFails: true
+        )))
+        XCTAssertEqual(unknown.coreStops, 1)
+        XCTAssertEqual(unknown.releases, 0, "an unreadable status is not a release")
+        XCTAssertEqual(unknown.dnsRestores, 0)
+    }
+
+    /// Controls: with no fault anywhere the same abandoned upgrade recovers
+    /// DNS and releases as before, and with the fault held the user's
     /// explicit Disconnect still releases.
     func testAbandonedUpgradeReleasesWithoutAFaultAndUserDisconnectReleasesAHeldOne() async {
-        var disarms = 0
-        XCTAssertThrowsError(try HelperManager.prepareReplacementBeforePrompt(
-            installedVersion: "4.52.47",
-            daemonRejected: false,
-            administratorPrompt: false,
-            operations: abandonedReplacement(
-                statusReportsFault: false, stoppedCore: {}, disarm: { disarms += 1 }
-            )
-        ))
-        XCTAssertEqual(disarms, 1, "no fault: the abandoned upgrade releases as before")
+        let log = ReplacementLog()
+        XCTAssertNotNil(preparePromptFree(abandonedReplacement(log: log, faultReads: [false])))
+        XCTAssertEqual(log.dnsRestores, 1, "no fault: DNS is recovered as before")
+        XCTAssertEqual(log.releases, 1, "no fault: the abandoned upgrade releases as before")
 
         var releases = 0
         let app = makeApp { releases += 1 }
