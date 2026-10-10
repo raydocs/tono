@@ -1,6 +1,70 @@
 import SwiftUI
 import ServiceManagement
 import AppKit
+import Observation
+
+/// Login Items is a process-wide OS setting, not a view-local optimistic choice.
+@MainActor @Observable
+final class LoginItemPreference {
+    static let shared = LoginItemPreference()
+    private(set) var status: SMAppService.Status
+    private(set) var isUpdating = false
+    private(set) var error: String?
+    private(set) var saved = false
+    private let readStatus: () -> SMAppService.Status
+    private let register: () throws -> Void
+    private let unregister: () async throws -> Void
+    private let defaults: UserDefaults
+
+    init(
+        readStatus: @escaping () -> SMAppService.Status = { SMAppService.mainApp.status },
+        register: @escaping () throws -> Void = { try SMAppService.mainApp.register() },
+        unregister: @escaping () async throws -> Void = { try await SMAppService.mainApp.unregister() },
+        defaults: UserDefaults = AppProfile.defaults
+    ) {
+        self.readStatus = readStatus
+        self.register = register
+        self.unregister = unregister
+        self.defaults = defaults
+        status = readStatus()
+    }
+
+    var enabled: Bool { status == .enabled }
+    var canChange: Bool { !isUpdating && error == nil && (status == .enabled || status == .notRegistered) }
+
+    func refresh() {
+        guard !isUpdating else { return }
+        let current = readStatus()
+        if current != status { saved = false }
+        status = current
+        error = nil
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        guard !isUpdating, error == nil else { return }
+        isUpdating = true
+        saved = false
+        Task {
+            defer { isUpdating = false }
+            do {
+                if enabled {
+                    if readStatus() != .enabled { try register() }
+                } else if readStatus() == .enabled || readStatus() == .requiresApproval {
+                    try await unregister()
+                }
+                status = readStatus()
+                defaults.set(status == .enabled, forKey: SettingsKey.launchAtStartup)
+                if status == (enabled ? .enabled : .notRegistered) {
+                    saved = true
+                } else if !(enabled && status == .requiresApproval) {
+                    error = String(localized: "macOS did not confirm the requested Login Items setting.")
+                }
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+}
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
@@ -10,10 +74,8 @@ struct SettingsView: View {
     @Environment(\.seaAccent) private var seaAccent
     @SeaAppearancePreference private var seaEnabled
 
-    @State private var launchAtStartup =
-        SMAppService.mainApp.status == .enabled
-    @State private var isUpdatingLaunchAtStartup = false
-    @State private var launchAtStartupMessage: String?
+    @State private var loginItems: LoginItemPreference
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage(SettingsKey.interfaceLanguage, store: AppProfile.defaults)
     private var selectedLanguage = InterfaceLanguagePreference.auto
     @AppStorage(SettingsKey.logsEnabled) private var logsEnabled = true
@@ -48,6 +110,10 @@ struct SettingsView: View {
 
     private let languages = InterfaceLanguagePreference.options
     private let themes = ["Light", "Dark", "Adaptive"]
+
+    init(loginItems: LoginItemPreference = .shared) {
+        _loginItems = State(initialValue: loginItems)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -97,6 +163,10 @@ struct SettingsView: View {
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .modifier(SeaDisclosureTreatment())
+        .onAppear { refreshLoginItemsIfConfirmed() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { refreshLoginItemsIfConfirmed() }
+        }
     }
 
     // MARK: - Preferences
@@ -115,30 +185,29 @@ struct SettingsView: View {
         Group {
             SettingToggleRow(
                 label: "Open at login",
+                subtitle: "Applies at your next macOS login. Changing this does not affect the current connection.",
                 isOn: Binding(
-                    get: { launchAtStartup },
-                    set: setLaunchAtStartup
+                    get: { loginItems.enabled },
+                    set: loginItems.setEnabled
                 )
             )
-            .disabled(isUpdatingLaunchAtStartup)
+            .disabled(!loginItems.canChange)
+            .accessibilityIdentifier("settings.loginItems")
 
-            if let launchAtStartupMessage {
-                Text(launchAtStartupMessage)
-                    .font(.system(size: seaEnabled ? 12 : 11))
-                    .foregroundStyle(seaEnabled ? SeaTheme.attention : Color.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            LoginItemFeedback(preference: loginItems)
 
             settingDivider
 
-            SettingRow(label: "Language") {
+            SettingRow(label: "Interface Language", subtitle: "Reopens Tono to apply. Quitting drops the connection and releases network protection until you connect again.") {
                 settingsPicker(
+                    label: "Interface Language",
                     selection: Binding(
                         get: { selectedLanguage },
                         set: changeLanguage
                     ),
                     options: languages
                 )
+                .disabled(loginItems.isUpdating)
             }
 
         }
@@ -162,7 +231,7 @@ struct SettingsView: View {
         Group {
             if !seaEnabled {
                 SettingRow(label: "Theme") {
-                    settingsPicker(selection: $themeMode, options: themes)
+                    settingsPicker(label: "Theme", selection: $themeMode, options: themes)
                 }
                 settingDivider
             }
@@ -174,7 +243,7 @@ struct SettingsView: View {
                         set: { seaMotionMode = $0 }), options: SeaAppearance.motionOptions)
                     .frame(maxWidth: 330)
                 } else {
-                    settingsPicker(selection: $seaMotionMode, options: SeaAppearance.motionOptions)
+                    settingsPicker(label: "Sea motion", selection: $seaMotionMode, options: SeaAppearance.motionOptions)
                 }
             }
         }
@@ -434,7 +503,7 @@ struct SettingsView: View {
     /// same. Asking only about a live tunnel would open that Mac to direct
     /// traffic with no warning at all.
     private func changeLanguage(_ language: String) {
-        guard language != selectedLanguage else { return }
+        guard !loginItems.isUpdating, language != selectedLanguage else { return }
         if appState.isConnected || appState.isConnecting || KillSwitchService.isArmed {
             guard confirmLanguageRestart() else { return }
         }
@@ -454,40 +523,9 @@ struct SettingsView: View {
         return alert.runModal() == .alertFirstButtonReturn
     }
 
-    private func setLaunchAtStartup(_ enabled: Bool) {
-        guard !isUpdatingLaunchAtStartup else { return }
-        isUpdatingLaunchAtStartup = true
-        launchAtStartupMessage = nil
-
-        Task {
-            defer { isUpdatingLaunchAtStartup = false }
-            do {
-                if enabled {
-                    if SMAppService.mainApp.status != .enabled {
-                        try SMAppService.mainApp.register()
-                    }
-                } else if SMAppService.mainApp.status == .enabled
-                            || SMAppService.mainApp.status == .requiresApproval {
-                    try await SMAppService.mainApp.unregister()
-                }
-
-                let status = SMAppService.mainApp.status
-                launchAtStartup = status == .enabled
-                AppProfile.defaults.set(
-                    launchAtStartup,
-                    forKey: SettingsKey.launchAtStartup
-                )
-                if status == .requiresApproval {
-                    launchAtStartupMessage =
-                        "Allow Tono in System Settings › General › Login Items."
-                }
-            } catch {
-                launchAtStartup =
-                    SMAppService.mainApp.status == .enabled
-                launchAtStartupMessage =
-                    "Could not update Login Items: \(error.localizedDescription)"
-            }
-        }
+    private func refreshLoginItemsIfConfirmed() {
+        // A background/route refresh cannot erase an ambiguous failed write.
+        if loginItems.error == nil { loginItems.refresh() }
     }
 
     private var settingDivider: some View {
@@ -498,9 +536,10 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
-    private func settingsPicker(selection: Binding<String>, options: [String]) -> some View {
+    private func settingsPicker(label: String, selection: Binding<String>, options: [String]) -> some View {
         if seaEnabled {
-            SeaChoice(label: "Language", selection: selection, options: options)
+            SeaChoice(label: LocalizedStringKey(label), selection: selection, options: options)
+                .fixedSize(horizontal: true, vertical: false)
         } else {
         Menu {
             ForEach(options, id: \.self) { option in
@@ -530,7 +569,63 @@ struct SettingsView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(Text(LocalizedStringKey(label)))
         }
+    }
+}
+
+struct LoginItemFeedback: View {
+    @SeaAppearancePreference private var seaEnabled
+    let preference: LoginItemPreference
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if preference.isUpdating {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Saving…")
+                }
+            } else if let error = preference.error {
+                Text("Could not confirm this change. Refresh status before trying again.")
+                    .foregroundStyle(seaEnabled ? SeaTheme.attention : Color.orange)
+                DisclosureGroup("Technical details") {
+                    Text(error).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                refreshButton
+            } else if preference.status == .requiresApproval {
+                Text("Approval needed in macOS Login Items. Tono is not enabled to open at login yet.")
+                    .foregroundStyle(seaEnabled ? SeaTheme.attention : Color.orange)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { approvalActions }
+                        .fixedSize(horizontal: true, vertical: false)
+                    VStack(alignment: .leading, spacing: 8) { approvalActions }
+                }
+            } else if preference.status != .enabled && preference.status != .notRegistered {
+                Text("Login Items is unavailable. Open Tono from Applications, then refresh status.")
+                    .foregroundStyle(seaEnabled ? SeaTheme.attention : Color.orange)
+                refreshButton
+            } else if preference.saved {
+                Text("Saved")
+            }
+        }
+        .font(.system(size: seaEnabled ? 12 : 11))
+        .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityIdentifier("settings.loginItems.feedback")
+    }
+
+    @ViewBuilder private var approvalActions: some View {
+        Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
+            .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .bordered))
+        refreshButton
+        Button("Turn off") { preference.setEnabled(false) }
+            .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .borderless))
+    }
+
+    private var refreshButton: some View {
+        Button("Refresh status") { preference.refresh() }
+            .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .borderless))
     }
 }
 
@@ -616,7 +711,7 @@ private struct SettingToggleRow: View {
                         .toggleStyle(SeaToggleStyle())
                         .labelsHidden()
                 } else {
-                    Toggle("", isOn: $isOn)
+                    Toggle(LocalizedStringKey(label), isOn: $isOn)
                     .toggleStyle(.switch)
                     .tint(TonoBrand.accent)
                     .labelsHidden()

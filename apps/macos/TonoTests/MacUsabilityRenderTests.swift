@@ -1,6 +1,7 @@
 import AppKit
 import ImageIO
 import ScreenCaptureKit
+import ServiceManagement
 import SwiftUI
 import Vision
 import XCTest
@@ -85,6 +86,92 @@ func nativeWindowRequest<Value>(
 /// Synthetic state only: no sign-in, helper calls, browser scans or uploads.
 @MainActor
 final class MacUsabilityRenderTests: XCTestCase {
+    func testLoginItemsWaitForConfirmationAndRecoverUnknownChanges() async throws {
+        let suite = "tono-login-items-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var actual: SMAppService.Status = .notRegistered
+        var needsApproval = true
+        var reply: CheckedContinuation<Void, Error>?
+        defer { reply?.resume(returning: ()) }
+        let preference = LoginItemPreference(
+            readStatus: { actual },
+            register: { actual = needsApproval ? .requiresApproval : .enabled },
+            unregister: {
+                actual = .notRegistered
+                try await withCheckedThrowingContinuation { reply = $0 }
+            }, defaults: defaults
+        )
+        let app = AppState()
+        let account = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        account.user = try JSONDecoder().decode(TonoUser.self, from: Data(#"{"id":"synthetic-sea-pages","email":"fixture@example.test","plan":"Fixture plan","quotaBytes":1000000000,"usageBytes":250000000}"#.utf8))
+        account.state = .ready
+        // No OS registration, helper, account request or protection mutation.
+        func render(_ name: String, width: CGFloat = 760, sea: Bool = true, chinese: Bool = false,
+                    labels: [String]) async throws {
+            try await capture(name, width: width, height: 920, annotate: false, darkAppearance: sea,
+                              nativeOpacity: .isolatedSubpixelEdges, nativeLabels: labels) {
+                ZStack { MeshGradientBackground(); SettingsView(loginItems: preference) }
+                    .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, sea)
+                    .environment(\.locale, Locale(identifier: chinese ? "zh-Hans" : "en"))
+                    .environment(app).environment(account).environmentObject(AppUpdater(enabled: false))
+            }
+        }
+        func settle() async throws {
+            let deadline = Date().addingTimeInterval(2)
+            while preference.isUpdating && Date() < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertFalse(preference.isUpdating, "synthetic completion must settle")
+        }
+        try await render("settings-general-normal", labels: ["Settings", "General", "Interface Language"])
+        preference.setEnabled(true)
+        try await settle()
+        XCTAssertEqual(preference.status, .requiresApproval)
+        XCTAssertFalse(preference.saved)
+        XCTAssertFalse(preference.canChange)
+        try await render("settings-general-approval", labels: ["Open Login Items", "Refresh status", "Turn off"])
+        actual = .enabled // The user approves in macOS, then returns to Tono.
+        preference.refresh()
+        XCTAssertTrue(preference.enabled)
+        preference.setEnabled(false)
+        XCTAssertTrue(preference.isUpdating)
+        preference.refresh() // Must not clear a write whose reply is pending.
+        preference.setEnabled(true) // A second page cannot overtake that write.
+        try await render("settings-general-saving", labels: ["Saving…", "Interface Language"])
+        XCTAssertFalse(preference.canChange)
+        XCTAssertFalse(preference.saved)
+        let completion = try XCTUnwrap(reply)
+        reply = nil
+        completion.resume(throwing: NSError(domain: "SyntheticLostReply", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Synthetic reply lost after macOS stored OFF."]))
+        try await settle()
+        XCTAssertNotNil(preference.error)
+        XCTAssertFalse(preference.canChange)
+        XCTAssertFalse(preference.saved)
+        // A recreated production SettingsView's onAppear must preserve failure.
+        try await render("settings-general-error", labels: ["Could not confirm this change.", "Refresh status"])
+        XCTAssertNotNil(preference.error)
+        preference.refresh()
+        XCTAssertFalse(preference.enabled)
+        XCTAssertTrue(preference.canChange)
+        needsApproval = false
+        preference.setEnabled(true)
+        try await settle()
+        XCTAssertTrue(preference.enabled)
+        XCTAssertTrue(preference.saved)
+        XCTAssertTrue(defaults.bool(forKey: SettingsKey.launchAtStartup))
+        try await render("settings-general-saved", labels: ["Saved", "Interface Language"])
+        try await render("settings-general-zh-narrow", width: 660, chinese: true,
+                         labels: ["设置", "界面语言", "登录时打开"])
+        try await render("settings-general-classic", sea: false, labels: ["Settings", "Interface Language"])
+        actual = .notFound
+        preference.refresh()
+        XCTAssertFalse(preference.canChange)
+        XCTAssertFalse(preference.saved)
+        try await render("settings-general-unavailable", labels: ["Login Items is unavailable.", "Refresh status"])
+    }
+
     func testIsolatedRasterEdgesCannotHideMissingNativeContent() {
         let opaque = NativeRenderPixel(red: 0.8, green: 0.4, blue: 0.2, alpha: 1)
         let edge = NativeRenderPixel(red: 0.8, green: 0.4, blue: 0.2, alpha: CGFloat(253) / 255)
