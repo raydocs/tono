@@ -89,6 +89,11 @@ records on the device row, because a relayed request otherwise looks like one fr
 node. The relay is **not** in the WFP/PF bootstrap permit: while protection is armed it is
 blocked like any other non-permitted address.
 
+Updater: Windows (`commands/update.rs` `get_with_relays`) sends a discovery, signature or
+package GET through the relays when the direct GET got no response. macOS
+(`NativeUpdateDownload.bounded`) does the same for the manifest and signature GETs only; the
+package download stays direct (backlog A2).
+
 ## Rollback
 
 On the node: restore the latest `/etc/nginx/nginx.conf.bak-*-pre-tono-relay*` over

@@ -103,16 +103,21 @@ nonisolated struct ControlPlanePath: Sendable {
     /// the PF bootstrap permit: while protection is armed the relay is
     /// blocked like any other non-permitted address.
     /// Kept in step with the Windows client's `bootstrap::API_RELAYS` and the
-    /// control plane's `api-relays.ts`.
+    /// control plane's `api-relays.ts`. The same relays admit the release
+    /// host's SNI, which the updater's metadata GETs use (backlog A2).
     static let apiRelays: [String: [ControlPlaneEndpoint]] = [
-        "api.afk.ccwu.cc": [
-            ControlPlaneEndpoint(address: "179.253.233.220", port: 2053), // Los Angeles · Westwood
-            ControlPlaneEndpoint(address: "179.255.154.17", port: 2053), // Los Angeles · Mesa
-        ],
+        "api.afk.ccwu.cc": relayEndpoints,
+        "releases.afk.ccwu.cc": relayEndpoints,
+    ]
+
+    private static let relayEndpoints = [
+        ControlPlaneEndpoint(address: "179.253.233.220", port: 2053), // Los Angeles · Westwood
+        ControlPlaneEndpoint(address: "179.255.154.17", port: 2053), // Los Angeles · Mesa
     ]
 
     /// The relays for `baseURL`'s host, or nil when it has none. Only the
-    /// production API host has relays; a debug base URL never dials them.
+    /// production API and release hosts have relays; a debug base URL never
+    /// dials them.
     nonisolated static func relays(for baseURL: URL) -> ControlPlanePath? {
         guard let components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
               components.scheme?.lowercased() == "https",
