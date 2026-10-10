@@ -38,7 +38,7 @@
 - macOS 连接中开始原生更新、Execute 失败后，armed 状态下没有控制面放行，断开即可恢复（[MAC-UPDATE-RETAIN-NO-RELAY](../findings.d/MAC-UPDATE-RETAIN-NO-RELAY.md)）。
 - macOS 自动解除保护本身失败时停在 Protected Offline、不自动重试（MAC-AUTO-RELEASE-FAIL-NO-RETRY，fail-closed，无泄漏）。
 - hy2 自动切换（仅内部账号开关打开时）有已记录的次要问题（A17W-*）。
-- 第三台中继 38.14.195.144 入站 2053 被供应商挡住（#1538 草稿）；两台 DMIT 洛杉矶中继同属一个供应商，有一起失效的风险。
+- 第三台中继改用 154.84.56.196（AROSSCLOUD，非 DMIT，节点已部署，客户端列表在 #1538，是否进本版由所有者定）；三台都在洛杉矶，区域级事故仍可能一起失效。
 - D1 定时备份仍缺 Cloudflare secret（D16）。
 - 已在 main（随候选带上，但仍需实机）：A30 macOS 无隧道 armed 只经中继（#1507）、Windows W-A 中继放行（#1539）、
   Windows 更新断点续传与半截文件清理/取消（#1527、#1540）。

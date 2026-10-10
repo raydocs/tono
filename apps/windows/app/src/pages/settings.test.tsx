@@ -14,10 +14,21 @@ import { afterEach, expect, it, vi } from 'vitest'
 
 import enSettings from '@/locales/en/settings.json'
 import enTono from '@/locales/en/tono.json'
+import zhTono from '@/locales/zh/tono.json'
+import { setPreloadConfig } from '@/services/preload'
 import { removeCacheData, swrConfig } from '@/services/query-client'
 import { setNewAppearance } from '@/tono-ui/appearance-preferences'
 
-const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  read: vi.fn(),
+  write: vi.fn(),
+  preferenceRead: vi.fn(),
+  preferenceWrite: vi.fn(),
+}))
+vi.mock('@/services/cmds', () => ({
+  getTonoPreferences: mocks.preferenceRead,
+  patchTonoPreferences: mocks.preferenceWrite,
+}))
 vi.mock('@/services/tono', async (original) => ({
   ...(await original<typeof import('@/services/tono')>()),
   tonoAuditEnabled: async () => true,
@@ -32,20 +43,25 @@ vi.mock('@/components/setting/mods/update-viewer', () => ({
   UpdateViewer: () => null,
 }))
 
-import { PrivacyCard } from './settings'
+import { GeneralCard, PrivacyCard } from './settings'
 
 afterEach(async () => {
   cleanup()
+  setPreloadConfig(null)
   await Promise.all(
     [
       'tonoAuditEnabled',
       'tonoPeriodicTelemetryEnabled',
       'tonoNetworkLogUploadEnabled',
       'tonoPrivacySaves',
+      'getTonoPreferences',
+      'tonoGeneralSave',
     ].map((key) => removeCacheData([key])),
   )
   mocks.read.mockReset()
   mocks.write.mockReset()
+  mocks.preferenceRead.mockReset()
+  mocks.preferenceWrite.mockReset()
 })
 
 it('privacy choices wait for confirmation and recover failed reads or ambiguous saves by reloading', async () => {
@@ -180,4 +196,104 @@ it('a pending privacy save remains locked across navigation until its reply arri
   )
   expect(actual).toBe(true)
   expect(screen.getByRole('status').textContent).toBe('Saved')
+})
+
+it('general settings confirm saved choices across navigation and apply language only after a successful save', async () => {
+  await i18n.use(initReactI18next).init({
+    resources: {
+      en: { translation: { tono: enTono, settings: enSettings } },
+      zh: { translation: { tono: zhTono } },
+    },
+    lng: 'en',
+  })
+  setNewAppearance(true)
+  setPreloadConfig(null)
+  let actual = { enable_auto_launch: false, language: 'en' }
+  let finishRead!: () => void
+  mocks.preferenceRead.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishRead = () => resolve(actual)
+      }),
+  )
+  const page = (settings: boolean) => (
+    <SWRConfig value={{ ...swrConfig, errorRetryCount: 0 }}>
+      {settings ? <GeneralCard /> : <p>Other page</p>}
+    </SWRConfig>
+  )
+  const { rerender } = render(page(true))
+  const toggle = () => screen.getByRole('switch') as HTMLButtonElement
+  expect(toggle().disabled).toBe(true)
+  await act(async () => finishRead())
+  await waitFor(() => expect(toggle().disabled).toBe(false))
+  expect(toggle().getAttribute('aria-checked')).toBe('false')
+  let refuse!: () => void
+  mocks.preferenceRead.mockImplementation(async () => actual)
+  mocks.preferenceWrite.mockImplementationOnce(async (value) => {
+    actual = { ...actual, ...value }
+    await new Promise((_, reject) => {
+      refuse = () => reject(new Error('Synthetic lost reply'))
+    })
+  })
+  fireEvent.click(toggle())
+  expect(toggle().disabled).toBe(true)
+  expect(toggle().getAttribute('aria-checked')).toBe('false')
+  expect(screen.queryByText('Saved')).toBeNull()
+  rerender(page(false))
+  rerender(page(true))
+  expect(toggle().disabled).toBe(true)
+  await act(async () => refuse())
+  expect((await screen.findByRole('alert')).textContent).toContain(
+    "Couldn't confirm",
+  )
+  rerender(page(false))
+  rerender(page(true))
+  expect(toggle().disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Reload saved choices' }))
+  await waitFor(() => expect(toggle().disabled).toBe(false))
+  expect(toggle().getAttribute('aria-checked')).toBe('true')
+  expect(screen.queryByText('Saved')).toBeNull()
+
+  let acknowledge!: () => void
+  mocks.preferenceWrite.mockImplementationOnce(async (value) => {
+    actual = { ...actual, ...value }
+    await new Promise<void>((resolve) => {
+      acknowledge = resolve
+    })
+  })
+  fireEvent.click(screen.getByRole('button', { name: '简体中文' }))
+  expect(i18n.language).toBe('en')
+  expect(toggle().disabled).toBe(true)
+  expect(
+    screen
+      .getByRole('button', { name: 'English' })
+      .getAttribute('aria-pressed'),
+  ).toBe('true')
+  await act(async () => acknowledge())
+  await waitFor(() => expect(i18n.language).toBe('zh'))
+  expect(
+    screen
+      .getByRole('button', { name: '简体中文' })
+      .getAttribute('aria-pressed'),
+  ).toBe('true')
+  expect(screen.getByRole('status').textContent).toBe('已保存')
+  expect(toggle().disabled).toBe(false)
+
+  // A successful write with a failed readback is still unconfirmed, not Saved.
+  mocks.preferenceWrite.mockImplementation(async (value) => {
+    actual = { ...actual, ...value }
+  })
+  mocks.preferenceRead.mockRejectedValueOnce(
+    new Error('Synthetic readback failed'),
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'English' }))
+  expect((await screen.findByRole('alert')).textContent).toContain(
+    '无法确认更改',
+  )
+  expect(i18n.language).toBe('zh')
+  expect(toggle().disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: '重新读取已保存的选择' }))
+  await waitFor(() => expect(i18n.language).toBe('en'))
+  expect(toggle().disabled).toBe(false)
+  expect(screen.queryByText('Saved')).toBeNull()
 })

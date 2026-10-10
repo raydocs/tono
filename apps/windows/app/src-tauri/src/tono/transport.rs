@@ -1898,6 +1898,72 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
         );
     }
 
+    /// Decision 089: the third compiled relay (Los Angeles, another provider) comes after the two
+    /// DMIT relays, and a request whose first two relays fail provably undelivered reaches it.
+    /// Two refused loopback ports stand in for the dead DMIT relays.
+    #[tokio::test]
+    async fn the_third_relay_carries_the_request_after_the_first_two_fail() {
+        assert_eq!(
+            crate::tono::bootstrap::api_relays(),
+            vec![
+                std::net::SocketAddr::from(([179, 253, 233, 220], 2053)),
+                std::net::SocketAddr::from(([179, 255, 154, 17], 2053)),
+                std::net::SocketAddr::from(([154, 84, 56, 196], 2053)),
+            ],
+            "the third relay is appended after the two DMIT relays"
+        );
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                use std::io::{BufRead as _, BufReader, Write as _};
+                let Ok(mut stream) = stream else { continue };
+                let mut reader = BufReader::new(match stream.try_clone() {
+                    Ok(clone) => clone,
+                    Err(_) => continue,
+                });
+                let mut line = String::new();
+                while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                    if line == "\r\n" || line == "\n" {
+                        break;
+                    }
+                    line.clear();
+                }
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nthird",
+                );
+                let _ = stream.flush();
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+            }
+        });
+
+        let dead = vec![std::net::SocketAddr::from(([10, 255, 255, 1], 443))];
+        let relays = vec![
+            std::net::SocketAddr::from(([127, 0, 0, 1], 1)),
+            std::net::SocketAddr::from(([127, 0, 0, 1], 2)),
+            std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        ];
+        let transport =
+            TonoTransport::with_clients_and_relays("tono-relay.test", &dead, &dead, &relays)
+                .expect("transport");
+        let response = transport
+            .send(ApiRequest {
+                // A POST, like the sign-in code submission: only a provably undelivered failure
+                // may move it on to the next relay.
+                method: HttpMethod::Post,
+                url: format!("http://tono-relay.test:{port}/api/v1/auth/email/start"),
+                bearer: None,
+                json_body: Some("{}".to_string()),
+                binary_body: None,
+                headers: Vec::new(),
+            })
+            .await
+            .expect("the third relay must carry the request");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"third");
+        assert_eq!(transport.preference.relay(), 3, "the third relay answered and is remembered");
+    }
+
     /// #583: launch restore's own sequence, a token refresh (POST) and then `me` (GET), through
     /// clients built exactly as in production with the pinned addresses dropped. Only the first
     /// request may pay the pinned connect budget; the pair must leave the fallbacks more than

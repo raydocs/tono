@@ -45,7 +45,9 @@
     preserve teardown does not, a kept live re-arm is latched and persisted like the stricter block, and a sleep or
     wake barrier that fails after its load keeps the block instead of releasing it. While a fault is held, no failed
     arm releases, whatever its tunnel (a bootstrap restriction, an arm after a power barrier saved a no-tunnel state,
-    a new tunnel's first arm). Without a fault, the first arm of a new session keeps today's failure policy.
+    a new tunnel's first arm), and an automatic prompt-free helper preparation whose upgrade is abandoned does not
+    disarm it (the block, intent and DNS snapshot stay; the install error surfaces). Without a fault, the first arm
+    of a new session and the abandoned-upgrade release keep today's policy.
   - Rejected: (a) a separate LAN DNS permit — #348 is a block, and the only remaining LAN DNS path was another VPN's
     utun, whose other private traffic off blocks anyway; (b) keeping `tono-multicast` / `tono-ssdp` when off; (c) new MLD,
     DHCPv6 or unicast DHCP renewal passes when off; (d) an indefinite heal/retry loop after a failed change (Mullvad's
@@ -61,4 +63,4 @@
   change Windows policy; macOS off is stricter than Windows.
 - Known limits: a reboot during the fault follows the existing boot policy (the leftover block is released at helper
   start); a daemon startup failure also releases as before. No real-hardware evidence yet.
-- Applied in: PR #1506, backlog A29, branch `amp/a29-lan-devices-toggle` (helper 4.52.47).
+- Applied in: PR #1506, backlog A29, branch `amp/a29-lan-devices-toggle` (helper 4.52.48).

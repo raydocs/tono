@@ -418,10 +418,14 @@ nonisolated enum HelperProtocolVersion {
     ///   monotonic clock, so a wall clock set back no longer holds the
     ///   core-down release, the orphaned-session releases and PF supervision
     ///   for the length of the step (MAC-HELPER-WATCHDOG-WALLCLOCK).
-    /// - 4.52.46 → 4.52.47: the arm request gained optional
+    /// - 4.52.46 → 4.52.47: a third Tono API relay, `154.84.56.196:2053`
+    ///   (another provider than the DMIT pair, decision 089), joins
+    ///   `ControlPlaneRelays`, so armed without a tunnel PF admits it like the
+    ///   other two (TCP 2053, the interactive user only).
+    /// - 4.52.47 → 4.52.48: the arm request gained optional
     ///   `allowLocalNetworkDevices` (D7, JSON boolean only). Absent means off: while a tunnel is
     ///   up the anchor renders no `tono-lan`, `tono-linklocal`,
-    ///   `tono-multicast` or `tono-ssdp` pass. True renders the 4.52.46 rules.
+    ///   `tono-multicast` or `tono-ssdp` pass. True renders the 4.52.47 rules.
     ///   The app sends the field only when the setting is on, so an older
     ///   daemon never sees it unless the user turned it on. Off also drops
     ///   root's reviewed-bundle web ports to local ranges (`tono-bundle-local`).
@@ -430,8 +434,9 @@ nonisolated enum HelperProtocolVersion {
     ///   re-arm of the live session never releases; a failed on → off
     ///   tightening installs block-all or stops the Core (protected fault,
     ///   `KILLSWITCH_LOCAL_NETWORK_FAULT[_STOP_CORE]`). While that fault is
-    ///   held, no failed arm releases, whatever its tunnel.
-    static let current = "4.52.47"
+    ///   held, no failed arm releases, whatever its tunnel, and an
+    ///   abandoned prompt-free helper upgrade does not disarm it.
+    static let current = "4.52.48"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

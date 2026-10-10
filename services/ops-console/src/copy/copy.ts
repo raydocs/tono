@@ -26,6 +26,7 @@ import { shellCopy } from './shell';
 import { todayCopy } from './today';
 import { worthwhileCopy } from './worthwhile';
 import { trafficCopy } from './traffic';
+import { customerSloCopy } from './customer-slo';
 import { hy2SwitchCopy } from './hy2-switch';
 
 export const copy = {
@@ -45,6 +46,7 @@ export const copy = {
   ...residentialCopy,
   ...customerBoardCopy,
   ...trafficCopy,
+  ...customerSloCopy,
   ...hy2SwitchCopy,
 } as const;
 

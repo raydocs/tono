@@ -29,7 +29,7 @@ export const resolveLanguage = (language?: string) => {
   }
 
   const baseLanguage = normalized.split('-')[0]
-  if (supportedLanguages.includes(baseLanguage)) {
+  if (baseLanguage && supportedLanguages.includes(baseLanguage)) {
     return baseLanguage
   }
 

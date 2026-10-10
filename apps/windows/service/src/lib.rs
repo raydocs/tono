@@ -236,11 +236,14 @@ pub const CONTROL_PLANE_PORTS: [u16; 6] = [443, 2053, 2083, 2087, 2096, 8443];
 /// renders it into the app-scoped bootstrap API channel (rule C) while armed without a tunnel
 /// (owner decision W-A, decision 090, which amends 077). Exact IPv4 literal and port, TCP only,
 /// never resolved — a relay the client tries but rule C refuses would look like the network.
-pub const API_RELAYS: [(std::net::Ipv4Addr, u16); 2] = [
+pub const API_RELAYS: [(std::net::Ipv4Addr, u16); 3] = [
     // Los Angeles · Westwood (DMIT)
     (std::net::Ipv4Addr::new(179, 253, 233, 220), 2053),
     // Los Angeles · Mesa (DMIT)
     (std::net::Ipv4Addr::new(179, 255, 154, 17), 2053),
+    // Los Angeles · Arosscloud (AS400619): another provider than the DMIT pair (decision 089);
+    // last, so a walk that reaches a DMIT relay is unchanged.
+    (std::net::Ipv4Addr::new(154, 84, 56, 196), 2053),
 ];
 /// Revision that introduced GET/POST `/bootstrap-pins`.
 pub const MIN_SERVICE_REVISION_FOR_BOOTSTRAP_PINS: u16 = 13;

@@ -257,94 +257,30 @@ nonisolated struct HelperManager {
         // launch (or installs its emergency block if the older state is no
         // longer readable), and the connect transaction tightens it with
         // current metadata immediately after this method returns.
-        var coreStoppedForReplacement = false
+        // Stop the previous Core and try the prompt-free upgrade. On every
+        // way out of that step other than a replacement or a hand-off to the
+        // administrator path, its own cleanup settles the abandoned upgrade.
+        let replacement = try prepareReplacementBeforePrompt(
+            installedVersion: installedVersion,
+            daemonRejected: daemonRejected,
+            administratorPrompt: administratorPrompt,
+            operations: .live(preparationStartedAt: preparationStartedAt)
+        )
+        if replacement.upgraded { return }
         var upgradeSucceeded = false
         defer {
             // A cancelled or failed replacement has no Core to carry traffic.
-            // Release through Disconnect's path, without hiding the install error.
-            if shouldReleaseAfterAbandonedUpgrade(
-                coreStopped: coreStoppedForReplacement,
+            // Release through Disconnect's path, without hiding the install
+            // error, unless a protected fault holds (A29).
+            cleanUpAbandonedUpgrade(
+                coreStopped: replacement.coreStopped,
                 succeeded: upgradeSucceeded
-            ) {
-                do {
-                    try KillSwitchService.disarm()
-                    LocalTrafficAudit.shared.recordEvent(
-                        "helper_upgrade_abandoned_released"
-                    )
-                } catch {
-                    // A disarm reply can be lost after PF was released, just
-                    // as on Disconnect; only a confirmed release clears intent.
-                    if KillSwitchService.refreshStatus()
-                        == .confirmed(requiresProtectionRecovery: false) {
-                        KillSwitchService.isArmed = false
-                        LocalTrafficAudit.shared.recordEvent(
-                            "helper_upgrade_abandoned_released",
-                            details: ["disarm_error": error.localizedDescription]
-                        )
-                    } else {
-                        LocalTrafficAudit.shared.recordEvent(
-                            "helper_upgrade_abandoned_release_failed",
-                            details: ["error": error.localizedDescription]
-                        )
-                    }
-                }
-            }
-        }
-        if installedVersion != nil {
-            do {
-                try prepareAuthenticatedHelperForReplacement(
-                    restoreDNS: { _ = try restoreProtectedDNSIfConfigured() },
-                    stopCore: {
-                        try stopCore()
-                        coreStoppedForReplacement = true
-                    },
-                    killSwitchStatus: killSwitchStatus
-                )
-            } catch {
-                LocalTrafficAudit.shared.recordEvent(
-                    "helper_upgrade_preflight_failed",
-                    details: ["error": error.localizedDescription]
-                )
-                throw HelperInstallError.installFailed(
-                    "The previous network helper could not stop the core and "
-                        + "retain firewall protection safely. "
-                        + error.localizedDescription
-                )
-            }
+            )
         }
 
         guard let helperSource = Bundle.main.url(forResource: "tono-core-helper", withExtension: nil),
               let mihomoSource = Bundle.main.url(forResource: "sing-box", withExtension: nil) else {
             throw HelperInstallError.resourceNotFound
-        }
-
-        if installedVersion != nil, !daemonRejected {
-            if attemptSilentUpgrade(
-                helperSource: helperSource,
-                mihomoSource: mihomoSource,
-                preparationStartedAt: preparationStartedAt
-            ) {
-                upgradeSucceeded = true
-                return
-            }
-        }
-
-        // A caller that did not ask for a repair stops before the prompt
-        // (MAC3-ADD-F1). Connect and Restore internet own the prompt; if Core
-        // was stopped for this upgrade, the deferred cleanup releases PF.
-        guard administratorPrompt else {
-            LocalTrafficAudit.shared.recordEvent(
-                "helper_administrator_prompt_withheld",
-                details: [
-                    "installed_version": installedVersion
-                        ?? (daemonRejected ? "rejected_client" : "unavailable"),
-                    "expected_version": helperVersion,
-                ]
-            )
-            if daemonRejected { throw HelperIPCError.forbidden }
-            throw HelperInstallError.installFailed(
-                "The network helper needs administrator approval, which only Connect or Restore internet asks for."
-            )
         }
 
         try verifyEmbeddedExecutable(
@@ -464,6 +400,169 @@ nonisolated struct HelperManager {
             ]
         )
         throw HelperInstallError.installFailed(String(localized: "The authenticated helper did not start."))
+    }
+
+    /// The effects of the replacement step, injectable so a test drives the
+    /// whole preparation and its abandoned-upgrade cleanup.
+    struct ReplacementOperations {
+        var restoreDNS: () throws -> Void
+        var stopCore: () throws -> Void
+        var killSwitchStatus: () throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool)
+        /// The packaged helper and Core are present. Throws when not.
+        var checkResources: () throws -> Void
+        /// The prompt-free upgrade; true when it replaced the daemon.
+        var silentUpgrade: () -> Bool
+        var release = AbandonedUpgradeRelease()
+
+        static func live(preparationStartedAt: Date) -> ReplacementOperations {
+            ReplacementOperations(
+                restoreDNS: { _ = try HelperManager.restoreProtectedDNSIfConfigured() },
+                stopCore: { try HelperManager.stopCore() },
+                killSwitchStatus: { try HelperManager.killSwitchStatus() },
+                checkResources: {
+                    guard Bundle.main.url(forResource: "tono-core-helper", withExtension: nil) != nil,
+                          Bundle.main.url(forResource: "sing-box", withExtension: nil) != nil else {
+                        throw HelperInstallError.resourceNotFound
+                    }
+                },
+                silentUpgrade: {
+                    guard let helperSource = Bundle.main.url(forResource: "tono-core-helper", withExtension: nil),
+                          let mihomoSource = Bundle.main.url(forResource: "sing-box", withExtension: nil) else {
+                        return false
+                    }
+                    return HelperManager.attemptSilentUpgrade(
+                        helperSource: helperSource,
+                        mihomoSource: mihomoSource,
+                        preparationStartedAt: preparationStartedAt
+                    )
+                }
+            )
+        }
+    }
+
+    /// How an abandoned upgrade releases, injectable for the same test.
+    struct AbandonedUpgradeRelease {
+        var disarm: () throws -> Void = { try KillSwitchService.disarm() }
+        var refreshStatus: () -> KillSwitchService.StatusObservation = {
+            KillSwitchService.refreshStatus()
+        }
+        /// Read at cleanup time: the status query during the preparation
+        /// records a fault the helper reports (`protectedFault`).
+        var protectedFaultHeld: () -> Bool = { LocalNetworkDevicesSync.holdsProtectedFault }
+    }
+
+    /// Recover DNS and stop the Core before launchd replaces an
+    /// authenticated older helper, deliberately retaining any live PF state
+    /// (disarming here opened a direct-egress window for the whole
+    /// administrator prompt; the replacement restores the persisted PF state
+    /// at launch). Then try the prompt-free upgrade. A caller that did not
+    /// ask for a repair stops before the prompt (MAC3-ADD-F1). Returns
+    /// whether the daemon was replaced, and whether the Core was stopped so
+    /// the administrator path's cleanup covers it. Every throw first settles
+    /// the abandoned upgrade (`cleanUpAbandonedUpgrade`).
+    static func prepareReplacementBeforePrompt(
+        installedVersion: String?,
+        daemonRejected: Bool,
+        administratorPrompt: Bool,
+        operations: ReplacementOperations
+    ) throws -> (upgraded: Bool, coreStopped: Bool) {
+        var coreStopped = false
+        var settled = false
+        defer {
+            if !settled {
+                cleanUpAbandonedUpgrade(
+                    coreStopped: coreStopped,
+                    succeeded: false,
+                    operations: operations.release
+                )
+            }
+        }
+        if installedVersion != nil {
+            do {
+                try prepareAuthenticatedHelperForReplacement(
+                    restoreDNS: operations.restoreDNS,
+                    stopCore: {
+                        try operations.stopCore()
+                        coreStopped = true
+                    },
+                    killSwitchStatus: operations.killSwitchStatus
+                )
+            } catch {
+                LocalTrafficAudit.shared.recordEvent(
+                    "helper_upgrade_preflight_failed",
+                    details: ["error": error.localizedDescription]
+                )
+                throw HelperInstallError.installFailed(
+                    "The previous network helper could not stop the core and "
+                        + "retain firewall protection safely. "
+                        + error.localizedDescription
+                )
+            }
+        }
+        try operations.checkResources()
+        if installedVersion != nil, !daemonRejected, operations.silentUpgrade() {
+            settled = true
+            return (true, coreStopped)
+        }
+        // Connect and Restore internet own the prompt; if the Core was
+        // stopped for this upgrade, the cleanup above settles it.
+        guard administratorPrompt else {
+            LocalTrafficAudit.shared.recordEvent(
+                "helper_administrator_prompt_withheld",
+                details: [
+                    "installed_version": installedVersion
+                        ?? (daemonRejected ? "rejected_client" : "unavailable"),
+                    "expected_version": helperVersion,
+                ]
+            )
+            if daemonRejected { throw HelperIPCError.forbidden }
+            throw HelperInstallError.installFailed(
+                "The network helper needs administrator approval, which only Connect or Restore internet asks for."
+            )
+        }
+        settled = true
+        return (false, coreStopped)
+    }
+
+    /// Settles an upgrade that stopped the Core and did not replace the
+    /// daemon: release through Disconnect's path, as before. Not while an
+    /// A29 protected fault holds: then the block, the saved intent and the
+    /// DNS snapshot stay, the caller's error still surfaces, and only the
+    /// user's Disconnect or Restore internet releases.
+    static func cleanUpAbandonedUpgrade(
+        coreStopped: Bool,
+        succeeded: Bool,
+        operations: AbandonedUpgradeRelease = AbandonedUpgradeRelease()
+    ) {
+        guard shouldReleaseAfterAbandonedUpgrade(coreStopped: coreStopped, succeeded: succeeded) else {
+            return
+        }
+        guard !operations.protectedFaultHeld() else {
+            LocalTrafficAudit.shared.recordEvent("helper_upgrade_abandoned_fault_held")
+            return
+        }
+        do {
+            try operations.disarm()
+            LocalTrafficAudit.shared.recordEvent(
+                "helper_upgrade_abandoned_released"
+            )
+        } catch {
+            // A disarm reply can be lost after PF was released, just
+            // as on Disconnect; only a confirmed release clears intent.
+            if operations.refreshStatus()
+                == .confirmed(requiresProtectionRecovery: false) {
+                KillSwitchService.isArmed = false
+                LocalTrafficAudit.shared.recordEvent(
+                    "helper_upgrade_abandoned_released",
+                    details: ["disarm_error": error.localizedDescription]
+                )
+            } else {
+                LocalTrafficAudit.shared.recordEvent(
+                    "helper_upgrade_abandoned_release_failed",
+                    details: ["error": error.localizedDescription]
+                )
+            }
+        }
     }
 
     static func shouldReleaseAfterAbandonedUpgrade(

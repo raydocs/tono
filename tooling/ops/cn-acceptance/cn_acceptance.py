@@ -59,7 +59,8 @@ HEALTH_PATH = "/api/v1/health"
 # apps/windows/app/src-tauri/src/tono/bootstrap.rs API_BOOTSTRAP_IPS, apps/macos Info.plist.
 PINNED = ("104.20.26.170", "172.66.162.98")
 # bootstrap.rs API_RELAYS, apps/macos/Tono/Services/ControlPlanePath.swift, docs/ops/api-relay.md.
-RELAYS = (("Westwood", "179.253.233.220", 2053), ("Mesa", "179.255.154.17", 2053))
+RELAYS = (("Westwood", "179.253.233.220", 2053), ("Mesa", "179.255.154.17", 2053),
+          ("Arosscloud", "154.84.56.196", 2053))
 # What the clients fetch to look for an update:
 #   apps/windows/service/src/update_wire.rs DISCOVERY_URL and
 #   apps/macos/Tono/Services/NativeUpdateDownload.swift origin + "latest/manifest.json";
