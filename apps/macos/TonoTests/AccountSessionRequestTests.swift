@@ -401,6 +401,70 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertTrue(message?.contains("relay") == true, "the error names the relays: \(message ?? "nil")")
     }
 
+    /// Decision 089: the third relay (Los Angeles, another provider) comes after
+    /// the two DMIT relays, and a walk whose first two relays fail still
+    /// dials it inside the walk's bounded connect budget. The two closed
+    /// loopback ports stand in for the dead DMIT relays; the listener stands
+    /// in for the third and only has to see the connection arrive.
+    func testTheThirdRelayIsDialedAfterTheFirstTwoFail() async throws {
+        let production = try XCTUnwrap(URL(string: "https://api.afk.ccwu.cc"))
+        XCTAssertEqual(
+            ControlPlanePath.relayEndpoints(for: production)?.endpoints.map(\.description),
+            ["179.253.233.220:2053", "179.255.154.17:2053", "154.84.56.196:2053"]
+        )
+        XCTAssertEqual(PinnedControlPlaneExchange.relayWalkBudget(3), 15, "5 s per relay, 15 s for the walk")
+
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        let listener = try NWListener(using: parameters)
+        let queue = DispatchQueue(label: "net.tono.tests.third-relay")
+        let ready = expectation(description: "third relay listens")
+        let dialed = expectation(description: "third relay is dialed")
+        dialed.assertForOverFulfill = false
+        listener.stateUpdateHandler = { state in
+            if case .ready = state { ready.fulfill() }
+        }
+        listener.newConnectionHandler = { connection in
+            dialed.fulfill()
+            connection.cancel()
+        }
+        defer {
+            listener.stateUpdateHandler = nil
+            listener.newConnectionHandler = nil
+            listener.cancel()
+        }
+        listener.start(queue: queue)
+        await fulfillment(of: [ready], timeout: 3)
+        let port = try XCTUnwrap(listener.port?.rawValue)
+
+        let started = Date()
+        var detail = ""
+        do {
+            _ = try await PinnedControlPlaneExchange.send(
+                URLRequest(url: production.appendingPathComponent("api/v1/health")),
+                label: "relay",
+                host: "api.afk.ccwu.cc",
+                endpoints: [
+                    ControlPlaneEndpoint(address: "127.0.0.1", port: 1),
+                    ControlPlaneEndpoint(address: "127.0.0.1", port: 2),
+                    ControlPlaneEndpoint(address: "127.0.0.1", port: port),
+                ],
+                connectBudget: 3,
+                userAgent: "Tono/test",
+                maximumResponseBytes: 1024
+            )
+            XCTFail("a listener that closes before TLS cannot answer")
+        } catch let error as URLError {
+            detail = error.localizedDescription
+        }
+        await fulfillment(of: [dialed], timeout: 1)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 4.5, "the walk stays inside its connect budget")
+        let first = try XCTUnwrap(detail.range(of: "127.0.0.1:1 "), detail)
+        let second = try XCTUnwrap(detail.range(of: "127.0.0.1:2 "), detail)
+        let third = try XCTUnwrap(detail.range(of: "127.0.0.1:\(port) "), detail)
+        XCTAssertTrue(first.lowerBound < second.lowerBound && second.lowerBound < third.lowerBound, detail)
+    }
+
     /// Decision 077: when the system resolver and the pinned addresses both
     /// fail before any request byte is sent, the request goes to the Tono
     /// relay outside Cloudflare, exactly once (a sign-in POST), and the relay

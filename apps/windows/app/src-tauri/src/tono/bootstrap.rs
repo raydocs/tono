@@ -33,9 +33,12 @@ pub const API_HOST: &str = "api.afk.ccwu.cc";
 /// `api.afk.ccwu.cc` and `releases.afk.ccwu.cc` and passes the bytes to the
 /// Cloudflare edge: TLS is not terminated there, so the client still validates
 /// Cloudflare's certificate for the hostname, and the relay sees what any router
-/// on the path sees. Two nodes on different hosts (Westwood, Mesa), so one node
-/// going down does not take the fallback with it; the API transport and the
-/// updater both walk them in this order. They are
+/// on the path sees. Two DMIT nodes on different hosts (Westwood, Mesa), so one
+/// node going down does not take the fallback with it, then a third on another
+/// provider and network (Arosscloud, AS400619; decision 089), so one provider going
+/// down does not either. The API transport and the updater both walk them in this
+/// order, `transport::RELAY_CONNECT_TIMEOUT` each. Appended last: a remembered relay
+/// is an index into this list, so the first two keep theirs. They are
 /// for the customer whose ISP cannot carry a TLS session to Cloudflare at all
 /// (China Mobile → anycast, 2026-10-10): for that customer the pins, the system
 /// resolver, DoH and the alternate ports all land on the same broken path.

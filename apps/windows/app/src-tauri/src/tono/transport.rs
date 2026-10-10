@@ -1898,7 +1898,7 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
         );
     }
 
-    /// Decision 089: the third compiled relay (San Jose, another provider) comes after the two
+    /// Decision 089: the third compiled relay (Los Angeles, another provider) comes after the two
     /// DMIT relays, and a request whose first two relays fail provably undelivered reaches it.
     /// Two refused loopback ports stand in for the dead DMIT relays.
     #[tokio::test]
@@ -1908,7 +1908,7 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             vec![
                 std::net::SocketAddr::from(([179, 253, 233, 220], 2053)),
                 std::net::SocketAddr::from(([179, 255, 154, 17], 2053)),
-                std::net::SocketAddr::from(([38, 14, 195, 144], 2053)),
+                std::net::SocketAddr::from(([154, 84, 56, 196], 2053)),
             ],
             "the third relay is appended after the two DMIT relays"
         );

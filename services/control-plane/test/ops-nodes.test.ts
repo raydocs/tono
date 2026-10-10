@@ -147,7 +147,7 @@ describe('ops nodes identity', () => {
         checkedAt: null, latencyMs: null, error: null, okSince: null, failingSince: null,
       },
       {
-        name: 'San Jose · Uscloud', host: '38.14.195.144', port: 2053, ok: null,
+        name: 'Los Angeles · Arosscloud', host: '154.84.56.196', port: 2053, ok: null,
         checkedAt: null, latencyMs: null, error: null, okSince: null, failingSince: null,
       },
     ]);

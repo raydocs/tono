@@ -1,24 +1,26 @@
-## 2026-10-10 · 第三个 API 中继（San Jose · Uscloud，另一家服务商）
-- 归属：运维计划 [docs/ops/plan-2026-09-11.md](../ops/plan-2026-09-11.md)（API 中继，决定 077 的补充
-  [089](../decisions/089-2026-10-10-third-api-relay-other-provider.md)；所有者 2026-10-10 经 Puck 批准）；macOS
-  `apps/macos/Tono/Services/ControlPlanePath.swift`，Windows `apps/windows/app/src-tauri/src/tono/bootstrap.rs`，
-  控制面 `services/control-plane/src/api-relays.ts`，运维手册 `docs/ops/api-relay.md`。
-- 来源：基线 3d973f95（main）→ 分支 `amp/third-api-relay`；草稿 PR；未合 main。外部验收通过前不合并。
-- 缺陷修复：无。
-- 新增/优化：中继列表在两台 DMIT（Westwood、Mesa）之后追加第三台 38.14.195.144:2053（Uscloud AS402169，San Jose；
-  不同服务商/ASN/城市，非出口节点）；三端顺序一致，第三台排最后。控制面 cron TCP 探测与运维台「API 中继」卡片多一行；
-  该主机无出口节点 token，`exitNodeId` 为空，不接受端到端上报，告警只看 TCP。macOS API 请求的中继连接预算由
-  「全部中继共 5 s」改为「每个中继 5 s」（三台共 15 s，与更新包下载一致）；Windows 仍每个 4 s（共 12 s）。
-  WFP/PF 放行表不变。
-- 工程与测试：新增 XCTest `testTheThirdRelayIsDialedAfterTheFirstTwoFail`、Rust `#[test]`
-  `the_third_relay_carries_the_request_after_the_first_two_fail`；更新 `NativeUpdateDownloadTests` 中继标签顺序、
-  `ops-nodes.test.ts` 中继列表。
-- 验证：Linux orb，`services/control-plane` `npx vitest run test/ops-nodes.test.ts test/api-relays.test.ts
-  test/ops-verdict-run.test.ts test/ops-api.test.ts`：4 files / 64 tests passed；`npm run typecheck` exit 0。
-  macOS XCTest、Windows `cargo test` 仅 hosted CI（ci-gate），本机未执行。节点侧（协调会话 2026-10-10 部署）：节点本机
-  验证通过；外部 Globalping TCP 2053 美/德/中 100% 丢包（443 正常），服务商网络防火墙未放行 2053，待所有者打开。
-- 候选：仅源码，无新候选。客户端要等下一次客户端发布才带上第三台；Worker 探测与卡片在下一次控制面部署后生效。
-- 剩余限制：外部验收（允许的 SNI TLS + `/api/v1/health` 200 经 38.14.195.144:2053；未知/缺失 SNI 被拒）未完成；
-  第三台无端到端监控（需要中继专用凭据）；节点的 `limit_conn`/systemd 限额不在规范配置文件中；macOS 只记住「relay」
-  不记哪一台，Westwood 宕机时已走中继的 Mac 每次请求最多多等 5 s。#1507（`ControlPlaneRelays.swift` 共享列表）
-  rebase 时必须包含第三台。
+## 2026-10-10 · 第三台 API 中继（非 DMIT 商家）与每台中继独立的连接预算
+- 归属：运维计划 [plan-2026-09-11](../ops/plan-2026-09-11.md)（控制面可达）；[决定 089](../decisions/089-2026-10-10-third-api-relay-other-provider.md)
+  （修订 077）；发现 [API-RELAY-SAME-PROVIDER](../findings.d/API-RELAY-SAME-PROVIDER.md)。不是 ship gate；是否进 0.0.75 由所有者另定。
+- 来源：分支 `amp/third-api-relay`（[#1538](https://github.com/raydocs/tono/pull/1538)），合并 main `2ad39dba` 后改为新节点。
+- 新增/优化：
+  - 中继列表在两台 DMIT（Westwood、Mesa）之后追加第三台 **154.84.56.196:2053**（AROSSCLOUD AS400619，洛杉矶）：
+    macOS `ControlPlaneRelays.swift`（app 与特权 helper 共用，helper 4.52.46 → 4.52.47，`CONTRACT.sha256` 重算）、
+    Windows `service/src/lib.rs` `API_RELAYS`（WFP rule C 多一条同形状放行，`FILTER_NAMESPACE` v14 → v15 `…9e0e…`）、
+    控制面 `api-relays.ts`、`cn_acceptance.py`、[api-relay.md](../ops/api-relay.md)。原选 38.14.195.144（Uscloud）入站 2053 被商家挡住，弃用。
+  - macOS API 交换的中继连接预算改为每台 5 s（三台 15 s，`relayWalkBudget`），不再三台共用 5 s。
+  - 中继规范配置加单地址并发上限 `limit_conn 256`；`apply-relay.sh` 在发行版已经加载 stream 模块时不再重复 `load_module`，并在缺 `logrotate` 时安装它（否则日志无上限）。
+  - 控制面测试统一 mock `cloudflare:sockets`，任何测试都不再真的连网络。
+- 节点（所有者经 Puck 批准，仅 2053 SNI 透传中继，2026-10-10 20:16 UTC）：Debian 13，安装 nginx / libnginx-mod-stream / logrotate
+  时用 `policy-rc.d` 拦住自动启动并删除默认站点（80 从未监听），再跑规范 `apply-relay.sh`。之后只有 sshd 与 2053 在监听。
+  回滚 `/root/tono-relay-rollback.sh`。未改防火墙、SSH、443，未部署出口。
+- 工程与测试：macOS `testTheThirdRelayIsDialedAfterTheFirstTwoFail`；helper 自测的中继规则、列表与状态处置期望改为三台；
+  Windows `the_third_relay_carries_the_request_after_the_first_two_fail` 与 WFP 中继放行固定表；`test_relay_stream_conf.py`
+  加 `test_one_address_cannot_hold_more_than_256_relay_sessions`。
+- 验证（2026-10-10）：节点本机经 2053 用 SNI `api.afk.ccwu.cc` 访问 `/api/v1/health` 200（证书校验通过），`releases.afk.ccwu.cc`
+  握手成功（v1 清单未发布，404 符合预期）；陌生 SNI（www.npmjs.com、example.com）与无 SNI 均在握手前被关闭；从 orb 外部经
+  154.84.56.196:2053 health 200；Globalping TCP 2053：电信、联通、移动 7 个探点 0 % 丢包、136–177 ms。本机 Linux：中继与 cn-acceptance
+  Python 测试通过；Swift、Windows cargo 以托管 CI 为准。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：与 DMIT 同在洛杉矶（约 1 ms），区域级事故仍可能三台同时失效；国内家宽未实测（Globalping 为机房/骨干探点）；
+  该主机无出口代理凭据，端到端探测不上报，只有 TCP 可达探测；Windows 启动恢复（30 s）在 Cloudflare 路径全断且两台 DMIT 都不可用时，
+  第三台约 28 s 才轮到，可能来不及完成两次请求；DMIT 两台节点仍跑不含 `limit_conn` 的旧规范文件，需另行批准后再 `apply-relay.sh`。

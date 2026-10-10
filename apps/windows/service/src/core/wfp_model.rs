@@ -87,8 +87,9 @@ pub const MAX_API_HOST_IPS: usize = 8;
 /// and non-public servers (#345); v12: `…9e0b…` intent-floor loopback/DHCP/NDP permits
 /// persistent alongside the block-alls; v13: `…9e0c…` local-network permits while locked,
 /// never on the DNS ports and never for the core (decision 048); v14: `…9e0d…` the Tono API
-/// relays in the app-scoped bootstrap API channel (decision 090).)
-const FILTER_NAMESPACE: u128 = 0x2f7c_9e0d_0000_4a6c_0000_0000_0000_0000;
+/// relays in the app-scoped bootstrap API channel (decision 090); v15: `…9e0e…` a third
+/// API relay, 154.84.56.196:2053, in that channel (decision 089).)
+const FILTER_NAMESPACE: u128 = 0x2f7c_9e0e_0000_4a6c_0000_0000_0000_0000;
 
 const fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
@@ -1406,7 +1407,7 @@ mod tests {
         // Upgrade safety: the key-only diff adopts anything with a matching key, so the
         // namespace must change whenever the rule tables do. Pin the current marker (see the
         // constant's doc comment); any rule-table change must bump it and this pin.
-        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e0d_0000_4a6c);
+        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e0e_0000_4a6c);
     }
 
     #[test]
@@ -2315,6 +2316,7 @@ mod tests {
             [
                 (std::net::Ipv4Addr::new(179, 253, 233, 220), 2053),
                 (std::net::Ipv4Addr::new(179, 255, 154, 17), 2053),
+                (std::net::Ipv4Addr::new(154, 84, 56, 196), 2053),
             ]
         );
         for mode in [
