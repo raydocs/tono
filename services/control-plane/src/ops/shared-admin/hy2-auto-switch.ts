@@ -6,7 +6,7 @@ import {
   hy2Override,
   resolveHy2AutoSwitch,
 } from '../../hy2-auto-switch';
-import { opsAuditStatement } from '../../product-account';
+import { opsAuditStatement, opsAuditStatementFrom } from '../../product-account';
 import { rejectUnexpectedKeys, body } from '../../request';
 
 /**
@@ -70,10 +70,10 @@ export async function hy2AutoSwitchResource(
   if (b.override !== undefined && b.override !== null && b.override !== 'on' && b.override !== 'off') {
     throw new ApiError(400, 'VALIDATION_ERROR', 'override must be on, off or null');
   }
-  // Existence check (404) and the "from" half of the audit line. The write
-  // itself sets only the fields this request names, in SQL, so two concurrent
-  // partial PUTs cannot restore each other's stale value.
-  const before = await accountView(e, userId);
+  // Existence check (404). The write sets only the fields this request names,
+  // in SQL, so two concurrent partial PUTs cannot restore each other's stale
+  // value; and the "was" half of the audit line is read inside the same batch.
+  await accountView(e, userId);
   const setInternal = b.internalAccount !== undefined;
   const internalValue = b.internalAccount === true ? 1 : 0;
   const setOverride = b.override !== undefined;
@@ -82,22 +82,40 @@ export async function hy2AutoSwitchResource(
     setInternal ? `internal ${b.internalAccount ? 'yes' : 'no'}` : null,
     setOverride ? `override ${overrideValue ?? 'default'}` : null,
   ].filter((part): part is string => part !== null).join('; ');
-  const [update] = await e.DB.batch([
+  // Rows this request would change. The audit INSERT runs first in the batch
+  // against the same predicate, so it sees the pre-update row in the same
+  // transaction (SQLite's RETURNING yields only new values) and writes
+  // nothing when the UPDATE is a no-op.
+  const willChange = `users.id = ?
+         AND ((? AND users.internal_account != ?) OR (? AND users.hy2_auto_switch IS NOT ?))`;
+  const willChangeBinds = [
+    userId, setInternal ? 1 : 0, internalValue, setOverride ? 1 : 0, overrideValue,
+  ];
+  const [, update] = await e.DB.batch([
+    opsAuditStatementFrom(
+      e, actorEmail, 'user.hy2-auto-switch', 'user', userId,
+      `set ${changed}; auto-switch was `,
+      // resolveHy2AutoSwitch in SQL, over the pre-update row.
+      `CASE users.hy2_auto_switch WHEN 'off' THEN 'off' WHEN 'on' THEN 'on'
+         ELSE CASE WHEN COALESCE(settings.all_accounts, 0) = 1 OR users.internal_account = 1
+                   THEN 'on' ELSE 'off' END
+       END`,
+      {
+        sql: `FROM users
+              LEFT JOIN hy2_auto_switch_settings settings ON settings.singleton_id = 1
+              WHERE ${willChange}`,
+        binds: willChangeBinds,
+      },
+    ),
     e.DB.prepare(
       `UPDATE users SET
          internal_account = CASE WHEN ? THEN ? ELSE internal_account END,
          hy2_auto_switch = CASE WHEN ? THEN ? ELSE hy2_auto_switch END,
          updated_at = ?
-       WHERE id = ?
-         AND ((? AND internal_account != ?) OR (? AND hy2_auto_switch IS NOT ?))`,
+       WHERE ${willChange}`,
     ).bind(
-      setInternal ? 1 : 0, internalValue, setOverride ? 1 : 0, overrideValue, now(), userId,
-      setInternal ? 1 : 0, internalValue, setOverride ? 1 : 0, overrideValue,
-    ),
-    opsAuditStatement(
-      e, actorEmail, 'user.hy2-auto-switch', 'user', userId,
-      `set ${changed}; auto-switch was ${before.effective ? 'on' : 'off'}`,
-      true,
+      setInternal ? 1 : 0, internalValue, setOverride ? 1 : 0, overrideValue, now(),
+      ...willChangeBinds,
     ),
   ]);
   // The answer rides the catalog response, so ask this account's devices

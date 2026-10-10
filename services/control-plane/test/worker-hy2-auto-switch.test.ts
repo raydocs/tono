@@ -94,6 +94,10 @@ describe('hy2 auto-switch', () => {
     expect(audit.results.map((row) => row.action).sort()).toEqual([
       'hy2-auto-switch.global', 'user.hy2-auto-switch', 'user.hy2-auto-switch', 'user.hy2-auto-switch',
     ]);
+    // "was" is read inside the write batch: global on but override off still reads "was off".
+    expect((await (env as unknown as Env).DB.prepare(
+      "SELECT summary FROM ops_audit WHERE action = 'user.hy2-auto-switch' AND target_id = ? AND summary LIKE 'set internal%'",
+    ).bind(pinnedOff.user.id).first<{ summary: string }>())?.summary).toBe('set internal yes; auto-switch was off');
     // No ` · hy2` block left in what is served → no permission, even when switched on.
     const tcpOnly = CATALOG.slice(0, CATALOG.indexOf('  - name: Tokyo · Sakura · hy2'));
     expect((await admin('exit-catalog', { yaml: tcpOnly, expectedRevision: 1 }, 'PUT')).status).toBe(200);
