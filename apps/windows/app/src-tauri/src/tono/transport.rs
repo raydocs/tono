@@ -1760,6 +1760,7 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             tunnel_port: std::sync::atomic::AtomicU16::new(0),
             relays: Vec::new(),
             preferred_relay: std::sync::atomic::AtomicUsize::new(0),
+            path_failure_sink: None,
         };
         let store = std::sync::Arc::new(MemoryCredentialStore::new());
         store.set_refresh_token("refresh-1").unwrap();
@@ -1790,6 +1791,7 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             tunnel_port: std::sync::atomic::AtomicU16::new(0),
             relays: Vec::new(),
             preferred_relay: std::sync::atomic::AtomicUsize::new(0),
+            path_failure_sink: None,
         };
         let get = || ApiRequest {
             method: HttpMethod::Get,
