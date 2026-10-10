@@ -145,14 +145,8 @@ export interface CustomerDeviceDto {
   lastFailAt: number | null;
   lastFailCode: string | null;
   lastFailNode: string | null;
-  /**
-   * The transport that carried the device's last sign-in, refresh or catalog
-   * fetch (`X-Tono-Path`: pinned, system_dns, relay, doh, alt_port, tunnel),
-   * and when it was stamped. Null for builds that do not send it. A relayed
-   * request's edge ASN names the exit node, so this is the path's only truth.
-   */
-  clientPath: string | null;
-  clientPathAt: number | null;
+  /** `X-Tono-Path` of the last sign-in/refresh/catalog fetch and when stamped; null for older builds. */
+  clientPath: string | null; clientPathAt: number | null;
 }
 
 /** 待办 rows. Always the `rem` tone, never an incident, never a colour decision. */
@@ -370,8 +364,7 @@ export function assertCustomerDevice(value: unknown, path = 'device'): CustomerD
     lastFailAt: optInt(row, path, 'lastFailAt'),
     lastFailCode: optText(row, path, 'lastFailCode'),
     lastFailNode: optText(row, path, 'lastFailNode'),
-    clientPath: optText(row, path, 'clientPath'),
-    clientPathAt: optInt(row, path, 'clientPathAt'),
+    clientPath: optText(row, path, 'clientPath'), clientPathAt: optInt(row, path, 'clientPathAt'),
   };
 }
 
