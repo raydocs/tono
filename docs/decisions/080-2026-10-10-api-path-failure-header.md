@@ -17,3 +17,5 @@
   a node's ASN is never attributed to a customer; the rate is unknown rather than optimistic when nobody reports;
   the five-minute catalog poll adds no write; the header widens nothing a client is allowed to do.
 - Applied in: PR #1490, branch `amp/a8-asn-path-success` (backlog A8), `GET /api/v1/ops/api-paths` (`nodes.read`).
+  Clients: branch `amp/a8b-path-failed-header` (macOS `TonoAPIClient.exchangeOverPaths`, Windows
+  `TonoTransport::send`), the header on every control-plane attempt, scoped to one path walk.

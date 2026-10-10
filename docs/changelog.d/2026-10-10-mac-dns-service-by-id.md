@@ -1,0 +1,12 @@
+## 2026-10-10 · macOS helper 受保护 DNS 按服务 ID 定位（R3-O5）
+- 归属：ops 任务（[运维计划](../ops/plan-2026-09-11.md)；backlog A12，[amp-backlog-2026-10-10](../ops/amp-backlog-2026-10-10.md)）；macOS 特权 helper 受保护 DNS。
+- 来源：`main` 4e373f06 → 分支 `amp/a12-dns-service-by-id`（457773ff），[#1473](https://github.com/raydocs/tono/pull/1473)；未合 main。
+- 缺陷修复：`/dns/enable` 只收到服务显示名，helper 从 `SCNetworkServiceCopyAll` 里取第一个同名服务；该列表包含所有 Network Location 的服务副本，多个 Location 都有「Wi-Fi」时可能把 127.0.0.1 写进未使用 Location 的副本，活动的 Wi-Fi 仍用局域网解析器。现在 helper 只在当前 Location（`SCNetworkSetCopyCurrent`）的服务里按名字找，IPv4/IPv6 `PrimaryService`（App 取名字的同一来源）优先；仍匹配两个以上且主服务不在其中时拒绝，在任何 DNS 读写之前失败（原有「无法识别服务」错误）。之后的读写、快照、恢复、清扫、状态都按记录的服务 ID，未改。
+- 新增/优化：无。IPC 请求不变（仍只有 `service`），无新特权命令，PF 规则不变。
+- 工程与测试：纯选择逻辑放在 `apps/macos/Tono/Core/ProtectedDNSServiceIdentity.swift`，App 与 helper 共用（加入 `build-core-helper.sh` 清单）；一个 XCTest `ProtectedDNSServiceSelectionTests.testDNSEnableTargetsTheServiceIDNotTheFirstSameNamedService`。helper 4.52.43 → 4.52.44，`CONTRACT.sha256` 同步；`apps/macos/scripts/test_build_source.py` 的 helper 清单副本加入新文件。
+- 验证：Linux 上 `sh tooling/scripts/test-core-helper-contract-guard.sh` → `PASS build-core-helper contract guard`；用假 `xcrun` 跑 `build-core-helper.sh`，契约守卫通过并到达编译（退出 73）；`python3 apps/macos/scripts/test_build_source.py` → `Ran 2 tests … OK`。Swift 编译、XCTest、helper 自测由托管 macOS CI 执行，本机未执行。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：未实机验证（多 Location 同名服务的 Mac）。旧版仅名字的快照与 `networksetup` 回退路径仍按名字定位（只用于恢复，行为未改）。
+- 续记 2026-10-10（独立复核 MINOR 一轮修正）：位置过滤移入共享纯函数，`select` 收全部服务与当前 Location 成员 ID，XCTest 覆盖另一 Location 的同名服务（排在前面或被当作主服务时）都不会被选中；helper 行为不变，仍为 4.52.44，`CONTRACT.sha256` 同步。枚举 System Configuration 的那层（`SCNetworkServiceCopyAll` / `SCNetworkSetCopyServices`）不在 XCTest 内。
+- 续记 2026-10-10（独立复核 MAJOR 修正）：旧版仅名字快照（无 `serviceID`）不再被当作同一服务：`enable` 先按旧语义退休它，再给选中服务取带 ID 的新快照后才写 127.0.0.1；退休与 restore 对同名的所有服务（跨 Location，按 ID 排序，不依赖 Set 顺序）逐一处理：仍是 127.0.0.1 或等于快照值的写回快照值，其它服务自己的 DNS 不动；全部都是外来值才归档为 superseded。带 ID 快照的行为不变。新增 helper 自测 `runLegacySameNamedRestoreSelfTest`（在 `--self-test` 内）；这段逻辑只在 helper 里，XCTest 覆盖不到。
+- 续记 2026-10-10（第二次复核 MAJOR：撤回旧快照迁移）：上一轮对旧版仅名字快照的退休/恢复改动全部撤回，退休、恢复、`isSameService`、`reenableSameOwner` 与 main 完全一致。改为门控：磁盘上已有无 `serviceID` 的旧快照时，`enable` 仍用旧的跨 Location 首个同名匹配，之后各步与 main 相同（零行为变化）；只有无快照或快照带 ID 时才走新的当前 Location 选择。快照读出 `.system` 错误时 `enable` 拒绝（不猜），损坏快照照旧隔离。这类设备上 R3-O5 仍未修复，直到一次正常断开把旧快照退休，下次连接才记录 ID。helper 自测改为 `runLegacySnapshotLookupSelfTest`（旧快照 → 旧查找；带 ID/无快照 → 新查找）。

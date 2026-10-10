@@ -100,6 +100,9 @@ final class AccountSession {
     let sidecar: TonoSidecarService
     let descriptorConsumer: @MainActor (TonoTransportDescriptor?) async -> Void
     let catalogConsumer: @MainActor (TonoExitCatalogResponse) async throws -> Void
+    /// A 2xx exit-catalog answer whose body did not decode (A17: it grants no
+    /// hy2 auto-switch either).
+    let catalogUndecodableConsumer: @MainActor () -> Void
     let trafficPolicyConsumer: @MainActor (TonoTrafficPolicyResponse) async throws -> Int
     let cloudFallbackPreferred: @MainActor () -> Bool
     let cloudFallbackConsumer: @MainActor (Bool) throws -> Void
@@ -284,6 +287,7 @@ final class AccountSession {
          exitNode: String = Bundle.main.object(forInfoDictionaryKey: "TonoExitNode") as? String ?? "",
          descriptorConsumer: @escaping @MainActor (TonoTransportDescriptor?) async -> Void,
          catalogConsumer: @escaping @MainActor (TonoExitCatalogResponse) async throws -> Void = { _ in },
+         catalogUndecodableConsumer: @escaping @MainActor () -> Void = {},
          trafficPolicyConsumer: @escaping @MainActor (TonoTrafficPolicyResponse) async throws -> Int = { $0.revision },
          cloudFallbackPreferred: @escaping @MainActor () -> Bool = { false },
          cloudFallbackConsumer: @escaping @MainActor (Bool) throws -> Void = { _ in },
@@ -360,6 +364,7 @@ final class AccountSession {
         self.exitNode = exitNode
         self.descriptorConsumer = descriptorConsumer
         self.catalogConsumer = catalogConsumer
+        self.catalogUndecodableConsumer = catalogUndecodableConsumer
         self.trafficPolicyConsumer = trafficPolicyConsumer
         self.cloudFallbackPreferred = cloudFallbackPreferred
         self.cloudFallbackConsumer = cloudFallbackConsumer

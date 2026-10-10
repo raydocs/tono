@@ -1,6 +1,22 @@
 // API 中继：Tono 自有的 API 中继端口还开着吗（决策 077）。
 
-import { arrayOf, fields, int, optBool, optInt, optText, text } from './checkers';
+import { arrayOf, bool, fields, int, optBool, optInt, optText, text } from './checkers';
+
+/**
+ * The relay node's own last full HTTPS request through its local relay port to
+ * the API, certificate verification on (`tooling/ops/relay/relay-probe.py`).
+ * `observedAt` is when the node ran it; the console shows its age, so a node
+ * that stopped reporting reads as stale, not as up.
+ */
+export interface ApiRelayEndToEndDto {
+  ok: boolean;
+  observedAt: number;
+  httpStatus: number | null;
+  latencyMs: number | null;
+  error: string | null;
+  okSince: number | null;
+  failingSince: number | null;
+}
 
 /**
  * One compiled relay and the cron's last TCP check of it.
@@ -20,6 +36,8 @@ export interface ApiRelayDto {
   error: string | null;
   okSince: number | null;
   failingSince: number | null;
+  /** Absent until the relay node has reported once. */
+  endToEnd?: ApiRelayEndToEndDto;
 }
 
 export interface ApiRelaysDto {
@@ -27,8 +45,25 @@ export interface ApiRelaysDto {
 }
 
 const RELAY_KEYS = [
-  'name', 'host', 'port', 'ok', 'checkedAt', 'latencyMs', 'error', 'okSince', 'failingSince',
+  'name', 'host', 'port', 'ok', 'checkedAt', 'latencyMs', 'error', 'okSince', 'failingSince', 'endToEnd',
 ] as const;
+
+const END_TO_END_KEYS = [
+  'ok', 'observedAt', 'httpStatus', 'latencyMs', 'error', 'okSince', 'failingSince',
+] as const;
+
+export function assertApiRelayEndToEnd(value: unknown, path = 'endToEnd'): ApiRelayEndToEndDto {
+  const row = fields(value, path, END_TO_END_KEYS);
+  return {
+    ok: bool(row, path, 'ok'),
+    observedAt: int(row, path, 'observedAt'),
+    httpStatus: optInt(row, path, 'httpStatus'),
+    latencyMs: optInt(row, path, 'latencyMs'),
+    error: optText(row, path, 'error'),
+    okSince: optInt(row, path, 'okSince'),
+    failingSince: optInt(row, path, 'failingSince'),
+  };
+}
 
 export function assertApiRelay(value: unknown, path = 'apiRelay'): ApiRelayDto {
   const row = fields(value, path, RELAY_KEYS);
@@ -42,6 +77,7 @@ export function assertApiRelay(value: unknown, path = 'apiRelay'): ApiRelayDto {
     error: optText(row, path, 'error'),
     okSince: optInt(row, path, 'okSince'),
     failingSince: optInt(row, path, 'failingSince'),
+    ...(row.endToEnd === undefined ? {} : { endToEnd: assertApiRelayEndToEnd(row.endToEnd, `${path}.endToEnd`) }),
   };
 }
 

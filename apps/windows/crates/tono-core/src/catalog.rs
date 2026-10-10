@@ -63,6 +63,12 @@ pub struct ExitCatalogResponse {
     /// the served routing.
     #[serde(rename = "routingSha256", default, skip_serializing_if = "Option::is_none")]
     pub routing_sha256: Option<String>,
+    /// A18 per-account permission for the same-node hy2 auto-switch
+    /// ([`crate::hy2_switch`]). Missing is `false`. Outside `sha256` and
+    /// `routingSha256`, so it is read from every 200, including an unchanged
+    /// install. A cached copy never turns the switch on.
+    #[serde(rename = "hy2AutoSwitch", default, skip_serializing_if = "std::ops::Not::not")]
+    pub hy2_auto_switch: bool,
 }
 
 /// Split-routing directives from `GET exit-catalog`: `homeProxy` names the
@@ -615,6 +621,7 @@ mod tests {
             updated_at: None,
             routing: None,
             routing_sha256: None,
+            hy2_auto_switch: false,
         }
     }
 

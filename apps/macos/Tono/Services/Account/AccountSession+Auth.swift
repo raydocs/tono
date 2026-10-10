@@ -73,6 +73,12 @@ extension AccountSession {
                         return
                     }
                 }
+                // Backlog A4 (D14-A): the sign-in screen is next. Handshake
+                // every control-plane path in the background, without
+                // identity, so the sign-in goes first to one that works. Not
+                // awaited: the screen does not wait for it. After any release
+                // above; a path PF still blocks just fails.
+                Task { [api] in await api.probePathsBeforeSignIn() }
                 state = .signedOut
                 await loadAuthMethods()
                 return
@@ -495,6 +501,10 @@ extension AccountSession {
                 return false
             } catch {
                 guard !Task.isCancelled, accountReadRevision == accountRevision else { return false }
+                // The client turns an undecodable 2xx body into `invalidResponse`.
+                if error as? TonoAPIClient.APIError == .invalidResponse {
+                    catalogUndecodableConsumer()
+                }
                 // Keep the last verified, mode-0600 cache. Catalog
                 // availability must never turn a temporary control-plane
                 // failure into a clearnet fallback or erase usable exits.

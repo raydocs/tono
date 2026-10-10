@@ -247,6 +247,10 @@ pub async fn tono_select_server(
         if catalog_sync::is_exit_blocked(&name) {
             return Err("this server is currently unavailable (network blocked)".to_string());
         }
+        // A17: any accepted hand pick of a node's block, including the row already
+        // selected, clears that node's automatic hy2 memory, so its next dial is the
+        // block the user picked.
+        connection::note_manual_selection(&mut inner, &name);
         let previous = inner.selected_node.clone();
         let changed = previous.as_deref() != Some(name.as_str());
         let cleared_choice = inner.catalog_requires_choice;

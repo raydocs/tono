@@ -132,7 +132,7 @@
 | R3-O2 | Windows 外层超时丢弃 restore future 时自写窗口提前关闭，自写通知被当外部变化 | fixed(f80951fb) | [#841](https://github.com/raydocs/tono/pull/841) | 低·推导 | 注册表写入在阻塞线程上另持一把自写窗口，直到写入返回；60 秒年龄上限仍会重新发布。异步调用方自己的 guard 超时仍会放下 |
 | R3-O3 | 无快照时把静态 DNS 改为 DHCP 的孤儿修复 | accepted-design | — | 低 | 有意取舍 |
 | R3-O4 | macOS `--emergency-disarm` 不先 bootout daemon，与在线 daemon 双写 | open | 待开 | 低·推导 | 观察项；操作员手动路径 |
-| R3-O5 | macOS 按名字取第一个网络服务，多 Network Location 同名时可能写错服务 | open | 待开 | 低·实机 | 观察项 |
+| R3-O5 | macOS 按名字取第一个网络服务，多 Network Location 同名时可能写错服务 | in-PR | [#1473](https://github.com/raydocs/tono/pull/1473) | 低·实机 | helper 4.52.44：`/dns/enable` 只在当前 Location 里按名字找，主服务 ID 优先，仍有歧义则拒绝；之后按 ID 读写。合入后改 fixed(<SHA>)；实机证据待补；磁盘上有旧版仅名字快照时 enable 仍走旧的首个同名匹配（与 main 相同），该设备要等一次正常断开退休旧快照后才生效 |
 | R3-O6 | Windows 卸载器在 owner lock 不可得且无 pid 文件时仍 disarm，可能与存活 Service 并发写 DNS | open | 待开 | 低·推导 | 观察项 |
 | R3-O7 | 无快照守卫只认 TUN 地址，旧版遗留 127.0.0.1 被当作用户本地解析器 | accepted-design | — | 低 | 有意取舍，源码有注释 |
 | X2-2 | Windows NRPT 漂移未计入受保护 DNS 健康状态 | fixed(d98b217d) | [#467](https://github.com/raydocs/tono/issues/467)，[#468](https://github.com/raydocs/tono/pull/468) | 中·实机 | 需实机 |
@@ -191,7 +191,7 @@
 | H17-G-F2 | Tailscale enrollment 关闭（生产配置）时吊销任务永不执行，带 tailnet 绑定设备的账户停用或销户后重新启用永远返回 409（= H17-O-F5） | fixed(3e64707e6) | [#522](https://github.com/raydocs/tono/issues/522)，[#523](https://github.com/raydocs/tono/pull/523)（409 不再永久），[#1442](https://github.com/raydocs/tono/pull/1442)（注册暂停时吊销任务照常执行） | 中·推导 | 2026-10-07 生产 D1 只读：0 台设备带 `tailscale_node_id`，1 条未完成吊销任务（设备行已不存在、从未尝试）。注册暂停时孤儿 pending 节点清扫仍不跑（新注册已被围栏；ephemeral 节点离线后由 Tailscale 自删）；token-admin 恢复路径不写审计 |
 | H17-C-F2 | 退款销户由多次独立提交组成，中途失败可留下「住宅线与产品账户已回收、VPN 仍有效」的账户 | fixed(61abd20b) | [#524](https://github.com/raydocs/tono/issues/524)，[#525](https://github.com/raydocs/tono/pull/525) | 中·推导 | 停用与全部回收是一个 `DB.batch`，停用在前；故障注入回归 `close reclaims nothing when disabling the account fails`。batch 之后的设备/会话撤销若失败，账户已停用，鉴权立即拒绝，cron 按「停用且仍有 live 设备/会话」补完。2026-10-07 核对 main，此行此前漏更新 |
 | H17-G-F5 | 同一设备再次登录或登出只作废当前会话，更早签发的 refresh token 仍然有效 | fixed | [#833](https://github.com/raydocs/tono/pull/833) | 中·已确认 | 同一设备的再次登录、refresh 与登出都会作废该设备其余未吊销会话；其他设备保持登录。refresh 有效期默认仍为 30 天 |
-| H17-C-F1 | 调低账户设备上限不会移除已超出上限的设备，直到有新设备登录（= H17-G-F1） | open | 待开 | 低·已确认 | 超出部分在下一次新设备登录时才按 LRU 轮换 |
+| H17-C-F1 | 调低账户设备上限不会移除已超出上限的设备，直到有新设备登录（= H17-G-F1） | in-PR | [#1487](https://github.com/raydocs/tono/pull/1487) | 低·已确认 | token-admin PATCH 调低上限时在同一事务里写上限并按 LRU 撤销超额设备 |
 
 ## 6. 客户端信任与账户隔离
 

@@ -161,6 +161,7 @@ export const customerCopy = {
     connectBegin: '开始连接',
     connectOk: '连上',
     connectFail: '没连上',
+    connectCancel: '取消连接',
     nodeSwitch: '换节点',
     connectCatalogFailover: '换线路',
     healthProbeFail: '探测没过',
@@ -175,6 +176,7 @@ export const customerCopy = {
     appCrash: '崩溃',
     networkRestore: '网络恢复',
     killSwitchFail: '断网保护失败',
+    controlPlanePathFail: '换路径',
   } as const,
   stageWord: {
     dial: '拨号',

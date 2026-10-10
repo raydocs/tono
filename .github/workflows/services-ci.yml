@@ -45,6 +45,8 @@ on:
       - services/**
       - ops-panel/**
       - tooling/scripts/remote/**
+      # The relay nodes' end-to-end probe script and its test.
+      - tooling/ops/relay/**
       - tooling/scripts/provision-tono-node.py
       - tooling/scripts/tests/test_provision_tono_node.py
       # The download-page check and its tests live here. Without these two the
@@ -187,6 +189,11 @@ jobs:
 
       - name: hy2 carrier and handshake probes
         run: python3 -m unittest discover -s tooling/ops/hy2 -p 'test_*.py'
+
+      - name: API relay end-to-end probe
+        # Default certificate verification is the point of the probe: an
+        # untrusted certificate through the relay must report a failure.
+        run: python3 tooling/ops/relay/test_relay_probe.py
 
   ops-contract:
     runs-on: ubuntu-24.04

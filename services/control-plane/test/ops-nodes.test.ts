@@ -121,11 +121,15 @@ describe('ops nodes identity', () => {
     expect(status?.verdict).toBe('ok');
   });
 
-  it('GET api-relays lists every compiled relay with its last probe, unprobed ones as null', async () => {
+  it('GET api-relays lists every compiled relay with its last probe and node report, unprobed ones as null', async () => {
     await db().prepare(
       `INSERT INTO api_relay_probes(relay, checked_at, ok, latency_ms, error, ok_since, failing_since)
        VALUES('179.253.233.220:2053', ?, 1, 142, NULL, ?, NULL)`,
     ).bind(NOW, NOW - 600).run();
+    await db().prepare(
+      `INSERT INTO api_relay_reports(relay, node_id, observed_at, received_at, ok, http_status, latency_ms, error, ok_since, failing_since)
+       VALUES('179.253.233.220:2053', 'los-angeles-westwood', ?, ?, 0, NULL, NULL, 'ssl: certificate verify failed', NULL, ?)`,
+    ).bind(NOW - 60, NOW - 59, NOW - 360).run();
     const res = await ops('api-relays');
     expect(res.status).toBe(200);
     const body = assertApiRelays(await res.json());
@@ -133,6 +137,10 @@ describe('ops nodes identity', () => {
       {
         name: 'Los Angeles · Westwood', host: '179.253.233.220', port: 2053, ok: true,
         checkedAt: NOW, latencyMs: 142, error: null, okSince: NOW - 600, failingSince: null,
+        endToEnd: {
+          ok: false, observedAt: NOW - 60, httpStatus: null, latencyMs: null,
+          error: 'ssl: certificate verify failed', okSince: null, failingSince: NOW - 360,
+        },
       },
       {
         name: 'Los Angeles · Mesa', host: '179.255.154.17', port: 2053, ok: null,

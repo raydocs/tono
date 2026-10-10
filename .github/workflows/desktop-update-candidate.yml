@@ -69,13 +69,22 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24
+      # The Windows build names its artifact after this package.json version (its
+      # verify-desktop-version gate pins it), so read it here instead of a literal.
+      - name: Read the Windows candidate version from the same source
+        id: windows-version
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./apps/windows/app/package.json').version")"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "invalid Windows version: $version" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: tono-macos-beta-${{ github.sha }}
           path: paired/macos
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: tono-windows-0.0.74-candidate-${{ github.sha }}
+          name: tono-windows-${{ steps.windows-version.outputs.version }}-candidate-${{ github.sha }}
           path: paired/windows
       - name: Assemble exact-source unsigned manifest and preserve both payloads
         env:
