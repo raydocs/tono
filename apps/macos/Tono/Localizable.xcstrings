@@ -8871,6 +8871,16 @@
           }
         }
       }
+    },
+    "Protection may still be on from an earlier session. If it is, it lets only Tono's fixed addresses through, so Tono's relays and every other route are blocked on this Mac. To sign in on this network, turn protection off with Restore internet: this Mac then uses its normal internet, unprotected, until you connect again. Tono does not turn protection off by itself.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一次会话的保护可能仍在生效。如果是这样，它只放行 Tono 固定地址，Tono 中继和其他路径在这台 Mac 上都被拦住。要在这个网络上登录，请用「恢复正常网络」关闭保护：这台 Mac 会改用普通网络、不受保护，直到你再次连接。Tono 不会自行关闭保护。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

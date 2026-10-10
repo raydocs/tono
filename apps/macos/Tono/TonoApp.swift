@@ -103,10 +103,14 @@ struct TonoApp: App {
             routeSplitConsumer: { appState.appTrafficLedger.cumulative },
             installedCatalogConsumer: { appState.installedManagedCatalogDigests },
             protectionUnconfirmedConsumer: { appState.isProtectionUnconfirmed },
-            gateProtectionHoldsConsumer: {
+            gateProtectionHoldConsumer: {
                 // AI recovery rules alone do not block Tono's relays.
-                guard !appState.isConnected, let notice = appState.gateProtectionNotice else { return false }
-                return notice != .selectiveRecovery
+                guard !appState.isConnected else { return .none }
+                switch appState.gateProtectionNotice {
+                case .blocking: return .blocking
+                case .unconfirmed: return .unconfirmed
+                case .selectiveRecovery, nil: return .none
+                }
             }
         )
         _accountSession = State(initialValue: accountSession)

@@ -770,7 +770,7 @@ final class AccountSessionRequestTests: XCTestCase {
             api: api, keychain: keychain, sidecar: TonoSidecarService(),
             descriptorConsumer: { _ in },
             killSwitchDisarmConsumer: { disarms.record() },
-            gateProtectionHoldsConsumer: { true }
+            gateProtectionHoldConsumer: { .blocking }
         )
         account.state = .signedOut
 
@@ -780,6 +780,9 @@ final class AccountSessionRequestTests: XCTestCase {
             return XCTFail("expected the sign-in error, got: \(account.state)")
         }
         XCTAssertTrue(message.contains(ControlPlaneUnreachable.protectedHint), message)
+        XCTAssertTrue(ControlPlaneUnreachable(attempts: [.init(path: "relay", failure: "connect")], stoppedEarly: false, detail: "")
+            .message(protection: .unconfirmed).contains(ControlPlaneUnreachable.unconfirmedProtectedHint),
+            "a barrier no helper answer confirmed is worded as one that may still be on")
         XCTAssertTrue(message.contains(ControlPlaneUnreachable.routeName("relay")), message)
         XCTAssertEqual(disarms.count, 0, "a failed sign-in never turns protection off")
     }
