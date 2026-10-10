@@ -267,12 +267,12 @@
     },
     "networkBlocked": {
       "title": "Internet is blocked",
-      "description": "Leak protection from the last session is still on and blocks this PC's internet, including Tono's relays, so sign-in cannot get through. To sign in, choose Restore network: it turns protection off, and this PC's traffic goes out directly, not through Tono, until you connect again.",
+      "description": "Protection keeps regular internet traffic blocked. You can sign in through Tono's relay routes without turning it off. Restore network is optional: it turns protection off and lets this PC's traffic go out directly until you connect again.",
       "restore": "Restore network",
       "restoring": "Restoring…",
-      "unverifiedDescription": "Tono cannot confirm whether leak protection from the last session is still on. To sign in, choose Restore network: it turns protection off, and this PC's traffic goes out directly, not through Tono, until you connect again.",
+      "unverifiedDescription": "Tono cannot confirm whether protection from the last session is still on. You can request a sign-in code through Tono's relay routes. Restore network explicitly turns protection off and lets this PC's traffic go out directly until you connect again; it is not required to request a code.",
       "stillRunningTitle": "Previous connection still running",
-      "stillRunningDescription": "The last session's tunnel is still carrying traffic. Restore network stops it."
+      "stillRunningDescription": "The last session's tunnel is still carrying traffic. Signing in with another account may stop that connection. Restore network stops it and turns protection off."
     },
     "errors": {
       "unreachable": "Tono couldn't reach its sign-in server from this network. Check that this PC is online, wait a minute, then retry. If it keeps failing, copy the details for support.",

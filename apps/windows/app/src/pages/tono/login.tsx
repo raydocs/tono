@@ -286,11 +286,11 @@ const LoginPage = () => {
   }, [codeSent])
 
   useEffect(() => {
-    if (!codeSent || verifying || internetBlocked) return
+    if (!codeSent || verifying) return
     if (!/^\d{6}$/.test(code) || autoSubmittedCodeRef.current === code) return
     autoSubmittedCodeRef.current = code
     void handleVerify()
-  }, [code, codeSent, handleVerify, internetBlocked, verifying])
+  }, [code, codeSent, handleVerify, verifying])
 
   const handleRetryRestore = useLockFn(async () => {
     setRetrying(true)
@@ -389,8 +389,8 @@ const LoginPage = () => {
         border: `1px solid ${TONO_COLORS.protectedOffline}4D`,
       }}
     >
-      {/* The card and its sign-in gate follow the fail-closed intent; the
-          "still blocked" claim needs the Service's live barrier. */}
+      {/* Protection still describes the Service's live barrier, not whether
+          relay-only sign-in is available. This UI does not release it to send. */}
       <span style={{ fontSize: 13, fontWeight: 650 }}>
         {previousTunnelRunning
           ? t('tono.login.networkBlocked.stillRunningTitle')
@@ -407,14 +407,13 @@ const LoginPage = () => {
       </span>
       <button
         type="button"
-        className="tono-button"
+        className="tono-link"
         style={{
-          width: '100%',
+          alignSelf: 'flex-start',
           padding: '9px 12px',
           fontSize: 13,
-          fontWeight: 600,
-          color: '#fff',
-          background: TONO_COLORS.protectedOffline,
+          fontWeight: 500,
+          color: text.secondary,
         }}
         onClick={handleRestoreInternet}
         disabled={restoringInternet}
@@ -723,12 +722,7 @@ const LoginPage = () => {
                 setAuthFailureSummary(null)
               }}
               disabled={
-                sending ||
-                sentAck ||
-                verifying ||
-                restoringInternet ||
-                internetBlocked ||
-                codeSent
+                sending || sentAck || verifying || restoringInternet || codeSent
               }
             />
           </label>
@@ -747,9 +741,7 @@ const LoginPage = () => {
                     : 'tono-button tono-action tono-progress-pill'
                 }
                 style={primaryButtonStyle}
-                disabled={
-                  sending || sentAck || restoringInternet || internetBlocked
-                }
+                disabled={sending || sentAck || restoringInternet}
               >
                 <span>
                   {sending
@@ -829,12 +821,7 @@ const LoginPage = () => {
                           }
                         : undefined
                     }
-                    disabled={
-                      sending ||
-                      verifying ||
-                      restoringInternet ||
-                      internetBlocked
-                    }
+                    disabled={sending || verifying || restoringInternet}
                   />
                 </div>
               </label>
@@ -846,7 +833,6 @@ const LoginPage = () => {
                   sending ||
                   verifying ||
                   restoringInternet ||
-                  internetBlocked ||
                   !/^\d{6}$/.test(code)
                 }
               >
@@ -875,11 +861,7 @@ const LoginPage = () => {
                   }}
                   onClick={countdown > 0 ? undefined : handleSendCode}
                   disabled={
-                    sending ||
-                    verifying ||
-                    restoringInternet ||
-                    internetBlocked ||
-                    countdown > 0
+                    sending || verifying || restoringInternet || countdown > 0
                   }
                 >
                   {countdown > 0
@@ -896,9 +878,7 @@ const LoginPage = () => {
                   alignSelf: 'center',
                 }}
                 onClick={resetToStart}
-                disabled={
-                  sending || verifying || restoringInternet || internetBlocked
-                }
+                disabled={sending || verifying || restoringInternet}
               >
                 {t('tono.login.changeEmail')}
               </button>
