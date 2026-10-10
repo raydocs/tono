@@ -69,11 +69,18 @@ export const nodesBoardCopy = {
   /** The Tono-owned API relays clients fall back to when Cloudflare is unreachable. */
   apiRelays: {
     title: 'API 中继',
-    lead: '客户端连不上 Cloudflare 时的备用入口。每 5 分钟从 Worker 试连一次 TCP 端口，只说明端口开着，不代表 TLS 转发一定通。',
+    lead: '客户端连不上 Cloudflare 时的备用入口。「TCP 可达」是 Worker 每 5 分钟试连端口，只说明端口开着；「端到端可用」是中继节点每 5 分钟经本机中继做一次完整 HTTPS 请求（校验证书）后上报的结果。',
+    tcpColumn: 'TCP 可达',
+    e2eColumn: '端到端可用',
     up: '可达',
     down: '不可达',
     unchecked: '还没检查',
     checked: (ago: string) => `检查于 ${ago}`,
+    e2eUp: '可用',
+    e2eDown: '不可用',
+    e2eNone: '节点未上报',
+    e2eStale: '上报过期',
+    reported: (ago: string) => `上报于 ${ago}`,
     loadFailed: 'API 中继状态没拿到',
   },
 } as const;

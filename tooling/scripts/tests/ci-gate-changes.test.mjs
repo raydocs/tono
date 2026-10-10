@@ -51,6 +51,7 @@ const SERVICES_PATHS = [
   'services/**',
   'ops-panel/**',
   'tooling/scripts/remote/**',
+  'tooling/ops/relay/**',
   'tooling/scripts/provision-tono-node.py',
   'tooling/scripts/tests/test_provision_tono_node.py',
   'tooling/scripts/generate-release-center.mjs',

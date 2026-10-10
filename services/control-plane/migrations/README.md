@@ -94,3 +94,7 @@ Ops tables after the sequence was unique. Applied in numeric order:
 
 - `0094_device_client_path.sql` — `devices.client_path` / `client_path_at`: the transport path (`X-Tono-Path`) that carried the device's last sign-in, refresh or catalog fetch
 - `0095_api_relay_probes.sql` — `api_relay_probes`: the cron's last TCP check of each Tono-owned API relay, with `ok_since` / `failing_since`
+
+## 0096
+
+- `0096_api_relay_reports.sql` — `api_relay_reports`: each relay node's own end-to-end HTTPS check through its local `:2053`, reported with its exit-node token, with `ok_since` / `failing_since`

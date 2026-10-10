@@ -1,0 +1,27 @@
+# Tono API relay end-to-end probe (decision 077). Canonical copy:
+# tooling/ops/relay/tono-relay-probe.service; install steps in docs/ops/api-relay.md.
+# One HTTPS request through the local :2053 relay with default certificate
+# verification, reported to the control plane with the exit agent's node token.
+[Unit]
+Description=Tono API relay end-to-end probe
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Root-only (0600) env file of the exit agent; systemd reads it before dropping
+# to the dynamic user, which never sees the file itself.
+EnvironmentFile=/etc/tono-exit-agent/env
+ExecStart=/usr/bin/python3 -I /opt/tono-relay-probe/relay-probe.py
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+CapabilityBoundingSet=
+TimeoutStartSec=60
