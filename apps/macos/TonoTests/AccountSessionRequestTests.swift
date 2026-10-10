@@ -604,6 +604,93 @@ final class AccountSessionRequestTests: XCTestCase {
         NetworkInterception.record(intercepted: false)
     }
 
+    /// Simulated poisoned resolver: the system resolver's answer leads to a
+    /// server whose certificate is not Tono's, so the trust store refuses it
+    /// in the handshake and no request byte leaves. The sign-in POST goes on
+    /// to the pinned addresses, which receive it exactly once, instead of
+    /// stopping on the system path as an intercepted network.
+    func testAPoisonedResolverAnswerHandsTheSignInToThePinnedAddresses() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        defer { AppProfile.defaults.removeObject(forKey: TonoAPIClient.preferredPathKey(forHost: host)) }
+        let systemRequests = PathCallCounter()
+        HeldAccountProtocol.install(host) { request in
+            systemRequests.record()
+            request.client?.urlProtocol(request, didFailWithError: URLError(.serverCertificateUntrusted))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        let pinnedAttempts = PathCallCounter()
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                pinnedAttempts.record()
+                return ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-poisoned","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
+            }
+        )
+        NetworkInterception.record(intercepted: false)
+
+        var outcome: String
+        do {
+            outcome = try await api.startEmailSignIn(TonoEmailStartRequest(
+                email: "poisoned@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+            )).challengeId
+        } catch {
+            outcome = "error: \(error)"
+        }
+
+        XCTAssertEqual(outcome, "c-poisoned", "the pinned addresses answer the sign-in")
+        XCTAssertEqual(systemRequests.count, 1)
+        XCTAssertEqual(pinnedAttempts.count, 1, "the pinned addresses receive the request exactly once")
+        XCTAssertFalse(NetworkInterception.wasObserved, "an answer clears the interception verdict")
+    }
+
+    /// Simulated TLS reset: the network breaks the system path's handshake
+    /// (`secureConnectionFailed`). TLS was never up, so nothing was sent, and
+    /// the sign-in POST goes on to the next path exactly once.
+    func testAHandshakeResetOnTheSystemPathHandsTheSignInToThePinnedAddresses() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        defer { AppProfile.defaults.removeObject(forKey: TonoAPIClient.preferredPathKey(forHost: host)) }
+        HeldAccountProtocol.install(host) { request in
+            request.client?.urlProtocol(request, didFailWithError: URLError(.secureConnectionFailed))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        let pinnedAttempts = PathCallCounter()
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                pinnedAttempts.record()
+                return ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-reset","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
+            }
+        )
+
+        var outcome: String
+        do {
+            outcome = try await api.startEmailSignIn(TonoEmailStartRequest(
+                email: "reset@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+            )).challengeId
+        } catch {
+            outcome = "error: \(error)"
+        }
+
+        XCTAssertEqual(outcome, "c-reset", "the pinned addresses answer the sign-in")
+        XCTAssertEqual(pinnedAttempts.count, 1, "the pinned addresses receive the request exactly once")
+    }
+
     func testLateAuthMethodsFailureDoesNotReplaceAuthenticatedState() async throws {
         let (account, transport, host, requests) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
