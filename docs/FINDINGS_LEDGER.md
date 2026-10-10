@@ -191,7 +191,7 @@
 | H17-G-F2 | Tailscale enrollment 关闭（生产配置）时吊销任务永不执行，带 tailnet 绑定设备的账户停用或销户后重新启用永远返回 409（= H17-O-F5） | fixed(3e64707e6) | [#522](https://github.com/raydocs/tono/issues/522)，[#523](https://github.com/raydocs/tono/pull/523)（409 不再永久），[#1442](https://github.com/raydocs/tono/pull/1442)（注册暂停时吊销任务照常执行） | 中·推导 | 2026-10-07 生产 D1 只读：0 台设备带 `tailscale_node_id`，1 条未完成吊销任务（设备行已不存在、从未尝试）。注册暂停时孤儿 pending 节点清扫仍不跑（新注册已被围栏；ephemeral 节点离线后由 Tailscale 自删）；token-admin 恢复路径不写审计 |
 | H17-C-F2 | 退款销户由多次独立提交组成，中途失败可留下「住宅线与产品账户已回收、VPN 仍有效」的账户 | fixed(61abd20b) | [#524](https://github.com/raydocs/tono/issues/524)，[#525](https://github.com/raydocs/tono/pull/525) | 中·推导 | 停用与全部回收是一个 `DB.batch`，停用在前；故障注入回归 `close reclaims nothing when disabling the account fails`。batch 之后的设备/会话撤销若失败，账户已停用，鉴权立即拒绝，cron 按「停用且仍有 live 设备/会话」补完。2026-10-07 核对 main，此行此前漏更新 |
 | H17-G-F5 | 同一设备再次登录或登出只作废当前会话，更早签发的 refresh token 仍然有效 | fixed | [#833](https://github.com/raydocs/tono/pull/833) | 中·已确认 | 同一设备的再次登录、refresh 与登出都会作废该设备其余未吊销会话；其他设备保持登录。refresh 有效期默认仍为 30 天 |
-| H17-C-F1 | 调低账户设备上限不会移除已超出上限的设备，直到有新设备登录（= H17-G-F1） | open | 待开 | 低·已确认 | 超出部分在下一次新设备登录时才按 LRU 轮换 |
+| H17-C-F1 | 调低账户设备上限不会移除已超出上限的设备，直到有新设备登录（= H17-G-F1） | in-PR | 待开（A9，分支 `amp/a9-device-cap-immediate`） | 低·已确认 | token-admin PATCH 调低上限时当场按 LRU 撤销超额设备；上限写入与驱逐分两个事务，中途中断时由重发或下次登录收敛 |
 
 ## 6. 客户端信任与账户隔离
 

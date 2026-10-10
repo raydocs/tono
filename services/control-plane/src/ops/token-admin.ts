@@ -6,6 +6,7 @@ import { ApiError } from '../errors';
 import { type Env, type Row, now, id, tailscaleEnrollmentEnabled } from '../env';
 import { rejectUnexpectedKeys, body, email } from '../request';
 import { writeOpsAudit } from '../product-account';
+import { evictDevicesOverLimit } from '../accounts';
 
 const ACTOR = 'token-admin';
 
@@ -14,7 +15,10 @@ export async function tokenAdminWrite(
   e: Env,
   p: string,
   m: string,
-  deps: { enforceUser: (e: Env, userId: string) => Promise<unknown> },
+  deps: {
+    enforceUser: (e: Env, userId: string) => Promise<unknown>;
+    processRevocations: (e: Env) => Promise<unknown>;
+  },
 ): Promise<Response | null> {
   let mt: RegExpMatchArray | null;
   if (p === '/api/v1/admin/signup-allowlist' && m === 'DELETE') {
@@ -147,6 +151,27 @@ export async function tokenAdminWrite(
     ].filter((name): name is string => name !== null);
     if (changedFields.length) {
       await writeOpsAudit(e, ACTOR, 'user.update', 'user', mt[1], `changed ${changedFields.join(', ')}`);
+    }
+    if (deviceLimit !== undefined) {
+      // A lowered cap takes effect now (D15-A), not at the next device login:
+      // the least recently seen devices beyond it are revoked and audited
+      // like an operator's device revoke. Raising the cap evicts nothing.
+      const userId = String(mt[1]);
+      const evicted = await evictDevicesOverLimit(e, userId);
+      for (const deviceId of evicted) {
+        await writeOpsAudit(
+          e, ACTOR, 'device.revoke', 'device', deviceId,
+          `revoked device of user ${userId}: device limit lowered to ${deviceLimit}`,
+        );
+      }
+      if (evicted.length) {
+        try {
+          await deps.processRevocations(e);
+        } catch (x) {
+          // The jobs are durable; the cron tick retries them.
+          console.error('device-limit processRevocations failed', x instanceof Error ? x.message : String(x));
+        }
+      }
     }
     await deps.enforceUser(e, mt[1]);
     return Response.json({ ok: true });

@@ -325,7 +325,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         'UPDATE devices SET tailscale_node_id = ? WHERE id = ?',
       ).bind(`node-limit-contraction-${index}`, device.id).run();
     }
-    expect((await admin(`users/${account.user.id}`, { deviceLimit: 1 }, 'PATCH')).status).toBe(200);
+    // An account already over its cap (lowered before the cap took effect on
+    // write) is still brought back under it by the next login.
+    await env.DB.prepare('UPDATE users SET device_limit = 1 WHERE id = ?').bind(account.user.id).run();
 
     const replacement = await emailSignIn({
       email: account.email,
@@ -341,6 +343,77 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await env.DB.prepare(
       "SELECT COUNT(*) AS count FROM revocation_jobs WHERE reason = 'device_rotated'",
     ).first<any>()).count).toBe(5);
+  });
+
+  it('revokes the least recently seen excess devices of that account only when the device limit is lowered', async () => {
+    const account = await createAccount('limit-lowered');
+    const other = await createAccount('limit-lowered-other');
+    expect((await admin(`users/${account.user.id}`, { deviceLimit: 5 }, 'PATCH')).status).toBe(200);
+    const accessTokens = new Map<string, string>([[String(account.device.id), account.accessToken]]);
+    for (const suffix of ['two', 'three', 'four', 'five']) {
+      const signedIn = await emailSignIn({
+        email: account.email,
+        deviceName: `Device ${suffix}`,
+        installationId: `limit-lowered-${suffix}`,
+      });
+      expect(signedIn.status).toBe(200);
+      const signedInBody = await signedIn.json() as any;
+      accessTokens.set(String(signedInBody.device.id), signedInBody.accessToken);
+    }
+    const live = (await env.DB.prepare(
+      "SELECT id FROM devices WHERE user_id = ? AND status IN ('pending', 'active') ORDER BY rowid",
+    ).bind(account.user.id).all<any>()).results.map((row: any) => String(row.id));
+    expect(live).toHaveLength(5);
+    // Last seen, oldest first: live[1], then live[2] and live[3] tied (rowid
+    // breaks it), live[4], and the first-created live[0] seen most recently.
+    // The other account's device is the oldest of all and must not count.
+    const seen = [500, 100, 300, 300, 400];
+    for (const [index, deviceId] of live.entries()) {
+      await env.DB.prepare(
+        'UPDATE devices SET last_seen_at = ?, created_at = 1, tailscale_node_id = ? WHERE id = ?',
+      ).bind(seen[index], `node-limit-lowered-${index}`, deviceId).run();
+      await env.DB.prepare(
+        'INSERT OR IGNORE INTO device_exit_credentials(device_id, user_id, client_uuid, created_at) VALUES(?, ?, ?, 1)',
+      ).bind(deviceId, account.user.id, crypto.randomUUID()).run();
+    }
+    await env.DB.prepare('UPDATE devices SET last_seen_at = 1, created_at = 1 WHERE user_id = ?')
+      .bind(other.user.id).run();
+
+    const liveIds = async (userId: string) => (await env.DB.prepare(
+      "SELECT id FROM devices WHERE user_id = ? AND status IN ('pending', 'active') ORDER BY id",
+    ).bind(userId).all<any>()).results.map((row: any) => String(row.id));
+    const revokeAudits = async () => (await env.DB.prepare(
+      "SELECT target_id FROM ops_audit WHERE action = 'device.revoke' AND actor_type = 'token_admin' ORDER BY target_id",
+    ).all<any>()).results.map((row: any) => String(row.target_id));
+    const otherLive = await liveIds(other.user.id);
+
+    expect((await admin(`users/${account.user.id}`, { deviceLimit: 3 }, 'PATCH')).status).toBe(200);
+    const evicted = [live[1], live[2]].sort();
+    expect(await liveIds(account.user.id)).toEqual([live[0], live[3], live[4]].sort());
+    expect(await liveIds(other.user.id)).toEqual(otherLive);
+    expect(await revokeAudits()).toEqual(evicted);
+    const jobs = await env.DB.prepare(
+      "SELECT device_id FROM revocation_jobs WHERE reason = 'device_limit_lowered' ORDER BY device_id",
+    ).all<any>();
+    expect(jobs.results.map((row: any) => String(row.device_id))).toEqual(evicted);
+    for (const deviceId of evicted) {
+      expect((await env.DB.prepare(
+        'SELECT COUNT(*) AS count FROM sessions WHERE device_id = ? AND revoked_at IS NULL',
+      ).bind(deviceId).first<any>()).count).toBe(0);
+      expect(await env.DB.prepare('SELECT 1 FROM device_exit_credentials WHERE device_id = ?')
+        .bind(deviceId).first()).toBeNull();
+    }
+    const meStatus = async (deviceId: string | undefined) => (await api('me', {
+      headers: { authorization: `Bearer ${accessTokens.get(String(deviceId))}` },
+    })).status;
+    expect(await meStatus(live[1])).toBe(401);
+    expect(await meStatus(live[0])).toBe(200);
+
+    // A retry at the same cap and a raised cap revoke nothing more.
+    expect((await admin(`users/${account.user.id}`, { deviceLimit: 3 }, 'PATCH')).status).toBe(200);
+    expect((await admin(`users/${account.user.id}`, { deviceLimit: 5 }, 'PATCH')).status).toBe(200);
+    expect(await liveIds(account.user.id)).toEqual([live[0], live[3], live[4]].sort());
+    expect(await revokeAudits()).toEqual(evicted);
   });
 
   it('confirm resolves via inventory with distinct IDs and stores management id', async () => {

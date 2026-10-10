@@ -12,6 +12,7 @@ import {
 import {
   accountForOidcIdentity,
   accountForVerifiedEmail,
+  DEVICE_LRU_ORDER,
   directSignupAllowed,
   ineligible,
 } from './accounts';
@@ -1010,18 +1011,7 @@ async function ensureDevice(e: Env, user: string, name: string, installation: st
          WHERE candidate.user_id = ?
            AND candidate.status IN ('pending', 'active')
            AND candidate.id != ?
-         ORDER BY MAX(
-                    COALESCE(candidate.last_seen_at, candidate.created_at),
-                    COALESCE((
-                      SELECT received_at
-                      FROM telemetry_windows
-                      WHERE device_id = candidate.id
-                      ORDER BY received_at DESC
-                      LIMIT 1
-                    ), 0)
-                  ) ASC,
-                  candidate.created_at ASC,
-                  candidate.rowid ASC
+         ORDER BY ${DEVICE_LRU_ORDER}
          LIMIT MAX(0,
            (SELECT COUNT(*) FROM devices live
             WHERE live.user_id = ? AND live.status IN ('pending', 'active') AND live.id != ?)
@@ -2851,7 +2841,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         })),
       });
     }
-    const tokenWrite = await tokenAdminWrite(req, e, p, m, { enforceUser });
+    const tokenWrite = await tokenAdminWrite(req, e, p, m, { enforceUser, processRevocations });
     if (tokenWrite) return tokenWrite;
     if (p === '/api/v1/admin/invitations' && m === 'GET') {
       const q = await e.DB.prepare(
