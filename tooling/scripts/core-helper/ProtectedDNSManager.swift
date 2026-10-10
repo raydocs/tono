@@ -1313,6 +1313,36 @@ final class ProtectedDNSManager {
         return ended.semaphore.wait(timeout: .now() + 5) == .success
     }
 
+    /// #1542 review F2: a mutating command whose launch was abandoned must
+    /// never take effect, even if the launch completes later. The stale
+    /// command would write `released`; a newer owner writes `protected`
+    /// after the deadline; the marker must still say `protected` once the
+    /// late launch has settled.
+    static func runAbandonedLaunchNeverExecutesSelfTest() -> Bool {
+        let marker = NSTemporaryDirectory() + "tono-abandoned-launch-\(UUID().uuidString)"
+        defer { unlink(marker) }
+        final class Ended: @unchecked Sendable {
+            let semaphore = DispatchSemaphore(value: 0)
+        }
+        let ended = Ended()
+        do {
+            _ = try KillSwitchManager.run(
+                "/bin/sh", ["-c", "printf released > \"$1\"", "sh", marker], deadline: 1,
+                ended: { ended.semaphore.signal() },
+                launch: { process in
+                    usleep(2_000_000)
+                    try process.run()
+                }
+            )
+            return false
+        } catch {}
+        guard FileManager.default.createFile(atPath: marker, contents: Data("protected".utf8)) else { return false }
+        // The late launch settles: its shell sees end-of-file and exits.
+        guard ended.semaphore.wait(timeout: .now() + 5) == .success else { return false }
+        usleep(200_000)
+        return (try? String(contentsOfFile: marker, encoding: .utf8)) == "protected"
+    }
+
     static func runNetworkSetupDeadlineSelfTest() -> Bool {
         let started = clock_gettime_nsec_np(CLOCK_MONOTONIC)
         do {
@@ -2159,6 +2189,7 @@ final class ProtectedDNSManager {
                 && runServerCountCapSelfTest()
                 && runNetworkSetupDeadlineSelfTest()
                 && runStalledLaunchDeadlineSelfTest()
+                && runAbandonedLaunchNeverExecutesSelfTest()
         } catch {
             return false
         }

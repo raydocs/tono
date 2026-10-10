@@ -1915,7 +1915,15 @@ extension KillSwitchManager {
     /// is synchronous and can stall before it returns a PID (executable I/O,
     /// launch validation), so it runs on its own thread, and a launch still
     /// pending at the deadline fails the command; if it returns later, its
-    /// child is terminated at once (#1542 review F1). A launched child gets
+    /// child is terminated at once (#1542 review F1). Termination alone cannot
+    /// undo what a late command already did (a stale `pfctl -F all` flushing
+    /// a newer arm's anchor, a stale `networksetup` setter), so the command
+    /// itself runs only after an admission barrier: the launched process is
+    /// `/bin/sh` waiting on its stdin for `go`, written only once the caller
+    /// has accepted the launch; an abandoned launch gets end-of-file instead
+    /// and exits without ever executing the command (#1542 review F2). `exec`
+    /// keeps the PID, so `started` still names the command's process. A
+    /// launched child gets
     /// SIGTERM, then SIGKILL, each waited on for a second; one stuck in the
     /// kernel beyond that exits on its own. `ended` runs once the child has
     /// exited and been reaped, even after this call has given up on it.
@@ -1931,12 +1939,17 @@ extension KillSwitchManager {
     ) throws -> HelperCommandResult {
         let end = DispatchTime.now() + deadline
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [
+            "-c", #"IFS= read -r gate || exit 125; [ "$gate" = go ] || exit 125; exec "$0" "$@""#,
+            executable,
+        ] + arguments
         process.environment = environment
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
+        let admission = Pipe()
+        process.standardInput = admission
         let exited = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in
             ended()
@@ -1951,13 +1964,18 @@ extension KillSwitchManager {
                 return
             }
             guard launched.report(.launched) else {
-                // Abandoned: the caller has already failed this command.
+                // Abandoned: the caller has already failed this command. No
+                // `go`: end-of-file, so the command is never executed.
+                try? admission.fileHandleForWriting.close()
                 process.terminate()
                 if exited.wait(timeout: .now() + 1) == .timedOut, process.isRunning {
                     kill(process.processIdentifier, SIGKILL)
                 }
                 return
             }
+            // Accepted: the caller owns this command now, inside its deadline.
+            try? admission.fileHandleForWriting.write(contentsOf: Data("go\n".utf8))
+            try? admission.fileHandleForWriting.close()
         }
         switch launched.wait(until: end) {
         case .launched: break
