@@ -1,7 +1,7 @@
 ## 2026-10-10 · 中继探测失败告警（A6）
 - 归属：运维计划 [§2](../ops/plan-2026-09-11.md)（中继可观测）；[Amp 待办](../ops/amp-backlog-2026-10-10.md) A6；
   `services/control-plane`（`src/ops/relay-alerts.ts`、`verdict-run.ts`、`alerts.ts`）。
-- 来源：基线 origin/main（含 A5 #1489）→ 分支 `amp/a6-relay-alerts`；PR 待开；未合 main。
+- 来源：基线 origin/main（含 A5 #1489）→ 分支 `amp/a6-relay-alerts`；[#1510](https://github.com/raydocs/tono/pull/1510)；未合 main。
 - 缺陷修复：[OPS-ALERT-RESOLVE-SUPPRESSED](../findings.d/OPS-ALERT-RESOLVE-SUPPRESSED.md)：`fire_on=open_resolve`
   的规则从来发不出「恢复」，因为发送时事故已是 resolved，被「延迟期内已恢复」那条检查当成过时投递压掉。
   现在这条检查只压 open / escalate；resolve 照常发送（冷却、暂停与重试规则不变）。
