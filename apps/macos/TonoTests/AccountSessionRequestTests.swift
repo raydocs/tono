@@ -387,8 +387,10 @@ final class AccountSessionRequestTests: XCTestCase {
                 email: "relays-down@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
             ))
             XCTFail("with both relays down the request must fail")
-        } catch TonoAPIClient.APIError.transport(let detail) {
-            message = detail
+        } catch TonoAPIClient.APIError.unreachable(let unreachable) {
+            // MAC-CN-UNREACHABLE-NO-WHERE (#1528): every path failing is `.unreachable`.
+            XCTAssertEqual(unreachable.attempts.map(\.path), ["relay"], "only the relays were tried")
+            message = unreachable.detail
         } catch {
             XCTFail("unexpected error \(error)")
         }
@@ -863,7 +865,7 @@ final class AccountSessionRequestTests: XCTestCase {
                 email: "allfail@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
             ))
         } catch let error as TonoAPIClient.APIError {
-            if case let .transport(text) = error { detail = text }
+            if case let .unreachable(paths) = error { detail = paths.detail }
         }
 
         // URLSession may reword the resolver's error; the shape and the two
@@ -873,6 +875,55 @@ final class AccountSessionRequestTests: XCTestCase {
             detail?.hasSuffix("]; pinned[pinned: 1.2.3.4 no route]; relay[relay: 5.6.7.8:2053 refused]") == true,
             "got: \(detail ?? "no transport error")"
         )
+    }
+
+    /// Simulated DNS failure with both relays down: when no path answers, the
+    /// error the sign-in screen shows says where it failed, route by route
+    /// (the system resolver's name lookup, the fixed addresses, the relays),
+    /// and what to do, from the walk's own error classes rather than the
+    /// system's localized text.
+    func testAnUnansweredSignInNamesEveryRouteItTriedAndHowEachFailed() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        defer { AppProfile.defaults.removeObject(forKey: TonoAPIClient.preferredPathKey(forHost: host)) }
+        HeldAccountProtocol.install(host) { request in
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotFindHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in throw URLError(.cannotConnectToHost) },
+            relayPath: ControlPlanePath(label: "relay") { _, _ in throw URLError(.cannotConnectToHost) }
+        )
+
+        var thrown: (any Error)?
+        do {
+            _ = try await api.startEmailSignIn(TonoEmailStartRequest(
+                email: "where@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+            ))
+        } catch {
+            thrown = error
+        }
+
+        guard case let .unreachable(paths)? = thrown as? TonoAPIClient.APIError else {
+            return XCTFail("expected the routes the sign-in tried, got: \(String(describing: thrown))")
+        }
+        XCTAssertEqual(paths.attempts, [
+            .init(path: "system_dns", failure: "dns"),
+            .init(path: "pinned", failure: "connect"),
+            .init(path: "relay", failure: "connect"),
+        ])
+        XCTAssertFalse(paths.stoppedEarly)
+        let message = try XCTUnwrap((thrown as? LocalizedError)?.errorDescription)
+        XCTAssertEqual(message, paths.userMessage)
+        for route in ["system_dns", "pinned", "relay"] {
+            XCTAssertTrue(message.contains(ControlPlaneUnreachable.routeName(route)), message)
+        }
+        XCTAssertTrue(message.contains(ControlPlaneUnreachable.failureName("dns")), message)
+        XCTAssertFalse(message.contains(host), "no host name in the copy")
     }
 
     /// #588: a server certificate this Mac's clock cannot date names the
@@ -2083,9 +2134,13 @@ final class AccountSessionRequestTests: XCTestCase {
         renewal.client?.urlProtocol(renewal, didReceive: refused, cacheStoragePolicy: .notAllowed)
         renewal.client?.urlProtocol(renewal, didFailWithError: URLError(.networkConnectionLost))
         let outcome = await read.result
-        if case let .failure(error) = outcome,
-           let apiError = error as? TonoAPIClient.APIError, case .transport = apiError {
-            XCTFail("a refused renewal is not an unreachable Tono")
+        if case let .failure(error) = outcome, let apiError = error as? TonoAPIClient.APIError {
+            switch apiError {
+            case .transport, .unreachable:
+                XCTFail("a refused renewal is not an unreachable Tono")
+            default:
+                break
+            }
         }
 
         let written = try Data(contentsOf: directory.appendingPathComponent(OfflineGrantGate.fileName))
