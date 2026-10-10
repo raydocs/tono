@@ -371,6 +371,7 @@
       "nodeUnreachable": "连接没有完成。",
       "tunDataPlaneBroken": "连接没有完成。",
       "tunIngressBroken": "线路是通的，但本机流量进不了隧道。通常是别的 VPN 或安全软件占住了网络，请先关掉再连。",
+      "otherVpnPresent": "存在其他 VPN：这台电脑上还有别的 VPN 在运行，可能与 Tono 冲突。请先退出它，再重新连接。",
       "protectedHttpsFailed": "连接没有完成。",
       "coreUnpinned": "此安装缺少内核校验，请安装最新版。",
       "coreMismatch": "内核与安装不匹配，请安装最新版。",
