@@ -33,6 +33,7 @@ let killSwitchArmFields = Set([
     "allowSystemResolution",
     "bootstrapPins",
     "reviewedBundleDirect",
+    "allowLocalNetworkDevices",
 ])
 
 enum HelperFailure: Error {
@@ -84,6 +85,7 @@ func runRequestContractSelfTests() -> Bool {
             "tailscaleBootstrapEnabled": false,
             "allowSystemResolution": false,
             "bootstrapPins": ["api.example.com": ["1.1.1.1"]],
+            "allowLocalNetworkDevices": true,
         ])
         do {
             try validateKillSwitchArmFields(["unexpected": []])
@@ -1014,7 +1016,8 @@ func runLANScopePreservationSelfTest() -> Bool {
         resolvedHosts: [:], pinnedHosts: [:], derpEndpoints: [],
         cachedDERPEndpoints: [], proxyTargets: [],
         sessionDirectEndpoints: [.init(address: "203.0.113.50", transport: "tcp", port: 443)],
-        reviewedBundleDirectEnabled: true
+        reviewedBundleDirectEnabled: true,
+        allowLocalNetworkDevices: true
     )
     let source = KillSwitchManager.renderRules(
         state: state, allowedUID: 501, physicalInterfaces: ["en0"]

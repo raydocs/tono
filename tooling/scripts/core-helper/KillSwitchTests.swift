@@ -56,7 +56,8 @@ extension KillSwitchManager {
                           addresses: ["8.8.4.4"]),
                 ],
                 sessionDirectEndpoints: [],
-                reviewedBundleDirectEnabled: reviewedBundleDirect
+                reviewedBundleDirectEnabled: reviewedBundleDirect,
+                allowLocalNetworkDevices: true
             )
         }
 
@@ -233,7 +234,8 @@ extension KillSwitchManager {
                               addresses: ["8.8.4.4"]),
                     ],
                     sessionDirectEndpoints: [],
-                    reviewedBundleDirectEnabled: true
+                    reviewedBundleDirectEnabled: true,
+                    allowLocalNetworkDevices: true
                 ),
                 allowedUID: 501
             )
@@ -1043,7 +1045,8 @@ extension KillSwitchManager {
                     ),
                 ],
                 sessionDirectEndpoints: directEndpoints,
-                reviewedBundleDirectEnabled: true
+                reviewedBundleDirectEnabled: true,
+                allowLocalNetworkDevices: false
             )
             let rules = renderRules(state: state, allowedUID: 501)
             // The same session once its TUN is up: the only state in which the
@@ -1061,7 +1064,8 @@ extension KillSwitchManager {
                     cachedDERPEndpoints: state.cachedDERPEndpoints,
                     proxyTargets: state.proxyTargets,
                     sessionDirectEndpoints: state.sessionDirectEndpoints,
-                    reviewedBundleDirectEnabled: true
+                    reviewedBundleDirectEnabled: true,
+                    allowLocalNetworkDevices: true
                 ),
                 allowedUID: 501
             )
@@ -1083,11 +1087,124 @@ extension KillSwitchManager {
                     cachedDERPEndpoints: [],
                     proxyTargets: state.proxyTargets,
                     sessionDirectEndpoints: [],
-            reviewedBundleDirectEnabled: false
+            reviewedBundleDirectEnabled: false,
+            allowLocalNetworkDevices: true
                 ),
                 allowedUID: 501,
                 physicalInterfaces: ["en0", "en7"]
             )
+            // D7 (A29): "Allow local network devices". On is the ruleset main
+            // rendered before the setting existed, pinned line for line. Off is
+            // that ruleset minus exactly the private, link-local, ULA and
+            // discovery-multicast passes; no line is added or reordered.
+            let localNetworkOnExpected = [
+                "# Managed by Tono Kill Switch — do not edit",
+                "pass in quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
+                "pass out quick on lo0 all no state label \"tono-loopback\"",
+                "pass out quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\"",
+                "pass in quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\"",
+                "pass in quick on awdl0 all no state label \"tono-continuity\"",
+                "pass out quick on awdl0 all no state label \"tono-continuity\"",
+                "pass in quick on llw0 all no state label \"tono-continuity\"",
+                "pass out quick on llw0 all no state label \"tono-continuity\"",
+                "pass in quick on bridge100 all no state label \"tono-continuity\"",
+                "pass out quick on bridge100 all no state label \"tono-continuity\"",
+                "pass out quick inet proto udp to 224.0.0.251 port 5353 keep state (if-bound) label \"tono-mdns\"",
+                "pass in quick inet proto udp to 224.0.0.251 port 5353 keep state (if-bound) label \"tono-mdns\"",
+                "pass out quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\"",
+                "pass in quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\"",
+                "block drop out quick on { en0, en7 } inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } port { 53, 853 } label \"tono-lan-dns\"",
+                "block drop out quick on { en0, en7 } inet6 proto { tcp, udp } to { fe80::/10, fc00::/7, ff00::/8 } port { 53, 853 } label \"tono-lan-dns\"",
+                "block drop out quick inet proto { tcp, udp } to { 224.0.0.0/24, 255.255.255.255 } port { 53, 853 } label \"tono-dns-multicast\"",
+                "block drop out quick inet to { 224.0.0.0/24, 255.255.255.255 } fragment label \"tono-fragment-multicast\"",
+                "block drop out quick inet proto tcp to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } fragment label \"tono-lan-fragment\"",
+                "block drop out quick inet6 proto tcp to { fe80::/10, fc00::/7, ff00::/8 } fragment label \"tono-lan-fragment\"",
+                "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } no state label \"tono-lan\"",
+                "pass in quick inet from { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\"",
+                "pass out quick inet6 to fe80::/10 no state label \"tono-linklocal\"",
+                "pass in quick inet6 to fe80::/10 keep state (if-bound) label \"tono-linklocal\"",
+                "pass out quick inet6 to { ff00::/8, fc00::/7 } no state label \"tono-linklocal\"",
+                "pass in quick inet6 from { fe80::/10, ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\"",
+                "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\"",
+                "pass in quick inet proto udp from any port 67 to any port 68 no state label \"tono-dhcp\"",
+                "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\"",
+                "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\"",
+                "pass out quick inet to { 224.0.0.0/24, 255.255.255.255 } no state label \"tono-multicast\"",
+                "pass out quick inet proto udp to 239.255.255.250 port 1900 no state label \"tono-ssdp\"",
+                "pass in quick on utun199 all keep state (if-bound) label \"tono-tunnel\"",
+                "pass out quick on utun199 all keep state (if-bound) label \"tono-tunnel\"",
+                "pass out quick inet proto tcp to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound) label \"tono-control\"",
+                "pass out quick inet proto tcp to 8.8.4.4 port 8443 user root keep state (if-bound) label \"tono-exit\"",
+                "block drop out quick all label \"tono-block\"",
+            ]
+            let localNetworkGatedLabels = [
+                "label \"tono-lan\"", "label \"tono-linklocal\"",
+                "label \"tono-multicast\"", "label \"tono-ssdp\"",
+            ]
+            let localNetworkOnMatchesMain = cloudRules
+                == localNetworkOnExpected.joined(separator: "\n") + "\n"
+            if !localNetworkOnMatchesMain {
+                FileHandle.standardError.write(Data(
+                    "self-test: Allow local network devices on does not render main's ruleset\n".utf8
+                ))
+            }
+            let localNetworkOffRules = renderRules(
+                state: .init(
+                    armed: true,
+                    tailscaleBootstrapEnabled: false,
+                    apiHosts: ["api.example.com"],
+                    exitHints: [],
+                    tunnelInterfaces: ["utun199"],
+                    resolvedHosts: ["api.example.com": ["1.1.1.1"]],
+                    pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+                    derpEndpoints: [],
+                    cachedDERPEndpoints: [],
+                    proxyTargets: state.proxyTargets,
+                    sessionDirectEndpoints: [],
+                    reviewedBundleDirectEnabled: false,
+                    allowLocalNetworkDevices: false
+                ),
+                allowedUID: 501,
+                physicalInterfaces: ["en0", "en7"]
+            )
+            let localNetworkOffKeepsOnlyMDNS: Bool = {
+                let gated = localNetworkOnExpected.filter { line in
+                    localNetworkGatedLabels.contains { line.hasSuffix($0) }
+                }
+                let expectedOff = localNetworkOnExpected.filter { !gated.contains($0) }
+                // Every outbound or inbound pass that still names a private,
+                // link-local, ULA, multicast or broadcast destination: only
+                // IGMP (protocol 2, group membership that mDNS needs), the four
+                // mDNS passes (group and port) and the DHCP broadcast.
+                let localDestinations = [
+                    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+                    "fe80::", "fc00::/7", "ff00::/8", "ff02::", "224.0.0.0/4",
+                    "224.0.0.0/24", "224.0.0.251", "239.", "255.255.255.255",
+                ]
+                let localPasses = localNetworkOffRules.split(separator: "\n")
+                    .map(String.init)
+                    .filter { line in
+                        line.hasPrefix("pass") && localDestinations.contains(where: line.contains)
+                    }
+                let allowedLocalPasses = [
+                    "pass out quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\"",
+                    "pass in quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\"",
+                    "pass out quick inet proto udp to 224.0.0.251 port 5353 keep state (if-bound) label \"tono-mdns\"",
+                    "pass in quick inet proto udp to 224.0.0.251 port 5353 keep state (if-bound) label \"tono-mdns\"",
+                    "pass out quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\"",
+                    "pass in quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\"",
+                    "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\"",
+                ]
+                return gated.count == 8
+                    && localNetworkOffRules == expectedOff.joined(separator: "\n") + "\n"
+                    && localPasses == allowedLocalPasses
+                    && (pfSyntaxAccepts(localNetworkOffRules) ?? true)
+            }()
+            if !localNetworkOffKeepsOnlyMDNS {
+                FileHandle.standardError.write(Data(
+                    "self-test: Allow local network devices off still passes the local network\n".utf8
+                ))
+            }
             let inactiveState = KillSwitchState(
                 armed: true,
                 tailscaleBootstrapEnabled: false,
@@ -1100,7 +1217,8 @@ extension KillSwitchManager {
                 cachedDERPEndpoints: state.cachedDERPEndpoints,
                 proxyTargets: state.proxyTargets,
                 sessionDirectEndpoints: [],
-            reviewedBundleDirectEnabled: false
+            reviewedBundleDirectEnabled: false,
+            allowLocalNetworkDevices: false
             )
             let inactiveRules = renderRules(
                 state: inactiveState,
@@ -1672,6 +1790,8 @@ extension KillSwitchManager {
                 && tcpFragmentsStayBlocked
                 && bootRestoreHasNoTunnelPass
                 && lanDNSBlockedFirst
+                && localNetworkOnMatchesMain
+                && localNetworkOffKeepsOnlyMDNS
                 && emergencyRules == emergencyExpected
                 && cloudShapesHold
                 && pfParses

@@ -314,24 +314,35 @@ extension KillSwitchManager {
             lines.append(
                 "block drop out quick inet6 proto tcp to { fe80::/10, fc00::/7, ff00::/8 } fragment label \"tono-lan-fragment\""
             )
-            lines.append(
-                "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } no state label \"tono-lan\""
-            )
-            lines.append(
-                "pass in quick inet from { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\""
-            )
-            lines.append(
-                "pass out quick inet6 to fe80::/10 no state label \"tono-linklocal\""
-            )
-            lines.append(
-                "pass in quick inet6 to fe80::/10 keep state (if-bound) label \"tono-linklocal\""
-            )
-            lines.append(
-                "pass out quick inet6 to { ff00::/8, fc00::/7 } no state label \"tono-linklocal\""
-            )
-            lines.append(
-                "pass in quick inet6 from { fe80::/10, ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""
-            )
+            // The local network itself (D7, decision D3-A): only when the user
+            // turned on "Allow local network devices". Off, nothing to the
+            // private, link-local or ULA ranges or to IPv6 multicast passes
+            // outbound, so the router page, printers, NAS, a LAN peer's reply,
+            // MLD, DHCPv6 and unicast DHCP renewal fall to the final block
+            // (DHCP renewal falls back to the broadcast `tono-dhcp` passes).
+            // Every block above, and mDNS, IGMP, Continuity, DHCP broadcast
+            // and NDP, render either way. On renders exactly the rules that
+            // were here before the setting existed.
+            if state.allowLocalNetworkDevices {
+                lines.append(
+                    "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } no state label \"tono-lan\""
+                )
+                lines.append(
+                    "pass in quick inet from { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\""
+                )
+                lines.append(
+                    "pass out quick inet6 to fe80::/10 no state label \"tono-linklocal\""
+                )
+                lines.append(
+                    "pass in quick inet6 to fe80::/10 keep state (if-bound) label \"tono-linklocal\""
+                )
+                lines.append(
+                    "pass out quick inet6 to { ff00::/8, fc00::/7 } no state label \"tono-linklocal\""
+                )
+                lines.append(
+                    "pass in quick inet6 from { fe80::/10, ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""
+                )
+            }
             // DHCP is identified by ports alone, and any local process can send
             // from port 68, so the destination carries the bound: the limited
             // broadcast only (unicast renewal to a LAN server is `tono-lan`).
@@ -350,20 +361,24 @@ extension KillSwitchManager {
             lines.append(
                 "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\""
             )
-            // Local discovery beyond mDNS. Link-local multicast (224.0.0.0/24)
-            // and the limited broadcast are never forwarded by a router. `no
-            // state`: answers come back unicast from a LAN address, which
-            // `tono-lan` passes.
-            lines.append(
-                "pass out quick inet to { 224.0.0.0/24, 255.255.255.255 } no state label \"tono-multicast\""
-            )
-            // SSDP (DLNA casting) is the one routable group: its address and
-            // port only. A multicast router may forward it as far as its
-            // configuration allows (RFC 2365 section 10), and PF cannot bound
-            // the TTL a sender sets.
-            lines.append(
-                "pass out quick inet proto udp to 239.255.255.250 port 1900 no state label \"tono-ssdp\""
-            )
+            // Discovery beyond mDNS goes with the same setting: off, the
+            // devices it would find are unreachable anyway.
+            if state.allowLocalNetworkDevices {
+                // Local discovery beyond mDNS. Link-local multicast (224.0.0.0/24)
+                // and the limited broadcast are never forwarded by a router. `no
+                // state`: answers come back unicast from a LAN address, which
+                // `tono-lan` passes.
+                lines.append(
+                    "pass out quick inet to { 224.0.0.0/24, 255.255.255.255 } no state label \"tono-multicast\""
+                )
+                // SSDP (DLNA casting) is the one routable group: its address and
+                // port only. A multicast router may forward it as far as its
+                // configuration allows (RFC 2365 section 10), and PF cannot bound
+                // the TTL a sender sets.
+                lines.append(
+                    "pass out quick inet proto udp to 239.255.255.250 port 1900 no state label \"tono-ssdp\""
+                )
+            }
         }
         for interface in state.tunnelInterfaces.sorted() {
             // Host packets leave through the TUN while proxied replies return

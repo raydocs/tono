@@ -73,6 +73,12 @@ struct KillSwitchState {
     /// Ephemeral like `sessionDirectEndpoints`: never restored from disk, so a
     /// recovery arm cannot inherit a broader permit than the session asked for.
     let reviewedBundleDirectEnabled: Bool
+    /// The app's "Allow local network devices" setting (D7). Off renders no
+    /// private, link-local, ULA or discovery-multicast pass while a tunnel is
+    /// up; mDNS keeps its own pass. Ephemeral like the bundle flag: never
+    /// restored from disk, so a recovery or heal renders the stricter form
+    /// until the app re-arms with the setting.
+    let allowLocalNetworkDevices: Bool
 }
 
 struct HelperCommandResult {
@@ -226,6 +232,18 @@ final class KillSwitchManager {
         default:
             throw HelperFailure.invalid("reviewedBundleDirect must be a boolean.")
         }
+        // Same contract as `reviewedBundleDirect`: omission means off (an older
+        // app never sends it), and a non-boolean is refused because the flag
+        // widens the permit.
+        let allowLocalNetworkDevices: Bool
+        switch object["allowLocalNetworkDevices"] {
+        case nil:
+            allowLocalNetworkDevices = false
+        case let flag as Bool:
+            allowLocalNetworkDevices = flag
+        default:
+            throw HelperFailure.invalid("allowLocalNetworkDevices must be a boolean.")
+        }
         var availablePins = previous?.pinnedHosts ?? [:]
         for (host, addresses) in bootstrapPins {
             // Bundle pins seed recovery but must not replace addresses learned
@@ -306,7 +324,8 @@ final class KillSwitchManager {
             cachedDERPEndpoints: cachedDERPEndpoints,
             proxyTargets: proxyTargets,
             sessionDirectEndpoints: sessionDirectEndpoints,
-            reviewedBundleDirectEnabled: reviewedBundleDirect
+            reviewedBundleDirectEnabled: reviewedBundleDirect,
+            allowLocalNetworkDevices: allowLocalNetworkDevices
         )
 
         lock.lock()
@@ -1172,7 +1191,8 @@ final class KillSwitchManager {
             cachedDERPEndpoints: state.cachedDERPEndpoints,
             proxyTargets: state.proxyTargets,
             sessionDirectEndpoints: state.sessionDirectEndpoints,
-            reviewedBundleDirectEnabled: state.reviewedBundleDirectEnabled
+            reviewedBundleDirectEnabled: state.reviewedBundleDirectEnabled,
+            allowLocalNetworkDevices: state.allowLocalNetworkDevices
         )
     }
 
@@ -1217,7 +1237,8 @@ final class KillSwitchManager {
             cachedDERPEndpoints: previous?.cachedDERPEndpoints ?? [],
             proxyTargets: [],
             sessionDirectEndpoints: [],
-            reviewedBundleDirectEnabled: false
+            reviewedBundleDirectEnabled: false,
+            allowLocalNetworkDevices: false
         )
     }
 
@@ -1355,7 +1376,8 @@ final class KillSwitchManager {
             // Session exceptions are intentionally not persisted. A helper
             // restart and every boot therefore restore fail-closed with none.
             sessionDirectEndpoints: [],
-            reviewedBundleDirectEnabled: false
+            reviewedBundleDirectEnabled: false,
+            allowLocalNetworkDevices: false
         )
     }
 

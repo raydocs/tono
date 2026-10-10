@@ -817,6 +817,19 @@ nonisolated struct HelperManager {
 
     // MARK: - Kill Switch
 
+    /// The arm request's "Allow local network devices" field, present only
+    /// when the setting is on. A helper before this field rejects any arm
+    /// that carries it, so off (the default) sends nothing; a helper that
+    /// knows the field reads its absence as off. The helper renders the LAN
+    /// passes only while a tunnel is up, so bootstrap arms are unaffected.
+    static func localNetworkDevicesArmFields(
+        defaults: UserDefaults = AppProfile.defaults
+    ) -> [String: Any] {
+        SettingsKey.allowsLocalNetworkDevices(defaults: defaults)
+            ? ["allowLocalNetworkDevices": true]
+            : [:]
+    }
+
     static func armKillSwitch(
         apiHosts: [String]? = nil,
         exitNodeHints: [String]? = nil,
@@ -832,6 +845,7 @@ nonisolated struct HelperManager {
     ) throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool, flushedStates: Bool, killedHosts: Int) {
         var object: [String: Any] = [:]
         if reviewedBundleDirect { object["reviewedBundleDirect"] = true }
+        object.merge(localNetworkDevicesArmFields()) { _, setting in setting }
         if let apiHosts { object["apiHosts"] = apiHosts }
         if let exitNodeHints { object["exitHints"] = exitNodeHints }
         if let tunnelInterfaces { object["tunnelInterfaces"] = tunnelInterfaces }

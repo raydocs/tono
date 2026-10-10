@@ -407,7 +407,13 @@ nonisolated enum HelperProtocolVersion {
     ///   among the current Network Location's services, preferring the
     ///   primary service ID; an ambiguous name refuses (R3-O5). While a
     ///   legacy name-only snapshot is on disk, enable keeps the old lookup.
-    static let current = "4.52.44"
+    /// - 4.52.44 → 4.52.45: the arm request gained optional
+    ///   `allowLocalNetworkDevices` (D7). Absent means off: while a tunnel is
+    ///   up the anchor renders no `tono-lan`, `tono-linklocal`,
+    ///   `tono-multicast` or `tono-ssdp` pass. True renders the 4.52.44 rules.
+    ///   The app sends the field only when the setting is on, so an older
+    ///   daemon never sees it unless the user turned it on.
+    static let current = "4.52.45"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

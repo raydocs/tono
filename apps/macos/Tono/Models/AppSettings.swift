@@ -80,6 +80,19 @@ enum SettingsKey {
     /// on by default.
     nonisolated static let crashReportingEnabled =
         "crashReportingEnabled"
+    /// "Allow local network devices" (D7, decision D3-A). Off by default:
+    /// while connected, PF passes nothing to private, link-local or ULA
+    /// addresses except mDNS. Read at every Kill Switch arm. Not the legacy
+    /// `allowLAN` key, which was the proxy listener's LAN binding.
+    nonisolated static let allowLocalNetworkDevices =
+        "allowLocalNetworkDevices"
+
+    /// Whether the setting is on. Absent or unreadable is off.
+    nonisolated static func allowsLocalNetworkDevices(
+        defaults: UserDefaults = AppProfile.defaults
+    ) -> Bool {
+        defaults.bool(forKey: allowLocalNetworkDevices)
+    }
     static let hasCompletedOnboarding = "hasCompletedOnboarding"
     /// First-run Welcome v2 intro. Set after Skip or Get started; never re-shown.
     static let introSeen = "introSeen"

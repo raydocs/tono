@@ -41,6 +41,10 @@ struct SettingsView: View {
         SettingsKey.internalFailureReportsOptedOut,
         store: AppProfile.defaults
     ) private var internalFailureReportsOptedOut = false
+    @AppStorage(
+        SettingsKey.allowLocalNetworkDevices,
+        store: AppProfile.defaults
+    ) private var allowLocalNetworkDevices = false
     @AppStorage(SettingsKey.themeMode) private var themeMode = "Adaptive"
     @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults)
     private var seaMotionMode = "Auto"
@@ -141,6 +145,32 @@ struct SettingsView: View {
                 )
             }
 
+            settingDivider
+
+            SettingToggleRow(
+                label: "Allow local network devices",
+                subtitle: "Off by default. While connected, let this Mac reach printers, file shares, casting and other devices on your local network. When off, they are blocked while connected.",
+                seaSummary: "Reach printers and other local devices while connected.",
+                isOn: Binding(
+                    get: { allowLocalNetworkDevices },
+                    set: setAllowLocalNetworkDevices
+                )
+            )
+
+        }
+    }
+
+    /// A connected session re-arms on its next health check (about five
+    /// seconds) through the path a helper heal uses, so the PF passes follow
+    /// the switch without a reconnect. Disconnected, the next connect reads it.
+    private func setAllowLocalNetworkDevices(_ enabled: Bool) {
+        allowLocalNetworkDevices = enabled
+        LocalTrafficAudit.shared.recordEvent(
+            "local_network_devices_setting",
+            details: ["enabled": String(enabled)]
+        )
+        if appState.isConnected, KillSwitchService.isArmed {
+            KillSwitchService.needsSessionExceptionReassert = true
         }
     }
 
