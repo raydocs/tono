@@ -1857,7 +1857,12 @@ mod restart_while_recovering_tests {
         publish_core_identity(&manager.running_pid, exited.id().context("no pid")?);
         manager
             .start_watchdog(
-                ChildGuard { child: Some(exited), readers: Vec::new() },
+                ChildGuard {
+                    child: Some(exited),
+                    readers: Vec::new(),
+                    #[cfg(windows)]
+                    job: None,
+                },
                 unrestartable_config(),
                 owner(),
             )
@@ -1878,7 +1883,12 @@ mod restart_while_recovering_tests {
         publish_core_identity(&manager.running_pid, started_pid);
         manager
             .start_watchdog(
-                ChildGuard { child: Some(started), readers: Vec::new() },
+                ChildGuard {
+                    child: Some(started),
+                    readers: Vec::new(),
+                    #[cfg(windows)]
+                    job: None,
+                },
                 unrestartable_config(),
                 owner(),
             )
