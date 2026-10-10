@@ -11,4 +11,4 @@
 - Why stricter: it moves toward the default Reality block ("keep hy2 stripped"), never toward hy2; no new protocol,
   port, permit, node or identity, and the A18 grant and the pre-tunnel recheck are unchanged. Cost: a user whose
   Reality path is blocked and who stops a working-but-slow hy2 attempt pays 3 Reality failures before the next hop.
-- Applied in: `amp/win-hy2-stopped-hop` (`Hy2AutoSwitch::note_stopped`, `connection/heal.rs` `note_hy2_outcome`).
+- Applied in: [#1532](https://github.com/raydocs/tono/pull/1532), `amp/win-hy2-stopped-hop` (`Hy2AutoSwitch::note_stopped`, `connection/heal.rs` `note_hy2_outcome`).

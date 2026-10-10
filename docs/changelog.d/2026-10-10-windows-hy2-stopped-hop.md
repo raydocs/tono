@@ -1,6 +1,6 @@
 ## 2026-10-10 · Windows hy2 自动切换：被停止的自动 hy2 尝试让下次回到 Reality
 - 归属：ops 计划（[plan-2026-09-11](../ops/plan-2026-09-11.md)），中国大陆连通性审计（Windows）检查项 2；A17 遗留；`apps/windows/crates/tono-core/src/hy2_switch.rs`、`apps/windows/app/src-tauri/src/tono/connection/heal.rs`。
-- 来源：基线 origin/main 3d973f95；分支 `amp/win-hy2-stopped-hop`；未合 main。
+- 来源：基线 origin/main 3d973f95；分支 `amp/win-hy2-stopped-hop`，PR [#1532](https://github.com/raydocs/tono/pull/1532)；未合 main。
 - 缺陷修复（[A17W-STOPPED-HOP-STICKS](../findings.d/A17W-STOPPED-HOP-STICKS.md)）：自动 hy2 尝试在连上前被停止时结果被忽略，记忆和计数不变；
   UDP 被丢的网络上 hy2 尝试会挂到用户放弃，于是每次都再拨 hy2。现在 `Hy2AutoSwitch::note_stopped` 清掉该节点的 24 h 记忆和 Reality 失败计数，
   下次无保护尝试拨 Reality；不加退避（[决定 088](../decisions/088-2026-10-10-stopped-hy2-hop-returns-to-reality.md)，provisional）。
