@@ -409,12 +409,18 @@ struct StandIns {
     /// `(host, address, ports)`: the alternate-port walk pins `host` to `address` on each port
     /// after 443, instead of `bootstrap::API_HOST` to the compiled pins on `CONTROL_PLANE_PORTS`.
     alternate: Option<(String, std::net::IpAddr, Vec<u16>)>,
-    /// `(host, resolve)`: DoH runs for `host` and takes its addresses from `resolve`.
-    doh: Option<(String, DohStandIn)>,
+    /// DoH runs for `host` against `resolvers` instead of the public ones.
+    doh: Option<DohStandIn>,
 }
 
-/// A DoH stand-in's answer, in place of the public resolvers.
-type DohStandIn = Box<dyn Fn() -> Result<Vec<std::net::Ipv4Addr>, ()> + Send + Sync>;
+/// DoH in a test: the API host it resolves, `(resolver host, addresses)` queried through the
+/// production query path (the URL carries a port other than 443), and `before_queries`, run
+/// after the step's own check and before the query futures exist.
+struct DohStandIn {
+    host: String,
+    resolvers: Vec<(String, Vec<std::net::SocketAddr>)>,
+    before_queries: Box<dyn Fn() + Send + Sync>,
+}
 
 /// Decision 091: one walk's latch. Once a check has seen that the request must go to the relays
 /// only, every later direct step of the same walk is refused, even if the published state flips
@@ -1336,7 +1342,7 @@ impl TonoTransport {
         gate: &WalkGate,
     ) -> Option<Result<ApiResponse, ApiError>> {
         let host = match &self.stand_ins.doh {
-            Some((host, _)) => host.as_str(),
+            Some(stand_in) => stand_in.host.as_str(),
             None => bootstrap::API_HOST,
         };
         if !request.url.contains(host) {
@@ -1347,10 +1353,7 @@ impl TonoTransport {
         if !self.direct_step_allowed(request, gate).await {
             return None;
         }
-        let ips = match &self.stand_ins.doh {
-            Some((_, resolve)) => resolve().ok()?,
-            None => resolve_via_doh(host).await.ok()?,
-        };
+        let ips = self.resolve_via_doh(host, request, gate).await.ok()?;
         if ips.is_empty() {
             return None;
         }
@@ -1375,6 +1378,55 @@ impl TonoTransport {
             }
             Err(other) => Some(Err(other)),
         }
+    }
+
+    /// The DoH queries, raced across the resolvers. They run inside this walk's own future, not
+    /// as detached tasks: none outlives a winning answer, the 2 s deadline or a dropped walk.
+    /// Decision 091: each query is admitted through the walk's gate right before it leaves the
+    /// machine, so a query that first runs after the tunnel was lost (Disconnect published
+    /// `Unarmed` after the step's own check) is never sent.
+    async fn resolve_via_doh(
+        &self,
+        name: &str,
+        request: &ApiRequest,
+        gate: &WalkGate,
+    ) -> Result<Vec<std::net::Ipv4Addr>, ()> {
+        use futures::StreamExt as _;
+        let resolvers: Vec<(String, Vec<std::net::SocketAddr>)> = match &self.stand_ins.doh {
+            Some(stand_in) => {
+                (stand_in.before_queries)();
+                stand_in.resolvers.clone()
+            }
+            None => tono_core::doh_resolvers()
+                .iter()
+                .map(|resolver| {
+                    let addrs = resolver
+                        .ipv4
+                        .iter()
+                        .map(|ip| std::net::SocketAddr::new(std::net::IpAddr::V4(*ip), 443))
+                        .collect();
+                    (resolver.host.to_owned(), addrs)
+                })
+                .collect(),
+        };
+        let mut queries: futures::stream::FuturesUnordered<_> = resolvers
+            .iter()
+            .map(|(host, addrs)| async move {
+                if !self.direct_step_allowed(request, gate).await {
+                    return None;
+                }
+                query_one_doh(host, addrs, name).await.ok()
+            })
+            .collect();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        let mut seen = Vec::with_capacity(resolvers.len());
+        while let Ok(Some(answer)) = tokio::time::timeout_at(deadline, queries.next()).await {
+            seen.push(answer);
+            if let Some(ips) = tono_core::first_public_doh_answer(&seen) {
+                return Ok(ips);
+            }
+        }
+        Err(())
     }
 
     /// Last resort through an already-running loopback proxy. HTTPS CONNECT failures
@@ -1419,59 +1471,24 @@ impl TonoTransport {
     }
 }
 
-async fn resolve_via_doh(name: &str) -> Result<Vec<std::net::Ipv4Addr>, ()> {
-    let resolvers = tono_core::doh_resolvers();
-    let (tx, mut rx) = tokio::sync::mpsc::channel(resolvers.len());
-    for resolver in resolvers {
-        let tx = tx.clone();
-        let name = name.to_owned();
-        let host = resolver.host;
-        let pins = resolver.ipv4.to_vec();
-        tokio::spawn(async move {
-            let answer = query_one_doh(host, &pins, &name).await.ok();
-            let _ = tx.send(answer).await;
-        });
-    }
-    drop(tx);
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    let mut seen = Vec::with_capacity(resolvers.len());
-    while seen.len() < resolvers.len() {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() {
-            break;
-        }
-        match tokio::time::timeout(remaining, rx.recv()).await {
-            Ok(Some(answer)) => {
-                seen.push(answer);
-                if let Some(ips) = tono_core::first_public_doh_answer(&seen) {
-                    return Ok(ips);
-                }
-            }
-            _ => break,
-        }
-    }
-    Err(())
-}
-
 async fn query_one_doh(
-    host: &'static str,
-    pins: &[std::net::Ipv4Addr],
+    host: &str,
+    addrs: &[std::net::SocketAddr],
     name: &str,
 ) -> Result<Vec<std::net::Ipv4Addr>, ()> {
-    let addrs: Vec<std::net::SocketAddr> = pins
-        .iter()
-        .copied()
-        .map(|ip| std::net::SocketAddr::new(std::net::IpAddr::V4(ip), 443))
-        .collect();
     let client = reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(2))
         .timeout(Duration::from_secs(2))
-        .resolve_to_addrs(host, &addrs)
+        .resolve_to_addrs(host, addrs)
         .build()
         .map_err(|_| ())?;
-    let url = format!("https://{host}/dns-query?name={name}&type=A");
+    // The URL carries any port other than 443 (test stand-ins); the pins carry the same one.
+    let url = match addrs.first().map(std::net::SocketAddr::port) {
+        Some(port) if port != 443 => format!("https://{host}:{port}/dns-query?name={name}&type=A"),
+        _ => format!("https://{host}/dns-query?name={name}&type=A"),
+    };
     let body = client
         .get(url)
         .header("accept", "application/dns-json")
@@ -1677,7 +1694,9 @@ impl TonoTransport {
                     // them, or WFP's `Locked` state did not permit them): the relays once more,
                     // now as the only path, and their relay-unreachable error if none answers.
                     // At most one extra relay walk per request, each relay bounded as always.
-                    if gate.lost() {
+                    // Read afresh through the gate: a tunnel lost during the last direct step
+                    // (the loopback request) has had no later check to latch it.
+                    if !self.direct_step_allowed(&request, &gate).await {
                         let relay_part = if relay_note.is_empty() {
                             String::new()
                         } else {
@@ -3037,8 +3056,9 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
         }
 
         /// A walk that started with a tunnel: pins and system resolver refused (the URL's port is
-        /// closed), the relays at `relay`, DoH answered by a counter that returns nothing, and
-        /// the alternate ports `ports` (after 443) on loopback.
+        /// closed), the relays at `relay`, DoH through the production query path to a loopback
+        /// resolver that counts each query (`doh_queries`, one connection each) and closes it
+        /// unanswered, and the alternate ports `ports` (after 443) on loopback.
         fn tunnel_walk(
             relay: SocketAddr,
             doh_queries: &Arc<AtomicUsize>,
@@ -3047,14 +3067,22 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             let loopback = SocketAddr::from(([127, 0, 0, 1], 0));
             let mut transport =
                 TonoTransport::with_clients_and_relays("localhost", &[loopback], &[loopback], &[relay]).unwrap();
+            let resolver = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let resolver_address = resolver.local_addr().unwrap();
+            resolver.set_nonblocking(true).unwrap();
+            let resolver = tokio::net::TcpListener::from_std(resolver).unwrap();
             let queries = Arc::clone(doh_queries);
-            transport.stand_ins.doh = Some((
-                "localhost".to_owned(),
-                Box::new(move || {
+            tokio::spawn(async move {
+                while let Ok((stream, _)) = resolver.accept().await {
                     queries.fetch_add(1, SeqCst);
-                    Err(())
-                }) as super::super::DohStandIn,
-            ));
+                    drop(stream);
+                }
+            });
+            transport.stand_ins.doh = Some(super::super::DohStandIn {
+                host: "localhost".to_owned(),
+                resolvers: vec![("localhost".to_owned(), vec![resolver_address])],
+                before_queries: Box::new(|| {}),
+            });
             transport.stand_ins.alternate = Some((
                 "localhost".to_owned(),
                 std::net::IpAddr::from([127, 0, 0, 1]),
@@ -3128,6 +3156,74 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             assert_eq!(doh_queries.load(SeqCst), 0, "a DoH query ran after the tunnel was lost");
             assert_eq!(alternate.connections(), 0, "a direct request ran after the tunnel was lost");
             assert_eq!(relay_connections.load(SeqCst), 2);
+        }
+
+        /// The tunnel is lost after the DoH step's own check passed and before its queries left
+        /// (Disconnect publishes Unarmed in between): no query is sent, no direct request
+        /// follows, and the relays carry the request.
+        #[tokio::test]
+        async fn a_tunnel_lost_after_the_doh_check_sends_no_doh_query() {
+            let relay_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let alternate = fixture("direct", false).await;
+            let doh_queries = Arc::new(AtomicUsize::new(0));
+            let transport = Arc::new_cyclic(|weak: &std::sync::Weak<TonoTransport>| {
+                let mut transport = tunnel_walk(
+                    relay_listener.local_addr().unwrap(),
+                    &doh_queries,
+                    vec![alternate.address.port()],
+                );
+                let weak = weak.clone();
+                transport.stand_ins.doh.as_mut().unwrap().before_queries = Box::new(move || {
+                    if let Some(transport) = weak.upgrade() {
+                        transport.set_control_plane_reach(ControlPlaneReach::Unarmed);
+                    }
+                });
+                transport
+            });
+            // The relay fails while the tunnel is up, and answers once it is the only path.
+            let relay_connections = scripted(relay_listener, |index| index > 0).await;
+
+            let response = transport
+                .send(request(HttpMethod::Get, closed_port()))
+                .await
+                .expect("the relays carry the rest of the walk");
+            assert_eq!(response.body, b"relay");
+            assert_eq!(doh_queries.load(SeqCst), 0, "a DoH query left after the tunnel was lost");
+            assert_eq!(alternate.connections(), 0, "a direct request ran after the tunnel was lost");
+            assert_eq!(relay_connections.load(SeqCst), 2);
+        }
+
+        /// The tunnel is lost during the last direct step, the loopback proxy request, and no
+        /// relay answers: the request still ends with the relay-unreachable error.
+        #[tokio::test]
+        async fn a_tunnel_lost_during_the_loopback_request_ends_with_the_relay_unreachable_error() {
+            let relay_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let proxy_port = proxy_listener.local_addr().unwrap().port();
+            let doh_queries = Arc::new(AtomicUsize::new(0));
+            let transport = Arc::new(tunnel_walk(relay_listener.local_addr().unwrap(), &doh_queries, Vec::new()));
+            transport.set_auth_tunnel_port(proxy_port);
+            let relay_connections = scripted(relay_listener, |_| false).await;
+            let proxy_connections = scripted(proxy_listener, {
+                let transport = Arc::clone(&transport);
+                move |_| {
+                    transport.set_control_plane_reach(ControlPlaneReach::Unarmed);
+                    false
+                }
+            })
+            .await;
+
+            let error = transport
+                .send(request(HttpMethod::Get, closed_port()))
+                .await
+                .expect_err("no relay answers");
+            let ApiError::Transport { kind, message } = error else {
+                panic!("expected a transport error");
+            };
+            assert_eq!(proxy_connections.load(SeqCst), 1);
+            assert_eq!(relay_connections.load(SeqCst), 2, "one walk with the tunnel, one without");
+            assert!(message.starts_with("TONO_RELAYS_UNREACHABLE: relay 1 ("), "{message}");
+            assert!(tono_core::auth::should_retry_transport(HttpMethod::Get, kind), "{kind:?}");
         }
 
         /// The tunnel is lost while the relays run and no relay answers: the request ends with

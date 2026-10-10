@@ -39,3 +39,11 @@
   `a_tunnel_lost_before_doh_sends_no_doh_query_and_no_direct_request`、`a_tunnel_lost_during_the_relays_ends_with_the_relay_unreachable_error`；
   为此 DoH 解析与备用端口的目标加了仅测试使用的本地替身（`StandIns`，生产为空、行为不变）。本机 `cargo check --tests --lib` 通过；
   `cargo test` 未在本机跑（磁盘不足），由 CI 运行。
+- 续记（2026-10-10，Sol 复核修复轮 @ 636ce742：F1 major 未尽、M1 minor 部分）：F1：生产 DoH 只在 `resolve_via_doh` 之前复查，
+  查询被 `tokio::spawn` 成脱离的任务，任务在 Disconnect 发布 `Unarmed` 之后才运行仍会直连发出，且赢得答案或父请求取消后其余查询
+  仍在跑。改为：查询在本次遍历自己的 future 里并发（`FuturesUnordered`，不再 spawn），赢得答案、2 s 截止或遍历被丢弃时其余查询随之
+  取消；每个查询发出前都经同一个 `WalkGate` 复查。DoH 测试替身改为走生产查询路径的本地解析器（按连接计数），不再是同步闭包。
+  M1：最后一步本地隧道请求期间隧道丢失时，终止处只看 `gate.lost()`，错误仍是 `pinned[…]; system-dns[…]`；改为经同一闸门重读当前
+  状态，再决定是否以 `TONO_RELAYS_UNREACHABLE` 走最后一轮中继。新增回归 `a_tunnel_lost_after_the_doh_check_sends_no_doh_query`、
+  `a_tunnel_lost_during_the_loopback_request_ends_with_the_relay_unreachable_error`；去掉修复后两者都失败，恢复后通过。本机
+  `cargo test --lib tono::transport`（Linux，资源文件用占位）35 通过。
