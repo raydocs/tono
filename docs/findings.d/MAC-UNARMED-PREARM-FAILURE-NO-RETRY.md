@@ -1,0 +1,3 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| MAC-UNARMED-PREARM-FAILURE-NO-RETRY | macOS 掉线后自动释放进入「未 armed 重连」循环：TCP 证明通过后循环调用 `connect(preservingUnarmedBackoff: true)` 并结束；这次连接若在 PF armed 之前失败（`AppState+Connect.swift` 未 armed 分支：网络服务切换中途消失、目录出口无法拨号等），只做清理、不再排任何重试，之后的网络变化也因循环已无 owner 而不重启（`unarmedReconnectAwaitsNetwork` 为假、`KillSwitchService.isArmed` 为假），Mac 停在「未连接」、网络不受保护，直到用户手动连接 | in-PR | 待开（分支 `amp/cn6-unarmed-retry-after-prearm-failure`） | 中·推导 | 修复：只对由未 armed 循环发起、失败不需要用户处理（`failureRequiresUserAction` 为假）且不在 helper 准备阶段（可能弹管理员授权）的连接，在释放之后把恢复交回循环（保留退避档位）。审计另见：自动释放失败后停在 Protected Offline 无重试（gap A）、唤醒连接在准入阶段被拒后无重试（gap C），未在本 PR 修 |
