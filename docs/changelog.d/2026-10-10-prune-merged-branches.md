@@ -7,14 +7,14 @@
   （`macos-release.yml` 的 `CANDIDATE_REF` 指向它）、`gh-readonly-queue/*`、main 的 `.github/workflows` 里点名的分支、
   任何开着的 PR 的 head 与 base（删 base 会关掉叠放 PR）、tip 等于 main 的新分支、以及有 main 之外提交的分支。
   删除用 `--force-with-lease=<ref>:<列出时的 SHA>`，列出后被推过的分支不删。读不到开着的 PR 列表就不删。
-  `worktrees`：只移除分支 tip 在 main 上、工作树干净（无修改、暂存、未跟踪文件）的链接 worktree；不碰主 worktree、
+  `worktrees`：只移除分支 tip 在 main 上、工作树干净（无修改、暂存、未跟踪、被忽略文件，无 skip-worktree/assume-unchanged 条目；`git worktree remove` 会连被忽略文件一起删）的链接 worktree；不碰主 worktree、
   当前 worktree、locked、目录缺失、detached、tip 等于 main、以及 24 小时内动过（HEAD/index/reflog mtime，
   `--min-idle-hours`）的 worktree；`git worktree remove` 不带 `--force`。两种模式默认 dry-run，`--apply` 才动手。
   `.github/workflows/prune-merged-branches.yml`：每周一 04:41 UTC 以 `--apply` 跑 remote 部分；手动触发默认 dry-run；
   权限 `contents: write`（唯一写权限）+ `pull-requests: read`。AGENTS.md「Records and Git」加两行规则。
   仓库设置「Automatically delete head branches」目前已开（`gh repo view --json deleteBranchOnMerge` 为 true），
   属所有者设置，本 PR 不改，建议保持开启。
-- 工程与测试：`tooling/scripts/tests/prune-merged-branches.test.mjs` 三条（远端选择、`--apply` 租约、worktree 选择），
+- 工程与测试：`tooling/scripts/tests/prune-merged-branches.test.mjs` 四条（远端选择含开着 PR 的 base、`--apply` 租约、读不到开着的 PR 列表时不删、worktree 选择含被忽略文件与 skip-worktree），
   用临时裸仓库；`services-ci.yml` push 路径加入脚本本身。
 - 验证：见 PR 正文（Linux orb，Node 24，`node --test`；对真实 origin 只跑 dry-run）。
 - 候选/发布：无新包。

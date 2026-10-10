@@ -14,8 +14,9 @@
 //              --force-with-lease=<ref>:<listed sha>, so a branch that moved
 //              after it was listed stays.
 //   worktrees  linked worktrees whose branch tip is an ancestor of origin/main
-//              and whose working tree is clean (no modified, staged or
-//              untracked files). Kept: the main worktree, the current one,
+//              and whose working tree is clean (no modified, staged,
+//              untracked or ignored files, no skip-worktree/assume-unchanged
+//              entries). Kept: the main worktree, the current one,
 //              locked, missing, detached, a branch at main's tip, and any
 //              worktree touched in the last --min-idle-hours (default 24) so a
 //              just-created agent worktree is not pulled from under it. Removal
@@ -200,6 +201,12 @@ export function selectWorktrees({ cwd, remote = 'origin', main = 'main', minIdle
     if (idleHours < minIdleHours) return decide(keep, `touched in the last ${minIdleHours}h`)
     const status = git(entry.worktree, ['status', '--porcelain=v1', '--untracked-files=all'])
     if (status !== '') return decide(keep, 'modified or untracked files')
+    // `git worktree remove` deletes ignored files too (.env, local evidence, wrangler state): keep them.
+    const ignored = git(entry.worktree, ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'])
+    if (ignored !== '') return decide(keep, 'ignored files present')
+    // Status does not see edits hidden by skip-worktree (S/s) or assume-unchanged (lowercase tag).
+    const hidden = git(entry.worktree, ['ls-files', '-v']).split('\n').some((line) => /^(S|[a-z])/.test(line))
+    if (hidden) return decide(keep, 'skip-worktree or assume-unchanged entries')
     return decide(remove, 'merged and clean')
   })
   return { mainSha, remove, keep }
