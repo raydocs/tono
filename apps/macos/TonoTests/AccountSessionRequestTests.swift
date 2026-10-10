@@ -192,8 +192,10 @@ final class AccountSessionRequestTests: XCTestCase {
                 // No pin reached TLS: nothing was sent.
                 throw URLError(.cannotConnectToHost)
             },
-            relayPath: ControlPlanePath(label: "relay") { _, _ in
+            relayPath: ControlPlanePath(label: "relay") { request, _ in
                 relayAttempts.record()
+                // Decision 077: the attempt names its path for the control plane.
+                XCTAssertEqual(request.value(forHTTPHeaderField: TonoAPIClient.pathHeader), "relay")
                 return ControlPlaneAnswer(
                     status: 202,
                     body: Data(#"{"challengeId":"c-077","expiresIn":600,"message":"sent"}"#.utf8),
@@ -217,6 +219,94 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(relayAttempts.count, 2, "the relay receives each request exactly once")
         XCTAssertEqual(systemRequests.count, 1, "the second request goes to the relay first")
         XCTAssertEqual(pinnedAttempts.count, 1, "the dead pins are not paid again once the relay answered")
+        AppProfile.defaults.removeObject(forKey: TonoAPIClient.preferredPathKey(forHost: host))
+    }
+
+    /// Decision 077: the path that answered is remembered in the app profile,
+    /// so a new client for the same host (the next launch) tries it first and
+    /// does not pay the dead paths again before its first request.
+    func testARememberedPathIsTriedFirstByANewClientForTheSameHost() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        let key = TonoAPIClient.preferredPathKey(forHost: host)
+        defer { AppProfile.defaults.removeObject(forKey: key) }
+        AppProfile.defaults.set(["label": "relay", "at": Date().timeIntervalSince1970], forKey: key)
+        let systemRequests = PathCallCounter()
+        HeldAccountProtocol.install(host) { request in
+            systemRequests.record()
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        let pinnedAttempts = PathCallCounter()
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                pinnedAttempts.record()
+                throw URLError(.cannotConnectToHost)
+            },
+            relayPath: ControlPlanePath(label: "relay") { _, _ in
+                ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-077b","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
+            }
+        )
+
+        let challengeId = try await api.startEmailSignIn(TonoEmailStartRequest(
+            email: "remembered@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+        )).challengeId
+
+        XCTAssertEqual(challengeId, "c-077b")
+        XCTAssertEqual(systemRequests.count, 0, "the remembered relay goes first; the system resolver is not tried")
+        XCTAssertEqual(pinnedAttempts.count, 0)
+    }
+
+    /// Decision 077: when no path answers, the transport failure names every
+    /// path's own failure, as the Windows client's combined message does, so
+    /// one audit line tells support what each path saw.
+    func testEveryPathFailureIsNamedWhenNoPathAnswers() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        defer { AppProfile.defaults.removeObject(forKey: TonoAPIClient.preferredPathKey(forHost: host)) }
+        HeldAccountProtocol.install(host) { request in
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost, userInfo: [
+                NSLocalizedDescriptionKey: "resolver refused",
+            ]))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                throw URLError(.cannotConnectToHost, userInfo: [NSLocalizedDescriptionKey: "pinned: 1.2.3.4 no route"])
+            },
+            relayPath: ControlPlanePath(label: "relay") { _, _ in
+                throw URLError(.cannotConnectToHost, userInfo: [NSLocalizedDescriptionKey: "relay: 5.6.7.8:2053 refused"])
+            }
+        )
+
+        var detail: String?
+        do {
+            _ = try await api.startEmailSignIn(TonoEmailStartRequest(
+                email: "allfail@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+            ))
+        } catch let error as TonoAPIClient.APIError {
+            if case let .transport(text) = error { detail = text }
+        }
+
+        // URLSession may reword the resolver's error; the shape and the two
+        // pinned-client failures are the behaviour.
+        XCTAssertTrue(detail?.hasPrefix("system_dns[") == true, "got: \(detail ?? "no transport error")")
+        XCTAssertTrue(
+            detail?.hasSuffix("]; pinned[pinned: 1.2.3.4 no route]; relay[relay: 5.6.7.8:2053 refused]") == true,
+            "got: \(detail ?? "no transport error")"
+        )
     }
 
     /// #588: a server certificate this Mac's clock cannot date names the
