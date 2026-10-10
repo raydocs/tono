@@ -44,6 +44,16 @@ Windows frontend-only work can use `pnpm web:dev`; ops uses
 Browser preview does not prove IPC, Service behavior or protection.
 Docs-only edits require no product test suite or compiler.
 
+**Orb dependency preparation.** `.agents/setup` installs the portable/web
+prerequisites; `.agents/resume` does not install dependencies. Explicit tasks use
+`.agents/setup-task kode-bridge` for the vendored IPC crate,
+`.agents/setup-task windows-rust` for the four Windows Rust workspaces, or
+`.agents/setup-task icon-design` for the pinned Pillow environment. Rust tasks
+install the app's pinned toolchain only if missing and run `cargo fetch --locked`;
+they never build or run tests, change the default toolchain, or relax lockfile
+verification. Native builds still use the execution lanes above. Existing caches
+are retained. Run task preparation from the repository root in a login shell.
+
 ## Reproducible hosted CI, not floating OS upgrades
 
 `macos-latest` and `windows-latest` migrate to newer GitHub images over time.

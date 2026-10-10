@@ -327,9 +327,24 @@ fn digits(text: &str) -> Option<u64> {
 }
 
 async fn bounded(client: &reqwest::Client, url: &str, limit: usize, preferred: &PathPreference) -> Result<String> {
-    let mut response = get(client, url, Some(Duration::from_secs(30)), preferred)
-        .await?
-        .error_for_status()?;
+    read_bounded(get(client, url, Some(Duration::from_secs(30)), preferred).await?, limit).await
+}
+
+/// The discovery document, or `None` when the release host answered 404: nothing is published
+/// on the v1 channel, which is no update rather than a failed check. The answer is the release
+/// host's own on every path (a relay passes the TLS session through). Any other 4xx/5xx still
+/// fails (`error_for_status`), and so does a 404 for the signature of a published manifest
+/// (`bounded`). A 3xx is not followed (`Policy::none`) and is not rejected here: its body is
+/// read under the same cap and goes to the Service's signature check like any other answer.
+async fn discovery_document(response: reqwest::Response) -> Result<Option<String>> {
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    read_bounded(response, 16_384).await.map(Some)
+}
+
+async fn read_bounded(response: reqwest::Response, limit: usize) -> Result<String> {
+    let mut response = response.error_for_status()?;
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await? {
         ensure!(bytes.len() + chunk.len() <= limit, "update document exceeds limit");
@@ -353,7 +368,13 @@ pub async fn tono_check_update(state: tauri::State<'_, Arc<TonoState>>) -> Resul
         // starts its update GETs there too (decision 077).
         let api = state.lock().await.client.clone();
         let preferred = api.transport().path_preference();
-        let manifest = bounded(&client, DISCOVERY_URL, 16_384, preferred).await?;
+        let discovered = get(&client, DISCOVERY_URL, Some(Duration::from_secs(30)), preferred).await?;
+        let Some(manifest) = discovery_document(discovered).await? else {
+            // Nothing published: no offer, and SWR keeps its daily cadence instead of the
+            // hourly recheck it gives a failed check.
+            *OFFER.lock().await = None;
+            return Ok(None);
+        };
         let decoded = ReleaseManifest::decode(manifest.as_bytes())?;
         let hash = decoded.sha256()?;
         let signature = bounded(
@@ -1035,5 +1056,56 @@ mod update_relay_tests {
             "the update GET went to the direct path before the relay the sign-in used"
         );
         assert_eq!(preferred.relay(), 2, "an answering relay stays preferred");
+    }
+
+    /// Nothing is published on the v1 channel yet: the release host answers 404 for
+    /// `latest/manifest.json`. Through a relay as on the direct path, that is no update
+    /// (`Ok(None)`), not a failed check, and the 404 is not sent on to another relay.
+    #[tokio::test]
+    async fn an_unpublished_discovery_manifest_over_a_relay_is_no_update() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let relay = listener.local_addr().expect("addr");
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                use std::io::{BufRead as _, BufReader, Write as _};
+                let Ok(mut stream) = stream else { continue };
+                let Ok(clone) = stream.try_clone() else { continue };
+                let mut reader = BufReader::new(clone);
+                let mut line = String::new();
+                while reader.read_line(&mut line).unwrap_or(0) > 0 && line != "\r\n" && line != "\n" {
+                    line.clear();
+                }
+                let _ = stream.write_all(
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nNot found",
+                );
+                let _ = stream.flush();
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+            }
+        });
+        // The direct path refuses before any response, so the GET goes to the relay.
+        let direct = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .resolve("releases.test", SocketAddr::from(([127, 0, 0, 1], 1)))
+            .build()
+            .expect("direct client");
+        let preferred = PathPreference::default();
+        let response = get_with_relays(
+            &direct,
+            "http://releases.test/desktop/v1/latest/manifest.json",
+            Some(Duration::from_secs(5)),
+            // A second relay that would refuse: a 404 is an answer and must not reach it.
+            &[relay, SocketAddr::from(([127, 0, 0, 1], 1))],
+            || reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()),
+            &preferred,
+        )
+        .await
+        .expect("the relay's 404 is an answer");
+        assert_eq!(response.status(), 404);
+        assert_eq!(
+            discovery_document(response).await.expect("an unpublished channel is not a failed check"),
+            None
+        );
+        assert_eq!(preferred.relay(), 1, "the relay that answered stays preferred");
     }
 }

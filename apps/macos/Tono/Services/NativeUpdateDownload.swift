@@ -12,12 +12,34 @@ nonisolated enum NativeUpdateDownload {
         let directory: URL
     }
 
-    static func discover() async throws -> Offer {
-        let bytes = try await bounded(URL(string: origin + "latest/manifest.json")!, maximum: UpdateContractV1.maxBytes)
+    /// The release host answered 404 for a metadata GET (over whichever
+    /// path carried it; a relay passes the TLS session through, so the
+    /// answer is the release host's own).
+    nonisolated struct NotPublished: LocalizedError {
+        var errorDescription: String? { "Update discovery metadata is unavailable or invalid." }
+    }
+
+    /// The signed offer, or nil when the discovery object is not published
+    /// (a 404 for `latest/manifest.json`): no update, not an error, never a
+    /// fallback installer. Any other missing or invalid metadata, including
+    /// a 404 for the signature of a published manifest, still throws.
+    static func discover(
+        origin: String = NativeUpdateDownload.origin, fallbacks: [ControlPlanePath]? = nil
+    ) async throws -> Offer? {
+        let bytes: Data
+        do {
+            bytes = try await bounded(
+                URL(string: origin + "latest/manifest.json")!, maximum: UpdateContractV1.maxBytes, fallbacks: fallbacks
+            )
+        } catch is NotPublished {
+            return nil
+        }
         let manifest = try UpdateContractV1.ReleaseManifest.decode(bytes)
         let hash = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
         let directory = URL(string: origin + hash + "/")!
-        let signature = try await bounded(directory.appendingPathComponent("manifest.macos-arm64.sig"), maximum: 4096)
+        let signature = try await bounded(
+            directory.appendingPathComponent("manifest.macos-arm64.sig"), maximum: 4096, fallbacks: fallbacks
+        )
         return .init(bytes: bytes, signature: signature, manifest: manifest, directory: directory)
     }
 
@@ -42,6 +64,7 @@ nonisolated enum NativeUpdateDownload {
             // No response arrived. A GET is safe to send again elsewhere.
             return try await fetch(url, maximum: maximum, after: error, over: fallbacks ?? Self.fallbacks(for: url))
         }
+        if let http = response as? HTTPURLResponse, http.statusCode == 404, http.url == url { throw NotPublished() }
         guard let http = response as? HTTPURLResponse, http.statusCode == 200, http.url == url,
               response.expectedContentLength <= maximum else { throw failure("Update discovery metadata is unavailable or invalid.") }
         var data = Data()
@@ -86,6 +109,7 @@ nonisolated enum NativeUpdateDownload {
                 failures.append("\(path.label)[\(error.localizedDescription)]")
                 continue
             }
+            if answer.status == 404 { throw NotPublished() }
             guard answer.status == 200, answer.bodyFailure == nil, answer.body.count <= maximum else {
                 throw failure("Update discovery metadata is unavailable or invalid.")
             }
@@ -368,37 +392,35 @@ nonisolated final class PackageResponseSink: @unchecked Sendable {
 /// The package GET over one relay (decision 077). TLS is `PinnedTLS`: the
 /// release host as SNI, the default certificate evaluation against it, no
 /// proxy. One request, no redirects. The body goes to the sink piece by
-/// piece as it arrives. The budgets are the direct download's: 60 s without
-/// a byte (`URLSession`'s request timeout), 900 s for the whole transfer.
-/// Once the signed length is on disk the transfer ends at the connection's
-/// end, or after `closeGrace`; a byte past the length in that window fails it.
+/// piece as it arrives; `RelayPackageTransfer` holds the budgets and decides
+/// how a transfer that reached the server ends.
 nonisolated final class RelayPackageConnection: @unchecked Sendable {
-    static let idleBudget: TimeInterval = 60
-    static let transferBudget: TimeInterval = 900
-    /// After the signed length, how long to wait for the connection's end.
-    static let closeGrace: TimeInterval = 2
-
     private let connection: NWConnection
     private let label: String
     private let message: Data
-    private let sink: PackageResponseSink
     private let queue = DispatchQueue(label: "app.tono.update.package-relay")
     private let lock = NSLock()
+    /// Set once in `init`; called only on `queue`.
+    private var transfer: RelayPackageTransfer!
     // Guarded by `lock`.
     private var outcome: Result<Void, any Error>?
     private var continuation: CheckedContinuation<Void, any Error>?
     // Touched only on `queue`.
     private var connected = false
     private var lastWaiting: String?
-    private var lastActivity: TimeInterval = 0
-    /// The signed length is on disk; only the connection's end may follow.
-    private var bodyComplete = false
 
     init(endpoint: ControlPlaneEndpoint, host: String, message: Data, sink: PackageResponseSink) {
         connection = PinnedTLS.connection(to: endpoint, host: host)
         label = "relay \(endpoint.description)"
         self.message = message
-        self.sink = sink
+        let queue = self.queue
+        transfer = RelayPackageTransfer(
+            label: label, sink: sink,
+            now: { ProcessInfo.processInfo.systemUptime },
+            schedule: { delay, action in queue.asyncAfter(deadline: .now() + delay, execute: action) },
+            isFinished: { [weak self] in self?.isFinished ?? true },
+            end: { [weak self] result in self?.finish(result) }
+        )
     }
 
     func run(connectBudget: TimeInterval) async throws {
@@ -429,9 +451,7 @@ nonisolated final class RelayPackageConnection: @unchecked Sendable {
                 NSLocalizedDescriptionKey: lastWaiting ?? "no TLS connection within \(Int(connectBudget.rounded(.up))) s",
             ])))
         }
-        queue.asyncAfter(deadline: .now() + Self.transferBudget) { [weak self] in
-            self?.finish(.failure(URLError(.timedOut)))
-        }
+        queue.async { [self] in transfer.begin() }
     }
 
     private var isFinished: Bool {
@@ -458,8 +478,7 @@ nonisolated final class RelayPackageConnection: @unchecked Sendable {
         case .ready:
             guard !isFinished, !connected else { return }
             connected = true
-            lastActivity = ProcessInfo.processInfo.systemUptime
-            watchIdle(after: Self.idleBudget)
+            transfer.connected()
             connection.send(content: message, completion: .contentProcessed { [self] error in
                 if let error {
                     finish(.failure(URLError(.networkConnectionLost, userInfo: [
@@ -486,48 +505,107 @@ nonisolated final class RelayPackageConnection: @unchecked Sendable {
     private func receive() {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [self] data, _, isComplete, error in
             guard !isFinished else { return }
-            if let data, !data.isEmpty {
-                lastActivity = ProcessInfo.processInfo.systemUptime
-                do {
-                    // A byte past the signed length throws here.
-                    if try sink.receive(data), !bodyComplete {
-                        // `Connection: close`: wait briefly for the end, so
-                        // excess bytes fail the transfer instead of passing.
-                        bodyComplete = true
-                        queue.asyncAfter(deadline: .now() + Self.closeGrace) { [weak self] in
-                            self?.finish(.success(()))
-                        }
-                    }
-                } catch {
-                    finish(.failure(error))
-                    return
-                }
-            }
-            guard !isComplete, error == nil else {
-                if bodyComplete {
-                    finish(.success(()))
-                    return
-                }
-                finish(.failure(URLError(.networkConnectionLost, userInfo: [
-                    NSLocalizedDescriptionKey: "\(label): the connection closed before the whole package"
-                        + (error.map { " (\($0))" } ?? ""),
-                ])))
-                return
-            }
-            receive()
+            if transfer.received(data, isComplete: isComplete, error: error) { receive() }
         }
+    }
+}
+
+/// The relay package transfer's budgets and end rules, apart from the
+/// connection so a test can drive them with an injected clock and timers.
+/// The budgets are the direct download's: 60 s without a byte (`URLSession`'s
+/// request timeout), 900 s for the whole transfer. Once the signed length is
+/// on disk the transfer ends at the connection's end, or after `closeGrace`;
+/// a byte past the length in that window fails it. From then on the 900 s
+/// budget no longer applies: the package arrived in time (review M3).
+/// Confined to one queue: every call and every scheduled action runs there.
+nonisolated final class RelayPackageTransfer: @unchecked Sendable {
+    static let idleBudget: TimeInterval = 60
+    static let transferBudget: TimeInterval = 900
+    /// After the signed length, how long to wait for the connection's end.
+    static let closeGrace: TimeInterval = 2
+
+    private let label: String
+    private let sink: PackageResponseSink
+    private let now: () -> TimeInterval
+    private let schedule: (TimeInterval, @escaping @Sendable () -> Void) -> Void
+    private let isFinished: () -> Bool
+    /// Ends the transfer; only the first call counts.
+    private let end: (Result<Void, any Error>) -> Void
+    private var lastActivity: TimeInterval = 0
+    /// The signed length is on disk; only the connection's end may follow.
+    private var bodyComplete = false
+
+    init(
+        label: String, sink: PackageResponseSink, now: @escaping () -> TimeInterval,
+        schedule: @escaping (TimeInterval, @escaping @Sendable () -> Void) -> Void,
+        isFinished: @escaping () -> Bool, end: @escaping (Result<Void, any Error>) -> Void
+    ) {
+        self.label = label
+        self.sink = sink
+        self.now = now
+        self.schedule = schedule
+        self.isFinished = isFinished
+        self.end = end
+    }
+
+    /// Starts the whole-transfer budget.
+    func begin() {
+        schedule(Self.transferBudget) { [weak self] in
+            // A package already on disk is in its close grace, which decides.
+            guard let self, !bodyComplete else { return }
+            end(.failure(URLError(.timedOut)))
+        }
+    }
+
+    /// The connection is ready: starts the budget without a byte.
+    func connected() {
+        lastActivity = now()
+        watchIdle(after: Self.idleBudget)
+    }
+
+    /// One receive result from the connection. True when it should read again.
+    func received(_ data: Data?, isComplete: Bool, error: (any Error)?) -> Bool {
+        if let data, !data.isEmpty {
+            lastActivity = now()
+            do {
+                // A byte past the signed length throws here.
+                if try sink.receive(data), !bodyComplete {
+                    // `Connection: close`: wait briefly for the end, so
+                    // excess bytes fail the transfer instead of passing.
+                    bodyComplete = true
+                    schedule(Self.closeGrace) { [weak self] in
+                        self?.end(.success(()))
+                    }
+                }
+            } catch {
+                end(.failure(error))
+                return false
+            }
+        }
+        guard !isComplete, error == nil else {
+            if bodyComplete {
+                end(.success(()))
+                return false
+            }
+            end(.failure(URLError(.networkConnectionLost, userInfo: [
+                NSLocalizedDescriptionKey: "\(label): the connection closed before the whole package"
+                    + (error.map { " (\($0))" } ?? ""),
+            ])))
+            return false
+        }
+        return true
     }
 
     /// Ends the transfer once no byte has arrived for `idleBudget`.
     private func watchIdle(after delay: TimeInterval) {
-        queue.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self, !isFinished else { return }
-            let quiet = ProcessInfo.processInfo.systemUptime - lastActivity
+        schedule(delay) { [weak self] in
+            guard let self, !isFinished() else { return }
+            let quiet = now() - lastActivity
             guard quiet >= Self.idleBudget else {
                 watchIdle(after: Self.idleBudget - quiet)
                 return
             }
-            finish(.failure(URLError(.timedOut)))
+            end(.failure(URLError(.timedOut)))
         }
     }
 }
