@@ -14,7 +14,13 @@ extension AppState {
             )
             RuntimeCleanup.nativeUpdatePending = true
             isProtectionBlocked = status.receipt?.requiredRecovery != .unprotected
+            // Decision 086: preparation armed without a tunnel inside the
+            // helper; route the control plane by the helper's state.
+            await coordinator.reconcileKillSwitchTunnelState()
         } catch {
+            // Preparation may have armed without a tunnel before the failure
+            // (Prepare succeeded, Execute did not): follow the helper.
+            await coordinator.reconcileKillSwitchTunnelState()
             // Unreachable is pending, never a reason to run ordinary cleanup.
             let status = try? await coordinator.nativeUpdate("status")
             if let status {

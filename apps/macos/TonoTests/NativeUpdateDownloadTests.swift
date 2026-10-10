@@ -30,7 +30,9 @@ final class NativeUpdateDownloadTests: XCTestCase {
         // fixture without adding an ATS exception to the product.
         let url = try XCTUnwrap(URL(string: "http://localhost:\(port.rawValue)/manifest.json"))
         do {
-            _ = try await NativeUpdateDownload.bounded(url, maximum: 80, timeoutInterval: 1)
+            _ = try await NativeUpdateDownload.bounded(
+                url, maximum: 80, timeoutInterval: 1, armedWithoutTunnel: false
+            )
             XCTFail("a progressing transfer must still meet the whole-resource deadline")
         } catch let error as URLError {
             XCTAssertEqual(error.code, .timedOut)
@@ -56,7 +58,7 @@ final class NativeUpdateDownloadTests: XCTestCase {
                 XCTAssertEqual(maximumResponseBytes, 80, "the relay is held to the same cap")
                 return ControlPlaneAnswer(status: 200, body: Data("signed-manifest".utf8), bodyFailure: nil)
             },
-        ])
+        ], armedWithoutTunnel: false)
 
         XCTAssertEqual(data, Data("signed-manifest".utf8))
         XCTAssertEqual(attempts.entries, ["pinned GET \(url.absoluteString)", "relay GET \(url.absoluteString)"])
@@ -91,7 +93,7 @@ final class NativeUpdateDownloadTests: XCTestCase {
                 // A byte past the signed length is refused.
                 XCTAssertThrowsError(try sink.receive(Data([0])))
             },
-        ])
+        ], armedWithoutTunnel: false)
         defer { try? FileManager.default.removeItem(at: saved.deletingLastPathComponent()) }
 
         XCTAssertEqual(requested.entries, [url.absoluteString])
@@ -114,7 +116,7 @@ final class NativeUpdateDownloadTests: XCTestCase {
                     throw URLError(.networkConnectionLost)
                 },
                 PackagePath(label: "relay") { _, _ in afterInterim.record("second") },
-            ])
+            ], armedWithoutTunnel: false)
             XCTFail("a disconnect after a status line must fail the download")
         } catch let error as URLError {
             XCTAssertEqual(error.code, .networkConnectionLost)
@@ -175,6 +177,65 @@ final class NativeUpdateDownloadTests: XCTestCase {
         XCTAssertEqual(outcomes.count, 1)
         XCTAssertNoThrow(try outcomes.first?.get())
         XCTAssertEqual(try Data(contentsOf: destination), package)
+    }
+
+    /// Nothing is published on the v1 channel yet (the release host answers
+    /// 404 for `latest/manifest.json`): discovery reports no update instead
+    /// of failing, directly and over a relay alike, and asks for nothing more.
+    func testUnpublishedDiscoveryManifestIsNoUpdateDirectlyAndOverTheRelay() async throws {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        let listener = try NWListener(using: parameters)
+        let queue = DispatchQueue(label: "net.tono.tests.update-unpublished")
+        let ready = expectation(description: "loopback release fixture is ready")
+        listener.stateUpdateHandler = { state in
+            if case .ready = state { ready.fulfill() }
+        }
+        listener.newConnectionHandler = { connection in
+            connection.start(queue: queue)
+            Self.answerNotFound(on: connection)
+        }
+        defer {
+            listener.stateUpdateHandler = nil
+            listener.newConnectionHandler = nil
+            listener.cancel()
+        }
+        listener.start(queue: queue)
+        await fulfillment(of: [ready], timeout: 3)
+        let port = try XCTUnwrap(listener.port)
+        let direct = try await NativeUpdateDownload.discover(
+            origin: "http://localhost:\(port.rawValue)/desktop/v1/", fallbacks: []
+        )
+        XCTAssertNil(direct, "a 404 from the release host is no update, not a failure")
+
+        // Nothing listens on loopback port 1: the relay carries the GET.
+        let requested = UpdatePathLog()
+        let relayed = try await NativeUpdateDownload.discover(origin: "http://localhost:1/desktop/v1/", fallbacks: [
+            ControlPlanePath(label: "relay") { request, _ in
+                requested.record(request.url?.absoluteString ?? "-")
+                return ControlPlaneAnswer(status: 404, body: Data("Not found".utf8), bodyFailure: nil)
+            },
+        ])
+        XCTAssertNil(relayed, "the relay's 404 is the release host's own answer")
+        XCTAssertEqual(requested.entries, ["http://localhost:1/desktop/v1/latest/manifest.json"])
+    }
+
+    private nonisolated static func answerNotFound(on connection: NWConnection, received: Data = Data()) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 4_096) { data, _, complete, error in
+            guard error == nil, let data, !data.isEmpty, received.count + data.count <= 8_192 else {
+                connection.cancel()
+                return
+            }
+            var request = received
+            request.append(data)
+            guard request.range(of: Data("\r\n\r\n".utf8)) != nil else {
+                if complete { connection.cancel() } else { answerNotFound(on: connection, received: request) }
+                return
+            }
+            let response = Data("HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nNot found".utf8)
+            connection.send(content: response, contentContext: .finalMessage, isComplete: true,
+                            completion: .contentProcessed { _ in connection.cancel() })
+        }
     }
 
     private nonisolated static func receiveRequest(

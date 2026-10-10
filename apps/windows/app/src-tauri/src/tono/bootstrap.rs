@@ -40,11 +40,14 @@ pub const API_HOST: &str = "api.afk.ccwu.cc";
 /// (China Mobile → anycast, 2026-10-10): for that customer the pins, the system
 /// resolver, DoH and the alternate ports all land on the same broken path.
 ///
-/// Deliberately not part of [`API_BOOTSTRAP_IPS`]: the WFP bootstrap permit stays
-/// Cloudflare-only, so an armed kill switch is not widened. A relay is therefore
-/// usable only while protection is not armed, which is exactly when sign-in and
-/// first catalog fetch happen.
-pub const API_RELAYS: [(&str, u16); 2] = [("179.253.233.220", 2053), ("179.255.154.17", 2053)];
+/// Not part of [`API_BOOTSTRAP_IPS`], and not sent to the Service: the list is
+/// compiled into both sides (`tono_service_protocol::API_RELAYS`, re-exported
+/// here). While protection is armed without a tunnel (bootstrap, Protected
+/// Offline), WFP rule C permits exactly these `IP:port` tuples, TCP, for the
+/// installed Tono app only (owner decision W-A, decision 090, which amends 077),
+/// so the transport and updater reach them in that state too. Connected, rule C is
+/// retracted and they are blocked like any other physical address.
+pub use tono_service_protocol::API_RELAYS;
 
 /// Hard cap for `bootstrap_api_hosts` on the wire (F1).
 pub const MAX_BOOTSTRAP_HOSTS: usize = 8;
@@ -72,9 +75,8 @@ pub fn pinned_bootstrap_ips() -> Vec<Ipv4Addr> {
 pub fn api_relays() -> Vec<std::net::SocketAddr> {
     API_RELAYS
         .iter()
-        .filter_map(|(text, port)| text.parse::<Ipv4Addr>().ok().map(|ip| (ip, *port)))
         .filter(|(ip, port)| tono_core::node::is_public_ipv4(*ip) && *port != 0)
-        .map(|(ip, port)| std::net::SocketAddr::new(std::net::IpAddr::V4(ip), port))
+        .map(|(ip, port)| std::net::SocketAddr::new(std::net::IpAddr::V4(*ip), *port))
         .collect()
 }
 
