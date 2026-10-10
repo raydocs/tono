@@ -274,8 +274,11 @@
       "stillRunningTitle": "Previous connection still running",
       "stillRunningDescription": "The last session's tunnel is still carrying traffic. Signing in with another account may stop that connection. Restore network stops it and turns protection off."
     },
+    "relayFailureDetails": "Relay failure details",
+    "relayFailureKinds": "connect: connection failed; timeout: took too long; tls: secure connection failed; dns: name lookup failed; other: request failed. These are the reported categories, not a diagnosis of your network.",
     "errors": {
       "unreachable": "Tono couldn't reach its sign-in server from this network. Check that this PC is online, wait a minute, then retry. If it keeps failing, copy the details for support.",
+      "relaysUnreachable": "Tono's backup routes cannot be reached right now. Check your network or try again later. You do not need to turn protection off to retry.",
       "rateLimited": "Too many tries. Wait a few minutes.",
       "deviceLimit": "This account already has its maximum number of devices. On a device that is signed in, open Account and remove one, then retry.",
       "sessionExpired": "That code expired. Request a new one.",

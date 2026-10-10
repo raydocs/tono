@@ -1289,6 +1289,7 @@ export interface TranslationResources {
           codeRejected: string
           deviceLimit: string
           rateLimited: string
+          relaysUnreachable: string
           serverError: string
           sessionExpired: string
           signInNotSaved: string
@@ -1312,6 +1313,8 @@ export interface TranslationResources {
           description: string
           title: string
         }
+        relayFailureDetails: string
+        relayFailureKinds: string
         resendIn: string
         restartTono: string
         restoreFailed: {
