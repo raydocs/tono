@@ -407,7 +407,13 @@ nonisolated enum HelperProtocolVersion {
     ///   among the current Network Location's services, preferring the
     ///   primary service ID; an ambiguous name refuses (R3-O5). While a
     ///   legacy name-only snapshot is on disk, enable keeps the old lookup.
-    static let current = "4.52.44"
+    /// - 4.52.44 → 4.52.45: the operator's `--emergency-disarm` boots the
+    ///   running daemon out of launchd (bounded wait) before releasing, so
+    ///   only one process writes PF and DNS; a failed bootout still releases,
+    ///   every launchctl call is hard-bounded, and a release that is refused
+    ///   or does not read back clean (DNS off 127.0.0.1, PF block gone)
+    ///   bootstraps the daemon again (R3-O4).
+    static let current = "4.52.45"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
