@@ -159,6 +159,10 @@ actor TonoAPIClient {
     /// the system resolver and the pinned addresses both fail before any
     /// status line.
     private let relayPath: ControlPlanePath?
+    /// How long a read waits for a status line on a path that has a head
+    /// budget (the system resolver) before the walk moves on
+    /// (`ControlPlanePath.systemHeadBudget`).
+    private let systemHeadBudget: TimeInterval
     /// #584: the label of a later path that answered where the paths before
     /// it failed, so later requests try it first. Cleared when a preferred
     /// attempt fails, is cancelled or its body fails. Kept in the app
@@ -249,9 +253,11 @@ actor TonoAPIClient {
         pinnedPath: ControlPlanePath? = nil,
         relayPath: ControlPlanePath? = nil,
         systemHandshake: (@Sendable () async -> Bool)? = nil,
-        controlPlanePathTimeline: ControlPlanePathTimeline = ControlPlanePathTimeline()
+        controlPlanePathTimeline: ControlPlanePathTimeline = ControlPlanePathTimeline(),
+        systemHeadBudget: TimeInterval = ControlPlanePath.systemHeadBudget
     ) {
         self.baseURL = baseURL
+        self.systemHeadBudget = systemHeadBudget
         self.keychain = keychain
         self.offlineGate = offlineGate
         self.controlPlanePathTimeline = controlPlanePathTimeline
@@ -1258,7 +1264,17 @@ actor TonoAPIClient {
             attempt.setValue(path.label, forHTTPHeaderField: Self.pathHeader)
             attempt.setValue(lostPaths.joined(separator: ","), forHTTPHeaderField: Self.pathFailedHeader)
             do {
-                let answer = try await path.exchange(attempt, maximumResponseBytes)
+                let answer: ControlPlaneAnswer
+                // A read with another path behind it waits for a status line
+                // only `systemHeadBudget` on a path that can bound it, so a
+                // resolver answer that drops every packet cannot hold the
+                // remaining paths back for the session's 45 s. A mutating
+                // request keeps the full wait: it may already have arrived.
+                if method == "GET", index + 1 < order.count, let bounded = path.exchangeWithinHeadBudget {
+                    answer = try await bounded(attempt, maximumResponseBytes, systemHeadBudget)
+                } else {
+                    answer = try await path.exchange(attempt, maximumResponseBytes)
+                }
                 if answer.bodyFailure != nil {
                     // A body that failed after the status line, or was
                     // cancelled, neither keeps nor earns the preference.
@@ -1293,6 +1309,15 @@ actor TonoAPIClient {
                         maximumAttempts: 2
                       ) || Self.failedBeforeRequest(error)
                 else {
+                    // A mutating request the first path may have delivered (a
+                    // timeout) ends its walk here. Handshake every path now, as
+                    // the pre-login probe does (no request, nothing
+                    // identifying), so the user's retry goes first to one that
+                    // completes TLS instead of waiting out the same dead path.
+                    if index == 0, index + 1 < order.count, method != "GET",
+                       !(error is ControlPlaneExchangeError), !Self.isCancellation(error) {
+                        Task { await self.probePathsBeforeSignIn() }
+                    }
                     if let clockFailure, !(error is ControlPlaneExchangeError),
                        !Self.isCancellation(error) {
                         throw Self.combined(clockFailure, failures: failures)

@@ -180,6 +180,22 @@ records on the device row, because a relayed request otherwise looks like one fr
 node. The relay is **not** in the WFP/PF bootstrap permit: while protection is armed it is
 blocked like any other non-permitted address.
 
+macOS sign-in budget, per walk (`TonoAPIClient.exchangeOverPaths`; `sendData` runs at most two
+walks, 1 s apart, and only when the retry rule allows a second one):
+
+| Path, in the usual order | Read (GET) | Mutating request (POST, DELETE) |
+|---|---|---|
+| `system_dns` (URLSession) | at most 15 s with no status line (`ControlPlanePath.systemHeadBudget`), then the next path | up to the session's 30 s request / 45 s resource timeout; moves on only after a failure that proves nothing was sent |
+| `pinned` | 10 s connect, split across the addresses | same |
+| `relay` | 5 s connect, split across both relays (a dead first relay leaves the second the rest) | same |
+
+So a read reaches the relays at most 25 s after it starts, whatever the system resolver does.
+A POST whose system attempt timed out is not re-sent, because it may have arrived. The client
+handshakes every path straight away instead (no request, nothing identifying, as the pre-login
+probe does), and the user's retry goes first to a path that completed TLS. A path remembered
+from an earlier answer or probe goes first, so a network that needs the relays pays the dead
+paths once per 24 h. After a connection is up, each exchange has 45 s.
+
 Updater: Windows (`commands/update.rs` `get_with_relays`) sends a discovery, signature or
 package GET through the relays when the direct GET got no response. macOS does the same:
 `NativeUpdateDownload.bounded` for the manifest and signature GETs (backlog A2), and
