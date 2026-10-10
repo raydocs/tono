@@ -1911,30 +1911,81 @@ extension KillSwitchManager {
 
     /// Past `deadline` the command has failed, whatever it would have done:
     /// no caller may read a load, an enable or a release that never reported
-    /// back as done. The child gets SIGTERM, then SIGKILL, each waited on
-    /// for a second; one stuck in the kernel beyond that exits on its own.
-    /// `ended` runs once the child has exited and been reaped, even after
-    /// this call has given up on it.
+    /// back as done. The deadline starts before the launch: `Process.run()`
+    /// is synchronous and can stall before it returns a PID (executable I/O,
+    /// launch validation), so it runs on its own thread, and a launch still
+    /// pending at the deadline fails the command; if it returns later, its
+    /// child is terminated at once (#1542 review F1). Termination alone cannot
+    /// undo what a late command already did (a stale `pfctl -F all` flushing
+    /// a newer arm's anchor, a stale `networksetup` setter), so the command
+    /// itself runs only after an admission barrier: the launched process is
+    /// `/bin/sh` waiting on its stdin for `go`, written only once the caller
+    /// has accepted the launch; an abandoned launch gets end-of-file instead
+    /// and exits without ever executing the command (#1542 review F2). `exec`
+    /// keeps the PID, so `started` still names the command's process. A
+    /// launched child gets
+    /// SIGTERM, then SIGKILL, each waited on for a second; one stuck in the
+    /// kernel beyond that exits on its own. `ended` runs once the child has
+    /// exited and been reaped, even after this call has given up on it.
+    /// `launch` is the seam the self-test uses to stall a launch.
     static func run(
         _ executable: String,
         _ arguments: [String],
         deadline: TimeInterval = KillSwitchManager.helperCommandDeadline,
+        environment: [String: String] = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"],
         started: (pid_t) -> Void = { _ in },
-        ended: @escaping @Sendable () -> Void = {}
+        ended: @escaping @Sendable () -> Void = {},
+        launch: @escaping @Sendable (Process) throws -> Void = { try $0.run() }
     ) throws -> HelperCommandResult {
+        let end = DispatchTime.now() + deadline
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [
+            "-c", #"IFS= read -r gate || exit 125; [ "$gate" = go ] || exit 125; exec "$0" "$@""#,
+            executable,
+        ] + arguments
+        process.environment = environment
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
+        let admission = Pipe()
+        process.standardInput = admission
         let exited = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in
             ended()
             exited.signal()
         }
-        try process.run()
+        let launched = HelperCommandLaunch()
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try launch(process)
+            } catch {
+                _ = launched.report(.failed(error))
+                return
+            }
+            guard launched.report(.launched) else {
+                // Abandoned: the caller has already failed this command. No
+                // `go`: end-of-file, so the command is never executed.
+                try? admission.fileHandleForWriting.close()
+                process.terminate()
+                if exited.wait(timeout: .now() + 1) == .timedOut, process.isRunning {
+                    kill(process.processIdentifier, SIGKILL)
+                }
+                return
+            }
+            // Accepted: the caller owns this command now, inside its deadline.
+            try? admission.fileHandleForWriting.write(contentsOf: Data("go\n".utf8))
+            try? admission.fileHandleForWriting.close()
+        }
+        switch launched.wait(until: end) {
+        case .launched: break
+        case .failed(let error): throw error
+        case .abandoned:
+            let name = (executable as NSString).lastPathComponent
+            throw HelperFailure.system(
+                "\(name) did not start within \(Int(deadline.rounded(.up))) seconds."
+            )
+        }
         started(process.processIdentifier)
         // Drained on its own thread, so a child that fills the pipe still
         // exits. The block holds the read end and the process until the
@@ -1947,7 +1998,6 @@ extension KillSwitchManager {
                 output.finish(reader.readDataToEndOfFile())
             }
         }
-        let end = DispatchTime.now() + deadline
         if exited.wait(timeout: end) == .success, output.wait(until: end) {
             return .init(status: process.terminationStatus, output: output.data)
         }
@@ -1964,38 +2014,21 @@ extension KillSwitchManager {
         )
     }
 
+    /// `dscacheutil` under the same supervised runner, so its launch and its
+    /// wait share one deadline on the monotonic clock (#1542 review F1); a
+    /// lookup past it fails rather than returning a killed child's status.
     static func runBoundedSystemLookup(
         _ host: String,
         timeoutMilliseconds: Int
     ) throws -> HelperCommandResult {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/dscacheutil")
-        process.arguments = ["-q", "host", "-a", "name", host]
-        process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        try process.run()
-
-        let deadline = Date().addingTimeInterval(
-            Double(max(100, timeoutMilliseconds)) / 1_000
+        let result = try run(
+            "/usr/bin/dscacheutil", ["-q", "host", "-a", "name", host],
+            deadline: Double(max(100, timeoutMilliseconds)) / 1_000
         )
-        while process.isRunning, Date() < deadline {
-            usleep(20_000)
-        }
-        if process.isRunning {
-            process.terminate()
-            for _ in 0..<10 where process.isRunning { usleep(20_000) }
-        }
-        if process.isRunning {
-            kill(process.processIdentifier, SIGKILL)
-        }
-        process.waitUntilExit()
-        let output = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard output.count <= 64 * 1024 else {
+        guard result.output.count <= 64 * 1024 else {
             throw HelperFailure.invalid("Endpoint resolver output is too large.")
         }
-        return .init(status: process.terminationStatus, output: output)
+        return result
     }
 
     // MARK: - Pure self-tests

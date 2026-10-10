@@ -1,0 +1,3 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| MAC-HELPER-NETWORKSETUP-UNBOUNDED | macOS helper 守护进程的 DNS 管理在 System Configuration 读写失败时回退到 `networksetup`，用 `waitUntilExit()` 无期限等待（`ProtectedDNSManager.runNetworkSetup`）；回退恰在非阻塞 `SCPreferencesLock` 发现别的写者时发生，而 `networksetup` 自己会等那个写者。它跑在唯一的请求/看门狗线程上、持有更新锁和 DNS 锁：子进程卡住时 Disconnect、其他请求、Core 已停的释放都一起卡住 | in-PR | [#1542](https://github.com/raydocs/tono/pull/1542) | 中·推导 | 改为与 `pfctl` 相同的 15 s 期限（SIGTERM→SIGKILL，输出边跑边读）；超时按命令失败处理，快照保留、调用方重试；自测用忽略 SIGTERM 的子进程代替卡住的 `networksetup`；期限从启动前开始，启动卡住也在期限内失败、迟到的子进程被终止（Sol F1）；未在真机复现 `networksetup` 卡住；#1504 只给 `--emergency-disarm` 进程加了期限，守护进程路径由本修复覆盖 |
