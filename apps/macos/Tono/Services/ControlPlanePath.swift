@@ -141,11 +141,9 @@ nonisolated struct ControlPlanePath: Sendable {
     /// production API and release hosts have relays; a debug base URL never
     /// dials them.
     nonisolated static func relays(for baseURL: URL) -> ControlPlanePath? {
-        guard let components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
-              components.scheme?.lowercased() == "https",
-              components.port == nil || components.port == 443,
-              let host = components.host?.lowercased(), !host.isEmpty,
-              let endpoints = apiRelays[host], !endpoints.isEmpty else { return nil }
+        guard let relay = relayEndpoints(for: baseURL) else { return nil }
+        let host = relay.host
+        let endpoints = relay.endpoints
         var path = ControlPlanePath(label: "relay") { request, maximumResponseBytes in
             try await PinnedControlPlaneExchange.send(
                 request,
@@ -161,8 +159,19 @@ nonisolated struct ControlPlanePath: Sendable {
         return path
     }
 
+    /// `baseURL`'s host and its relays, or nil when it has none: only an
+    /// HTTPS origin on 443 for the production API or release host.
+    nonisolated static func relayEndpoints(for baseURL: URL) -> (host: String, endpoints: [ControlPlaneEndpoint])? {
+        guard let components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "https",
+              components.port == nil || components.port == 443,
+              let host = components.host?.lowercased(), !host.isEmpty,
+              let endpoints = apiRelays[host], !endpoints.isEmpty else { return nil }
+        return (host, endpoints)
+    }
+
     /// `User-Agent` for the pinned client, which has no `URLSession` to set it.
-    private static var userAgent: String {
+    static var userAgent: String {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
         return "Tono/\(build)"
     }
@@ -206,19 +215,7 @@ nonisolated private final class HandshakeAttempt: @unchecked Sendable {
     private var continuation: CheckedContinuation<Bool, Never>?
 
     init(endpoint: ControlPlaneEndpoint, host: String) {
-        let tls = NWProtocolTLS.Options()
-        let options = tls.securityProtocolOptions
-        // SNI and the name the default trust evaluation checks against.
-        host.withCString { sec_protocol_options_set_tls_server_name(options, $0) }
-        sec_protocol_options_add_tls_application_protocol(options, "http/1.1")
-        sec_protocol_options_set_min_tls_protocol_version(options, .TLSv12)
-        let parameters = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
-        parameters.preferNoProxies = true
-        connection = NWConnection(
-            host: NWEndpoint.Host(endpoint.address),
-            port: NWEndpoint.Port(rawValue: endpoint.port) ?? .https,
-            using: parameters
-        )
+        connection = PinnedTLS.connection(to: endpoint, host: host)
     }
 
     func run(budget: TimeInterval) async -> Bool {
@@ -265,6 +262,28 @@ nonisolated private final class HandshakeAttempt: @unchecked Sendable {
         lock.unlock()
         connection.cancel()
         waiting?.resume(returning: reached)
+    }
+}
+
+/// A TLS connection to a literal address for `host`: the one set of
+/// parameters every pinned, relay and handshake connection uses. SNI and the
+/// name the default trust evaluation checks the certificate against are both
+/// `host`; nothing overrides that evaluation. Only where TCP lands is pinned.
+/// #587: no system proxy, like the control-plane session.
+nonisolated enum PinnedTLS {
+    static func connection(to endpoint: ControlPlaneEndpoint, host: String) -> NWConnection {
+        let tls = NWProtocolTLS.Options()
+        let options = tls.securityProtocolOptions
+        host.withCString { sec_protocol_options_set_tls_server_name(options, $0) }
+        sec_protocol_options_add_tls_application_protocol(options, "http/1.1")
+        sec_protocol_options_set_min_tls_protocol_version(options, .TLSv12)
+        let parameters = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
+        parameters.preferNoProxies = true
+        return NWConnection(
+            host: NWEndpoint.Host(endpoint.address),
+            port: NWEndpoint.Port(rawValue: endpoint.port) ?? .https,
+            using: parameters
+        )
     }
 }
 
@@ -435,21 +454,7 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
     init(
         endpoint: ControlPlaneEndpoint, host: String, label: String, message: Data, maximumResponseBytes: Int
     ) {
-        let tls = NWProtocolTLS.Options()
-        let options = tls.securityProtocolOptions
-        // SNI and the name the default trust evaluation checks the
-        // certificate against. Only where TCP lands is pinned.
-        host.withCString { sec_protocol_options_set_tls_server_name(options, $0) }
-        sec_protocol_options_add_tls_application_protocol(options, "http/1.1")
-        sec_protocol_options_set_min_tls_protocol_version(options, .TLSv12)
-        let parameters = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
-        // #587: no system proxy, like the control-plane session.
-        parameters.preferNoProxies = true
-        connection = NWConnection(
-            host: NWEndpoint.Host(endpoint.address),
-            port: NWEndpoint.Port(rawValue: endpoint.port) ?? .https,
-            using: parameters
-        )
+        connection = PinnedTLS.connection(to: endpoint, host: host)
         self.label = label
         self.message = message
         self.maximumResponseBytes = maximumResponseBytes
@@ -617,8 +622,9 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
     }
 }
 
-/// Reads an HTTP/1.1 response from the bytes received so far.
-nonisolated private enum PinnedResponse {
+/// Reads an HTTP/1.1 response from the bytes received so far. The update
+/// package relay (`PackageResponseSink`) reads its head with the same parts.
+nonisolated enum PinnedResponse {
     static let headLimit = 64 * 1024
 
     enum Reading {
@@ -666,7 +672,7 @@ nonisolated private enum PinnedResponse {
         }
     }
 
-    private static func parseStatusLine(_ bytes: ArraySlice<UInt8>) -> Int? {
+    static func parseStatusLine(_ bytes: ArraySlice<UInt8>) -> Int? {
         let parts = String(decoding: bytes, as: UTF8.self)
             .split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false)
         guard parts.count >= 2, parts[0].hasPrefix("HTTP/1."), parts[1].count == 3,
@@ -675,7 +681,7 @@ nonisolated private enum PinnedResponse {
         return status
     }
 
-    private static func parseHeaders(_ bytes: ArraySlice<UInt8>) -> [String: String]? {
+    static func parseHeaders(_ bytes: ArraySlice<UInt8>) -> [String: String]? {
         var headers: [String: String] = [:]
         guard !bytes.isEmpty else { return headers }
         for line in String(decoding: bytes, as: UTF8.self).components(separatedBy: "\r\n") {
@@ -759,7 +765,7 @@ nonisolated private enum PinnedResponse {
         }
     }
 
-    private static func find(_ pattern: [UInt8], in bytes: [UInt8], from start: Int) -> Int? {
+    static func find(_ pattern: [UInt8], in bytes: [UInt8], from start: Int) -> Int? {
         var index = start
         while index + pattern.count <= bytes.count {
             if bytes[index..<(index + pattern.count)].elementsEqual(pattern) { return index }

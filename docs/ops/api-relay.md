@@ -164,9 +164,11 @@ node. The relay is **not** in the WFP/PF bootstrap permit: while protection is a
 blocked like any other non-permitted address.
 
 Updater: Windows (`commands/update.rs` `get_with_relays`) sends a discovery, signature or
-package GET through the relays when the direct GET got no response. macOS
-(`NativeUpdateDownload.bounded`) does the same for the manifest and signature GETs only; the
-package download stays direct (backlog A2).
+package GET through the relays when the direct GET got no response. macOS does the same:
+`NativeUpdateDownload.bounded` for the manifest and signature GETs (backlog A2), and
+`NativeUpdateDownload.package(at:size:)` for the package, streamed to disk under the signed
+size with the direct download's 60 s idle and 900 s total budgets (A2 follow-up). Any status
+line is the answer and is not sent again on another path.
 
 ## Rollback
 
