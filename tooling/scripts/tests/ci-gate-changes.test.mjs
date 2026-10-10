@@ -67,6 +67,7 @@ const SERVICES_PATHS = [
   'tooling/scripts/tests/provision-reality-node.test.rb',
   '.github/workflows/services-ci.yml',
   '.github/workflows/desktop-update-sign.yml',
+  '.github/workflows/screenshots-nightly.yml',
 ]
 const SING_BOX_PATHS = [
   '.github/workflows/sing-box-alpha9-check.yml',
@@ -144,6 +145,13 @@ test('a touched path selects the workflow that lists it', () => {
   assert.equal(bench.connectBench, true)
   assert.equal(bench.macos, false)
   assert.equal(bench.windows, false)
+})
+
+test('a screenshots-nightly edit runs the services gate that holds its split test', () => {
+  const nightly = matchingWorkflows(['.github/workflows/screenshots-nightly.yml'], filters)
+  assert.equal(nightly.services, true)
+  assert.equal(nightly.macos, false)
+  assert.equal(nightly.windows, false)
 })
 
 test('aggregate fails when a relevant job failed or was cancelled', () => {

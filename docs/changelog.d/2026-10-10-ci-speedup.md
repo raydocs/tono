@@ -1,0 +1,12 @@
+## 2026-10-10 · CI 提速：截图测试移到 nightly，Cargo 缓存与命中显示（A25）
+- 归属：ops 计划（[plan-2026-09-11](../ops/plan-2026-09-11.md)），[Amp 待办](../ops/amp-backlog-2026-10-10.md) A25，老板决定 D9-A（截图测试移到合并后 nightly）。只改 CI 工作流、一条守护测试和 BUILD_AND_TEST；不改产品源码。
+- 来源：main `a504ca31` → 分支 `amp/a25-ci-speedup`；PR 待开；未合 main。
+- 缺陷修复：无。
+- 新增/优化：
+  - 新工作流 `screenshots-nightly.yml`（每天 18:23 UTC 定时 + `workflow_dispatch`，跑 main）：macOS 四个 `TONO_HOSTED_WINDOW_DIAGNOSTIC` 门控的 `MacSeaPolishRenderTests` 整窗截图（英文）和中文整窗一遍；ops 控制台 Playwright 像素对比（不加 `--ignore-snapshots`，在 `macos-26` 上对 macOS 基线）。失败即红，main 上的运行还会开或追评一个 "Screenshots nightly is failing" issue。
+  - PR 门（ci-gate 调用的 `macos-ci.yml`）用 `-skip-testing` 跳过这四个方法，并删去中文截图那一步；`MacUsabilityRenderTests` 留在 PR 门（它断言原生标签、标识和不透明度，不是像素）。`macos-release.yml` 不动，候选仍跑整个 XCTest target。ops 控制台 PR 门本来就是 `--ignore-snapshots`，功能断言不变。Windows PR 门没有截图类测试，无可移。
+  - `windows-ci.yml` 三个 Cargo job（core、app-rust、service）加 `actions/cache/restore`，键为 runner 默认 `rustc -vV` 哈希 + lockfile + 固定工具链文件；只在 push 到 main 时 `actions/cache/save`；每个 job 的 summary 和 notice 写 `Cargo cache (<job>): hit|miss`。`CARGO_INCREMENTAL=0`。macOS 不加 Swift 缓存（Xcode 工程没有 SwiftPM 依赖，DerivedData 按时间戳增量、Release 产物可进配对候选、特权 helper 必须源码编译），summary 写明 "none"。
+- 工程与测试：新增 `tooling/scripts/tests/screenshot-nightly-split.test.mjs`（一条 `test`：PR 门 skip 列表 = nightly only 列表；services PR 门保留 `--ignore-snapshots`、nightly 不带；nightly 只有 schedule/dispatch），在 macOS policy-tests 和 services ops-contract（`*.test.mjs` glob）里跑；`services-ci.yml` push paths 加 `screenshots-nightly.yml`，`ci-gate-changes.test.mjs` 同步路径表并加一条用例。
+- 验证：基线（改前）取 2026-10-07T21:52Z..2026-10-10T09:48Z 的 80 次成功 ci-gate：`macos / build` 中位 11.3 min（其中 TonoTests 5.5、中文截图步 0.8；四个整窗截图方法约 110 s），`windows / app-rust` 14.3（Tauri crate 测试 11.4），`windows / service` 6.3，services e2e 分片 3.1–4.2；最近 20 次 ci-gate 墙钟中位 17.1、非纯文档中位 29.1 min（含排队）。本地：`node --test tooling/scripts/tests/ci-gate-changes.test.mjs tooling/scripts/tests/screenshot-nightly-split.test.mjs` 9/9 通过；删一条 skip 的变异使守护测试失败。改后数据：见 PR。
+- 候选/发布：无新包。
+- 剩余限制：Cargo 缓存要等合入后 main 上第一次 Windows push 运行才有条目，之前的 PR 都是 miss；macOS 托管机字体与基线机器可能不同，nightly 的 ops 截图对比可能需要在 macos-26 上重录基线；四个整窗截图方法里顺带的行为断言（隐藏窗口合成时钟暂停、缓存树缩放覆盖）也随之只在 nightly 和 release 跑。
