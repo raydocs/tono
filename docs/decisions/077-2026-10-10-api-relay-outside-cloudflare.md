@@ -37,3 +37,8 @@
   `ControlPlanePath.apiRelays`, tried after the system resolver and the pinned addresses both
   fail before any request byte; not in the PF bootstrap permit); changelog
   [2026-10-10-mac-api-relay.md](../changelog.d/2026-10-10-mac-api-relay.md).
+- Follow-up 2026-10-10: a second relay on "Mesa" (179.255.154.17:2053, same nginx shape); both
+  now admit the SNIs `api.afk.ccwu.cc` and `releases.afk.ccwu.cc`. The Windows client walks both
+  in order, its updater retries an undelivered GET through them, and every control-plane attempt
+  carries `X-Tono-Path` naming its path. Windows PR fix/win-api-relay-followups-20261010;
+  changelog [2026-10-10-win-api-relay-followups.md](../changelog.d/2026-10-10-win-api-relay-followups.md).

@@ -1,16 +1,26 @@
 //! The App transports untrusted bytes. Only Service admits, consumes, adopts,
 //! and commits an update. No Tauri updater installation or App journal authority.
-use crate::{core::owner_identity::current_owner_credentials, tono::{connection, state::TonoState}, utils::dirs};
+use crate::{
+    core::owner_identity::current_owner_credentials,
+    tono::{
+        bootstrap, connection,
+        state::TonoState,
+        transport::{RELAY_CONNECT_TIMEOUT, classify},
+    },
+    utils::dirs,
+};
 use anyhow::{Context as _, Result, ensure};
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use std::{
+    net::SocketAddr,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
     },
     time::Duration,
 };
+use tono_core::auth::{HttpMethod, should_retry_transport};
 use tauri::{AppHandle, ipc::Channel};
 use tokio::{io::AsyncWriteExt as _, sync::Mutex};
 use tono_logging::{Type, logging};
@@ -54,20 +64,95 @@ pub async fn request(request: UpdateRequest) -> Result<UpdateStatus> {
     Ok(status)
 }
 
-fn client() -> Result<reqwest::Client> {
-    Ok(reqwest::Client::builder()
+fn builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
         .https_only(true)
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(600))
-        .build()?)
+}
+
+fn client() -> Result<reqwest::Client> {
+    Ok(builder().build()?)
+}
+
+/// Index + 1 of the relay that last carried an update GET, or 0. Process memory only.
+static PREFERRED_RELAY: AtomicUsize = AtomicUsize::new(0);
+
+/// One update GET: direct first, then through the Tono relays (decision 077).
+async fn get(client: &reqwest::Client, url: &str, timeout: Option<Duration>) -> Result<reqwest::Response> {
+    get_with_relays(client, url, timeout, &bootstrap::api_relays(), builder, &PREFERRED_RELAY).await
+}
+
+/// GET `url` through `direct`; when that failed before any response arrived, send the same GET
+/// once through each relay in order (the one that last answered first) until one answers.
+///
+/// The relay passes the TLS session through unterminated: the relayed client resolves the
+/// URL's own host to the relay socket and keeps every setting of `builder`, so SNI and the
+/// certificate check are those of the direct path. The URL carries the relay's port and the
+/// override carries the same one, as in the API transport. Only the transport is changed: what
+/// comes back is checked exactly as a direct answer is (signature by the Service, size here).
+/// An HTTP status is an answer and is never re-sent. The relays sit outside the WFP bootstrap
+/// permit, so while protection is armed this attempt fails like any other blocked address.
+async fn get_with_relays(
+    direct: &reqwest::Client,
+    url: &str,
+    timeout: Option<Duration>,
+    relays: &[SocketAddr],
+    builder: impl Fn() -> reqwest::ClientBuilder,
+    preferred: &AtomicUsize,
+) -> Result<reqwest::Response> {
+    let prepare = |client: &reqwest::Client, url: &str| {
+        let request = client.get(url);
+        match timeout {
+            Some(limit) => request.timeout(limit),
+            None => request,
+        }
+    };
+    let direct_error = match prepare(direct, url).send().await {
+        Ok(response) => return Ok(response),
+        Err(error) => error,
+    };
+    // The transport's rule for an undelivered GET (`should_retry_transport`).
+    if !should_retry_transport(HttpMethod::Get, classify(&direct_error)) || relays.is_empty() {
+        return Err(direct_error.into());
+    }
+    let parsed = reqwest::Url::parse(url)?;
+    let Some(host) = parsed.host_str() else {
+        return Err(direct_error.into());
+    };
+    let first = preferred
+        .load(Ordering::Relaxed)
+        .checked_sub(1)
+        .filter(|index| *index < relays.len());
+    let order = first
+        .into_iter()
+        .chain((0..relays.len()).filter(|index| Some(*index) != first));
+    let mut failures = Vec::new();
+    for index in order {
+        let relay = relays[index];
+        let mut relayed = parsed.clone();
+        if relayed.set_port(Some(relay.port())).is_err() {
+            continue;
+        }
+        let client = builder()
+            .connect_timeout(RELAY_CONNECT_TIMEOUT)
+            .resolve(host, relay)
+            .build()?;
+        match prepare(&client, relayed.as_str()).send().await {
+            Ok(response) => {
+                preferred.store(index + 1, Ordering::Relaxed);
+                return Ok(response);
+            }
+            Err(error) => failures.push(format!("relay {relay}: {error}")),
+        }
+    }
+    preferred.store(0, Ordering::Relaxed);
+    Err(anyhow::Error::new(direct_error).context(failures.join("; ")))
 }
 
 async fn bounded(client: &reqwest::Client, url: &str, limit: usize) -> Result<String> {
-    let mut response = client
-        .get(url)
-        .timeout(Duration::from_secs(30))
-        .send()
+    let mut response = get(client, url, Some(Duration::from_secs(30)))
         .await?
         .error_for_status()?;
     let mut bytes = Vec::new();
@@ -157,11 +242,13 @@ pub async fn tono_install_update(
             .write(true)
             .open(&path)
             .await?;
-        let mut response = client()?
-            .get(format!("{RELEASE_ROOT}/{manifest_sha256}/package.windows-x86_64.exe"))
-            .send()
-            .await?
-            .error_for_status()?;
+        let mut response = get(
+            &client()?,
+            &format!("{RELEASE_ROOT}/{manifest_sha256}/package.windows-x86_64.exe"),
+            None,
+        )
+        .await?
+        .error_for_status()?;
         progress.send(serde_json::json!({"event":"Started", "data":{"contentLength":target.artifact_size_bytes}}))?;
         let mut size = 0u64;
         while let Some(chunk) = response.chunk().await? {
