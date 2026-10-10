@@ -27,4 +27,4 @@
   same ranges while connected and has no setting, so the D3-A premise "Windows does not permit this" is out of date;
   after this change macOS off is stricter than Windows and macOS on matches Windows' shape. A Windows setting is a
   separate task.
-- Applied in: backlog A29, branch `amp/a29-lan-devices-toggle` (helper 4.52.45).
+- Applied in: PR #1506, backlog A29, branch `amp/a29-lan-devices-toggle` (helper 4.52.45).
