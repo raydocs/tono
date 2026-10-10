@@ -56,6 +56,9 @@ pub enum CustomerFailureCode {
     AuthTimeout,
     AuthClock,
     AuthCaptive,
+    /// H21-O-F8: the system trust store refused the control plane's
+    /// certificate for its issuer, signature or name.
+    AuthTlsIntercepted,
     AuthApi,
     AuthRateLimited,
     AuthDeviceLimit,
@@ -86,6 +89,7 @@ impl CustomerFailureCode {
             Self::AuthTimeout => "TONO_AUTH_TIMEOUT",
             Self::AuthClock => "TONO_CLOCK_SKEW",
             Self::AuthCaptive => "TONO_AUTH_CAPTIVE",
+            Self::AuthTlsIntercepted => crate::network_interference::TLS_INTERCEPTED,
             Self::AuthApi => "TONO_AUTH_API",
             Self::AuthRateLimited => "TONO_AUTH_RATE_LIMITED",
             Self::AuthDeviceLimit => "TONO_AUTH_DEVICE_LIMIT",
@@ -111,7 +115,7 @@ impl CustomerFailureCode {
         match self {
             Self::AuthDns | Self::ConnectDns => FailureStage::Dns,
             Self::AuthTcp | Self::ConnectTcp => FailureStage::Tcp,
-            Self::AuthTls | Self::ConnectTls => FailureStage::Tls,
+            Self::AuthTls | Self::AuthTlsIntercepted | Self::ConnectTls => FailureStage::Tls,
             Self::AuthQuic | Self::ConnectQuic => FailureStage::Quic,
             Self::AuthTimeout | Self::ConnectTimeout => FailureStage::Timeout,
             Self::AuthClock => FailureStage::Clock,
@@ -172,6 +176,9 @@ pub fn classify_auth_transport(kind: TransportKind, message: &str) -> CustomerFa
     }
     if is_captive(message) {
         return CustomerFailureCode::AuthCaptive;
+    }
+    if message.contains(crate::network_interference::TLS_INTERCEPTED) {
+        return CustomerFailureCode::AuthTlsIntercepted;
     }
     if is_local_conflict(message) {
         return CustomerFailureCode::AuthLocalConflict;

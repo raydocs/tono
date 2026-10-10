@@ -308,6 +308,9 @@ enum ManagedExitCatalogOwnership {
     private static var installedAccount: String?
     private static var hasInstalledCatalog = false
     private static var discardInstalledCatalog: (@MainActor () -> Void)?
+    /// Runs on sign-out and on a switch to another account, whether or not a
+    /// catalog is installed (A17: drops hy2 auto-switch state).
+    static var accountTeardownObserver: (@MainActor () -> Void)?
 
     /// The account a freshly fetched catalog is recorded against.
     static var currentAccount: String? {
@@ -339,6 +342,9 @@ enum ManagedExitCatalogOwnership {
     /// different account — including a cache written before owners were
     /// recorded, whose account cannot be established.
     static func adopt(_ userID: String) {
+        if case let .account(previous) = binding, previous != userID {
+            accountTeardownObserver?()
+        }
         binding = .account(userID)
         guard hasInstalledCatalog, installedAccount != userID else { return }
         discardInstalled()
@@ -347,6 +353,7 @@ enum ManagedExitCatalogOwnership {
     /// Sign-out barrier: no exit issued to this account may reach the next one.
     static func purge() {
         binding = .signedOut
+        accountTeardownObserver?()
         discardInstalled()
     }
 

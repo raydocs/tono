@@ -38,34 +38,94 @@ nonisolated struct ControlPlanePath: Sendable {
     /// Sends the request and returns the answer, capped at the given number
     /// of bytes. A thrown error means no status line arrived.
     let exchange: @Sendable (URLRequest, Int) async throws -> ControlPlaneAnswer
+    /// Backlog A4 (D14-A, decision 079): whether a TCP connection and a TLS
+    /// handshake for the API host complete over this path, sending no HTTP
+    /// request and nothing that identifies the user or the device. Nil when
+    /// the path cannot be probed; the pre-login probe then says nothing.
+    var handshake: (@Sendable () async -> Bool)? = nil
+    /// The same exchange, given up with `URLError(.timedOut)` when no status
+    /// line has arrived within the budget (the last argument, seconds). Only
+    /// the system resolver has one: its `URLSession` otherwise waits out its
+    /// own 30 s request and 45 s resource timeouts on an address that drops
+    /// every packet. The walk uses it for a read with another path behind it,
+    /// never for a mutating request, which may already have arrived.
+    var exchangeWithinHeadBudget: (@Sendable (URLRequest, Int, TimeInterval) async throws -> ControlPlaneAnswer)? = nil
+
+    /// How long a read waits for the system resolver's status line before
+    /// the walk hands it to the next path. A healthy cross-border answer
+    /// takes a few seconds; a resolver answer that leads nowhere would
+    /// otherwise hold the pinned addresses and the relays back for 45 s.
+    static let systemHeadBudget: TimeInterval = 15
 
     /// The system resolver, through the control-plane `URLSession`.
     nonisolated static func systemResolver(_ session: URLSession) -> ControlPlanePath {
-        ControlPlanePath(label: "system_dns") { request, maximumResponseBytes in
-            let (bytes, response) = try await session.bytes(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                throw ControlPlaneExchangeError.invalidResponse
-            }
-            let declared = http.value(forHTTPHeaderField: "Content-Length").flatMap(Int.init)
-            if let declared, declared < 0 || declared > maximumResponseBytes {
-                throw ControlPlaneExchangeError.invalidResponse
-            }
-            var data = Data()
-            data.reserveCapacity(min(declared ?? 0, maximumResponseBytes))
-            do {
-                for try await byte in bytes {
-                    guard data.count < maximumResponseBytes else {
-                        throw ControlPlaneExchangeError.invalidResponse
-                    }
-                    data.append(byte)
-                }
-            } catch let error as ControlPlaneExchangeError {
-                throw error
-            } catch {
-                return ControlPlaneAnswer(status: http.statusCode, body: data, bodyFailure: error)
-            }
-            return ControlPlaneAnswer(status: http.statusCode, body: data, bodyFailure: nil)
+        var path = ControlPlanePath(label: "system_dns") { request, maximumResponseBytes in
+            try await systemExchange(session, request, maximumResponseBytes, headArrived: nil)
         }
+        path.exchangeWithinHeadBudget = { request, maximumResponseBytes, budget in
+            let deadline = HeadDeadline()
+            let work = Task {
+                try await systemExchange(
+                    session, request, maximumResponseBytes, headArrived: { deadline.headArrived() }
+                )
+            }
+            let timer = Task {
+                // Cancelled once the exchange is over: nothing to give up.
+                do { try await Task.sleep(for: .seconds(budget)) } catch { return }
+                if deadline.expireUnlessHeadArrived() { work.cancel() }
+            }
+            defer { timer.cancel() }
+            do {
+                return try await withTaskCancellationHandler {
+                    try await work.value
+                } onCancel: {
+                    work.cancel()
+                }
+            } catch {
+                guard deadline.expired else { throw error }
+                // Nothing came back in time; for a read that is a reason to
+                // try the next path, like any other transport failure.
+                throw URLError(.timedOut, userInfo: [
+                    NSLocalizedDescriptionKey: "system_dns: no status line within \(Int(budget.rounded(.up))) s",
+                ])
+            }
+        }
+        return path
+    }
+
+    /// One exchange over `session`. `headArrived`, when given, is called as
+    /// soon as the status line and headers are in; false means the head
+    /// budget already ran out and the exchange stops there.
+    nonisolated private static func systemExchange(
+        _ session: URLSession,
+        _ request: URLRequest,
+        _ maximumResponseBytes: Int,
+        headArrived: (@Sendable () -> Bool)?
+    ) async throws -> ControlPlaneAnswer {
+        let (bytes, response) = try await session.bytes(for: request)
+        if let headArrived, !headArrived() { throw CancellationError() }
+        guard let http = response as? HTTPURLResponse else {
+            throw ControlPlaneExchangeError.invalidResponse
+        }
+        let declared = http.value(forHTTPHeaderField: "Content-Length").flatMap(Int.init)
+        if let declared, declared < 0 || declared > maximumResponseBytes {
+            throw ControlPlaneExchangeError.invalidResponse
+        }
+        var data = Data()
+        data.reserveCapacity(min(declared ?? 0, maximumResponseBytes))
+        do {
+            for try await byte in bytes {
+                guard data.count < maximumResponseBytes else {
+                    throw ControlPlaneExchangeError.invalidResponse
+                }
+                data.append(byte)
+            }
+        } catch let error as ControlPlaneExchangeError {
+            throw error
+        } catch {
+            return ControlPlaneAnswer(status: http.statusCode, body: data, bodyFailure: error)
+        }
+        return ControlPlaneAnswer(status: http.statusCode, body: data, bodyFailure: nil)
     }
 
     /// The pinned addresses for `baseURL`'s host, or nil when it has none.
@@ -82,49 +142,64 @@ nonisolated struct ControlPlanePath: Sendable {
         let addresses = (KillSwitchService.configuredBootstrapPins(for: [host])[host] ?? [])
             .filter { IPv4Address($0) != nil }
         guard !addresses.isEmpty else { return nil }
-        return ControlPlanePath(label: "pinned") { request, maximumResponseBytes in
+        let endpoints = addresses.map { ControlPlaneEndpoint(address: $0, port: 443) }
+        var path = ControlPlanePath(label: "pinned") { request, maximumResponseBytes in
             try await PinnedControlPlaneExchange.send(
                 request,
                 label: "pinned",
                 host: host,
-                endpoints: addresses.map { ControlPlaneEndpoint(address: $0, port: 443) },
+                endpoints: endpoints,
                 connectBudget: PinnedControlPlaneExchange.connectBudget,
                 userAgent: userAgent,
                 maximumResponseBytes: maximumResponseBytes
             )
         }
+        path.handshake = { await ControlPlaneHandshake.reaches(endpoints, host: host) }
+        return path
+    }
+
+    /// Backlog A4: the system path's handshake, to `baseURL`'s host on 443
+    /// through the system resolver, or nil when the base URL is not an HTTPS
+    /// origin on 443.
+    nonisolated static func systemResolverHandshake(for baseURL: URL) -> (@Sendable () async -> Bool)? {
+        guard let components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "https",
+              components.port == nil || components.port == 443,
+              let host = components.host?.lowercased(), !host.isEmpty else { return nil }
+        // The host name itself as the endpoint: Network.framework resolves
+        // it through the system resolver, as the control-plane session does.
+        let endpoints = [ControlPlaneEndpoint(address: host, port: 443)]
+        return { await ControlPlaneHandshake.reaches(endpoints, host: host) }
     }
 
     /// Tono-owned relays outside Cloudflare, per API host (decision 077,
     /// the Windows client's `bootstrap::API_RELAYS`). Each is an nginx
     /// `ssl_preread` listener that admits only this host's SNI and forwards
     /// the unterminated TLS session to the Cloudflare edge, so the client
-    /// validates the same certificate it does on every other path. Not in
-    /// the PF bootstrap permit: while protection is armed the relay is
-    /// blocked like any other non-permitted address.
-    /// Kept in step with the Windows client's `bootstrap::API_RELAYS` and the
-    /// control plane's `api-relays.ts`. The same relays admit the release
-    /// host's SNI, which the updater's metadata GETs use (backlog A2).
+    /// validates the same certificate it does on every other path. Decision
+    /// 086 (H1-F5, Option A): while protection is armed without a tunnel the
+    /// helper's PF permits only these endpoints for the control plane, so
+    /// then they are the only path (`TonoAPIClient`); while connected PF
+    /// permits none of them. The list is `ControlPlaneRelays`, compiled into
+    /// the helper too. The same relays admit the release host's SNI, which
+    /// the updater's metadata GETs use (backlog A2).
     static let apiRelays: [String: [ControlPlaneEndpoint]] = [
         "api.afk.ccwu.cc": relayEndpoints,
         "releases.afk.ccwu.cc": relayEndpoints,
     ]
 
-    private static let relayEndpoints = [
-        ControlPlaneEndpoint(address: "179.253.233.220", port: 2053), // Los Angeles · Westwood
-        ControlPlaneEndpoint(address: "179.255.154.17", port: 2053), // Los Angeles · Mesa
-    ]
+    private static let relayEndpoints = ControlPlaneRelays.endpoints.map {
+        ControlPlaneEndpoint(address: $0.address, port: $0.port)
+    }
 
     /// The relays for `baseURL`'s host, or nil when it has none. Only the
     /// production API and release hosts have relays; a debug base URL never
     /// dials them.
     nonisolated static func relays(for baseURL: URL) -> ControlPlanePath? {
-        guard let components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
-              components.scheme?.lowercased() == "https",
-              components.port == nil || components.port == 443,
-              let host = components.host?.lowercased(), !host.isEmpty,
-              let endpoints = apiRelays[host], !endpoints.isEmpty else { return nil }
-        return ControlPlanePath(label: "relay") { request, maximumResponseBytes in
+        guard let relay = relayEndpoints(for: baseURL) else { return nil }
+        let host = relay.host
+        let endpoints = relay.endpoints
+        var path = ControlPlanePath(label: "relay") { request, maximumResponseBytes in
             try await PinnedControlPlaneExchange.send(
                 request,
                 label: "relay",
@@ -135,12 +210,166 @@ nonisolated struct ControlPlanePath: Sendable {
                 maximumResponseBytes: maximumResponseBytes
             )
         }
+        path.handshake = { await ControlPlaneHandshake.reaches(endpoints, host: host) }
+        return path
+    }
+
+    /// `baseURL`'s host and its relays, or nil when it has none: only an
+    /// HTTPS origin on 443 for the production API or release host.
+    nonisolated static func relayEndpoints(for baseURL: URL) -> (host: String, endpoints: [ControlPlaneEndpoint])? {
+        guard let components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "https",
+              components.port == nil || components.port == 443,
+              let host = components.host?.lowercased(), !host.isEmpty,
+              let endpoints = apiRelays[host], !endpoints.isEmpty else { return nil }
+        return (host, endpoints)
     }
 
     /// `User-Agent` for the pinned client, which has no `URLSession` to set it.
-    private static var userAgent: String {
+    static var userAgent: String {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
         return "Tono/\(build)"
+    }
+}
+
+/// Which of the head and the head budget came first, for one system
+/// resolver exchange (`ControlPlanePath.exchangeWithinHeadBudget`).
+nonisolated private final class HeadDeadline: @unchecked Sendable {
+    private let lock = NSLock()
+    // Guarded by `lock`.
+    private var arrived = false
+    private var didExpire = false
+
+    /// The head is in; false when the budget ran out first.
+    func headArrived() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !didExpire else { return false }
+        arrived = true
+        return true
+    }
+
+    /// The budget ran out; true when no head had arrived, so the exchange
+    /// is to be given up.
+    func expireUnlessHeadArrived() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !arrived else { return false }
+        didExpire = true
+        return true
+    }
+
+    var expired: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return didExpire
+    }
+}
+
+/// Backlog A4 (D14-A, decision 079): the pre-login network self-check. A TCP
+/// connection and a TLS handshake, nothing more: no HTTP request, so no
+/// cookie, token, device or installation id and no `X-Tono-*` header. TLS
+/// carries the API host as SNI and the certificate is checked by the default
+/// trust evaluation against that name, as on `PinnedConnection`; one that is
+/// not valid for the host fails the probe. No proxy (#587). No PF permit is
+/// added for it: while protection is armed, a path PF blocks just fails here.
+nonisolated enum ControlPlaneHandshake {
+    /// One path's whole budget; its endpoints are tried in parallel.
+    static let budget: TimeInterval = 5
+
+    /// True when any of `endpoints` completes TCP and TLS for `host` within
+    /// `budget`.
+    static func reaches(_ endpoints: [ControlPlaneEndpoint], host: String) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            for endpoint in endpoints {
+                group.addTask { await HandshakeAttempt(endpoint: endpoint, host: host).run(budget: Self.budget) }
+            }
+            for await reached in group where reached {
+                group.cancelAll()
+                return true
+            }
+            return false
+        }
+    }
+}
+
+/// One handshake to one endpoint. The connection is closed as soon as TLS is
+/// up, fails, or the budget is spent; not one application byte is sent.
+nonisolated private final class HandshakeAttempt: @unchecked Sendable {
+    private let connection: NWConnection
+    private let queue = DispatchQueue(label: "app.tono.control-plane.handshake")
+    private let lock = NSLock()
+    // Guarded by `lock`.
+    private var result: Bool?
+    private var continuation: CheckedContinuation<Bool, Never>?
+
+    init(endpoint: ControlPlaneEndpoint, host: String) {
+        connection = PinnedTLS.connection(to: endpoint, host: host)
+    }
+
+    func run(budget: TimeInterval) async -> Bool {
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+                self.start(continuation, budget: budget)
+            }
+        } onCancel: {
+            self.finish(false)
+        }
+    }
+
+    private func start(_ continuation: CheckedContinuation<Bool, Never>, budget: TimeInterval) {
+        lock.lock()
+        if let early = result {
+            // Cancelled before it started.
+            lock.unlock()
+            continuation.resume(returning: early)
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+        connection.stateUpdateHandler = { [self] state in
+            switch state {
+            case .ready: finish(true)
+            case .failed: finish(false)
+            case .cancelled: connection.stateUpdateHandler = nil
+            default: break // `.waiting` keeps trying; the budget decides.
+            }
+        }
+        connection.start(queue: queue)
+        queue.asyncAfter(deadline: .now() + budget) { [self] in finish(false) }
+    }
+
+    private func finish(_ reached: Bool) {
+        lock.lock()
+        guard result == nil else {
+            lock.unlock()
+            return
+        }
+        result = reached
+        let waiting = continuation
+        continuation = nil
+        lock.unlock()
+        connection.cancel()
+        waiting?.resume(returning: reached)
+    }
+}
+
+/// A TLS connection to a literal address for `host`: the one set of
+/// parameters every pinned, relay and handshake connection uses. SNI and the
+/// name the default trust evaluation checks the certificate against are both
+/// `host`; nothing overrides that evaluation. Only where TCP lands is pinned.
+/// #587: no system proxy, like the control-plane session.
+nonisolated enum PinnedTLS {
+    static func connection(to endpoint: ControlPlaneEndpoint, host: String) -> NWConnection {
+        let tls = NWProtocolTLS.Options()
+        let options = tls.securityProtocolOptions
+        host.withCString { sec_protocol_options_set_tls_server_name(options, $0) }
+        sec_protocol_options_add_tls_application_protocol(options, "http/1.1")
+        sec_protocol_options_set_min_tls_protocol_version(options, .TLSv12)
+        let parameters = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
+        parameters.preferNoProxies = true
+        return NWConnection(
+            host: NWEndpoint.Host(endpoint.address),
+            port: NWEndpoint.Port(rawValue: endpoint.port) ?? .https,
+            using: parameters
+        )
     }
 }
 
@@ -187,6 +416,7 @@ nonisolated enum PinnedControlPlaneExchange {
         let started = Date()
         var failures: [String] = []
         var clockRejected = false
+        var trustRejected = false
         for (index, endpoint) in endpoints.enumerated() {
             try Task.checkCancellation()
             let remaining = connectBudget - Date().timeIntervalSince(started)
@@ -217,13 +447,20 @@ nonisolated enum PinnedControlPlaneExchange {
                 // #588: named as the clock by `TonoAPIClient`.
                 clockRejected = true
                 failures.append("\(endpoint.description) \(detail)")
+            case let .trustRejected(detail):
+                // H21-O-F8: named as interception by `TonoAPIClient`.
+                trustRejected = true
+                failures.append("\(endpoint.description) \(detail)")
             }
         }
         // No endpoint reached TLS, so no request byte left this Mac.
-        throw URLError(clockRejected ? .serverCertificateHasBadDate : .cannotConnectToHost, userInfo: [
+        var userInfo: [String: Any] = [
             NSLocalizedDescriptionKey: "\(label): " + (failures.isEmpty
                 ? "connect budget spent" : failures.joined(separator: "; ")),
-        ])
+        ]
+        // The code stays `cannotConnectToHost`, so the retry rule is unchanged.
+        if trustRejected, !clockRejected { userInfo[NetworkInterception.evidenceKey] = true }
+        throw URLError(clockRejected ? .serverCertificateHasBadDate : .cannotConnectToHost, userInfo: userInfo)
     }
 
     /// The request as HTTP/1.1 bytes, or nil when a header cannot be framed.
@@ -272,6 +509,9 @@ nonisolated private enum PinnedOutcome: Sendable {
     /// #588: TLS failed on a certificate date, before any request byte was
     /// sent. The clock, not the address, is at fault.
     case clockRejected(String)
+    /// H21-O-F8: no TLS connection, and the trust store refused a certificate
+    /// on the way (issuer, chain or name). No request byte was sent.
+    case trustRejected(String)
     /// The request may have reached the server and no status line came back.
     case failedAfterConnect(any Error)
     case answered(ControlPlaneAnswer)
@@ -293,26 +533,14 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
     // Touched only on `queue`.
     private var connected = false
     private var lastWaiting: String?
+    /// H21-O-F8: a TLS attempt met a certificate the trust store refused.
+    private var refusedCertificate = false
     private var received = Data()
 
     init(
         endpoint: ControlPlaneEndpoint, host: String, label: String, message: Data, maximumResponseBytes: Int
     ) {
-        let tls = NWProtocolTLS.Options()
-        let options = tls.securityProtocolOptions
-        // SNI and the name the default trust evaluation checks the
-        // certificate against. Only where TCP lands is pinned.
-        host.withCString { sec_protocol_options_set_tls_server_name(options, $0) }
-        sec_protocol_options_add_tls_application_protocol(options, "http/1.1")
-        sec_protocol_options_set_min_tls_protocol_version(options, .TLSv12)
-        let parameters = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
-        // #587: no system proxy, like the control-plane session.
-        parameters.preferNoProxies = true
-        connection = NWConnection(
-            host: NWEndpoint.Host(endpoint.address),
-            port: NWEndpoint.Port(rawValue: endpoint.port) ?? .https,
-            using: parameters
-        )
+        connection = PinnedTLS.connection(to: endpoint, host: host)
         self.label = label
         self.message = message
         self.maximumResponseBytes = maximumResponseBytes
@@ -347,11 +575,16 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
         connection.start(queue: queue)
         queue.asyncAfter(deadline: .now() + connectBudget) { [self] in
             guard !connected else { return }
-            finish(.notConnected(lastWaiting ?? "no TLS connection within \(Int(connectBudget.rounded(.up))) s"))
+            finish(notConnected(lastWaiting ?? "no TLS connection within \(Int(connectBudget.rounded(.up))) s"))
         }
         queue.asyncAfter(deadline: .now() + exchangeBudget) { [self] in
             finish(ending(with: URLError(.timedOut)))
         }
+    }
+
+    /// No TLS connection: named as interception when a certificate was refused.
+    private func notConnected(_ detail: String) -> PinnedOutcome {
+        refusedCertificate ? .trustRejected(detail) : .notConnected(detail)
     }
 
     private var isFinished: Bool {
@@ -393,6 +626,7 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
                 finish(.clockRejected("\(error)"))
                 return
             }
+            if !connected, NetworkInterception.isTrustFailure(error) { refusedCertificate = true }
             // Still trying; the connect budget decides.
             lastWaiting = "\(error)"
         case let .failed(error):
@@ -400,11 +634,12 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
                 finish(.clockRejected("\(error)"))
                 return
             }
+            if !connected, NetworkInterception.isTrustFailure(error) { refusedCertificate = true }
             finish(connected
                 ? ending(with: URLError(.networkConnectionLost, userInfo: [
                     NSLocalizedDescriptionKey: "\(label): \(error)",
                 ]))
-                : .notConnected("\(error)"))
+                : notConnected("\(error)"))
         case .cancelled:
             connection.stateUpdateHandler = nil
         default:
@@ -473,8 +708,9 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
     }
 }
 
-/// Reads an HTTP/1.1 response from the bytes received so far.
-nonisolated private enum PinnedResponse {
+/// Reads an HTTP/1.1 response from the bytes received so far. The update
+/// package relay (`PackageResponseSink`) reads its head with the same parts.
+nonisolated enum PinnedResponse {
     static let headLimit = 64 * 1024
 
     enum Reading {
@@ -522,7 +758,7 @@ nonisolated private enum PinnedResponse {
         }
     }
 
-    private static func parseStatusLine(_ bytes: ArraySlice<UInt8>) -> Int? {
+    static func parseStatusLine(_ bytes: ArraySlice<UInt8>) -> Int? {
         let parts = String(decoding: bytes, as: UTF8.self)
             .split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false)
         guard parts.count >= 2, parts[0].hasPrefix("HTTP/1."), parts[1].count == 3,
@@ -531,7 +767,7 @@ nonisolated private enum PinnedResponse {
         return status
     }
 
-    private static func parseHeaders(_ bytes: ArraySlice<UInt8>) -> [String: String]? {
+    static func parseHeaders(_ bytes: ArraySlice<UInt8>) -> [String: String]? {
         var headers: [String: String] = [:]
         guard !bytes.isEmpty else { return headers }
         for line in String(decoding: bytes, as: UTF8.self).components(separatedBy: "\r\n") {
@@ -615,7 +851,7 @@ nonisolated private enum PinnedResponse {
         }
     }
 
-    private static func find(_ pattern: [UInt8], in bytes: [UInt8], from start: Int) -> Int? {
+    static func find(_ pattern: [UInt8], in bytes: [UInt8], from start: Int) -> Int? {
         var index = start
         while index + pattern.count <= bytes.count {
             if bytes[index..<(index + pattern.count)].elementsEqual(pattern) { return index }

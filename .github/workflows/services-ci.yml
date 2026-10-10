@@ -45,6 +45,10 @@ on:
       - services/**
       - ops-panel/**
       - tooling/scripts/remote/**
+      # The relay nodes' end-to-end probe script and its test.
+      - tooling/ops/relay/**
+      # Post-install validator for the relay probe, relay logrotate and node agent.
+      - tooling/ops/node-install/**
       - tooling/scripts/provision-tono-node.py
       - tooling/scripts/tests/test_provision_tono_node.py
       # The download-page check and its tests live here. Without these two the
@@ -54,6 +58,14 @@ on:
       # The migration-number checker and the *.test.mjs glob live outside
       # services/**; without these the new steps could be edited without running.
       - tooling/scripts/check-migration-numbers.mjs
+      # The api-relay-down recovery rule checker; its test reads the rule the
+      # doc suggests, so the doc and the fixture run it too.
+      - tooling/scripts/check-relay-alert-rule.mjs
+      - tooling/scripts/tests/fixtures/ops-alert-rules.json
+      - docs/ops/api-relay.md
+      # Local migration rehearsal: its additive checker is tested by the glob below.
+      - tooling/scripts/check-migrations-additive.mjs
+      - tooling/scripts/rehearse-control-plane-migrations.sh
       - tooling/scripts/check-ops-budgets.mjs
       - tooling/scripts/compare-connect-performance.mjs
       - tooling/scripts/windows-package-components.mjs
@@ -65,6 +77,8 @@ on:
       - tooling/scripts/provision-reality-node.rb
       - tooling/scripts/tests/provision-reality-node.test.rb
       - tooling/ops/hy2/**
+      # The mainland acceptance tool's result classification.
+      - tooling/ops/cn-acceptance/**
       - .github/workflows/services-ci.yml
       # desktop-update-sign-workflow.test.mjs guards this file; run it on every edit.
       - .github/workflows/desktop-update-sign.yml
@@ -174,6 +188,11 @@ jobs:
       - name: Node restart verification fixtures
         run: python3 tooling/scripts/remote/test_node_verification.py
 
+      - name: Node self-registration agent
+        # Reports only running Tono services and never sends its token anywhere
+        # but a bare HTTPS origin.
+        run: python3 services/node-agent/test_tono_node_agent.py
+
       - name: Operator SSH collector jobs
         run: python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'
 
@@ -182,6 +201,21 @@ jobs:
 
       - name: hy2 carrier and handshake probes
         run: python3 -m unittest discover -s tooling/ops/hy2 -p 'test_*.py'
+
+      - name: API relay end-to-end probe
+        # Default certificate verification is the point of the probe: an
+        # untrusted certificate through the relay must report a failure.
+        # test_relay_stream_conf.py: the SNI allow-list the armed macOS
+        # permit relies on (decision 086).
+        run: python3 -m unittest discover -s tooling/ops/relay -p 'test_*.py'
+
+      - name: Mainland acceptance tool classification
+        run: python3 -m unittest discover -s tooling/ops/cn-acceptance -p 'test_*.py'
+
+      - name: Node install validator
+        # Stubbed node root: a broken install must fail each check, and no
+        # credential value may reach the output.
+        run: python3 tooling/ops/node-install/test_check_node_install.py
 
   ops-contract:
     runs-on: ubuntu-24.04

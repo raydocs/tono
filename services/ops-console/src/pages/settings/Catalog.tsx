@@ -16,6 +16,7 @@ import {
   FailurePanel,
   NoticePanel,
 } from './Editor';
+import { Hy2Global } from './Hy2Global';
 import { useDocument } from './use-document';
 import '@/styles/settings-publish.css';
 
@@ -143,6 +144,8 @@ export function Catalog() {
       <FoldedSection title={words.history}>
         <History revision={online.revision} />
       </FoldedSection>
+
+      <Hy2Global />
 
       <ConfirmDialog
         open={asking === 'publish'}

@@ -1,0 +1,3 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| WIN-HEAL-UNGATED-HY2-HOP | Windows 粘性自愈（`connection/heal.rs` → `tono_core::heal`）在选中节点第一次连接失败（屏障未验证）后，把下一次拨号改成同一节点的 ` · hy2` 块（同基名换传输排第一），不看任何控制面开关，违反 SHIP_PLAN G2.8「自动切换默认关」 | fixed(a74bdc59) | [#1500](https://github.com/raydocs/tono/pull/1500)（A17 Windows） | 中·推导（读码，未实机） | 只影响目录里带 hy2 块的账户（`X-Tono-Accept: hy2` 且在 `HY2_CATALOG_EMAILS` 灰度名单内）。修法：自愈候选里去掉非用户所选的 hy2 块，自动换 hy2 只走 A17 的 `hy2AutoSwitch` 门（决定 083）。#1500 合 main `a74bdc59`，托管 CI 绿（core 346、app-Rust 683）；待实机（Windows 设备上 Reality 失败后自愈不换 hy2 的证据）；同 PR 评审遗留 A17W-* 四条（仅开关开时） |

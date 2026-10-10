@@ -224,6 +224,24 @@ pub const REVIEWED_DIRECT_PORTS: [u16; 4] = [80, 443, 8000, 8080];
 /// permit from it and the App's transport walks it, so a port the client will try cannot be one
 /// the kill switch refuses — which is exactly what would happen if each side kept its own list.
 pub const CONTROL_PLANE_PORTS: [u16; 6] = [443, 2053, 2083, 2087, 2096, 8443];
+
+/// Tono-owned API relays outside Cloudflare (decision 077), in the order the App walks them.
+///
+/// Each is an nginx `stream` listener that admits only the SNIs `api.afk.ccwu.cc` and
+/// `releases.afk.ccwu.cc` and passes the unterminated TLS session to the Cloudflare edge, so the
+/// client still validates Cloudflare's certificate for the hostname.
+///
+/// One compiled list, used by both sides, like [`CONTROL_PLANE_PORTS`]: the App's transport and
+/// updater walk it (`bootstrap::API_RELAYS` re-exports this), and `wfp_model::session_rules`
+/// renders it into the app-scoped bootstrap API channel (rule C) while armed without a tunnel
+/// (owner decision W-A, decision 090, which amends 077). Exact IPv4 literal and port, TCP only,
+/// never resolved — a relay the client tries but rule C refuses would look like the network.
+pub const API_RELAYS: [(std::net::Ipv4Addr, u16); 2] = [
+    // Los Angeles · Westwood (DMIT)
+    (std::net::Ipv4Addr::new(179, 253, 233, 220), 2053),
+    // Los Angeles · Mesa (DMIT)
+    (std::net::Ipv4Addr::new(179, 255, 154, 17), 2053),
+];
 /// Revision that introduced GET/POST `/bootstrap-pins`.
 pub const MIN_SERVICE_REVISION_FOR_BOOTSTRAP_PINS: u16 = 13;
 pub const MIN_SERVICE_REVISION_FOR_DIRECT_RUNTIME_RELOAD: u16 = 10;

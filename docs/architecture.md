@@ -23,9 +23,10 @@ macOS SwiftUI          Windows Tauri           Ubuntu desktop (Tauri)
 | `apps/windows/app/` | Windows / future Ubuntu GUI (Tauri) |
 | `apps/windows/service/` | Privileged service (WFP today; nftables for Linux) |
 | `apps/windows/crates/tono-core/` | Portable catalog, policy, connect FSM, auth |
-| `services/control-plane/` | Cloudflare Worker, D1, ops console. Entry is `src/index.ts`; extracted so far: `crypto`, `oidc`, `access`, `ops-timeseries`, `ops-usage-hours`, `errors`, `http`, `catalog-yaml`, `scheduled` (the five-minute cron), … |
+| `services/control-plane/` | Cloudflare Worker, D1, ops console. Entry is `src/index.ts`; extracted so far: `crypto`, `oidc`, `access`, `ops-timeseries`, `ops-usage-hours`, `errors`, `http`, `catalog-yaml`, `scheduled` (the five-minute cron), `client-reports`, `exit-credentials`, `tailscale`, `devices`, `enrollment`, `login`, … |
 | `services/exit-agent/` | VPS Xray roster + metering |
 | `services/home-agent/` | Tailscale home-exit reporter |
+| `services/node-agent/` | Node self-registration heartbeat (IP, roles, version) |
 | `ops-panel/` | SSH quality collector |
 | `tooling/scripts/` | Provision, release, helper build, tests |
 
@@ -62,8 +63,10 @@ does not depend on `AppState`. Do not merge `Core/` into `Services/`.
 | `service/src/core/` | Privileged WFP, DNS, Mihomo supervision |
 | `crates/tono-core/` | Portable catalog, policy, connect FSM |
 
-`tono/connection.rs` still owns the outer attempt, disconnect, switching,
-monitoring, probes and DIRECT lifecycle. `connection/stages.rs` now owns
+`tono/connection.rs` is the module facade (`mod`/`use` surface, session clock). The outer
+attempt lives in `connection/attempt.rs` (with `entry.rs`, `guards.rs` and the failure
+decision table in `outcome.rs`); disconnect, switching, monitoring, probes and the DIRECT
+lifecycle have their own `connection/` files. `connection/stages.rs` owns
 `run_stages`; `connection/transaction.rs` owns the shared deadline and cancellation;
 `connection/failure.rs` owns stable error mapping. Health, decision tables and route
 classification remain in `connection_health.rs`, `connection_plan.rs`, and

@@ -30,6 +30,9 @@ extension AppState {
             errorMessage = reason + ": this sing-box build cannot authenticate the catalog's HY2 certificate pin. Choose Reality."
             return
         }
+        // A17: a pick is the user's own block. Manual hy2 stays hy2, and the
+        // node's automatic-switch memory starts over.
+        hy2AutoSwitch.noteManualSelection(nodeName)
 
         if isConnected, !forceRuntimeReplacement,
            let current = proxyService.activeNodeName,
