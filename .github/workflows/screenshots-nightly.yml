@@ -23,9 +23,6 @@ on:
   schedule:
     - cron: '23 18 * * *' # 02:23 Asia/Shanghai
   workflow_dispatch:
-  push: # TEMP A25 trial: prove the nightly before merge; removed before review
-    branches:
-      - amp/a25-ci-speedup
 
 permissions:
   contents: read

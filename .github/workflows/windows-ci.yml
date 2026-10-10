@@ -131,7 +131,7 @@ jobs:
             -D warnings -A clippy::collapsible_if -A clippy::too_many_arguments
 
       - name: Save Cargo cache (push to main only)
-        if: ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'pull_request') && steps.cargo-cache.outputs.cache-hit != 'true' # TEMP A25 trial: PR-scope save
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           key: ${{ steps.cargo-key.outputs.key }}
@@ -319,7 +319,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Shared update contract failed' }
 
       - name: Save Cargo cache (push to main only)
-        if: ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'pull_request') && steps.cargo-cache.outputs.cache-hit != 'true' # TEMP A25 trial: PR-scope save
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           key: ${{ steps.cargo-key.outputs.key }}
@@ -451,7 +451,7 @@ jobs:
           cargo test --locked --features standalone,client --lib $test -- --exact --nocapture
 
       - name: Save Cargo cache (push to main only)
-        if: ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'pull_request') && steps.cargo-cache.outputs.cache-hit != 'true' # TEMP A25 trial: PR-scope save
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           key: ${{ steps.cargo-key.outputs.key }}
