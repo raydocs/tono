@@ -422,8 +422,8 @@ jobs:
   # verify`; clients do not check it). The only job holding an OIDC token or
   # attestation write; it checks out and runs no repository code and sees no
   # secret. No condition and no continue-on-error: a failed attestation fails
-  # the run, and macos-dmg.yml and desktop-update-sign.yml take only a
-  # successful run.
+  # the run and stops validate-appcast (no Sparkle signature or release proof),
+  # and macos-dmg.yml and desktop-update-sign.yml take only a successful run.
   attest:
     needs: build
     runs-on: ubuntu-24.04
@@ -443,7 +443,7 @@ jobs:
   validate-appcast:
     # A local physical-test candidate must never obtain the Sparkle signing key.
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.candidate_only) }}
-    needs: build
+    needs: [build, attest]
     runs-on: macos-26
     environment: macos-appcast
     env:

@@ -282,4 +282,5 @@ test('Windows release jobs that run third-party build code never hold a writable
   const publish = read('windows-release.yml').jobs['publish-draft']
   assert.equal(publish?.permissions?.contents, 'write')
   assert.ok(publish.needs.includes('build-draft'))
+  assert.ok(publish.needs.includes('attest'), 'no draft release without build provenance')
 })

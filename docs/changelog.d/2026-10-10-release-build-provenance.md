@@ -7,3 +7,8 @@
 - 验证：Linux orb 上 `python3 tooling/scripts/tests/test_verify_macos_notarization.py`（OK）、`ruby tooling/scripts/tests/macos-candidate-workflow.test.rb`（全部通过）、`node --test tooling/scripts/tests/desktop-update-sign-workflow.test.mjs`（6/6）、`node --test tooling/scripts/tests/windows-ci-paths.test.cjs`（14/14）。未执行：任何发布工作流（未派发）、真实 `xcrun`/`spctl`、actionlint（未安装）。PR 的 ci-gate 结果见 PR。
 - 候选/发布：无新包。没有发布到客户渠道。
 - 剩余限制：客户端不校验来源证明（D8-A）。证明只说明字节由哪个 run/提交/ref 产生，不代表已签名或已公证。在派发一次真实发布工作流之前，`attest` 作业本身未在 GitHub 上跑过。新发现 [A24-PAIR-STALE-WINDOWS-ARTIFACT](../findings.d/A24-PAIR-STALE-WINDOWS-ARTIFACT.md)（open）。
+
+续记（2026-10-10，独立评审 Grok @f2d6e6ea PASS，2 minor + 1 info，一轮修复）：
+- `verify-macos-notarization.sh` 改用绝对路径 `/usr/bin/ditto`、`/usr/bin/xcrun`、`/usr/sbin/spctl`；只有测试用的 `TONO_NOTARIZATION_TOOLS_DIR`（非空时）换成桩并打印警告，两个调用方都显式清空它。解压出的 Tono.app 或其 Contents 是符号链接、zip 本身是符号链接时拒绝。`release-macos.sh` 不再丢弃它的输出。
+- 测试改为走客户下载的 zip 路径（macOS CI 用真 `/usr/bin/ditto`，Linux 用 unzip 替身）：正常 zip 通过；没有 Tono.app、Tono.app 是符号链接、票据缺失、Gatekeeper 拒绝都非零。Linux 上 `Ran 5 tests … OK`。
+- `windows-release.yml` 的 `publish-draft` 和 `macos-release.yml` 的 `validate-appcast` 现在 `needs: attest`：证明失败就不建草稿、不出 Sparkle 签名和发布证明；结构测试各加一条断言。

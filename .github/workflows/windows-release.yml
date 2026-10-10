@@ -361,7 +361,8 @@ jobs:
   # D8-A: generated and auditable with `gh attestation verify`; clients do not
   # check it). Writes only attestations, never contents: it checks out nothing,
   # runs no build code, sees no secret, and attests only bytes that match the
-  # digests the build job recorded. A failed attestation fails the run.
+  # digests the build job recorded. A failed attestation fails the run and stops
+  # publish-draft.
   attest:
     needs: build-draft
     runs-on: ubuntu-24.04
@@ -399,9 +400,9 @@ jobs:
   # The only job that can write release contents. It checks out nothing executable
   # and runs no build code: it downloads the payload, refuses bytes that differ
   # from the digests the build job recorded, and creates the draft release with
-  # its updater manifest.
+  # its updater manifest. It waits for `attest`: no draft without provenance.
   publish-draft:
-    needs: build-draft
+    needs: [build-draft, attest]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

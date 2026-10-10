@@ -158,6 +158,7 @@ workflow.fetch('jobs').each do |id, job|
     abort 'attest must hold exactly OIDC and attestation write' unless job['permissions'] == { 'contents' => 'read', 'id-token' => 'write', 'attestations' => 'write' }
     abort 'attest must run no repository code and see no secret' unless job.fetch('steps').map { |step| step.fetch('uses', '').split('@').first } == ['actions/download-artifact', 'actions/attest-build-provenance'] && !job.to_s.include?('secrets.')
     abort 'attest must not be skippable or fail open' if job.key?('if') || job.key?('continue-on-error') || job.fetch('steps').any? { |step| step.key?('if') || step.key?('continue-on-error') }
+    abort 'no Sparkle signature or release proof without build provenance' unless Array(workflow.fetch('jobs').fetch('validate-appcast')['needs']).include?('attest')
     next
   end
   abort "#{id} must not gain write permissions" if job.fetch('permissions', {}).to_s.include?('write')
