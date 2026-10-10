@@ -158,4 +158,4 @@ Report at the end of each task: PR number, ci-gate run id, review receipt, what 
 
 工程项（不进发现总账）：`services/ops-console` e2e `e2e/ledger.spec.ts:155` 在 ci-gate run
 [38056004583](https://github.com/raydocs/tono/actions/runs/38056004583) 第 1 次尝试失败（#1511，未改相关文件），重跑通过；偶发。
-已由 PR #PRNUM 修（根因：冲正后整页重载把约一千行的 SLO 表卸掉重拉重画，慢机上主线程被占满超过 5 s，冲正对话框一直开着、表格被 `aria-hidden`；SLO 表改为加载时隐藏不卸载并 memo，测试等对话框关上、只在「条目」里找行、每次重复用独立 fixture 会话）。
+已由 #1537 修（根因：冲正后整页重载把约一千行的 SLO 表卸掉重拉重画，慢机上主线程被占满超过 5 s，冲正对话框一直开着、表格被 `aria-hidden`；SLO 表改为加载时隐藏不卸载并 memo，测试等对话框关上、只在「条目」里找行、每次重复用独立 fixture 会话）。

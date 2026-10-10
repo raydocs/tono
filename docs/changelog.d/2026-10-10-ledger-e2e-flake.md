@@ -1,6 +1,6 @@
 ## 2026-10-10 · ops 控制台：账目冲正 e2e 偶发失败的根因修复
 - 归属：ops 计划（[plan-2026-09-11](../ops/plan-2026-09-11.md)），[Amp 待办](../ops/amp-backlog-2026-10-10.md) §9 工程项（`e2e/ledger.spec.ts:155`）。只改 ops 控制台账目页的渲染方式和这一个 spec；不改接口、文案和加载后的页面外观。
-- 来源：main `a6ebf460` → 分支 `amp/ledger-e2e-flake`，PR #PRNUM；未合 main。
+- 来源：main `a6ebf460` → 分支 `amp/ledger-e2e-flake`，[PR #1537](https://github.com/raydocs/tono/pull/1537)；未合 main。
 - 缺陷修复：无客户可见缺陷。
 - 新增/优化：账目页每次写入（冲正、记一笔、改备注、锁定）都会给月汇总换 key，汇总重读期间 `month0 === null` 把下面四节整块卸掉，其中 SLO 表（fixture 约一千行）跟着卸载、重新请求 `/slo`、重新画。现在 SLO 那一节在汇总重读时只加 `hidden`、不卸载，`LedgerSlo` 用 `memo` 包起来，页面其余部分重渲时不再重画它。加载完成后的 DOM 和以前一样；SLO 不再因为账目写入顺带重拉（它本来就不读账目）。
 - 工程与测试：
