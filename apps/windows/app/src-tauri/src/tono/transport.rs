@@ -397,6 +397,35 @@ pub struct TonoTransport {
     /// Asks the Service for its protocol revision (production only). None in tests, where the
     /// permit stays whatever the test set.
     relay_permit_probe: Option<RelayPermitProbe>,
+    /// Loopback stand-ins for the steps that otherwise reach the public internet (the DoH
+    /// resolvers and the API host's pins on the alternate ports). Production leaves it empty,
+    /// and those steps then run exactly as before.
+    stand_ins: StandIns,
+}
+
+/// See [`TonoTransport::stand_ins`]. Set only by tests.
+#[derive(Default)]
+struct StandIns {
+    /// `(host, address, ports)`: the alternate-port walk pins `host` to `address` on each port
+    /// after 443, instead of `bootstrap::API_HOST` to the compiled pins on `CONTROL_PLANE_PORTS`.
+    alternate: Option<(String, std::net::IpAddr, Vec<u16>)>,
+    /// `(host, resolve)`: DoH runs for `host` and takes its addresses from `resolve`.
+    doh: Option<(String, DohStandIn)>,
+}
+
+/// A DoH stand-in's answer, in place of the public resolvers.
+type DohStandIn = Box<dyn Fn() -> Result<Vec<std::net::Ipv4Addr>, ()> + Send + Sync>;
+
+/// Decision 091: one walk's latch. Once a check has seen that the request must go to the relays
+/// only, every later direct step of the same walk is refused, even if the published state flips
+/// back meanwhile.
+#[derive(Default)]
+struct WalkGate(std::sync::atomic::AtomicBool);
+
+impl WalkGate {
+    fn lost(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Acquire)
+    }
 }
 
 /// Decision 091: what carries the control plane, as far as the app knows.
@@ -656,6 +685,7 @@ impl TonoTransport {
             reach: std::sync::atomic::AtomicU8::new(ControlPlaneReach::Unknown.code()),
             relay_permit: std::sync::atomic::AtomicU8::new(RELAY_PERMIT_UNKNOWN),
             relay_permit_probe: None,
+            stand_ins: StandIns::default(),
         }
     }
 
@@ -987,15 +1017,21 @@ impl TonoTransport {
     /// how the HTTP client treats a port inside a DNS override. Everything else — no proxy, no
     /// redirects, full certificate validation against the same hostname — is the shared
     /// builder, so this is the same channel on a different port rather than a weaker one.
-    fn alternate_client(port: u16) -> Result<reqwest::Client> {
-        let pinned: Vec<std::net::SocketAddr> = bootstrap::control_plane_http_pins()
-            .into_iter()
-            .map(|ip| std::net::SocketAddr::new(std::net::IpAddr::V4(ip), port))
-            .collect();
+    fn alternate_client(&self, port: u16) -> Result<reqwest::Client> {
+        let (host, pinned): (&str, Vec<std::net::SocketAddr>) = match &self.stand_ins.alternate {
+            Some((host, address, _)) => (host, vec![std::net::SocketAddr::new(*address, port)]),
+            None => (
+                bootstrap::API_HOST,
+                bootstrap::control_plane_http_pins()
+                    .into_iter()
+                    .map(|ip| std::net::SocketAddr::new(std::net::IpAddr::V4(ip), port))
+                    .collect(),
+            ),
+        };
         Self::builder()
             .connect_timeout(ALTERNATE_CONNECT_TIMEOUT)
             .timeout(ALTERNATE_TOTAL_TIMEOUT)
-            .resolve_to_addrs(bootstrap::API_HOST, &pinned)
+            .resolve_to_addrs(host, &pinned)
             .build()
             .context("failed to build the alternate-port Tono HTTP client")
     }
@@ -1019,9 +1055,14 @@ impl TonoTransport {
         &self,
         request: &ApiRequest,
         port: u16,
+        gate: &WalkGate,
     ) -> Option<Result<ApiResponse, ApiError>> {
+        // Decision 091: checked right before this port is dialed, after any earlier port.
+        if !self.direct_step_allowed(request, gate).await {
+            return None;
+        }
         let url = Self::with_port(&request.url, port)?;
-        let client = Self::alternate_client(port).ok()?;
+        let client = self.alternate_client(port).ok()?;
         let attempt = ApiRequest {
             url,
             ..request.clone()
@@ -1053,10 +1094,14 @@ impl TonoTransport {
     async fn attempt_alternate_ports(
         &self,
         request: &ApiRequest,
+        gate: &WalkGate,
     ) -> Option<Result<ApiResponse, ApiError>> {
         use std::sync::atomic::Ordering;
         let remembered = self.alternate_port.load(Ordering::Relaxed);
-        let ports = tono_service_protocol::CONTROL_PLANE_PORTS;
+        let ports: &[u16] = match &self.stand_ins.alternate {
+            Some((_, _, ports)) => ports,
+            None => &tono_service_protocol::CONTROL_PLANE_PORTS,
+        };
         let mut order: Vec<u16> = Vec::with_capacity(ports.len());
         if remembered != 0 && remembered != 443 {
             order.push(remembered);
@@ -1071,10 +1116,10 @@ impl TonoTransport {
 
         let deadline = tokio::time::Instant::now() + ALTERNATE_WALK_BUDGET;
         for port in order {
-            if tokio::time::Instant::now() >= deadline {
+            if tokio::time::Instant::now() >= deadline || gate.lost() {
                 break;
             }
-            if let Some(result) = self.attempt_one_alternate(request, port).await {
+            if let Some(result) = self.attempt_one_alternate(request, port, gate).await {
                 return Some(result);
             }
         }
@@ -1137,15 +1182,45 @@ impl TonoTransport {
     /// Decision 091: whether `request` goes to the relays only, read now. True without a tunnel
     /// that carries the control plane, for the host the relays serve, while there are relays;
     /// armed without a tunnel, only when the Service's rule C permits them (the legacy gate).
+    ///
+    /// The Service probe behind the legacy gate is awaited; the published state is read again
+    /// after it, and a state that changed meanwhile is decided from it alone, with no further
+    /// wait, so the answer never rests on a state older than the moment it is returned.
     async fn relays_only(&self, request: &ApiRequest) -> bool {
         if self.relays.is_empty() || !self.is_relay_host(&request.url) {
             return false;
         }
-        match self.control_plane_reach() {
+        let reach = self.control_plane_reach();
+        let answer = match reach {
             ControlPlaneReach::Unknown | ControlPlaneReach::Tunnel => false,
             ControlPlaneReach::Unarmed => true,
             ControlPlaneReach::ArmedWithoutTunnel => self.service_permits_relays().await,
+        };
+        let now = self.control_plane_reach();
+        if now == reach {
+            return answer;
         }
+        match now {
+            ControlPlaneReach::Unknown | ControlPlaneReach::Tunnel => false,
+            ControlPlaneReach::Unarmed => true,
+            ControlPlaneReach::ArmedWithoutTunnel => {
+                self.relay_permit.load(std::sync::atomic::Ordering::Acquire) == RELAY_PERMIT_PRESENT
+            }
+        }
+    }
+
+    /// Decision 091: whether the next direct (non-relay) step of this walk may run. Read right
+    /// before the step, after every wait and loop iteration before it; once refused, refused for
+    /// the rest of the walk (`gate`).
+    async fn direct_step_allowed(&self, request: &ApiRequest, gate: &WalkGate) -> bool {
+        if gate.lost() {
+            return false;
+        }
+        if self.relays_only(request).await {
+            gate.0.store(true, std::sync::atomic::Ordering::Release);
+            return false;
+        }
+        true
     }
 
     fn is_relay_host(&self, url: &str) -> bool {
@@ -1255,13 +1330,32 @@ impl TonoTransport {
 
     /// DNS-over-HTTPS raced across pinned resolvers. System DNS is not
     /// read or written. A poisoned answer that is not a public IPv4 is ignored.
-    async fn attempt_doh(&self, request: &ApiRequest) -> Option<Result<ApiResponse, ApiError>> {
-        if !request.url.contains(bootstrap::API_HOST) {
+    async fn attempt_doh(
+        &self,
+        request: &ApiRequest,
+        gate: &WalkGate,
+    ) -> Option<Result<ApiResponse, ApiError>> {
+        let host = match &self.stand_ins.doh {
+            Some((host, _)) => host.as_str(),
+            None => bootstrap::API_HOST,
+        };
+        if !request.url.contains(host) {
             return None;
         }
         tokio::time::sleep(tono_core::backoff_before(2)).await;
-        let ips = resolve_via_doh(bootstrap::API_HOST).await.ok()?;
+        // Decision 091: after the wait and before the queries, which leave the machine directly.
+        if !self.direct_step_allowed(request, gate).await {
+            return None;
+        }
+        let ips = match &self.stand_ins.doh {
+            Some((_, resolve)) => resolve().ok()?,
+            None => resolve_via_doh(host).await.ok()?,
+        };
         if ips.is_empty() {
+            return None;
+        }
+        // And again before the request itself goes to the addresses DoH returned.
+        if !self.direct_step_allowed(request, gate).await {
             return None;
         }
         let pinned: Vec<std::net::SocketAddr> = ips
@@ -1271,7 +1365,7 @@ impl TonoTransport {
         let client = Self::builder()
             .connect_timeout(Duration::from_secs(2))
             .timeout(Duration::from_secs(8))
-            .resolve_to_addrs(bootstrap::API_HOST, &pinned)
+            .resolve_to_addrs(host, &pinned)
             .build()
             .ok()?;
         match self.attempt(&client, request, AttemptPath::Doh).await {
@@ -1285,12 +1379,20 @@ impl TonoTransport {
 
     /// Last resort through an already-running loopback proxy. HTTPS CONNECT failures
     /// surface as transport errors; a response after TLS belongs to the API, including 5xx.
-    async fn attempt_tunnel(&self, request: &ApiRequest) -> Option<Result<ApiResponse, ApiError>> {
+    async fn attempt_tunnel(
+        &self,
+        request: &ApiRequest,
+        gate: &WalkGate,
+    ) -> Option<Result<ApiResponse, ApiError>> {
         let port = self.tunnel_port.load(std::sync::atomic::Ordering::Relaxed);
         if port == 0 {
             return None;
         }
         tokio::time::sleep(tono_core::backoff_before(4)).await;
+        // Decision 091: after the wait, before the loopback proxy is dialed.
+        if !self.direct_step_allowed(request, gate).await {
+            return None;
+        }
         let proxy = reqwest::Proxy::all(format!("http://127.0.0.1:{port}")).ok()?;
         let client = reqwest::Client::builder()
             .no_proxy()
@@ -1411,9 +1513,12 @@ impl TonoTransport {
         crate::tono::integration_profile::delay_remote_operation().await;
 
         // Decision 091: no tunnel carries the control plane, so the relays alone. Asked again
-        // before every later non-relay step below: a tunnel lost while this walk runs sends the
-        // rest of it to the relays, and the direct steps it has not reached never run.
-        if self.relays_only(&request).await {
+        // right before every later direct (non-relay) step of this walk, including inside the
+        // DoH, alternate-port and loopback steps after their waits and between their ports: a
+        // tunnel lost while this walk runs sends the rest of it to the relays, and the direct
+        // steps it has not reached never run (`gate` keeps it that way for the whole walk).
+        let gate = WalkGate::default();
+        if !self.direct_step_allowed(&request, &gate).await {
             return self.send_over_relays(&request, "", String::new(), None).await;
         }
 
@@ -1431,8 +1536,9 @@ impl TonoTransport {
             .alternate_port
             .load(std::sync::atomic::Ordering::Relaxed);
         if remembered != 0 {
-            match self.attempt_one_alternate(&request, remembered).await {
+            match self.attempt_one_alternate(&request, remembered, &gate).await {
                 Some(result) => return result,
+                None if gate.lost() => return self.send_over_relays(&request, "", String::new(), None).await,
                 // Provably not delivered, so this port has stopped working. Forget it before
                 // falling through, or every later request pays for it first.
                 None => self
@@ -1463,15 +1569,14 @@ impl TonoTransport {
             }
         }
 
-        if self.relays_only(&request).await {
-            return self.send_over_relays(&request, "", relay_entry, relay_tried).await;
-        }
-
         // The resolved client goes first once it has answered in place of dead pins (#583). Its
         // failure moves on to the pins only when it proves nothing was delivered. Any failure or
         // cancellation clears the preference (`PreferenceLease`).
         let mut resolved_failed = None;
         if self.preference.resolved_first() {
+            if !self.direct_step_allowed(&request, &gate).await {
+                return self.send_over_relays(&request, "", relay_entry, relay_tried).await;
+            }
             let mut lease = PreferenceLease { preference: &self.preference, answered: false };
             match self.attempt(&self.resolved, &request, AttemptPath::SystemDns).await {
                 Err(ApiError::Transport { kind, message })
@@ -1488,18 +1593,17 @@ impl TonoTransport {
             }
         }
 
-        if self.relays_only(&request).await {
-            let earlier = match &resolved_failed {
-                Some(ApiError::Transport { message, .. }) => format!("system-dns[{message}]"),
-                _ => String::new(),
-            };
-            return self.send_over_relays(&request, &earlier, relay_entry, relay_tried).await;
-        }
-
         let pinned = {
             // Each attempt keeps its own pool/pin snapshot. Publishing fresh pins must not
             // wait for a slow response, nor cancel or replay an already delivered request.
             let client = self.client.read().await.clone();
+            if !self.direct_step_allowed(&request, &gate).await {
+                let earlier = match &resolved_failed {
+                    Some(ApiError::Transport { message, .. }) => format!("system-dns[{message}]"),
+                    _ => String::new(),
+                };
+                return self.send_over_relays(&request, &earlier, relay_entry, relay_tried).await;
+            }
             self.attempt(&client, &request, AttemptPath::Pinned).await
         };
         let Err(ApiError::Transport { kind, message }) = pinned else {
@@ -1513,7 +1617,7 @@ impl TonoTransport {
         if !should_retry_transport(request.method, kind) {
             return Err(ApiError::Transport { kind, message });
         }
-        if resolved_failed.is_none() && self.relays_only(&request).await {
+        if resolved_failed.is_none() && !self.direct_step_allowed(&request, &gate).await {
             let earlier = format!("pinned[{message}]");
             return self.send_over_relays(&request, &earlier, relay_entry, relay_tried).await;
         }
@@ -1551,25 +1655,37 @@ impl TonoTransport {
                     // are its ports, and the customer this exists for cannot reach
                     // Cloudflare on any of them.
                     //
-                    // Decision 091: once the relays have run, a tunnel lost meanwhile ends the
-                    // walk here; the Cloudflare steps after them do not run.
+                    // Decision 091: a tunnel lost during the system-resolver attempt sends the
+                    // walk to the relays alone from here, with their relay-unreachable error.
+                    if !self.direct_step_allowed(&request, &gate).await {
+                        let earlier = format!("pinned[{message}]; system-dns[{fallback_message}]");
+                        return self.send_over_relays(&request, &earlier, relay_entry, relay_tried).await;
+                    }
                     if let Some(result) = self.attempt_relays(&request, &mut relay_note).await {
                         return result;
                     }
-                    if !self.relays_only(&request).await
-                        && let Some(result) = self.attempt_doh(&request).await
-                    {
+                    if let Some(result) = self.attempt_doh(&request, &gate).await {
                         return result;
                     }
-                    if !self.relays_only(&request).await
-                        && let Some(result) = self.attempt_alternate_ports(&request).await
-                    {
+                    if let Some(result) = self.attempt_alternate_ports(&request, &gate).await {
                         return result;
                     }
-                    if !self.relays_only(&request).await
-                        && let Some(result) = self.attempt_tunnel(&request).await
-                    {
+                    if let Some(result) = self.attempt_tunnel(&request, &gate).await {
                         return result;
+                    }
+                    // Decision 091: the tunnel was lost after the relays had run (it carried
+                    // them, or WFP's `Locked` state did not permit them): the relays once more,
+                    // now as the only path, and their relay-unreachable error if none answers.
+                    // At most one extra relay walk per request, each relay bounded as always.
+                    if gate.lost() {
+                        let relay_part = if relay_note.is_empty() {
+                            String::new()
+                        } else {
+                            format!("; relay[{relay_note}]")
+                        };
+                        let earlier =
+                            format!("pinned[{message}]; system-dns[{fallback_message}]{relay_part}");
+                        return self.send_over_relays(&request, &earlier, String::new(), None).await;
                     }
                 }
                 let relay_part = if relay_note.is_empty() {
@@ -2883,6 +2999,162 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
                 .expect("the direct path answers");
             assert_eq!(response.body, b"direct");
             assert_eq!(relay.connections(), 0);
+        }
+
+        /// A loopback server whose `script(n)` runs for its `n`th connection (from 0) once the
+        /// request head has arrived: `true` answers `200 relay`, `false` closes with no answer
+        /// (a GET may move on). Counts connections.
+        async fn scripted(
+            listener: tokio::net::TcpListener,
+            script: impl Fn(usize) -> bool + Send + Sync + 'static,
+        ) -> Arc<AtomicUsize> {
+            use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+            let connections = Arc::new(AtomicUsize::new(0));
+            let count = Arc::clone(&connections);
+            tokio::spawn(async move {
+                while let Ok((mut stream, _)) = listener.accept().await {
+                    let index = count.fetch_add(1, SeqCst);
+                    let mut header = Vec::new();
+                    while !header.ends_with(b"\r\n\r\n") {
+                        let Ok(byte) = stream.read_u8().await else { break };
+                        header.push(byte);
+                    }
+                    if script(index) {
+                        let _ = stream
+                            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nrelay")
+                            .await;
+                        let _ = stream.shutdown().await;
+                    }
+                    drop(stream);
+                }
+            });
+            connections
+        }
+
+        /// A loopback port nothing listens on.
+        fn closed_port() -> u16 {
+            std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+        }
+
+        /// A walk that started with a tunnel: pins and system resolver refused (the URL's port is
+        /// closed), the relays at `relay`, DoH answered by a counter that returns nothing, and
+        /// the alternate ports `ports` (after 443) on loopback.
+        fn tunnel_walk(
+            relay: SocketAddr,
+            doh_queries: &Arc<AtomicUsize>,
+            ports: Vec<u16>,
+        ) -> TonoTransport {
+            let loopback = SocketAddr::from(([127, 0, 0, 1], 0));
+            let mut transport =
+                TonoTransport::with_clients_and_relays("localhost", &[loopback], &[loopback], &[relay]).unwrap();
+            let queries = Arc::clone(doh_queries);
+            transport.stand_ins.doh = Some((
+                "localhost".to_owned(),
+                Box::new(move || {
+                    queries.fetch_add(1, SeqCst);
+                    Err(())
+                }) as super::super::DohStandIn,
+            ));
+            transport.stand_ins.alternate = Some((
+                "localhost".to_owned(),
+                std::net::IpAddr::from([127, 0, 0, 1]),
+                std::iter::once(443).chain(ports).collect(),
+            ));
+            transport.set_control_plane_reach(ControlPlaneReach::Tunnel);
+            transport
+        }
+
+        /// The tunnel is lost while the alternate-port walk runs (Disconnect publishes Unarmed
+        /// as the first port fails): the next port is never dialed, and the relays carry the
+        /// request.
+        #[tokio::test]
+        async fn a_tunnel_lost_mid_alternate_port_walk_dials_no_further_port_and_uses_the_relays() {
+            let relay_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let first_port = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let second = fixture("direct", false).await;
+            let doh_queries = Arc::new(AtomicUsize::new(0));
+            let transport = Arc::new(tunnel_walk(
+                relay_listener.local_addr().unwrap(),
+                &doh_queries,
+                vec![first_port.local_addr().unwrap().port(), second.address.port()],
+            ));
+            // The relay fails while the tunnel is up, and answers once it is the only path.
+            let relay_connections = scripted(relay_listener, |index| index > 0).await;
+            let first_connections = scripted(first_port, {
+                let transport = Arc::clone(&transport);
+                move |_| {
+                    transport.set_control_plane_reach(ControlPlaneReach::Unarmed);
+                    false
+                }
+            })
+            .await;
+
+            let response = transport
+                .send(request(HttpMethod::Get, closed_port()))
+                .await
+                .expect("the relays carry the rest of the walk");
+            assert_eq!(response.body, b"relay");
+            assert_eq!(first_connections.load(SeqCst), 1);
+            assert_eq!(second.connections(), 0, "the next alternate port was dialed after the tunnel was lost");
+            assert_eq!(relay_connections.load(SeqCst), 2);
+        }
+
+        /// The tunnel is lost before DoH (while the relays run): no DoH query and no direct
+        /// request leave the machine; the relays carry the request.
+        #[tokio::test]
+        async fn a_tunnel_lost_before_doh_sends_no_doh_query_and_no_direct_request() {
+            let relay_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let alternate = fixture("direct", false).await;
+            let doh_queries = Arc::new(AtomicUsize::new(0));
+            let transport = Arc::new(tunnel_walk(
+                relay_listener.local_addr().unwrap(),
+                &doh_queries,
+                vec![alternate.address.port()],
+            ));
+            let relay_connections = scripted(relay_listener, {
+                let transport = Arc::clone(&transport);
+                move |index| {
+                    transport.set_control_plane_reach(ControlPlaneReach::Unarmed);
+                    index > 0
+                }
+            })
+            .await;
+
+            let response = transport
+                .send(request(HttpMethod::Get, closed_port()))
+                .await
+                .expect("the relays carry the rest of the walk");
+            assert_eq!(response.body, b"relay");
+            assert_eq!(doh_queries.load(SeqCst), 0, "a DoH query ran after the tunnel was lost");
+            assert_eq!(alternate.connections(), 0, "a direct request ran after the tunnel was lost");
+            assert_eq!(relay_connections.load(SeqCst), 2);
+        }
+
+        /// The tunnel is lost while the relays run and no relay answers: the request ends with
+        /// the relay-unreachable error, still retryable, not the full walk's pinned/system text.
+        #[tokio::test]
+        async fn a_tunnel_lost_during_the_relays_ends_with_the_relay_unreachable_error() {
+            let relay_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let doh_queries = Arc::new(AtomicUsize::new(0));
+            let transport = Arc::new(tunnel_walk(relay_listener.local_addr().unwrap(), &doh_queries, Vec::new()));
+            scripted(relay_listener, {
+                let transport = Arc::clone(&transport);
+                move |_| {
+                    transport.set_control_plane_reach(ControlPlaneReach::Unarmed);
+                    false
+                }
+            })
+            .await;
+
+            let error = transport
+                .send(request(HttpMethod::Get, closed_port()))
+                .await
+                .expect_err("no relay answers");
+            let ApiError::Transport { kind, message } = error else {
+                panic!("expected a transport error");
+            };
+            assert!(message.starts_with("TONO_RELAYS_UNREACHABLE: relay 1 ("), "{message}");
+            assert!(tono_core::auth::should_retry_transport(HttpMethod::Get, kind), "{kind:?}");
         }
 
         /// The published state follows the connection state machine: a tunnel that died is not

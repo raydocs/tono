@@ -29,3 +29,13 @@
 - 剩余限制：无中国大陆实机证据；旧 Service 升级到修订 20 之前，armed 无隧道仍走旧路径；修订 19 且已带放行的 main 构建也按旧
   Service 处理（保守）；所有中继都下线时无隧道的控制面不可达（无直连回退，所有者选择）；中继运营方能看到无隧道时每个请求的
   客户端 IP、SNI、大小和时间。
+- 续记（2026-10-10，独立审查 Sol @ 4a4b7c95：1 major + 1 minor，同一轮修复）：major F1：途中失去隧道的复查只在 DoH、
+  备用端口、本地隧道三步的入口，步骤内部等待之后、端口之间不再复查；且 `relays_only` 在等 Service 探测（最长 1 s）之后不重读
+  状态。改为：每一个真正的直连动作之前都复查（记住的备用端口、系统 DNS 优先、固定 IP、系统 DNS 回退、每个 DoH 查询及其后的
+  直连请求、每个备用端口、本地隧道），一次遍历内一旦判定只走中继就锁存（`WalkGate`），之后不再放行任何直连；探测之后重读
+  状态，状态已变则只按新状态和已缓存的放行判定、不再等待。minor M1：中继步骤期间隧道丢失且中继全失败时，错误改为
+  `TONO_RELAYS_UNREACHABLE: …`（再走一遍中继作为唯一路径，每请求最多多一轮，种类仍可重试），其后附原 `pinned[…]; system-dns[…]; relay[…]`。
+  新增 3 个回归：`a_tunnel_lost_mid_alternate_port_walk_dials_no_further_port_and_uses_the_relays`、
+  `a_tunnel_lost_before_doh_sends_no_doh_query_and_no_direct_request`、`a_tunnel_lost_during_the_relays_ends_with_the_relay_unreachable_error`；
+  为此 DoH 解析与备用端口的目标加了仅测试使用的本地替身（`StandIns`，生产为空、行为不变）。本机 `cargo check --tests --lib` 通过；
+  `cargo test` 未在本机跑（磁盘不足），由 CI 运行。
