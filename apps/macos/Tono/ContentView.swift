@@ -19,7 +19,8 @@ struct ContentView: View {
                     failed: appState.lastConnectionFailure != nil),
                     motionEnabled: true,
                     progress: appState.isConnecting ? SeaSceneParameters.progress(for: appState.connectionStage) : nil,
-                    active: appState.selectedPage == .dashboard)
+                    active: appState.selectedPage == .dashboard,
+                    traffic: { [appState] in appState.seaTrafficSample })
                     .ignoresSafeArea()
                     .opacity(appState.selectedPage == .dashboard ? 1 : 0)
                 SeaSecondaryScene()

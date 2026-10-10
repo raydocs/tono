@@ -121,6 +121,8 @@ struct SeaScene: View {
     let motionEnabled: Bool
     var progress: Double? = nil
     var active = true
+    /// Live rates for the Full-quality water's sparkle; read per water frame, not observed.
+    var traffic: (() -> SeaTrafficSample?)? = nil
     @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults) private var motionPreference = "Auto"
     private var reduceMotion: Bool { displayPreferences.reduceMotion }
     @SeaDisplayPreferences private var displayPreferences
@@ -133,7 +135,7 @@ struct SeaScene: View {
             preference: motionEnabled ? motionPreference : "Static",
             reduceMotion: reduceMotion,
             decorations: decorationsOverride ?? (!reduceTransparency && contrast != .increased),
-            active: active)
+            active: active, traffic: traffic)
         .background(Color(hex: "0A0A12"))
         .accessibilityHidden(true)
         .allowsHitTesting(false)
