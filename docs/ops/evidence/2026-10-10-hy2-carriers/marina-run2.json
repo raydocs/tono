@@ -1,0 +1,320 @@
+{
+  "target": "144.225.255.114",
+  "label": "Los Angeles · Marina (run 2)",
+  "hy2Port": 443,
+  "controlPort": 33434,
+  "measurementIds": {
+    "icmp": "2eNby89z9v7nefQbx00021I4J",
+    "tcp443": "2utqwifhrod6xO0ku00021I4J",
+    "udpHy2": "2zsZ7JO9XFFzkUc1000021I4J",
+    "udpControl": "2jKFolVZ8OqXOQy5g00021I4J"
+  },
+  "rows": [
+    {
+      "city": "Guangzhou",
+      "asn": 9808,
+      "network": "China Mobile Communications Group",
+      "carrier": "China Mobile",
+      "icmp": {
+        "minMs": 164.535,
+        "avgMs": 165.069,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 160.6,
+        "avgMs": 162.8,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "no-reply",
+        "lastHop": null,
+        "lastHopName": null,
+        "lastHopAsn": null,
+        "lastHopMs": null,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "left-china",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": 197196,
+        "lastHopMs": 204.7,
+        "preTargetAsn": null
+      }
+    },
+    {
+      "city": "Nanning",
+      "asn": 9808,
+      "network": "China Mobile Communications Group",
+      "carrier": "China Mobile",
+      "icmp": {
+        "minMs": 173.146,
+        "avgMs": 173.493,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 172.9,
+        "avgMs": 173.9,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": 197196,
+        "lastHopMs": 179.1,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "left-china",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": 197196,
+        "lastHopMs": 175.9,
+        "preTargetAsn": null
+      }
+    },
+    {
+      "city": "Shanghai",
+      "asn": 9808,
+      "network": "China Mobile Communications Group",
+      "carrier": "China Mobile",
+      "icmp": {
+        "minMs": 145.863,
+        "avgMs": 152.909,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 145.4,
+        "avgMs": 147.8,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": 197196,
+        "lastHopMs": 172.2,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "left-china",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": 197196,
+        "lastHopMs": 189.3,
+        "preTargetAsn": null
+      }
+    },
+    {
+      "city": "Dongguan",
+      "asn": 4134,
+      "network": "Chinanet Backbone",
+      "carrier": "China Telecom",
+      "icmp": {
+        "minMs": 154.789,
+        "avgMs": 155.097,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 157.7,
+        "avgMs": 162,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": 197196,
+        "lastHopMs": 161.4,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "left-china",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": 197196,
+        "lastHopMs": 163.5,
+        "preTargetAsn": null
+      }
+    },
+    {
+      "city": "Guangzhou",
+      "asn": 4134,
+      "network": "Chinanet Backbone",
+      "carrier": "China Telecom",
+      "icmp": {
+        "minMs": 163.447,
+        "avgMs": 163.599,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 155.1,
+        "avgMs": 161.1,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": null,
+        "lastHopMs": 215.9,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "unclassified",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": null,
+        "lastHopMs": 176.4,
+        "preTargetAsn": null
+      }
+    },
+    {
+      "city": "Nanjing",
+      "asn": 4134,
+      "network": "Chinanet Backbone",
+      "carrier": "China Telecom",
+      "icmp": {
+        "minMs": 141.291,
+        "avgMs": 141.349,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 137.8,
+        "avgMs": 140.6,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": 197196,
+        "lastHopMs": 182.9,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "left-china",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": 197196,
+        "lastHopMs": 161.4,
+        "preTargetAsn": null
+      }
+    },
+    {
+      "city": "Changsha",
+      "asn": 4837,
+      "network": "CHINA UNICOM China169 Backbone",
+      "carrier": "China Unicom",
+      "icmp": {
+        "minMs": 163.824,
+        "avgMs": 163.893,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 163.3,
+        "avgMs": 167.6,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": 197196,
+        "lastHopMs": 195.1,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "left-china",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": 197196,
+        "lastHopMs": 198.4,
+        "preTargetAsn": null
+      }
+    },
+    {
+      "city": "Guilin",
+      "asn": 4837,
+      "network": "CHINA UNICOM China169 Backbone",
+      "carrier": "China Unicom",
+      "icmp": {
+        "minMs": 174.553,
+        "avgMs": 174.826,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 176.4,
+        "avgMs": 178.2,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": 197196,
+        "lastHopMs": 188.9,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "left-china",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": 197196,
+        "lastHopMs": 188.3,
+        "preTargetAsn": null
+      }
+    },
+    {
+      "city": "Nanning",
+      "asn": 4837,
+      "network": "CHINA UNICOM China169 Backbone",
+      "carrier": "China Unicom",
+      "icmp": {
+        "minMs": 184.953,
+        "avgMs": 185.489,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 174,
+        "avgMs": 179.5,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": 197196,
+        "lastHopMs": 197.4,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "left-china",
+        "lastHop": "144.225.255.1",
+        "lastHopName": null,
+        "lastHopAsn": 197196,
+        "lastHopMs": 179.9,
+        "preTargetAsn": null
+      }
+    }
+  ]
+}
