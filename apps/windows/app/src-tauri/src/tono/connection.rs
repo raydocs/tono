@@ -33,6 +33,9 @@ pub(crate) use reconnect::crash_recovery_reconnect_allowed;
 mod switch;
 mod direct;
 mod heal;
+pub(crate) use heal::{
+    forget_hy2_choices, note_hy2_catalog, note_manual_selection, restore_hy2_choices,
+};
 mod platform;
 mod unarmed_probe;
 mod core_select;
@@ -513,6 +516,8 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
         }
     }
     .await;
+    // A17: count a TCP failure of the selected node, or settle its automatic hy2 hop.
+    heal::note_hy2_outcome(state, selected_node.as_deref(), &node.name, account_owner.0, &outcome).await;
     if let Attempt::Failed { error, .. } = &outcome {
         retain_attempt_failure(state, generation, &attempt_record, error).await;
     }

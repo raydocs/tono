@@ -205,11 +205,16 @@ pub async fn switch_selected_node(
             }
             return;
         }
-        let previous = inner
-            .nodes
-            .iter()
-            .find(|node| node.name == previous_name)
-            .cloned();
+        // A17: the live runtime may dial the previous node's hy2 block. Judge the
+        // hot switch by that block; if it left the catalog, take the rebuild path.
+        let previous = match inner.hy2_switch.live_hy2_for(&previous_name) {
+            Some(hy2) => inner.nodes.iter().find(|node| node.name == hy2).cloned(),
+            None => inner
+                .nodes
+                .iter()
+                .find(|node| node.name == previous_name)
+                .cloned(),
+        };
         let next = inner.nodes.iter().find(|node| node.name == next_name).cloned();
         let routing = inner.routing.clone();
         let nodes = inner.nodes.clone();

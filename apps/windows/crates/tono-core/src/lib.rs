@@ -17,6 +17,7 @@ pub mod credentials;
 pub mod customer_failure;
 pub mod direct_domains;
 pub mod heal;
+pub mod hy2_switch;
 pub mod network_disposition;
 pub mod network_interference;
 pub mod node;

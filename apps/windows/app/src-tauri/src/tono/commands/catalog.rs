@@ -279,6 +279,8 @@ pub async fn tono_select_server(
         }
         if changed {
             inner.clear_exit_identity();
+            // A17: a hand-picked block of a node clears that node's automatic hy2 memory.
+            connection::note_manual_selection(&mut inner, &name);
         }
         inner.selected_node = Some(name.clone());
         // A fresh user choice re-arms auto-reconnect (§3).

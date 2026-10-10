@@ -39,27 +39,156 @@ pub fn prepare(inner: &mut TonoInner) {
 
 /// Dial target for a connect that has not armed protection. While the barrier
 /// is up, the saved server is the only name we will dial.
+///
+/// A17: when the healer is on the selected Reality node and the control plane
+/// permits it, the same node's ` · hy2` block replaces it after
+/// [`tono_core::hy2_switch::TCP_FAILURES_BEFORE_HY2`] TCP failures or while a
+/// hy2 success is remembered. Under an armed barrier it never moves the dial;
+/// it only keeps an automatic hy2 session on the endpoint the barrier already
+/// permits, so an in-place reconnect does not change that permit.
 pub fn dial_name(inner: &TonoInner) -> String {
     let selected = inner.selected_node.clone().unwrap_or_default();
     if inner.fsm.kill_switch_armed() {
-        return selected;
+        return inner
+            .hy2_switch
+            .live_dial(&selected, &inner.nodes)
+            .unwrap_or(selected);
     }
-    if inner.nodes.iter().any(|node| node.name == inner.heal.dial) {
-        return inner.heal.dial.clone();
+    let dial = if inner.nodes.iter().any(|node| node.name == inner.heal.dial) {
+        inner.heal.dial.clone()
+    } else {
+        selected.clone()
+    };
+    if dial == selected
+        && let Some(hy2) = inner.hy2_switch.dial(&selected, &inner.nodes, now_ms())
+    {
+        logging!(
+            info,
+            Type::Service,
+            "Tono: hy2 auto-switch: dialing the selected node's hy2 block (same node, same identity)"
+        );
+        return hy2;
     }
-    selected
+    dial
 }
 
 pub fn on_failure(inner: &mut TonoInner, error: &str) -> NetworkEffect {
     prepare(inner);
-    let nodes = candidates(&inner.nodes);
-    heal::observe(
+    let on_selected = inner.heal.dial == inner.heal.preferred;
+    let nodes = candidates(&inner.nodes, &inner.heal);
+    let effect = heal::observe(
         &mut inner.heal,
         Some(heal::classify_failure(error)),
         &nodes,
         KillSwitchStance::Ordinary,
         now_ms(),
-    )
+    );
+    // A17: while the same-node hy2 switch owns the selected node, the next
+    // dial stays on that node (TCP until the count is reached, then its hy2
+    // block). The protection effect above is unchanged; only the dial target
+    // is kept. Once the switch stops holding (flag off, no hy2 block, or the
+    // backoff after a failed hy2 attempt), the healer moves on as before.
+    if on_selected && inner.hy2_switch.holds(&inner.heal.preferred, &inner.nodes, now_ms()) {
+        inner.heal.dial = inner.heal.preferred.clone();
+        inner.heal.pending_dial = None;
+        inner.heal.tried.clear();
+        inner.heal.backup_since_ms = None;
+    }
+    effect
+}
+
+/// A17: settle one finished attempt. `preferred` is the selection captured
+/// when the attempt was admitted and `dialed` the node it actually dialed.
+/// A superseded attempt (`Stale`) or one from another sign-in counts nothing.
+pub(super) async fn note_hy2_outcome(
+    state: &Arc<TonoState>,
+    preferred: Option<&str>,
+    dialed: &str,
+    sign_in_generation: u64,
+    outcome: &super::Attempt,
+) {
+    let Some(preferred) = preferred else {
+        return;
+    };
+    let mut inner = state.lock().await;
+    if inner.sign_in_generation != sign_in_generation {
+        return;
+    }
+    let now = now_ms();
+    let changed = match outcome {
+        super::Attempt::Connected => inner.hy2_switch.note_connected(preferred, dialed, now),
+        super::Attempt::Failed { error, .. } => {
+            inner.hy2_switch.note_failure(preferred, dialed, error, now)
+        }
+        super::Attempt::GuardRejected(_) | super::Attempt::Stale => return,
+    };
+    if changed {
+        persist_hy2_choices(&inner);
+    }
+}
+
+/// A17: apply `hy2AutoSwitch` from a catalog 200 (installed or unchanged).
+pub(crate) fn note_hy2_catalog(inner: &mut TonoInner, permitted: bool) {
+    if inner.hy2_switch.on_catalog(permitted, &inner.nodes) {
+        persist_hy2_choices(inner);
+    }
+}
+
+/// A17: the user picked either block of `name` by hand. That node starts
+/// from its Reality block again with no remembered hy2 choice.
+pub(crate) fn note_manual_selection(inner: &mut TonoInner, name: &str) {
+    if inner.hy2_switch.forget_node(name) {
+        persist_hy2_choices(inner);
+    }
+}
+
+/// Load the remembered choices that belong with the restored catalog cache.
+/// The permission itself is not restored: it waits for a live catalog 200.
+pub(crate) fn restore_hy2_choices(inner: &mut TonoInner) {
+    let path = inner.catalog_dir.join(tono_core::hy2_switch::STATE_FILE_NAME);
+    let Ok(file) = std::fs::File::open(&path) else {
+        return;
+    };
+    let mut body = String::new();
+    let limit = tono_core::hy2_switch::MAX_STATE_FILE_BYTES;
+    if std::io::Read::read_to_string(&mut std::io::Read::take(file, limit + 1), &mut body).is_err()
+        || body.len() as u64 > limit
+    {
+        return;
+    }
+    if let Ok(persisted) = serde_json::from_str(&body) {
+        inner.hy2_switch.restore(persisted, now_ms());
+    }
+}
+
+/// Sign-out or another account: the remembered choices go with its catalog.
+pub(crate) fn forget_hy2_choices(inner: &mut TonoInner) {
+    inner.hy2_switch = Default::default();
+    let path = inner.catalog_dir.join(tono_core::hy2_switch::STATE_FILE_NAME);
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => logging!(
+            warn,
+            Type::Service,
+            "Tono: could not delete the hy2 auto-switch choices: {error}"
+        ),
+    }
+}
+
+fn persist_hy2_choices(inner: &TonoInner) {
+    let path = inner.catalog_dir.join(tono_core::hy2_switch::STATE_FILE_NAME);
+    let result = match serde_json::to_vec(&inner.hy2_switch.snapshot()) {
+        Ok(body) => crate::tono::state::write_private_file(&path, &body).map_err(|error| format!("{error:#}")),
+        Err(error) => Err(error.to_string()),
+    };
+    if let Err(error) = result {
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: could not save the hy2 auto-switch choices: {error}"
+        );
+    }
 }
 
 pub fn note_connected(inner: &mut TonoInner) {
@@ -103,7 +232,7 @@ pub async fn refine_before_arm(state: &Arc<TonoState>, node: ValidatedNode) -> V
     if reachable {
         return node;
     }
-    let nodes = candidates(&inner.nodes);
+    let nodes = candidates(&inner.nodes, &inner.heal);
     let effect = heal::observe(
         &mut inner.heal,
         Some(heal::FailureClass::Tcp),
@@ -130,9 +259,16 @@ pub async fn refine_before_arm(state: &Arc<TonoState>, node: ValidatedNode) -> V
         .unwrap_or(node)
 }
 
-fn candidates(nodes: &[ValidatedNode]) -> Vec<Candidate> {
+/// The healer never hops onto a hy2 block by itself: that is the A17 switch,
+/// gated by the control plane. A hy2 row stays a candidate only when it is
+/// the user's own selection or the current dial, so a manual hy2 choice can
+/// still fall back to TCP as before.
+fn candidates(nodes: &[ValidatedNode], session: &heal::Session) -> Vec<Candidate> {
     nodes
         .iter()
+        .filter(|node| {
+            !node.is_hysteria2() || node.name == session.preferred || node.name == session.dial
+        })
         .map(|node| Candidate {
             name: node.name.clone(),
             region: heal::region_key(&node.name),
