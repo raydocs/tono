@@ -24,7 +24,17 @@ private actor RuntimeConfigWriter {
                 fakeIPSlot: slot
             ).runtimeJSON
         }
-        return try ConfigPipeline.secureWrite(String(decoding: document, as: UTF8.self), to: outputPath)
+        let digest = try ConfigPipeline.secureWrite(String(decoding: document, as: UTF8.self), to: outputPath)
+        // D7: which "Allow local network devices" generation these bytes
+        // carry, so the install that runs them can record it as applied.
+        LocalNetworkDevicesSync.documentWritten(
+            digest: digest,
+            setting: .init(
+                generation: overlay.localNetworkDevicesGeneration,
+                allow: overlay.allowLocalNetworkDevices
+            )
+        )
+        return digest
     }
 }
 

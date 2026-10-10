@@ -58,7 +58,8 @@ extension KillSwitchManager {
                           addresses: ["8.8.4.4"]),
                 ],
                 sessionDirectEndpoints: [],
-                reviewedBundleDirectEnabled: reviewedBundleDirect
+                reviewedBundleDirectEnabled: reviewedBundleDirect,
+                allowLocalNetworkDevices: true
             )
         }
 
@@ -235,7 +236,8 @@ extension KillSwitchManager {
                               addresses: ["8.8.4.4"]),
                     ],
                     sessionDirectEndpoints: [],
-                    reviewedBundleDirectEnabled: true
+                    reviewedBundleDirectEnabled: true,
+                    allowLocalNetworkDevices: true
                 ),
                 allowedUID: 501
             )
@@ -317,7 +319,8 @@ extension KillSwitchManager {
             resolvedHosts: ["api.afk.ccwu.cc": ["104.20.26.170", "172.66.162.98"]],
             pinnedHosts: ["api.afk.ccwu.cc": ["104.20.26.170", "172.66.162.98"]],
             derpEndpoints: [], cachedDERPEndpoints: [], proxyTargets: [],
-            sessionDirectEndpoints: [], reviewedBundleDirectEnabled: false
+            sessionDirectEndpoints: [], reviewedBundleDirectEnabled: false,
+            allowLocalNetworkDevices: false
         )
         if let relayShown = load(renderRules(
             state: relayState, allowedUID: 501, physicalInterfaces: physicalInterfaces
@@ -1071,7 +1074,8 @@ extension KillSwitchManager {
                     ),
                 ],
                 sessionDirectEndpoints: directEndpoints,
-                reviewedBundleDirectEnabled: true
+                reviewedBundleDirectEnabled: true,
+                allowLocalNetworkDevices: false
             )
             let rules = renderRules(state: state, allowedUID: 501)
             // The same session once its TUN is up: the only state in which the
@@ -1089,7 +1093,8 @@ extension KillSwitchManager {
                     cachedDERPEndpoints: state.cachedDERPEndpoints,
                     proxyTargets: state.proxyTargets,
                     sessionDirectEndpoints: state.sessionDirectEndpoints,
-                    reviewedBundleDirectEnabled: true
+                    reviewedBundleDirectEnabled: true,
+                    allowLocalNetworkDevices: true
                 ),
                 allowedUID: 501
             )
@@ -1111,11 +1116,153 @@ extension KillSwitchManager {
                     cachedDERPEndpoints: [],
                     proxyTargets: state.proxyTargets,
                     sessionDirectEndpoints: [],
-            reviewedBundleDirectEnabled: false
+            reviewedBundleDirectEnabled: false,
+            allowLocalNetworkDevices: true
                 ),
                 allowedUID: 501,
                 physicalInterfaces: ["en0", "en7"]
             )
+            // D7 (A29): "Allow local network devices". On is the ruleset main
+            // rendered before the setting existed, pinned line for line. Off is
+            // that ruleset minus exactly the private, link-local, ULA and
+            // discovery-multicast passes; no line is added or reordered.
+            let localNetworkOnExpected = [
+                "# Managed by Tono Kill Switch — do not edit",
+                "pass in quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
+                "pass out quick on lo0 all no state label \"tono-loopback\"",
+                "pass out quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\"",
+                "pass in quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\"",
+                "pass in quick on awdl0 all no state label \"tono-continuity\"",
+                "pass out quick on awdl0 all no state label \"tono-continuity\"",
+                "pass in quick on llw0 all no state label \"tono-continuity\"",
+                "pass out quick on llw0 all no state label \"tono-continuity\"",
+                "pass in quick on bridge100 all no state label \"tono-continuity\"",
+                "pass out quick on bridge100 all no state label \"tono-continuity\"",
+                "pass out quick inet proto udp to 224.0.0.251 port 5353 keep state (if-bound) label \"tono-mdns\"",
+                "pass in quick inet proto udp to 224.0.0.251 port 5353 keep state (if-bound) label \"tono-mdns\"",
+                "pass out quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\"",
+                "pass in quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\"",
+                "block drop out quick on { en0, en7 } inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } port { 53, 853 } label \"tono-lan-dns\"",
+                "block drop out quick on { en0, en7 } inet6 proto { tcp, udp } to { fe80::/10, fc00::/7, ff00::/8 } port { 53, 853 } label \"tono-lan-dns\"",
+                "block drop out quick inet proto { tcp, udp } to { 224.0.0.0/24, 255.255.255.255 } port { 53, 853 } label \"tono-dns-multicast\"",
+                "block drop out quick inet to { 224.0.0.0/24, 255.255.255.255 } fragment label \"tono-fragment-multicast\"",
+                "block drop out quick inet proto tcp to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } fragment label \"tono-lan-fragment\"",
+                "block drop out quick inet6 proto tcp to { fe80::/10, fc00::/7, ff00::/8 } fragment label \"tono-lan-fragment\"",
+                "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } no state label \"tono-lan\"",
+                "pass in quick inet from { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\"",
+                "pass out quick inet6 to fe80::/10 no state label \"tono-linklocal\"",
+                "pass in quick inet6 to fe80::/10 keep state (if-bound) label \"tono-linklocal\"",
+                "pass out quick inet6 to { ff00::/8, fc00::/7 } no state label \"tono-linklocal\"",
+                "pass in quick inet6 from { fe80::/10, ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\"",
+                "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\"",
+                "pass in quick inet proto udp from any port 67 to any port 68 no state label \"tono-dhcp\"",
+                "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\"",
+                "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\"",
+                "pass out quick inet to { 224.0.0.0/24, 255.255.255.255 } no state label \"tono-multicast\"",
+                "pass out quick inet proto udp to 239.255.255.250 port 1900 no state label \"tono-ssdp\"",
+                "pass in quick on utun199 all keep state (if-bound) label \"tono-tunnel\"",
+                "pass out quick on utun199 all keep state (if-bound) label \"tono-tunnel\"",
+                "pass out quick inet proto tcp to 8.8.4.4 port 8443 user root keep state (if-bound) label \"tono-exit\"",
+                "block drop out quick all label \"tono-block\"",
+            ]
+            let localNetworkGatedLabels = [
+                "label \"tono-lan\"", "label \"tono-linklocal\"",
+                "label \"tono-multicast\"", "label \"tono-ssdp\"",
+            ]
+            let localNetworkOnMatchesMain = cloudRules
+                == localNetworkOnExpected.joined(separator: "\n") + "\n"
+            if !localNetworkOnMatchesMain {
+                FileHandle.standardError.write(Data(
+                    "self-test: Allow local network devices on does not render main's ruleset\n".utf8
+                ))
+            }
+            // The `cloudRules` session with the setting and the reviewed-bundle
+            // permit chosen per case.
+            func localNetworkRules(allow: Bool, bundle: Bool) -> String {
+                renderRules(
+                    state: .init(
+                        armed: true,
+                        tailscaleBootstrapEnabled: false,
+                        apiHosts: ["api.example.com"],
+                        exitHints: [],
+                        tunnelInterfaces: ["utun199"],
+                        resolvedHosts: ["api.example.com": ["1.1.1.1"]],
+                        pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+                        derpEndpoints: [],
+                        cachedDERPEndpoints: [],
+                        proxyTargets: state.proxyTargets,
+                        sessionDirectEndpoints: [],
+                        reviewedBundleDirectEnabled: bundle,
+                        allowLocalNetworkDevices: allow
+                    ),
+                    allowedUID: 501,
+                    physicalInterfaces: ["en0", "en7"]
+                )
+            }
+            let localNetworkOffRules = localNetworkRules(allow: false, bundle: false)
+            // Review R1: with the reviewed-bundle permit (root, any address, web
+            // ports) off must drop exactly that traffic to the local ranges
+            // first; on keeps main's bundle rules with nothing added.
+            let localNetworkOffBundleRules = localNetworkRules(allow: false, bundle: true)
+            let bundlePermits = [
+                "pass out quick inet proto tcp from any to any port { 80, 443, 8000, 8080 } user root keep state (if-bound) label \"tono-bundle\"",
+                "pass out quick inet proto udp from any to any port { 80, 443, 8000, 8080 } user root keep state (if-bound) label \"tono-bundle\"",
+            ]
+            let bundleLocalBlock = "block drop out quick inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 224.0.0.0/4, 255.255.255.255 } port { 80, 443, 8000, 8080 } user root label \"tono-bundle-local\""
+            let localNetworkOffKeepsOnlyMDNS: Bool = {
+                let gated = localNetworkOnExpected.filter { line in
+                    localNetworkGatedLabels.contains { line.hasSuffix($0) }
+                }
+                let expectedOff = localNetworkOnExpected.filter { !gated.contains($0) }
+                // Every outbound or inbound pass that still names a private,
+                // link-local, ULA, multicast or broadcast destination: only
+                // IGMP (protocol 2, group membership that mDNS needs), the four
+                // mDNS passes (group and port) and the DHCP broadcast.
+                let localDestinations = [
+                    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+                    "fe80::", "fc00::/7", "ff00::/8", "ff02::", "224.0.0.0/4",
+                    "224.0.0.0/24", "224.0.0.251", "239.", "255.255.255.255",
+                ]
+                let localPasses = localNetworkOffRules.split(separator: "\n")
+                    .map(String.init)
+                    .filter { line in
+                        line.hasPrefix("pass") && localDestinations.contains(where: line.contains)
+                    }
+                let allowedLocalPasses = [
+                    "pass out quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\"",
+                    "pass in quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\"",
+                    "pass out quick inet proto udp to 224.0.0.251 port 5353 keep state (if-bound) label \"tono-mdns\"",
+                    "pass in quick inet proto udp to 224.0.0.251 port 5353 keep state (if-bound) label \"tono-mdns\"",
+                    "pass out quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\"",
+                    "pass in quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\"",
+                    "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\"",
+                ]
+                var expectedOffBundle = expectedOff
+                expectedOffBundle.insert(
+                    contentsOf: [bundleLocalBlock] + bundlePermits,
+                    at: expectedOffBundle.count - 1
+                )
+                var expectedOnBundle = localNetworkOnExpected
+                expectedOnBundle.insert(contentsOf: bundlePermits, at: expectedOnBundle.count - 1)
+                return gated.count == 8
+                    && localNetworkOffRules == expectedOff.joined(separator: "\n") + "\n"
+                    && localPasses == allowedLocalPasses
+                    && localNetworkOffBundleRules == expectedOffBundle.joined(separator: "\n") + "\n"
+                    && localNetworkRules(allow: true, bundle: true)
+                        == expectedOnBundle.joined(separator: "\n") + "\n"
+                    // The on → off swap withdraws range passes, which no
+                    // address list can express: every state is flushed, so no
+                    // LAN flow established under on survives into off.
+                    && stateDisposal(
+                        replacing: passRules(in: cloudRules),
+                        with: passRules(in: localNetworkOffRules)
+                    ) == .full
+            }()
+            if !localNetworkOffKeepsOnlyMDNS {
+                FileHandle.standardError.write(Data(
+                    "self-test: Allow local network devices off still passes the local network\n".utf8
+                ))
+            }
             let inactiveState = KillSwitchState(
                 armed: true,
                 tailscaleBootstrapEnabled: false,
@@ -1128,7 +1275,8 @@ extension KillSwitchManager {
                 cachedDERPEndpoints: state.cachedDERPEndpoints,
                 proxyTargets: state.proxyTargets,
                 sessionDirectEndpoints: [],
-            reviewedBundleDirectEnabled: false
+            reviewedBundleDirectEnabled: false,
+            allowLocalNetworkDevices: false
             )
             let inactiveRules = renderRules(
                 state: inactiveState,
@@ -1509,17 +1657,21 @@ extension KillSwitchManager {
             let armedParse = pfSyntaxAccepts(tunneledRules)
             let bootstrapParse = pfSyntaxAccepts(cloudRules)
             // Decision 086: the tunnel-less set carries the relay permit
-            // (`user <uid>`, a form no other rule uses).
+            // (`user <uid>`, a form no other rule uses). The "Allow local
+            // network devices" off ruleset (with the bundle permit and its
+            // local-range block, a superset of the plain off lines) is parsed
+            // beside the on one (`cloudRules`), under the same skip rule.
             let relayParse = pfSyntaxAccepts(rules)
+            let localNetworkOffParse = pfSyntaxAccepts(localNetworkOffBundleRules)
             let pfParses: Bool
-            switch (armedParse, bootstrapParse, relayParse) {
-            case (nil, _, _), (_, nil, _), (_, _, nil):
+            switch (armedParse, bootstrapParse, relayParse, localNetworkOffParse) {
+            case (nil, _, _, _), (_, nil, _, _), (_, _, nil, _), (_, _, _, nil):
                 let warning = "warn: PF syntax check skipped (needs root); "
                     + "run `sudo tono-core-helper --self-test` to include it\n"
                 FileHandle.standardError.write(Data(warning.utf8))
                 pfParses = true
-            case let (armed?, bootstrap?, relay?):
-                pfParses = armed && bootstrap && relay
+            case let (armed?, bootstrap?, relay?, localNetworkOff?):
+                pfParses = armed && bootstrap && relay && localNetworkOff
             }
             // R609-F2: a command past its deadline is killed and fails. It
             // must never hold the helper's request thread, nor read as done.
@@ -1712,6 +1864,8 @@ extension KillSwitchManager {
                 && tcpFragmentsStayBlocked
                 && bootRestoreHasNoTunnelPass
                 && lanDNSBlockedFirst
+                && localNetworkOnMatchesMain
+                && localNetworkOffKeepsOnlyMDNS
                 && emergencyRules == emergencyExpected
                 && cloudShapesHold
                 && pfParses
@@ -1886,6 +2040,250 @@ extension KillSwitchManager {
             )
     }
 
+    /// A29: how a failed arm is settled, with every effect injected, so this
+    /// runs without root and touches no live anchor, state or Core.
+    /// - A re-arm of the live session never releases, however often it fails
+    ///   and whether or not a baseline survived the previous failure (the
+    ///   nil-baseline retry used to be read as a first arm and released).
+    /// - An unreadable saved state counts as a live session.
+    /// - A failed on→off tightening installs the block-all; when that cannot
+    ///   be installed the caller must stop the Core. Neither releases.
+    /// - The core-down watchdog never releases during that protected fault.
+    /// - The first arm of a new session keeps today's release.
+    static func runLiveSessionReArmKeepsBlockSelfTest() -> Bool {
+        struct InstallFailed: Error {}
+        func state(tunnels: [String], allow: Bool = false) -> KillSwitchState {
+            KillSwitchState(
+                armed: true, tailscaleBootstrapEnabled: false,
+                apiHosts: [], exitHints: [], tunnelInterfaces: tunnels,
+                resolvedHosts: [:], pinnedHosts: [:], derpEndpoints: [],
+                cachedDERPEndpoints: [], proxyTargets: [], sessionDirectEndpoints: [],
+                reviewedBundleDirectEnabled: false, allowLocalNetworkDevices: allow
+            )
+        }
+        let liveOff = state(tunnels: ["utun199"])
+        let liveOn = state(tunnels: ["utun199"], allow: true)
+        let bootstrap = state(tunnels: [])
+        var released = 0
+        func settle(
+            _ load: KernelLoadOutcome, live: Bool, tightening: Bool,
+            install: () throws -> Void = {}
+        ) -> FailedArmOutcome {
+            settleFailedArm(
+                load: load, liveSessionReArm: live, tighteningUnconfirmed: tightening,
+                release: { released += 1 }, installStricterBlock: install
+            )
+        }
+
+        // Session identity comes from the saved state alone.
+        let identity = isLiveSessionReArm(previous: liveOn, previousUnreadable: false, next: liveOff)
+            && isLiveSessionReArm(previous: nil, previousUnreadable: true, next: liveOff)
+            && !isLiveSessionReArm(previous: bootstrap, previousUnreadable: false, next: liveOff)
+            && !isLiveSessionReArm(previous: nil, previousUnreadable: false, next: liveOff)
+            && !isLiveSessionReArm(previous: liveOff, previousUnreadable: false, next: state(tunnels: ["utun200"]))
+
+        // Consecutive failures of the same session's re-arm (off → off, so no
+        // tightening): the first leaves no baseline, the second used to be
+        // classified as a first arm. Both keep the block.
+        let consecutive = settle(.acceptedOrUnknown, live: true, tightening: false) == .kept
+            && settle(.acceptedOrUnknown, live: true, tightening: false) == .kept
+            && settle(.rejected, live: true, tightening: false) == .kept
+            && settle(.notIssued, live: true, tightening: false) == .kept
+
+        // On → off tightening.
+        let tighteningDetected = localNetworkTighteningUnconfirmed(next: liveOff, lastCommitted: true)
+            && localNetworkTighteningUnconfirmed(next: liveOff, lastCommitted: nil)
+            && !localNetworkTighteningUnconfirmed(next: liveOff, lastCommitted: false)
+            && !localNetworkTighteningUnconfirmed(next: liveOn, lastCommitted: true)
+            && !localNetworkTighteningUnconfirmed(next: bootstrap, lastCommitted: true)
+        var stricterInstalled = 0
+        let postLoadFault = settle(.acceptedOrUnknown, live: true, tightening: true, install: {
+            stricterInstalled += 1
+        })
+        let rejectedLoadFault = settle(.rejected, live: true, tightening: true, install: {
+            stricterInstalled += 1
+        })
+        let unstoppableFault = settle(.acceptedOrUnknown, live: true, tightening: true, install: {
+            throw InstallFailed()
+        })
+        let fault = postLoadFault == .faultStricterBlock
+            && rejectedLoadFault == .faultStricterBlock
+            && stricterInstalled == 2
+            && unstoppableFault == .faultStopCore
+        let watchdogHolds = !watchdogShouldRestoreNetwork(consecutiveCoreDownChecks: 99, localNetworkFault: true)
+            && watchdogShouldRestoreNetwork(consecutiveCoreDownChecks: 99, localNetworkFault: false)
+        let nothingReleasedYet = released == 0
+
+        // The first arm of a new session: today's policy.
+        let newSession = settle(.acceptedOrUnknown, live: false, tightening: false) == .released
+            && released == 1
+            && settle(.rejected, live: false, tightening: false) == .kept
+            && released == 1
+
+        // The protected fault persists beside the saved state: a simulated
+        // helper restart in the same boot keeps it and skips the startup
+        // release; a disarm (the user's Disconnect) clears it; a fault from
+        // another boot is dropped (that boot follows the existing launch
+        // policy); an unreadable marker holds.
+        let markerDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-a29-fault-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: markerDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: markerDirectory) }
+        let marker = markerDirectory.appendingPathComponent("protected-fault").path
+        let plainWrite: (String, Data) throws -> Void = { try $1.write(to: URL(fileURLWithPath: $0)) }
+        let plainRead: (String) throws -> Data = { try Data(contentsOf: URL(fileURLWithPath: $0)) }
+        let persisted: Bool = {
+            guard (try? recordProtectedFault(path: marker, bootSession: { "boot-A" }, write: plainWrite)) != nil
+            else { return false }
+            let survivesRestart = persistedProtectedFaultHolds(
+                path: marker, bootSession: { "boot-A" }, read: plainRead
+            )
+            let startupKeepsBlock = !startupReleasesLeftoverBlock(
+                coreRunning: false, stateFilePresent: true, protectedFault: survivesRestart
+            )
+            let startupReleasesOtherwise = startupReleasesLeftoverBlock(
+                coreRunning: false, stateFilePresent: true, protectedFault: false
+            )
+            clearProtectedFault(path: marker)
+            let disconnectClears = !persistedProtectedFaultHolds(
+                path: marker, bootSession: { "boot-A" }, read: plainRead
+            )
+            _ = try? recordProtectedFault(path: marker, bootSession: { "boot-A" }, write: plainWrite)
+            let otherBootDropped = !persistedProtectedFaultHolds(
+                path: marker, bootSession: { "boot-B" }, read: plainRead
+            ) && !FileManager.default.fileExists(atPath: marker)
+            _ = try? recordProtectedFault(path: marker, bootSession: { "boot-A" }, write: plainWrite)
+            let unreadableHolds = persistedProtectedFaultHolds(
+                path: marker, bootSession: { "boot-A" }, read: { _ in throw InstallFailed() }
+            )
+            return survivesRestart && startupKeepsBlock && startupReleasesOtherwise
+                && disconnectClears && otherBootDropped && unreadableHolds
+        }()
+
+        let passed = identity && consecutive && tighteningDetected && fault
+            && watchdogHolds && nothingReleasedYet && newSession && persisted
+        if !passed {
+            FileHandle.standardError.write(Data(
+                ("self-test: failed-arm settlement (identity \(identity), consecutive \(consecutive), "
+                    + "tightening \(tighteningDetected), fault \(fault), watchdog \(watchdogHolds), "
+                    + "unreleased \(nothingReleasedYet), new session \(newSession), "
+                    + "persisted \(persisted))\n").utf8
+            ))
+        }
+        return passed
+    }
+
+    /// A29 review (f7c83f65) major 1: a bootstrap restriction (no tunnel),
+    /// which an automatic preserve teardown issues, does not end the
+    /// protected fault; only a tunnel commit or a disarm does.
+    static func runPreserveTeardownKeepsProtectedFaultSelfTest() -> Bool {
+        func state(tunnels: [String]) -> KillSwitchState {
+            KillSwitchState(
+                armed: true, tailscaleBootstrapEnabled: false,
+                apiHosts: [], exitHints: [], tunnelInterfaces: tunnels,
+                resolvedHosts: [:], pinnedHosts: [:], derpEndpoints: [],
+                cachedDERPEndpoints: [], proxyTargets: [], sessionDirectEndpoints: [],
+                reviewedBundleDirectEnabled: false, allowLocalNetworkDevices: false
+            )
+        }
+        let passed = !commitEndsProtectedFault(state(tunnels: []))
+            && commitEndsProtectedFault(state(tunnels: ["utun199"]))
+        if !passed {
+            FileHandle.standardError.write(Data(
+                "self-test: a bootstrap restriction ended the protected fault\n".utf8
+            ))
+        }
+        return passed
+    }
+
+    /// A29 review (2dd4e3d3) F1: while a protected fault is held, a failed
+    /// arm never releases, whatever its tunnel. Drives `failedArm`, the path
+    /// `arm` takes after its commit threw, with the release, stricter block
+    /// and persistence injected: a bootstrap restriction (not a live re-arm)
+    /// whose load PF accepted and whose enable/flush/verification then
+    /// failed keeps the block and the intent; so does a new tunnel's first
+    /// arm (stricter block). Without a fault, the same bootstrap failure
+    /// still takes the ordinary release.
+    static func runHeldFaultFailedArmKeepsBlockSelfTest() -> Bool {
+        struct VerificationFailed: Error {}
+        var released = 0
+        var stricter = 0
+        var persisted = 0
+        func fail(
+            live: Bool, tightening: Bool, faultHeld: inout Bool
+        ) -> (error: Error, bumpsGeneration: Bool) {
+            failedArm(
+                error: VerificationFailed(),
+                load: .acceptedOrUnknown,
+                liveSessionReArm: live,
+                tighteningUnconfirmed: tightening,
+                faultHeld: &faultHeld,
+                release: { released += 1 },
+                installStricterBlock: { stricter += 1 },
+                persist: { persisted += 1; return nil }
+            )
+        }
+        // Held fault → bootstrap arm (no tunnel, so neither live nor a
+        // tightening) → post-load failure.
+        var held = true
+        let bootstrap = fail(live: false, tightening: false, faultHeld: &held)
+        let bootstrapKept = released == 0 && held
+            && (bootstrap.error as? HelperFailure)?.code == liveReArmFailedCode
+        // Held fault → a new tunnel's first arm (off, not live) fails.
+        let newTunnel = fail(live: false, tightening: true, faultHeld: &held)
+        let newTunnelKept = released == 0 && held && stricter == 1
+            && (newTunnel.error as? HelperFailure)?.code == localNetworkFaultCode
+        // No fault: the ordinary first-arm release is unchanged.
+        var noFault = false
+        _ = fail(live: false, tightening: false, faultHeld: &noFault)
+        let ordinaryReleases = released == 1 && !noFault
+        let passed = bootstrapKept && newTunnelKept && ordinaryReleases && persisted == 2
+        if !passed {
+            FileHandle.standardError.write(Data(
+                ("self-test: a failed arm released while the protected fault was held (bootstrap \(bootstrapKept), "
+                    + "new tunnel \(newTunnelKept), ordinary \(ordinaryReleases), persisted \(persisted))\n").utf8
+            ))
+        }
+        return passed
+    }
+
+    /// A29 review (f7c83f65) major 2: a live re-arm that kept the block is a
+    /// protected fault like the stricter block and the stopped Core, so it
+    /// is latched and persisted; a persist failure is reported, not dropped.
+    static func runGenericLiveReArmFaultPersistsSelfTest() -> Bool {
+        struct WriteFailed: Error {}
+        var recorded = 0
+        let latched = latchesProtectedFault(.kept, liveSessionReArm: true)
+            && latchesProtectedFault(.faultStricterBlock, liveSessionReArm: true)
+            && latchesProtectedFault(.faultStopCore, liveSessionReArm: true)
+            && !latchesProtectedFault(.kept, liveSessionReArm: false)
+            && !latchesProtectedFault(.released, liveSessionReArm: false)
+        let persisted = persistProtectedFault(record: { recorded += 1 }) == nil && recorded == 1
+        let failureReported = persistProtectedFault(record: { throw WriteFailed() }) != nil
+        let passed = latched && persisted && failureReported
+        if !passed {
+            FileHandle.standardError.write(Data(
+                "self-test: a kept live re-arm is not latched and persisted as a protected fault\n".utf8
+            ))
+        }
+        return passed
+    }
+
+    /// A29 review (f7c83f65) major 3: while the protected fault holds, a
+    /// sleep or wake barrier that failed after its load keeps the block; the
+    /// non-strict release is unchanged otherwise.
+    static func runPowerTransitionKeepsProtectedFaultSelfTest() -> Bool {
+        let passed = !powerTransitionFailureReleases(load: .acceptedOrUnknown, protectedFault: true)
+            && powerTransitionFailureReleases(load: .acceptedOrUnknown, protectedFault: false)
+            && !powerTransitionFailureReleases(load: .rejected, protectedFault: false)
+        if !passed {
+            FileHandle.standardError.write(Data(
+                "self-test: a failed power barrier released the protected fault's block\n".utf8
+            ))
+        }
+        return passed
+    }
+
     static func runFailedBarrierSelectiveReleaseSelfTest() -> Bool {
         var intentPresent = true
         var events: [String] = []
@@ -1957,7 +2355,8 @@ extension KillSwitchManager {
                 pinnedHosts: ["api.afk.ccwu.cc": cloudflare],
                 derpEndpoints: [], cachedDERPEndpoints: [],
                 proxyTargets: [.init(host: exit, transport: "tcp", port: 443, addresses: [exit])],
-                sessionDirectEndpoints: [], reviewedBundleDirectEnabled: false
+                sessionDirectEndpoints: [], reviewedBundleDirectEnabled: false,
+                allowLocalNetworkDevices: false
             )
         }
         let bootstrap = renderRules(state: state(tunnel: false), allowedUID: 501, physicalInterfaces: ["en0"])
@@ -1985,7 +2384,7 @@ extension KillSwitchManager {
             armed: true, tailscaleBootstrapEnabled: false, apiHosts: [], exitHints: [],
             tunnelInterfaces: [], resolvedHosts: [:], pinnedHosts: [:], derpEndpoints: [],
             cachedDERPEndpoints: [], proxyTargets: [], sessionDirectEndpoints: [],
-            reviewedBundleDirectEnabled: false
+            reviewedBundleDirectEnabled: false, allowLocalNetworkDevices: false
         )
         check("no-api-host-no-relay-permit", controlRelayPermitEndpoints(state: noAPIHost).isEmpty)
 

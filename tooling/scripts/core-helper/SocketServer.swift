@@ -408,9 +408,23 @@ final class SocketServer {
     /// A running Core is not disarmed and is not reinstalled from the file.
     private func releaseLeftoverBlockIfCoreStopped() {
         // Under an operator release no Core keeps a block (decision 084).
-        guard !core.status().running || !HelperTarget.automaticRearmAllowed(HelperTarget.read()) else { return }
+        let operatorReleased = !HelperTarget.automaticRearmAllowed(HelperTarget.read())
+        guard !core.status().running || operatorReleased else { return }
         guard KillSwitchManager.stateFileExists() else {
             killSwitch.reconcileSelectiveRecoveryIfReleased()
+            return
+        }
+        // A29: a protected fault from this boot keeps its block until the
+        // user disconnects (release) or reconnects (re-arm) from the app.
+        // An operator release wins over the fault as well (decision 084).
+        guard KillSwitchManager.startupReleasesLeftoverBlock(
+            coreRunning: false,
+            stateFilePresent: true,
+            protectedFault: killSwitch.localNetworkFault && !operatorReleased
+        ) else {
+            FileHandle.standardError.write(Data(
+                "tono: protected fault from this boot holds; leftover block kept\n".utf8
+            ))
             return
         }
         do {
@@ -456,7 +470,8 @@ final class SocketServer {
             // intent (a load that landed after the CLI deleted it, #1504
             // review F1); read the anchor itself, and unread counts as there.
             blockPresent: !rearmAllowed && (stateFilePresent || Self.tonoAnchorMayHoldBlock()),
-            coreDownChecks: consecutiveCoreDownChecks
+            coreDownChecks: consecutiveCoreDownChecks,
+            localNetworkFault: killSwitch.localNetworkFault
         ) {
             switch step {
             case .relaunchOwner:
@@ -467,8 +482,12 @@ final class SocketServer {
                 // MAC-ORPHAN-BOOTSTRAP-PF: an app that died between /core/start
                 // and the lock arm leaves this branch reinstalling a bootstrap
                 // block nobody is left to lift. Check that before supervising.
-                if observeOrphanedBootstrap() { return }
-                if observeOrphanedTunnel() { return }
+                // A29: an orphaned-session release would lift the protected
+                // fault's block; the fault waits for the user instead.
+                if !killSwitch.localNetworkFault {
+                    if observeOrphanedBootstrap() { return }
+                    if observeOrphanedTunnel() { return }
+                }
                 killSwitch.superviseProtection()
             case .withholdPermit:
                 // The Core took its utun with it (#608). Narrow the
@@ -509,12 +528,16 @@ final class SocketServer {
     /// the AI layer's removal is retried, DNS is restored even beside a Core
     /// that survived. `blockPresent` (read only under a release) is the
     /// saved intent or Tono's anchor holding a block: either is released.
+    /// The A29 protected fault (`localNetworkFault`) keeps a saved block past
+    /// the threshold, and its DNS, until the user acts; an operator release
+    /// still wins over it.
     static func watchdogSteps(
         rearmAllowed: Bool,
         coreRunning: Bool,
         stateFilePresent: Bool,
         blockPresent: Bool = false,
-        coreDownChecks: Int
+        coreDownChecks: Int,
+        localNetworkFault: Bool = false
     ) -> [WatchdogStep] {
         guard rearmAllowed else {
             return (stateFilePresent || blockPresent ? [.releaseBlock] : []) + [.reconcileAI, .recoverDNS]
@@ -522,7 +545,10 @@ final class SocketServer {
         if coreRunning { return [.relaunchOwner, .supervise] }
         var steps: [WatchdogStep] = [.relaunchOwner, .withholdPermit]
         if stateFilePresent {
-            guard KillSwitchManager.watchdogShouldRestoreNetwork(consecutiveCoreDownChecks: coreDownChecks) else {
+            guard KillSwitchManager.watchdogShouldRestoreNetwork(
+                consecutiveCoreDownChecks: coreDownChecks,
+                localNetworkFault: localNetworkFault
+            ) else {
                 return steps
             }
             steps.append(.releaseBlock)
@@ -987,11 +1013,30 @@ final class SocketServer {
             case ("POST", "/killswitch/arm"):
                 let object = try jsonObject(request.body)
                 try validateKillSwitchArmFields(object)
-                let response = try killSwitch.arm(
-                    object,
-                    sessionGeneration: try HelperTarget.sessionGeneration(object["sessionGeneration"]),
-                    commitAllowed: { transitionGate.isAwake() }
-                )
+                let response: [String: Any]
+                do {
+                    response = try killSwitch.arm(
+                        object,
+                        sessionGeneration: try HelperTarget.sessionGeneration(object["sessionGeneration"]),
+                        commitAllowed: { transitionGate.isAwake() }
+                    )
+                } catch let failure as HelperFailure
+                    where failure.code == KillSwitchManager.localNetworkFaultStopCoreCode {
+                    // A29: an off re-arm failed and not even the block-all
+                    // could be installed. Stop the Core, the remaining path
+                    // to the LAN (its DIRECT dials and the local mixed proxy).
+                    // The saved intent stays armed and the watchdog holds the
+                    // block while the fault is set.
+                    do {
+                        try core.stop()
+                    } catch {
+                        let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+                        FileHandle.standardError.write(Data(
+                            "tono: protected fault could not stop the Core: \(detail)\n".utf8
+                        ))
+                    }
+                    throw failure
+                }
                 recordSessionOwner(owner)
                 sendResponse(client, status: 200, object: response)
             case ("POST", "/killswitch/quit"):

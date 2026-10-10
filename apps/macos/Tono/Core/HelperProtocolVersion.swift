@@ -429,6 +429,20 @@ nonisolated enum HelperProtocolVersion {
     ///   command's deadline now starts before its launch: a launch that stalls
     ///   before returning a PID fails at the deadline and a child that starts
     ///   late is terminated (#1542 review F1).
+    /// - 4.52.48 → 4.52.49: the arm request gained optional
+    ///   `allowLocalNetworkDevices` (D7, JSON boolean only). Absent means off: while a tunnel is
+    ///   up the anchor renders no `tono-lan`, `tono-linklocal`,
+    ///   `tono-multicast` or `tono-ssdp` pass. True renders the 4.52.48 rules.
+    ///   The app sends the field only when the setting is on, so an older
+    ///   daemon never sees it unless the user turned it on. Off also drops
+    ///   root's reviewed-bundle web ports to local ranges (`tono-bundle-local`).
+    ///   The arm reply echoes `allowLocalNetworkDevices`; the app treats a
+    ///   reply without it as a helper too old for the setting. A failed
+    ///   re-arm of the live session never releases; a failed on → off
+    ///   tightening installs block-all or stops the Core (protected fault,
+    ///   `KILLSWITCH_LOCAL_NETWORK_FAULT[_STOP_CORE]`). While that fault is
+    ///   held, no failed arm releases, whatever its tunnel, and an
+    ///   abandoned prompt-free helper upgrade does not disarm it.
     /// - 4.52.49 → 4.52.50: operator release (R3-O4, decision 084). A
     ///   persisted target (`secured <n>` / `released <n>`) joins the helper's
     ///   state: `--emergency-disarm` sets `released` in memory first and

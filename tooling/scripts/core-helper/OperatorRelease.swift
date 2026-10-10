@@ -992,7 +992,15 @@ func runOperatorReleaseSelfTests() -> Bool {
           SocketServer.watchdogSteps(rearmAllowed: true, coreRunning: true, stateFilePresent: true, coreDownChecks: 0)
             == [.relaunchOwner, .supervise],
           SocketServer.watchdogSteps(rearmAllowed: true, coreRunning: false, stateFilePresent: true, coreDownChecks: 1)
-            == [.relaunchOwner, .withholdPermit] else {
+            == [.relaunchOwner, .withholdPermit],
+          // A29's protected fault keeps its block past the core-down
+          // threshold, but an operator release still wins over it.
+          SocketServer.watchdogSteps(rearmAllowed: true, coreRunning: false, stateFilePresent: true,
+                                     coreDownChecks: 10, localNetworkFault: true)
+            == [.relaunchOwner, .withholdPermit],
+          SocketServer.watchdogSteps(rearmAllowed: false, coreRunning: false, stateFilePresent: true,
+                                     coreDownChecks: 10, localNetworkFault: true)
+            == [.releaseBlock, .reconcileAI, .recoverDNS] else {
         return fail("watchdog plan")
     }
 

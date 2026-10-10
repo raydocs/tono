@@ -505,6 +505,13 @@ extension AppState {
             }
             return
         }
+        let localNetwork = LocalNetworkDevicesSync.desired
+        // A29: this reload is applying a local network generation PF or the
+        // Core does not hold yet. If it fails, the session holds in the
+        // protected fault instead of taking the exhausted-failure release.
+        let appliesLocalNetworkGeneration = LocalNetworkDevicesSync.pfApplied != nil
+            && LocalNetworkDevicesSync.coreApplied != nil
+            && !LocalNetworkDevicesSync.converged
         let overlay = ConfigPipeline.OverlayConfig(
             mixedPort: config.mixedPort,
             externalController: config.externalController,
@@ -517,7 +524,9 @@ extension AppState {
             tonoTransport: tonoTransport,
             claudeHomeNodeName: managedCatalogRouting?.homeProxy,
             defaultNodeName: managedCatalogRouting?.defaultProxy,
-            claudeHomeSocks5: managedCatalogRouting?.homeSocks5
+            claudeHomeSocks5: managedCatalogRouting?.homeSocks5,
+            allowLocalNetworkDevices: localNetwork.allow,
+            localNetworkDevicesGeneration: localNetwork.generation
         )
         let selectedExit = selectedExitNode()
         let selectedExitName = selectedExit?.name
@@ -586,6 +595,9 @@ extension AppState {
                     LocalTrafficAudit.shared.recordEvent(
                         "core_config_reload_skipped_unchanged"
                     )
+                    // The running Core already holds these bytes, so it holds
+                    // the generation they were just written for (D7).
+                    LocalNetworkDevicesSync.documentInstalled(digest: digest)
                     finishConfigReloadRequest(requestID)
                     return
                 }
@@ -775,10 +787,17 @@ extension AppState {
                     finishConfigReloadRequest(requestID)
                 } else if ownedRuntime {
                     finishConfigReloadRequest(requestID, startPending: false)
+                    // D7: a local network devices fault is the error to show,
+                    // not a generic connection failure, and it holds.
+                    if appliesLocalNetworkGeneration, LocalNetworkDevicesSync.fault == nil {
+                        LocalNetworkDevicesSync.recordFault(.reArmFailed(error.localizedDescription))
+                    }
+                    showLocalNetworkDevicesFault()
                     await applyExhaustedArmedFailure(
-                        message: ConnectionFailurePresentation.userFacingMessage(
-                            classified: lastClassifiedFailure
-                        ),
+                        message: LocalNetworkDevicesSync.faultMessage
+                            ?? ConnectionFailurePresentation.userFacingMessage(
+                                classified: lastClassifiedFailure
+                            ),
                         resumeWhenReachable: true
                     )
                 } else {
