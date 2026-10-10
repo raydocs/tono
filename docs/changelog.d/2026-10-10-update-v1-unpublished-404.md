@@ -2,7 +2,7 @@
 - 归属：运维计划 [plan-2026-09-11](../ops/plan-2026-09-11.md)，协调方指派的发布主机 404 排查（Amp 待办 2026-10-10 夜间批次）；
   macOS `apps/macos/Tono/{Services/NativeUpdateDownload,App/AppUpdater}.swift`、Windows
   `apps/windows/app/src-tauri/src/tono/commands/update.rs`。服务端、helper/Service、PF/WFP 不改，`HelperProtocolVersion` 不变。
-- 来源：基线 origin/main 3d973f95 → 分支 `amp/releases-manifest-404`；未合 main。
+- 来源：基线 origin/main 3d973f95 → 分支 `amp/releases-manifest-404`，[#1521](https://github.com/raydocs/tono/pull/1521)；未合 main。
 - 排查结论：`https://releases.afk.ccwu.cc/desktop/v1/latest/manifest.json` 今天 404 是因为 v1 渠道尚未发布（G4 前预期），
   不是路径/路由错配：404 带 latest 路由才加的 `cache-control: no-store`，说明 Worker 命中路由、R2 无此对象；同一 R2 绑定的
   `/download/…` 正常；客户端、Worker、`desktop-update-v1.mjs` 的布局一致。旧渠道 `windows/latest.json`、`appcast.xml` 均 200。
