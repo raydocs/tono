@@ -20,6 +20,7 @@ import { CarrierMatrix } from './customer/CarrierMatrix';
 import { ClaudeAccount } from './customer/ClaudeAccount';
 import { Destinations } from './customer/Destinations';
 import { Devices } from './customer/Devices';
+import { Experience } from './customer/Experience';
 import { Followups } from './customer/Followups';
 import { CustomerHeader, CustomerWechat } from './customer/Header';
 import { HomeLine } from './customer/HomeLine';
@@ -161,6 +162,8 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
               ))}
             </div>
           </Section>
+
+          <Experience now={row.now} devices={row.devices} />
 
           {/* The answer, then the record of having given it. Both sit above the
               timeline because both are what the operator came here to do; the
