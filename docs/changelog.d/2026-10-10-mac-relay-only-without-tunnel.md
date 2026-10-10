@@ -6,6 +6,9 @@
   `TonoAPIClient` 的 API 请求只走中继，不再先试系统解析或 Cloudflare 固定地址，中继全部失败也不回退直连，错误逐个写明中继与失败方式。
   走路径途中隧道消失时，后面的直连步骤跳过。隧道在（`KillSwitchService.tunnelCarriesControlPlane`）时顺序不变、走隧道。
   旧 helper（没有隧道标记的旧记录）按有隧道处理，保持原顺序。原参数 `armedWithoutTunnel` 改名 `relayOnly`。
+- 文案（`ControlPlaneUnreachable`，与 transport 同属本 PR）：只试了中继时标题为「Tono 连不上任何一台中继」，提示只建议稍后重试或换网络；
+  保护开启（或可能仍开启）时的说明改为「保护放行 Tono 中继，但中继都没有应答，Tono 保持保护开启」，不再建议用「恢复正常网络」关闭保护（所有者决定 091）。
+  中英文案同步更新 `Localizable.xcstrings`。
 - 不改：更新器（发现/签名/安装包 GET 仍直连优先、中继后备）；登录前握手探测；TLS 主机名与证书校验；PF 规则。
 - 工程与测试：`testUnarmedFirstSignInGoesToTheRelayOnly`（生产状态读取、未武装时系统与固定地址 0 次、中继 1 次）、
   `testATunnelLostDuringTheWalkSkipsTheDirectStepsStillAhead`（第一步时隧道消失，固定地址 0 次、中继应答）；原 086 测试改用新参数。

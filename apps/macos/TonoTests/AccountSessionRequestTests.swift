@@ -1028,12 +1028,12 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertFalse(message.contains(host), "no host name in the copy")
     }
 
-    /// Simulated Protected Offline with both relays down: while the gate's
-    /// fail-closed barrier holds (PF lets only the fixed addresses through),
-    /// a sign-in no route answered says that signing in on this network
-    /// needs protection off, and what that means. The failed sign-in itself
-    /// never releases protection.
-    func testAnUnreachableSignInWhileProtectionHoldsSaysSigningInNeedsProtectionOff() async throws {
+    /// Simulated Protected Offline with every relay down: while the gate's
+    /// fail-closed barrier holds (PF lets the relays through), a sign-in no
+    /// route answered names the relays and says Tono keeps protection on; it
+    /// does not send the user to turn protection off (decision 091). The
+    /// failed sign-in itself never releases protection.
+    func testAnUnreachableSignInWhileProtectionHoldsNamesTheRelaysAndKeepsProtection() async throws {
         let host = "\(UUID().uuidString.lowercased()).invalid"
         defer { AppProfile.defaults.removeObject(forKey: TonoAPIClient.preferredPathKey(forHost: host)) }
         HeldAccountProtocol.install(host) { request in
@@ -1069,6 +1069,7 @@ final class AccountSessionRequestTests: XCTestCase {
             .message(protection: .unconfirmed).contains(ControlPlaneUnreachable.unconfirmedProtectedHint),
             "a barrier no helper answer confirmed is worded as one that may still be on")
         XCTAssertTrue(message.contains(ControlPlaneUnreachable.routeName("relay")), message)
+        XCTAssertFalse(message.contains("Restore internet"), "the copy does not suggest turning protection off")
         XCTAssertEqual(disarms.count, 0, "a failed sign-in never turns protection off")
     }
 
