@@ -2,7 +2,7 @@
 - 归属：运维计划 [plan-2026-09-11](../ops/plan-2026-09-11.md)；Amp 待办 [A19](../ops/amp-backlog-2026-10-10.md)。
   `apps/windows`（`transport.rs`、`audit.rs`、`state.rs`、`telemetry.rs`）、`services/control-plane`（展平、ops 合同）、
   `services/ops-console`（客户时间线）。
-- 来源：基线 main 2e4a7dfc → 分支 `amp/a19-windows-path-timeline`；PR 待开；未合 main。
+- 来源：基线 main 2e4a7dfc，变基到 44dcb4fe（与 A11 #1488 的 `send` 拆分合并：路径作用域包住 `send_over_paths`，A11 的归因在其后）→ 分支 `amp/a19-windows-path-timeline`；PR [#1494](https://github.com/raydocs/tono/pull/1494)；未合 main。
 - 缺陷修复：无。
 - 新增/优化：
   - Windows：一条控制面路径（`pinned` / `system_dns` / `relay` / `doh` / `alt_port` / `tunnel`）在确定没送达后，
