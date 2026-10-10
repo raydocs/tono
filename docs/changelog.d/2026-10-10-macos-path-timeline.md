@@ -1,7 +1,7 @@
 ## 2026-10-10 · macOS 控制面路径切换进客户时间线（A19 续）
 - 归属：运维计划 [plan-2026-09-11](../ops/plan-2026-09-11.md)；Amp 待办 [A19](../ops/amp-backlog-2026-10-10.md) 的 macOS 部分
   （Windows 部分见 [2026-10-10-windows-path-timeline](2026-10-10-windows-path-timeline.md)，#1494）。`apps/macos`。
-- 来源：基线 main a6ebf460 → 分支 `amp/a19-macos-path-fail-telemetry`；PR 见正文；未合 main。
+- 来源：基线 main a6ebf460 → 分支 `amp/a19-macos-path-fail-telemetry`；PR [#1513](https://github.com/raydocs/tono/pull/1513)；未合 main。
 - 缺陷修复：无。
 - 新增/优化：
   - macOS：一条控制面路径在没有收到状态行就失败、同一请求的下一条路径开始时，除原有本地审计
