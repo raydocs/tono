@@ -577,6 +577,18 @@ impl TonoTransport {
         self.answers.load(std::sync::atomic::Ordering::Acquire)
     }
 
+    /// The system-resolved attempt: the pinned connect budget too. reqwest's connect budget
+    /// covers name resolution, TCP and the TLS handshake, so a poisoned or silent resolver
+    /// costs at most this before the walk moves on (`resolved`).
+    fn system_dns_builder() -> reqwest::ClientBuilder {
+        Self::pinned_builder()
+    }
+
+    /// One relay attempt: `RELAY_CONNECT_TIMEOUT`.
+    fn relay_builder() -> reqwest::ClientBuilder {
+        Self::builder().connect_timeout(RELAY_CONNECT_TIMEOUT)
+    }
+
     /// Rebuild the pinned client from the current compiled + learned set.
     pub async fn refresh_control_plane_pins(&self) -> Result<()> {
         let client = Self::build_pinned_client()?;
@@ -598,18 +610,6 @@ impl TonoTransport {
     /// The shared settings with the pinned attempt's shorter connect budget.
     fn pinned_builder() -> reqwest::ClientBuilder {
         Self::builder().connect_timeout(PINNED_CONNECT_TIMEOUT)
-    }
-
-    /// The system-resolved attempt: the pinned connect budget too. reqwest's connect budget
-    /// covers name resolution, TCP and the TLS handshake, so a poisoned or silent resolver
-    /// costs at most this before the walk moves on (`resolved`).
-    fn system_dns_builder() -> reqwest::ClientBuilder {
-        Self::pinned_builder()
-    }
-
-    /// One relay attempt: `RELAY_CONNECT_TIMEOUT`.
-    fn relay_builder() -> reqwest::ClientBuilder {
-        Self::builder().connect_timeout(RELAY_CONNECT_TIMEOUT)
     }
 
     /// Same wiring, with both clients' resolution supplied.
