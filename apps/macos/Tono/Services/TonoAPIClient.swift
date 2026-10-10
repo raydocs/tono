@@ -1283,14 +1283,15 @@ actor TonoAPIClient {
                       !(error is ControlPlaneExchangeError),
                       !Self.isCancellation(error),
                       // The retry rule itself, as if this were a first attempt
-                      // with one retry left.
+                      // with one retry left, or a TLS failure that proves no
+                      // request byte left on this path.
                       Self.shouldRetry(
                         method: method,
                         error: error as NSError,
                         responseReceived: false,
                         attempt: 1,
                         maximumAttempts: 2
-                      )
+                      ) || Self.failedBeforeRequest(error)
                 else {
                     if let clockFailure, !(error is ControlPlaneExchangeError),
                        !Self.isCancellation(error) {
@@ -1494,6 +1495,26 @@ actor TonoAPIClient {
             NSURLErrorDNSLookupFailed,
             NSURLErrorNotConnectedToInternet,
         ].contains(error.code)
+    }
+
+    /// A URLSession failure in the TLS handshake: the handshake did not
+    /// complete (`secureConnectionFailed`, e.g. a reset in the middle of it)
+    /// or the trust store refused the certificate (a poisoned resolver answer
+    /// that leads to another site's certificate, an intercepting network). TLS
+    /// comes before the request, so no request byte left on this path, and
+    /// the walk may hand a mutating request to the next path as it does after
+    /// `cannotConnectToHost`. Only the walk reads this: the retry rule for the
+    /// same path, and a certificate date the clock cannot pass (#588), are
+    /// unchanged. The pinned client already files its own TLS failures as
+    /// not connected.
+    nonisolated private static func failedBeforeRequest(_ error: any Error) -> Bool {
+        let failure = error as NSError
+        guard failure.domain == NSURLErrorDomain else { return false }
+        if failure.code == NSURLErrorSecureConnectionFailed { return true }
+        return [
+            NSURLErrorServerCertificateUntrusted,
+            NSURLErrorServerCertificateHasUnknownRoot,
+        ].contains(failure.code) && NetworkInterception.isTrustFailure(error)
     }
 
     nonisolated private static func durationMilliseconds(since startedAt: Date) -> String {
