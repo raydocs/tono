@@ -220,6 +220,8 @@ if [ "$notarize" = 1 ]; then
     /usr/sbin/spctl -a -t exec -vv "$artifact_app"
     /bin/rm -f "$artifact_zip"
     archive_app
+    # The zip, not the working copy, is what ships: its Tono.app must carry the ticket.
+    DEVELOPER_DIR="$developer_dir" sh "$repo_root/tooling/scripts/verify-macos-notarization.sh" "$artifact_zip"
 else
     echo "WARNING: artifact is Developer ID signed but not notarized; do not distribute it outside this Mac." >&2
 fi

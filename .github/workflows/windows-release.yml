@@ -12,7 +12,8 @@ on:
         required: false
         type: string
 
-# Read-only by default. Only `publish-draft`, which runs no build code, can write.
+# Read-only by default. Only `publish-draft` (release contents) and `attest` (build
+# provenance only), neither of which runs build code, can write.
 permissions:
   contents: read
 
@@ -356,9 +357,49 @@ jobs:
           )
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Value ($lines -join "`n")
 
-  # The only job that can write. It checks out nothing executable and runs no build
-  # code: it downloads the payload, refuses bytes that differ from the digests the
-  # build job recorded, and creates the draft release with its updater manifest.
+  # Build provenance for the installer and its updater signature (decision 079
+  # D8-A: generated and auditable with `gh attestation verify`; clients do not
+  # check it). Writes only attestations, never contents: it checks out nothing,
+  # runs no build code, sees no secret, and attests only bytes that match the
+  # digests the build job recorded. A failed attestation fails the run.
+  attest:
+    needs: build-draft
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      INSTALLER: ${{ needs.build-draft.outputs.installer }}
+      INSTALLER_SHA256: ${{ needs.build-draft.outputs.installer_sha256 }}
+      SIGNATURE_SHA256: ${{ needs.build-draft.outputs.signature_sha256 }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: windows-release-payload-${{ github.sha }}
+          path: ${{ runner.temp }}/attest
+
+      - name: Refuse a payload that is not what the build job recorded
+        working-directory: ${{ runner.temp }}/attest
+        run: |
+          set -euo pipefail
+          [[ "$INSTALLER" =~ ^[A-Za-z0-9._-]+-setup\.exe$ ]]
+          [[ "$INSTALLER_SHA256" =~ ^[0-9a-f]{64}$ && "$SIGNATURE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(find . -type f | sort)" = "$(printf './%s\n./%s.sig' "$INSTALLER" "$INSTALLER" | sort)"
+          printf '%s  %s\n%s  %s\n' \
+            "$INSTALLER_SHA256" "$INSTALLER" \
+            "$SIGNATURE_SHA256" "$INSTALLER.sig" | sha256sum --check --strict
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/attest/${{ needs.build-draft.outputs.installer }}
+            ${{ runner.temp }}/attest/${{ needs.build-draft.outputs.installer }}.sig
+
+  # The only job that can write release contents. It checks out nothing executable
+  # and runs no build code: it downloads the payload, refuses bytes that differ
+  # from the digests the build job recorded, and creates the draft release with
+  # its updater manifest.
   publish-draft:
     needs: build-draft
     runs-on: ubuntu-24.04

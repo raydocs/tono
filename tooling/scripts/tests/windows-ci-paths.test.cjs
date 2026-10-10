@@ -163,6 +163,8 @@ test('Windows candidate build and installer smoke agree with the product version
   assert.equal(gate.run.match(/verify-desktop-version\.py --expected (\S+)/)?.[1], version)
   const artifact = steps.find(step => step.uses?.startsWith('actions/upload-artifact@')).with.name
   assert.equal(artifact, `tono-windows-${version}-candidate-` + '${{ github.sha }}')
+  // Build provenance (A24) attests the same artifact the build uploaded.
+  assert.equal(candidate.jobs.attest.steps.find(step => step.uses?.startsWith('actions/download-artifact@')).with.name, artifact)
   const fetch = smoke.jobs['install-repair-uninstall'].steps.find(step => step.run?.includes('gh run download'))
   assert.ok(fetch.run.includes(`--name "tono-windows-${version}-candidate-$source"`))
   const installer = readFileSync(path.join(root, 'tooling/scripts/test-windows-candidate-install.ps1'), 'utf8')
