@@ -102,6 +102,23 @@ tokio::task_local! {
     /// The failed attempt of the current `send` waiting to learn which path follows it. Scoped
     /// per `send`, so a failure is never paired with another request's attempt.
     static PENDING_PATH_FAILURE: std::cell::Cell<Option<(AttemptPath, &'static str, u64)>>;
+    /// Decision 080: the paths the current `send` has lost so far, in attempt order, each once.
+    /// Scoped per `send` like the pending failure, so one request never reports another's.
+    static FAILED_PATHS: std::cell::RefCell<Vec<AttemptPath>>;
+}
+
+/// Decision 080: sent on every attempt, naming the paths this `send` lost before it; present
+/// and empty when none was. Only path labels: no address, timing, error text or account value.
+const PATH_FAILED_HEADER: &str = "X-Tono-Path-Failed";
+
+/// The `X-Tono-Path-Failed` value for `failed`: comma-separated path labels. Six distinct
+/// labels fit in 43 characters, under the control plane's 96-character limit.
+fn path_failed_value(failed: &[AttemptPath]) -> String {
+    failed
+        .iter()
+        .map(|path| path.header_value())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Map a reqwest failure onto the retry-policy classification (§1).
@@ -685,12 +702,21 @@ impl TonoTransport {
                 });
             }
         });
+        let failed = FAILED_PATHS
+            .try_with(|failed| path_failed_value(&failed.borrow()))
+            .unwrap_or_default();
         let started = tokio::time::Instant::now();
-        let result = self.exchange(client, request, path).await;
+        let result = self.exchange(client, request, path, &failed).await;
         if let Err(ApiError::Transport { kind, .. }) = &result {
             let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
             let _ = PENDING_PATH_FAILURE
                 .try_with(|pending| pending.set(Some((path, kind_label(*kind), elapsed_ms))));
+            let _ = FAILED_PATHS.try_with(|failed| {
+                let mut failed = failed.borrow_mut();
+                if !failed.contains(&path) {
+                    failed.push(path);
+                }
+            });
         }
         result
     }
@@ -702,6 +728,7 @@ impl TonoTransport {
         client: &reqwest::Client,
         request: &ApiRequest,
         path: AttemptPath,
+        failed: &str,
     ) -> Result<ApiResponse, ApiError> {
         let transport = |err: &reqwest::Error| ApiError::Transport {
             kind: classify(err),
@@ -710,7 +737,8 @@ impl TonoTransport {
         let mut builder = client
             .request(method_of(request.method), &request.url)
             .header("X-Tono-Client", CLIENT_HEADER)
-            .header("X-Tono-Path", path.header_value());
+            .header("X-Tono-Path", path.header_value())
+            .header(PATH_FAILED_HEADER, failed);
         if let Some(bearer) = &request.bearer {
             builder = builder.bearer_auth(bearer);
         }
@@ -1089,8 +1117,12 @@ impl HttpTransport for TonoTransport {
     /// probe; the kind, and so the retry and offline-admission rules, are unchanged.
     async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
         // A19: each request's path failures wait for their successor within this `send` only.
+        // Decision 080: and the paths it lost are reported on its later attempts only.
         let result = PENDING_PATH_FAILURE
-            .scope(std::cell::Cell::new(None), self.send_over_paths(request))
+            .scope(
+                std::cell::Cell::new(None),
+                FAILED_PATHS.scope(std::cell::RefCell::new(Vec::new()), self.send_over_paths(request)),
+            )
             .await;
         let captive = tono_core::network_interference::wants_os_signal(&result)
             && crate::tono::network_interference::os_reports_captive_portal().await;
@@ -1699,6 +1731,77 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
                 "reason": "connect",
                 "elapsedMs": failure.elapsed_ms,
             })
+        );
+    }
+
+    /// Decision 080: an attempt names the paths its request already lost, so the control plane
+    /// can count failures per path; a request that lost none sends the header empty, which is
+    /// what marks the client as reporting.
+    #[tokio::test]
+    async fn each_attempt_names_the_paths_its_request_already_lost() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        // The `X-Tono-Path` and `X-Tono-Path-Failed` values of every request received.
+        let (seen_tx, seen_rx) = std::sync::mpsc::channel::<(Option<String>, Option<String>)>();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                use std::io::{BufRead as _, BufReader, Write as _};
+                let Ok(mut stream) = stream else { continue };
+                let mut reader = BufReader::new(match stream.try_clone() {
+                    Ok(clone) => clone,
+                    Err(_) => continue,
+                });
+                let mut line = String::new();
+                let (mut path, mut failed) = (None, None);
+                while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                    if line == "\r\n" || line == "\n" {
+                        break;
+                    }
+                    if let Some((name, value)) = line.split_once(':') {
+                        if name.eq_ignore_ascii_case("x-tono-path") {
+                            path = Some(value.trim().to_owned());
+                        } else if name.eq_ignore_ascii_case("x-tono-path-failed") {
+                            failed = Some(value.trim().to_owned());
+                        }
+                    }
+                    line.clear();
+                }
+                let _ = seen_tx.send((path, failed));
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi");
+                let _ = stream.flush();
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+            }
+        });
+        // The pins drop packets; the system resolver reaches the listener.
+        let transport = TonoTransport::with_clients(
+            "tono-path-failed.test",
+            &[std::net::SocketAddr::from(([10, 255, 255, 1], port))],
+            &[std::net::SocketAddr::from(([127, 0, 0, 1], port))],
+        )
+        .expect("transport");
+        let request = ApiRequest {
+            method: HttpMethod::Get,
+            url: format!("http://tono-path-failed.test:{port}/api/v1/me"),
+            bearer: None,
+            json_body: None,
+            binary_body: None,
+            headers: Vec::new(),
+        };
+
+        let first = transport.send(request.clone()).await.expect("the system resolver answers");
+        assert_eq!(first.status, 200);
+        assert_eq!(
+            seen_rx.recv_timeout(Duration::from_secs(1)).expect("the first request arrived"),
+            (Some("system_dns".to_owned()), Some("pinned".to_owned())),
+            "the request that lost the pins names them"
+        );
+        // The system resolver now goes first and answers at once: nothing was lost.
+        let second = transport.send(request).await.expect("the preferred system resolver answers");
+        assert_eq!(second.status, 200);
+        assert_eq!(
+            seen_rx.recv_timeout(Duration::from_secs(1)).expect("the second request arrived"),
+            (Some("system_dns".to_owned()), Some(String::new())),
+            "a first-try success still sends the header, empty"
         );
     }
 
