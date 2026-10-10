@@ -5,7 +5,7 @@ use crate::{
     tono::{
         bootstrap, connection,
         state::TonoState,
-        transport::{RELAY_CONNECT_TIMEOUT, classify},
+        transport::{PathPreference, RELAY_CONNECT_TIMEOUT, classify},
     },
     utils::dirs,
 };
@@ -16,7 +16,7 @@ use std::{
     net::SocketAddr,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
     },
     time::Duration,
 };
@@ -78,13 +78,13 @@ fn client() -> Result<reqwest::Client> {
 
 /// One update GET: through the relay the API transport last reached first, when there is one,
 /// then direct, then through the Tono relays (decision 077). `preferred` is the API
-/// transport's relay preference (`TonoTransport::preferred_relay`), so a device whose sign-in
+/// transport's relay preference (`TonoTransport::path_preference`), so a device whose sign-in
 /// went through a relay does not pay the dead direct path before every update request.
 async fn get(
     client: &reqwest::Client,
     url: &str,
     timeout: Option<Duration>,
-    preferred: &AtomicUsize,
+    preferred: &PathPreference,
 ) -> Result<reqwest::Response> {
     get_with_relays(client, url, timeout, &bootstrap::api_relays(), builder, preferred).await
 }
@@ -135,14 +135,14 @@ async fn get_with_relays(
     timeout: Option<Duration>,
     relays: &[SocketAddr],
     builder: impl Fn() -> reqwest::ClientBuilder,
-    preferred: &AtomicUsize,
+    preferred: &PathPreference,
 ) -> Result<reqwest::Response> {
     let parsed = reqwest::Url::parse(url)?;
     let host = parsed.host_str().map(str::to_owned);
     let mut failures = Vec::new();
     let mut tried = None;
     let first = preferred
-        .load(Ordering::Relaxed)
+        .relay()
         .checked_sub(1)
         .filter(|index| *index < relays.len());
     if let (Some(index), Some(host)) = (first, host.as_deref()) {
@@ -160,7 +160,7 @@ async fn get_with_relays(
             }
             None => {}
         }
-        preferred.store(0, Ordering::Relaxed);
+        preferred.set_relay(0);
     }
     let direct_error = match with_timeout(direct.get(url), timeout).send().await {
         Ok(response) => return Ok(response),
@@ -177,21 +177,21 @@ async fn get_with_relays(
         let relay = relays[index];
         match get_via_relay(&parsed, host, relay, timeout, &builder).await? {
             Some(Ok(response)) => {
-                preferred.store(index + 1, Ordering::Relaxed);
+                preferred.set_relay(index + 1);
                 return Ok(response);
             }
             Some(Err(error)) => failures.push(format!("relay {relay}: {error}")),
             None => {}
         }
     }
-    preferred.store(0, Ordering::Relaxed);
+    preferred.set_relay(0);
     if failures.is_empty() {
         return Err(direct_error.into());
     }
     Err(anyhow::Error::new(direct_error).context(failures.join("; ")))
 }
 
-async fn bounded(client: &reqwest::Client, url: &str, limit: usize, preferred: &AtomicUsize) -> Result<String> {
+async fn bounded(client: &reqwest::Client, url: &str, limit: usize, preferred: &PathPreference) -> Result<String> {
     let mut response = get(client, url, Some(Duration::from_secs(30)), preferred)
         .await?
         .error_for_status()?;
@@ -217,7 +217,7 @@ pub async fn tono_check_update(state: tauri::State<'_, Arc<TonoState>>) -> Resul
         // The sign-in's relay preference: a device whose API requests reach only a relay
         // starts its update GETs there too (decision 077).
         let api = state.lock().await.client.clone();
-        let preferred = api.transport().preferred_relay();
+        let preferred = api.transport().path_preference();
         let manifest = bounded(&client, DISCOVERY_URL, 16_384, preferred).await?;
         let decoded = ReleaseManifest::decode(manifest.as_bytes())?;
         let hash = decoded.sha256()?;
@@ -292,7 +292,7 @@ pub async fn tono_install_update(
             &client()?,
             &format!("{RELEASE_ROOT}/{manifest_sha256}/package.windows-x86_64.exe"),
             None,
-            api.transport().preferred_relay(),
+            api.transport().path_preference(),
         )
         .await?
         .error_for_status()?;
@@ -659,7 +659,7 @@ mod update_quiesce_tests {
 #[cfg(test)]
 mod update_relay_tests {
     use super::*;
-    use std::{net::SocketAddr, sync::atomic::AtomicUsize};
+    use std::net::SocketAddr;
 
     /// Decision 077 follow-up: an update GET whose direct path delivered nothing is sent once
     /// through the relays in order, keeps its hostname (so the certificate check is the same),
@@ -710,7 +710,7 @@ mod update_relay_tests {
             .expect("direct client");
         // The first relay refuses, so the walk must go on to the second in order.
         let refused = SocketAddr::from(([127, 0, 0, 1], 1));
-        let preferred = AtomicUsize::new(0);
+        let preferred = PathPreference::default();
         let response = get_with_relays(
             &direct,
             "http://releases.test/desktop/v1/latest/manifest.json",
@@ -728,7 +728,7 @@ mod update_relay_tests {
             host == "releases.test" || host.starts_with("releases.test:"),
             "the relayed GET must keep the release hostname, got {host:?}"
         );
-        assert_eq!(preferred.load(Ordering::Relaxed), 2, "the relay that answered is remembered");
+        assert_eq!(preferred.relay(), 2, "the relay that answered is remembered");
     }
 
     /// Backlog A1: once a sign-in went through a relay, the update GET starts at that relay
@@ -769,7 +769,7 @@ mod update_relay_tests {
             .build()
             .expect("direct client");
         // What the API transport leaves after a sign-in through the second relay.
-        let preferred = AtomicUsize::new(2);
+        let preferred = PathPreference::new(false, 2);
         let response = get_with_relays(
             &direct,
             "http://releases.test/desktop/v1/latest/manifest.json",
@@ -785,6 +785,6 @@ mod update_relay_tests {
             "relay",
             "the update GET went to the direct path before the relay the sign-in used"
         );
-        assert_eq!(preferred.load(Ordering::Relaxed), 2, "an answering relay stays preferred");
+        assert_eq!(preferred.relay(), 2, "an answering relay stays preferred");
     }
 }
