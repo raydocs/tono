@@ -29,21 +29,29 @@ candidate.created_at ASC,
 candidate.rowid ASC`;
 
 /**
- * Revoke one account's live devices beyond its stored device_limit, least
- * recently seen first, and return the revoked device ids (D15-A, H17-C-F1).
+ * Revoke one account's live devices beyond its device_limit, least recently
+ * seen first, and return the revoked device ids (D15-A, H17-C-F1).
  *
- * One D1 batch is one SQLite transaction: the excess is computed from the
- * device_limit and live devices committed at that moment, so a retry or a
- * concurrent call finds nothing left to evict, and a limit that was raised in
- * the meantime evicts nothing. Every statement is scoped to `userId`. The
- * victims go through the same outbox as login rotation: a tailnet revocation
- * job, the device row, its sessions and its exit credential.
+ * `limitWrite`, when given, is the users UPDATE that sets the new limit; it
+ * runs first in the same D1 batch, which is one SQLite transaction. The excess
+ * is computed from the limit it just wrote and the live devices committed at
+ * that moment, so the cap and the eviction commit or roll back together, a
+ * retry or a concurrent call finds nothing left to evict, and a limit raised
+ * in the meantime evicts nothing. Every eviction statement is scoped to
+ * `userId`. The victims go through the same outbox as login rotation: a
+ * tailnet revocation job, the device row, its sessions and its exit credential.
  */
-export async function evictDevicesOverLimit(e: Env, userId: string): Promise<string[]> {
+export async function evictDevicesOverLimit(
+  e: Env,
+  userId: string,
+  limitWrite?: D1PreparedStatement,
+): Promise<{ limitWriteChanges: number; evicted: string[] }> {
   const t = now();
   const evictionId = id();
   const victims = `SELECT device_id FROM device_rotation_victims WHERE rotation_id = ?`;
+  const leading = limitWrite ? [limitWrite] : [];
   const results = await e.DB.batch<Row>([
+    ...leading,
     e.DB.prepare(
       `INSERT INTO device_rotation_victims(rotation_id, device_id)
        SELECT ?, candidate.id
@@ -98,7 +106,10 @@ export async function evictDevicesOverLimit(e: Env, userId: string): Promise<str
     e.DB.prepare(`${victims} ORDER BY device_id`).bind(evictionId),
     e.DB.prepare('DELETE FROM device_rotation_victims WHERE rotation_id = ?').bind(evictionId),
   ]);
-  return (results[5]?.results ?? []).map((row) => String(row.device_id));
+  return {
+    limitWriteChanges: limitWrite ? Number(results[0]?.meta.changes ?? 0) : 0,
+    evicted: (results[leading.length + 5]?.results ?? []).map((row) => String(row.device_id)),
+  };
 }
 
 export async function directSignupAllowed(e: Env, emailAddr: string): Promise<boolean> {

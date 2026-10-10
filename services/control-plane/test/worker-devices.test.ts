@@ -414,6 +414,19 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await admin(`users/${account.user.id}`, { deviceLimit: 5 }, 'PATCH')).status).toBe(200);
     expect(await liveIds(account.user.id)).toEqual([live[0], live[3], live[4]].sort());
     expect(await revokeAudits()).toEqual(evicted);
+
+    // The cap and the eviction are one transaction: a failed eviction leaves
+    // the previous cap and every device in place, and the request fails.
+    await env.DB.prepare(
+      `CREATE TRIGGER fail_limit_eviction BEFORE INSERT ON revocation_jobs
+       WHEN NEW.reason = 'device_limit_lowered'
+       BEGIN SELECT RAISE(ABORT, 'EVICTION_FAILED'); END`,
+    ).run();
+    expect((await admin(`users/${account.user.id}`, { deviceLimit: 1 }, 'PATCH')).status).toBe(500);
+    await env.DB.prepare('DROP TRIGGER fail_limit_eviction').run();
+    expect((await env.DB.prepare('SELECT device_limit FROM users WHERE id = ?')
+      .bind(account.user.id).first<any>()).device_limit).toBe(5);
+    expect(await liveIds(account.user.id)).toEqual([live[0], live[3], live[4]].sort());
   });
 
   it('confirm resolves via inventory with distinct IDs and stores management id', async () => {
