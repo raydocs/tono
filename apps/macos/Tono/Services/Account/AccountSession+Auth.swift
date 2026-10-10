@@ -282,7 +282,7 @@ extension AccountSession {
             authMethods = nil
             if state != .authenticating {
                 state = .error(
-                    (error as? LocalizedError)?.errorDescription
+                    accountErrorMessage(error)
                         ?? String(localized: "Tono sign-in is temporarily unavailable.")
                 )
             }
