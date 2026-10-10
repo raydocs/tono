@@ -14,4 +14,7 @@
 - 验证：Linux orb，Node 24：`npx vitest run src/components/setting/mods/update-viewer.test.tsx` 2 passed；`pnpm test` 400 passed；`pnpm typecheck` 通过；
   `node --test scripts/windows-packaging.test.mjs ../../../tooling/scripts/tests/desktop-update-v1.test.mjs` 45 pass。`src-tauri` 的 cargo 本机不跑，以托管 Windows CI 为准。
 - 候选/发布：仅源码，无新候选。
-- 剩余限制：Service 仍固定着的文件删不掉，留给下次启动；取消只在下载阶段有效。
+- 剩余限制：Service 仍固定着的文件删不掉，留给下次启动；取消在安装被受理后到下载结束前有效，之后（同步、代理清理、Prepare、Install）不可取消。
+- 2026-10-10 续记（Sol 终审 minor F1，覆盖 `0937a6f2`）：之前 Cancel 令牌要到下载开始才登记，所以在准备阶段（取报价、建目录、建文件）按 Cancel 会落空，更新随后照常下载、Prepare、Install，用户看不到。
+  改为安装一被受理（`admit_install`）就登记，下载开始时若已取消即失败且不发请求；登记位仍在下载结束、Prepare 之前关闭。
+  回归测试 `cancel_before_the_download_starts_stops_the_admitted_install`；原取消测试改为持有 INSTALL，避免两个测试争用进程级令牌。cargo 本机不跑，以托管 Windows CI 为准。

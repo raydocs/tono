@@ -40,8 +40,8 @@ static INCOMPLETE: AtomicBool = AtomicBool::new(false);
 /// a refusal of the offer: the user may start the same update again.
 pub(crate) const DOWNLOAD_CANCELLED: &str = "TONO_UPDATE_CANCELLED";
 
-/// The token of the package download in flight. Set only while bytes are being fetched
-/// (`DownloadCancelSlot`), so Cancel can never reach the proxy clear, Prepare or Install.
+/// The token of the update in flight, from the moment the install is admitted until its download
+/// ends (`DownloadCancelSlot`), so Cancel can never reach the proxy clear, Prepare or Install.
 static DOWNLOAD_CANCEL: std::sync::Mutex<Option<CancellationToken>> = std::sync::Mutex::new(None);
 
 /// Holds `DOWNLOAD_CANCEL` for one download and empties it however the download ends,
@@ -501,6 +501,20 @@ pub async fn tono_check_update(state: tauri::State<'_, Arc<TonoState>>) -> Resul
     .map_err(|e| format!("Protected update discovery failed: {e:#}"))
 }
 
+/// Admits one install and registers its Cancel at once. The dialog shows the update running
+/// as soon as it asks for the install, so a Cancel during the preparation before the download
+/// (offer, directory, file) must still stop it: the download then never starts. Before, the
+/// token was registered only when the download began, so an early Cancel reached nothing and
+/// the update went on to download, Prepare and Install unseen.
+fn admit_install() -> Result<(tokio::sync::MutexGuard<'static, ()>, CancellationToken, DownloadCancelSlot), String> {
+    let install = INSTALL
+        .try_lock()
+        .map_err(|_| "An update request is already running".to_string())?;
+    let cancel = CancellationToken::new();
+    let slot = DownloadCancelSlot::open(&cancel);
+    Ok((install, cancel, slot))
+}
+
 #[tauri::command]
 pub async fn tono_install_update(
     app: AppHandle,
@@ -508,9 +522,7 @@ pub async fn tono_install_update(
     manifest_sha256: String,
     progress: Channel<serde_json::Value>,
 ) -> Result<(), String> {
-    let _install = INSTALL
-        .try_lock()
-        .map_err(|_| "An update request is already running".to_string())?;
+    let (_install, cancel, cancel_slot) = admit_install()?;
     // The generation this update retired, if it got that far. Convergence may
     // only fold the attempt this update invalidated, never a live one.
     let mut invalidated = None;
@@ -540,8 +552,6 @@ pub async fn tono_install_update(
         // Removed on every way out of this block, and right after Prepare below.
         let package = DownloadedPackage(path.clone());
         let api = state.lock().await.client.clone();
-        let cancel = CancellationToken::new();
-        let cancel_slot = DownloadCancelSlot::open(&cancel);
         let downloaded = download_resuming(
             &client()?,
             &format!("{RELEASE_ROOT}/{manifest_sha256}/package.windows-x86_64.exe"),
@@ -1137,6 +1147,9 @@ mod update_relay_tests {
             .resolve("releases.test", address)
             .build()
             .expect("direct client");
+        // DOWNLOAD_CANCEL is process-wide: hold INSTALL as an install would, so the other
+        // Cancel test cannot take this token.
+        let _install = INSTALL.lock().await;
         let cancel = CancellationToken::new();
         // The download slot as the install command opens it; Cancel reaches it through the command.
         let slot = DownloadCancelSlot::open(&cancel);
@@ -1167,6 +1180,39 @@ mod update_relay_tests {
         assert_eq!(written, b"01234", "nothing is written after the cancel");
         drop(slot);
         assert!(!tono_cancel_update_download(), "with no download in flight Cancel reaches nothing");
+    }
+
+    /// Sol review minor (#1540): Cancel pressed while an admitted install is still preparing (before
+    /// the download starts) reaches it, and the download it would start fails as cancelled.
+    #[tokio::test]
+    async fn cancel_before_the_download_starts_stops_the_admitted_install() {
+        // Another test may hold INSTALL for a moment; wait for the slot rather than share it.
+        let (install, cancel, slot) = loop {
+            match admit_install() {
+                Ok(admitted) => break admitted,
+                Err(_) => tokio::time::sleep(Duration::from_millis(20)).await,
+            }
+        };
+        assert!(tono_cancel_update_download(), "the admitted install is cancellable at once");
+        let mut written = Vec::new();
+        let direct = reqwest::Client::builder().no_proxy().build().expect("client");
+        let error = download_resuming(
+            &direct,
+            "http://127.0.0.1:1/desktop/v1/package.windows-x86_64.exe",
+            &[],
+            || reqwest::Client::builder().no_proxy(),
+            &PathPreference::default(),
+            10,
+            &mut written,
+            &cancel,
+            |_| Ok(()),
+        )
+        .await
+        .expect_err("a download after an early Cancel fails");
+        assert!(error.to_string().starts_with(DOWNLOAD_CANCELLED), "{error:#}");
+        assert!(written.is_empty(), "nothing is fetched");
+        drop(slot);
+        drop(install);
     }
 
     /// WIN-UPDATE-PARTIAL-FILES: a package file is removed when its install ends (failure,
