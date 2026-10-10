@@ -495,6 +495,10 @@ extension AccountSession {
                 return false
             } catch {
                 guard !Task.isCancelled, accountReadRevision == accountRevision else { return false }
+                // The client turns an undecodable 2xx body into `invalidResponse`.
+                if error as? TonoAPIClient.APIError == .invalidResponse {
+                    catalogUndecodableConsumer()
+                }
                 // Keep the last verified, mode-0600 cache. Catalog
                 // availability must never turn a temporary control-plane
                 // failure into a clearnet fallback or erase usable exits.

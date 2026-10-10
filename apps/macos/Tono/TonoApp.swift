@@ -48,6 +48,9 @@ struct TonoApp: App {
             catalogConsumer: { catalog in
                 try await appState.acceptManagedExitCatalog(catalog)
             },
+            catalogUndecodableConsumer: {
+                appState.revokeHy2AutoSwitchForRejectedCatalog()
+            },
             trafficPolicyConsumer: { policy in
                 try await appState.acceptManagedTrafficPolicy(policy)
                 return appState.managedTrafficPolicyRevision

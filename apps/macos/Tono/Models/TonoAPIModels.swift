@@ -161,6 +161,11 @@ nonisolated struct TonoExitCatalogResponse: Codable, Sendable, Equatable {
     let sha256: String
     let updatedAt: Int?
     let routing: TonoExitCatalogRouting?
+    /// A18/A17: permission to fall back on our own from a node's Reality
+    /// block to its ` · hy2` block. Outside `sha256`/`routingSha256`, read on
+    /// every 200. Missing or not a boolean means false; it never rejects the
+    /// catalog.
+    let hy2AutoSwitch: Bool
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -172,10 +177,11 @@ nonisolated struct TonoExitCatalogResponse: Codable, Sendable, Equatable {
             TonoExitCatalogRouting.self,
             forKey: .routing
         )
+        hy2AutoSwitch = (try? container.decodeIfPresent(Bool.self, forKey: .hy2AutoSwitch)) ?? false
     }
 
     private enum CodingKeys: String, CodingKey {
-        case revision, yaml, sha256, updatedAt, routing
+        case revision, yaml, sha256, updatedAt, routing, hy2AutoSwitch
     }
 }
 nonisolated struct TonoTrafficPolicyResponse: Codable, Sendable, Equatable {
