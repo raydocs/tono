@@ -58,6 +58,11 @@ on:
       # The migration-number checker and the *.test.mjs glob live outside
       # services/**; without these the new steps could be edited without running.
       - tooling/scripts/check-migration-numbers.mjs
+      # The api-relay-down recovery rule checker; its test reads the rule the
+      # doc suggests, so the doc and the fixture run it too.
+      - tooling/scripts/check-relay-alert-rule.mjs
+      - tooling/scripts/tests/fixtures/ops-alert-rules.json
+      - docs/ops/api-relay.md
       # Local migration rehearsal: its additive checker is tested by the glob below.
       - tooling/scripts/check-migrations-additive.mjs
       - tooling/scripts/rehearse-control-plane-migrations.sh
