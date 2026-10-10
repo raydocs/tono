@@ -10,7 +10,7 @@ struct SeaTrafficSample: Equatable {
     var down: Int64
 }
 
-/// Traffic-driven sparkle on the full-quality water (decision 077, owner 2026-10-08).
+/// Traffic-driven sparkle on the full-quality water (decision 078, owner 2026-10-08).
 /// Advanced once per drawn water frame; never a SwiftUI state update.
 struct SeaWaterTraffic {
     /// Sparkle drive, 0...1, smoothed.

@@ -488,7 +488,7 @@ private final class SeaSceneLayers {
         top.mask = gradientMask(frame: top.bounds, stops: [0, 0.454545, 0.606061, 1], values: [1, 1, 0, 0])
         night.compositingFilter = CIFilter(name: "CIAdditionCompositing")
         let day = layer("sky-day", parent: sky)
-        // Light pass (decision 077): warmer low sky, hotter sun light, cool blue-grey zenith (no violet).
+        // Light pass (decision 078): warmer low sky, hotter sun light, cool blue-grey zenith (no violet).
         linear("day-linear", parent: day, colors: ["FFB46A00", "FFB46A00", "FFB46A70"], stops: [0, 0.46, 1])
         radial("day-light", parent: day, frame: day.bounds,
             colors: ["FFC0749E", "E8684A3D", "E8684A00"], stops: [0, 0.46, 1],
