@@ -167,6 +167,57 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(pinnedAttempts.count, 1, "the pinned addresses receive the request exactly once")
     }
 
+    /// A19: a system resolver that fails before the pinned addresses answer
+    /// queues one `controlPlanePathFail` for the customer timeline, as the
+    /// Windows client does: the two path labels, the failure class and the
+    /// time, and nothing that names the host, the account or an address.
+    func testAFailedPathFollowedByTheNextQueuesOneTimelineEventWithNothingIdentifying() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        HeldAccountProtocol.install(host) { request in
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotFindHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        let buffer = ConnectionTelemetryBuffer()
+        let timeline = ControlPlanePathTimeline(buffer: buffer)
+        timeline.admit(true)
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-a19","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
+            },
+            controlPlanePathTimeline: timeline
+        )
+
+        let challengeId = try await api.startEmailSignIn(TonoEmailStartRequest(
+            email: "timeline@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+        )).challengeId
+
+        XCTAssertEqual(challengeId, "c-a19", "the pinned addresses answer")
+        let events = buffer.drain().events
+        XCTAssertEqual(events.count, 1, "one failed path, followed by one more")
+        let event = try XCTUnwrap(events.first)
+        XCTAssertEqual(event.kind, "controlPlanePathFail")
+        XCTAssertEqual(event.from, "system_dns")
+        XCTAssertEqual(event.to, "pinned")
+        XCTAssertEqual(event.reason, "dns")
+        let elapsedMs = try XCTUnwrap(event.elapsedMs)
+        XCTAssertGreaterThanOrEqual(elapsedMs, 0)
+        let encoded = try JSONEncoder().encode(event)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(Set(object.keys), ["ts", "kind", "from", "to", "reason", "elapsedMs"])
+        let text = String(decoding: encoded, as: UTF8.self)
+        XCTAssertFalse(text.contains(host), text)
+        XCTAssertFalse(text.contains("timeline@example.test"), text)
+    }
+
     /// Decision 077: when the system resolver and the pinned addresses both
     /// fail before any request byte is sent, the request goes to the Tono
     /// relay outside Cloudflare, exactly once (a sign-in POST), and the relay
