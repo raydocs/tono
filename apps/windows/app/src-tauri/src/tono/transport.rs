@@ -1200,6 +1200,75 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
         assert_eq!(response.body, b"hi");
     }
 
+    /// Decision 077: when the pinned addresses and the system resolver both fail provably
+    /// undelivered, the request goes through a Tono relay, its answer stands, and later
+    /// requests go to that relay first.
+    #[tokio::test]
+    async fn dead_cloudflare_paths_fall_back_to_a_relay() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                use std::io::{BufRead as _, BufReader, Write as _};
+                let Ok(mut stream) = stream else { continue };
+                let mut reader = BufReader::new(match stream.try_clone() {
+                    Ok(clone) => clone,
+                    Err(_) => continue,
+                });
+                let mut line = String::new();
+                while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                    if line == "\r\n" || line == "\n" {
+                        break;
+                    }
+                    line.clear();
+                }
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nrelay",
+                );
+                let _ = stream.flush();
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+            }
+        });
+
+        // Both Cloudflare paths drop packets; only the relay listens.
+        let dead = vec![std::net::SocketAddr::from(([10, 255, 255, 1], 443))];
+        let relay = vec![std::net::SocketAddr::from(([127, 0, 0, 1], port))];
+        let transport =
+            TonoTransport::with_clients_and_relays("tono-relay.test", &dead, &dead, &relay)
+                .expect("transport");
+        let request = ApiRequest {
+            // A POST: the relay must be reached by the retry rule for undelivered requests,
+            // which is the one the sign-in code submission depends on.
+            method: HttpMethod::Post,
+            url: format!("http://tono-relay.test:{port}/api/v1/auth/email/start"),
+            bearer: None,
+            json_body: Some("{}".to_string()),
+            binary_body: None,
+            headers: Vec::new(),
+        };
+        let response = transport
+            .send(request.clone())
+            .await
+            .expect("the relay must carry the request");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"relay");
+        assert_eq!(
+            transport.preferred_relay.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "the relay that answered is remembered for the next request"
+        );
+        // The second request must not pay the dead pins again: well under one pinned
+        // connect budget (700 ms in this fixture) is proof it went to the relay first.
+        let started = std::time::Instant::now();
+        let again = transport.send(request).await.expect("preferred relay");
+        assert_eq!(again.status, 200);
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "second request took {:?}, so it paid a dead path first",
+            started.elapsed()
+        );
+    }
+
     /// #583: launch restore's own sequence, a token refresh (POST) and then `me` (GET), through
     /// clients built exactly as in production with the pinned addresses dropped. Only the first
     /// request may pay the pinned connect budget; the pair must leave the fallbacks more than
