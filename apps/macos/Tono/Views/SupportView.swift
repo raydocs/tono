@@ -141,10 +141,7 @@ struct SupportView: View {
     private var header: some View {
         HStack(alignment: .top) {
             if seaEnabled {
-                SeaPageHeading(
-                    title: "Support & Diagnostics",
-                    subtitle: "State, logs and recovery steps support may ask you for."
-                )
+                SeaPageHeading(title: "Support & Diagnostics")
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(String(localized: "Support & Diagnostics"))

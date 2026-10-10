@@ -218,6 +218,8 @@ struct SeaTabs: View {
     let label: LocalizedStringKey
     @Binding var selection: String
     let options: [String]
+    /// The shown word when it differs from the stored option.
+    var title: (String) -> LocalizedStringKey = { LocalizedStringKey($0) }
     @Environment(\.seaAccent) private var accent
     @SeaDisplayPreferences private var display
 
@@ -226,7 +228,7 @@ struct SeaTabs: View {
             ForEach(options, id: \.self) { option in
                 let selected = selection == option
                 Button { selection = option } label: {
-                    Text(LocalizedStringKey(option)).font(.system(size: 13))
+                    Text(title(option)).font(.system(size: 13))
                         .foregroundStyle(selected ? accent : SeaTheme.tertiary)
                         .padding(.vertical, 10)
                         .overlay(alignment: .bottom) {

@@ -5,7 +5,7 @@ import SwiftUI
 /// Not a second dashboard — no TUN toggle, IP, DNS, or node list.
 struct MenuBarView: View {
     @SeaAppearancePreference private var seaAppearance
-    static let popoverWidth: CGFloat = 280
+    static let popoverWidth: CGFloat = 300
 
     @Environment(AppState.self) private var appState
     @Environment(AccountSession.self) private var accountSession
@@ -13,6 +13,9 @@ struct MenuBarView: View {
     @State private var routeProposal: RouteRecommendation?
     @State private var showingRouteConfirmation = false
     @State private var staleRouteProposal = false
+    /// Measured content height: the panel is as tall as what it shows, and
+    /// scrolls only past the screen-bounded maximum.
+    @State private var contentHeight: CGFloat = 0
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -27,15 +30,21 @@ struct MenuBarView: View {
                     || (KillSwitchService.isArmed && accountSession.state != .ready) {
                     restoreAction
                 }
-                if seaAppearance { seaQuickRoutes }
-                menuDivider
-                openTonoButton
-                quitButton
+                if seaAppearance {
+                    seaQuickRoutes
+                    seaFooter
+                } else {
+                    menuDivider
+                    openTonoButton
+                    quitButton
+                }
             }
             .padding(.bottom, 8)
             .frame(width: Self.popoverWidth)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
         }
         .frame(width: Self.popoverWidth)
+        .frame(height: contentHeight > 0 ? min(contentHeight, maximumPopoverHeight) : nil)
         .frame(maxHeight: maximumPopoverHeight)
         .background {
             if seaAppearance { SeaSecondaryScene() }
@@ -75,12 +84,16 @@ struct MenuBarView: View {
         MenuBarProtectionStatus(appState)
     }
 
+    private var statusDot: some View {
+        Circle()
+            .fill(seaAppearance && status.kind == .connecting ? SeaTheme.cool : status.color)
+            .frame(width: 8, height: 8)
+            .shadow(color: appState.isConnected ? TonoStatus.connected.opacity(0.6) : .clear, radius: 3)
+    }
+
     private var header: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(seaAppearance && status.kind == .connecting ? SeaTheme.cool : status.color)
-                .frame(width: 8, height: 8)
-                .shadow(color: appState.isConnected ? TonoStatus.connected.opacity(0.6) : .clear, radius: 3)
+        HStack(alignment: seaAppearance ? .firstTextBaseline : .center, spacing: 10) {
+            if !seaAppearance { statusDot }
             VStack(alignment: .leading, spacing: 1) {
                 if !seaAppearance {
                     Text("Tono").font(.system(size: 13, weight: .semibold))
@@ -101,13 +114,48 @@ struct MenuBarView: View {
                 }
             }
             Spacer(minLength: 0)
+            if seaAppearance { statusDot.alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 6 } }
         }
         .padding(.horizontal, 16)
         .padding(.top, seaAppearance ? 16 : 12)
         .padding(.bottom, 8)
     }
 
+    @ViewBuilder
     private var currentNode: some View {
+        if seaAppearance {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(seaNodeLabel)
+                    .font(.system(size: 13)).foregroundStyle(SeaTheme.muted).lineLimit(1)
+                if appState.isConnected, appState.trafficFeedLive || appState.isClaudeHomeActive {
+                    HStack(spacing: 6) {
+                        if appState.trafficFeedLive {
+                            Text(verbatim: "↑ \(TonoByteFormat.bytes(appState.trafficStats.uploadSpeed))/s · ↓ \(TonoByteFormat.bytes(appState.trafficStats.downloadSpeed))/s")
+                                .monospacedDigit()
+                        }
+                        if appState.isClaudeHomeActive {
+                            if appState.trafficFeedLive { Text(verbatim: "·") }
+                            Text("Claude AI").foregroundStyle(SeaTheme.good)
+                        }
+                    }
+                    .font(.system(size: 12)).foregroundStyle(SeaTheme.tertiary).lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+        } else {
+            legacyCurrentNode
+        }
+    }
+
+    /// The line's name as Home shows it: no flag, no region code.
+    private var seaNodeLabel: String {
+        let name = appState.activeNode?.name ?? appState.proxyService.activeNodeName ?? ""
+        guard !name.isEmpty else { return String(localized: "No server selected") }
+        return nodeRouteTitle(for: name)
+    }
+
+    private var legacyCurrentNode: some View {
         HStack(spacing: 6) {
             Text(nodeLabel)
                 .font(.system(size: 11))
@@ -250,8 +298,7 @@ struct MenuBarView: View {
                 favorites: appState.routePreferences.favorites(owner: owner, catalog: catalog),
                 selected: appState.activeNode?.name ?? appState.proxyService.activeNodeName)
             if !routes.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Choose another route").font(.system(size: 10)).foregroundStyle(SeaTheme.muted)
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(routes) { node in
                         Button {
                             guard accountSession.user?.id == owner,
@@ -266,11 +313,13 @@ struct MenuBarView: View {
                             }
                         } label: {
                             HStack(spacing: 8) {
-                                Image(systemName: "arrow.up.right").accessibilityHidden(true)
                                 Text(nodeRouteTitle(node)).lineLimit(1)
                                 Spacer(minLength: 4)
+                                Image(systemName: "arrow.right").font(.system(size: 12))
+                                    .foregroundStyle(SeaTheme.muted).accessibilityHidden(true)
                             }
-                            .font(.system(size: 12)).padding(.vertical, 6).contentShape(Rectangle())
+                            .font(.system(size: 14)).foregroundStyle(SeaTheme.text)
+                            .frame(minHeight: 36).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain).disabled(!canAct)
                         .accessibilityLabel(String(localized: "Connect using \(nodeRouteTitle(node))"))
@@ -281,9 +330,27 @@ struct MenuBarView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(.horizontal, 16).padding(.vertical, 8)
+                .padding(.horizontal, 16).padding(.bottom, 4)
             }
         }
+    }
+
+    /// One row of text buttons: Open Tono, Switch server, Quit.
+    private var seaFooter: some View {
+        HStack(spacing: 0) {
+            Button("Open Tono", action: openMainWindow)
+            Spacer(minLength: 8)
+            Button("Switch server") {
+                appState.selectedPage = .proxies
+                openMainWindow()
+            }
+            Spacer(minLength: 8)
+            Button("Quit") { NSApp.terminate(nil) }
+                .accessibilityLabel("Quit Tono")
+        }
+        .buttonStyle(SeaMenuFooterButtonStyle())
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
     }
 
     private var openTonoButton: some View {
@@ -310,6 +377,19 @@ struct MenuBarView: View {
         .modifier(SeaActionStyle(variant: .danger, size: .row))
         .padding(.horizontal, 16)
         .padding(.vertical, seaAppearance ? 0 : 6)
+    }
+
+    private struct SeaMenuFooterButtonStyle: ButtonStyle {
+        @SeaDisplayPreferences private var display
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .font(.system(size: 13))
+                .foregroundStyle(SeaTheme.muted)
+                .frame(minHeight: 32)
+                .contentShape(Rectangle())
+                .opacity(configuration.isPressed ? 0.6 : 1)
+                .animation(TonoMotion.press(reduceMotion: display.reduceMotion), value: configuration.isPressed)
+        }
     }
 
     private var menuDivider: some View {

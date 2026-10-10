@@ -1,8 +1,62 @@
 import SwiftUI
 
 enum SeaServerPresentation {
+    static let otherRegionsCode = "GL"
+
     static func favorites(in nodes: [ProxyNode], names: Set<String>) -> [ProxyNode] {
         nodes.filter { names.contains(ProxyNode.catalogBaseName(for: $0.name)) }
+    }
+
+    /// Country evidence only; guessed initials collapse into "Other regions"
+    /// (Windows `node-meta.ts`), so a tab never reads as two stray letters.
+    static func regionCode(flag: String, name: String) -> String {
+        if ProxyNode.isHy2CatalogName(name) { return udpBackupRegionCode }
+        return catalogNodeRegionCode(flag: flag, name: name) ?? otherRegionsCode
+    }
+
+    static func regionLabel(_ code: String) -> String {
+        if code == udpBackupRegionCode { return String(localized: "Backup UDP") }
+        if code == otherRegionsCode { return String(localized: "Other regions") }
+        let language = Bundle.main.preferredLocalizations.first ?? "en"
+        return Locale(identifier: language).localizedString(forRegionCode: code) ?? code
+    }
+
+    /// Countries by name, then the backup channel, then "Other regions" last.
+    static func sortedRegions(_ codes: [String]) -> [String] {
+        func rank(_ code: String) -> Int {
+            code == otherRegionsCode ? 2 : code == udpBackupRegionCode ? 1 : 0
+        }
+        return codes.sorted { a, b in
+            rank(a) != rank(b)
+                ? rank(a) < rank(b)
+                : regionLabel(a).localizedStandardCompare(regionLabel(b)) == .orderedAscending
+        }
+    }
+}
+
+/// Three bars for the exit latency band; none lit when untested.
+struct SeaSignalBars: View {
+    let latency: Int
+    var didFail = false
+
+    private var lit: Int {
+        guard !didFail, latency > 0 else { return 0 }
+        switch LatencyLevel.level(for: latency, kind: .exit) {
+        case .low: return 3
+        case .mid: return 2
+        case .high: return 1
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 2) {
+            ForEach(0..<3, id: \.self) { index in
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(index < lit ? SeaTheme.warm : SeaTheme.text.opacity(0.22))
+                    .frame(width: 3, height: CGFloat(5 + index * 3))
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -13,8 +67,18 @@ extension ProxiesView {
         return Set(appState.routePreferences.favorites(owner: owner, catalog: appState.managedCatalogNodes))
     }
 
-    var seaNodeToolbar: some View {
-        VStack(alignment: .leading, spacing: 12) {
+    var seaHeaderRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text("Servers")
+                .font(.system(size: 28, weight: .light)).tracking(-0.5)
+                .foregroundStyle(SeaTheme.text).accessibilityAddTraits(.isHeader)
+                .lineLimit(1)
+            Spacer(minLength: 12)
+            if AppProfile.isDev {
+                GradientAddButton("Add Node") {
+                    withAnimation(.easeOut(duration: 0.25)) { showingAddNode = true }
+                }
+            }
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").foregroundStyle(SeaTheme.muted).accessibilityHidden(true)
                 TextField("Search servers", text: $searchText)
@@ -25,32 +89,56 @@ extension ProxiesView {
                 }
             }
             .modifier(SeaFieldSurface(focused: isSearchFocused))
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    regionFilterChip(nil)
-                    ForEach(regionOptions, id: \.self) { regionFilterChip($0) }
-                    Divider().frame(height: 16)
-                    Button { seaFavoritesOnly.toggle() } label: {
-                        Label("Favorites", systemImage: seaFavoritesOnly ? "star.fill" : "star")
-                            .font(.system(size: 12, weight: .medium)).padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(seaFavoritesOnly ? seaAccent.opacity(0.14) : .clear, in: Capsule())
+            .frame(width: 280)
+            if appState.isConnected {
+                // Measures the selected exit only, never a list-wide sweep.
+                Button { testCurrentExit() } label: {
+                    HStack(spacing: 6) {
+                        if isTesting { ProgressView().controlSize(.mini) }
+                        Text("Test current")
                     }
-                    .buttonStyle(.plain).foregroundStyle(seaAccent)
-                    .accessibilityAddTraits(seaFavoritesOnly ? [.isSelected] : [])
+                }
+                .buttonStyle(SeaButtonStyle(variant: .quiet))
+                .fixedSize()
+                .disabled(isTesting || appState.isConnecting || appState.isDisconnecting
+                    || appState.switchingNodeId != nil)
+                .accessibilityLabel("Test current exit")
+            }
+        }
+    }
+
+    /// Text tabs: All, regions by name, Favorites.
+    var seaNodeToolbar: some View {
+        let all = "All", favorites = "Favorites"
+        let labels = Dictionary(uniqueKeysWithValues: regionOptions.map { ($0, SeaServerPresentation.regionLabel($0)) })
+        let selection = Binding<String>(
+            get: {
+                if seaFavoritesOnly { return favorites }
+                return regionFilter.flatMap { labels[$0] } ?? all
+            },
+            set: { value in
+                withAnimation(TonoMotion.stateChange(reduceMotion: reduceMotion)) {
+                    seaFavoritesOnly = value == favorites
+                    regionFilter = labels.first(where: { $0.value == value })?.key
                 }
             }
+        )
+        return ScrollView(.horizontal, showsIndicators: false) {
+            SeaTabs(label: "Server filter", selection: selection,
+                    options: [all] + regionOptions.compactMap { labels[$0] } + [favorites])
         }
     }
 
     var seaNodesSection: some View {
         let nodes = filteredNodes(from: cloudNodes)
         let favorites = SeaServerPresentation.favorites(in: nodes, names: seaFavoriteNames)
-        return VStack(alignment: .leading, spacing: 16) {
+        let listTitle = regionFilter.map(SeaServerPresentation.regionLabel) ?? String(localized: "All servers")
+        return VStack(alignment: .leading, spacing: 20) {
             if !favorites.isEmpty {
-                seaServerGroup("Favorites", nodes: favorites)
+                seaServerGroup(String(localized: "Favorites"), nodes: favorites)
             }
-            if !seaFavoritesOnly {
-                seaServerGroup("Cloud Servers", nodes: nodes)
+            if !seaFavoritesOnly, !nodes.isEmpty {
+                seaServerGroup(listTitle, nodes: nodes)
             }
             if nodes.isEmpty || (seaFavoritesOnly && favorites.isEmpty) {
                 ContentUnavailableView(
@@ -66,13 +154,12 @@ extension ProxiesView {
     }
 
     private func seaServerGroup(_ title: String, nodes: [ProxyNode]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(LocalizedStringKey(title)).font(.system(size: 13))
-                Text("\(nodes.count)").monospacedDigit()
-            }
-            .foregroundStyle(SeaTheme.muted).accessibilityAddTraits(.isHeader)
-            LazyVStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(verbatim: "\(title) · \(nodes.count)")
+                .font(.system(size: 13)).monospacedDigit()
+                .foregroundStyle(SeaTheme.tertiary).accessibilityAddTraits(.isHeader)
+                .padding(.bottom, 4)
+            LazyVStack(spacing: 0) {
                 ForEach(nodes) { seaServerRow($0) }
             }
         }
@@ -82,20 +169,17 @@ extension ProxiesView {
         let selected = appState.selectedNodeId == node.id || appState.selectedNodeId == node.name
         let switching = appState.switchingNodeId == node.id || appState.switchingNodeId == node.name
         let runtime = appState.proxyService.node(named: node.name)
-        let recent: LocalRoutePreferences.Success? = accountSession.user.flatMap { user in
-            guard user.id == ManagedExitCatalogOwnership.currentAccount else { return nil }
-            return appState.routePreferences.recentSuccesses(owner: user.id, catalog: appState.managedCatalogNodes)
-                .first(where: { $0.name == node.name })
-        }
+        let latency = runtime?.latency ?? 0
+        let didFail = runtime?.lastTestFailed == true
         let disabled = appState.isConnecting || appState.isDisconnecting
             || (appState.switchingNodeId != nil && !switching)
-        return HStack(spacing: 10) {
+        return HStack(spacing: 6) {
             if let owner = accountSession.user?.id, owner == ManagedExitCatalogOwnership.currentAccount {
                 let favorite = seaFavoriteNames.contains(ProxyNode.catalogBaseName(for: node.name))
                 Button { appState.toggleRouteFavorite(node.name, owner: owner) } label: {
                     Image(systemName: favorite ? "star.fill" : "star")
-                        .foregroundStyle(favorite ? SeaTheme.warm : SeaTheme.muted)
-                        .frame(width: 28, height: 36).contentShape(Rectangle())
+                        .foregroundStyle(favorite ? SeaTheme.warm : SeaTheme.subtle)
+                        .frame(width: 32, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(favorite ? "Remove favorite" : "Favorite")
@@ -106,37 +190,77 @@ extension ProxiesView {
                     appState.selectNode(node.name)
                 }
             } label: {
-                HStack(spacing: 12) {
-                    Text(node.flag).font(.system(size: 20)).frame(width: 30).accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(nodeRouteTitle(node)).font(.system(size: 15)).lineLimit(1)
-                        HStack(spacing: 6) {
-                            Text(nodeListRegionLabel(nodeListRegionCode(flag: node.flag, name: node.name)))
-                            Text(node.protocolType.uppercased())
-                            if let recent {
-                                Text("Last successful connection")
-                                Text(recent.at, format: .dateTime.hour().minute())
-                            }
-                        }
-                        .font(.system(size: 12)).monospacedDigit().foregroundStyle(SeaTheme.muted).lineLimit(1)
-                    }
+                HStack(spacing: 10) {
+                    Text(nodeRouteTitle(node)).font(.system(size: 15))
+                        .foregroundStyle(SeaTheme.text).lineLimit(1)
                     Spacer(minLength: 8)
                     if switching {
                         ProgressView().controlSize(.small)
                     } else {
-                        if selected { SeaTag(title: "Selected") }
-                        NodeLatencyBadge(latency: runtime?.latency ?? 0, didFail: runtime?.lastTestFailed == true)
+                        SeaSignalBars(latency: latency, didFail: didFail)
+                        Group {
+                            if didFail {
+                                Text("Timeout")
+                            } else if latency > 0 {
+                                Text(LatencyLevel.spokenTitle(for: latency, kind: .exit))
+                                    .contentTransition(reduceMotion ? .identity : .numericText())
+                            } else {
+                                Text("Not tested")
+                            }
+                        }
+                        .font(.system(size: 13)).monospacedDigit()
+                        .foregroundStyle(latency > 0 && !didFail ? SeaTheme.muted : SeaTheme.tertiary)
+                        .animation(TonoMotion.numeric(reduceMotion: reduceMotion), value: latency)
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain).disabled(disabled)
             .accessibilityLabel(localNodeAccessibilitySummary(node: node, isActive: selected,
-                isSwitching: switching, latency: runtime?.latency ?? 0, didFail: runtime?.lastTestFailed == true))
+                isSwitching: switching, latency: latency, didFail: didFail))
         }
-        .padding(.horizontal, 12).padding(.vertical, 4)
-        .background(selected ? seaAccent.opacity(0.10) : .white.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
-        .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(selected ? 0.16 : 0.04), lineWidth: 1) }
+        .padding(.leading, 4).padding(.trailing, 14)
+        .background(selected ? Color.white.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+        }
+        .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: selected)
+    }
+
+    /// One tertiary line with a text Refresh; refresh and policy failures keep
+    /// their own rows so the reason stays readable.
+    var seaCatalogFooter: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Group {
+                    if accountSession.catalogFailureMessage != nil {
+                        Text(verbatim: "\(catalogStatusTitle) · \(catalogStatusDetail)")
+                            .foregroundStyle(SeaTheme.attention)
+                    } else {
+                        Text(verbatim: catalogStatusDetail).foregroundStyle(SeaTheme.tertiary)
+                    }
+                }
+                .font(.system(size: 12)).monospacedDigit().lineLimit(1)
+                if let catalogFeedback {
+                    Text(verbatim: catalogFeedback)
+                        .font(.system(size: 12))
+                        .foregroundStyle(catalogRefreshSucceeded ? SeaTheme.good : SeaTheme.attention)
+                        .lineLimit(1)
+                        .transition(.opacity)
+                }
+                Spacer(minLength: 8)
+                Button(isRefreshingCatalog ? "Refreshing…" : "Refresh") { refreshCatalog() }
+                    .buttonStyle(SeaButtonStyle(variant: .text, size: .row))
+                    .font(.system(size: 13))
+                    .disabled(isRefreshingCatalog || accountSession.state != .ready)
+            }
+            if let reason = accountSession.catalogFailureMessage {
+                catalogIssueRow(label: String(localized: "Server catalog refresh failed"), reason: reason)
+            }
+            if let reason = accountSession.trafficPolicyFailureMessage {
+                catalogIssueRow(label: String(localized: "Traffic policy refresh failed"), reason: reason)
+            }
+        }
     }
 }

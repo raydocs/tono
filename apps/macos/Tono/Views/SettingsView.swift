@@ -52,7 +52,7 @@ struct SettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if seaEnabled {
-                SeaPageHeading(title: "Settings", subtitle: "Your Mac, appearance, privacy, and app information.")
+                SeaPageHeading(title: "Settings")
                     .padding(.bottom, 20)
             } else {
                 Text("Settings")
@@ -67,13 +67,16 @@ struct SettingsView: View {
                     if seaEnabled {
                         SettingsCard(icon: "gearshape", title: "General") {
                             generalRows
-                            settingDivider
-                            logsPageRow
                         }
                         SettingsCard(icon: "paintbrush", title: "Appearance") {
                             appearanceRows
                         }
                         privacyCard
+                        SettingsCard(icon: "wrench.and.screwdriver", title: "Advanced") {
+                            logsPageRow
+                            settingDivider
+                            auditLogRow
+                        }
                         aboutCard
                     } else {
                         Grid(horizontalSpacing: 20, verticalSpacing: 20) {
@@ -141,6 +144,16 @@ struct SettingsView: View {
         }
     }
 
+    private var auditLogRow: some View {
+        SettingRow(label: "Audit Log") {
+            Button("Copy path") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(LocalTrafficAudit.shared.logFileURL.path, forType: .string)
+            }
+            .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .borderless))
+        }
+    }
+
     private var logsPageRow: some View {
         SettingToggleRow(label: "Show Logs page", isOn: $logsEnabled)
     }
@@ -178,14 +191,6 @@ struct SettingsView: View {
                 SettingRow(label: "Cloud protection", subtitle: "See current and uncertain protection details in Support; this is not release attestation.") {
                     Button("Open Support") { appState.selectedPage = .support }
                         .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .borderless))
-                }
-                settingDivider
-                SettingRow(label: "Audit Log") {
-                    Button("Copy path") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(LocalTrafficAudit.shared.logFileURL.path, forType: .string)
-                    }
-                    .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .borderless))
                 }
             }
         } else {

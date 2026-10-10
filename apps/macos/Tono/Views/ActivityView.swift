@@ -105,7 +105,8 @@ private enum RouteTint {
 private enum SeaRouteTint {
     static func color(for type: ConnectionType) -> Color {
         switch type {
-        case .proxied, .home: return SeaTheme.cool
+        case .proxied: return SeaTheme.cool
+        case .home: return SeaTheme.cool.opacity(0.7)
         case .direct: return SeaTheme.warm
         case .rejected: return SeaTheme.danger
         }
@@ -206,6 +207,9 @@ struct ActivityView: View {
     @State private var trafficHistory = TrafficHistory()
     @State private var explainingApp: String?
     @State private var expandedApp: String?
+    @State private var showingSessionHelp = false
+    @SeaDisplayPreferences private var display
+    private var displayReduceMotion: Bool { display.reduceMotion }
 
     private enum Section: String, CaseIterable {
         case apps = "Apps"
@@ -248,6 +252,32 @@ struct ActivityView: View {
     }
 
     var body: some View {
+        Group {
+            if seaEnabled { seaBody } else { legacyBody }
+        }
+        .padding(.horizontal, 32)
+        .padding(.vertical, 16)
+        .padding(.bottom, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .sheet(isPresented: Binding(get: { explainingApp != nil }, set: { if !$0 { explainingApp = nil } })) {
+            VStack(alignment: .trailing, spacing: 0) {
+                ActivityRoutingDetails(entries: appState.connections.filter {
+                    ($0.processName ?? AppTrafficLedger.unattributed) == explainingApp
+                })
+                Button("Close") { explainingApp = nil }
+                    .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic)).padding(16)
+            }
+        }
+        .onChange(of: appState.trafficStats.downloadSpeed) { _, _ in
+            guard appState.trafficFeedLive else { return }
+            trafficHistory.record(
+                up: appState.trafficStats.uploadSpeed,
+                down: appState.trafficStats.downloadSpeed
+            )
+        }
+    }
+
+    private var legacyBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             Group {
                 if seaEnabled { seaHeader } else { headerRow }
@@ -280,25 +310,152 @@ struct ActivityView: View {
             case .connections: connectionsList
             }
         }
-        .padding(.horizontal, 32)
-        .padding(.vertical, 16)
-        .padding(.bottom, 16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .sheet(isPresented: Binding(get: { explainingApp != nil }, set: { if !$0 { explainingApp = nil } })) {
-            VStack(alignment: .trailing, spacing: 0) {
-                ActivityRoutingDetails(entries: appState.connections.filter {
-                    ($0.processName ?? AppTrafficLedger.unattributed) == explainingApp
-                })
-                Button("Close") { explainingApp = nil }
-                    .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic)).padding(16)
+    }
+
+    // MARK: - Sea
+
+    /// Windows `sea-activity`: search and a legend, route tabs, one summary
+    /// line, then the rows. Not connected is one sentence and nothing else.
+    private var seaBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SeaPageHeading(title: "Activity")
+                .padding(.bottom, 20)
+            if !appState.isConnected {
+                Text("Connect to see which apps use which route.")
+                    .font(.system(size: 15)).foregroundStyle(SeaTheme.muted)
+                Spacer(minLength: 0)
+            } else {
+                HStack(spacing: 16) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(SeaTheme.muted).accessibilityHidden(true)
+                        TextField("Filter by app, domain, or destination", text: $connectionQuery)
+                            .textFieldStyle(.plain).focused($connectionSearchFocused)
+                    }
+                    .modifier(SeaFieldSurface(focused: connectionSearchFocused))
+                    .frame(maxWidth: 360)
+                    Spacer(minLength: 8)
+                    seaLegend
+                }
+                .padding(.bottom, 8)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    SeaTabs(label: "Route", selection: $selectedFilter, options: filters,
+                            title: { LocalizedStringKey($0 == "Proxied" ? "Exit" : $0) })
+                }
+                .padding(.bottom, 14)
+                seaSummary
+                    .padding(.bottom, 10)
+                switch section {
+                case .apps: appsList
+                case .connections: connectionsList
+                }
+                // An empty list has nothing to close (Windows #1460).
+                if !appState.connections.isEmpty {
+                    HStack(spacing: 16) {
+                        Button("Close All", role: .destructive) {
+                            Task { await appState.closeAllConnections() }
+                        }
+                        .buttonStyle(SeaButtonStyle(variant: .danger, size: .row))
+                        Text("Closes these connections only. Tono stays connected.")
+                            .font(.system(size: 12)).foregroundStyle(SeaTheme.tertiary)
+                            .lineLimit(1)
+                    }
+                    .padding(.top, 12)
+                }
             }
         }
-        .onChange(of: appState.trafficStats.downloadSpeed) { _, _ in
-            guard appState.trafficFeedLive else { return }
-            trafficHistory.record(
-                up: appState.trafficStats.uploadSpeed,
-                down: appState.trafficStats.downloadSpeed
-            )
+        .foregroundStyle(SeaTheme.text)
+    }
+
+    private var seaLegend: some View {
+        HStack(spacing: 12) {
+            ForEach(filters.dropFirst(), id: \.self) { filter in
+                HStack(spacing: 5) {
+                    Capsule().fill(seaColor(for: filter)).frame(width: 8, height: 4)
+                    Text(LocalizedStringKey(filter == "Proxied" ? "Exit" : filter))
+                }
+            }
+        }
+        .font(.system(size: 12))
+        .foregroundStyle(SeaTheme.muted)
+        .fixedSize()
+        .accessibilityElement(children: .combine)
+    }
+
+    /// One line: the exit as Home names it, the counts, the live rate, and
+    /// the session total behind a "?".
+    private var seaSummary: some View {
+        HStack(spacing: 8) {
+            let exit = appState.proxyService.activeNodeName.map { nodeRouteTitle(for: $0) }
+                ?? String(localized: "No exit selected")
+            Text(verbatim: "\(exit) · \(seaLatencyText)")
+                .foregroundStyle(selectedExitNode?.lastTestFailed == true ? SeaTheme.danger : SeaTheme.muted)
+                .lineLimit(1)
+            latencyRefreshButton
+            if appState.connectionsFeedLive {
+                Text(verbatim: "·").foregroundStyle(SeaTheme.tertiary)
+                Text("\(seaVisibleApps.count) apps").monospacedDigit()
+                Text(verbatim: "·").foregroundStyle(SeaTheme.tertiary)
+                Text("\(appState.connections.count) current connections").monospacedDigit()
+            }
+            if appState.trafficFeedLive {
+                Text(verbatim: "·").foregroundStyle(SeaTheme.tertiary)
+                Text(verbatim: "↑ \(activityBytes(appState.trafficStats.uploadSpeed))/s  ↓ \(activityBytes(appState.trafficStats.downloadSpeed))/s")
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+            Button { showingSessionHelp.toggle() } label: {
+                Image(systemName: "questionmark.circle").foregroundStyle(SeaTheme.tertiary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Traffic by route · this session")
+            .popover(isPresented: $showingSessionHelp, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Traffic by route · this session").foregroundStyle(SeaTheme.muted)
+                    RouteSplitBar(split: appState.appTrafficLedger.overall, height: 7)
+                    Text(activityBytes(appState.appTrafficLedger.overall.total))
+                        .font(.system(size: 15)).monospacedDigit()
+                    Text("Session bytes include closed connections; they are not current traffic.")
+                        .foregroundStyle(SeaTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if appState.connectionsDisplayLimited {
+                        Text("Route counts show the newest \(ConnectionActivityPresentation.maxDisplayed) connections only.")
+                            .foregroundStyle(SeaTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .font(.system(size: 12))
+                .padding(16)
+                .frame(width: 300, alignment: .leading)
+            }
+            Spacer(minLength: 8)
+            SeaChoice(label: "Activity", selection: Binding(
+                get: { section.rawValue },
+                set: { value in
+                    withAnimation(TonoMotion.stateChange(reduceMotion: displayReduceMotion)) {
+                        section = Section(rawValue: value) ?? .apps
+                    }
+                }),
+                options: Section.allCases.map(\.rawValue))
+        }
+        .font(.system(size: 13))
+        .foregroundStyle(SeaTheme.muted)
+    }
+
+    /// Apps narrowed by the same search and route tab as the connections.
+    private var seaVisibleApps: [AppTrafficLedger.AppTotals] {
+        let query = connectionQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return appState.appTrafficLedger.apps.filter { app in
+            let split = app.split
+            let matchesRoute: Bool
+            switch selectedFilter {
+            case "Direct": matchesRoute = split.direct > 0
+            case "Home": matchesRoute = split.residential > 0
+            case "Proxied": matchesRoute = split.tunnel > 0
+            case "Rejected": matchesRoute = split.blocked > 0
+            default: matchesRoute = true
+            }
+            guard matchesRoute else { return false }
+            return query.isEmpty || app.id.lowercased().contains(query)
         }
     }
 
@@ -423,6 +580,7 @@ struct ActivityView: View {
         switch filter {
         case "Direct": return SeaTheme.warm
         case "Rejected": return SeaTheme.danger
+        case "Home": return SeaTheme.cool.opacity(0.7)
         default: return SeaTheme.cool
         }
     }
@@ -655,8 +813,8 @@ struct ActivityView: View {
 
     private var appsList: some View {
         ScrollView {
-            LazyVStack(spacing: 8) {
-                ForEach(appState.appTrafficLedger.apps) { app in
+            LazyVStack(spacing: seaEnabled ? 0 : 8) {
+                ForEach(seaEnabled ? seaVisibleApps : appState.appTrafficLedger.apps) { app in
                     if seaEnabled {
                         VStack(alignment: .leading, spacing: 0) {
                             Button {
@@ -672,10 +830,13 @@ struct ActivityView: View {
                             .accessibilityLabel("\(app.id), \(activityBytes(app.total)) this session, \(app.liveConnections) current connections")
                             if expandedApp == app.id {
                                 seaExpandedConnections(for: app)
+                                    .transition(displayReduceMotion ? .identity : TonoMotion.surfaceTransition)
                             }
                         }
-                        .padding(8)
-                        .modifier(SeaPanelSurface())
+                        .overlay(alignment: .bottom) {
+                            Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+                        }
+                        .animation(TonoMotion.stateChange(reduceMotion: displayReduceMotion), value: expandedApp)
                     } else {
                         Button { explainingApp = app.id } label: {
                             AppTrafficRow(app: app, peak: appState.appTrafficLedger.apps.first?.total ?? 1)
@@ -684,8 +845,10 @@ struct ActivityView: View {
                         .help(String(localized: "Why this route?"))
                     }
                 }
-                if appState.appTrafficLedger.apps.isEmpty {
-                    Text(appsEmptyCopy)
+                if (seaEnabled ? seaVisibleApps : appState.appTrafficLedger.apps).isEmpty {
+                    Text(seaEnabled && !appState.appTrafficLedger.apps.isEmpty
+                         ? String(localized: "No connections match these filters.")
+                         : appsEmptyCopy)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -704,10 +867,7 @@ struct ActivityView: View {
                  : String(localized: "Current connections unavailable"))
                 .font(.system(size: 11))
                 .foregroundStyle(SeaTheme.muted)
-            if !appState.connectionsFeedLive {
-                Text("Reading connections…")
-                    .font(.system(size: 11)).foregroundStyle(SeaTheme.muted)
-            } else if current.isEmpty {
+            if appState.connectionsFeedLive, current.isEmpty {
                 Text("No current connections. Session totals can include closed flows.")
                     .font(.system(size: 11)).foregroundStyle(SeaTheme.muted)
             }
@@ -901,22 +1061,28 @@ private struct AppTrafficRow: View {
                     Text(app.id == AppTrafficLedger.unattributed
                          ? String(localized: "Unattributed")
                          : app.id)
-                        .font(.system(size: seaEnabled ? 14 : 12, weight: .medium))
+                        .font(.system(size: seaEnabled ? 15 : 12, weight: seaEnabled ? .regular : .medium))
                         .foregroundStyle(seaEnabled ? SeaTheme.text : Color.primary)
                         .lineLimit(1)
                     if app.liveConnections > 0, (!seaEnabled || appState.connectionsFeedLive) {
+                        if seaEnabled {
+                            // A plain count, not a chip.
+                            Text("\(app.liveConnections)")
+                                .font(.system(size: 13)).monospacedDigit()
+                                .foregroundStyle(SeaTheme.tertiary)
+                        } else {
                         Text("\(app.liveConnections)")
-                            .font(.system(size: 9, weight: .semibold,
-                                          design: seaEnabled ? .default : .monospaced)).monospacedDigit()
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced)).monospacedDigit()
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
                             .background(.secondary.opacity(0.14), in: Capsule())
+                        }
                     }
                     Spacer(minLength: 6)
                     Text(activityBytes(app.total))
-                        .font(.system(size: 12, weight: .semibold,
-                                      design: seaEnabled ? .default : .monospaced)).monospacedDigit()
+                        .font(seaEnabled ? .system(size: 13) : .system(size: 12, weight: .semibold, design: .monospaced))
+                        .monospacedDigit()
                         .foregroundStyle(seaEnabled ? SeaTheme.text : Color.primary)
                 }
 
@@ -940,11 +1106,6 @@ private struct AppTrafficRow: View {
                 }
 
                 HStack(spacing: 10) {
-                    if seaEnabled {
-                        Text("This session")
-                            .font(.system(size: 10))
-                            .foregroundStyle(SeaTheme.muted)
-                    }
                     Label(activityBytes(app.upload), systemImage: "arrow.up")
                         .font(.system(size: 10, design: seaEnabled ? .default : .monospaced)).monospacedDigit()
                         .foregroundStyle(.secondary)

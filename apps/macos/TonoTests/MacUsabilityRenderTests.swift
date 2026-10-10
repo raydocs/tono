@@ -298,7 +298,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         let preferenceBefore = AppProfile.defaults.object(forKey: SeaAppearance.enabledKey) as? Bool
         let introBefore = AppProfile.defaults.object(forKey: SettingsKey.introSeen) as? Bool
         try await capture("servers-sea-normal", width: 760, height: 720, annotate: false, darkAppearance: true,
-                          nativeOpacity: .isolatedSubpixelEdges, nativeLabels: ["Servers", "Favorites", "Cloud Servers", "Paris"],
+                          nativeOpacity: .isolatedSubpixelEdges, nativeLabels: ["Servers", "Favorites", "All servers", "Paris"],
                           nativeAXLabels: ["Remove favorite"]) {
             ZStack { MeshGradientBackground(); ProxiesView() }
                 .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
@@ -314,7 +314,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         app.isConnected = true
         app.updateConnections(from: .init(downloadTotal: 50, uploadTotal: 15, connections: [cloud, direct]))
         try await capture("activity-sea-normal", width: 760, height: 640, annotate: false, darkAppearance: true,
-                          nativeOpacity: .isolatedSubpixelEdges, nativeLabels: ["Activity", "Routes now", "Session bytes include closed connections; they are not current traffic."]) {
+                          nativeOpacity: .isolatedSubpixelEdges, nativeLabels: ["Activity", "Close All", "Closes these connections only. Tono stays connected."]) {
             ZStack { MeshGradientBackground(); ActivityView() }
                 .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true).environment(app)
         }
@@ -347,8 +347,8 @@ final class MacUsabilityRenderTests: XCTestCase {
             WelcomeIntroView().modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
         }
         app.isConnected = false
-        try await capture("menubar-sea-normal", width: 280, height: 480, annotate: false, darkAppearance: true,
-                          nativeOpacity: .isolatedSubpixelEdges, nativeLabels: ["Open Tono", "Quit Tono", "Connect"]) {
+        try await capture("menubar-sea-normal", width: 300, height: 480, annotate: false, darkAppearance: true,
+                          nativeOpacity: .isolatedSubpixelEdges, nativeLabels: ["Open Tono", "Switch server", "Connect"]) {
             MenuBarView().modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
                 .environment(app).environment(account)
         }
@@ -419,7 +419,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         app.isConnected = true
         app.isProxyDegraded = true
         let account = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
-        try await capture("menubar-sea-degraded", width: 280, height: 480,
+        try await capture("menubar-sea-degraded", width: 300, height: 480,
                           annotate: false, darkAppearance: true, nativeOpacity: .isolatedSubpixelEdges,
                           nativeLabels: ["Connected", "Exit not responding — checking", "Open Tono"]) {
             MenuBarView().modifier(SeaPageAppearance()).environment(app).environment(account)

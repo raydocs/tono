@@ -23,7 +23,7 @@ struct ProxiesView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            headerRow
+            if showsSeaAppearance { seaHeaderRow } else { headerRow }
             if !showsSeaAppearance {
                 catalogSummary.padding(.top, 14)
             }
@@ -43,7 +43,7 @@ struct ProxiesView: View {
                     Group {
                         if showsSeaAppearance { seaNodesSection } else { nodesSection }
                     }
-                    if showsSeaAppearance { catalogSummary }
+                    if showsSeaAppearance { seaCatalogFooter }
 
                     if AppProfile.isDev {
                         ForEach(appState.proxyRegions.filter { $0.id == "custom" }) { region in
@@ -149,11 +149,18 @@ struct ProxiesView: View {
     /// region code that actually appears, so new regions show up without a
     /// code change. `nil` means no region filter.
     var regionOptions: [String] {
-        nodeListRegionSorted(Array(Set(cloudNodes.compactMap { node in
-            ProxyNode.hy2UdpIsVendorBlocked(node.name)
-                ? nil
-                : nodeListRegionCode(flag: node.flag, name: node.name)
-        })))
+        let codes = Array(Set(cloudNodes.compactMap { node in
+            ProxyNode.hy2UdpIsVendorBlocked(node.name) ? nil : listRegionCode(node)
+        }))
+        return showsSeaAppearance ? SeaServerPresentation.sortedRegions(codes) : nodeListRegionSorted(codes)
+    }
+
+    /// Sea filters by country name, with every unknown location under one
+    /// "Other regions" tab; the legacy chips keep their display initials.
+    func listRegionCode(_ node: ProxyNode) -> String {
+        showsSeaAppearance
+            ? SeaServerPresentation.regionCode(flag: node.flag, name: node.name)
+            : nodeListRegionCode(flag: node.flag, name: node.name)
     }
 
     var cloudNodes: [ProxyNode] {

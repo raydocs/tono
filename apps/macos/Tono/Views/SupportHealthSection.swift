@@ -14,8 +14,10 @@ struct SupportHealthSection: View {
 
     var body: some View {
         SupportCard(icon: "stethoscope", title: String(localized: "Local health check")) {
-            Text("Read-only checks. No connection, network reset, repair, or upload happens here.")
-                .font(.system(size: 12)).foregroundStyle(.secondary)
+            if !seaEnabled {
+                Text("Read-only checks. No connection, network reset, repair, or upload happens here.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+            }
             if seaEnabled {
                 HStack(spacing: 10) {
                     Button(checking ? String(localized: "Checking…") : String(localized: "Check this Mac"), action: runCheck)
@@ -34,8 +36,11 @@ struct SupportHealthSection: View {
                     .accessibilityIdentifier("localHealthCheck")
             }
             if seaEnabled {
-                Text("Copy for support copies the redacted diagnostic snapshot. Upload diagnostics opens a separate health report preview first; sending still requires your confirmation.")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                // One helper line under the buttons (it keeps both promises:
+                // the check changes nothing, and upload waits for consent).
+                Text("Read-only checks; nothing is changed or sent. Upload diagnostics shows a preview first and sends only after you confirm.")
+                    .font(.system(size: 12)).foregroundStyle(SeaTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if changedDuringCheck {
                 Text("The account or connection changed during the check. Check again for a consistent snapshot.")

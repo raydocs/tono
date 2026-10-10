@@ -681,6 +681,7 @@ private struct ConnectionProgressCard: View {
     var primaryActionInHeader = false
     var homePresentation = false
     @SeaDisplayPreferences private var displayPreferences
+    @State private var failureDetailsExpanded = false
     private var reduceMotion: Bool { displayPreferences.reduceMotion }
 
     var body: some View {
@@ -820,17 +821,33 @@ private struct ConnectionProgressCard: View {
                         .foregroundStyle(.secondary)
                 } else if let failure = appState.lastConnectionFailure {
                     VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 4) {
-                            Text("Failed at")
-                            Text(LocalizedStringKey(failure.stage.rawValue))
-                        }
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        if !appState.isProtectionBlocked {
-                            Text("Direct internet is available. Support code TONO_CONNECT_RELEASED.")
+                        if seaAppearance {
+                            // A noun, not the progressive step label: the step
+                            // has stopped (Windows `progress.failedAt`).
+                            Text("Stopped while \(failure.stage.stepName)")
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            HStack(spacing: 4) {
+                                Text("Failed at")
+                                Text(LocalizedStringKey(failure.stage.rawValue))
+                            }
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                        }
+                        if !appState.isProtectionBlocked {
+                            // Customer copy is localized; the support code
+                            // lives under Technical details below.
+                            Group {
+                                if seaAppearance {
+                                    Text("Direct internet is available.")
+                                } else {
+                                    Text("Direct internet is available. Support code TONO_CONNECT_RELEASED.")
+                                }
+                            }
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 } else {
@@ -856,12 +873,13 @@ private struct ConnectionProgressCard: View {
                 .padding(.vertical, 5)
                 .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
             } else if appState.protectedReconnectAttempt > 0 {
+                // Sea: a neutral count, not an orange alarm badge.
                 Text("TRY \(appState.protectedReconnectAttempt)")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundStyle(headerColor)
+                    .font(seaAppearance ? .system(size: 11).monospacedDigit() : .system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(seaAppearance ? SeaTheme.muted : headerColor)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(headerColor.opacity(0.10), in: Capsule())
+                    .background(seaAppearance ? Color.white.opacity(0.06) : headerColor.opacity(0.10), in: Capsule())
             }
         }
     }
@@ -879,7 +897,7 @@ private struct ConnectionProgressCard: View {
 
     private var headerColor: Color {
         appState.lastConnectionFailure != nil && !appState.isConnecting
-            ? .orange
+            ? (seaAppearance ? SeaTheme.attention : .orange)
             : (seaAppearance ? SeaTheme.cool : TonoBrand.accent)
     }
 
@@ -894,8 +912,15 @@ private struct ConnectionProgressCard: View {
             stageIcon(stage)
                 .frame(width: 14, height: 14)
 
-            Text(LocalizedStringKey(stage.rawValue))
-                .font(.system(size: 10.5, weight: stage == appState.connectionStage && appState.isConnecting ? .semibold : .regular))
+            Group {
+                if seaAppearance, !appState.isConnecting, appState.lastConnectionFailure?.stage == stage {
+                    // The failed row names the step; it is no longer "…" in progress.
+                    Text(verbatim: stage.stepName.prefix(1).uppercased() + stage.stepName.dropFirst())
+                } else {
+                    Text(LocalizedStringKey(stage.rawValue))
+                }
+            }
+                .font(.system(size: seaAppearance ? 12 : 10.5, weight: !seaAppearance && stage == appState.connectionStage && appState.isConnecting ? .semibold : .regular))
                 .foregroundStyle(stageTextColor(stage))
                 .lineLimit(1)
                 .minimumScaleFactor(0.76)
@@ -917,7 +942,7 @@ private struct ConnectionProgressCard: View {
                   appState.lastConnectionFailure?.stage == stage {
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 12))
-                .foregroundStyle(.orange)
+                .foregroundStyle(seaAppearance ? SeaTheme.attention : .orange)
         } else {
             Image(systemName: "circle")
                 .font(.system(size: 9))
@@ -928,11 +953,51 @@ private struct ConnectionProgressCard: View {
     private func stageTextColor(_ stage: ConnectionStage) -> Color {
         if appState.isConnecting, stage == appState.connectionStage { return .primary }
         if appState.completedConnectionStages.contains(stage) { return .secondary }
-        if appState.lastConnectionFailure?.stage == stage { return .orange }
+        if appState.lastConnectionFailure?.stage == stage { return seaAppearance ? SeaTheme.attention : .orange }
         return .secondary.opacity(0.65)
     }
 
+    @ViewBuilder
     private func failureBlock(_ failure: ConnectionFailure) -> some View {
+        if seaAppearance {
+            // Sea: a neutral box in the system font, no amber alarm. The
+            // support code is a diagnostic, kept copyable under Technical details.
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("What failed")
+                        .font(.system(size: 12))
+                        .foregroundStyle(SeaTheme.text)
+                    Text(failure.message)
+                        .font(.system(size: 12))
+                        .foregroundStyle(SeaTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+                if !appState.isProtectionBlocked {
+                    DisclosureGroup(isExpanded: $failureDetailsExpanded) {
+                        Text("Support code \("TONO_CONNECT_RELEASED")")
+                            .font(.system(size: 12))
+                            .foregroundStyle(SeaTheme.muted)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 6)
+                    } label: {
+                        Text("Technical details")
+                            .font(.system(size: 12))
+                            .foregroundStyle(SeaTheme.muted)
+                    }
+                    .modifier(SeaDisclosureTreatment())
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+        } else {
+            legacyFailureBlock(failure)
+        }
+    }
+
+    private func legacyFailureBlock(_ failure: ConnectionFailure) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")

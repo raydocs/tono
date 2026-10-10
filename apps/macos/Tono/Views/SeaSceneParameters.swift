@@ -159,9 +159,17 @@ struct SeaSceneStar {
             seed = seed &* 1664525 &+ 1013904223
             return Double(seed) / 4294967296
         }
+        // Sky percent, as Windows `SeaScene.tsx`: a bright star beside a glyph
+        // reads as stray punctuation ("Tono." / "未连接 ."), so the title
+        // chrome and the copy column keep only the faint tier.
+        func behindText(_ x: Double, _ y: Double) -> Bool {
+            (y < 16 && (x < 52 || x > 84)) || (x < 50 && y > 22)
+        }
         return (0..<200).map { index in
-            Self(x: 3 + random() * 94, y: 8 + random() * 72,
-                tier: index % 11 < 6 ? 0 : index % 11 < 9 ? 1 : 2,
+            let x = 3 + random() * 94
+            let y = 8 + random() * 72
+            let tier = index % 11 < 6 ? 0 : index % 11 < 9 ? 1 : 2
+            return Self(x: x, y: y, tier: behindText(x, y) ? 0 : tier,
                 twinkle: index % 3 == 0, duration: 3 + random() * 6,
                 delay: -random() * 9, color: ["B8CAFF", "F4EEE2", "FFE0B0"][index % 3])
         }

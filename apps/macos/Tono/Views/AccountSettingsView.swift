@@ -44,14 +44,13 @@ struct AccountSettingsCard: View {
                             .accessibilityValue("\(ByteCountFormatter.string(fromByteCount: usage, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: quota, countStyle: .file))")
                         }
                     }
+                    // The Devices fact above already names the list; one
+                    // hairline, no second heading.
                     Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
-                    Text("Devices")
-                        .font(.system(size: 13))
-                        .foregroundStyle(SeaTheme.muted)
                     ForEach(session.devices) { device in
                         HStack(spacing: 10) {
                             Image(systemName: "desktopcomputer")
-                                .foregroundStyle(seaAccent)
+                                .foregroundStyle(SeaTheme.tertiary)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(device.name).font(.system(size: 15)).foregroundStyle(SeaTheme.text)
                                 if let seen = device.lastSeenAt {
