@@ -165,11 +165,12 @@ actor TonoAPIClient {
     /// the system resolver and the pinned addresses both fail before any
     /// status line.
     private let relayPath: ControlPlanePath?
-    /// Decision 086: whether protection is armed without a tunnel, when the
-    /// relays are the only control-plane path PF admits. Production reads
-    /// `KillSwitchService.isArmedWithoutTunnel`; an injected session (tests)
-    /// reads false unless a reader is passed.
-    private let armedWithoutTunnel: @Sendable () -> Bool
+    /// Decision 091 (amends 086): whether the relays are the whole walk,
+    /// which is whenever no tunnel carries the control plane (unarmed, or
+    /// armed without a tunnel). Production reads
+    /// `!KillSwitchService.tunnelCarriesControlPlane`; an injected session
+    /// (tests) reads false unless a reader is passed.
+    private let relayOnly: @Sendable () -> Bool
     /// How long a read waits for a status line on a path that has a head
     /// budget (the system resolver) before the walk moves on
     /// (`ControlPlanePath.systemHeadBudget`).
@@ -265,7 +266,7 @@ actor TonoAPIClient {
         relayPath: ControlPlanePath? = nil,
         systemHandshake: (@Sendable () async -> Bool)? = nil,
         controlPlanePathTimeline: ControlPlanePathTimeline = ControlPlanePathTimeline(),
-        armedWithoutTunnel: (@Sendable () -> Bool)? = nil,
+        relayOnly: (@Sendable () -> Bool)? = nil,
         systemHeadBudget: TimeInterval = ControlPlanePath.systemHeadBudget
     ) {
         self.baseURL = baseURL
@@ -290,9 +291,9 @@ actor TonoAPIClient {
             ?? (session == nil ? ControlPlanePath.pinnedAddresses(for: baseURL) : nil)
         self.relayPath = relayPath
             ?? (session == nil ? ControlPlanePath.relays(for: baseURL) : nil)
-        let protectionReader: @Sendable () -> Bool = { KillSwitchService.isArmedWithoutTunnel }
+        let protectionReader: @Sendable () -> Bool = { !KillSwitchService.tunnelCarriesControlPlane }
         let fixtureReader: @Sendable () -> Bool = { false }
-        self.armedWithoutTunnel = armedWithoutTunnel
+        self.relayOnly = relayOnly
             ?? (session == nil ? protectionReader : fixtureReader)
         preferredPathKey = Self.preferredPathKey(forHost: baseURL.host ?? "")
         preferredPathLabel = Self.loadPreferredPath(key: preferredPathKey)
@@ -1253,13 +1254,16 @@ actor TonoAPIClient {
         // A path that answered where the ones before it could not goes in
         // front; the rest keep their order behind it.
         var order = [systemPath] + fallbacks
-        // Decision 086 (H1-F5, Option A): armed without a tunnel, the helper's
-        // PF permits the control plane only through the Tono relays. The
-        // system resolver and the pinned Cloudflare addresses would only wait
-        // out their timeouts against PF, so the relays are the whole walk,
-        // and the remembered preference is neither read nor changed. TLS
-        // still names the API host and is validated by default trust.
-        let relayOnly = relayPath != nil && armedWithoutTunnel()
+        // Decision 091 (owner, amends 086): with no tunnel carrying the
+        // control plane (signed out, first sign-in, disconnected, bootstrap,
+        // Protected Offline, drop recovery) the relays are the whole walk:
+        // no system resolver, no pinned Cloudflare address, before or after
+        // them. Armed, the helper's PF admits only the relays anyway (086);
+        // unarmed, a mainland path to Cloudflare is the thing that fails. All
+        // relays failing is reported as such, never followed by a direct
+        // attempt. The remembered preference is neither read nor changed.
+        // TLS still names the API host and is validated by default trust.
+        let relayOnly = relayPath != nil && self.relayOnly()
         if relayOnly, let relayPath { order = [relayPath] }
         let preferred = relayOnly ? nil : preferredPathLabel
         let preferredFirst: Bool
@@ -1284,8 +1288,28 @@ actor TonoAPIClient {
         var attempts: [ControlPlaneUnreachable.Attempt] = []
         // Decision 080: the labels of the paths lost so far, each once.
         var lostPaths: [String] = []
-        for (index, path) in order.enumerated() {
+        // The failure that ended the step before this one, so a walk the
+        // tunnel's loss cuts short ends on it (decision 091).
+        var lastFailure: (any Error)?
+        var index = 0
+        while index < order.count {
+            defer { index += 1 }
             if index > 0 { try Self.requireCurrent(requestIsCurrent) }
+            // Decision 091, also between steps: the tunnel may go away after
+            // the last failure was classified. Drop the direct steps still
+            // ahead; with none left, the walk ends on that failure.
+            if index > 0, !relayOnly, let relayPath, order[index].label != relayPath.label, self.relayOnly() {
+                order = Array(order[..<index]) + order[index...].filter { $0.label == relayPath.label }
+                if index >= order.count {
+                    guard let lastFailure else { throw APIError.transport("No control-plane path answered.") }
+                    if let clockFailure { throw Self.combined(clockFailure, failures: failures) }
+                    throw Self.combined(
+                        lastFailure, failures: failures, intercepted: sawRefusedCertificate,
+                        attempts: attempts, stoppedEarly: false
+                    )
+                }
+            }
+            let path = order[index]
             let startedAt = Date()
             var attempt = request
             attempt.setValue(path.label, forHTTPHeaderField: Self.pathHeader)
@@ -1318,8 +1342,18 @@ actor TonoAPIClient {
                 if index == 0, preferredFirst { preferredPathLabel = nil }
                 if CertificateClock.isDateFailure(error) { clockFailure = error }
                 if NetworkInterception.isTrustFailure(error) { sawRefusedCertificate = true }
+                lastFailure = error
                 failures.append("\(path.label)[\(Self.failureDetail(error))]")
                 attempts.append(.init(path: path.label, failure: ControlPlanePathTimeline.failureClass(error)))
+                // Decision 091: the tunnel went away during this walk (drop,
+                // teardown to bootstrap). The direct steps still ahead would
+                // go out with no tunnel, so only the relays remain of them.
+                // With none left, this failure ends the walk as the last one
+                // would, error and evidence intact, so the retry rule and the
+                // copy see what actually happened.
+                if !relayOnly, let relayPath, self.relayOnly() {
+                    order = Array(order[...index]) + order[(index + 1)...].filter { $0.label == relayPath.label }
+                }
                 if Self.reportablePathLabels.contains(path.label), !lostPaths.contains(path.label) {
                     lostPaths.append(path.label)
                 }

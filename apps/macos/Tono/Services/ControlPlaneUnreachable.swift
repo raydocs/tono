@@ -57,28 +57,38 @@ nonisolated struct ControlPlaneUnreachable: Equatable, Sendable {
     }
 
     /// `userMessage`, or, while a fail-closed barrier without a tunnel holds
-    /// this Mac (the account gate offers Restore internet), the same failure
-    /// with what that barrier means for signing in: PF lets only Tono's
-    /// fixed addresses through, so the relays and every other route are
-    /// blocked, and signing in on this network needs protection off. Tono
-    /// never turns it off by itself; the user chooses Restore internet. An
-    /// unconfirmed barrier is worded as one that may still be on.
+    /// this Mac, the same failure with what that barrier means for it: when
+    /// the walk reached the relays, they are what failed. The copy does not send
+    /// the user to turn protection off (owner, decision 091); Tono keeps it
+    /// on. An unconfirmed barrier is worded as one that may still be on.
     func message(protection: ProtectionHold) -> String {
         let closing: String
+        // Only a walk that reached the relays may say the relays failed: a
+        // stopped-early POST or an older helper's walk may never have tried
+        // them, and the copy claims nothing about which routes PF admits.
+        let triedRelays = attempts.contains { $0.path == "relay" }
         switch protection {
         case .none: closing = hint
-        case .blocking: closing = Self.protectedHint
-        case .unconfirmed: closing = Self.unconfirmedProtectedHint
+        case .blocking: closing = triedRelays ? Self.protectedHint : Self.protectedNoRelayHint
+        case .unconfirmed: closing = triedRelays ? Self.unconfirmedProtectedHint : Self.unconfirmedNoRelayHint
         }
         return [headline, triedSentence, closing].joined(separator: " ")
     }
 
     static var unconfirmedProtectedHint: String {
-        String(localized: "Protection may still be on from an earlier session. If it is, it lets only Tono's fixed addresses through, so Tono's relays and every other route are blocked on this Mac. To sign in on this network, turn protection off with Restore internet: this Mac then uses its normal internet, unprotected, until you connect again. Tono does not turn protection off by itself.")
+        String(localized: "Protection may still be on from an earlier session, and Tono's relays did not answer from this network. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.")
+    }
+
+    static var protectedNoRelayHint: String {
+        String(localized: "Protection is on. Tono keeps it on. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.")
+    }
+
+    static var unconfirmedNoRelayHint: String {
+        String(localized: "Protection may still be on from an earlier session. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.")
     }
 
     static var protectedHint: String {
-        String(localized: "Protection is on and lets only Tono's fixed addresses through, so Tono's relays and every other route are blocked on this Mac. To sign in on this network, turn protection off with Restore internet: this Mac then uses its normal internet, unprotected, until you connect again. Tono does not turn protection off by itself.")
+        String(localized: "Protection is on, and Tono's relays did not answer from this network. Tono keeps protection on. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.")
     }
 
     var headline: String {
@@ -89,6 +99,10 @@ nonisolated struct ControlPlaneUnreachable: Equatable, Sendable {
                 return String(localized: "Tono's service did not answer in time. This request was not sent again on another route, in case it already arrived.")
             }
             return String(localized: "The connection was interrupted before Tono got an answer. This request was not sent again on another route, in case it already arrived.")
+        }
+        if relayOnly {
+            // Decision 091: without a tunnel the walk is the relays alone.
+            return String(localized: "Tono could not reach any of its relays.")
         }
         if attempts.contains(where: { $0.path == "relay" }) {
             return String(localized: "Tono could not reach its service on any route, Tono's relays included.")
@@ -110,10 +124,18 @@ nonisolated struct ControlPlaneUnreachable: Equatable, Sendable {
         if stoppedEarly {
             return String(localized: "Retry in a moment. If it keeps failing, try another network, for example a phone hotspot.")
         }
+        if relayOnly {
+            return String(localized: "Tono's relays could not be reached from this network. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.")
+        }
         if attempts.first(where: { $0.path == "system_dns" })?.failure == "dns" {
             return String(localized: "This network's DNS did not return Tono's address. Try another network, for example a phone hotspot, then retry. For help, select this text and send it to Tono support.")
         }
         return String(localized: "Try another network, for example a phone hotspot, then retry. For help, select this text and send it to Tono support.")
+    }
+
+    /// Every route tried was a relay: the walk without a tunnel (decision 091).
+    var relayOnly: Bool {
+        !attempts.isEmpty && attempts.allSatisfy { $0.path == "relay" }
     }
 
     static func routeName(_ path: String) -> String {
