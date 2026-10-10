@@ -9,7 +9,8 @@
   recovery), a request to the production API host goes to the relays only, in the compiled order with the relay that
   last answered first. No Cloudflare system-DNS attempt, no pinned-address attempt, no DoH, no alternate port, no
   "tunnel already up" step. When every relay fails, the request fails with an error naming every relay and how it
-  failed; there is no automatic direct fallback. With a healthy tunnel the path order is unchanged (the tunnel carries
+  failed (Windows: stable prefix `TONO_RELAYS_UNREACHABLE: relay 1 (<ip:port>) <how>; relay 2 …` for the UI to map);
+  there is no automatic direct fallback. With a healthy tunnel the path order is unchanged (the tunnel carries
   the direct path). A POST or DELETE moves to the next relay only after a failure that proves nothing was delivered.
   TLS keeps the real hostname, SNI and default certificate validation; relays pass TLS through; nothing about auth
   moves to the relay. VPN payload never goes through the relays.
