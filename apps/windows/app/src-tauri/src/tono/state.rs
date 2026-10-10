@@ -741,7 +741,16 @@ impl TonoState {
     fn with_catalog_dir(
         catalog_dir: PathBuf, audit: Arc<crate::tono::audit::Audit>, credentials: Arc<SessionCredentialStore>,
     ) -> Result<Self> {
-        let transport = TonoTransport::new()?;
+        // A19: each control-plane path that fails before another one runs goes on the timeline.
+        let path_audit = audit.clone();
+        let transport = TonoTransport::new()?.with_path_failure_sink(Box::new(move |failure| {
+            path_audit.log(crate::tono::audit::AuditEvent::ControlPlanePathFail {
+                from: failure.path,
+                to: failure.next_path,
+                reason: failure.reason,
+                elapsed_ms: failure.elapsed_ms,
+            });
+        }));
         let fake_ip_slot_file = catalog_dir.join("fake-ip-slot");
         // The production client is built only here: every server answer on this session reaches
         // the offline gate (#582).
