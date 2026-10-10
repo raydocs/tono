@@ -69,7 +69,11 @@ extension AppState {
             error: errorCode,
             retryAttempt: snapshot.reconnectAttempt,
             totalElapsedMs: steps.isEmpty ? nil : min(steps.reduce(0) { $0 + ($1.elapsedMs ?? 0) }, 86_400_000),
-            steps: steps, virtualAdapters: [], auditLogPath: "", serviceLogPath: ""
+            steps: steps,
+            // H21-O-F7: a class token only, never an interface name.
+            virtualAdapters: OtherVPNDetection.isPresent(OtherVPNDetection.currentInterfaces())
+                ? [OtherVPNDetection.diagnosticsClass] : [],
+            auditLogPath: "", serviceLogPath: ""
         )
         let findings: [LocalHealthCheck.Finding] = [
             .init(id: "account", title: String(localized: "Account"), status: ready ? .observed : .attention,

@@ -643,6 +643,16 @@
         }
       }
     },
+    "Another VPN is running on this Mac and may conflict with Tono. Quit it, then connect again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存在其他 VPN：这台 Mac 上还有别的 VPN 在运行，可能与 Tono 冲突。请先退出它，再重新连接。"
+          }
+        }
+      }
+    },
     "Another program keeps replacing Tono's network protection. The original network is back. Quit the other VPN or firewall, then connect again.": {
       "localizations": {
         "zh-Hans": {

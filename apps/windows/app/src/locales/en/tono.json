@@ -371,6 +371,7 @@
       "nodeUnreachable": "The connection didn't complete.",
       "tunDataPlaneBroken": "The connection didn't complete.",
       "tunIngressBroken": "The connection didn't complete.",
+      "otherVpnPresent": "Another VPN is running on this PC and may conflict with Tono. Quit it, then connect again.",
       "protectedHttpsFailed": "The connection didn't complete.",
       "coreUnpinned": "This copy of Tono is missing its integrity check. Install the latest Tono — reinstalling the same copy will not help.",
       "coreMismatch": "This copy of Tono does not match its core. Install the latest Tono.",
