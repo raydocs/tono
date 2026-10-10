@@ -1,6 +1,6 @@
 ## 2026-10-10 · macOS 登录失败文案写明试了哪些路径、各自怎么失败（直连 / 固定地址 / 中继）
 - 归属：ops 任务（[运维计划](../ops/plan-2026-09-11.md)；中国大陆连通性审计，与 [Amp backlog](../ops/amp-backlog-2026-10-10.md) A3（Windows #1478 草稿）的路径列表对齐）；macOS App 控制面客户端与登录文案。
-- 来源：origin/main `3d973f95` → 分支 `amp/cn3-unreachable-names-paths`；未合 main。
+- 来源：origin/main `3d973f95` → 分支 `amp/cn3-unreachable-names-paths`，[#1528](https://github.com/raydocs/tono/pull/1528)；未合 main。
 - 缺陷修复（MAC-CN-UNREACHABLE-NO-WHERE）：所有控制面路径都失败时只显示「无法连接 Tono 服务，请检查网络后重试。」→
   `exchangeOverPaths` 抛错时在 `userInfo` 带上每条路径的标签与失败类别（`ControlPlanePathTimeline.failureClass`：dns / connect / tls / timeout / other，
   与 A19 时间线一致，不读系统本地化文字）以及「是否因可能已送达而停在中途」；`handleTransportFailure` 据此抛新的 `APIError.unreachable(ControlPlaneUnreachable)`
