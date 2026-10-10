@@ -863,6 +863,7 @@ export const translationKeys = [
   'tono.dashboard.errors.nodeUnreachable',
   'tono.dashboard.errors.tunDataPlaneBroken',
   'tono.dashboard.errors.tunIngressBroken',
+  'tono.dashboard.errors.otherVpnPresent',
   'tono.dashboard.errors.protectedHttpsFailed',
   'tono.dashboard.errors.coreUnpinned',
   'tono.dashboard.errors.coreMismatch',

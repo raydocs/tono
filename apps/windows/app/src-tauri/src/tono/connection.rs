@@ -677,6 +677,13 @@ async fn guard_snapshot(
 async fn fail_connect(
     state: &Arc<TonoState>, app: &AppHandle, generation: u64, err: String, account_owner: (u64, u64),
 ) -> bool {
+    // H21-O-F7: name another VPN when one is up and the failure is network/TUN class. A read-only
+    // adapter read with no lock held; it changes nothing the failure plan below decides. The hy2
+    // idle code goes on first so that more specific cause keeps its own sentence.
+    let err = {
+        let adapters = crate::tono::other_vpn::adapters().await;
+        tono_core::other_vpn::annotate(&tono_core::hy2_idle::annotate(&err), &adapters).into_owned()
+    };
     {
         let inner = state.lock().await;
         inner.client.transport().set_auth_tunnel_port(0);

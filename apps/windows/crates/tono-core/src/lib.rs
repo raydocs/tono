@@ -19,6 +19,7 @@ pub mod direct_domains;
 pub mod heal;
 pub mod network_disposition;
 pub mod node;
+pub mod other_vpn;
 pub mod policy;
 pub mod policy_signature;
 pub mod protected_connectivity;

@@ -1,0 +1,320 @@
+{
+  "target": "198.12.84.154",
+  "label": "US-VLESS-Reality (Grove)",
+  "hy2Port": 443,
+  "controlPort": 33434,
+  "measurementIds": {
+    "icmp": "2U30UOChKQjMmq38S00021I4H",
+    "tcp443": "2uO2MqTZrT1cAeVB300021I4H",
+    "udpHy2": "2lFi0KO1LF187gmWJ00021I4H",
+    "udpControl": "2AEfRc4v2GhDaMSZ400021I4H"
+  },
+  "rows": [
+    {
+      "city": "Nanning",
+      "asn": 9808,
+      "network": "China Mobile Communications Group",
+      "carrier": "China Mobile",
+      "icmp": {
+        "minMs": 188.747,
+        "avgMs": 189.019,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 1200,
+        "avgMs": 2432,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "160.72.204.194",
+        "lastHopName": "160.72.204.194.lightower.net",
+        "lastHopAsn": 46887,
+        "lastHopMs": 191.7,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.12.84.154",
+        "lastHopName": "police.idzseller.info",
+        "lastHopAsn": 36352,
+        "lastHopMs": 193.3,
+        "preTargetAsn": 46887
+      }
+    },
+    {
+      "city": "Shanghai",
+      "asn": 9808,
+      "network": "China Mobile Communications Group",
+      "carrier": "China Mobile",
+      "icmp": {
+        "minMs": 200.139,
+        "avgMs": 200.468,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 1199,
+        "avgMs": 2656,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "160.72.204.194",
+        "lastHopName": "160.72.204.194.lightower.net",
+        "lastHopAsn": 46887,
+        "lastHopMs": 201.9,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.12.84.154",
+        "lastHopName": "police.idzseller.info",
+        "lastHopAsn": 36352,
+        "lastHopMs": 204.2,
+        "preTargetAsn": 46887
+      }
+    },
+    {
+      "city": "Taishan",
+      "asn": 9808,
+      "network": "China Mobile Communications Group",
+      "carrier": "China Mobile",
+      "icmp": {
+        "minMs": 184.335,
+        "avgMs": 184.605,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 1190,
+        "avgMs": 1206,
+        "loss": 20,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "160.72.204.194",
+        "lastHopName": "160.72.204.194.lightower.net",
+        "lastHopAsn": 46887,
+        "lastHopMs": 192.5,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.12.84.154",
+        "lastHopName": "police.idzseller.info",
+        "lastHopAsn": 36352,
+        "lastHopMs": 182.3,
+        "preTargetAsn": 46887
+      }
+    },
+    {
+      "city": "Dongguan",
+      "asn": 4134,
+      "network": "Chinanet Backbone",
+      "carrier": "China Telecom",
+      "icmp": {
+        "minMs": 166.613,
+        "avgMs": 172.095,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 168.4,
+        "avgMs": 176.4,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "62.115.197.43",
+        "lastHopName": "hostpapa-ic-390227.ip.twelve99-cust.net",
+        "lastHopAsn": 1299,
+        "lastHopMs": 173.4,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.12.84.154",
+        "lastHopName": "police.idzseller.info",
+        "lastHopAsn": 36352,
+        "lastHopMs": 169.8,
+        "preTargetAsn": 1299
+      }
+    },
+    {
+      "city": "Guangzhou",
+      "asn": 4134,
+      "network": "Chinanet Backbone",
+      "carrier": "China Telecom",
+      "icmp": {
+        "minMs": 172.378,
+        "avgMs": 174.833,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 168.1,
+        "avgMs": 171.2,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "62.115.197.43",
+        "lastHopName": "hostpapa-ic-390227.ip.twelve99-cust.net",
+        "lastHopAsn": 1299,
+        "lastHopMs": 180.7,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.12.84.154",
+        "lastHopName": "police.idzseller.info",
+        "lastHopAsn": 36352,
+        "lastHopMs": 173.1,
+        "preTargetAsn": 1299
+      }
+    },
+    {
+      "city": "Nanjing",
+      "asn": 4134,
+      "network": "Chinanet Backbone",
+      "carrier": "China Telecom",
+      "icmp": {
+        "minMs": 167.023,
+        "avgMs": 171.149,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 173.8,
+        "avgMs": 185,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "62.115.162.227",
+        "lastHopName": "hostpapa-ic-389114.ip.twelve99-cust.net",
+        "lastHopAsn": 1299,
+        "lastHopMs": 167.6,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.12.84.154",
+        "lastHopName": "police.idzseller.info",
+        "lastHopAsn": 36352,
+        "lastHopMs": 175.3,
+        "preTargetAsn": 1299
+      }
+    },
+    {
+      "city": "Changsha",
+      "asn": 4837,
+      "network": "CHINA UNICOM China169 Backbone",
+      "carrier": "China Unicom",
+      "icmp": {
+        "minMs": 173.953,
+        "avgMs": 174.227,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 177.6,
+        "avgMs": 191,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "160.72.204.194",
+        "lastHopName": "160.72.204.194.lightower.net",
+        "lastHopAsn": 46887,
+        "lastHopMs": 193.9,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.12.84.154",
+        "lastHopName": "police.idzseller.info",
+        "lastHopAsn": 36352,
+        "lastHopMs": 188.1,
+        "preTargetAsn": 46887
+      }
+    },
+    {
+      "city": "Guilin",
+      "asn": 4837,
+      "network": "CHINA UNICOM China169 Backbone",
+      "carrier": "China Unicom",
+      "icmp": {
+        "minMs": 189.791,
+        "avgMs": 190.391,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 195.6,
+        "avgMs": 206.5,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "160.72.204.194",
+        "lastHopName": "160.72.204.194.lightower.net",
+        "lastHopAsn": 46887,
+        "lastHopMs": 194.6,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.12.84.154",
+        "lastHopName": "police.idzseller.info",
+        "lastHopAsn": 36352,
+        "lastHopMs": 199.9,
+        "preTargetAsn": 46887
+      }
+    },
+    {
+      "city": "Xi'an",
+      "asn": 4837,
+      "network": "CHINA UNICOM China169 Backbone",
+      "carrier": "China Unicom",
+      "icmp": {
+        "minMs": 212.124,
+        "avgMs": 222.564,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 192.5,
+        "avgMs": 218.9,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "160.72.204.194",
+        "lastHopName": "160.72.204.194.lightower.net",
+        "lastHopAsn": 46887,
+        "lastHopMs": 200.2,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.12.84.154",
+        "lastHopName": "police.idzseller.info",
+        "lastHopAsn": 36352,
+        "lastHopMs": 191.2,
+        "preTargetAsn": 46887
+      }
+    }
+  ]
+}

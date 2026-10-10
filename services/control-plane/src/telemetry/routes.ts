@@ -59,9 +59,10 @@ export function normalizedReferenceCode(value: unknown): string {
 // as `null` and not arriving at all mean the same thing here: both drop out
 // of the canonical form. The non-nullable fields are required.
 const diagnosticsStepStates = ['pending', 'current', 'completed', 'failed'];
-/** Fixed vocabulary; an unknown adapter class is rejected, not stored. */
+/** Fixed vocabulary; an unknown adapter class is rejected, not stored.
+ *  `otherVpn` (H21-O-F7): an up VPN/TUN adapter the client does not own. */
 const diagnosticsVirtualAdapters = [
-  'hyperV', 'wsl', 'vmware', 'virtualBox', 'docker', 'loopbackAdapter',
+  'hyperV', 'wsl', 'vmware', 'virtualBox', 'docker', 'loopbackAdapter', 'otherVpn',
 ];
 const DIAGNOSTICS_MAX_STEPS = 32;
 /** A connect attempt that "took" more than a day is a broken clock, not data. */
