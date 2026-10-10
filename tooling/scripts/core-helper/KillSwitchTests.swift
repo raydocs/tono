@@ -324,7 +324,8 @@ extension KillSwitchManager {
         )) {
             check("kernel-holds-relay-permit",
                   relayShown.contains("179.253.233.220 port = 2053")
-                    && relayShown.contains("179.255.154.17 port = 2053"))
+                    && relayShown.contains("179.255.154.17 port = 2053")
+                    && relayShown.contains("154.84.56.196 port = 2053"))
             check("kernel-relay-permit-is-user-only", relayShown.split(separator: "\n")
                 .filter { $0.contains("2053") }
                 .allSatisfy { $0.contains("user = 501") && !$0.contains("user = 0") })
@@ -1964,9 +1965,10 @@ extension KillSwitchManager {
         check("relay-permit-is-exactly-the-compiled-relays", relayRules == [
             "pass out quick inet proto tcp to 179.253.233.220 port 2053 user 501 keep state (if-bound) label \"tono-api-relay\"",
             "pass out quick inet proto tcp to 179.255.154.17 port 2053 user 501 keep state (if-bound) label \"tono-api-relay\"",
+            "pass out quick inet proto tcp to 154.84.56.196 port 2053 user 501 keep state (if-bound) label \"tono-api-relay\"",
         ])
         check("relays-match-the-app-list", ControlPlaneRelays.endpoints.map { "\($0.address):\($0.port)" }
-              == ["179.253.233.220:2053", "179.255.154.17:2053"])
+              == ["179.253.233.220:2053", "179.255.154.17:2053", "154.84.56.196:2053"])
         check("no-cloudflare-address-permitted",
               !cloudflare.contains { bootstrap.contains($0) } && !bootstrap.contains("104.20.27.170"))
         check("no-tono-control-for-the-api-host", !bootstrap.contains("tono-control"))
@@ -2009,7 +2011,7 @@ extension KillSwitchManager {
             withdrawn: newPass.subtracting(toTunnel), remaining: toTunnel
         )
         check("tunnel-arm-kills-relay-states",
-              tunnelDisposal == .targeted(["179.253.233.220", "179.255.154.17"]))
+              tunnelDisposal == .targeted(["154.84.56.196", "179.253.233.220", "179.255.154.17"]))
         let relayExitBootstrap = passRules(in: renderRules(
             state: state(tunnel: false, exit: "179.253.233.220"), allowedUID: 501, physicalInterfaces: ["en0"]
         ))
@@ -2020,7 +2022,7 @@ extension KillSwitchManager {
             stateDisposal(replacing: relayExitBootstrap, with: relayExitConnected),
             withdrawn: relayExitBootstrap.subtracting(relayExitConnected), remaining: relayExitConnected
         )
-        check("exit-on-a-relay-node-is-spared", relayExitDisposal == .targeted(["179.255.154.17"]))
+        check("exit-on-a-relay-node-is-spared", relayExitDisposal == .targeted(["154.84.56.196", "179.255.154.17"]))
         // An exit permit withdrawn from the same address is still killed.
         let exitMoved = sparingSharedRelayHosts(
             .targeted(["179.253.233.220"]),
