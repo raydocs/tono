@@ -418,7 +418,11 @@ nonisolated enum HelperProtocolVersion {
     ///   monotonic clock, so a wall clock set back no longer holds the
     ///   core-down release, the orphaned-session releases and PF supervision
     ///   for the length of the step (MAC-HELPER-WATCHDOG-WALLCLOCK).
-    static let current = "4.52.46"
+    /// - 4.52.46 → 4.52.47: a third Tono API relay, `154.84.56.196:2053`
+    ///   (another provider than the DMIT pair, decision 089), joins
+    ///   `ControlPlaneRelays`, so armed without a tunnel PF admits it like the
+    ///   other two (TCP 2053, the interactive user only).
+    static let current = "4.52.47"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

@@ -1,4 +1,4 @@
-# API relay (decision 077)
+# API relay (decisions 077, 089)
 
 Tono-owned TCP relays outside Cloudflare for clients whose carrier path to the Cloudflare
 edge is broken (first case: China Mobile Shanghai, 2026-10-10). The relay is nginx
@@ -12,8 +12,9 @@ the node; the client validates the normal Cloudflare certificate.
 |---|---|---|---|
 | Los Angeles · Westwood (DMIT) | 179.253.233.220 | 2053 | 2026-10-10 03:04 UTC |
 | Los Angeles · Mesa (DMIT) | 179.255.154.17 | 2053 | 2026-10-10 03:59 UTC |
+| Los Angeles · Arosscloud (AS400619) | 154.84.56.196 | 2053 | 2026-10-10 20:16 UTC (node side; clients after #1538) |
 
-Both are exit nodes; `tono-xray` owns 443 and is never touched. Admitted SNIs:
+Westwood and Mesa are exit nodes; `tono-xray` owns 443 and is never touched. Admitted SNIs:
 `api.afk.ccwu.cc` (control plane), `releases.afk.ccwu.cc` (installers). Anything else is
 sent to a closed port.
 
@@ -24,17 +25,50 @@ Services, Los Angeles** for 179.253.233.220 and for 179.255.154.17 (hostname `ho
 same postal code). Different hosts protect against one VM failing, not against a DMIT network or
 data-centre outage, a DMIT route change towards Chinese carriers, or a block of DMIT's address
 space; any of those takes both relays down together, and clients fall back to today's
-behaviour (no relay). Owner action: add a relay on a different provider and region
-(different ASN, ideally not Los Angeles) and list it in all four places below. Nothing has been
-bought or deployed for this. Finding [API-RELAY-SAME-PROVIDER](../findings.d/API-RELAY-SAME-PROVIDER.md).
+behaviour (no relay). 2026-10-10: a third relay on another provider (Arosscloud, AS400619)
+is deployed, below; it is still in Los Angeles, so the "different region" half stays open. Finding [API-RELAY-SAME-PROVIDER](../findings.d/API-RELAY-SAME-PROVIDER.md).
 A field check of both relays from a mainland network: [cn-acceptance.md](cn-acceptance.md) (3c, 4.x).
 
-The same list is compiled into the clients and the control plane; change all four together:
+Clients walk the relays in the table's order. The third is appended last, so a walk that
+reaches a DMIT relay is unchanged and a remembered relay index (Windows) keeps its meaning.
+
+### Los Angeles · Arosscloud (decision 089)
+
+- **Failure domain.** AROSSCLOUD INC (AS400619; address block 154.84.56.0/22 registered at
+  AFRINIC, leased space), Los Angeles: another provider and ASN than the DMIT pair, so a DMIT
+  network outage, route change or address-space block no longer takes every relay down. **Same
+  metro** as DMIT (about 1 ms between them), so a Los Angeles regional or transit event still can.
+  The earlier choice, 38.14.195.144 (Uscloud, San Jose), was never reachable: its provider drops
+  inbound TCP 2053.
+- **Routes** (2026-10-10, backbone probes, not home broadband): outbound to China Telecom via
+  59.43.x (CN2), to China Unicom via 218.105.x (AS9929), to China Mobile via 223.120.x (CMI);
+  Globalping mtr from mainland probes showed the same carriers inbound. That is the same class
+  of route as the DMIT relays; mainland round trips measured 128–182 ms, 0 % loss, about the same
+  as the DMIT relays.
+- **Not an exit node.** No `tono-xray`, no exit agent, no `exit_nodes` row; only the relay and
+  sshd listen.
+- **Deploy** (owner-approved via Puck 2026-10-10, relay only): Debian 13; `nginx`,
+  `libnginx-mod-stream` and `logrotate` installed with service start held back
+  (`policy-rc.d`) so the distro default site never listened, `sites-enabled/default` removed,
+  then `apply-relay.sh` with the canonical files. Not changed: firewall (none configured on the
+  node), SSH, anything on 443.
+- **Rollback.** `/root/tono-relay-rollback.sh` on the node stops nginx and purges the packages
+  this install added. Clients then fail over the third relay within its connect budget.
+- **End-to-end monitoring gap.** The node-side probe (below) reports with an exit agent's
+  token, and this host has none, so `api-relays.ts` gives it no `exitNodeId`: the console's
+  「端到端可用」 column stays 「节点未上报」 and alerts judge it on the Worker's TCP-open probe alone.
+  Check it by hand with "Verify".
+
+The same list, in the same order, is compiled into the clients and the control plane; change
+all of these together:
 `apps/windows/service/src/lib.rs` (`API_RELAYS`, re-exported by the Windows app's
 `bootstrap.rs` and rendered into WFP rule C; a change there changes the kill switch permit
-table and its pinned test, decision 090),
-`apps/macos/Tono/Services/ControlPlanePath.swift` (`apiRelays`),
-`services/control-plane/src/api-relays.ts` (probe list), this file.
+table, its pinned test and `wfp_model::FILTER_NAMESPACE`, decision 090),
+`apps/macos/Tono/Core/ControlPlaneRelays.swift` (compiled into the app and the privileged
+helper's PF relay permit: a change needs a `HelperProtocolVersion` bump and a new
+`CONTRACT.sha256`, decision 086),
+`services/control-plane/src/api-relays.ts` (probe list),
+`tooling/ops/cn-acceptance/cn_acceptance.py` (`RELAYS`), this file.
 
 ## Config
 
@@ -50,8 +84,11 @@ ssh root@<node> bash /root/apply-relay.sh --logrotate-only   # log rotation only
 ```
 
 The script backs up `nginx.conf` to `nginx.conf.bak-<UTC>-pre-tono-relay-v2`, installs
-`libnginx-mod-stream` if missing, reloads only when `nginx -t` passes, otherwise restores
-the backup. Log: `/var/log/nginx/tono-relay.log` (only sessions that named an admitted SNI).
+`libnginx-mod-stream` and `logrotate` if missing (it adds no second `load_module` when the
+distro's `modules-enabled` already loads the stream module), reloads only when `nginx -t`
+passes, otherwise restores the backup. The canonical file caps one client address at 256
+concurrent relay sessions (`limit_conn`; loose because carrier-grade NAT shares addresses).
+The DMIT nodes still run the file without that cap until the next `apply-relay.sh` there. Log: `/var/log/nginx/tono-relay.log` (only sessions that named an admitted SNI).
 Errors: `/var/log/nginx/tono-relay-error.log`.
 
 ### Log rotation
@@ -256,7 +293,7 @@ walks, 1 s apart, and only when the retry rule allows a second one):
 |---|---|---|
 | `system_dns` (URLSession) | at most 15 s with no status line (`ControlPlanePath.systemHeadBudget`), then the next path | up to the session's 30 s request / 45 s resource timeout; moves on only after a failure that proves nothing was sent |
 | `pinned` | 10 s connect, split across the addresses | same |
-| `relay` | 5 s connect, split across both relays (a dead first relay leaves the second the rest) | same |
+| `relay` | 5 s connect per relay (`relayWalkBudget`: 15 s for three; a relay that fails sooner leaves its rest to the next) | same |
 
 So when the pinned connects fail, a read reaches the relays at most 25 s after it starts, whatever
 the system resolver does. A pinned address that accepts the connection and then never answers has no
@@ -280,5 +317,6 @@ line is the answer and is not sent again on another path.
 ## Rollback
 
 On the node: restore the latest `/etc/nginx/nginx.conf.bak-*-pre-tono-relay*` over
-`/etc/nginx/nginx.conf`, `nginx -t`, `systemctl reload nginx`. Clients then fail over the
-relay within their connect budget (Windows 4 s, macOS 5 s) and behave as before the relay.
+`/etc/nginx/nginx.conf`, `nginx -t`, `systemctl reload nginx` (Los Angeles · Arosscloud:
+`/root/tono-relay-rollback.sh`). Clients then fail over the relay within their connect budget
+(Windows 4 s, macOS 5 s per relay) and behave as before the relay.

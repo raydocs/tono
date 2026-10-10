@@ -78,6 +78,11 @@ class RelayStreamConfTest(unittest.TestCase):
         self.assertNotRegex(text, r"\bssl_certificate(_key)?\b")
         self.assertNotRegex(text, r"\blisten\s+\S*\b443\b")
 
+    def test_one_address_cannot_hold_more_than_256_relay_sessions(self):
+        text = strip_comments(CONF.read_text())
+        self.assertRegex(text, r"(?m)^\s*limit_conn_zone\s+\$binary_remote_addr\s+zone=tono_relay_per_ip:\S+\s*;")
+        self.assertRegex(block(text, "server"), r"(?m)^\s*limit_conn\s+tono_relay_per_ip\s+256\s*;")
+
 
 if __name__ == "__main__":
     unittest.main()

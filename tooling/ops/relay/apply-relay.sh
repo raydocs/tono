@@ -32,6 +32,10 @@ install_logrotate() {
 }
 
 [ -f "$SRC/tono-relay.logrotate" ] || { echo "missing $SRC/tono-relay.logrotate" >&2; exit 1; }
+# A minimal image may lack logrotate; without it the relay logs would grow unbounded.
+if ! command -v logrotate >/dev/null 2>&1; then
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -q logrotate >/dev/null
+fi
 if [ "${1:-}" = --logrotate-only ]; then
   install_logrotate
   exit 0
@@ -45,13 +49,17 @@ cp "$CONF" "$BAK"
 if ! ls /usr/lib/nginx/modules/ngx_stream_module.so >/dev/null 2>&1; then
   DEBIAN_FRONTEND=noninteractive apt-get install -y -q libnginx-mod-stream >/dev/null
 fi
+# Debian's libnginx-mod-stream already loads the module from modules-enabled; a second
+# load_module line in nginx.conf fails `nginx -t` ("already loaded").
+STREAM_PRELOADED=0
+if grep -qs 'ngx_stream_module.so' /etc/nginx/modules-enabled/*.conf; then STREAM_PRELOADED=1; fi
 install -m 0644 "$SRC/tono-relay.stream.conf" /etc/nginx/tono-relay.stream.conf
-python3 - "$CONF" <<'PY'
+python3 - "$CONF" "$STREAM_PRELOADED" <<'PY'
 import re,sys
-p=sys.argv[1]; s=open(p).read()
+p=sys.argv[1]; preloaded=sys.argv[2]=="1"; s=open(p).read()
 # drop any inline stream block we wrote before
 s=re.sub(r"\nstream \{\n.*?\n\}\n", "\n", s, count=1, flags=re.S)
-if "ngx_stream_module.so" not in s:
+if "ngx_stream_module.so" not in s and not preloaded:
     s="load_module /usr/lib/nginx/modules/ngx_stream_module.so;\n"+s
 if "tono-relay.stream.conf" not in s:
     s=s.rstrip("\n")+"\nstream {\n    include /etc/nginx/tono-relay.stream.conf;\n}\n"
@@ -66,4 +74,5 @@ else
 fi
 install_logrotate
 ss -ltn | grep -c ':2053 '
-systemctl is-active nginx tono-xray
+systemctl is-active nginx
+systemctl is-active tono-xray 2>/dev/null || true
