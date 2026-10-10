@@ -1,6 +1,6 @@
 ## 2026-10-10 · macOS 控制面：系统 DNS 路径不再拖住 pinned / 中继（读请求 15 s 预算；POST 超时后重试改走握手成功的路径）
 - 归属：ops 任务（[运维计划](../ops/plan-2026-09-11.md)；中国大陆连通性审计，延续 [Amp backlog](../ops/amp-backlog-2026-10-10.md) A4 与决定 077）；macOS App 控制面客户端。
-- 来源：origin/main `3d973f95` → 分支 `amp/cn2-bounded-path-walk`；未合 main。
+- 来源：origin/main `3d973f95` → 分支 `amp/cn2-bounded-path-walk`，[#1523](https://github.com/raydocs/tono/pull/1523)；未合 main。
 - 缺陷修复（MAC-CN-SYSTEM-PATH-HOLDS-WALK）：
   - 系统 DNS 答案指向丢包地址时，读请求要等 URLSession 30 s / 45 s 超时才轮到 pinned 与中继 → 后面还有路径时，读请求在系统 DNS 路径上
     最多等 15 s 状态行（`ControlPlanePath.systemHeadBudget`，`exchangeWithinHeadBudget`），之后按普通传输失败交给下一条路径；状态行到了以后的 body 读取不受此限。
