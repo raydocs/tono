@@ -34,7 +34,7 @@ mod switch;
 mod direct;
 mod heal;
 pub(crate) use heal::{
-    forget_hy2_choices, note_hy2_catalog, note_manual_selection, restore_hy2_choices,
+    forget_hy2_choices, note_hy2_catalog, note_manual_selection, restore_hy2_choices, settle_stopped_auto_hop,
 };
 mod platform;
 mod unarmed_probe;
