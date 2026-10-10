@@ -1,6 +1,6 @@
 ## 2026-10-10 · macOS：补「hy2 不通 → 回到同一节点的 Reality TCP 块」的回归测试（审计确认现有行为，无代码改动）
 - 归属：ops 任务（[运维计划](../ops/plan-2026-09-11.md)；中国大陆连通性审计第 2 项，延续 [Amp backlog](../ops/amp-backlog-2026-10-10.md) A17 / #1499 与 H21-O-F4、R4SW-MAC-HY2-PROBE）；macOS App 测试。
-- 来源：origin/main `3d973f95` → 分支 `amp/cn7-hy2-dead-returns-to-reality`；未合 main。
+- 来源：origin/main `3d973f95` → 分支 `amp/cn7-hy2-dead-returns-to-reality`，[#1534](https://github.com/raydocs/tono/pull/1534)；未合 main。
 - 缺陷修复：无。审计确认（只读代码）：UDP 全不通时，用户手选的 ` · hy2` 块 armed 连接失败 → `applyExhaustedArmedFailure` 释放并进入未 armed 循环；
   `UnarmedReconnect.tcpCandidateNames` 把 hy2 名映射到同节点的 Reality 基名放在第一位、hy2 块不参与 TCP 证明；证明通过后选择改回 Reality 并拨号。
   不引入新协议，不改节点 :443 的 tono-xray。此前没有测试覆盖「首选是 hy2」这一入口（现有测试只覆盖记住的 hy2 不遮挡 TCP 候选）。
