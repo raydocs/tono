@@ -30,7 +30,11 @@ Both apps discover bounded canonical manifest bytes at
 `https://releases.afk.ccwu.cc/desktop/v1/latest/manifest.json`. This new endpoint
 is not published by this source change. Discovery is untrusted until signature
 verification. Missing or mismatched metadata is not "up to date" and must not
-fall back to the legacy installer.
+fall back to the legacy installer. One exception (decision 087, provisional): a
+404 for `latest/manifest.json` itself means nothing is published on the channel,
+and both apps report no update (no error, normal check cadence, no fallback),
+on the direct path and over a relay alike. A 404 for a published manifest's
+signature or package is still an error.
 
 Compute SHA-256 over the exact manifest bytes and download immutable files from
 `https://releases.afk.ccwu.cc/desktop/v1/<manifest-sha256>/`:

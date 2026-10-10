@@ -42,7 +42,18 @@ final class AppUpdater: ObservableObject {
             if let pending = try await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate(), pending.pending {
                 throw NativeUpdateDownload.failure(pending.diagnostic ?? "A previous update is pending. Installation and recovery evidence are retained.")
             }
-            let offer = try await NativeUpdateDownload.discover()
+            guard let offer = try await NativeUpdateDownload.discover() else {
+                // Nothing is published on the update channel (the release
+                // host's 404): no update, not a failure. Background checks
+                // stay silent and keep their six-hour cadence.
+                if userInitiated {
+                    let alert = NSAlert()
+                    alert.messageText = String(localized: "No update available")
+                    alert.informativeText = String(localized: "No signed Tono release is published for this channel yet.")
+                    alert.runModal()
+                }
+                return
+            }
             let available = try await PrivilegedRuntimeCoordinator.shared.verifyUpdateOffer(
                 manifest: offer.bytes, signature: offer.signature
             )
@@ -63,7 +74,8 @@ final class AppUpdater: ObservableObject {
             // InstallStarted stamp. The executor waits for this process to exit.
             (NSApp.delegate as? AppDelegate)?.terminateForNativeUpdate()
         } catch {
-            // Missing metadata is an error, never "up to date". Background
+            // Missing metadata (other than an unpublished channel, above) is
+            // an error, never "up to date". Background
             // discovery does not raise a modal or perform a fallback install.
             if userInitiated || appState.nativeUpdatePending {
                 appState.errorMessage = error.localizedDescription
