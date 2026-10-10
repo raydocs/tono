@@ -33,6 +33,11 @@ struct HelperTarget: Equatable {
         /// Fails closed for the release: no automatic re-arm, an explicit
         /// error, cleanup continues.
         case unreadable(String)
+
+        var isUnreadable: Bool {
+            if case .unreadable = self { return true }
+            return false
+        }
     }
 
     /// Set only in the `--emergency-disarm` process, before anything else:
@@ -156,7 +161,11 @@ struct HelperTarget: Equatable {
     /// 127.0.0.1 DNS write, AI sinkhole or route install, app relaunch): the
     /// target is read right before it and again right after. A release that
     /// landed in between, however long the effect stalled, wins: the effect
-    /// is undone and the caller stops with the release's refusal.
+    /// is undone and the caller stops with the release's refusal. The read
+    /// after runs whether the effect returned or threw (#1504 review F1/F2):
+    /// an effect can throw after it committed (PF loaded, then the
+    /// verification failed; System Configuration committed, then Apply
+    /// failed), and a thrown effect under a release is undone too.
     static func guardedEffect<T>(
         allowed: () -> Bool = { HelperTarget.automaticRearmAllowed(HelperTarget.read()) },
         refusal: () -> HelperFailure? = { HelperTarget.releaseRefusal() },
@@ -164,12 +173,12 @@ struct HelperTarget: Equatable {
         undo: () -> Void
     ) throws -> T {
         guard allowed() else { throw refusal() ?? releasedFailure }
-        let result = try effect()
+        let result = Result<T, any Error> { try effect() }
         guard allowed() else {
             undo()
             throw refusal() ?? releasedFailure
         }
-        return result
+        return try result.get()
     }
 
     /// `guardedEffect` over a sequence of install steps: each runs only while
@@ -210,6 +219,9 @@ struct HelperTarget: Equatable {
         var write: (HelperTarget, String) throws -> Void = { target, path in
             try KillSwitchManager.atomicWrite(path: path, data: HelperTarget.encode(target), permissions: 0o600)
         }
+        /// `rename(2)`, behind a seam so the self-test can fail one step of
+        /// the repair below.
+        var move: (String, String) -> Int32 = { rename($0, $1) }
 
         var lockPath: String { path + ".lock" }
 
@@ -240,13 +252,40 @@ struct HelperTarget: Equatable {
             }
         }
 
-        /// A record that cannot be read as Tono's (wrong type, owner, mode or
-        /// content) is moved aside, never followed or reused.
-        func quarantine(now: Date) throws {
-            let aside = path + ".invalid-\(UInt64(max(0, now.timeIntervalSince1970) * 1000))"
-            guard rename(path, aside) == 0 || errno == ENOENT else {
-                throw HelperFailure.system("The unreadable target record cannot be moved aside (errno \(errno)).")
+        /// Writes `target` over the record (caller holds the lock). A record
+        /// that cannot be read as Tono's (wrong type, owner, mode or content)
+        /// is moved aside, never followed or reused, but never before its
+        /// replacement exists (#1504 review F3): the replacement is written
+        /// (synced) beside it first, so a full or failing disk fails here with
+        /// the unreadable record, which refuses every automatic re-arm, still
+        /// in place. Only then is the record moved aside and the replacement
+        /// renamed in; if that rename fails, the record is moved back. A
+        /// missing target would read as "no release ever recorded".
+        func commit(_ target: HelperTarget, replacingUnreadable: Bool, now: Date) throws {
+            guard replacingUnreadable else {
+                try write(target, path)
+                return
             }
+            let staged = path + ".staged-\(UUID().uuidString)"
+            try write(target, staged)
+            let aside = path + ".invalid-\(UInt64(max(0, now.timeIntervalSince1970) * 1000))"
+            guard move(path, aside) == 0 || errno == ENOENT else {
+                let code = errno
+                unlink(staged)
+                throw HelperFailure.system("The unreadable target record cannot be moved aside (errno \(code)).")
+            }
+            guard move(staged, path) == 0 else {
+                let code = errno
+                unlink(staged)
+                if move(aside, path) != 0 {
+                    // Last resort: an empty record is unreadable too, so the
+                    // target keeps refusing rather than reading as missing.
+                    let fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+                    if fd >= 0 { close(fd) }
+                }
+                throw HelperFailure.system("The target record could not be replaced (errno \(code)).")
+            }
+            if requireRootOwnership { try? KillSwitchManager.fsyncParent(path) }
         }
     }
 
@@ -284,9 +323,11 @@ struct HelperTarget: Equatable {
                 guard currentGeneration(reading) == expected else {
                     throw HelperFailure.coded(code: "SESSION_SUPERSEDED", message: supersededConnectMessage)
                 }
-                if case .unreadable = reading { try store.quarantine(now: now) }
                 let generation = nextGeneration(after: reading, now: now)
-                try store.write(HelperTarget(mode: .secured, generation: generation), store.path)
+                try store.commit(
+                    HelperTarget(mode: .secured, generation: generation),
+                    replacingUnreadable: reading.isUnreadable, now: now
+                )
                 return generation
             }
         } catch let failure as HelperFailure where failure.code == "SESSION_SUPERSEDED" || failure.code == "TARGET_STATE_BUSY" {
@@ -318,9 +359,8 @@ struct HelperTarget: Equatable {
     static func persistOperatorRelease(store: Store = Store(), now: Date = Date()) throws -> HelperTarget {
         try store.withLock {
             let reading = store.read()
-            if case .unreadable = reading { try store.quarantine(now: now) }
             let target = HelperTarget(mode: .released, generation: nextGeneration(after: reading, now: now))
-            try store.write(target, store.path)
+            try store.commit(target, replacingUnreadable: reading.isUnreadable, now: now)
             return target
         }
     }
@@ -1178,7 +1218,7 @@ func runOperatorReleaseSelfTests() -> Bool {
     let hangingChild = ["-c", "trap '' TERM; exec /bin/sleep 30"]
     UpdatePackage.operatorChildDeadline = 0.5
     let childStart = Date()
-    let childEnded = (try? UpdatePackage.run("/bin/sh", hangingChild)) == nil
+    let childEnded = (try? UpdatePackage.run("/bin/sh", hangingChild, deadline: 30)) == nil
     UpdatePackage.operatorChildDeadline = nil
     guard childEnded, elapsed(since: childStart) < 3.5 else { return fail("hung child") }
     let stopStart = Date()
@@ -1222,6 +1262,234 @@ func runOperatorReleaseSelfTests() -> Bool {
     let silent = scripted()
     guard gone == .stopped, refused == .stillLoaded(bootout: 5), silent == .unknown else {
         return fail("stop answers", "\(gone) \(refused) \(silent)")
+    }
+    return true
+}
+
+// MARK: - Interleaving regressions (#1504 round 5)
+//
+// One per failure sequence the review named. Each drives the real code path
+// (the PF load gate, the target store's repair, the relaunch runner, the
+// update child runner) with the kernel, disk or child replaced by an injected
+// stall or failure; the target flips through `HelperTarget.processOverride`,
+// which every target read in this process obeys.
+
+private enum InjectedFailure: Error { case partialCommit, diskFull, renameFailed }
+
+private func selfTestFail(_ label: String, _ detail: Any = "") -> Bool {
+    FileHandle.standardError.write(Data("operator release \(label): \(detail)\n".utf8))
+    return false
+}
+
+/// Runs `body` with the target held in memory, PF loads behind `seam`, and
+/// both reset afterwards.
+private func withInjectedTarget<T>(
+    _ target: HelperTarget,
+    seam: KillSwitchManager.BlockLoadSeam? = nil,
+    _ body: () throws -> T
+) rethrows -> T {
+    let previousTarget = HelperTarget.processOverride
+    let previousSeam = KillSwitchManager.blockLoadSeam
+    HelperTarget.processOverride = target
+    KillSwitchManager.blockLoadSeam = seam
+    defer {
+        HelperTarget.processOverride = previousTarget
+        KillSwitchManager.blockLoadSeam = previousSeam
+    }
+    return try body()
+}
+
+private let selfTestSecured = HelperTarget(mode: .secured, generation: 5)
+private let selfTestReleased = HelperTarget(mode: .released, generation: 6)
+
+/// F1: a LAN widening derived from the armed rules stalls in its disk write;
+/// meanwhile the CLI persists `released`, flushes PF and deletes the saved
+/// intent. When the widening resumes it must not load the block, and the
+/// rules it wrote must not stay on disk. A block that still reached the
+/// kernel with no saved intent is released by the released-mode watchdog.
+func runLateLANWideningAfterReleaseSelfTest() -> Bool {
+    var events: [String] = []
+    let seam = KillSwitchManager.BlockLoadSeam(
+        load: { events.append("load") },
+        undo: { events.append("undo") }
+    )
+    var code: String?
+    withInjectedTarget(selfTestSecured, seam: seam) {
+        do {
+            try KillSwitchManager.applyWidenedLANScope("block drop out quick all\n", writeRules: { _ in
+                events.append("write")
+                // The release lands while this write is stalled.
+                HelperTarget.processOverride = selfTestReleased
+            })
+        } catch let failure as HelperFailure {
+            code = failure.code
+        } catch {}
+    }
+    guard code == "OPERATOR_RELEASED", events == ["write", "undo"] else {
+        return selfTestFail("late LAN widening", "\(code ?? "none") \(events)")
+    }
+    // The same widening with the release landing during the kernel load:
+    // the loaded block is undone.
+    events = []
+    code = nil
+    let loadSeam = KillSwitchManager.BlockLoadSeam(
+        load: { events.append("load"); HelperTarget.processOverride = selfTestReleased },
+        undo: { events.append("undo") }
+    )
+    withInjectedTarget(selfTestSecured, seam: loadSeam) {
+        do {
+            try KillSwitchManager.applyWidenedLANScope("block drop out quick all\n", writeRules: { _ in })
+        } catch let failure as HelperFailure {
+            code = failure.code
+        } catch {}
+    }
+    guard code == "OPERATOR_RELEASED", events.first == "load", events.dropFirst().allSatisfy({ $0 == "undo" }),
+          events.count >= 2 else {
+        return selfTestFail("LAN widening released during load", "\(code ?? "none") \(events)")
+    }
+    // With no saved intent left, the released-mode watchdog still releases a
+    // block it reads in Tono's anchor.
+    guard SocketServer.watchdogSteps(
+        rearmAllowed: false, coreRunning: false, stateFilePresent: false, blockPresent: true, coreDownChecks: 0
+    ) == [.releaseBlock, .reconcileAI, .recoverDNS] else {
+        return selfTestFail("released watchdog without saved intent")
+    }
+    return true
+}
+
+/// F1: a PF load (the one arm, supervision repair, permit withholding and
+/// the power barrier share) commits the block, then throws (enable
+/// reference, state flush or verification), and a release landed meanwhile.
+/// The throw must not skip the undo; the caller gets the release's refusal.
+/// Without a release the load's own error still comes back, nothing undone.
+func runReleaseDuringPartialPFCommitSelfTest() -> Bool {
+    var undone = 0
+    var code: String?
+    let seam = KillSwitchManager.BlockLoadSeam(
+        load: {
+            HelperTarget.processOverride = selfTestReleased
+            throw InjectedFailure.partialCommit
+        },
+        undo: { undone += 1 }
+    )
+    withInjectedTarget(selfTestSecured, seam: seam) {
+        do { try KillSwitchManager.ensureAnchorLoaded(flushStates: true) }
+        catch let failure as HelperFailure { code = failure.code }
+        catch {}
+    }
+    guard code == "OPERATOR_RELEASED", undone == 1 else {
+        return selfTestFail("partial PF commit under release", "\(code ?? "none") \(undone)")
+    }
+    var passedThrough = false
+    let plain = KillSwitchManager.BlockLoadSeam(load: { throw InjectedFailure.partialCommit }, undo: { undone += 1 })
+    withInjectedTarget(selfTestSecured, seam: plain) {
+        do { try KillSwitchManager.ensureAnchorLoaded(flushStates: true) }
+        catch InjectedFailure.partialCommit { passedThrough = true }
+        catch {}
+    }
+    guard passedThrough, undone == 1 else {
+        return selfTestFail("partial PF commit without release", "\(passedThrough) \(undone)")
+    }
+    return true
+}
+
+/// F3: repairing an unreadable target must never leave it missing (missing
+/// reads as "no release recorded" and allows automatic re-arms). A full
+/// disk while writing the replacement, or a failed rename into place,
+/// leaves the unreadable record, which still refuses.
+func runFailedTargetRepairKeepsRefusalSelfTest() -> Bool {
+    let directory = NSTemporaryDirectory() + "tono-target-repair-\(UUID().uuidString)"
+    guard mkdir(directory, 0o700) == 0 else { return selfTestFail("repair directory") }
+    defer { try? FileManager.default.removeItem(atPath: directory) }
+    var store = HelperTarget.Store()
+    store.path = directory + "/target"
+    store.requireRootOwnership = false
+    store.lockBudget = 0.3
+    store.write = { target, path in
+        try HelperTarget.encode(target).write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+    func refusing() -> Bool {
+        guard case .unreadable = store.read() else { return false }
+        return !HelperTarget.automaticRearmAllowed(store.read())
+    }
+    let now = Date(timeIntervalSince1970: 3_000)
+    guard FileManager.default.createFile(atPath: store.path, contents: Data("garbage".utf8)), refusing() else {
+        return selfTestFail("repair setup")
+    }
+    // The replacement cannot be written (ENOSPC): nothing was moved.
+    var full = store
+    full.write = { _, _ in throw InjectedFailure.diskFull }
+    guard (try? HelperTarget.persistOperatorRelease(store: full, now: now)) == nil,
+          (try? HelperTarget.beginSession(expected: 0, store: full, now: now)) == nil,
+          refusing() else {
+        return selfTestFail("repair on a full disk", store.read())
+    }
+    // The replacement is staged, but renaming it into place fails: the
+    // record is moved back.
+    var stuck = store
+    stuck.move = { from, to in
+        if from.contains(".staged-") { errno = EIO; return -1 }
+        return rename(from, to)
+    }
+    guard (try? HelperTarget.persistOperatorRelease(store: stuck, now: now)) == nil, refusing(),
+          (try? FileManager.default.contentsOfDirectory(atPath: directory))?
+            .contains(where: { $0.contains(".staged-") }) == false else {
+        return selfTestFail("repair with a failed rename", store.read())
+    }
+    // The same repair with a working disk still succeeds.
+    guard let released = try? HelperTarget.persistOperatorRelease(store: store, now: now),
+          store.read() == .recorded(released) else {
+        return selfTestFail("repair", store.read())
+    }
+    return true
+}
+
+/// M1: the dead owner's relaunch is admitted, then an operator release lands
+/// while `Process.run()` is still pending. The request must be stopped before
+/// it does anything (here: before the child writes its marker).
+func runOwnerRelaunchReleasedDuringSpawnSelfTest() -> Bool {
+    final class Box: @unchecked Sendable {
+        let lock = NSLock()
+        var allowed = true
+        let ended = DispatchSemaphore(value: 0)
+        func read() -> Bool { lock.lock(); defer { lock.unlock() }; return allowed }
+        func release() { lock.lock(); allowed = false; lock.unlock() }
+    }
+    let box = Box()
+    let marker = NSTemporaryDirectory() + "tono-relaunch-\(UUID().uuidString)"
+    defer { unlink(marker) }
+    SocketServer.requestOwnerRelaunch(
+        "/bin/sh", ["-c", "/bin/sleep 1; /usr/bin/touch \"$0\"", marker],
+        allowed: { box.read() },
+        launch: { process in
+            box.release() // the release lands while the launch is pending
+            try process.run()
+        },
+        ended: { box.ended.signal() }
+    )
+    guard box.ended.wait(timeout: .now() + 10) == .success else {
+        return selfTestFail("relaunch during release: never ended")
+    }
+    usleep(1_500_000)
+    guard !FileManager.default.fileExists(atPath: marker) else {
+        return selfTestFail("relaunch during release: the request ran")
+    }
+    return true
+}
+
+/// Owner requirement: the update executor's and recovery's children are
+/// bounded in the daemon and the executor too, not only under
+/// `--emergency-disarm` (no operator deadline here). A child that ignores
+/// SIGTERM ends within its deadline plus the kill waits, as a failure; the
+/// update lock's wait is finite.
+func runUpdateChildBoundedSelfTest() -> Bool {
+    guard UpdatePackage.operatorChildDeadline == nil else { return selfTestFail("update child: operator deadline set") }
+    let started = Date()
+    let ended = (try? UpdatePackage.run("/bin/sh", ["-c", "trap '' TERM; exec /bin/sleep 30"], deadline: 0.5)) == nil
+    let elapsed = Date().timeIntervalSince(started)
+    guard ended, elapsed < 3.5, UpdateStorage.lockWaitBudget.isFinite,
+          UpdateStorage.lockWaitBudget > HelperChildDeadline.installScript else {
+        return selfTestFail("update child bounded", elapsed)
     }
     return true
 }

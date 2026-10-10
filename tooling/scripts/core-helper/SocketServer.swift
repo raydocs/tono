@@ -452,6 +452,10 @@ final class SocketServer {
             rearmAllowed: rearmAllowed,
             coreRunning: coreRunning,
             stateFilePresent: stateFilePresent,
+            // Under a release a block can be in the kernel with no saved
+            // intent (a load that landed after the CLI deleted it, #1504
+            // review F1); read the anchor itself, and unread counts as there.
+            blockPresent: !rearmAllowed && (stateFilePresent || Self.tonoAnchorMayHoldBlock()),
             coreDownChecks: consecutiveCoreDownChecks
         ) {
             switch step {
@@ -488,6 +492,11 @@ final class SocketServer {
         }
     }
 
+    /// Tono's child anchor holds the broad block, or could not be read.
+    static func tonoAnchorMayHoldBlock() -> Bool {
+        (try? KillSwitchManager.childAnchorActive()) ?? true
+    }
+
     enum WatchdogStep: Equatable {
         case relaunchOwner, supervise, withholdPermit, releaseBlock, reconcileAI, recoverDNS
     }
@@ -498,15 +507,17 @@ final class SocketServer {
     /// Core; DNS stays put until then. Under an operator release (or an
     /// unreadable target) nothing loads PF: a saved block is released at once,
     /// the AI layer's removal is retried, DNS is restored even beside a Core
-    /// that survived.
+    /// that survived. `blockPresent` (read only under a release) is the
+    /// saved intent or Tono's anchor holding a block: either is released.
     static func watchdogSteps(
         rearmAllowed: Bool,
         coreRunning: Bool,
         stateFilePresent: Bool,
+        blockPresent: Bool = false,
         coreDownChecks: Int
     ) -> [WatchdogStep] {
         guard rearmAllowed else {
-            return (stateFilePresent ? [.releaseBlock] : []) + [.reconcileAI, .recoverDNS]
+            return (stateFilePresent || blockPresent ? [.releaseBlock] : []) + [.reconcileAI, .recoverDNS]
         }
         if coreRunning { return [.relaunchOwner, .supervise] }
         var steps: [WatchdogStep] = [.relaunchOwner, .withholdPermit]
@@ -564,24 +575,59 @@ final class SocketServer {
     /// The request is not awaited: this runs inside the idle loop under the
     /// update lock, and a stuck `open` must not stall IPC or the releases
     /// that follow it. `sudo -n` can never prompt; a non-zero exit is logged
-    /// by the termination handler and still counts as an attempt.
+    /// and still counts as an attempt.
     static func relaunchInstalledApp(uid: uid_t) throws {
         _ = try UpdatePackage.verifyCode(UpdatePackage.appPath, identifier: "com.raydocs.tono")
         // Read where it acts: a release during the bundle check wins.
         try HelperTarget.requireNoRelease()
-        let child = Process()
-        child.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        child.arguments = ["asuser", String(uid), "/usr/bin/sudo", "-n", "-u", "#\(uid)", "/usr/bin/open", UpdatePackage.appPath]
-        child.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/var/root"]
-        child.standardOutput = FileHandle.nullDevice
-        child.standardError = FileHandle.nullDevice
-        child.terminationHandler = { process in
-            guard process.terminationStatus != 0 else { return }
-            FileHandle.standardError.write(Data(
-                "tono: the relaunch request exited with status \(process.terminationStatus)\n".utf8
-            ))
+        requestOwnerRelaunch(
+            "/bin/launchctl",
+            ["asuser", String(uid), "/usr/bin/sudo", "-n", "-u", "#\(uid)", "/usr/bin/open", UpdatePackage.appPath]
+        )
+    }
+
+    /// The relaunch request itself, on its own thread so the idle loop never
+    /// waits for it, and through the bounded runner: its launch and its run
+    /// end by `HelperChildDeadline.openApp`. The target is read again right
+    /// before `Process.run()` and right after it returns (#1504 review M1):
+    /// a release that landed while the launch was pending kills the request
+    /// before `open` can reach Launch Services. If the app was already asked
+    /// to start, its every arm is still refused by the release.
+    static func requestOwnerRelaunch(
+        _ executable: String,
+        _ arguments: [String],
+        allowed: @escaping @Sendable () -> Bool = { HelperTarget.automaticRearmAllowed(HelperTarget.read()) },
+        launch: @escaping @Sendable (Process) throws -> Void = { try $0.run() },
+        ended: @escaping @Sendable () -> Void = {}
+    ) {
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                let result = try KillSwitchManager.run(
+                    executable, arguments,
+                    deadline: HelperChildDeadline.openApp,
+                    environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/var/root"],
+                    started: { pid in
+                        guard !allowed() else { return }
+                        kill(pid, SIGKILL)
+                        FileHandle.standardError.write(Data(
+                            "tono: an operator release landed while the app relaunch started; the request was stopped\n".utf8
+                        ))
+                    },
+                    ended: ended,
+                    launch: { process in
+                        guard allowed() else { throw HelperTarget.releasedFailure }
+                        try launch(process)
+                    }
+                )
+                guard result.status != 0 else { return }
+                FileHandle.standardError.write(Data(
+                    "tono: the relaunch request exited with status \(result.status)\n".utf8
+                ))
+            } catch {
+                let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+                FileHandle.standardError.write(Data("tono: the relaunch request failed: \(detail)\n".utf8))
+            }
         }
-        try child.run()
     }
 
     /// MAC-ORPHAN-BOOTSTRAP-PF: the app armed the bootstrap block (empty
@@ -1133,19 +1179,16 @@ final class SocketServer {
             // older or equal build needs the administrator install.
             // Read stdout only: a runtime warning on stderr must not turn a
             // valid version line into an unparsable one.
-            let probe = Process()
-            probe.executableURL = URL(fileURLWithPath: helperTemp)
-            probe.arguments = ["--version"]
-            probe.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
-            let stdout = Pipe()
-            probe.standardOutput = stdout
-            probe.standardError = FileHandle.nullDevice
-            try probe.run()
-            let output = stdout.fileHandleForReading.readDataToEndOfFile()
-            probe.waitUntilExit()
-            let candidate = String(decoding: output.prefix(64), as: UTF8.self)
+            // Bounded like every helper child (#1504): a staged binary that
+            // hangs fails the upgrade instead of holding the request thread.
+            let probe = try KillSwitchManager.run(
+                helperTemp, ["--version"],
+                deadline: HelperChildDeadline.versionProbe,
+                output: .standardOutputOnly
+            )
+            let candidate = String(decoding: probe.output.prefix(64), as: UTF8.self)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard probe.terminationStatus == 0,
+            guard probe.status == 0,
                   helperUpgradeAdmissible(running: helperVersion, candidate: candidate) else {
                 throw HelperFailure.invalid("Silent helper upgrade requires a newer helper version.")
             }

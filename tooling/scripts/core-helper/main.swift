@@ -402,17 +402,13 @@ func runCoreLifecycleSelfTests() -> Bool {
     let configPath = "\(configDirectory)/config.json"
 
     // A core already running would own the DNS port this one needs.
-    let probe = Process()
-    probe.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
     // `-x` matches the process name, not the whole command line: with `-f` this
     // matched any shell whose arguments happened to mention the core, including
     // the one running this test.
-    probe.arguments = ["-x", "tono-sing-box"]
-    probe.standardOutput = FileHandle.nullDevice
-    probe.standardError = FileHandle.nullDevice
-    try? probe.run()
-    probe.waitUntilExit()
-    if probe.terminationStatus == 0 {
+    let probe = try? KillSwitchManager.run(
+        "/usr/bin/pgrep", ["-x", "tono-sing-box"], deadline: HelperChildDeadline.selfTestProbe
+    )
+    if probe?.status == 0 {
         FileHandle.standardError.write(Data(
             "a core is already running; disconnect before running this\n".utf8
         ))
@@ -482,13 +478,9 @@ func runCoreLifecycleSelfTests() -> Bool {
         // blocked every later run by holding the DNS port. Safe to be blunt
         // here: this test refuses to start when a core is already present, so
         // anything alive at this point was started by it.
-        let sweep = Process()
-        sweep.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        sweep.arguments = ["-x", "tono-sing-box"]
-        sweep.standardOutput = FileHandle.nullDevice
-        sweep.standardError = FileHandle.nullDevice
-        try? sweep.run()
-        sweep.waitUntilExit()
+        _ = try? KillSwitchManager.run(
+            "/usr/bin/pkill", ["-x", "tono-sing-box"], deadline: HelperChildDeadline.selfTestProbe
+        )
     }
 
     // A digest that does not match must be refused before anything is launched.
@@ -1407,15 +1399,12 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
     // concurrent GUI arm between this tool's disarm and the removal below,
     // re-writing PF state that then survives with no helper left installed —
     // a fail-closed machine with no owner.
-    let bootout = Process()
-    bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-    bootout.arguments = ["bootout", "system/com.raydocs.tono.core-helper"]
-    bootout.standardOutput = FileHandle.nullDevice
-    bootout.standardError = FileHandle.nullDevice
     // A daemon that is not currently bootstrapped makes bootout fail; the
-    // reset continues either way.
-    try? bootout.run()
-    bootout.waitUntilExit()
+    // reset continues either way, as it does past the bounded wait.
+    _ = try? KillSwitchManager.run(
+        "/bin/launchctl", ["bootout", "system/com.raydocs.tono.core-helper"],
+        deadline: HelperChildDeadline.launchctl
+    )
 
     switch emergencyRelease(underLock: storage) {
     case .released, .coreStillRunning:
@@ -1450,16 +1439,11 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
 }
 
 private func bootstrapHelperDaemon() {
-    let restore = Process()
-    restore.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-    restore.arguments = [
-        "bootstrap", "system",
-        "/Library/LaunchDaemons/com.raydocs.tono.core-helper.plist",
-    ]
-    restore.standardOutput = FileHandle.nullDevice
-    restore.standardError = FileHandle.nullDevice
-    try? restore.run()
-    restore.waitUntilExit()
+    _ = try? KillSwitchManager.run(
+        "/bin/launchctl",
+        ["bootstrap", "system", "/Library/LaunchDaemons/com.raydocs.tono.core-helper.plist"],
+        deadline: HelperChildDeadline.launchctl
+    )
 }
 
 /// Removal after a verified release. Callers have released PF first.
@@ -1731,13 +1715,10 @@ func bootoutRemovedHelper() {
     // not happen, the plist and executable are already gone, so nothing loads
     // it at the next boot.
     signal(SIGTERM, SIG_DFL)
-    let bootout = Process()
-    bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-    bootout.arguments = ["bootout", "system/com.raydocs.tono.core-helper"]
-    bootout.standardOutput = FileHandle.nullDevice
-    bootout.standardError = FileHandle.nullDevice
-    try? bootout.run()
-    bootout.waitUntilExit()
+    _ = try? KillSwitchManager.run(
+        "/bin/launchctl", ["bootout", "system/com.raydocs.tono.core-helper"],
+        deadline: HelperChildDeadline.launchctl
+    )
 }
 
 func fileType(_ value: stat) -> mode_t {
@@ -1969,12 +1950,17 @@ if CommandLine.arguments.dropFirst() == ["--update-install-guard"] {
             guard UpdateExecutor.allowsOrdinaryInstall(attempt) else {
                 throw HelperFailure.invalid("Pending update prevents helper repair.")
             }
-            let installer = Process()
-            installer.executableURL = URL(fileURLWithPath: "/bin/sh")
-            installer.standardInput = FileHandle.standardInput
-            try installer.run()
-            installer.waitUntilExit()
-            return installer.terminationStatus
+            // Bounded like every helper child (#1504): a wedged script ends
+            // at the deadline (TERM, KILL) and the install fails, instead of
+            // holding the update lock forever. Its output still reaches the
+            // administrator prompt's caller.
+            return try KillSwitchManager.run(
+                "/bin/sh", [],
+                deadline: HelperChildDeadline.installScript,
+                environment: ProcessInfo.processInfo.environment,
+                standardInput: FileHandle.standardInput,
+                output: .inherited
+            ).status
         }
         exit(status)
     } catch { exit(1) }
@@ -2101,6 +2087,13 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && runStartupOrderSelfTest()
             && runStartupDNSRecoverySelfTest()
             && runOperatorReleaseSelfTests()
+            && runLateLANWideningAfterReleaseSelfTest()
+            && runReleaseDuringPartialPFCommitSelfTest()
+            && ProtectedDNSManager.runPendingDNSWriteAfterReleaseSelfTest()
+            && ProtectedDNSManager.runDNSCommitThenApplyFailureSelfTest()
+            && runFailedTargetRepairKeepsRefusalSelfTest()
+            && runOwnerRelaunchReleasedDuringSpawnSelfTest()
+            && runUpdateChildBoundedSelfTest()
             && KillSwitchManager.runFailedCommitReleaseSelfTest()
             && KillSwitchManager.runFailedBarrierSelectiveReleaseSelfTest()
             && KillSwitchManager.runFailedBarrierUnreleasedSelfTest()

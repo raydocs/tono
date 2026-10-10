@@ -861,6 +861,68 @@ extension KillSwitchManager {
         standaloneMain: Bool = false,
         loadOutcome: inout KernelLoadOutcome
     ) throws {
+        try guardedBlockLoad {
+            try ensureAnchorLoadedUnguarded(
+                disposal: disposal,
+                standaloneMain: standaloneMain,
+                loadOutcome: &loadOutcome
+            )
+        }
+    }
+
+    /// Self-test seam for `guardedBlockLoad`: stands in for the kernel load
+    /// and its undo so the gate around them runs for real without touching
+    /// PF. nil (always, outside `--self-test`) is the real load.
+    struct BlockLoadSeam {
+        var load: () throws -> Void
+        var undo: () -> Void
+    }
+    nonisolated(unsafe) static var blockLoadSeam: BlockLoadSeam?
+
+    /// Decision 084, #1504 review F1: every PF load that can install Tono's
+    /// broad block (arm commit, supervision repair, permit withholding, LAN
+    /// widening, power barrier, emergency block) passes through here, so no
+    /// caller can forget the target. It is read right before the load and
+    /// again right after it, whether the load returned or threw: a throw can
+    /// come after a partial commit (the anchor loaded, then the enable
+    /// reference, the state flush or the verification failed). A release
+    /// that landed in between, however long the load or anything before it
+    /// stalled, wins: the block is undone and the caller gets the release's
+    /// refusal. In the `--emergency-disarm` process the target is `released`
+    /// in memory, so nothing there can load a block either.
+    static func guardedBlockLoad(_ load: () throws -> Void) throws {
+        let seam = blockLoadSeam
+        try HelperTarget.guardedEffect({
+            if let seam { try seam.load() } else { try load() }
+        }, undo: {
+            if let seam { seam.undo() } else { undoBlockLoadUnderRelease() }
+        })
+    }
+
+    /// The undo of a block load a release overtook: Tono's anchor is flushed
+    /// first (no disk, System Configuration or update store needed, the same
+    /// step `--emergency-disarm` takes), then the saved intent, the rule file
+    /// (placeholder), host pins, a displaced main ruleset and the PF enable
+    /// reference go as in a disarm. Never loads anything. Takes no lock.
+    static func undoBlockLoadUnderRelease() {
+        if !OperatorReleaseSteps.flushTonoAnchor() {
+            FileHandle.standardError.write(Data("tono: release-overtaken PF load: anchor flush failed\n".utf8))
+        }
+        do {
+            try releasePersistedBlockUnlocked()
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: release-overtaken PF load not fully undone: \(detail)\n".utf8
+            ))
+        }
+    }
+
+    private static func ensureAnchorLoadedUnguarded(
+        disposal: StateDisposal,
+        standaloneMain: Bool,
+        loadOutcome: inout KernelLoadOutcome
+    ) throws {
         let mainChanged = try standaloneMain ? false : ensureMainHook()
         // Read only where it decides the load, as before. No answer fails the
         // load rather than reading as a missing anchor.
@@ -954,6 +1016,10 @@ extension KillSwitchManager {
     /// The standalone marker is what a later successful load uses to put
     /// Apple's anchors back (BRICK-M6).
     static func loadInMemoryEmergencyBlock(_ rules: String) throws {
+        try guardedBlockLoad { try loadInMemoryEmergencyBlockUnguarded(rules) }
+    }
+
+    private static func loadInMemoryEmergencyBlockUnguarded(_ rules: String) throws {
         let child = "/Library/Application Support/Tono/.tono-emergency-\(UUID().uuidString).conf"
         let main = "/etc/.tono-pf-emergency-\(UUID().uuidString)"
         defer {
@@ -1920,11 +1986,18 @@ extension KillSwitchManager {
     /// kernel beyond that exits on its own. `ended` runs once the child has
     /// exited and been reaped, even after this call has given up on it.
     /// `launch` is the seam the self-test uses to stall a launch.
+    /// `currentDirectory`, `standardInput` and `output` exist so every child
+    /// the helper starts goes through this one runner (#1504: Core config
+    /// check, version probe, the install guard's script); the defaults are
+    /// the pfctl shape.
     static func run(
         _ executable: String,
         _ arguments: [String],
         deadline: TimeInterval = KillSwitchManager.helperCommandDeadline,
         environment: [String: String] = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"],
+        currentDirectory: String? = nil,
+        standardInput: FileHandle? = nil,
+        output outputMode: HelperCommandOutputMode = .captured,
         started: (pid_t) -> Void = { _ in },
         ended: @escaping @Sendable () -> Void = {},
         launch: @escaping @Sendable (Process) throws -> Void = { try $0.run() }
@@ -1934,39 +2007,32 @@ extension KillSwitchManager {
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         process.environment = environment
+        if let currentDirectory {
+            process.currentDirectoryURL = URL(fileURLWithPath: currentDirectory, isDirectory: true)
+        }
+        if let standardInput { process.standardInput = standardInput }
         let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+        switch outputMode {
+        case .captured:
+            process.standardOutput = pipe
+            process.standardError = pipe
+        case .standardOutputOnly:
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+        case .inherited:
+            break
+        }
         let exited = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in
             ended()
             exited.signal()
         }
-        let launched = HelperCommandLaunch()
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                try launch(process)
-            } catch {
-                _ = launched.report(.failed(error))
-                return
+        try launchWithinDeadline(process, until: end, deadline: deadline, launch: launch) { process in
+            // Abandoned: the caller has already failed this command.
+            process.terminate()
+            if exited.wait(timeout: .now() + 1) == .timedOut, process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
             }
-            guard launched.report(.launched) else {
-                // Abandoned: the caller has already failed this command.
-                process.terminate()
-                if exited.wait(timeout: .now() + 1) == .timedOut, process.isRunning {
-                    kill(process.processIdentifier, SIGKILL)
-                }
-                return
-            }
-        }
-        switch launched.wait(until: end) {
-        case .launched: break
-        case .failed(let error): throw error
-        case .abandoned:
-            let name = (executable as NSString).lastPathComponent
-            throw HelperFailure.system(
-                "\(name) did not start within \(Int(deadline.rounded(.up))) seconds."
-            )
         }
         started(process.processIdentifier)
         // Drained on its own thread, so a child that fills the pipe still
@@ -1974,10 +2040,14 @@ extension KillSwitchManager {
         // child's end closes, so a read abandoned below still finishes, frees
         // its descriptor, and the child is still reaped.
         let output = HelperCommandOutput()
-        let reader = pipe.fileHandleForReading
-        DispatchQueue.global(qos: .utility).async {
-            withExtendedLifetime(process) {
-                output.finish(reader.readDataToEndOfFile())
+        if case .inherited = outputMode {
+            output.finish(Data())
+        } else {
+            let reader = pipe.fileHandleForReading
+            DispatchQueue.global(qos: .utility).async {
+                withExtendedLifetime(process) {
+                    output.finish(reader.readDataToEndOfFile())
+                }
             }
         }
         if exited.wait(timeout: end) == .success, output.wait(until: end) {
@@ -1994,6 +2064,47 @@ extension KillSwitchManager {
         throw HelperFailure.system(
             "\(name) did not finish within \(Int(deadline.rounded(.up))) seconds."
         )
+    }
+
+    /// The launch half of `run`, shared with the one long-running child the
+    /// helper starts (the Core, which is supervised rather than waited on):
+    /// `Process.run()` on its own thread, the caller waiting until `end`. A
+    /// launch still pending then fails, and when it returns later its child
+    /// goes to `abandon` (#1542 review F1). Not a second runner: `run` itself
+    /// launches through here.
+    static func launchWithinDeadline(
+        _ process: Process,
+        until end: DispatchTime,
+        deadline: TimeInterval,
+        launch: @escaping @Sendable (Process) throws -> Void = { try $0.run() },
+        abandon: @escaping @Sendable (Process) -> Void = { process in
+            process.terminate()
+            for _ in 0..<20 where process.isRunning { usleep(50_000) }
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        }
+    ) throws {
+        let launched = HelperCommandLaunch()
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try launch(process)
+            } catch {
+                _ = launched.report(.failed(error))
+                return
+            }
+            guard launched.report(.launched) else {
+                abandon(process)
+                return
+            }
+        }
+        switch launched.wait(until: end) {
+        case .launched: return
+        case .failed(let error): throw error
+        case .abandoned:
+            let name = process.executableURL?.lastPathComponent ?? "A helper command"
+            throw HelperFailure.system(
+                "\(name) did not start within \(Int(deadline.rounded(.up))) seconds."
+            )
+        }
     }
 
     /// `dscacheutil` under the same supervised runner, so its launch and its

@@ -30,9 +30,20 @@
     final one. Command ceiling: 181.5 s. Exit 0 only when the release finished, all four components read back
     restored and the release is confirmed on disk.
   - **Every irreversible effect is guarded on both sides** (`HelperTarget.guardedEffect` / `stepsUnlessReleased`): PF
-    loads (arm commit, supervision repair, permit withholding, power barrier), each 127.0.0.1 DNS write, each AI
-    resolver file and route, and the owner app relaunch read the target right before and right after; a release in
-    between undoes the effect and stops. No lock is held across PF, System Configuration or disk I/O.
+    loads (arm commit, supervision repair, permit withholding, LAN widening, power barrier, emergency block: all
+    through one gate inside `ensureAnchorLoaded`), each 127.0.0.1 DNS write, each AI resolver file and route, and the
+    owner app relaunch (right before `Process.run()` and right after it returns) read the target right before and
+    right after; a release in between undoes the effect and stops. The read after also runs when the effect threw,
+    since it may have committed first. The undo uses what was captured before the effect (the DNS originals), never
+    a re-read that the release's own cleanup may have removed. A released daemon also releases a block it reads in
+    Tono's anchor without saved intent. No lock is held across PF, System Configuration or disk I/O.
+  - **Repairing an unreadable target never leaves it missing:** the replacement is written beside it first, then the
+    record is moved aside and the replacement renamed in; a failed rename moves the record back (round 5, F3).
+  - **Every helper child and the update lock are bounded**, not only in `--emergency-disarm` (owner requirement,
+    round 5): launchctl 60 s, ditto 600 s, the relaunch / successor `open` 60 s, the install guard's script 600 s,
+    the Core's launch 10 s and config check 5 s, a staged helper's `--version` 10 s, pfctl and networksetup 15 s,
+    all through `KillSwitchManager.run` (deadline from before the launch); the update lock 660 s, then
+    `UPDATE_LOCK_TIMEOUT`.
   - **Readback per component** (PF broad block in `tono.killswitch`, DNS, AI sinkhole resolvers, AI blackhole routes):
     restored / NOT restored (with the residue named) / unknown. A failed query is unknown, never restored.
   - **While `released` or unreadable** the helper refuses `/killswitch/arm` (all callers, the update path's included),
@@ -64,4 +75,4 @@
 - Why stricter: an operator release can no longer be undone by anything automatic, including a helper restart; the
   escape hatch never waits without limit or fails closed on launchd, the update lock, a child process or the disk;
   success is never claimed on an unread component.
-- Applied in: [#1504](https://github.com/raydocs/tono/pull/1504) (backlog A13, helper 4.52.45).
+- Applied in: [#1504](https://github.com/raydocs/tono/pull/1504) (backlog A13, helper 4.52.49).

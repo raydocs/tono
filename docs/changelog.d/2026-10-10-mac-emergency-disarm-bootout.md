@@ -35,3 +35,12 @@
   - CLI 稳定阶段：第一次回读后隔 1 s 再读一次（4 s 预算）。只要读到残留（重新出现或一直还在），就把 PF / DNS / AI 各步骤再跑一次（5 / 10 / 5 s），然后第三次回读。成功只依据最终那次回读判断，报告会写明重跑过。整条命令上限 181.5 s。
   - 自测新增交错场景：已放行的效果停住，直到 CLI 释放之后才继续，结果被撤销且以 OPERATOR_RELEASED 停止，尚未开始的效果不会执行；AI 安装在条目之间停住，已装的被撤下，其余不装；CLI 稳定阶段遇到被重新加载的阻断会再 flush 一次，若仍在则如实报告 NOT restored。
   - 验证（Linux）：契约守卫 PASS；假 `xcrun` 构建在守卫之后到达编译；`test_build_source.py` OK。
+- 续记 2026-10-10（第五轮：GPT-6.1 Sol 复审 @176c006b FAIL，3 个 MAJOR、1 个 minor；所有者要求本轮修完并把 helper 里所有子进程和等待都设上限；helper 4.52.49 = main 4.52.48（含 #1542）+ 0.0.1）：
+  - F1 迟到的 LAN 放宽在释放后重新加载阻断：PF 加载的门移进 `ensureAnchorLoaded`（以及应急阻断的内存加载）本身，`guardedBlockLoad` 在加载前、加载后各读一次目标，加载抛错（部分提交后）也照样再读；被释放超车就先只 flush Tono 的 anchor，再按 disarm 去掉保存的意图、占位规则文件、hosts、PF 引用。LAN 放宽拆出 `applyWidenedLANScope`：磁盘写停住期间被释放，不加载，并把刚写的规则撤回占位。arm、permit 收窄、监督修复、电源屏障的 catch 在释放下一律 `disarmLocked`（收窄不再把阻断规则写回磁盘）。released 模式的看门狗在没有 `killswitch.state` 时也读 anchor，读到阻断（或读不到）就放行。
+  - F2 同属主 DNS 写入的撤销重新读快照：撤销改用写入前捕获的原值（`enable` 传刚保存的快照值，`reenableSameOwner` 传它算出的原值）；写入提交后抛错（SC commit 成功、Apply 失败）也做事后检查和撤销（`guardedEffect` 对抛错同样复查）；撤销没读回原值时，若快照已被 CLI 删掉就按原值重存快照，让 released 看门狗继续恢复。
+  - F3 修复读不出的目标时先移走再写：改为先把替换写成同目录的暂存文件（磁盘满等在这里失败，原记录不动，仍拒绝自动重连），再移走旧记录、改名放入；改名失败就把旧记录移回（再失败就放一个空文件，同样读不出、同样拒绝）。
+  - M1 App 重启请求：改走有界运行器，在 `Process.run()` 前、返回后各读一次目标；释放落在 spawn 期间就 SIGKILL 这个请求。
+  - 所有者要求的有界化（MAC-EMERGENCY-UNBOUNDED-WAITS 收尾）：复用 #1542 的 `KillSwitchManager.run`（期限从 spawn 前开始），只给它加了工作目录、stdin、输出模式参数，并抽出同一份启动逻辑 `launchWithinDeadline` 给常驻的 Core 用，没有第三个运行器。期限常量 `HelperChildDeadline`：launchctl 60 s、ditto 600 s、open 60 s、安装守卫脚本 600 s、Core 启动 10 s、Core 配置检查 5 s、暂存 helper `--version` 10 s、自测探针 10 s；`UpdatePackage.run` 必带期限，`--emergency-disarm` 内仍取 15 s 的更小值；更新锁默认等待 `lockWaitBudget` = 660 s（单调时钟）后 `UPDATE_LOCK_TIMEOUT`。
+  - 回归（每个失败序列一个，均接入 `--self-test`，用注入的停顿/失败驱动真实路径）：`runLateLANWideningAfterReleaseSelfTest`、`runReleaseDuringPartialPFCommitSelfTest`、`ProtectedDNSManager.runPendingDNSWriteAfterReleaseSelfTest`、`ProtectedDNSManager.runDNSCommitThenApplyFailureSelfTest`、`runFailedTargetRepairKeepsRefusalSelfTest`、`runOwnerRelaunchReleasedDuringSpawnSelfTest`、`runUpdateChildBoundedSelfTest`。
+  - 合并：merge origin/main（4.52.47）与 #1542 分支（4.52.48）；`CONTRACT.sha256` 按 `build-core-helper.sh` 清单重算。
+  - 验证（Linux）：契约守卫 PASS；`test_build_source.py` OK。Swift 编译、helper 自测与 XCTest 只在托管 macOS CI 上跑；未实机。

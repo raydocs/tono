@@ -12,9 +12,9 @@ enum UpdateExecutor {
     static let daemonPlist = "/Library/LaunchDaemons/\(daemonLabel).plist"
 
     static func retire() throws {
-        do { try UpdatePackage.run("/bin/launchctl", ["bootout", "system/" + label]) }
+        do { try UpdatePackage.run("/bin/launchctl", ["bootout", "system/" + label], deadline: HelperChildDeadline.launchctl) }
         catch {
-            if (try? UpdatePackage.run("/bin/launchctl", ["print", "system/" + label])) != nil { throw error }
+            if (try? UpdatePackage.run("/bin/launchctl", ["print", "system/" + label], deadline: HelperChildDeadline.launchctl)) != nil { throw error }
         }
         guard unlink(plist) == 0 || errno == ENOENT else { throw HelperFailure.system("Cannot retire committed update entry.") }
         try UpdateStorage.syncDirectory("/Library/LaunchDaemons")
@@ -28,7 +28,7 @@ enum UpdateExecutor {
         try UpdatePackage.snapshot(source, owner: uid, target: target, to: archive)
         try UpdateZIP.validate(archive)
         try ensureRootDirectory(directory + "/expanded", permissions: 0o700)
-        try UpdatePackage.run("/usr/bin/ditto", ["-x", "-k", archive, directory + "/expanded"])
+        try UpdatePackage.run("/usr/bin/ditto", ["-x", "-k", archive, directory + "/expanded"], deadline: HelperChildDeadline.ditto)
         let bundle = directory + "/expanded/Tono.app"
         try UpdatePackage.secureTree(bundle)
         try UpdatePackage.checkTarget(bundle, manifest: manifest)
@@ -68,8 +68,8 @@ enum UpdateExecutor {
         try UpdateStorage.write(data, to: plist)
         guard chmod(plist, 0o644) == 0 else { throw HelperFailure.system("Cannot secure update launch entry.") }
         // An already running executor owns the lock; never bootout/kick it.
-        do { try UpdatePackage.run("/bin/launchctl", ["bootstrap", "system", plist]) }
-        catch { try UpdatePackage.run("/bin/launchctl", ["print", "system/" + label]) }
+        do { try UpdatePackage.run("/bin/launchctl", ["bootstrap", "system", plist], deadline: HelperChildDeadline.launchctl) }
+        catch { try UpdatePackage.run("/bin/launchctl", ["print", "system/" + label], deadline: HelperChildDeadline.launchctl) }
     }
 
     /// Startup failure used to install an emergency block, and skipped that
@@ -334,17 +334,17 @@ enum UpdateExecutor {
     }
 
     private static func stopDaemon() throws {
-        do { try UpdatePackage.run("/bin/launchctl", ["bootout", "system/" + daemonLabel]) }
+        do { try UpdatePackage.run("/bin/launchctl", ["bootout", "system/" + daemonLabel], deadline: HelperChildDeadline.launchctl) }
         catch {
             // Already absent after a crash is fine; a still-registered daemon
             // is not. No concurrent daemon may own replacement/recovery.
-            if (try? UpdatePackage.run("/bin/launchctl", ["print", "system/" + daemonLabel])) != nil { throw error }
+            if (try? UpdatePackage.run("/bin/launchctl", ["print", "system/" + daemonLabel], deadline: HelperChildDeadline.launchctl)) != nil { throw error }
         }
     }
 
     private static func startDaemon() throws {
-        do { try UpdatePackage.run("/bin/launchctl", ["bootstrap", "system", daemonPlist]) }
-        catch { try UpdatePackage.run("/bin/launchctl", ["print", "system/" + daemonLabel]) }
+        do { try UpdatePackage.run("/bin/launchctl", ["bootstrap", "system", daemonPlist], deadline: HelperChildDeadline.launchctl) }
+        catch { try UpdatePackage.run("/bin/launchctl", ["print", "system/" + daemonLabel], deadline: HelperChildDeadline.launchctl) }
     }
 
     private static func launchSuccessor(uid: uid_t, attempt: UpdateStorage.Attempt) throws {
@@ -353,7 +353,7 @@ enum UpdateExecutor {
         // Re-enter this path after a crash between the replaced write and
         // launch. The executor does not impersonate the App on helper IPC;
         // Launch Services starts a fresh process that must authenticate anew.
-        try UpdatePackage.run("/bin/launchctl", ["asuser", String(uid), "/usr/bin/sudo", "-u", "#\(uid)", "/usr/bin/open", "-n", UpdatePackage.appPath])
+        try UpdatePackage.run("/bin/launchctl", ["asuser", String(uid), "/usr/bin/sudo", "-u", "#\(uid)", "/usr/bin/open", "-n", UpdatePackage.appPath], deadline: HelperChildDeadline.openApp)
     }
 
     private static func syncFile(_ path: String) throws {

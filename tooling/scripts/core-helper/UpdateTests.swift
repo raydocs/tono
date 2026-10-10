@@ -346,8 +346,14 @@ func runUpdateSelfTests() -> Bool {
         let child = Process()
         child.executableURL = URL(fileURLWithPath: path)
         child.arguments = ["20"]
-        try child.run()
-        defer { if child.isRunning { child.terminate() }; child.waitUntilExit() }
+        try KillSwitchManager.launchWithinDeadline(
+            child, until: .now() + HelperChildDeadline.selfTestProbe, deadline: HelperChildDeadline.selfTestProbe
+        )
+        defer {
+            if child.isRunning { child.terminate() }
+            for _ in 0..<20 where child.isRunning { usleep(50_000) }
+            if child.isRunning { kill(child.processIdentifier, SIGKILL) }
+        }
         func identities() throws -> (SecCode, SecStaticCode) {
             var dynamic: SecCode?
             var installed: SecStaticCode?

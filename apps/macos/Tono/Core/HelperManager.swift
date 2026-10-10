@@ -51,7 +51,7 @@ nonisolated struct HelperManager {
         /// never sends it.
         let originalDNSRestored: Bool?
         /// `/session/connect` only: the session an explicit user Connect began
-        /// (decision 084). Absent before helper 4.52.45.
+        /// (decision 084). Absent before helper 4.52.49.
         let sessionGeneration: UInt64?
         /// `/killswitch/status` only (decision 086): whether the saved arm
         /// carries a tunnel. Absent before helper 4.52.45 or without saved

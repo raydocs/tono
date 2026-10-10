@@ -444,6 +444,13 @@ nonisolated enum HelperProtocolVersion {
     ///   newer `secured` generation, and arms carry it. AI sinkholes and
     ///   blackhole routes are removed, never reinstalled, while released.
     ///   Every wait of the command is bounded (MAC-EMERGENCY-UNBOUNDED-WAITS).
+    ///   Every PF block load reads the target before and after itself (a
+    ///   load that threw included) and is undone under a release; a released
+    ///   daemon also releases a block it reads in Tono's anchor without saved
+    ///   intent; a 127.0.0.1 write's undo restores the originals captured
+    ///   before it; repairing an unreadable target never leaves it missing;
+    ///   every helper child (launchctl, ditto, open, the Core's launch and
+    ///   config check, the install script) and the update lock are bounded.
     static let current = "4.52.49"
 }
 

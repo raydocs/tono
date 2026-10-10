@@ -101,6 +101,17 @@ final class HelperCommandOutput: @unchecked Sendable {
     }
 }
 
+/// Where a bounded helper command's output goes. `.captured` (stdout and
+/// stderr into the result) is the pfctl shape; `.standardOutputOnly` drops
+/// stderr (a version probe whose runtime warnings must not corrupt its line);
+/// `.inherited` passes both through to this process (the install guard's
+/// script, whose output reaches the administrator prompt's caller).
+enum HelperCommandOutputMode {
+    case captured
+    case standardOutputOnly
+    case inherited
+}
+
 /// The launch of one bounded helper command, settled once: launched, failed,
 /// or abandoned because its deadline passed while `Process.run()` had not yet
 /// returned. A launch that returns after it was abandoned terminates its own
@@ -408,12 +419,10 @@ final class KillSwitchManager {
         // measuring against a ruleset that was never fully live — which would
         // hide a withdrawn permit and leave its states passing.
         lastLoadedPassRules = nil
-        // Right before and right after the kernel load (decision 084): a
-        // release that landed while this arm stalled wins. A post-load
-        // refusal throws into the catch below, which releases what loaded.
-        try HelperTarget.requireNoRelease()
+        // The load reads the target right before and right after itself
+        // (`guardedBlockLoad`, decision 084): a release that landed while this
+        // arm stalled wins, and the catch below releases what this arm saved.
         try Self.ensureAnchorLoaded(disposal: disposal, loadOutcome: &load)
-        try HelperTarget.requireNoRelease()
         lastLoadedPassRules = passRules
         stateGeneration &+= 1
         openNetworkEpoch &+= 1
@@ -441,6 +450,9 @@ final class KillSwitchManager {
             // A failure before the load, or a load pfctl rejected, left the
             // previous rules in place: flushing them opens the physical NIC
             // under a Core that is still running.
+            // An operator release that overtook this arm wins over both: the
+            // intent and rules it saved go too (#1504 review F1).
+            if let failure = releaseIfOvertakenLocked() { throw failure }
             if Self.failedCommitReleasesInstalledBlock(
                 load: load,
                 strictKillSwitchEnabled: false
@@ -562,6 +574,9 @@ final class KillSwitchManager {
                 try Self.writeRuleText(rules)
                 try Self.ensureAnchorLoaded(disposal: disposal)
             } catch {
+                // A release overtook the reload (`guardedBlockLoad` refused or
+                // undid it): never put the block rules back on disk.
+                if let failure = releaseIfOvertakenLocked() { throw failure }
                 // The narrowed file must not outlive a load the kernel may
                 // not have taken: it reads as already withheld and no later
                 // call would retry.
@@ -587,9 +602,17 @@ final class KillSwitchManager {
     /// wins, so the block is released again (AI hold included) and the
     /// caller stops with the refusal (decision 084). Caller holds `lock`.
     private func undoLoadIfReleased() throws {
-        guard let failure = HelperTarget.releaseRefusal() else { return }
+        if let failure = releaseIfOvertakenLocked() { throw failure }
+    }
+
+    /// A PF mutation an operator release overtook, whether its load returned
+    /// or threw (#1504 review F1): what it saved or loaded is released, the
+    /// AI hold included, and the release's refusal is returned for the
+    /// caller to throw. nil while no release holds. Caller holds `lock`.
+    private func releaseIfOvertakenLocked() -> HelperFailure? {
+        guard let failure = HelperTarget.releaseRefusal() else { return nil }
         _ = try? disarmLocked(preserveAIHold: false)
-        throw failure
+        return failure
     }
 
     static func withholdFailure(_ error: Error) -> HelperFailure {
@@ -624,16 +647,16 @@ final class KillSwitchManager {
             let state = Self.emergencyState(preserving: previous)
             try Self.writeRules(state: state, allowedUID: allowedUID)
             try saveState(state)
-            try HelperTarget.requireNoRelease()
+            // Gated on the target before and after (`guardedBlockLoad`).
             try Self.ensureAnchorLoaded(flushStates: true, loadOutcome: &load)
-            // A release during the load wins: the catch releases it again.
-            try HelperTarget.requireNoRelease()
             // Stale /etc/hosts pins do not permit traffic through the all-block
             // PF state. Clean them best-effort after the kernel barrier commits.
             try? Self.ensureHostsMappings(state: state)
             return true
         } catch {
             stateGeneration &+= 1
+            // A release that overtook the barrier releases what it saved.
+            if releaseIfOvertakenLocked() != nil { return false }
             if Self.failedCommitReleasesInstalledBlock(
                 load: load,
                 strictKillSwitchEnabled: false
@@ -1137,6 +1160,10 @@ final class KillSwitchManager {
             try Self.ensureAnchorLoaded(flushStates: true)
             try undoLoadIfReleased()
         } catch {
+            // Refused or undone by `guardedBlockLoad` (a release overtook the
+            // repair, #1504 review F1), or a repair that threw after a partial
+            // commit: under a release, nothing it wrote stays.
+            _ = releaseIfOvertakenLocked()
             // A failed repair must not fall through to an all-block. The next
             // pass retries the saved rules while the Core is running. When the
             // Core is down, the idle loop releases instead.
@@ -1179,14 +1206,43 @@ final class KillSwitchManager {
                   let widened = Self.widenLANScope(
                     in: source, current: current, baseline: lastLoadedPassRules
                   ) else { return }
-            try Self.writeRuleText(widened)
-            var outcome = KernelLoadOutcome.notIssued
-            try Self.ensureAnchorLoaded(flushStates: false, loadOutcome: &outcome)
+            try Self.applyWidenedLANScope(widened)
         } catch {
+            _ = releaseIfOvertakenLocked()
             let detail = (error as? HelperFailure)?.message ?? String(describing: error)
             FileHandle.standardError.write(Data(
                 "tono: LAN DNS scope reload skipped: \(detail)\n".utf8
             ))
+        }
+    }
+
+    /// The reload half of the LAN widening (#1504 review F1). The widened
+    /// rules derive from the armed ones and may have been computed, then
+    /// stalled in the disk write, before an operator release. The load reads
+    /// the target before and after itself (`guardedBlockLoad`); a release
+    /// that overtook the write or the load also takes the rules just written
+    /// off the disk (`undo`, the same release `guardedBlockLoad` runs), so a
+    /// later main-ruleset load cannot read them back.
+    static func applyWidenedLANScope(
+        _ rules: String,
+        writeRules: (String) throws -> Void = { try KillSwitchManager.writeRuleText($0) },
+        undo: () -> Void = {
+            if let seam = KillSwitchManager.blockLoadSeam { seam.undo() } else {
+                KillSwitchManager.undoBlockLoadUnderRelease()
+            }
+        }
+    ) throws {
+        try HelperTarget.requireNoRelease()
+        do {
+            try writeRules(rules)
+            var outcome = KernelLoadOutcome.notIssued
+            try ensureAnchorLoaded(flushStates: false, loadOutcome: &outcome)
+        } catch {
+            if let failure = HelperTarget.releaseRefusal() {
+                undo()
+                throw failure
+            }
+            throw error
         }
     }
 
