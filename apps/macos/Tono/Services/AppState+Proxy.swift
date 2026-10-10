@@ -503,6 +503,7 @@ extension AppState {
             }
             return
         }
+        let localNetwork = LocalNetworkDevicesSync.desired
         let overlay = ConfigPipeline.OverlayConfig(
             mixedPort: config.mixedPort,
             externalController: config.externalController,
@@ -516,7 +517,8 @@ extension AppState {
             claudeHomeNodeName: managedCatalogRouting?.homeProxy,
             defaultNodeName: managedCatalogRouting?.defaultProxy,
             claudeHomeSocks5: managedCatalogRouting?.homeSocks5,
-            allowLocalNetworkDevices: SettingsKey.allowsLocalNetworkDevices()
+            allowLocalNetworkDevices: localNetwork.allow,
+            localNetworkDevicesGeneration: localNetwork.generation
         )
         let selectedExit = selectedExitNode()
         let selectedExitName = selectedExit?.name
@@ -585,6 +587,9 @@ extension AppState {
                     LocalTrafficAudit.shared.recordEvent(
                         "core_config_reload_skipped_unchanged"
                     )
+                    // The running Core already holds these bytes, so it holds
+                    // the generation they were just written for (D7).
+                    LocalNetworkDevicesSync.documentInstalled(digest: digest)
                     finishConfigReloadRequest(requestID)
                     return
                 }
@@ -774,10 +779,14 @@ extension AppState {
                     finishConfigReloadRequest(requestID)
                 } else if ownedRuntime {
                     finishConfigReloadRequest(requestID, startPending: false)
+                    // D7: a local network devices fault is the error to show,
+                    // not a generic connection failure.
+                    showLocalNetworkDevicesFault()
                     await applyExhaustedArmedFailure(
-                        message: ConnectionFailurePresentation.userFacingMessage(
-                            classified: lastClassifiedFailure
-                        ),
+                        message: LocalNetworkDevicesSync.faultMessage
+                            ?? ConnectionFailurePresentation.userFacingMessage(
+                                classified: lastClassifiedFailure
+                            ),
                         resumeWhenReachable: true
                     )
                 } else {

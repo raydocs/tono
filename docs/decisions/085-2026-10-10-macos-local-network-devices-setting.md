@@ -1,37 +1,53 @@
-## 2026-10-10 · macOS: which connected-state PF passes the "Allow local network devices" setting (default off) withholds
-- Status: provisional (agent for backlog A29 under decision 079 D3-A, owner asleep; the owner may revisit)
-- Chosen: one app setting, 「允许局域网设备」 / "Allow local network devices", default off, sent to the helper as the
-  optional arm field `allowLocalNetworkDevices` (only when on; absent means off). Off withholds, while a tunnel is up,
-  the passes `tono-lan` (out and in, `10/8`, `172.16/12`, `192.168/16`, `169.254/16`), `tono-linklocal` (out and in,
-  `fe80::/10`, `fc00::/7`, `ff00::/8`), `tono-multicast` (`224.0.0.0/24`, `255.255.255.255`) and `tono-ssdp`
-  (`239.255.255.250` UDP 1900). Kept either way: `tono-mdns` (UDP 5353 to `224.0.0.251` / `ff02::fb` only),
-  `tono-igmp` (protocol 2, the group membership mDNS needs on a snooping switch), `tono-continuity` (`awdl0`, `llw0`,
-  `bridge100`: interface-scoped, decision 045 kept them for Universal Clipboard and Sidecar), `tono-dhcp` (broadcast
-  only), `tono-ndp`, and every block rule, including the #348 LAN DNS block `tono-lan-dns`. On renders exactly the
-  4.52.44 rules. The setting is ephemeral in the helper like `reviewedBundleDirect`: the persisted state never
-  carries it, so a heal, boot restore or emergency state renders off until the app re-arms.
-  Off also covers what the Core carries (review round 2): the sing-box document rejects `10/8`, `172.16/12`,
-  `192.168/16`, `169.254/16`, `fe80::/10`, `fc00::/7` ahead of every DIRECT route (TUN, the loopback mixed proxy,
-  reviewed-app and web-direct routes), and when the reviewed-bundle permit renders, PF drops root's traffic on its web
-  ports to those IPv4 ranges plus `100.64/10`, `224/4` and broadcast first (`tono-bundle-local`). The Core reads the
-  setting when its document is built; a document older than the current setting is either stricter (Core off, PF on)
-  or held by PF (Core on, PF off), so a mismatch fails closed. A re-arm of the live session that fails after the PF
-  load keeps the block and intent instead of releasing them.
-  Rejected: (a) a separate explicit LAN DNS permit. The task text read "only LAN DNS (as tightened by #348) and mDNS
-  are permitted", but #348 is a block, not a permit: after it, LAN DNS passed only through `tono-lan` on non-`en`
-  interfaces (another VPN's utun). Keeping that would add a dedicated DNS permit whose only user is split DNS of a
-  VPN whose other private traffic is now blocked; off therefore has no DNS permit. (b) Keeping `tono-multicast` and
-  `tono-ssdp` when off: they are local-network discovery (Windows rule I groups them with its LAN permit), and with
-  unicast to the found device blocked they only announce the Mac. (c) Adding narrower MLD, DHCPv6 or unicast DHCP
-  renewal passes when off: each would be a new rule shape under review; the costs are listed below instead.
-- Why stricter: off adds no pass and removes eight; on is byte-identical to main. Missing or malformed input never
-  widens: an old app sends no field (off), a non-boolean is refused, and an older helper rejects an arm carrying the
-  field (the app also replaces any helper whose version differs before arming). Costs while connected with the
-  setting off, recorded here: the router page, printers, NAS, AirPlay/casting targets and LAN peers are unreachable
-  (mDNS still lists them); IPv4 unicast DHCP renewal falls back to the broadcast rebind; DHCPv6 and MLD reports are
-  dropped (no IPv6 leaves the tunnel anyway; IPv6 mDNS may stop on an MLD-snooping switch); private destinations of
-  another VPN running beside Tono are blocked. Windows parity: Windows rule I (decision 048, #1355) still permits the
-  same ranges while connected and has no setting, so the D3-A premise "Windows does not permit this" is out of date;
-  after this change macOS off is stricter than Windows and macOS on matches Windows' shape. A Windows setting is a
-  separate task.
+## 2026-10-10 · macOS: "Allow local network devices" (default off) — what off withholds, and how a failed change stays fail-closed
+- Status: provisional (agent for backlog A29 under decision 079 D3-A; the owner authorised the redesign of 2026-10-10, including
+  the helper protocol and failure-handling changes, after three review rounds; the owner may revisit)
+- Chosen:
+  - **Setting.** 「允许局域网设备」 / "Allow local network devices", default off. The arm request carries the optional
+    `allowLocalNetworkDevices` field only when on (absent = off; anything but a JSON boolean is refused). The helper
+    echoes what each committed ruleset enforces; an app that gets no echo treats the helper as too old for the setting
+    and reports an explicit error instead of showing off as applied.
+  - **PF, while a tunnel is up.** Off withholds `tono-lan` (out and in: `10/8`, `172.16/12`, `192.168/16`, `169.254/16`),
+    `tono-linklocal` (out and in: `fe80::/10`, `fc00::/7`, `ff00::/8`), `tono-multicast` (`224.0.0.0/24`,
+    `255.255.255.255`) and `tono-ssdp` (`239.255.255.250` UDP 1900); when the reviewed-bundle permit renders, it is
+    preceded by `tono-bundle-local`, which drops root's traffic on the bundle's web ports to `10/8`, `172.16/12`,
+    `192.168/16`, `100.64/10`, `169.254/16`, `224/4` and broadcast. Kept either way: `tono-mdns` (UDP 5353 to
+    `224.0.0.251` / `ff02::fb` only), `tono-igmp`, `tono-continuity` (interface-scoped, decision 045), `tono-dhcp`
+    (broadcast), `tono-ndp`, and every block rule, including the #348 LAN DNS block. On renders exactly the 4.52.44 rules.
+    No-tunnel states (disconnected, bootstrap, armed-not-connected, emergency, boot restore) are unchanged. Each change is
+    one `pfctl -a tono.killswitch -f` load of the complete anchor (PF holds the old or the new ruleset, never a mix), and
+    the on → off swap withdraws range passes, which always takes the machine-wide state flush, so no LAN flow survives it.
+  - **Core (sing-box document).** Off rejects `10/8`, `172.16/12`, `192.168/16`, `100.64/10`, `169.254/16`, `fe80::/10`,
+    `fc00::/7` ahead of every DIRECT route, and every DIRECT rule that matches by name or process (web-direct suffixes,
+    the reviewed app's port rule, UDP 5353) is preceded by a `resolve` of the same match (with the direct outbound's own
+    resolver) and a reject of a local answer, so a hostname resolved later at dial time is never dialed into the LAN.
+    On adds nothing.
+  - **Convergence.** The desired value carries a generation. Every arm and every Core document records the generation
+    it applied, or unknown; a result from an older generation never overwrites a newer one. A toggle while connected
+    runs one full reload (PF arm, then the Core document) so both move together; the health check repeats that at most
+    three times while either lags. A Core older than PF fails closed either way: Core off + PF on is stricter, Core on +
+    PF off is held by PF.
+  - **Failure.** A re-arm of the live session (identified by the saved, armed state with the same tunnel, which is kept
+    apart from the in-memory rule baseline; an unreadable state counts as live) never releases protection on any
+    failure. If that re-arm was tightening to off and the replaced ruleset may still pass the LAN (it was on, or is
+    unknown), the helper installs the block-all emergency ruleset (one verified anchor load) and reports
+    `KILLSWITCH_LOCAL_NETWORK_FAULT`; if even that cannot be installed it stops the Core (its DIRECT dials and the local
+    mixed proxy) and reports `KILLSWITCH_LOCAL_NETWORK_FAULT_STOP_CORE`, and the core-down watchdog does not release the
+    block while that fault holds. The app shows the fault, stops automatic attempts, and retries only when the user
+    toggles the setting or connects again (or when PF and the Core are seen converged). The first arm of a new session
+    keeps today's failure policy.
+  - Rejected: (a) a separate LAN DNS permit — #348 is a block, and the only remaining LAN DNS path was another VPN's
+    utun, whose other private traffic off blocks anyway; (b) keeping `tono-multicast` / `tono-ssdp` when off; (c) new MLD,
+    DHCPv6 or unicast DHCP renewal passes when off; (d) an indefinite heal/retry loop after a failed change (Mullvad's
+    error state, which keeps blocking and surfaces the failure, is the model); (e) a narrower private-range block layered
+    on the old rules, which would need a second anchor reference in the main ruleset.
+- Why stricter: off adds no pass and removes eight; on is byte-identical to main; every failure keeps the block or makes
+  it stricter, never looser; missing, malformed or stale input never widens. Costs with the setting off while connected:
+  the router page, printers, NAS, casting targets and LAN peers are unreachable (mDNS still lists them); IPv4 unicast DHCP
+  renewal falls back to the broadcast rebind; DHCPv6 and MLD are dropped; private and CGNAT destinations of another VPN
+  beside Tono are blocked; in the protected fault all traffic stops until the user acts.
+- Windows: Windows does **not** block private ranges while connected. Its rule I (decision 048, #1355) permits the same
+  ranges and discovery multicast with no setting. This decision does not claim alignment with Windows and does not
+  change Windows policy; macOS off is stricter than Windows.
+- Known limits: the protected-fault flag lives in helper memory; a helper restart while the Core is stopped falls back
+  to the existing launch policy for a leftover block. No real-hardware evidence yet.
 - Applied in: PR #1506, backlog A29, branch `amp/a29-lan-devices-toggle` (helper 4.52.45).

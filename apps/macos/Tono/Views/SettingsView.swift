@@ -157,19 +157,21 @@ struct SettingsView: View {
                 )
             )
 
+            if let localNetworkFault = appState.localNetworkDevicesFaultMessage {
+                Text(localNetworkFault)
+                    .font(.system(size: seaEnabled ? 12 : 11))
+                    .foregroundStyle(seaEnabled ? SeaTheme.attention : Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
         }
     }
 
-    /// Only stores the choice. A connected session's health check (about
-    /// every five seconds) compares it with the value the helper last
-    /// committed and re-arms while they differ, so the PF passes follow the
-    /// switch without a reconnect. Disconnected, the next connect reads it.
+    /// Stores the choice and hands it to AppState, which applies PF and the
+    /// Core together (a new generation in `LocalNetworkDevicesSync`).
     private func setAllowLocalNetworkDevices(_ enabled: Bool) {
         allowLocalNetworkDevices = enabled
-        LocalTrafficAudit.shared.recordEvent(
-            "local_network_devices_setting",
-            details: ["enabled": String(enabled)]
-        )
+        appState.localNetworkDevicesSettingChanged(enabled)
     }
 
     private var auditLogRow: some View {

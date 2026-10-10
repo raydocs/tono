@@ -141,6 +141,24 @@ final class KillSwitchManager {
     /// its core-down counter from this, so a connect that has just armed is
     /// not released by a counter that already reached the threshold.
     private(set) var openNetworkEpoch: UInt64 = 0
+    /// "Allow local network devices" as the last committed arm loaded it while
+    /// a tunnel was up (false when the arm had no tunnel, so no LAN pass). nil
+    /// until an arm commits and after any arm fails: unknown is treated as
+    /// possibly on, so a failed tightening is never assumed to be harmless.
+    /// In memory only, like `lastLoadedPassRules`; the helper's other rule
+    /// writers (heal, power transition, bundle withhold, DNS scope widening)
+    /// never render a LAN pass.
+    var lastCommittedLocalNetwork: Bool?
+    /// Set when an off re-arm of the live session failed and the helper put
+    /// the host into the protected fault (block-all, or the Core stopped).
+    /// While set, the core-down watchdog does not release the block. Cleared
+    /// by the next committed arm or by a disarm. Read under `lock`.
+    var localNetworkFaultLocked = false
+    var localNetworkFault: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return localNetworkFaultLocked
+    }
     private var selectiveRecoveryReconciled = false
     /// Idle-loop checks, 10s apart, with the Core continuously down before a
     /// leftover kill switch is released. Three checks is about 30s: long
@@ -195,7 +213,13 @@ final class KillSwitchManager {
         // network work unlocked so the power callback can close its gate
         // immediately instead of missing macOS's sleep acknowledgement window.
         lock.lock()
-        let previous = try? loadState()
+        // Whether the saved state could be read is kept apart from its value:
+        // an unreadable state is an unknown session, and unknown never
+        // authorises releasing the block (see `isLiveSessionReArm`).
+        let previousRead = Result { try loadState() }
+        let previous: KillSwitchState? = try? previousRead.get()
+        let previousUnreadable: Bool
+        if case .failure = previousRead { previousUnreadable = true } else { previousUnreadable = false }
         let startingGeneration = stateGeneration
         lock.unlock()
 
@@ -361,7 +385,20 @@ final class KillSwitchManager {
             )
         }
         var load = KernelLoadOutcome.notIssued
-        var liveSessionReArm = false
+        // Classified before anything is written: a failure at any later step
+        // (rule file, saved state, load, enable, verification) is settled the
+        // same way.
+        let liveSessionReArm = Self.isLiveSessionReArm(
+            previous: previous,
+            previousUnreadable: previousUnreadable,
+            next: state
+        )
+        // A failed off re-arm cannot be assumed harmless unless the ruleset it
+        // replaces was a committed off one (see `lastCommittedLocalNetwork`).
+        let tighteningUnconfirmed = Self.localNetworkTighteningUnconfirmed(
+            next: state,
+            lastCommitted: lastCommittedLocalNetwork
+        )
         do {
         // Retire an earlier explicit release before saving a new armed intent.
         // If this arm is interrupted, its fallback remains selective.
@@ -377,11 +414,6 @@ final class KillSwitchManager {
         // gain. Any removed pass rule still forces the full flush.
         let passRules = Self.passRules(in: renderedRules)
         let disposal = Self.stateDisposal(replacing: lastLoadedPassRules, with: passRules)
-        liveSessionReArm = Self.isLiveSessionReArm(
-            previous: previous,
-            previousBaseline: lastLoadedPassRules,
-            next: state
-        )
         // The kernel takes the new ruleset part-way through the call below, ahead
         // of the PF enable, the state disposal, and the verification probes that
         // can each still throw. Recording nothing across it is what keeps a
@@ -392,6 +424,8 @@ final class KillSwitchManager {
         lastLoadedPassRules = nil
         try Self.ensureAnchorLoaded(disposal: disposal, loadOutcome: &load)
         lastLoadedPassRules = passRules
+        lastCommittedLocalNetwork = !state.tunnelInterfaces.isEmpty && state.allowLocalNetworkDevices
+        localNetworkFaultLocked = false
         stateGeneration &+= 1
         openNetworkEpoch &+= 1
         repairedSinceArm = false
@@ -401,7 +435,7 @@ final class KillSwitchManager {
         try? Self.clearSelectiveRecoveryDisposition()
         selectiveRecoveryReconciled = false
         SelectiveFailOpenInstaller.removeBestEffort()
-        return response(
+        var committed = response(
             armed: true,
             wanted: true,
             live: true,
@@ -411,6 +445,10 @@ final class KillSwitchManager {
                 return 0
             }()
         )
+        // Echo what this ruleset enforces. An app reads a reply without it as
+        // a helper too old for the setting and refuses to report it applied.
+        committed["allowLocalNetworkDevices"] = state.allowLocalNetworkDevices
+        return committed
         } catch {
             // A load that pfctl accepted, or that never answered, may already
             // be in the kernel. macOS has no strict kill switch, so that
@@ -418,9 +456,37 @@ final class KillSwitchManager {
             // A failure before the load, or a load pfctl rejected, left the
             // previous rules in place: flushing them opens the physical NIC
             // under a Core that is still running. A re-arm of the session PF
-            // already holds keeps the block (see `settleFailedCommit`).
-            Self.settleFailedCommit(load: load, liveSessionReArm: liveSessionReArm)
-            throw error
+            // already holds keeps the block, and a failed tightening enters
+            // the protected fault (see `settleFailedArm`).
+            lastCommittedLocalNetwork = nil
+            let uid = self.allowedUID
+            let outcome = Self.settleFailedArm(
+                load: load,
+                liveSessionReArm: liveSessionReArm,
+                tighteningUnconfirmed: tighteningUnconfirmed,
+                installStricterBlock: { try Self.installEmergencyBlock(allowedUID: uid) }
+            )
+            switch outcome {
+            case .faultStricterBlock:
+                localNetworkFaultLocked = true
+                stateGeneration &+= 1
+                throw HelperFailure.coded(
+                    code: Self.localNetworkFaultCode,
+                    message: "Could not apply Allow local network devices off: "
+                        + "\((error as? HelperFailure)?.message ?? String(describing: error)). "
+                        + "Every connection is blocked until protection is applied again."
+                )
+            case .faultStopCore:
+                localNetworkFaultLocked = true
+                stateGeneration &+= 1
+                throw HelperFailure.coded(
+                    code: Self.localNetworkFaultStopCoreCode,
+                    message: "Could not apply Allow local network devices off, and the stricter "
+                        + "block could not be installed; the Core is stopped and protection stays armed."
+                )
+            case .released, .kept:
+                throw error
+            }
         }
     }
 
@@ -445,55 +511,108 @@ final class KillSwitchManager {
     /// while the Core is still up. A strict kill switch keeps the block.
     static func failedCommitReleasesInstalledBlock(
         load: KernelLoadOutcome,
-        strictKillSwitchEnabled: Bool,
-        liveSessionReArm: Bool = false
+        strictKillSwitchEnabled: Bool
     ) -> Bool {
-        guard failureRecoveryReleasesNetwork(strictKillSwitchEnabled: strictKillSwitchEnabled),
-              !liveSessionReArm else {
+        guard failureRecoveryReleasesNetwork(strictKillSwitchEnabled: strictKillSwitchEnabled) else {
             return false
         }
         return load == .acceptedOrUnknown
     }
 
+    static let localNetworkFaultCode = "KILLSWITCH_LOCAL_NETWORK_FAULT"
+    static let localNetworkFaultStopCoreCode = "KILLSWITCH_LOCAL_NETWORK_FAULT_STOP_CORE"
+
     /// A re-arm of the session PF already holds: the armed state on disk has
-    /// the same non-empty tunnel set, and this process committed the ruleset
-    /// it replaces (a nil baseline is a first arm after daemon start or after
-    /// a partial commit). The app re-arms a live session for a settings
-    /// change, a heal reassert, a node switch or a config reload. The first
-    /// arm of a new session (no tunnel on disk, or another tunnel) is not one.
+    /// the same non-empty tunnel set. The saved state is the session identity
+    /// and protection intent; it is kept apart from the in-memory baseline, so
+    /// a failed load that cleared the baseline cannot turn the next retry into
+    /// a "first arm". A state that could not be read is an unknown session and
+    /// counts as live: unknown never authorises a release. The first arm of a
+    /// new session (no saved state, or one without a tunnel or with another
+    /// tunnel) is not one.
     static func isLiveSessionReArm(
         previous: KillSwitchState?,
-        previousBaseline: Set<String>?,
+        previousUnreadable: Bool,
         next: KillSwitchState
     ) -> Bool {
-        guard let previous, previous.armed, previousBaseline != nil,
-              !previous.tunnelInterfaces.isEmpty else { return false }
+        if previousUnreadable { return true }
+        guard let previous, previous.armed, !previous.tunnelInterfaces.isEmpty else { return false }
         return Set(previous.tunnelInterfaces) == Set(next.tunnelInterfaces)
     }
 
-    /// After an arm threw. A re-arm of a live session that failed after the
-    /// load keeps whatever the kernel now holds (the just-loaded rules, or the
-    /// previous ones) and its saved intent: releasing it would open the host
-    /// under a session the app still shows as protected. The error still
-    /// reaches the app, and the next arm takes the full flush because the
-    /// baseline was cleared before the load. Every other failure keeps
-    /// today's policy.
-    static func settleFailedCommit(
+    /// Whether a failed arm may leave a LAN pass the new state forbids: the
+    /// new state is off with a tunnel, and the ruleset it replaces is not a
+    /// committed off one (on, or unknown).
+    static func localNetworkTighteningUnconfirmed(
+        next: KillSwitchState,
+        lastCommitted: Bool?
+    ) -> Bool {
+        !next.tunnelInterfaces.isEmpty && !next.allowLocalNetworkDevices && lastCommitted != false
+    }
+
+    enum FailedArmOutcome: Equatable {
+        /// First arm of a new session after a load that may have committed:
+        /// today's policy (macOS has no strict kill switch).
+        case released
+        /// Whatever the kernel holds stays (the previous ruleset, or the one
+        /// just loaded), and so does the saved intent.
+        case kept
+        /// A failed tightening: the block-all emergency ruleset replaced the
+        /// anchor in one load and passed its verification.
+        case faultStricterBlock
+        /// A failed tightening whose stricter block could not be installed:
+        /// the caller stops the Core (the local proxy and DIRECT dials).
+        case faultStopCore
+    }
+
+    /// After an arm threw. A re-arm of the live session never releases: on
+    /// any failure it keeps the installed protection and the saved intent.
+    /// When that re-arm was tightening the local network (off) and the
+    /// replaced ruleset may still pass the LAN, it installs the stricter
+    /// block-all ruleset, or asks for the Core to be stopped when even that
+    /// cannot be installed. Nothing here loosens.
+    static func settleFailedArm(
         load: KernelLoadOutcome,
         liveSessionReArm: Bool,
-        release: () -> Void = { KillSwitchManager.releaseInstalledBlock() }
-    ) {
-        if failedCommitReleasesInstalledBlock(
-            load: load,
-            strictKillSwitchEnabled: false,
-            liveSessionReArm: liveSessionReArm
-        ) {
-            release()
-        } else if load == .acceptedOrUnknown, liveSessionReArm {
-            FileHandle.standardError.write(Data(
-                "tono: re-arm of the live session failed after the PF load; the block stays installed\n".utf8
-            ))
+        tighteningUnconfirmed: Bool,
+        release: () -> Void = { KillSwitchManager.releaseInstalledBlock() },
+        installStricterBlock: () throws -> Void
+    ) -> FailedArmOutcome {
+        guard liveSessionReArm else {
+            if failedCommitReleasesInstalledBlock(load: load, strictKillSwitchEnabled: false) {
+                release()
+                return .released
+            }
+            return .kept
         }
+        guard tighteningUnconfirmed else {
+            FileHandle.standardError.write(Data(
+                "tono: re-arm of the live session failed; the installed block and intent stay\n".utf8
+            ))
+            return .kept
+        }
+        do {
+            try installStricterBlock()
+            FileHandle.standardError.write(Data(
+                "tono: local network tightening failed; block-all installed (protected fault)\n".utf8
+            ))
+            return .faultStricterBlock
+        } catch {
+            FileHandle.standardError.write(Data(
+                "tono: local network tightening failed and block-all could not be installed; stopping the Core\n".utf8
+            ))
+            return .faultStopCore
+        }
+    }
+
+    /// The core-down watchdog releases a leftover block after the Core has
+    /// been down for a while. Not in the protected fault: there the Core may
+    /// have been stopped on purpose, and releasing would loosen.
+    static func watchdogShouldRestoreNetwork(
+        consecutiveCoreDownChecks: Int,
+        localNetworkFault: Bool
+    ) -> Bool {
+        !localNetworkFault && watchdogShouldRestoreNetwork(consecutiveCoreDownChecks: consecutiveCoreDownChecks)
     }
 
     static func passRules(in rules: String) -> Set<String> {
@@ -806,6 +925,8 @@ final class KillSwitchManager {
         stateGeneration &+= 1
         openNetworkEpoch &+= 1
         lastLoadedPassRules = nil
+        lastCommittedLocalNetwork = nil
+        localNetworkFaultLocked = false
         repairedSinceArm = false
         return response(armed: false, wanted: false, live: false)
     }

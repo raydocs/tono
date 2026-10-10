@@ -471,6 +471,9 @@ final class AppState {
     var residentialRouteAuditContext: ResidentialRouteAuditContext?
     var residentialRouteAuditGeneration: UInt64 = 0
     var pendingFullConfigReload = false
+    /// D7: the "Allow local network devices" fault shown under the setting,
+    /// or nil (see `LocalNetworkDevicesSync`).
+    var localNetworkDevicesFaultMessage: String?
     var pendingOptionalPolicyReload = false
     /// Applies of one accepted document that failed on this session before
     /// touching the Core and were queued again.
@@ -2871,7 +2874,8 @@ final class AppState {
     }
 
     func currentOwnedRuntimeOverlay() -> ConfigPipeline.OverlayConfig {
-        ConfigPipeline.OverlayConfig(
+        let localNetwork = LocalNetworkDevicesSync.desired
+        return ConfigPipeline.OverlayConfig(
             mixedPort: config.mixedPort,
             externalController: config.externalController,
             secret: config.secret,
@@ -2884,7 +2888,8 @@ final class AppState {
             claudeHomeNodeName: managedCatalogRouting?.homeProxy,
             defaultNodeName: managedCatalogRouting?.defaultProxy,
             claudeHomeSocks5: managedCatalogRouting?.homeSocks5,
-            allowLocalNetworkDevices: SettingsKey.allowsLocalNetworkDevices()
+            allowLocalNetworkDevices: localNetwork.allow,
+            localNetworkDevicesGeneration: localNetwork.generation
         )
     }
 

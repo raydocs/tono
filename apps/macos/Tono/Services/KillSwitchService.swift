@@ -12,6 +12,11 @@ nonisolated enum KillSwitchService {
         case commandFailed(String)
         case helperRejected
         case userDenied
+        /// D7: the helper could not apply "Allow local network devices" off
+        /// and holds the protected fault. The helper's message.
+        case localNetworkFault(String)
+        /// D7: the helper does not report what it enforces for the setting.
+        case localNetworkHelperTooOld
 
         var errorDescription: String? {
             switch self {
@@ -25,6 +30,10 @@ nonisolated enum KillSwitchService {
                 String(localized: "The installed network helper rejected this copy of Tono.")
             case .userDenied:
                 String(localized: "Administrator privileges were denied for the Kill Switch.")
+            case .localNetworkFault:
+                String(localized: "Tono couldn't block local network devices, so all traffic is blocked to keep you protected. Turn the setting off and on again, or reconnect.")
+            case .localNetworkHelperTooOld:
+                String(localized: "The network helper is too old to block local network devices. Reconnect to update it.")
             }
         }
     }
@@ -41,9 +50,13 @@ nonisolated enum KillSwitchService {
 
     private static let stateKey = "Tono_killSwitchArmed"
 
+    /// `localNetworkDevices` is what the helper says this ruleset enforces
+    /// for "Allow local network devices" (D7); nil from a helper older than
+    /// the setting.
     typealias ArmReply = (
         armed: Bool, wanted: Bool, live: Bool,
-        healed: Bool, flushedStates: Bool, killedHosts: Int
+        healed: Bool, flushedStates: Bool, killedHosts: Int,
+        localNetworkDevices: Bool?
     )
 
     /// Helper IPC boundary of `arm`. Production delivers the prepared
@@ -93,12 +106,15 @@ nonisolated enum KillSwitchService {
         }
         do {
             let bootstrapPins = configuredBootstrapPins(for: apiHosts)
-            // D7: read the setting once per arm and record what the helper
-            // committed. Any outcome but a confirmed commit leaves it unknown,
-            // which the health loop treats as a mismatch and re-arms.
-            let allowLocalNetworkDevices = localNetworkDevicesSetting()
-            var committedLocalNetworkDevices: Bool?
-            defer { appliedLocalNetworkDevices = committedLocalNetworkDevices }
+            // D7: the setting (with its generation) this arm sends. Recorded as
+            // applied only when the helper confirms it enforces exactly that;
+            // every other outcome records unknown at this generation, which
+            // never overwrites a newer result (`LocalNetworkDevicesSync`).
+            let localNetwork = LocalNetworkDevicesSync.desired
+            var localNetworkOutcome = LocalNetworkDevicesSync.Applied.unknown(
+                generation: localNetwork.generation
+            )
+            defer { LocalNetworkDevicesSync.recordPF(localNetworkOutcome) }
             // A superseded arm is retried once, here rather than in the caller.
             //
             // The daemon refuses an arm whose state generation moved while it was
@@ -123,7 +139,7 @@ nonisolated enum KillSwitchService {
                 tailscaleBootstrapEnabled: tailscaleBootstrapEnabled,
                 allowSystemResolution: allowSystemResolution,
                 reviewedBundleDirect: reviewedBundleDirect,
-                allowLocalNetworkDevices: allowLocalNetworkDevices
+                allowLocalNetworkDevices: localNetwork.allow
             )
             guard status.armed, status.wanted, status.live else {
                 // The helper answered, so the outcome is known: a reply that
@@ -159,10 +175,24 @@ nonisolated enum KillSwitchService {
                     ]
                 )
             }
-            committedLocalNetworkDevices = allowLocalNetworkDevices
             isArmed = true
+            // A helper that does not say what it enforces predates the
+            // setting and keeps the LAN passes whatever was asked. Never
+            // report off as applied on it: an explicit error instead.
+            guard status.localNetworkDevices == localNetwork.allow else {
+                LocalNetworkDevicesSync.recordFault(.helperTooOld)
+                throw Error.localNetworkHelperTooOld
+            }
+            localNetworkOutcome = .known(localNetwork)
         } catch HelperIPCError.forbidden {
             throw Error.helperRejected
+        } catch HelperIPCError.commandFailed(let message, let code?)
+            where code.hasPrefix("KILLSWITCH_LOCAL_NETWORK_FAULT") {
+            // The helper could not tighten to off and holds the protected
+            // fault (block-all, or the Core stopped). It is still armed.
+            isArmed = true
+            LocalNetworkDevicesSync.recordFault(.helper(message))
+            throw Error.localNetworkFault(message)
         } catch let error as Error {
             throw error
         } catch {
@@ -212,14 +242,8 @@ nonisolated enum KillSwitchService {
         allowSystemResolution: Bool,
         reviewedBundleDirect: Bool,
         allowLocalNetworkDevices: Bool
-    ) throws -> (
-        armed: Bool, wanted: Bool, live: Bool,
-        healed: Bool, flushedStates: Bool, killedHosts: Int
-    ) {
-        func attempt() throws -> (
-            armed: Bool, wanted: Bool, live: Bool,
-            healed: Bool, flushedStates: Bool, killedHosts: Int
-        ) {
+    ) throws -> ArmReply {
+        func attempt() throws -> ArmReply {
             try armIPC.deliver {
                 try HelperManager.armKillSwitch(
                     apiHosts: apiHosts,
@@ -379,36 +403,10 @@ nonisolated enum KillSwitchService {
         get { reassertLock.withLock { reassertNeeded } }
         set {
             reassertLock.withLock { reassertNeeded = newValue }
-            // A heal or release rendered PF from disk, where the local network
-            // setting is always off: what the helper holds is no longer known.
-            if newValue { appliedLocalNetworkDevices = nil }
+            // A heal or release rewrote PF without this session's arm: what
+            // it enforces for the local network is no longer known.
+            if newValue { LocalNetworkDevicesSync.pfBecameUnknown() }
         }
-    }
-
-    /// D7 (A29): the "Allow local network devices" value carried by the last
-    /// arm the helper confirmed, or nil when unknown (no confirmed arm yet, an
-    /// arm that failed or whose outcome is unknown, a heal or release). The
-    /// health loop re-arms while this differs from the setting, so a toggle
-    /// that lands while an earlier arm is in flight is applied by the next
-    /// tick instead of being lost. Arms are serialized by
-    /// `PrivilegedRuntimeCoordinator`, so the last confirmed value is the one
-    /// the helper holds. Lock-guarded like the reassert flag.
-    private static let localNetworkLock = NSLock()
-    nonisolated(unsafe) private static var appliedLocalNetwork: Bool?
-    static var appliedLocalNetworkDevices: Bool? {
-        get { localNetworkLock.withLock { appliedLocalNetwork } }
-        set { localNetworkLock.withLock { appliedLocalNetwork = newValue } }
-    }
-
-    /// The setting as each arm reads it. Replaced by tests.
-    nonisolated(unsafe) static var localNetworkDevicesSetting: () -> Bool = {
-        SettingsKey.allowsLocalNetworkDevices()
-    }
-
-    /// Whether a fail-closed session must re-arm because the helper does not
-    /// hold the current setting (or it is unknown).
-    static var localNetworkDevicesNeedReassert: Bool {
-        isArmed && appliedLocalNetworkDevices != localNetworkDevicesSetting()
     }
 
     /// Observes effective helper-owned protection without mutating local intent.

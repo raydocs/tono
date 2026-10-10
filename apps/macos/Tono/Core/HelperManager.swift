@@ -39,6 +39,9 @@ nonisolated struct HelperManager {
         /// the machine. Absent from a pre-3.11.0 daemon, which only had the
         /// all-or-nothing choice.
         let killedHosts: Int?
+        /// What the committed ruleset enforces for "Allow local network
+        /// devices" (D7). Absent from a helper older than the setting.
+        let allowLocalNetworkDevices: Bool?
         /// Machine-readable refusal code, for the refusals whose correct handling
         /// is a decision rather than a message. Absent from a pre-3.11.2 daemon.
         let code: String?
@@ -839,9 +842,9 @@ nonisolated struct HelperManager {
         // rule engine still routes that bundle direct.
         reviewedBundleDirect: Bool,
         // No default either: the caller records which value the helper
-        // committed (`KillSwitchService.appliedLocalNetworkDevices`).
+        // committed (`LocalNetworkDevicesSync`).
         allowLocalNetworkDevices: Bool
-    ) throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool, flushedStates: Bool, killedHosts: Int) {
+    ) throws -> KillSwitchService.ArmReply {
         var object: [String: Any] = [:]
         if reviewedBundleDirect { object["reviewedBundleDirect"] = true }
         object.merge(localNetworkDevicesArmFields(allowLocalNetworkDevices)) { _, setting in setting }
@@ -878,7 +881,13 @@ nonisolated struct HelperManager {
             path: "/killswitch/arm",
             object: object
         )
-        return try requireKillSwitchSuccess(result, operation: "arm")
+        let reply = try requireKillSwitchSuccess(result, operation: "arm")
+        let enforced = (try? JSONDecoder().decode(Envelope.self, from: result.body))?
+            .allowLocalNetworkDevices
+        return (
+            reply.armed, reply.wanted, reply.live, reply.healed,
+            reply.flushedStates, reply.killedHosts, enforced
+        )
     }
 
     static func disarmKillSwitch(preserveAIHold: Bool = false) throws {

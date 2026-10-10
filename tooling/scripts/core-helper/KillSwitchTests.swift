@@ -1222,6 +1222,13 @@ extension KillSwitchManager {
                     && localNetworkOffBundleRules == expectedOffBundle.joined(separator: "\n") + "\n"
                     && localNetworkRules(allow: true, bundle: true)
                         == expectedOnBundle.joined(separator: "\n") + "\n"
+                    // The on → off swap withdraws range passes, which no
+                    // address list can express: every state is flushed, so no
+                    // LAN flow established under on survives into off.
+                    && stateDisposal(
+                        replacing: passRules(in: cloudRules),
+                        with: passRules(in: localNetworkOffRules)
+                    ) == .full
             }()
             if !localNetworkOffKeepsOnlyMDNS {
                 FileHandle.standardError.write(Data(
@@ -1994,48 +2001,93 @@ extension KillSwitchManager {
             )
     }
 
-    /// A29 review R2: a re-arm of the live session (a settings change, a heal
-    /// reassert) that fails after the PF load keeps the anchor and the saved
-    /// intent; the first arm of a new session keeps the release. The release
-    /// effect is injected, so this runs without root and touches no live
-    /// anchor or state.
+    /// A29: how a failed arm is settled, with every effect injected, so this
+    /// runs without root and touches no live anchor, state or Core.
+    /// - A re-arm of the live session never releases, however often it fails
+    ///   and whether or not a baseline survived the previous failure (the
+    ///   nil-baseline retry used to be read as a first arm and released).
+    /// - An unreadable saved state counts as a live session.
+    /// - A failed on→off tightening installs the block-all; when that cannot
+    ///   be installed the caller must stop the Core. Neither releases.
+    /// - The core-down watchdog never releases during that protected fault.
+    /// - The first arm of a new session keeps today's release.
     static func runLiveSessionReArmKeepsBlockSelfTest() -> Bool {
-        func state(tunnels: [String]) -> KillSwitchState {
+        struct InstallFailed: Error {}
+        func state(tunnels: [String], allow: Bool = false) -> KillSwitchState {
             KillSwitchState(
                 armed: true, tailscaleBootstrapEnabled: false,
                 apiHosts: [], exitHints: [], tunnelInterfaces: tunnels,
                 resolvedHosts: [:], pinnedHosts: [:], derpEndpoints: [],
                 cachedDERPEndpoints: [], proxyTargets: [], sessionDirectEndpoints: [],
-                reviewedBundleDirectEnabled: false, allowLocalNetworkDevices: false
+                reviewedBundleDirectEnabled: false, allowLocalNetworkDevices: allow
             )
         }
-        let live = state(tunnels: ["utun199"])
+        let liveOff = state(tunnels: ["utun199"])
+        let liveOn = state(tunnels: ["utun199"], allow: true)
         let bootstrap = state(tunnels: [])
-        let baseline: Set<String> = ["pass out quick on utun199 all keep state (if-bound) label \"tono-tunnel\""]
-        let reArm = isLiveSessionReArm(previous: live, previousBaseline: baseline, next: live)
-        let firstArmOfSession = !isLiveSessionReArm(previous: bootstrap, previousBaseline: baseline, next: live)
-            && !isLiveSessionReArm(previous: nil, previousBaseline: nil, next: live)
-            && !isLiveSessionReArm(previous: live, previousBaseline: nil, next: live)
-            && !isLiveSessionReArm(previous: live, previousBaseline: baseline, next: state(tunnels: ["utun200"]))
-        // Injected post-load failure: `release` stands for the anchor flush
-        // and intent removal that `releaseInstalledBlock` performs.
-        func settle(_ load: KernelLoadOutcome, liveSessionReArm: Bool) -> (anchorLoaded: Bool, intentKept: Bool) {
-            var anchorLoaded = true
-            var intentKept = true
-            settleFailedCommit(load: load, liveSessionReArm: liveSessionReArm) {
-                anchorLoaded = false
-                intentKept = false
-            }
-            return (anchorLoaded, intentKept)
+        var released = 0
+        func settle(
+            _ load: KernelLoadOutcome, live: Bool, tightening: Bool,
+            install: () throws -> Void = {}
+        ) -> FailedArmOutcome {
+            settleFailedArm(
+                load: load, liveSessionReArm: live, tighteningUnconfirmed: tightening,
+                release: { released += 1 }, installStricterBlock: install
+            )
         }
-        let reArmFailure = settle(.acceptedOrUnknown, liveSessionReArm: reArm)
-        let newSessionFailure = settle(.acceptedOrUnknown, liveSessionReArm: false)
-        let passed = reArm && firstArmOfSession
-            && reArmFailure.anchorLoaded && reArmFailure.intentKept
-            && !newSessionFailure.anchorLoaded && !newSessionFailure.intentKept
+
+        // Session identity comes from the saved state alone.
+        let identity = isLiveSessionReArm(previous: liveOn, previousUnreadable: false, next: liveOff)
+            && isLiveSessionReArm(previous: nil, previousUnreadable: true, next: liveOff)
+            && !isLiveSessionReArm(previous: bootstrap, previousUnreadable: false, next: liveOff)
+            && !isLiveSessionReArm(previous: nil, previousUnreadable: false, next: liveOff)
+            && !isLiveSessionReArm(previous: liveOff, previousUnreadable: false, next: state(tunnels: ["utun200"]))
+
+        // Consecutive failures of the same session's re-arm (off → off, so no
+        // tightening): the first leaves no baseline, the second used to be
+        // classified as a first arm. Both keep the block.
+        let consecutive = settle(.acceptedOrUnknown, live: true, tightening: false) == .kept
+            && settle(.acceptedOrUnknown, live: true, tightening: false) == .kept
+            && settle(.rejected, live: true, tightening: false) == .kept
+            && settle(.notIssued, live: true, tightening: false) == .kept
+
+        // On → off tightening.
+        let tighteningDetected = localNetworkTighteningUnconfirmed(next: liveOff, lastCommitted: true)
+            && localNetworkTighteningUnconfirmed(next: liveOff, lastCommitted: nil)
+            && !localNetworkTighteningUnconfirmed(next: liveOff, lastCommitted: false)
+            && !localNetworkTighteningUnconfirmed(next: liveOn, lastCommitted: true)
+            && !localNetworkTighteningUnconfirmed(next: bootstrap, lastCommitted: true)
+        var stricterInstalled = 0
+        let postLoadFault = settle(.acceptedOrUnknown, live: true, tightening: true, install: {
+            stricterInstalled += 1
+        })
+        let rejectedLoadFault = settle(.rejected, live: true, tightening: true, install: {
+            stricterInstalled += 1
+        })
+        let unstoppableFault = settle(.acceptedOrUnknown, live: true, tightening: true, install: {
+            throw InstallFailed()
+        })
+        let fault = postLoadFault == .faultStricterBlock
+            && rejectedLoadFault == .faultStricterBlock
+            && stricterInstalled == 2
+            && unstoppableFault == .faultStopCore
+        let watchdogHolds = !watchdogShouldRestoreNetwork(consecutiveCoreDownChecks: 99, localNetworkFault: true)
+            && watchdogShouldRestoreNetwork(consecutiveCoreDownChecks: 99, localNetworkFault: false)
+        let nothingReleasedYet = released == 0
+
+        // The first arm of a new session: today's policy.
+        let newSession = settle(.acceptedOrUnknown, live: false, tightening: false) == .released
+            && released == 1
+            && settle(.rejected, live: false, tightening: false) == .kept
+            && released == 1
+
+        let passed = identity && consecutive && tighteningDetected && fault
+            && watchdogHolds && nothingReleasedYet && newSession
         if !passed {
             FileHandle.standardError.write(Data(
-                "self-test: a live-session re-arm that failed after the load released the block\n".utf8
+                ("self-test: failed-arm settlement (identity \(identity), consecutive \(consecutive), "
+                    + "tightening \(tighteningDetected), fault \(fault), watchdog \(watchdogHolds), "
+                    + "unreleased \(nothingReleasedYet), new session \(newSession))\n").utf8
             ))
         }
         return passed

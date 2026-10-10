@@ -31,9 +31,11 @@ nonisolated struct ConfigPipeline {
         /// through `Tono-Exit`, so its host is not a direct PF exception.
         var claudeHomeSocks5: TonoExitCatalogHomeSocks5? = nil
         /// "Allow local network devices" (D7). Off, the default, rejects the
-        /// local ranges in the Core; callers pass the setting read when the
-        /// document is built.
+        /// local ranges in the Core. Callers pass one snapshot of
+        /// `LocalNetworkDevicesSync.desired`: the value and the generation it
+        /// belongs to, so an installed document records what it applied.
         var allowLocalNetworkDevices: Bool = false
+        var localNetworkDevicesGeneration: UInt64 = 0
     }
 
     struct DialEndpoint: Hashable, Equatable, Sendable {

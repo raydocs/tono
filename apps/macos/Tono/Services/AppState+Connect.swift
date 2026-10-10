@@ -200,6 +200,7 @@ extension AppState {
                 let port = self.config.mixedPort
                 let selectedExit = self.preferManagedCatalogExitForConnect()
                 let selectedExitName = selectedExit?.name ?? ConfigPipeline.homeNodeName
+                let localNetwork = LocalNetworkDevicesSync.desired
                 let overlay = ConfigPipeline.OverlayConfig(
                     mixedPort: port,
                     externalController: self.config.externalController,
@@ -213,7 +214,8 @@ extension AppState {
                     claudeHomeNodeName: self.managedCatalogRouting?.homeProxy,
                     defaultNodeName: self.managedCatalogRouting?.defaultProxy,
                     claudeHomeSocks5: self.managedCatalogRouting?.homeSocks5,
-                    allowLocalNetworkDevices: SettingsKey.allowsLocalNetworkDevices()
+                    allowLocalNetworkDevices: localNetwork.allow,
+                    localNetworkDevicesGeneration: localNetwork.generation
                 )
                 let apiHost = (Bundle.main.object(forInfoDictionaryKey: "TonoAPIBaseURL") as? String)
                     .flatMap { URL(string: $0)?.host }
@@ -1774,12 +1776,7 @@ extension AppState {
         // Never race a node switch or config reload: both arm PF with
         // transaction-specific endpoint unions this reassert would
         // clobber. The flag stays set and retries next cycle.
-        // The same re-arm applies "Allow local network devices" (D7): it
-        // runs whenever the value the helper last confirmed differs from the
-        // setting or is unknown, and each arm records what it sent, so a
-        // toggle during an in-flight arm is caught on the next tick.
-        let localNetworkDevicesStale = KillSwitchService.localNetworkDevicesNeedReassert
-        if KillSwitchService.needsSessionExceptionReassert || localNetworkDevicesStale,
+        if KillSwitchService.needsSessionExceptionReassert,
            self.switchingNodeId == nil,
            self.connectionCoordinator.configReloadTask == nil {
             LocalTrafficAudit.shared.recordEvent(
@@ -1788,7 +1785,6 @@ extension AppState {
                     "session_endpoints": String(
                         self.activeDirectPolicy?.sessionEndpoints.count ?? 0
                     ),
-                    "local_network_devices_stale": String(localNetworkDevicesStale),
                 ]
             )
             do {
@@ -1816,6 +1812,7 @@ extension AppState {
                 )
             }
         }
+        self.convergeLocalNetworkDevices()
         // This refresh existed because pins were the only thing routing
         // these hosts direct, so a rotated CDN answer stranded the flow
         // on a stale /32. Pins are no longer that load-bearing: the

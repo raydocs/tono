@@ -414,8 +414,11 @@ nonisolated enum HelperProtocolVersion {
     ///   The app sends the field only when the setting is on, so an older
     ///   daemon never sees it unless the user turned it on. Off also drops
     ///   root's reviewed-bundle web ports to local ranges (`tono-bundle-local`).
-    ///   A re-arm of the live session that fails after the PF load keeps the
-    ///   block instead of releasing it.
+    ///   The arm reply echoes `allowLocalNetworkDevices`; the app treats a
+    ///   reply without it as a helper too old for the setting. A failed
+    ///   re-arm of the live session never releases; a failed on → off
+    ///   tightening installs block-all or stops the Core (protected fault,
+    ///   `KILLSWITCH_LOCAL_NETWORK_FAULT[_STOP_CORE]`).
     static let current = "4.52.45"
 }
 

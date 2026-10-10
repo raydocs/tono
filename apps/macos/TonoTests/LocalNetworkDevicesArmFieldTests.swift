@@ -2,8 +2,52 @@ import XCTest
 @testable import Tono
 
 /// D7 (A29): "Allow local network devices" on the app side of the helper
-/// boundary.
+/// boundary: the arm field, generation bookkeeping for PF and the Core, the
+/// bounded automatic convergence, the explicit faults, and the toggle's
+/// reload.
 final class LocalNetworkDevicesArmFieldTests: XCTestCase {
+    private var savedIPC = KillSwitchService.armIPC
+    private var savedArmed = false
+    private var savedReader = LocalNetworkDevicesSync.readStoredSetting
+
+    override func setUp() {
+        super.setUp()
+        savedIPC = KillSwitchService.armIPC
+        savedArmed = KillSwitchService.isArmed
+        savedReader = LocalNetworkDevicesSync.readStoredSetting
+        LocalNetworkDevicesSync.readStoredSetting = { false }
+        LocalNetworkDevicesSync.resetForTesting()
+    }
+
+    override func tearDown() {
+        KillSwitchService.armIPC = savedIPC
+        KillSwitchService.isArmed = savedArmed
+        LocalNetworkDevicesSync.readStoredSetting = savedReader
+        LocalNetworkDevicesSync.resetForTesting()
+        super.tearDown()
+    }
+
+    nonisolated private static func reply(echo: Bool?) -> KillSwitchService.ArmReply {
+        (armed: true, wanted: true, live: true, healed: false,
+         flushedStates: false, killedHosts: 0, localNetworkDevices: echo)
+    }
+
+    private func armSession() throws {
+        try KillSwitchService.arm(
+            apiHosts: [],
+            tunnelInterfaces: [],
+            proxyEndpoints: [],
+            sessionDirectEndpoints: [],
+            helperPrepared: true,
+            reviewedBundleDirect: false
+        )
+    }
+
+    /// The Core installs a document built from `setting`.
+    private func installCore(_ setting: LocalNetworkDevicesSync.Setting, digest: String) {
+        LocalNetworkDevicesSync.documentWritten(digest: digest, setting: setting)
+        LocalNetworkDevicesSync.documentInstalled(digest: digest)
+    }
 
     /// The arm request carries `allowLocalNetworkDevices` only when the
     /// setting is on. A helper older than the field rejects any arm that
@@ -27,53 +71,128 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
         XCTAssertEqual(fields()["allowLocalNetworkDevices"] as? Bool, true)
     }
 
-    /// Review F1 (lost update): the setting is turned off while an arm that
-    /// read it as on is still in flight. That arm's completion must not mark
-    /// the session current; the health check sees the helper holds on while
-    /// the setting is off, re-arms, and ends with the helper holding off.
-    func testToggleDuringAnInFlightArmIsReappliedByTheNextHealthCheck() throws {
-        let savedIPC = KillSwitchService.armIPC
-        let savedSetting = KillSwitchService.localNetworkDevicesSetting
-        let savedArmed = KillSwitchService.isArmed
-        defer {
-            KillSwitchService.armIPC = savedIPC
-            KillSwitchService.localNetworkDevicesSetting = savedSetting
-            KillSwitchService.isArmed = savedArmed
-            KillSwitchService.appliedLocalNetworkDevices = nil
-        }
-        var setting = true
-        KillSwitchService.localNetworkDevicesSetting = { setting }
-        let committed: KillSwitchService.ArmReply = (
-            armed: true, wanted: true, live: true,
-            healed: false, flushedStates: false, killedHosts: 0
-        )
-        func armSession() throws {
-            try KillSwitchService.arm(
-                apiHosts: [],
-                tunnelInterfaces: [],
-                proxyEndpoints: [],
-                sessionDirectEndpoints: [],
-                helperPrepared: true,
-                reviewedBundleDirect: false
-            )
-        }
-
-        // The first arm read "on"; the user turns it off before it returns.
+    /// Rapid toggles in both directions, with the user changing the setting
+    /// twice while an arm is in flight: the in-flight arm records only what it
+    /// sent, the session is not converged until an arm and a Core document of
+    /// the newest generation are both applied, and it ends on the last choice.
+    func testRapidTogglesConvergeOnTheLastChoiceInBothDirections() throws {
+        // off → on, then on → off → on while the first arm is in flight.
+        let firstOn = LocalNetworkDevicesSync.settingChanged(true)
+        var echo: Bool? = firstOn.allow
         KillSwitchService.armIPC.deliver = { _ in
-            setting = false
-            return committed
+            LocalNetworkDevicesSync.settingChanged(false)
+            LocalNetworkDevicesSync.settingChanged(true)
+            return Self.reply(echo: echo)
         }
         try armSession()
-        XCTAssertEqual(KillSwitchService.appliedLocalNetworkDevices, true)
-        XCTAssertTrue(
-            KillSwitchService.localNetworkDevicesNeedReassert,
-            "the helper holds on while the setting is off: the next tick must re-arm"
-        )
+        installCore(firstOn, digest: "doc-1")
+        XCTAssertEqual(LocalNetworkDevicesSync.pfApplied, .known(firstOn))
+        XCTAssertFalse(LocalNetworkDevicesSync.converged, "a newer generation is pending")
 
-        // The health check's re-arm reads the current setting.
-        KillSwitchService.armIPC.deliver = { _ in committed }
+        // The next arm sends the newest generation (on).
+        let lastOn = LocalNetworkDevicesSync.desired
+        XCTAssertEqual(lastOn.generation, firstOn.generation + 2)
+        echo = lastOn.allow
+        KillSwitchService.armIPC.deliver = { _ in Self.reply(echo: echo) }
         try armSession()
-        XCTAssertEqual(KillSwitchService.appliedLocalNetworkDevices, false)
-        XCTAssertFalse(KillSwitchService.localNetworkDevicesNeedReassert)
+        XCTAssertFalse(LocalNetworkDevicesSync.converged, "the Core still runs the older document")
+        installCore(lastOn, digest: "doc-3")
+        XCTAssertTrue(LocalNetworkDevicesSync.converged)
+
+        // on → off.
+        let off = LocalNetworkDevicesSync.settingChanged(false)
+        XCTAssertFalse(LocalNetworkDevicesSync.converged)
+        echo = off.allow
+        try armSession()
+        installCore(off, digest: "doc-4")
+        XCTAssertEqual(LocalNetworkDevicesSync.pfApplied, .known(off))
+        XCTAssertEqual(LocalNetworkDevicesSync.coreApplied, .known(off))
+        XCTAssertTrue(LocalNetworkDevicesSync.converged)
+    }
+
+    /// A result from an older generation (a late reply, a late document)
+    /// never overwrites a newer one, known or unknown.
+    func testStaleGenerationNeverOverwritesANewerResult() {
+        let old = LocalNetworkDevicesSync.settingChanged(true)
+        let new = LocalNetworkDevicesSync.settingChanged(false)
+        LocalNetworkDevicesSync.recordPF(.known(new))
+        LocalNetworkDevicesSync.recordPF(.known(old))
+        LocalNetworkDevicesSync.recordPF(.unknown(generation: old.generation))
+        XCTAssertEqual(LocalNetworkDevicesSync.pfApplied, .known(new))
+        installCore(new, digest: "doc-new")
+        installCore(old, digest: "doc-old")
+        XCTAssertEqual(LocalNetworkDevicesSync.coreApplied, .known(new))
+        XCTAssertTrue(LocalNetworkDevicesSync.converged)
+    }
+
+    /// Toggling while connected reloads the Core with PF: with a reload
+    /// already running, the toggle queues a full reload behind it (and the
+    /// health check's automatic step waits for it).
+    func testToggleWhileConnectedQueuesAFullCoreAndPFReload() {
+        let app = AppState()
+        app.isConnected = true
+        let running = Task<Void, Never> {}
+        app.connectionCoordinator.configReloadTask = running
+        defer { app.connectionCoordinator.configReloadTask = nil }
+        app.pendingFullConfigReload = false
+
+        app.localNetworkDevicesSettingChanged(true)
+
+        XCTAssertTrue(app.pendingFullConfigReload, "the toggle must reload the Core, not only re-arm PF")
+        XCTAssertEqual(LocalNetworkDevicesSync.desired.allow, true)
+        app.pendingFullConfigReload = false
+        app.convergeLocalNetworkDevices()
+        XCTAssertFalse(app.pendingFullConfigReload, "no automatic attempt while a reload is running")
+    }
+
+    /// Automatic convergence is bounded: after the budget the session holds
+    /// an explicit fault with a message, and the user's toggle retries.
+    func testAutomaticAttemptsStopAtTheBudgetAndTheTogglesRetry() {
+        LocalNetworkDevicesSync.settingChanged(true)
+        for _ in 0..<LocalNetworkDevicesSync.automaticAttemptLimit {
+            XCTAssertTrue(LocalNetworkDevicesSync.takeAutomaticAttempt())
+        }
+        XCTAssertFalse(LocalNetworkDevicesSync.takeAutomaticAttempt())
+        XCTAssertEqual(LocalNetworkDevicesSync.fault, .attemptsExhausted)
+        XCTAssertNotNil(LocalNetworkDevicesSync.faultMessage)
+        XCTAssertFalse(LocalNetworkDevicesSync.takeAutomaticAttempt(), "no retry loop after the fault")
+
+        LocalNetworkDevicesSync.settingChanged(false)
+        XCTAssertNil(LocalNetworkDevicesSync.fault)
+        XCTAssertTrue(LocalNetworkDevicesSync.takeAutomaticAttempt())
+    }
+
+    /// A helper that does not say what it enforces is older than the
+    /// setting. The arm must not report off as applied on it: an explicit
+    /// error, protection intent kept, PF unknown, and the fault recorded.
+    func testOldHelperWithoutTheEchoIsAnExplicitError() {
+        KillSwitchService.isArmed = false
+        KillSwitchService.armIPC.deliver = { _ in Self.reply(echo: nil) }
+        XCTAssertThrowsError(try armSession()) { error in
+            guard case KillSwitchService.Error.localNetworkHelperTooOld = error else {
+                return XCTFail("expected the old-helper error: \(error)")
+            }
+        }
+        XCTAssertTrue(KillSwitchService.isArmed)
+        XCTAssertEqual(LocalNetworkDevicesSync.pfApplied, .unknown(generation: 0))
+        XCTAssertEqual(LocalNetworkDevicesSync.fault, .helperTooOld)
+    }
+
+    /// The helper's protected fault (an off re-arm it could not apply) is an
+    /// explicit error with intent kept, and stops automatic attempts.
+    func testHelperProtectedFaultIsAnExplicitErrorWithoutRetryLoop() {
+        LocalNetworkDevicesSync.settingChanged(false)
+        KillSwitchService.isArmed = false
+        KillSwitchService.armIPC.deliver = { _ in
+            throw HelperIPCError.commandFailed("block-all installed", code: "KILLSWITCH_LOCAL_NETWORK_FAULT")
+        }
+        XCTAssertThrowsError(try armSession()) { error in
+            guard case KillSwitchService.Error.localNetworkFault = error else {
+                return XCTFail("expected the protected fault: \(error)")
+            }
+        }
+        XCTAssertTrue(KillSwitchService.isArmed)
+        XCTAssertEqual(LocalNetworkDevicesSync.fault, .helper("block-all installed"))
+        XCTAssertFalse(LocalNetworkDevicesSync.takeAutomaticAttempt())
     }
 }

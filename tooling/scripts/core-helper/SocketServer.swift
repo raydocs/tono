@@ -456,8 +456,11 @@ final class SocketServer {
             consecutiveCoreDownChecks += 1
             // DNS stays put until the block is released. Restoring it during
             // the gap between arm and the Core process would undo a connect.
+            // Not while an off re-arm left the protected fault (A29): the Core
+            // may have been stopped on purpose and the block must stay.
             guard KillSwitchManager.watchdogShouldRestoreNetwork(
-                consecutiveCoreDownChecks: consecutiveCoreDownChecks
+                consecutiveCoreDownChecks: consecutiveCoreDownChecks,
+                localNetworkFault: killSwitch.localNetworkFault
             ) else { return }
             do {
                 _ = try killSwitch.disarm(preserveAIHold: KillSwitchManager.automaticReleasePreservesAIHold())
@@ -873,10 +876,29 @@ final class SocketServer {
             case ("POST", "/killswitch/arm"):
                 let object = try jsonObject(request.body)
                 try validateKillSwitchArmFields(object)
-                let response = try killSwitch.arm(
-                    object,
-                    commitAllowed: { transitionGate.isAwake() }
-                )
+                let response: [String: Any]
+                do {
+                    response = try killSwitch.arm(
+                        object,
+                        commitAllowed: { transitionGate.isAwake() }
+                    )
+                } catch let failure as HelperFailure
+                    where failure.code == KillSwitchManager.localNetworkFaultStopCoreCode {
+                    // A29: an off re-arm failed and not even the block-all
+                    // could be installed. Stop the Core, the remaining path
+                    // to the LAN (its DIRECT dials and the local mixed proxy).
+                    // The saved intent stays armed and the watchdog holds the
+                    // block while the fault is set.
+                    do {
+                        try core.stop()
+                    } catch {
+                        let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+                        FileHandle.standardError.write(Data(
+                            "tono: protected fault could not stop the Core: \(detail)\n".utf8
+                        ))
+                    }
+                    throw failure
+                }
                 recordSessionOwner(owner)
                 sendResponse(client, status: 200, object: response)
             case ("POST", "/killswitch/quit"):

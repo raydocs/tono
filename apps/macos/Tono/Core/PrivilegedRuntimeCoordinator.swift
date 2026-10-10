@@ -86,10 +86,12 @@ actor PrivilegedRuntimeCoordinator {
             configDir: configDirectory,
             configSHA256: configSHA256
         )
+        LocalNetworkDevicesSync.documentInstalled(digest: configSHA256)
     }
 
     func stopCore() throws {
         try HelperManager.stopCore()
+        LocalNetworkDevicesSync.coreBecameUnknown()
     }
 
     /// One non-reentrant helper transaction: no new arm/start can interleave
@@ -117,10 +119,12 @@ actor PrivilegedRuntimeCoordinator {
     }
 
     func syncCoreConfig(configDirectory: String, configSHA256: String) throws -> String {
-        try HelperManager.syncCoreConfig(
+        let path = try HelperManager.syncCoreConfig(
             configDir: configDirectory,
             configSHA256: configSHA256
         )
+        LocalNetworkDevicesSync.documentInstalled(digest: configSHA256)
+        return path
     }
 
     func coreStatus() -> (
