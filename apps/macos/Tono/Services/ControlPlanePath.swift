@@ -20,8 +20,18 @@ nonisolated enum ControlPlaneExchangeError: Error {
     case invalidResponse
 }
 
+/// A literal address and port the pinned client dials (#584); the TLS
+/// server name is always the API host.
+nonisolated struct ControlPlaneEndpoint: Sendable, Hashable {
+    let address: String
+    let port: UInt16
+
+    var description: String { port == 443 ? address : "\(address):\(port)" }
+}
+
 /// One way to reach the control plane (#584): the bundled pinned addresses,
-/// or whatever the system resolver returns.
+/// whatever the system resolver returns, or a Tono-owned relay outside
+/// Cloudflare (decision 077).
 nonisolated struct ControlPlanePath: Sendable {
     /// Named in audit events.
     let label: String
@@ -72,17 +82,55 @@ nonisolated struct ControlPlanePath: Sendable {
         let addresses = (KillSwitchService.configuredBootstrapPins(for: [host])[host] ?? [])
             .filter { IPv4Address($0) != nil }
         guard !addresses.isEmpty else { return nil }
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
-        let userAgent = "Tono/\(build)"
         return ControlPlanePath(label: "pinned") { request, maximumResponseBytes in
             try await PinnedControlPlaneExchange.send(
                 request,
+                label: "pinned",
                 host: host,
-                addresses: addresses,
+                endpoints: addresses.map { ControlPlaneEndpoint(address: $0, port: 443) },
+                connectBudget: PinnedControlPlaneExchange.connectBudget,
                 userAgent: userAgent,
                 maximumResponseBytes: maximumResponseBytes
             )
         }
+    }
+
+    /// Tono-owned relays outside Cloudflare, per API host (decision 077,
+    /// the Windows client's `bootstrap::API_RELAYS`). Each is an nginx
+    /// `ssl_preread` listener that admits only this host's SNI and forwards
+    /// the unterminated TLS session to the Cloudflare edge, so the client
+    /// validates the same certificate it does on every other path. Not in
+    /// the PF bootstrap permit: while protection is armed the relay is
+    /// blocked like any other non-permitted address.
+    static let apiRelays: [String: [ControlPlaneEndpoint]] = [
+        "api.afk.ccwu.cc": [ControlPlaneEndpoint(address: "179.253.233.220", port: 2053)],
+    ]
+
+    /// The relays for `baseURL`'s host, or nil when it has none. Only the
+    /// production API host has relays; a debug base URL never dials them.
+    nonisolated static func relays(for baseURL: URL) -> ControlPlanePath? {
+        guard let components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "https",
+              components.port == nil || components.port == 443,
+              let host = components.host?.lowercased(), !host.isEmpty,
+              let endpoints = apiRelays[host], !endpoints.isEmpty else { return nil }
+        return ControlPlanePath(label: "relay") { request, maximumResponseBytes in
+            try await PinnedControlPlaneExchange.send(
+                request,
+                label: "relay",
+                host: host,
+                endpoints: endpoints,
+                connectBudget: PinnedControlPlaneExchange.relayConnectBudget,
+                userAgent: userAgent,
+                maximumResponseBytes: maximumResponseBytes
+            )
+        }
+    }
+
+    /// `User-Agent` for the pinned client, which has no `URLSession` to set it.
+    private static var userAgent: String {
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
+        return "Tono/\(build)"
     }
 }
 
@@ -104,37 +152,44 @@ nonisolated enum PinnedControlPlaneExchange {
     /// this, whether they are the fallback or, once preferred, stand in front
     /// of the system resolver.
     static let connectBudget: TimeInterval = 10
+    /// Connect budget across the relays (decision 077), the last path: a
+    /// dead relay must not stretch a failed sign-in much further. The
+    /// Windows client gives its relays 4 s.
+    static let relayConnectBudget: TimeInterval = 5
     /// One whole exchange, like the session's `timeoutIntervalForResource`.
     static let exchangeBudget: TimeInterval = 45
 
     static func send(
         _ request: URLRequest,
+        label: String,
         host: String,
-        addresses: [String],
+        endpoints: [ControlPlaneEndpoint],
+        connectBudget: TimeInterval,
         userAgent: String,
         maximumResponseBytes: Int
     ) async throws -> ControlPlaneAnswer {
         guard let message = requestBytes(request, host: host, userAgent: userAgent) else {
-            // Nothing was sent, so the system path may still carry it.
+            // Nothing was sent, so another path may still carry it.
             throw URLError(.cannotConnectToHost, userInfo: [
-                NSLocalizedDescriptionKey: "pinned: the request could not be framed",
+                NSLocalizedDescriptionKey: "\(label): the request could not be framed",
             ])
         }
         let started = Date()
         var failures: [String] = []
         var clockRejected = false
-        for (index, address) in addresses.enumerated() {
+        for (index, endpoint) in endpoints.enumerated() {
             try Task.checkCancellation()
             let remaining = connectBudget - Date().timeIntervalSince(started)
             guard remaining > 0 else { break }
             let connection = PinnedConnection(
-                address: address,
+                endpoint: endpoint,
                 host: host,
+                label: label,
                 message: message,
                 maximumResponseBytes: maximumResponseBytes
             )
             switch await connection.run(
-                connectBudget: remaining / Double(addresses.count - index),
+                connectBudget: remaining / Double(endpoints.count - index),
                 exchangeBudget: exchangeBudget
             ) {
             case let .answered(answer):
@@ -147,16 +202,16 @@ nonisolated enum PinnedControlPlaneExchange {
             case .cancelled:
                 throw CancellationError()
             case let .notConnected(detail):
-                failures.append("\(address) \(detail)")
+                failures.append("\(endpoint.description) \(detail)")
             case let .clockRejected(detail):
                 // #588: named as the clock by `TonoAPIClient`.
                 clockRejected = true
-                failures.append("\(address) \(detail)")
+                failures.append("\(endpoint.description) \(detail)")
             }
         }
-        // No pin reached TLS, so no request byte left this Mac.
+        // No endpoint reached TLS, so no request byte left this Mac.
         throw URLError(clockRejected ? .serverCertificateHasBadDate : .cannotConnectToHost, userInfo: [
-            NSLocalizedDescriptionKey: "pinned: " + (failures.isEmpty
+            NSLocalizedDescriptionKey: "\(label): " + (failures.isEmpty
                 ? "connect budget spent" : failures.joined(separator: "; ")),
         ])
     }
@@ -214,9 +269,10 @@ nonisolated private enum PinnedOutcome: Sendable {
     case cancelled
 }
 
-/// One pinned address, one request.
+/// One pinned endpoint, one request.
 nonisolated private final class PinnedConnection: @unchecked Sendable {
     private let connection: NWConnection
+    private let label: String
     private let message: Data
     private let maximumResponseBytes: Int
     private let queue = DispatchQueue(label: "app.tono.control-plane.pinned")
@@ -229,7 +285,9 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
     private var lastWaiting: String?
     private var received = Data()
 
-    init(address: String, host: String, message: Data, maximumResponseBytes: Int) {
+    init(
+        endpoint: ControlPlaneEndpoint, host: String, label: String, message: Data, maximumResponseBytes: Int
+    ) {
         let tls = NWProtocolTLS.Options()
         let options = tls.securityProtocolOptions
         // SNI and the name the default trust evaluation checks the
@@ -240,7 +298,12 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
         let parameters = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
         // #587: no system proxy, like the control-plane session.
         parameters.preferNoProxies = true
-        connection = NWConnection(host: NWEndpoint.Host(address), port: .https, using: parameters)
+        connection = NWConnection(
+            host: NWEndpoint.Host(endpoint.address),
+            port: NWEndpoint.Port(rawValue: endpoint.port) ?? .https,
+            using: parameters
+        )
+        self.label = label
         self.message = message
         self.maximumResponseBytes = maximumResponseBytes
     }
@@ -308,7 +371,7 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
             connection.send(content: message, completion: .contentProcessed { [self] error in
                 if let error {
                     finish(.failedAfterConnect(URLError(.networkConnectionLost, userInfo: [
-                        NSLocalizedDescriptionKey: "pinned send: \(error)",
+                        NSLocalizedDescriptionKey: "\(label) send: \(error)",
                     ])))
                     return
                 }
@@ -329,7 +392,7 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
             }
             finish(connected
                 ? ending(with: URLError(.networkConnectionLost, userInfo: [
-                    NSLocalizedDescriptionKey: "pinned: \(error)",
+                    NSLocalizedDescriptionKey: "\(label): \(error)",
                 ]))
                 : .notConnected("\(error)"))
         case .cancelled:
@@ -366,7 +429,7 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
                     return
                 }
                 finish(ending(with: URLError(.networkConnectionLost, userInfo: [
-                    NSLocalizedDescriptionKey: "pinned: the connection closed early"
+                    NSLocalizedDescriptionKey: "\(label): the connection closed early"
                         + (error.map { " (\($0))" } ?? ""),
                 ])))
             }

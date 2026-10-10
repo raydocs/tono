@@ -32,5 +32,8 @@
   touched (it owns 443).
 - Applied in: PR fix/win-api-relay-20261010 (`apps/windows/app/src-tauri/src/tono/{bootstrap,transport}.rs`);
   changelog [2026-10-10-win-api-relay.md](../changelog.d/2026-10-10-win-api-relay.md);
-  finding [WIN-AUTH-CN-CF-PATH](../findings.d/WIN-AUTH-CN-CF-PATH.md). macOS follows in its
-  own PR (same server side).
+  finding [WIN-AUTH-CN-CF-PATH](../findings.d/WIN-AUTH-CN-CF-PATH.md). macOS: PR
+  fix/mac-api-relay-20261010 (`apps/macos/Tono/Services/{ControlPlanePath,TonoAPIClient}.swift`,
+  `ControlPlanePath.apiRelays`, tried after the system resolver and the pinned addresses both
+  fail before any request byte; not in the PF bootstrap permit); changelog
+  [2026-10-10-mac-api-relay.md](../changelog.d/2026-10-10-mac-api-relay.md).
