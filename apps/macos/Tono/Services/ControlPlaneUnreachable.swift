@@ -53,7 +53,12 @@ nonisolated struct ControlPlaneUnreachable: Equatable, Sendable {
 
     var headline: String {
         if stoppedEarly {
-            return String(localized: "Tono's service did not answer in time. This request was not sent again on another route, in case it already arrived.")
+            // Only a timeout may mean the request arrived and its answer is
+            // late; any other early stop broke the exchange off.
+            if attempts.last?.failure == "timeout" {
+                return String(localized: "Tono's service did not answer in time. This request was not sent again on another route, in case it already arrived.")
+            }
+            return String(localized: "The connection was interrupted before Tono got an answer. This request was not sent again on another route, in case it already arrived.")
         }
         if attempts.contains(where: { $0.path == "relay" }) {
             return String(localized: "Tono could not reach its service on any route, Tono's relays included.")

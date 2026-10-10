@@ -8851,6 +8851,16 @@
           }
         }
       }
+    },
+    "The connection was interrupted before Tono got an answer. This request was not sent again on another route, in case it already arrived.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接在 Tono 收到应答之前中断了。为免重复提交，这次请求没有改走其他路径重发。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

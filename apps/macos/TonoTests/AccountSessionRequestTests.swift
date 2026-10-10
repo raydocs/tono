@@ -1951,9 +1951,13 @@ final class AccountSessionRequestTests: XCTestCase {
         renewal.client?.urlProtocol(renewal, didReceive: refused, cacheStoragePolicy: .notAllowed)
         renewal.client?.urlProtocol(renewal, didFailWithError: URLError(.networkConnectionLost))
         let outcome = await read.result
-        if case let .failure(error) = outcome,
-           let apiError = error as? TonoAPIClient.APIError, case .transport = apiError {
-            XCTFail("a refused renewal is not an unreachable Tono")
+        if case let .failure(error) = outcome, let apiError = error as? TonoAPIClient.APIError {
+            switch apiError {
+            case .transport, .unreachable:
+                XCTFail("a refused renewal is not an unreachable Tono")
+            default:
+                break
+            }
         }
 
         let written = try Data(contentsOf: directory.appendingPathComponent(OfflineGrantGate.fileName))
