@@ -3,7 +3,7 @@
 ## 来源与方法
 
 - Before：生产 UI/hook [b9922d78217e7032bd15b7e2c26e176b1f756ad6](https://github.com/raydocs/tono/commit/b9922d78217e7032bd15b7e2c26e176b1f756ad6)。
-- After：所有 after PNG 的生产 UI/hook [e2e75c5462e7c871e0f4a7a0c8e44d47b371fbfc](https://github.com/raydocs/tono/commit/e2e75c5462e7c871e0f4a7a0c8e44d47b371fbfc)。后续归档 commit 只改本目录与记录，不改应用。
+- After：所有 after PNG 的生产 UI/hook [e2e75c5462e7c871e0f4a7a0c8e44d47b371fbfc](https://github.com/raydocs/tono/commit/e2e75c5462e7c871e0f4a7a0c8e44d47b371fbfc)。归档 dd2f1db28 只改文档；其后修正 `resolveLanguage` 的非空基础语言检查，解决严格索引类型推断，布局和这些有效语言场景的运行结果未变。保留真实捕获 SHA，不把旧图改称新 head 重拍。
 - Linux orb、Chromium 155、DPR **2**；正常 1040×960 CSS px，窄窗 660×720。不是 Windows 原生 WebView2/Segoe UI，也不是 macOS 截图、已安装候选包或真机验收。
 - 使用 `vite.shell-preview.config.mts` 的生产设置组件、偏好 hook、i18n、共享 query cache 和生产 `swrConfig`；只有原生 IO、设备状态和路由入口使用合成 fixture。海景使用现有 Static 模式，无图片后期修饰。
 - Before 在独立 b9922d78 worktree 加入同一合成读写/延迟/丢失回执入口和 SWR 配置；仍调用该 SHA 的生产偏好 hook，不加入新的操作状态导出。**这是带共用测试入口的基线，不冒称完全未改树渲染。** 两边原生合成值均先写入、再延迟回执，故失败可以留下已变更的值。
@@ -22,6 +22,8 @@
 | 写入成功但读回失败 | 保留的公开 GeneralCard 回归断言不确认 Saved、不切换语言；成功重新读取后才能继续 |
 
 `vitest run src/pages/settings.test.tsx src/tono-ui/SeaControls.test.tsx src/tono-ui/AppearanceCard.test.tsx src/tono-ui/tono-layout.test.tsx --maxWorkers=1`：4 files / 11 tests passed；`tsc --noEmit` 通过。旧版回归先失败：读取中的开关 `expected false to be true`。最终 PR CI 以 PR 当前 head 为准，不用截图代替 CI。
+
+首次 CI dd2f1db28 的额外 `pnpm typecheck` ratchet **失败（82 > 79）**；普通 tsc 不包括这项，未把它算成通过。3 个新增调用都来自 `resolveLanguage` 的索引返回类型。修正解析器的非空判断后同命令输出 `unchecked indexed access errors 69 (baseline 79)`，没有抬预算/断言绕过；设置与既有 i18n 测试 2 files / 13 tests passed，lint/Biome exit0。
 
 ## 截图（3 before + 9 after）
 
