@@ -117,7 +117,15 @@ pub(super) async fn note_hy2_outcome(
     let attempt_generation = match outcome {
         super::Attempt::Connected => owner.1,
         super::Attempt::Failed { generation, .. } => *generation,
-        super::Attempt::GuardRejected(_) | super::Attempt::Stale => return,
+        // Decision 088: a stopped automatic hy2 attempt sends the next one back to the Reality
+        // block. Stale has no generation of its own (it was superseded); the account must match.
+        super::Attempt::Stale => {
+            if inner.sign_in_generation == owner.0 && inner.hy2_switch.note_stopped(preferred, dialed) {
+                persist_hy2_choices(&inner);
+            }
+            return;
+        }
+        super::Attempt::GuardRejected(_) => return,
     };
     if inner.sign_in_generation != owner.0 || inner.connect_generation != attempt_generation {
         return;
