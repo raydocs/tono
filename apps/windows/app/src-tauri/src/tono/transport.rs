@@ -461,6 +461,32 @@ impl TonoTransport {
         &self.preferred_relay
     }
 
+    /// Backlog A4: put the path a pre-login handshake probe (`path_probe`) reached first, as if
+    /// a request had just answered there. `answers_before` is `answers_seen()` when the probe
+    /// started; once a request has answered since, the preferences already rest on a real answer
+    /// and stay as they are. The pins lead the walk anyway, so reaching them clears both
+    /// preferences. False when nothing was applied.
+    pub(crate) fn prefer_probed_path(
+        &self,
+        path: crate::tono::path_probe::ProbedPath,
+        answers_before: u64,
+    ) -> bool {
+        use crate::tono::path_probe::ProbedPath;
+        use std::sync::atomic::Ordering;
+        if self.answers_seen() != answers_before {
+            return false;
+        }
+        let (resolved_first, relay) = match path {
+            ProbedPath::Pinned => (false, 0),
+            ProbedPath::SystemDns => (true, 0),
+            ProbedPath::Relay(index) if index < self.relays.len() => (false, index + 1),
+            ProbedPath::Relay(_) => return false,
+        };
+        self.prefer_resolved.store(resolved_first, Ordering::Relaxed);
+        self.preferred_relay.store(relay, Ordering::Relaxed);
+        true
+    }
+
     /// How many responses have delivered a status line so far (#582).
     pub fn answers_seen(&self) -> u64 {
         self.answers.load(std::sync::atomic::Ordering::Acquire)
@@ -510,7 +536,7 @@ impl TonoTransport {
 
     /// `with_clients` plus the relay sockets, each with the same quick budget.
     #[cfg(test)]
-    fn with_clients_and_relays(
+    pub(crate) fn with_clients_and_relays(
         host: &str,
         pinned: &[std::net::SocketAddr],
         resolved: &[std::net::SocketAddr],

@@ -38,6 +38,11 @@ nonisolated struct ControlPlanePath: Sendable {
     /// Sends the request and returns the answer, capped at the given number
     /// of bytes. A thrown error means no status line arrived.
     let exchange: @Sendable (URLRequest, Int) async throws -> ControlPlaneAnswer
+    /// Backlog A4 (D14-A, decision 079): whether a TCP connection and a TLS
+    /// handshake for the API host complete over this path, sending no HTTP
+    /// request and nothing that identifies the user or the device. Nil when
+    /// the path cannot be probed; the pre-login probe then says nothing.
+    var handshake: (@Sendable () async -> Bool)? = nil
 
     /// The system resolver, through the control-plane `URLSession`.
     nonisolated static func systemResolver(_ session: URLSession) -> ControlPlanePath {
@@ -82,17 +87,34 @@ nonisolated struct ControlPlanePath: Sendable {
         let addresses = (KillSwitchService.configuredBootstrapPins(for: [host])[host] ?? [])
             .filter { IPv4Address($0) != nil }
         guard !addresses.isEmpty else { return nil }
-        return ControlPlanePath(label: "pinned") { request, maximumResponseBytes in
+        let endpoints = addresses.map { ControlPlaneEndpoint(address: $0, port: 443) }
+        var path = ControlPlanePath(label: "pinned") { request, maximumResponseBytes in
             try await PinnedControlPlaneExchange.send(
                 request,
                 label: "pinned",
                 host: host,
-                endpoints: addresses.map { ControlPlaneEndpoint(address: $0, port: 443) },
+                endpoints: endpoints,
                 connectBudget: PinnedControlPlaneExchange.connectBudget,
                 userAgent: userAgent,
                 maximumResponseBytes: maximumResponseBytes
             )
         }
+        path.handshake = { await ControlPlaneHandshake.reaches(endpoints, host: host) }
+        return path
+    }
+
+    /// Backlog A4: the system path's handshake, to `baseURL`'s host on 443
+    /// through the system resolver, or nil when the base URL is not an HTTPS
+    /// origin on 443.
+    nonisolated static func systemResolverHandshake(for baseURL: URL) -> (@Sendable () async -> Bool)? {
+        guard let components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "https",
+              components.port == nil || components.port == 443,
+              let host = components.host?.lowercased(), !host.isEmpty else { return nil }
+        // The host name itself as the endpoint: Network.framework resolves
+        // it through the system resolver, as the control-plane session does.
+        let endpoints = [ControlPlaneEndpoint(address: host, port: 443)]
+        return { await ControlPlaneHandshake.reaches(endpoints, host: host) }
     }
 
     /// Tono-owned relays outside Cloudflare, per API host (decision 077,
@@ -124,7 +146,7 @@ nonisolated struct ControlPlanePath: Sendable {
               components.port == nil || components.port == 443,
               let host = components.host?.lowercased(), !host.isEmpty,
               let endpoints = apiRelays[host], !endpoints.isEmpty else { return nil }
-        return ControlPlanePath(label: "relay") { request, maximumResponseBytes in
+        var path = ControlPlanePath(label: "relay") { request, maximumResponseBytes in
             try await PinnedControlPlaneExchange.send(
                 request,
                 label: "relay",
@@ -135,12 +157,114 @@ nonisolated struct ControlPlanePath: Sendable {
                 maximumResponseBytes: maximumResponseBytes
             )
         }
+        path.handshake = { await ControlPlaneHandshake.reaches(endpoints, host: host) }
+        return path
     }
 
     /// `User-Agent` for the pinned client, which has no `URLSession` to set it.
     private static var userAgent: String {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
         return "Tono/\(build)"
+    }
+}
+
+/// Backlog A4 (D14-A, decision 079): the pre-login network self-check. A TCP
+/// connection and a TLS handshake, nothing more: no HTTP request, so no
+/// cookie, token, device or installation id and no `X-Tono-*` header. TLS
+/// carries the API host as SNI and the certificate is checked by the default
+/// trust evaluation against that name, as on `PinnedConnection`; one that is
+/// not valid for the host fails the probe. No proxy (#587). No PF permit is
+/// added for it: while protection is armed, a path PF blocks just fails here.
+nonisolated enum ControlPlaneHandshake {
+    /// One path's whole budget; its endpoints are tried in parallel.
+    static let budget: TimeInterval = 5
+
+    /// True when any of `endpoints` completes TCP and TLS for `host` within
+    /// `budget`.
+    static func reaches(_ endpoints: [ControlPlaneEndpoint], host: String) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            for endpoint in endpoints {
+                group.addTask { await HandshakeAttempt(endpoint: endpoint, host: host).run(budget: Self.budget) }
+            }
+            for await reached in group where reached {
+                group.cancelAll()
+                return true
+            }
+            return false
+        }
+    }
+}
+
+/// One handshake to one endpoint. The connection is closed as soon as TLS is
+/// up, fails, or the budget is spent; not one application byte is sent.
+nonisolated private final class HandshakeAttempt: @unchecked Sendable {
+    private let connection: NWConnection
+    private let queue = DispatchQueue(label: "app.tono.control-plane.handshake")
+    private let lock = NSLock()
+    // Guarded by `lock`.
+    private var result: Bool?
+    private var continuation: CheckedContinuation<Bool, Never>?
+
+    init(endpoint: ControlPlaneEndpoint, host: String) {
+        let tls = NWProtocolTLS.Options()
+        let options = tls.securityProtocolOptions
+        // SNI and the name the default trust evaluation checks against.
+        host.withCString { sec_protocol_options_set_tls_server_name(options, $0) }
+        sec_protocol_options_add_tls_application_protocol(options, "http/1.1")
+        sec_protocol_options_set_min_tls_protocol_version(options, .TLSv12)
+        let parameters = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
+        parameters.preferNoProxies = true
+        connection = NWConnection(
+            host: NWEndpoint.Host(endpoint.address),
+            port: NWEndpoint.Port(rawValue: endpoint.port) ?? .https,
+            using: parameters
+        )
+    }
+
+    func run(budget: TimeInterval) async -> Bool {
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+                self.start(continuation, budget: budget)
+            }
+        } onCancel: {
+            self.finish(false)
+        }
+    }
+
+    private func start(_ continuation: CheckedContinuation<Bool, Never>, budget: TimeInterval) {
+        lock.lock()
+        if let early = result {
+            // Cancelled before it started.
+            lock.unlock()
+            continuation.resume(returning: early)
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+        connection.stateUpdateHandler = { [self] state in
+            switch state {
+            case .ready: finish(true)
+            case .failed: finish(false)
+            case .cancelled: connection.stateUpdateHandler = nil
+            default: break // `.waiting` keeps trying; the budget decides.
+            }
+        }
+        connection.start(queue: queue)
+        queue.asyncAfter(deadline: .now() + budget) { [self] in finish(false) }
+    }
+
+    private func finish(_ reached: Bool) {
+        lock.lock()
+        guard result == nil else {
+            lock.unlock()
+            return
+        }
+        result = reached
+        let waiting = continuation
+        continuation = nil
+        lock.unlock()
+        connection.cancel()
+        waiting?.resume(returning: reached)
     }
 }
 

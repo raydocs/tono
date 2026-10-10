@@ -265,6 +265,66 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(pinnedAttempts.count, 0)
     }
 
+    /// Backlog A4 (D14-A): a pre-login probe that completed a handshake only
+    /// over the relay is kept, so the next launch's first sign-in goes to the
+    /// relay; a probe result more than a day old is ignored and the system
+    /// resolver goes first again.
+    func testAPreLoginProbeThatReachedOnlyTheRelaySendsTheFirstSignInThereUntilItIsADayOld() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        let key = TonoAPIClient.preferredPathKey(forHost: host)
+        AppProfile.defaults.removeObject(forKey: key)
+        defer { AppProfile.defaults.removeObject(forKey: key) }
+        let systemRequests = PathCallCounter()
+        HeldAccountProtocol.install(host) { request in
+            systemRequests.record()
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        let relayAttempts = PathCallCounter()
+        // One launch: a client over the same host and the same paths.
+        func launch() -> TonoAPIClient {
+            var pinned = ControlPlanePath(label: "pinned") { _, _ in throw URLError(.cannotConnectToHost) }
+            pinned.handshake = { false }
+            var relay = ControlPlanePath(label: "relay") { _, _ in
+                relayAttempts.record()
+                return ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-a4","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
+            }
+            relay.handshake = { true }
+            return TonoAPIClient(
+                baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+                offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+                pinnedPath: pinned, relayPath: relay, systemHandshake: { false }
+            )
+        }
+        let request = TonoEmailStartRequest(
+            email: "probe@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+        )
+
+        // Sign-in screen of the first launch: the probe alone, no request.
+        await launch().probePathsBeforeSignIn()
+        XCTAssertEqual(systemRequests.count + relayAttempts.count, 0, "the probe sends no request")
+
+        // The next launch's first sign-in goes to the relay.
+        _ = try await launch().startEmailSignIn(request)
+        XCTAssertEqual(systemRequests.count, 0, "the probed relay goes first; the dead system resolver is not paid")
+        XCTAssertEqual(relayAttempts.count, 1)
+
+        // A day-old probe result is ignored: the system resolver goes first.
+        AppProfile.defaults.set(
+            ["label": "relay", "at": Date().timeIntervalSince1970 - 25 * 60 * 60], forKey: key
+        )
+        _ = try await launch().startEmailSignIn(request)
+        XCTAssertEqual(systemRequests.count, 1, "an expired probe result does not reorder the paths")
+        XCTAssertEqual(relayAttempts.count, 2, "the usual walk still reaches the relay")
+    }
+
     /// Decision 077: when no path answers, the transport failure names every
     /// path's own failure, as the Windows client's combined message does, so
     /// one audit line tells support what each path saw.

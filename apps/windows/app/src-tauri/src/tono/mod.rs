@@ -23,6 +23,7 @@ mod integration_profile;
 pub mod offline_grant;
 pub(crate) mod network_interference;
 pub(crate) mod other_vpn;
+pub(crate) mod path_probe;
 pub mod policy_sync;
 pub mod protected_probe;
 mod signed_apps;
