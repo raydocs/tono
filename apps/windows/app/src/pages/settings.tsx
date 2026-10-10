@@ -4,10 +4,13 @@ import { useTranslation } from 'react-i18next'
 
 import type { DialogRef } from '@/components/base'
 import { UpdateViewer } from '@/components/setting/mods/update-viewer'
-import { useI18n } from '@/hooks/use-i18n'
 import { useTonoPreferences } from '@/hooks/use-tono-preferences'
 import { useUpdate } from '@/hooks/use-update'
-import { resolveLanguage, supportedLanguages } from '@/services/i18n'
+import {
+  changeLanguage,
+  resolveLanguage,
+  supportedLanguages,
+} from '@/services/i18n'
 import { showNotice } from '@/services/notice-service'
 import { getCacheData, setCacheData, useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
@@ -20,7 +23,6 @@ import {
   tonoSetPeriodicTelemetryEnabled,
   tonoNetworkLogUploadEnabled,
   tonoSetNetworkLogUploadEnabled,
-  formatTonoActionError,
   describeTonoActionError,
   type TonoActionErrorDescription,
 } from '@/services/tono'
@@ -55,6 +57,13 @@ type PrivacySaves = Record<
 >
 const readPrivacySaves = () =>
   getCacheData<PrivacySaves>(tonoPrivacySavesQueryKey) ?? {}
+
+const tonoGeneralSaveQueryKey = ['tonoGeneralSave'] as const
+type GeneralSave = {
+  phase: 'reading' | 'saving' | 'saved' | 'failed'
+  error?: TonoActionErrorDescription
+}
+const readGeneralSave = () => getCacheData<GeneralSave>(tonoGeneralSaveQueryKey)
 
 const LANGUAGE_LABELS: Record<string, string> = {
   en: 'English',
@@ -140,7 +149,9 @@ const Row = ({
           {label}
         </span>
         {subtitle && (
-          <span style={{ fontSize: 11, color: text.secondary }}>
+          <span
+            style={{ fontSize: newAppearance ? 12 : 11, color: text.secondary }}
+          >
             {subtitle}
           </span>
         )}
@@ -151,50 +162,93 @@ const Row = ({
   )
 }
 
-const GeneralCard = () => {
-  const { t } = useTranslation()
+export const GeneralCard = () => {
+  const { t, i18n } = useTranslation()
   const { newAppearance } = useAppearancePreferences()
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const Toggle = newAppearance ? SeaToggle : TonoToggle
-  const { preferences, mutatePreferences, patchPreferences } =
-    useTonoPreferences()
-  const { switchLanguage } = useI18n()
+  const {
+    preferences,
+    error,
+    isFetching,
+    refetchPreferences,
+    patchPreferences,
+  } = useTonoPreferences()
+  // All these choices share one native preferences document. Serialize them
+  // across routes, including the readback and language application.
+  const { data: save } = useQuery({
+    queryKey: tonoGeneralSaveQueryKey,
+    queryFn: readGeneralSave,
+    initialData: readGeneralSave,
+  })
   const themeMode = preferences?.theme_mode ?? 'system'
-
-  const handleAutostart = useLockFn(async (value: boolean) => {
-    const previous = preferences?.enable_auto_launch ?? false
-    mutatePreferences((prev) =>
-      prev ? { ...prev, enable_auto_launch: value } : prev,
-    )
-    try {
-      await patchPreferences({ enable_auto_launch: value })
-    } catch (error) {
-      mutatePreferences((prev) =>
-        prev ? { ...prev, enable_auto_launch: previous } : prev,
-      )
-      showNotice.error(formatTonoActionError(error, t))
-    }
-  })
-
-  const handleLanguage = useLockFn(async (language: string) => {
-    try {
-      await switchLanguage(language)
-      await patchPreferences({ language })
-    } catch (error) {
-      showNotice.error(formatTonoActionError(error, t))
-    }
-  })
-
-  const handleThemeMode = useLockFn(
-    async (value: 'light' | 'dark' | 'system') => {
-      try {
-        await patchPreferences({ theme_mode: value })
-      } catch (error) {
-        showNotice.error(formatTonoActionError(error, t))
-      }
-    },
+  const selectedLanguage = resolveLanguage(
+    preferences?.language ?? i18n.language,
   )
+  const disabled =
+    !preferences ||
+    isFetching ||
+    Boolean(error) ||
+    save?.phase === 'reading' ||
+    save?.phase === 'saving' ||
+    save?.phase === 'failed'
+  const failure = error ? describeTonoActionError(error, t) : save?.error
+
+  const savePreferences = async (value: Partial<TonoPreferences>) => {
+    const phase = readGeneralSave()?.phase
+    if (
+      disabled ||
+      phase === 'reading' ||
+      phase === 'saving' ||
+      phase === 'failed'
+    )
+      return
+    setCacheData<GeneralSave>(tonoGeneralSaveQueryKey, { phase: 'saving' })
+    try {
+      const result = await patchPreferences(value)
+      if (result.error || !result.data) {
+        throw result.error ?? new Error(t('tono.settings.general.readFailed'))
+      }
+      const confirmed = result.data
+      if (
+        Object.entries(value).some(
+          ([key, requested]) =>
+            confirmed[key as keyof TonoPreferences] !== requested,
+        )
+      ) {
+        throw new Error(t('tono.settings.general.saveFailed'))
+      }
+      if (value.language)
+        await changeLanguage(resolveLanguage(result.data.language))
+      setCacheData<GeneralSave>(tonoGeneralSaveQueryKey, { phase: 'saved' })
+    } catch (cause) {
+      setCacheData<GeneralSave>(tonoGeneralSaveQueryKey, {
+        phase: 'failed',
+        error: describeTonoActionError(cause, t),
+      })
+    }
+  }
+
+  const reloadPreferences = async () => {
+    const phase = readGeneralSave()?.phase
+    if (phase === 'reading' || phase === 'saving' || isFetching) return
+    setCacheData<GeneralSave>(tonoGeneralSaveQueryKey, { phase: 'reading' })
+    try {
+      const result = await refetchPreferences()
+      if (result.error || !result.data) {
+        throw result.error ?? new Error(t('tono.settings.general.readFailed'))
+      }
+      if (result.data.language)
+        await changeLanguage(resolveLanguage(result.data.language))
+      setCacheData(tonoGeneralSaveQueryKey, undefined)
+    } catch (cause) {
+      setCacheData<GeneralSave>(tonoGeneralSaveQueryKey, {
+        phase: 'failed',
+        error: describeTonoActionError(cause, t),
+      })
+    }
+  }
 
   return (
     <GlassCard>
@@ -207,37 +261,49 @@ const GeneralCard = () => {
         )}
         tint={`${TONO_COLORS.accent}26`}
       />
+      <p className="tono-settings-effect-hint">
+        {t('tono.settings.general.effectHint')}
+      </p>
       <Row
         label={t('tono.settings.general.launchAtStartup')}
         subtitle={t('tono.settings.general.launchAtStartupHint')}
       >
         <Toggle
           checked={preferences?.enable_auto_launch ?? false}
-          onChange={(value) => void handleAutostart(value)}
+          disabled={disabled}
+          onChange={(value) =>
+            void savePreferences({ enable_auto_launch: value })
+          }
           label={t('tono.settings.general.launchAtStartup')}
         />
       </Row>
-      <Row label={t('tono.settings.general.language')}>
+      <Row
+        label={t('tono.settings.general.language')}
+        subtitle={t('tono.settings.general.languageHint')}
+      >
         {newAppearance ? (
           <SeaSegmented
             label={t('tono.settings.general.language')}
-            value={resolveLanguage(preferences?.language) ?? ''}
+            value={selectedLanguage}
+            disabled={disabled}
             options={supportedLanguages.map((code) => ({
               value: code,
               label: LANGUAGE_LABELS[code] ?? code,
             }))}
-            onChange={(language) => void handleLanguage(language)}
+            onChange={(language) => void savePreferences({ language })}
           />
         ) : (
           <span className="tono-segmented">
             {supportedLanguages.map((code) => {
-              const active = resolveLanguage(preferences?.language) === code
+              const active = selectedLanguage === code
               return (
                 <button
                   key={code}
                   type="button"
                   className="tono-link"
-                  onClick={() => void handleLanguage(code)}
+                  disabled={disabled}
+                  aria-pressed={active}
+                  onClick={() => void savePreferences({ language: code })}
                   style={{
                     padding: '6px 10px',
                     fontSize: 11,
@@ -261,7 +327,9 @@ const GeneralCard = () => {
                 key={value}
                 type="button"
                 className="tono-link"
-                onClick={() => void handleThemeMode(value)}
+                disabled={disabled}
+                aria-pressed={themeMode === value}
+                onClick={() => void savePreferences({ theme_mode: value })}
                 style={{
                   padding: '6px 10px',
                   fontSize: 11,
@@ -276,6 +344,52 @@ const GeneralCard = () => {
             ))}
           </span>
         </Row>
+      )}
+      {error || save?.phase === 'failed' ? (
+        <div className="tono-setting-feedback" role="alert">
+          {t(
+            error
+              ? 'tono.settings.general.readFailed'
+              : 'tono.settings.general.saveFailed',
+          )}
+          {failure && (
+            <span className="tono-setting-error-detail">{failure.message}</span>
+          )}
+          {failure?.detail && (
+            <details className="tono-setting-error-detail">
+              <summary>{t('tono.progress.technicalDetails')}</summary>
+              <code>{failure.detail}</code>
+            </details>
+          )}
+          <button
+            type="button"
+            className="tono-link"
+            disabled={
+              isFetching ||
+              save?.phase === 'reading' ||
+              save?.phase === 'saving'
+            }
+            onClick={() => void reloadPreferences()}
+          >
+            {t(
+              isFetching
+                ? 'tono.settings.privacy.reading'
+                : 'tono.settings.general.reload',
+            )}
+          </button>
+        </div>
+      ) : (
+        (!preferences || isFetching || save) && (
+          <span className="tono-setting-feedback" role="status">
+            {t(
+              save?.phase === 'saving'
+                ? 'tono.settings.privacy.saving'
+                : !preferences || isFetching || save?.phase === 'reading'
+                  ? 'tono.settings.privacy.reading'
+                  : 'tono.settings.privacy.saved',
+            )}
+          </span>
+        )
       )}
     </GlassCard>
   )

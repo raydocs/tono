@@ -1628,9 +1628,14 @@ export interface TranslationResources {
           title: string
         }
         general: {
+          effectHint: string
           language: string
+          languageHint: string
           launchAtStartup: string
           launchAtStartupHint: string
+          readFailed: string
+          reload: string
+          saveFailed: string
           title: string
         }
         preferences: {

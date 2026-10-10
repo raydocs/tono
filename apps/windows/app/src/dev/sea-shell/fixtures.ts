@@ -1,6 +1,5 @@
 /* eslint-disable @eslint-react/no-unnecessary-use-prefix -- Stateless adapters retain the production hook names; this dev-only entry has no native hook effects. */
 import { createTheme } from '@mui/material'
-import i18n from 'i18next'
 
 import type {
   TonoDiagnosticsReport,
@@ -28,23 +27,32 @@ const theme = createTheme({
 export const useCustomTheme = () => ({ theme })
 export const useLoadingOverlay = () => {}
 export const useLayoutEvents = () => {}
-export const useI18n = () => ({
-  currentLanguage: i18n.language,
-  supportedLanguages: ['zh', 'en'],
-  switchLanguage: async () => {},
-  isLoading: false,
-  t: i18n.t,
-})
-export const useTonoPreferences = () => ({
-  preferences: {
-    language: params.get('lang') === 'zh' ? 'zh' : 'en',
-    theme_mode: 'dark',
-    enable_auto_launch: false,
-    auto_check_update: false,
-  },
-  patchPreferences: async () => {},
-  mutatePreferences: () => {},
-})
+export { useI18n } from '../../hooks/use-i18n'
+export { useTonoPreferences } from '../../hooks/use-tono-preferences'
+let generalPreferences: TonoPreferences = {
+  language: params.get('lang') === 'zh' ? 'zh' : 'en',
+  theme_mode: 'dark',
+  enable_auto_launch: false,
+  auto_check_update: false,
+}
+let generalReadFailed = false
+let generalSaveFailed = false
+export const getTonoPreferences = async () => {
+  await privacyDelay('generalReadDelay')
+  if (params.has('generalReadError') && !generalReadFailed) {
+    generalReadFailed = true
+    throw new Error('Synthetic settings read failure')
+  }
+  return { ...generalPreferences }
+}
+export const patchTonoPreferences = async (value: Partial<TonoPreferences>) => {
+  await privacyDelay('generalSaveDelay')
+  generalPreferences = { ...generalPreferences, ...value }
+  if (params.has('generalSaveError') && !generalSaveFailed) {
+    generalSaveFailed = true
+    throw new Error('Synthetic settings lost reply; value may be saved')
+  }
+}
 export const useUpdate = () => ({
   updateInfo: null,
   checkUpdate: async () => null,

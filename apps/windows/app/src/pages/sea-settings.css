@@ -10,8 +10,15 @@
   min-height: 56px;
   padding: 12px 0;
   align-items: center;
+  flex-wrap: wrap;
   gap: 20px;
   border-color: var(--sea-divider);
+}
+.sea-settings .tono-row > div:first-child {
+  flex: 1 1 240px;
+}
+.sea-settings .sea-segmented:disabled {
+  opacity: 0.42;
 }
 .sea-settings h2,
 .sea-appearance-settings h2 {

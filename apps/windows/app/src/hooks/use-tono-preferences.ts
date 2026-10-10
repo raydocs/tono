@@ -9,7 +9,12 @@ export const tonoPreferencesQueryKey = ['getTonoPreferences'] as const
 export const useTonoPreferences = () => {
   const initial = getPreloadConfig()
 
-  const { data: preferences, refetch } = useQuery({
+  const {
+    data: preferences,
+    error,
+    isFetching,
+    refetch,
+  } = useQuery({
     queryKey: [...tonoPreferencesQueryKey],
     queryFn: async () => {
       const config = await getTonoPreferences()
@@ -42,13 +47,16 @@ export const useTonoPreferences = () => {
   const patchPreferences = useCallback(
     async (value: Partial<TonoPreferences>) => {
       await patchTonoPreferences(value)
-      await refetch()
+      return refetch()
     },
     [refetch],
   )
 
   return {
     preferences,
+    error,
+    isFetching,
+    refetchPreferences: refetch,
     mutatePreferences,
     patchPreferences,
   }
