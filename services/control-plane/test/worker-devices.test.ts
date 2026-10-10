@@ -387,6 +387,14 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     ).all<any>()).results.map((row: any) => String(row.target_id));
     const otherLive = await liveIds(other.user.id);
 
+    // An account already over a lower stored cap (set before the cap took
+    // effect on write) is not evicted by raising it: 5 live, cap 1 -> 3.
+    await env.DB.prepare('UPDATE users SET device_limit = 1 WHERE id = ?').bind(account.user.id).run();
+    expect((await admin(`users/${account.user.id}`, { deviceLimit: 3 }, 'PATCH')).status).toBe(200);
+    expect(await liveIds(account.user.id)).toEqual([...live].sort());
+    expect(await revokeAudits()).toEqual([]);
+    expect((await admin(`users/${account.user.id}`, { deviceLimit: 5 }, 'PATCH')).status).toBe(200);
+
     expect((await admin(`users/${account.user.id}`, { deviceLimit: 3 }, 'PATCH')).status).toBe(200);
     const evicted = [live[1], live[2]].sort();
     expect(await liveIds(account.user.id)).toEqual([live[0], live[3], live[4]].sort());

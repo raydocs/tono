@@ -29,41 +29,46 @@ candidate.created_at ASC,
 candidate.rowid ASC`;
 
 /**
- * Revoke one account's live devices beyond its device_limit, least recently
- * seen first, and return the revoked device ids (D15-A, H17-C-F1).
+ * Set one account's device limit and, only when that lowers the stored limit,
+ * revoke its live devices beyond the new limit, least recently seen first;
+ * return the revoked device ids (D15-A, H17-C-F1, A9-RAISE-EVICTS-OVERCAP).
  *
- * `limitWrite`, when given, is the users UPDATE that sets the new limit; it
- * runs first in the same D1 batch, which is one SQLite transaction. The excess
- * is computed from the limit it just wrote and the live devices committed at
- * that moment, so the cap and the eviction commit or roll back together, a
- * retry or a concurrent call finds nothing left to evict, and a limit raised
- * in the meantime evicts nothing. Every eviction statement is scoped to
- * `userId`. The victims go through the same outbox as login rotation: a
- * tailnet revocation job, the device row, its sessions and its exit credential.
+ * `limitWrite` is the users UPDATE that writes `newLimit`. It runs in the same
+ * D1 batch, which is one SQLite transaction, right after the victim selection.
+ * The selection compares `newLimit` with the limit stored at that moment, so a
+ * raise or an unchanged limit evicts nothing even when the account is already
+ * over its old cap (it catches up at its next login), and concurrent calls see
+ * each other's committed limit. The excess is computed from `newLimit` and the
+ * live devices committed at that moment, so the cap and the eviction commit or
+ * roll back together and a retry finds nothing left to evict. Every eviction
+ * statement is scoped to `userId`. The victims go through the same outbox as
+ * login rotation: a tailnet revocation job, the device row, its sessions and
+ * its exit credential.
  */
 export async function evictDevicesOverLimit(
   e: Env,
   userId: string,
-  limitWrite?: D1PreparedStatement,
+  newLimit: number,
+  limitWrite: D1PreparedStatement,
 ): Promise<{ limitWriteChanges: number; evicted: string[] }> {
   const t = now();
   const evictionId = id();
   const victims = `SELECT device_id FROM device_rotation_victims WHERE rotation_id = ?`;
-  const leading = limitWrite ? [limitWrite] : [];
   const results = await e.DB.batch<Row>([
-    ...leading,
     e.DB.prepare(
       `INSERT INTO device_rotation_victims(rotation_id, device_id)
        SELECT ?, candidate.id
        FROM devices candidate
        WHERE candidate.user_id = ? AND candidate.status IN ('pending', 'active')
+         AND ? < (SELECT device_limit FROM users WHERE id = ?)
        ORDER BY ${DEVICE_LRU_ORDER}
        LIMIT MAX(0,
          (SELECT COUNT(*) FROM devices live
           WHERE live.user_id = ? AND live.status IN ('pending', 'active'))
-         - COALESCE((SELECT device_limit FROM users WHERE id = ?), 25)
+         - ?
        )`,
-    ).bind(evictionId, userId, userId, userId),
+    ).bind(evictionId, userId, newLimit, userId, userId, newLimit),
+    limitWrite,
     e.DB.prepare(
       `INSERT INTO revocation_jobs(
          id, device_id, tailscale_node_id, created_at, ownership_generation, reason
@@ -107,8 +112,8 @@ export async function evictDevicesOverLimit(
     e.DB.prepare('DELETE FROM device_rotation_victims WHERE rotation_id = ?').bind(evictionId),
   ]);
   return {
-    limitWriteChanges: limitWrite ? Number(results[0]?.meta.changes ?? 0) : 0,
-    evicted: (results[leading.length + 5]?.results ?? []).map((row) => String(row.device_id)),
+    limitWriteChanges: Number(results[1]?.meta.changes ?? 0),
+    evicted: (results[6]?.results ?? []).map((row) => String(row.device_id)),
   };
 }
 

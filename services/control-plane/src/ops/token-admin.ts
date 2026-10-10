@@ -143,10 +143,11 @@ export async function tokenAdminWrite(
     // A lowered cap takes effect now (D15-A), not at the next device login:
     // the limit write and the eviction of the least recently seen devices
     // beyond it are one transaction, so a failed eviction leaves the old cap
-    // in place and the request fails. Raising the cap evicts nothing.
+    // in place and the request fails. Raising the cap, or writing the same
+    // one, evicts nothing, even on an account already over its old cap.
     let evicted: string[] = [];
     if (deviceLimit !== undefined) {
-      const outcome = await evictDevicesOverLimit(e, userId, limitWrite);
+      const outcome = await evictDevicesOverLimit(e, userId, deviceLimit, limitWrite);
       if (!outcome.limitWriteChanges) throw new ApiError(404, 'NOT_FOUND', 'User not found');
       evicted = outcome.evicted;
     } else if (!(await limitWrite.run()).meta.changes) {
