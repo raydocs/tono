@@ -75,9 +75,10 @@ nonisolated struct ControlPlanePath: Sendable {
 
     /// The pinned addresses for `baseURL`'s host, or nil when it has none.
     ///
-    /// The same set the helper's PF permits on TCP 443 for this host: the
-    /// compiled `TonoAPIBootstrapAddresses`, then addresses learned through
-    /// the protected resolver. Only the configured API host has pins, so a
+    /// The same set the helper's PF permits on TCP 443 for this host while a
+    /// control window is open (`ControlPlaneWindow`): the compiled
+    /// `TonoAPIBootstrapAddresses`, then addresses learned through the
+    /// protected resolver. Only the configured API host has pins, so a
     /// debug base URL or a test host never dials them.
     nonisolated static func pinnedAddresses(for baseURL: URL) -> ControlPlanePath? {
         guard let components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
@@ -191,6 +192,47 @@ nonisolated enum ControlPlaneHandshake {
                 return true
             }
             return false
+        }
+    }
+}
+
+/// H1-F5 (owner decision 079, D4-A): the helper's PF permit for the API
+/// host's pinned addresses exists only while a control-plane exchange runs.
+/// `TonoAPIClient` opens a window right before an exchange and returns it the
+/// moment the exchange completes or fails; the helper closes it on its own at
+/// `ControlWindowLeases.hardCap` (15 s) if the lease never comes back.
+/// Overlapping exchanges each hold their own lease on one shared window.
+///
+/// Best effort on purpose: a helper that does not answer leaves the exchange
+/// to the ruleset as it stands, which fails closed while armed.
+nonisolated struct ControlPlaneWindow: Sendable {
+    /// Returns a lease to hand back, or nil when nothing was opened.
+    let open: @Sendable () async -> Int?
+    let close: @Sendable (Int) async -> Void
+
+    /// Production: the helper's window, asked for only while protection is
+    /// armed. The helper itself opens nothing when it is not, or when a
+    /// tunnel carries control-plane traffic.
+    static let helper = ControlPlaneWindow(
+        open: {
+            guard KillSwitchService.isArmed else { return nil }
+            let lease: Int? = await helperCall { try? HelperManager.openControlWindow() }
+            return lease
+        },
+        close: { lease in
+            await helperCall { _ = try? HelperManager.closeControlWindow(lease: lease) }
+        }
+    )
+
+    private static let queue = DispatchQueue(label: "com.raydocs.tono.control-window")
+
+    /// Helper IPC is a blocking socket round trip; keep it off the caller's
+    /// executor.
+    private static func helperCall<T: Sendable>(
+        _ body: @escaping @Sendable () -> T
+    ) async -> T {
+        await withCheckedContinuation { continuation in
+            queue.async { continuation.resume(returning: body()) }
         }
     }
 }

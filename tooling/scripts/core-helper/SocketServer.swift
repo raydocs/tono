@@ -879,6 +879,25 @@ final class SocketServer {
                 )
                 recordSessionOwner(owner)
                 sendResponse(client, status: 200, object: response)
+            case ("POST", "/killswitch/control-window"):
+                // H1-F5 (decision 079, D4-A): the API host's permit for one
+                // control-plane exchange, at most `ControlWindowLeases.hardCap`
+                // seconds. Refused while the machine enters sleep.
+                guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
+                let response = try transitionGate.whileAwake {
+                    try killSwitch.openControlWindow()
+                }
+                sendResponse(client, status: 200, object: response)
+            case ("POST", "/killswitch/control-window/close"):
+                // Only ever narrows, so it is allowed asleep or not.
+                let object = try jsonObject(request.body)
+                guard object.count == 1,
+                      let number = object["lease"] as? NSNumber,
+                      CFGetTypeID(number) != CFBooleanGetTypeID(),
+                      let lease = Int(exactly: number.doubleValue), lease > 0 else {
+                    throw HelperFailure.invalid("Invalid control window lease.")
+                }
+                sendResponse(client, status: 200, object: killSwitch.closeControlWindow(lease: lease))
             case ("POST", "/killswitch/quit"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
                 let response = try transitionGate.whileAwake {

@@ -47,8 +47,10 @@ extension KillSwitchManager {
                 apiHosts: [],
                 exitHints: [],
                 tunnelInterfaces: ["utun199"],
-                resolvedHosts: ["api.example.com": ["1.1.1.1"]],
-                pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+                // A Tailscale control host: with a tunnel up only those keep a
+                // `tono-control` permit (H1-F5 windows the Tono API host).
+                resolvedHosts: ["controlplane.tailscale.com": ["1.1.1.1"]],
+                pinnedHosts: ["controlplane.tailscale.com": ["1.1.1.1"]],
                 derpEndpoints: [],
                 cachedDERPEndpoints: [],
                 proxyTargets: [
@@ -222,10 +224,10 @@ extension KillSwitchManager {
                     exitHints: [],
                     tunnelInterfaces: ["utun199"],
                     resolvedHosts: [
-                        "api.example.com": ["1.1.1.1"],
-                        "extra.example.com": ["9.9.9.9"],
+                        "controlplane.tailscale.com": ["1.1.1.1"],
+                        "login.tailscale.com": ["9.9.9.9"],
                     ],
-                    pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+                    pinnedHosts: ["controlplane.tailscale.com": ["1.1.1.1"]],
                     derpEndpoints: [],
                     cachedDERPEndpoints: [],
                     proxyTargets: [
@@ -1045,7 +1047,9 @@ extension KillSwitchManager {
                 sessionDirectEndpoints: directEndpoints,
                 reviewedBundleDirectEnabled: true
             )
-            let rules = renderRules(state: state, allowedUID: 501)
+            // Inside an open control window, the only time the API host's
+            // permit renders (H1-F5).
+            let rules = renderRules(state: state, allowedUID: 501, controlWindowOpen: true)
             // The same session once its TUN is up: the only state in which the
             // reviewed-bundle permit may render.
             let tunneledRules = renderRules(
@@ -1086,7 +1090,9 @@ extension KillSwitchManager {
             reviewedBundleDirectEnabled: false
                 ),
                 allowedUID: 501,
-                physicalInterfaces: ["en0", "en7"]
+                physicalInterfaces: ["en0", "en7"],
+                // Even an open window renders no API permit beside a tunnel.
+                controlWindowOpen: true
             )
             let inactiveState = KillSwitchState(
                 armed: true,
@@ -1427,7 +1433,6 @@ extension KillSwitchManager {
             let cloudRequired = [
                 "pass in quick on utun199 all keep state (if-bound)",
                 "pass out quick on utun199 all keep state (if-bound)",
-                "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound)",
                 // DHCP leaves only as a limited broadcast, and a reply creates no
                 // state that could carry port 68 back out to its sender.
                 "from any port 68 to 255.255.255.255 port 67 keep state (if-bound)",
@@ -1443,6 +1448,9 @@ extension KillSwitchManager {
                 "to 8.8.4.4 port 443",
                 // A session that did not ask for it must not inherit the permit.
                 "port { 80, 443, 8000, 8080 }",
+                // H1-F5: with a tunnel up the API host's traffic uses it, so
+                // its physical-interface permit never renders, window or not.
+                "to 1.1.1.1 port 443",
             ]
             let cloudShapesHold = cloudRequired.allSatisfy(cloudRules.contains)
                 && !cloudForbidden.contains(where: cloudRules.contains)
@@ -1468,18 +1476,20 @@ extension KillSwitchManager {
                 && installedHosts.contains(killSwitchHostsEndMarker)
                 && removedHosts.isEmpty
             // Reported, not silently folded in: a skip must not read as a pass.
-            // The tunneled set holds every line of `rules` plus the bundle permit.
+            // The tunneled set holds every line of `rules` but the API host's
+            // permit, plus the bundle permit; `rules` carries that permit.
             let armedParse = pfSyntaxAccepts(tunneledRules)
             let bootstrapParse = pfSyntaxAccepts(cloudRules)
+            let windowParse = pfSyntaxAccepts(rules)
             let pfParses: Bool
-            switch (armedParse, bootstrapParse) {
-            case (nil, _), (_, nil):
+            switch (armedParse, bootstrapParse, windowParse) {
+            case (nil, _, _), (_, nil, _), (_, _, nil):
                 let warning = "warn: PF syntax check skipped (needs root); "
                     + "run `sudo tono-core-helper --self-test` to include it\n"
                 FileHandle.standardError.write(Data(warning.utf8))
                 pfParses = true
-            case let (armed?, bootstrap?):
-                pfParses = armed && bootstrap
+            case let (armed?, bootstrap?, window?):
+                pfParses = armed && bootstrap && window
             }
             // R609-F2: a command past its deadline is killed and fails. It
             // must never hold the helper's request thread, nor read as done.
@@ -1893,6 +1903,135 @@ extension KillSwitchManager {
             return false
         }
         return agreedFiltering(first: .success(false), confirmDown: { throw Unreadable() }) == nil
+    }
+
+    /// H1-F5 (decision 079, D4-A): the Tono API host's permit exists only
+    /// while a control-plane exchange holds the window. Present during the
+    /// exchange, absent after it succeeded, after it failed (the app returns
+    /// the lease either way), and after the hard cap with the lease still out.
+    /// Overlapping exchanges share the window; joining never extends it.
+    static func runControlWindowSelfTest() -> Bool {
+        let bootstrap = KillSwitchState(
+            armed: true,
+            tailscaleBootstrapEnabled: true,
+            apiHosts: ["api.example.com"],
+            exitHints: [],
+            tunnelInterfaces: [],
+            resolvedHosts: [
+                "api.example.com": ["1.1.1.1"],
+                "controlplane.tailscale.com": ["9.9.9.9"],
+            ],
+            pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+            derpEndpoints: [],
+            cachedDERPEndpoints: [],
+            proxyTargets: [],
+            sessionDirectEndpoints: [],
+            reviewedBundleDirectEnabled: false
+        )
+        let apiPermit = "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound) label \"tono-control\""
+        let tailscalePermit = "to 9.9.9.9 port 443 user { 0, 501 } keep state (if-bound) label \"tono-control\""
+        var window = ControlWindowLeases()
+        func rendered(at now: TimeInterval) -> String {
+            renderRules(
+                state: bootstrap, allowedUID: 501, physicalInterfaces: ["en0"],
+                controlWindowOpen: window.isOpen(at: now)
+            )
+        }
+        var failures: [String] = []
+        func check(_ name: String, _ ok: Bool) {
+            if !ok { failures.append(name) }
+        }
+        let cap = ControlWindowLeases.hardCap
+        check("cap-is-at-most-15s", cap > 0 && cap <= 15)
+
+        // Closed: the API permit is absent, Tailscale's control host is not
+        // windowed, and the block is still the last word.
+        let closed = rendered(at: 0)
+        check("closed-has-no-api-permit", !closed.contains(apiPermit))
+        check("closed-keeps-tailscale-control", closed.contains(tailscalePermit))
+        check("closed-fails-closed", closed.contains("block drop out quick all"))
+
+        // One exchange that succeeds.
+        guard let first = try? window.open(at: 100) else { return false }
+        let during = rendered(at: 101)
+        check("present-during-exchange", during.contains(apiPermit))
+        check("same-permit-as-before",
+              during.contains("pass out quick inet proto tcp " + apiPermit))
+        window.close(first.lease)
+        check("absent-after-success", !rendered(at: 102).contains(apiPermit))
+        // Closing withdraws by address, so a flow opened inside the window by
+        // any process of the user is killed with it.
+        check(
+            "close-kills-api-states",
+            stateDisposal(replacing: passRules(in: during), with: passRules(in: closed))
+                == .targeted(["1.1.1.1"])
+        )
+        check("open-keeps-states",
+              stateDisposal(replacing: passRules(in: closed), with: passRules(in: during)) == .keep)
+
+        // One exchange that fails: the lease comes back the same way.
+        guard let failed = try? window.open(at: 200) else { return false }
+        check("present-during-failing-exchange", rendered(at: 200.5).contains(apiPermit))
+        window.close(failed.lease)
+        check("absent-after-failure", !rendered(at: 201).contains(apiPermit))
+
+        // Overlapping exchanges: the permit stays until the last returns, and
+        // joining does not move the deadline.
+        guard let a = try? window.open(at: 300), let b = try? window.open(at: 310) else { return false }
+        check("join-keeps-deadline", a.deadline == b.deadline && a.deadline == 300 + cap)
+        window.close(a.lease)
+        check("present-while-another-exchange-runs", rendered(at: 311).contains(apiPermit))
+        window.close(b.lease)
+        check("absent-after-last-exchange", !rendered(at: 312).contains(apiPermit))
+
+        // Hard cap: a lease never returned (a hung exchange, a crashed app)
+        // loses the permit at the cap, and its late return cannot close a
+        // later window.
+        guard let hung = try? window.open(at: 400) else { return false }
+        check("present-before-cap", rendered(at: 400 + cap - 0.001).contains(apiPermit))
+        check("absent-at-cap", !rendered(at: 400 + cap).contains(apiPermit))
+        check("cap-expires-leases", window.expireIfDue(at: 400 + cap) && window.leases.isEmpty)
+        guard let next = try? window.open(at: 500) else { return false }
+        window.close(hung.lease)
+        check("stale-lease-cannot-close-new-window", window.isOpen(at: 501))
+        window.close(next.lease)
+        check("new-window-closes", !window.isOpen(at: 502))
+
+        // With a tunnel up the API host's traffic uses it: no permit even
+        // inside a window.
+        let tunneled = KillSwitchState(
+            armed: true,
+            tailscaleBootstrapEnabled: bootstrap.tailscaleBootstrapEnabled,
+            apiHosts: bootstrap.apiHosts,
+            exitHints: [],
+            tunnelInterfaces: ["utun199"],
+            resolvedHosts: bootstrap.resolvedHosts,
+            pinnedHosts: bootstrap.pinnedHosts,
+            derpEndpoints: [],
+            cachedDERPEndpoints: [],
+            proxyTargets: [],
+            sessionDirectEndpoints: [],
+            reviewedBundleDirectEnabled: false
+        )
+        check(
+            "no-api-permit-beside-a-tunnel",
+            !renderRules(
+                state: tunneled, allowedUID: 501, physicalInterfaces: ["en0"],
+                controlWindowOpen: true
+            ).contains(apiPermit)
+        )
+
+        // Bounded lease count.
+        var crowded = ControlWindowLeases()
+        for _ in 0..<ControlWindowLeases.maximumLeases { _ = try? crowded.open(at: 600) }
+        check("lease-count-bounded", (try? crowded.open(at: 600)) == nil)
+
+        if !failures.isEmpty {
+            FileHandle.standardError.write(Data(
+                "control window self-test failed: \(failures.joined(separator: ", "))\n".utf8
+            ))
+        }
+        return failures.isEmpty
     }
 
     static func runNetworkSelfTest() -> Bool {

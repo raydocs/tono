@@ -75,6 +75,77 @@ struct KillSwitchState {
     let reviewedBundleDirectEnabled: Bool
 }
 
+/// The control-plane window (H1-F5, owner decision 079 D4-A). PF cannot bind
+/// the Tono API host's permit to the signed app, and that host sits on shared
+/// anycast, so the permit is bounded in time instead: it exists only while the
+/// app has announced a control-plane exchange, and never longer than
+/// `hardCap` seconds from the moment the window opened. Overlapping exchanges
+/// share one window (a lease each); the window closes when the last lease is
+/// returned or at the cap, whichever comes first, and a lease taken after the
+/// cap starts a new window. In memory only: a helper restart starts closed.
+struct ControlWindowLeases {
+    /// N in "已知风险，窗口 ≤ N s". One exchange's pinned connect budget is
+    /// 10 s (`PinnedControlPlaneExchange.connectBudget`); an exchange still
+    /// running at the cap loses its permit and fails closed.
+    static let hardCap: TimeInterval = 15
+    /// Bounded so a misbehaving client cannot grow the set.
+    static let maximumLeases = 32
+
+    /// Positive and never reused within a helper process, so a lease returned
+    /// after its window expired cannot close a later window.
+    private(set) var leases: Set<Int> = []
+    /// Monotonic seconds (`KillSwitchManager.monotonicSeconds`) at which the
+    /// open window closes whatever its leases. nil while closed.
+    private(set) var deadline: TimeInterval?
+    private var lastLease = 0
+
+    func isOpen(at now: TimeInterval) -> Bool {
+        guard let deadline, !leases.isEmpty else { return false }
+        return now < deadline
+    }
+
+    /// Joins the open window, or opens one ending `hardCap` from now. Joining
+    /// never extends the deadline.
+    mutating func open(at now: TimeInterval) throws -> (lease: Int, deadline: TimeInterval) {
+        _ = expireIfDue(at: now)
+        guard leases.count < Self.maximumLeases, lastLease < Int.max else {
+            throw HelperFailure.invalid("Too many control-plane exchanges are open.")
+        }
+        let closesAt = deadline ?? now + Self.hardCap
+        deadline = closesAt
+        lastLease += 1
+        leases.insert(lastLease)
+        return (lastLease, closesAt)
+    }
+
+    /// Returns a lease. An unknown or already expired lease is a no-op.
+    mutating func close(_ lease: Int) {
+        leases.remove(lease)
+        if leases.isEmpty { deadline = nil }
+    }
+
+    /// Drops every lease once the cap has passed. True when it did.
+    mutating func expireIfDue(at now: TimeInterval) -> Bool {
+        guard let deadline, now >= deadline else { return false }
+        expire()
+        return true
+    }
+
+    mutating func expire() {
+        leases.removeAll()
+        deadline = nil
+    }
+}
+
+/// What the loaded anchor holds of the control window's permit. `unknown`
+/// after a load that may or may not have committed: it is treated as present
+/// and withdrawn again.
+enum ControlPermitLoad: Equatable {
+    case absent
+    case present
+    case unknown
+}
+
 struct HelperCommandResult {
     let status: Int32
     let output: Data
@@ -136,6 +207,26 @@ final class KillSwitchManager {
     /// not released by a counter that already reached the threshold.
     private(set) var openNetworkEpoch: UInt64 = 0
     private var selectiveRecoveryReconciled = false
+    /// H1-F5 control-plane window (decision 079, D4-A). Guarded by `lock`.
+    var controlWindow = ControlWindowLeases()
+    /// What the kernel holds of the window's permit. Guarded by `lock`.
+    var controlPermitLoad = ControlPermitLoad.absent
+    /// The state the last committed arm loaded, session exceptions included,
+    /// so a window change re-renders exactly that ruleset. nil once anything
+    /// else replaced the rules; a window change then renders the persisted
+    /// state the way a heal does. Guarded by `lock`.
+    var lastArmedState: KillSwitchState?
+    /// Fires the window's cap and retries an unconfirmed withdrawal. Its
+    /// handler takes `lock`, like the power callback.
+    private let controlWindowQueue = DispatchQueue(label: "com.raydocs.tono.helper.control-window")
+    private var controlWindowTimer: DispatchSourceTimer?
+    private var controlWindowCheckAt: TimeInterval?
+    /// Retry interval for a withdrawal whose load failed.
+    static let controlWindowRetryInterval: TimeInterval = 1
+    /// Failed withdrawals in a row. At `maximumControlWindowWithdrawFailures`
+    /// the emergency all-block replaces the ruleset, permit included.
+    private var controlWindowWithdrawFailures = 0
+    static let maximumControlWindowWithdrawFailures = 3
     /// Idle-loop checks, 10s apart, with the Core continuously down before a
     /// leftover kill switch is released. Three checks is about 30s: long
     /// enough for a connect to start the Core, short enough that a dead Core
@@ -158,6 +249,17 @@ final class KillSwitchManager {
             ))
         }
         try restoreAtLaunch()
+        // A block left loaded by an earlier helper process may hold the API
+        // permit: one that died with a window open, or a helper from before
+        // the window, which loaded it with every arm. Without a tunnel
+        // nothing but bootstrap traffic is live, so the first check reloads
+        // that ruleset without it. With a tunnel the app's control-plane
+        // traffic uses the tunnel and its next arm renders the ruleset anew;
+        // reloading here would drop the session's exceptions mid-session.
+        if let state = try? loadState(), state.armed, state.tunnelInterfaces.isEmpty {
+            controlPermitLoad = .unknown
+            scheduleControlWindowCheckLocked(after: Self.controlWindowRetryInterval)
+        }
     }
 
     /// Whether the idle loop should release a leftover kill switch. The Core
@@ -337,11 +439,20 @@ final class KillSwitchManager {
             )
         }
         var load = KernelLoadOutcome.notIssued
+        // H1-F5: the API host's permit renders only inside an open control
+        // window, decided now, under the lock, not when the request arrived.
+        let windowRendered = Self.controlWindowRenders(
+            state: state,
+            controlWindowOpen: controlWindow.isOpen(at: Self.monotonicSeconds())
+        )
+        let previousPermitLoad = controlPermitLoad
         do {
         // Retire an earlier explicit release before saving a new armed intent.
         // If this arm is interrupted, its fallback remains selective.
         try Self.saveSelectiveRecoveryDisposition(true)
-        let renderedRules = try Self.writeRules(state: state, allowedUID: allowedUID)
+        let renderedRules = try Self.writeRules(
+            state: state, allowedUID: allowedUID, controlWindowOpen: windowRendered
+        )
         // Persist fail-closed intent before activating the new rules.
         try saveState(state)
         Self.pinHostsIfUsable(state: state)
@@ -360,8 +471,12 @@ final class KillSwitchManager {
         // measuring against a ruleset that was never fully live — which would
         // hide a withdrawn permit and leave its states passing.
         lastLoadedPassRules = nil
+        lastArmedState = nil
+        controlPermitLoad = .unknown
         try Self.ensureAnchorLoaded(disposal: disposal, loadOutcome: &load)
         lastLoadedPassRules = passRules
+        lastArmedState = state
+        controlPermitLoad = windowRendered ? .present : .absent
         stateGeneration &+= 1
         openNetworkEpoch &+= 1
         repairedSinceArm = false
@@ -393,6 +508,12 @@ final class KillSwitchManager {
                 strictKillSwitchEnabled: false
             ) {
                 Self.releaseInstalledBlock()
+                // The release can fail too; the check below finds out.
+                controlPermitLoad = .unknown
+                scheduleControlWindowCheckLocked(after: Self.controlWindowRetryInterval)
+            } else {
+                // Nothing reached the kernel: it still holds what it held.
+                controlPermitLoad = previousPermitLoad
             }
             throw error
         }
@@ -499,8 +620,10 @@ final class KillSwitchManager {
             )
         case .withhold(let rules, let disposal, let rollback):
             // An arm prepared against the ruleset being narrowed must not
-            // commit it back while the tunnel is gone.
+            // commit it back while the tunnel is gone. Nor may a control
+            // window change re-render the last arm with the permit in it.
             stateGeneration &+= 1
+            lastArmedState = nil
             do {
                 try Self.writeRuleText(rules)
                 try Self.ensureAnchorLoaded(disposal: disposal)
@@ -541,10 +664,21 @@ final class KillSwitchManager {
     func secureForPowerTransition() -> Bool {
         lock.lock()
         defer { lock.unlock() }
+        return secureEmergencyLocked()
+    }
 
+    /// The body of `secureForPowerTransition`, also the last resort of a
+    /// control-window withdrawal that keeps failing. Caller holds `lock`.
+    /// The window closes with it: the emergency state has no API host, and
+    /// sleep must never carry an open window across.
+    private func secureEmergencyLocked() -> Bool {
+        controlWindow.expire()
+        lastArmedState = nil
         var load = KernelLoadOutcome.notIssued
         do {
             guard let previous = try loadState(), previous.armed else {
+                // No armed intent: the block, and any permit in it, is gone.
+                controlPermitLoad = .absent
                 return false
             }
             // Invalidate any arm request that started network work before this
@@ -554,7 +688,10 @@ final class KillSwitchManager {
             let state = Self.emergencyState(preserving: previous)
             try Self.writeRules(state: state, allowedUID: allowedUID)
             try saveState(state)
+            controlPermitLoad = .unknown
             try Self.ensureAnchorLoaded(flushStates: true, loadOutcome: &load)
+            controlPermitLoad = .absent
+            controlWindowWithdrawFailures = 0
             // Stale /etc/hosts pins do not permit traffic through the all-block
             // PF state. Clean them best-effort after the kernel barrier commits.
             try? Self.ensureHostsMappings(state: state)
@@ -566,9 +703,156 @@ final class KillSwitchManager {
                 strictKillSwitchEnabled: false
             ) {
                 Self.releaseInstalledBlock()
+                controlPermitLoad = .unknown
+            }
+            if controlPermitLoad != .absent {
+                scheduleControlWindowCheckLocked(after: Self.controlWindowRetryInterval)
             }
             return false
         }
+    }
+
+    // MARK: - Control-plane window (H1-F5, decision 079 D4-A)
+
+    /// Seconds on a clock that keeps counting while the machine sleeps
+    /// (`CLOCK_MONOTONIC` on Darwin), so sleep never extends a window.
+    static func monotonicSeconds() -> TimeInterval {
+        TimeInterval(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000_000
+    }
+
+    /// `POST /killswitch/control-window`: the app is about to exchange with
+    /// the control plane. Lease 0 means nothing opened, because nothing needs
+    /// to: protection is not armed, its block is not loaded, or a tunnel
+    /// carries control-plane traffic. The permit is the same one every arm
+    /// used to load (the API host's pinned addresses, TCP 443, root and the
+    /// interactive user), only bounded in time.
+    func openControlWindow() throws -> [String: Any] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let persisted = try loadState(), persisted.armed,
+              Self.controlWindowRenders(
+                state: lastArmedState ?? Self.restorableState(persisted),
+                controlWindowOpen: true
+              ),
+              try Self.childAnchorActive() else {
+            return ["ok": true, "lease": 0]
+        }
+        let now = Self.monotonicSeconds()
+        let grant = try controlWindow.open(at: now)
+        // Scheduled before the load: a load that fails or half-commits is
+        // withdrawn at the cap like any other.
+        scheduleControlWindowCheckLocked(after: grant.deadline - now)
+        try applyControlWindowLocked()
+        return [
+            "ok": true,
+            "lease": grant.lease,
+            "expiresInMs": Int(((grant.deadline - now) * 1_000).rounded(.down)),
+        ]
+    }
+
+    /// `POST /killswitch/control-window/close`: that exchange completed or
+    /// failed. The permit goes as soon as no exchange holds the window.
+    func closeControlWindow(lease: Int) -> [String: Any] {
+        lock.lock()
+        defer { lock.unlock() }
+        controlWindow.close(lease)
+        settleControlWindowLocked()
+        return ["ok": true]
+    }
+
+    /// The cap passed, or an unconfirmed withdrawal is due for a retry.
+    private func controlWindowCheckFired() {
+        lock.lock()
+        defer { lock.unlock() }
+        controlWindowCheckAt = nil
+        settleControlWindowLocked()
+        // A check that fired before the cap (an earlier retry) waits for it.
+        let now = Self.monotonicSeconds()
+        if controlWindow.isOpen(at: now), let deadline = controlWindow.deadline {
+            scheduleControlWindowCheckLocked(after: deadline - now)
+        }
+    }
+
+    /// Brings the kernel to what the window says now. A failed load is
+    /// retried every `controlWindowRetryInterval`; after
+    /// `maximumControlWindowWithdrawFailures` failures in a row the emergency
+    /// all-block replaces the ruleset, permit included. Caller holds `lock`.
+    func settleControlWindowLocked() {
+        _ = controlWindow.expireIfDue(at: Self.monotonicSeconds())
+        do {
+            try applyControlWindowLocked()
+            controlWindowWithdrawFailures = 0
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: control window change not confirmed: \(detail.prefixString(512))\n".utf8
+            ))
+            controlWindowWithdrawFailures += 1
+            if controlWindowWithdrawFailures >= Self.maximumControlWindowWithdrawFailures {
+                controlWindowWithdrawFailures = 0
+                // Schedules its own retry if it fails as well.
+                _ = secureEmergencyLocked()
+            } else {
+                scheduleControlWindowCheckLocked(after: Self.controlWindowRetryInterval)
+            }
+        }
+    }
+
+    /// Loads the ruleset the window calls for when the kernel may hold
+    /// anything else. Caller holds `lock`.
+    private func applyControlWindowLocked() throws {
+        guard let persisted = try loadState(), persisted.armed else {
+            // Released: the permit went with the anchor.
+            controlPermitLoad = .absent
+            return
+        }
+        let base = lastArmedState ?? Self.restorableState(persisted)
+        let wanted = Self.controlWindowRenders(
+            state: base,
+            controlWindowOpen: controlWindow.isOpen(at: Self.monotonicSeconds())
+        )
+        let target: ControlPermitLoad = wanted ? .present : .absent
+        guard controlPermitLoad != target else { return }
+        // Never put back a block that is gone: a release in progress, or one
+        // that half-finished, must not be undone by a window change. Without
+        // the block nothing needs the permit and nothing holds it.
+        guard try Self.childAnchorActive() else {
+            controlPermitLoad = .absent
+            return
+        }
+        let rules = try Self.writeRules(
+            state: base, allowedUID: allowedUID, controlWindowOpen: wanted
+        )
+        let passRules = Self.passRules(in: rules)
+        // Opening only adds pass rules (`.keep`); closing withdraws the API
+        // addresses' permits, whose states are killed by address, so no
+        // connection opened inside the window outlives it.
+        let disposal = Self.stateDisposal(replacing: lastLoadedPassRules, with: passRules)
+        lastLoadedPassRules = nil
+        controlPermitLoad = .unknown
+        try Self.ensureAnchorLoaded(disposal: disposal)
+        lastLoadedPassRules = passRules
+        controlPermitLoad = target
+    }
+
+    /// Keeps the earliest pending check. Caller holds `lock`, or is `init`.
+    private func scheduleControlWindowCheckLocked(after seconds: TimeInterval) {
+        let delay = max(0, seconds)
+        let at = Self.monotonicSeconds() + delay
+        if let pending = controlWindowCheckAt, pending <= at { return }
+        controlWindowCheckAt = at
+        let timer: DispatchSourceTimer
+        if let existing = controlWindowTimer {
+            timer = existing
+        } else {
+            timer = DispatchSource.makeTimerSource(queue: controlWindowQueue)
+            timer.setEventHandler { [weak self] in self?.controlWindowCheckFired() }
+            controlWindowTimer = timer
+            timer.schedule(deadline: .now() + delay, leeway: .milliseconds(100))
+            timer.resume()
+            return
+        }
+        timer.schedule(deadline: .now() + delay, leeway: .milliseconds(100))
     }
 
     /// `false` records a pending removal ("releasing"). Only a finished
@@ -734,6 +1018,12 @@ final class KillSwitchManager {
         lastLoadedPassRules = nil
 
         selectiveRecoveryReconciled = try Self.releaseWithAIHold(preserveAIHold: preserveAIHold)
+        // The anchor was flushed with every permit in it. A release that
+        // threw leaves the window to its own deadline, whose withdrawal never
+        // reloads an anchor that no longer holds the block.
+        controlWindow.expire()
+        lastArmedState = nil
+        controlPermitLoad = .absent
         stateGeneration &+= 1
         openNetworkEpoch &+= 1
         lastLoadedPassRules = nil
@@ -1000,10 +1290,25 @@ final class KillSwitchManager {
             // disarm clears it.
             lastLoadedPassRules = nil
             repairedSinceArm = true
-            try Self.writeRules(state: Self.restorableState(state), allowedUID: allowedUID)
+            // The persisted state replaces the last arm's ruleset. An open
+            // control window stays open in it; a closed one stays closed.
+            lastArmedState = nil
+            let restorable = Self.restorableState(state)
+            let windowRendered = Self.controlWindowRenders(
+                state: restorable,
+                controlWindowOpen: controlWindow.isOpen(at: Self.monotonicSeconds())
+            )
+            try Self.writeRules(
+                state: restorable, allowedUID: allowedUID, controlWindowOpen: windowRendered
+            )
             Self.pinHostsIfUsable(state: state)
+            if windowRendered || controlPermitLoad != .absent { controlPermitLoad = .unknown }
             try Self.ensureAnchorLoaded(flushStates: true)
+            controlPermitLoad = windowRendered ? .present : .absent
         } catch {
+            if controlPermitLoad == .unknown {
+                scheduleControlWindowCheckLocked(after: Self.controlWindowRetryInterval)
+            }
             // A failed repair must not fall through to an all-block. The next
             // pass retries the saved rules while the Core is running. When the
             // Core is down, the idle loop releases instead.
@@ -1046,6 +1351,7 @@ final class KillSwitchManager {
                   let widened = Self.widenLANScope(
                     in: source, current: current, baseline: lastLoadedPassRules
                   ) else { return }
+            lastArmedState = nil
             try Self.writeRuleText(widened)
             var outcome = KernelLoadOutcome.notIssued
             try Self.ensureAnchorLoaded(flushStates: false, loadOutcome: &outcome)

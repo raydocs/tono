@@ -423,6 +423,11 @@ final class UpdateTransaction {
         let ledger = try storage.load()
         guard let attempt = ledger.attempt, attempt.receipt.phase != .committed else { return }
         if path == "/core/stop" || path == "/dns/restore" { return } // Tightening/cleanup only.
+        // H1-F5: the control window re-renders the ruleset the update left
+        // armed, plus at most `hardCap` seconds of the API permit that ruleset
+        // carried permanently before decision 079. Narrower than before, so
+        // a pending update does not refuse it.
+        if path == "/killswitch/control-window" || path == "/killswitch/control-window/close" { return }
         if ["/core/start", "/core/sync", "/killswitch/arm", "/dns/enable"].contains(path) {
             _ = try bound(ledger, peer: peer, initiating: false)
             guard attempt.receipt.requiredRecovery == .connected else { throw HelperFailure.invalid("Update does not authorize reconnect.") }

@@ -407,7 +407,11 @@ nonisolated enum HelperProtocolVersion {
     ///   among the current Network Location's services, preferring the
     ///   primary service ID; an ambiguous name refuses (R3-O5). While a
     ///   legacy name-only snapshot is on disk, enable keeps the old lookup.
-    static let current = "4.52.44"
+    /// - 4.52.44 → 4.52.45: the Tono API host's `tono-control` permit renders
+    ///   only inside a control window (`/killswitch/control-window`, returned
+    ///   through `/killswitch/control-window/close`), never beside a tunnel,
+    ///   and for at most 15 s (H1-F5, decision 079 D4-A).
+    static let current = "4.52.45"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

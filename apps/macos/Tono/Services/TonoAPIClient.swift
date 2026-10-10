@@ -159,6 +159,13 @@ actor TonoAPIClient {
     /// the system resolver and the pinned addresses both fail before any
     /// status line.
     private let relayPath: ControlPlanePath?
+    /// H1-F5 (decision 079): brackets each exchange so the helper's PF permit
+    /// for the API host exists only while one runs. nil for injected
+    /// sessions (tests) unless one is passed.
+    private let controlWindow: ControlPlaneWindow?
+    /// The session behind `systemPath`, flushed before an exchange that runs
+    /// in a control window (see `exchangeInControlWindow`).
+    private let systemSession: URLSession
     /// #584: the label of a later path that answered where the paths before
     /// it failed, so later requests try it first. Cleared when a preferred
     /// attempt fails, is cancelled or its body fails. Kept in the app
@@ -244,7 +251,8 @@ actor TonoAPIClient {
         offlineGate: OfflineGrantGate = OfflineGrantGate(directory: ConfigStorage.shared.appSupportDirectory),
         pinnedPath: ControlPlanePath? = nil,
         relayPath: ControlPlanePath? = nil,
-        systemHandshake: (@Sendable () async -> Bool)? = nil
+        systemHandshake: (@Sendable () async -> Bool)? = nil,
+        controlWindow: ControlPlaneWindow? = nil
     ) {
         self.baseURL = baseURL
         self.keychain = keychain
@@ -260,12 +268,14 @@ actor TonoAPIClient {
         system.handshake = systemHandshake
             ?? (session == nil ? ControlPlanePath.systemResolverHandshake(for: baseURL) : nil)
         systemPath = system
+        systemSession = urlSession
         // #584: production falls back to the pinned addresses. An injected
         // session (tests) has none unless one is passed.
         self.pinnedPath = pinnedPath
             ?? (session == nil ? ControlPlanePath.pinnedAddresses(for: baseURL) : nil)
         self.relayPath = relayPath
             ?? (session == nil ? ControlPlanePath.relays(for: baseURL) : nil)
+        self.controlWindow = controlWindow ?? (session == nil ? .helper : nil)
         preferredPathKey = Self.preferredPathKey(forHost: baseURL.host ?? "")
         preferredPathLabel = Self.loadPreferredPath(key: preferredPathKey)
     }
@@ -1071,7 +1081,7 @@ actor TonoAPIClient {
             let answer: ControlPlaneAnswer
             let pathLabel: String
             do {
-                (answer, pathLabel) = try await exchangeOverPaths(
+                (answer, pathLabel) = try await exchangeInControlWindow(
                     request,
                     method: method,
                     auditDetails: auditDetails,
@@ -1189,6 +1199,44 @@ actor TonoAPIClient {
             return data
         }
         throw APIError.transport("Retry attempts exhausted.")
+    }
+
+    /// H1-F5 (decision 079, D4-A): one exchange inside the helper's control
+    /// window. The window opens right before the first path is tried and is
+    /// returned as soon as the exchange answers, fails or is cancelled; the
+    /// helper withdraws it at its hard cap if the return never arrives.
+    private func exchangeInControlWindow(
+        _ request: URLRequest,
+        method: String,
+        auditDetails: [String: String],
+        requestIsCurrent: (@Sendable () -> Bool)?
+    ) async throws -> (ControlPlaneAnswer, String) {
+        guard let controlWindow else {
+            return try await exchangeOverPaths(
+                request, method: method, auditDetails: auditDetails,
+                requestIsCurrent: requestIsCurrent
+            )
+        }
+        let lease = await controlWindow.open()
+        if lease != nil {
+            // Closing a window kills every state to the API addresses, so a
+            // connection pooled in an earlier window is dead without a reset:
+            // reusing it would stall until the request timeout. Start on a
+            // new connection. Only while a window is in use (bootstrap), never
+            // on a tunnel.
+            await systemSession.flush()
+        }
+        do {
+            let exchanged = try await exchangeOverPaths(
+                request, method: method, auditDetails: auditDetails,
+                requestIsCurrent: requestIsCurrent
+            )
+            if let lease { await controlWindow.close(lease) }
+            return exchanged
+        } catch {
+            if let lease { await controlWindow.close(lease) }
+            throw error
+        }
     }
 
     /// #584: one exchange, over the system resolver first, then the pinned

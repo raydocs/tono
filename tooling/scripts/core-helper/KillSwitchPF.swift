@@ -6,11 +6,17 @@ extension KillSwitchManager {
     static func writeRules(
         state: KillSwitchState,
         allowedUID: uid_t,
-        physicalInterfaces: [String]? = nil
+        physicalInterfaces: [String]? = nil,
+        controlWindowOpen: Bool = false
     ) throws -> String {
         let rules = physicalInterfaces.map {
-            renderRules(state: state, allowedUID: allowedUID, physicalInterfaces: $0)
-        } ?? renderRules(state: state, allowedUID: allowedUID)
+            renderRules(
+                state: state, allowedUID: allowedUID, physicalInterfaces: $0,
+                controlWindowOpen: controlWindowOpen
+            )
+        } ?? renderRules(
+            state: state, allowedUID: allowedUID, controlWindowOpen: controlWindowOpen
+        )
         // Detach the boot load before the rule file holds a block. A throw
         // leaves the previous file in place.
         _ = try ensureMainHook()
@@ -138,10 +144,22 @@ extension KillSwitchManager {
         return !Set(current).isSubset(of: Set(loaded))
     }
 
+    /// Whether the Tono API host's control permit renders: only inside an
+    /// open control window (H1-F5, decision 079 D4-A) and only without a
+    /// tunnel. With a tunnel up the app's control-plane traffic is routed into
+    /// it and needs no physical-interface permit.
+    static func controlWindowRenders(state: KillSwitchState, controlWindowOpen: Bool) -> Bool {
+        controlWindowOpen && state.tunnelInterfaces.isEmpty
+    }
+
+    /// `controlWindowOpen` defaults to closed, so every render that does not
+    /// ask for the window (boot restore, heal, power transition, emergency)
+    /// omits the Tono API host's addresses.
     static func renderRules(
         state: KillSwitchState,
         allowedUID: uid_t,
-        physicalInterfaces: [String] = KillSwitchManager.physicalEgressInterfaces()
+        physicalInterfaces: [String] = KillSwitchManager.physicalEgressInterfaces(),
+        controlWindowOpen: Bool = false
     ) -> String {
         var lines = [
             "# Managed by Tono Kill Switch — do not edit",
@@ -378,7 +396,19 @@ extension KillSwitchManager {
         }
 
         var controlEndpoints = Set<KillSwitchEndpoint>()
-        for addresses in state.resolvedHosts.values {
+        let apiWindowRenders = controlWindowRenders(
+            state: state, controlWindowOpen: controlWindowOpen
+        )
+        for (host, addresses) in state.resolvedHosts {
+            // H1-F5 (decision 079, D4-A): the Tono API host sits on shared
+            // anycast, so its permit exists only for the seconds of a
+            // control-plane exchange the app announced (`ControlWindowLeases`)
+            // and never while a tunnel carries that traffic instead. The
+            // Tailscale control hosts keep their permit as before: tailscaled
+            // holds a long-lived control connection, as root, to its own hosts.
+            guard KillSwitchManager.defaultHosts.contains(host) || apiWindowRenders else {
+                continue
+            }
             for address in addresses {
                 controlEndpoints.insert(
                     .init(address: address, transport: "tcp", port: 443)
@@ -405,7 +435,10 @@ extension KillSwitchManager {
             // bound is these pinned addresses and TCP 443 only. Binding it to
             // the app requires the bootstrap requests to be issued by root (the
             // helper) or a dedicated identity and this rule to match only that;
-            // see #331 for the design.
+            // see #331 for the design. Decision 079 (D4-A) keeps the UID
+            // boundary and bounds the API addresses in time instead: they
+            // render only inside a control window of at most
+            // `ControlWindowLeases.hardCap` seconds (H1-F5, a known risk).
             let family = endpoint.address.contains(":") ? "inet6" : "inet"
             lines.append(
                 "pass out quick \(family) proto \(endpoint.transport) " +

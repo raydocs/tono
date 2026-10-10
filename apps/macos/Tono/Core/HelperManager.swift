@@ -868,6 +868,29 @@ nonisolated struct HelperManager {
         return try requireKillSwitchSuccess(result, operation: "arm")
     }
 
+    /// H1-F5 (decision 079, D4-A): opens the helper's control-plane window
+    /// for one exchange. Returns the lease to hand back, or nil when the
+    /// helper opened nothing (not armed, or a tunnel carries the traffic).
+    static func openControlWindow() throws -> Int? {
+        let result = try sendRequest(method: "POST", path: "/killswitch/control-window")
+        _ = try requireSuccess(result, operation: "control window")
+        guard let object = try? JSONSerialization.jsonObject(with: result.body) as? [String: Any],
+              let lease = object["lease"] as? Int else {
+            throw HelperIPCError.invalidResponse
+        }
+        return lease > 0 ? lease : nil
+    }
+
+    /// Returns a control-window lease; the permit goes once no exchange holds it.
+    static func closeControlWindow(lease: Int) throws {
+        let result = try sendJSONObject(
+            method: "POST",
+            path: "/killswitch/control-window/close",
+            object: ["lease": lease]
+        )
+        _ = try requireSuccess(result, operation: "control window close")
+    }
+
     static func disarmKillSwitch(preserveAIHold: Bool = false) throws {
         let path = preserveAIHold ? "/killswitch/release" : "/killswitch/disarm"
         let result = try sendRequest(method: "POST", path: path)
@@ -1228,6 +1251,10 @@ nonisolated struct HelperManager {
             return 20
         case "/version", "/core/status", "/killswitch/status":
             return 2
+        case "/killswitch/control-window", "/killswitch/control-window/close":
+            // Every control-plane request waits on this. A helper busy with
+            // something longer leaves the exchange to the ruleset as it is.
+            return 3
         default:
             return 6
         }

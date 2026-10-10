@@ -167,6 +167,66 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(pinnedAttempts.count, 1, "the pinned addresses receive the request exactly once")
     }
 
+    /// H1-F5 (decision 079, D4-A): the helper's PF permit for the API host's
+    /// pinned addresses is held for one exchange only. The window is open
+    /// while the exchange runs, and returned once it answered and once it
+    /// failed. The helper side (the permit itself and its 15 s cap) is the
+    /// helper's `runControlWindowSelfTest`.
+    func testTheControlWindowIsHeldOnlyWhileAnExchangeRuns() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        HeldAccountProtocol.install(host) { request in
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer {
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            AppProfile.defaults.removeObject(forKey: TonoAPIClient.preferredPathKey(forHost: host))
+        }
+        let window = ControlWindowRecorder()
+        let pinnedAttempts = PathCallCounter()
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                pinnedAttempts.record()
+                window.observeExchange()
+                guard pinnedAttempts.count == 1 else { throw URLError(.cannotConnectToHost) }
+                return ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-h1f5","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
+            },
+            controlWindow: ControlPlaneWindow(
+                open: { window.open() },
+                close: { window.close($0) }
+            )
+        )
+        func signIn() async throws -> String {
+            try await api.startEmailSignIn(TonoEmailStartRequest(
+                email: "window@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+            )).challengeId
+        }
+
+        let answered = try await signIn()
+        XCTAssertEqual(answered, "c-h1f5")
+        XCTAssertFalse(window.isOpen, "the window is returned once the exchange answered")
+        XCTAssertEqual(window.closes, window.opens)
+
+        var failed = false
+        do { _ = try await signIn() } catch { failed = true }
+        XCTAssertTrue(failed, "every path refuses the second sign-in")
+        XCTAssertFalse(window.isOpen, "the window is returned once the exchange failed")
+        XCTAssertEqual(window.closes, window.opens)
+
+        XCTAssertGreaterThanOrEqual(window.opens, 2, "each exchange opens its own window")
+        XCTAssertFalse(window.observations.isEmpty)
+        XCTAssertTrue(window.observations.allSatisfy { $0 }, "every path ran inside an open window")
+    }
+
     /// Decision 077: when the system resolver and the pinned addresses both
     /// fail before any request byte is sent, the request goes to the Tono
     /// relay outside Cloudflare, exactly once (a sign-in POST), and the relay
@@ -2507,6 +2567,40 @@ nonisolated private final class PathHeaderLog: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         return recorded
     }
+}
+
+/// Stands in for the helper's control window (H1-F5): leases, and whether one
+/// was out each time a path ran.
+nonisolated private final class ControlWindowRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var held: Set<Int> = []
+    private var lastLease = 0
+    private var opened = 0
+    private var closed = 0
+    private var seen: [Bool] = []
+
+    func open() -> Int? {
+        lock.lock(); defer { lock.unlock() }
+        lastLease += 1
+        opened += 1
+        held.insert(lastLease)
+        return lastLease
+    }
+
+    func close(_ lease: Int) {
+        lock.lock(); defer { lock.unlock() }
+        if held.remove(lease) != nil { closed += 1 }
+    }
+
+    func observeExchange() {
+        lock.lock(); defer { lock.unlock() }
+        seen.append(!held.isEmpty)
+    }
+
+    var isOpen: Bool { lock.lock(); defer { lock.unlock() }; return !held.isEmpty }
+    var opens: Int { lock.lock(); defer { lock.unlock() }; return opened }
+    var closes: Int { lock.lock(); defer { lock.unlock() }; return closed }
+    var observations: [Bool] { lock.lock(); defer { lock.unlock() }; return seen }
 }
 
 nonisolated private final class PathCallCounter: @unchecked Sendable {
