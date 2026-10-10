@@ -321,7 +321,9 @@ export async function sendPending(
         ? null
         : await db.prepare('SELECT status, snoozed_until FROM ops_incidents WHERE id = ?')
           .bind(row.incident_id).first<Row>();
-      if (live && String(live.status) === 'resolved') {
+      // A resolve delivery is about a resolved incident by definition; only an
+      // open or escalate that waited out its delay is moot once it resolved.
+      if (live && String(live.status) === 'resolved' && String(row.transition) !== 'resolve') {
         await db.prepare(
           `UPDATE ops_alert_deliveries SET status = 'suppressed', next_attempt_at = NULL, error = ?
            WHERE id = ? AND attempts = ?`,

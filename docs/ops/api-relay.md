@@ -121,6 +121,37 @@ the node's `exit_nodes.id` is not the relay's `exitNodeId`. Rollback:
 `systemctl disable --now tono-relay-probe.timer`; nothing else on the node changes (nginx and
 `tono-xray` are not touched).
 
+## Alerts
+
+Every ops verdict pass (`src/ops/relay-alerts.ts`) turns the two checks into one incident per
+relay, kind `api-relay-down`, subject `fleet/<host>:<port>`, severity `warn`, sent through the
+ordinary `ops_alert_rules` outbox:
+
+- **Opens** when either signal has failed **3 consecutive checks**: the Worker's TCP probe, or
+  the node's end-to-end report. For end to end only, a report older than 15 minutes (the
+  console's 「上报过期」 line; three missed 5-minute reports) counts as tripped. A relay whose
+  node has never reported has no end-to-end signal and is judged on TCP alone.
+- **Clears** at the first check after which neither signal is tripped.
+- The count is not stored: both checks run every 5 minutes and a success resets the row's
+  `failing_since`, so the failures in the current run are `round((latest − failing_since) / 300) + 1`.
+  No migration. A skipped cron tick inside a failing run still counts as a cadence.
+- One message per transition: while the incident stays open nothing new is planned (the detail
+  is refreshed in place), so a 4th failure sends nothing. Reopening needs 3 new failures.
+
+Rules decide who hears it. Production's `Email: warn and above` (`fire_on=open`) already sends
+the opening; a recovery message needs a rule with `fire_on=open_resolve`, and its
+`cooldown_seconds` must be shorter than the outage or the recovery is suppressed as inside the
+cooldown. Suggested rule (admin API, owner chooses the target):
+
+```sh
+curl -X POST https://admin.afk.ccwu.cc/api/v1/ops/alert-rules -H 'content-type: application/json' \
+  -d '{"name":"API 中继","matchKind":"api-relay-down","minSeverity":"warn","fireOn":"open_resolve","cooldownSeconds":0,"channel":"email","target":"<address>"}'
+```
+
+With `cooldownSeconds: 0` a flapping relay can send at most one opening and one recovery per
+15 minutes, because each reopening needs three fresh failed checks. Every matching rule sends its
+own copy: with both rules the opening arrives twice and the recovery once.
+
 ## Client behaviour
 
 Windows (`transport.rs`) and macOS (`TonoAPIClient.exchangeOverPaths`) try a relay only after
