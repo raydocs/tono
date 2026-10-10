@@ -9,6 +9,7 @@ import { materializeFleet, materializeLive } from './src/lib/fixture-load';
 import { materializeOps } from './src/lib/ops-fixtures';
 import { createSettingsFixtures } from './fixtures/routes/settings';
 import { createCustomerFixtures } from './fixtures/routes/customers';
+import { createHy2SwitchFixtures } from './fixtures/routes/hy2-switch';
 import { createFunnelFixtures } from './fixtures/routes/funnel';
 import { createFollowupFixtures } from './fixtures/routes/followups';
 import { createLedgerFixtures } from './fixtures/routes/ledger';
@@ -236,6 +237,8 @@ function fixturesPlugin(): Plugin {
   const settingsFixtures = createSettingsFixtures(rootDir);
   /** The 客户 writes: onboarding, expiry, the home binding, devices, Claude. */
   const customerFixtures = createCustomerFixtures();
+  /** hy2 auto-switch: the 设置 switch and the per-account card, before 客户 claims `users/*`. */
+  const hy2SwitchFixtures = createHy2SwitchFixtures();
   /**
    * 开通漏斗, and the two writes on somebody who has no account yet. It goes
    * before 设置 because both of them are sent to `signup-allowlist`: the
@@ -289,6 +292,7 @@ function fixturesPlugin(): Plugin {
           empty: set === 'empty',
           incidents: () => opsFile(fileNames(set).incidents, pickSession(url, set)),
         })) return;
+        if (set !== 'error' && hy2SwitchFixtures({ req, res, route, session: pickSession(url, set) })) return;
         if (set !== 'error' && customerFixtures({
           req,
           res,

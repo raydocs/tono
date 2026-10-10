@@ -1,5 +1,31 @@
 # Hysteria2 三网证明（T0）
 
+## A18 自动切换开关：客户端怎么读
+
+[Amp 待办](amp-backlog-2026-10-10.md) A18，D1-C（[决定 079](../decisions/079-2026-10-10-amp-backlog-defaults.md)，
+形状见暂定[决定 080](../decisions/080-2026-10-10-hy2-auto-switch-flag-shape.md)）。客户端实现是 A17。
+
+- **字段**：`GET /api/v1/exit-catalog` 的响应顶层多一个可选布尔 `hy2AutoSwitch`，只在已登录设备的每账户视图上出现
+  （和 `routingSha256` 同一视图）。缺失（旧 Worker、ops/admin 明文目录）按 `false`。
+  ```json
+  { "revision": 54, "yaml": "proxies: …", "sha256": "…", "routingSha256": "…", "hy2AutoSwitch": true }
+  ```
+- **含义**：`true` 只允许客户端在当前节点主块（VLESS Reality）连不上时，**自己**换到**同一节点**的 ` · hy2` 块
+  （同基名、同一 Tono 身份；`catalog-yaml.ts` 不变量）。不允许换到别的节点，不增删目录条目；`false` 时手选 hy2
+  照旧可用，只是不自动切。本次响应里没有 hy2 块（客户端没发 `X-Tono-Accept: hy2`，或被 `HY2_CATALOG_EMAILS`
+  灰度名单挡掉）时恒为 `false`。
+- **不在摘要里**：`hy2AutoSwitch` 不进 `sha256`，也不进 `routingSha256`（已发布的 Windows 按固定配方校验后者）。
+  所以客户端每次拿到 200 的目录响应都要读它，**包括** `(revision, sha256, routingSha256)` 没变、安装结果是
+  「未变化」的那次；缓存目录时一并缓存，离线按缓存值，没有缓存按 `false`。
+- **生效时机**：账户层开关变化时控制面给该账户的设备排 `refresh_catalog`；全体开关不推送，客户端下次取目录时生效。
+- **怎么算**（`services/control-plane/src/hy2-auto-switch.ts`）：本账户「关」→ 关；本账户「开」→ 开；否则全体开关开
+  或该账户被标为内部账户 → 开；其余关。迁移 0100 的默认：全体关、没有内部账户、没有单独设置，即所有账户关，
+  直到运维在客户页标内部账户或在 设置 › 目录 翻全体开关。「两周后对全体开」是运维按按钮，没有定时器。
+- **后台**：`GET|PUT /api/v1/ops/hy2-auto-switch`（`{ allAccounts }`，`settings.publish`）、
+  `GET|PUT /api/v1/ops/users/{id}/hy2-auto-switch`（`{ internalAccount?, override?: "on"|"off"|null }`，
+  `customers.write`）；每次实际变更写一条 `ops_audit`（`hy2-auto-switch.global` / `user.hy2-auto-switch`）。
+  签名的分流规则（traffic policy）与其签名、校验都没动。
+
 ## 2026-10-10 三网公共探针（A16 第 1 步）
 
 [Amp 待办](amp-backlog-2026-10-10.md) A16，D2-A。本轮**没有 SSH 到任何节点**，节点侧未改，443 上的 `tono-xray`
