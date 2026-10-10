@@ -3,7 +3,7 @@
 ## A18 自动切换开关：客户端怎么读
 
 [Amp 待办](amp-backlog-2026-10-10.md) A18，D1-C（[决定 079](../decisions/079-2026-10-10-amp-backlog-defaults.md)，
-形状见暂定[决定 080](../decisions/080-2026-10-10-hy2-auto-switch-flag-shape.md)）。客户端实现是 A17。
+形状见暂定[决定 081](../decisions/081-2026-10-10-hy2-auto-switch-flag-shape.md)）。客户端实现是 A17。
 
 - **字段**：`GET /api/v1/exit-catalog` 的响应顶层多一个可选布尔 `hy2AutoSwitch`，只在已登录设备的每账户视图上出现
   （和 `routingSha256` 同一视图）。缺失（旧 Worker、ops/admin 明文目录）按 `false`。

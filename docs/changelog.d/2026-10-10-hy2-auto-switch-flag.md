@@ -10,7 +10,7 @@
   （`customers.read` / `customers.write`），每次实际变更写一条 `ops_audit`；账户开关变化时给该账户设备排
   `refresh_catalog`。控制台：客户页侧栏「备用通道自动切换」卡片（标内部账户、本账户开/关/跟随默认，均经确认框），
   设置 › 目录 底部全体开关（`ConfirmDialog`，确认文案带单独关/单独开的账户数）。客户端读法写在
-  [transport-hy2.md](../ops/transport-hy2.md#a18-自动切换开关客户端怎么读)。暂定决定 [080](../decisions/080-2026-10-10-hy2-auto-switch-flag-shape.md)。
+  [transport-hy2.md](../ops/transport-hy2.md#a18-自动切换开关客户端怎么读)。暂定决定 [081](../decisions/081-2026-10-10-hy2-auto-switch-flag-shape.md)。
 - 工程与测试：新增 `test/worker-hy2-auto-switch.test.ts` 一条 `it`（内部账户开、其他账户关、未声明 hy2 的客户端关、
   operator 不能翻全体开关、全体开后单独关仍关、目录内容不变、三条审计）。夹具 `fixtures/routes/hy2-switch.ts`。
 - 验证：Linux orb，Node 24：控制面 `npx vitest run test/worker-hy2-auto-switch.test.ts` 1/1 通过；`npm run typecheck`、
