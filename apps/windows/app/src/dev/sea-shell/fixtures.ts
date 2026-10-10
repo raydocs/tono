@@ -28,7 +28,12 @@ export const useCustomTheme = () => ({ theme })
 export const useLoadingOverlay = () => {}
 export const useLayoutEvents = () => {}
 export { useI18n } from '../../hooks/use-i18n'
-export { useTonoPreferences } from '../../hooks/use-tono-preferences'
+export {
+  useTonoPreferences,
+  readGeneralSave,
+  tonoGeneralSaveQueryKey,
+  type GeneralSave,
+} from '../../hooks/use-tono-preferences'
 let generalPreferences: TonoPreferences = {
   language: params.get('lang') === 'zh' ? 'zh' : 'en',
   theme_mode: 'dark',
@@ -46,8 +51,8 @@ export const getTonoPreferences = async () => {
   return { ...generalPreferences }
 }
 export const patchTonoPreferences = async (value: Partial<TonoPreferences>) => {
-  await privacyDelay('generalSaveDelay')
   generalPreferences = { ...generalPreferences, ...value }
+  await privacyDelay('generalSaveDelay')
   if (params.has('generalSaveError') && !generalSaveFailed) {
     generalSaveFailed = true
     throw new Error('Synthetic settings lost reply; value may be saved')

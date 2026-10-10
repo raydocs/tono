@@ -4,7 +4,12 @@ import { useTranslation } from 'react-i18next'
 
 import type { DialogRef } from '@/components/base'
 import { UpdateViewer } from '@/components/setting/mods/update-viewer'
-import { useTonoPreferences } from '@/hooks/use-tono-preferences'
+import {
+  useTonoPreferences,
+  readGeneralSave,
+  tonoGeneralSaveQueryKey,
+  type GeneralSave,
+} from '@/hooks/use-tono-preferences'
 import { useUpdate } from '@/hooks/use-update'
 import {
   changeLanguage,
@@ -57,13 +62,6 @@ type PrivacySaves = Record<
 >
 const readPrivacySaves = () =>
   getCacheData<PrivacySaves>(tonoPrivacySavesQueryKey) ?? {}
-
-const tonoGeneralSaveQueryKey = ['tonoGeneralSave'] as const
-type GeneralSave = {
-  phase: 'reading' | 'saving' | 'saved' | 'failed'
-  error?: TonoActionErrorDescription
-}
-const readGeneralSave = () => getCacheData<GeneralSave>(tonoGeneralSaveQueryKey)
 
 const LANGUAGE_LABELS: Record<string, string> = {
   en: 'English',
@@ -170,6 +168,7 @@ export const GeneralCard = () => {
   const Toggle = newAppearance ? SeaToggle : TonoToggle
   const {
     preferences,
+    generalSave: save,
     error,
     isFetching,
     refetchPreferences,
@@ -177,11 +176,6 @@ export const GeneralCard = () => {
   } = useTonoPreferences()
   // All these choices share one native preferences document. Serialize them
   // across routes, including the readback and language application.
-  const { data: save } = useQuery({
-    queryKey: tonoGeneralSaveQueryKey,
-    queryFn: readGeneralSave,
-    initialData: readGeneralSave,
-  })
   const themeMode = preferences?.theme_mode ?? 'system'
   const selectedLanguage = resolveLanguage(
     preferences?.language ?? i18n.language,
