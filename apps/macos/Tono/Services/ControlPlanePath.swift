@@ -187,6 +187,7 @@ nonisolated enum PinnedControlPlaneExchange {
         let started = Date()
         var failures: [String] = []
         var clockRejected = false
+        var trustRejected = false
         for (index, endpoint) in endpoints.enumerated() {
             try Task.checkCancellation()
             let remaining = connectBudget - Date().timeIntervalSince(started)
@@ -217,13 +218,20 @@ nonisolated enum PinnedControlPlaneExchange {
                 // #588: named as the clock by `TonoAPIClient`.
                 clockRejected = true
                 failures.append("\(endpoint.description) \(detail)")
+            case let .trustRejected(detail):
+                // H21-O-F8: named as interception by `TonoAPIClient`.
+                trustRejected = true
+                failures.append("\(endpoint.description) \(detail)")
             }
         }
         // No endpoint reached TLS, so no request byte left this Mac.
-        throw URLError(clockRejected ? .serverCertificateHasBadDate : .cannotConnectToHost, userInfo: [
+        var userInfo: [String: Any] = [
             NSLocalizedDescriptionKey: "\(label): " + (failures.isEmpty
                 ? "connect budget spent" : failures.joined(separator: "; ")),
-        ])
+        ]
+        // The code stays `cannotConnectToHost`, so the retry rule is unchanged.
+        if trustRejected, !clockRejected { userInfo[NetworkInterception.evidenceKey] = true }
+        throw URLError(clockRejected ? .serverCertificateHasBadDate : .cannotConnectToHost, userInfo: userInfo)
     }
 
     /// The request as HTTP/1.1 bytes, or nil when a header cannot be framed.
@@ -272,6 +280,9 @@ nonisolated private enum PinnedOutcome: Sendable {
     /// #588: TLS failed on a certificate date, before any request byte was
     /// sent. The clock, not the address, is at fault.
     case clockRejected(String)
+    /// H21-O-F8: no TLS connection, and the trust store refused a certificate
+    /// on the way (issuer, chain or name). No request byte was sent.
+    case trustRejected(String)
     /// The request may have reached the server and no status line came back.
     case failedAfterConnect(any Error)
     case answered(ControlPlaneAnswer)
@@ -293,6 +304,8 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
     // Touched only on `queue`.
     private var connected = false
     private var lastWaiting: String?
+    /// H21-O-F8: a TLS attempt met a certificate the trust store refused.
+    private var refusedCertificate = false
     private var received = Data()
 
     init(
@@ -347,11 +360,16 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
         connection.start(queue: queue)
         queue.asyncAfter(deadline: .now() + connectBudget) { [self] in
             guard !connected else { return }
-            finish(.notConnected(lastWaiting ?? "no TLS connection within \(Int(connectBudget.rounded(.up))) s"))
+            finish(notConnected(lastWaiting ?? "no TLS connection within \(Int(connectBudget.rounded(.up))) s"))
         }
         queue.asyncAfter(deadline: .now() + exchangeBudget) { [self] in
             finish(ending(with: URLError(.timedOut)))
         }
+    }
+
+    /// No TLS connection: named as interception when a certificate was refused.
+    private func notConnected(_ detail: String) -> PinnedOutcome {
+        refusedCertificate ? .trustRejected(detail) : .notConnected(detail)
     }
 
     private var isFinished: Bool {
@@ -393,6 +411,7 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
                 finish(.clockRejected("\(error)"))
                 return
             }
+            if !connected, NetworkInterception.isTrustFailure(error) { refusedCertificate = true }
             // Still trying; the connect budget decides.
             lastWaiting = "\(error)"
         case let .failed(error):
@@ -400,11 +419,12 @@ nonisolated private final class PinnedConnection: @unchecked Sendable {
                 finish(.clockRejected("\(error)"))
                 return
             }
+            if !connected, NetworkInterception.isTrustFailure(error) { refusedCertificate = true }
             finish(connected
                 ? ending(with: URLError(.networkConnectionLost, userInfo: [
                     NSLocalizedDescriptionKey: "\(label): \(error)",
                 ]))
-                : .notConnected("\(error)"))
+                : notConnected("\(error)"))
         case .cancelled:
             connection.stateUpdateHandler = nil
         default:

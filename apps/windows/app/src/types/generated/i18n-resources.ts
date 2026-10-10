@@ -1284,6 +1284,7 @@ export interface TranslationResources {
         emailLabel: string
         emailPlaceholder: string
         errors: {
+          captivePortal: string
           clockSkew: string
           codeRejected: string
           deviceLimit: string
@@ -1291,6 +1292,7 @@ export interface TranslationResources {
           serverError: string
           sessionExpired: string
           signInNotSaved: string
+          tlsIntercepted: string
           unreachable: string
         }
         inboxInstructions: string

@@ -282,6 +282,8 @@
       "codeRejected": "That code was not accepted.",
       "signInNotSaved": "Sign-in didn't complete.",
       "clockSkew": "Sign-in didn't complete.",
+      "captivePortal": "This network needs a web sign-in (captive portal) before Tono can reach its server. Open a browser, finish the network's sign-in page, then retry.",
+      "tlsIntercepted": "This network is intercepting encrypted connections: something between this PC and Tono replaced Tono's certificate, and Tono will not accept it. If this network has a sign-in page, finish it in a browser; otherwise turn off any proxy or security software that inspects HTTPS, then retry.",
       "serverError": "Sign-in didn't complete."
     }
   },

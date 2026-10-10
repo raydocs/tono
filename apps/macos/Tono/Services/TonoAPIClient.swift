@@ -85,6 +85,11 @@ actor TonoAPIClient {
         /// this Mac's clock is wrong. No status line arrived: offline
         /// admission reads it as unreachable, but the user is told the clock.
         case clockSkew
+        /// H21-O-F8: the system trust store refused the control plane's
+        /// certificate for its issuer, chain or name: the network (or local
+        /// security software) is intercepting TLS. No status line arrived, so
+        /// offline admission reads it as unreachable, like `clockSkew`.
+        case tlsIntercepted
         /// HTTP 503 `EXIT_IDENTITY_PROPAGATING`: this device's exit identity
         /// is not yet acknowledged by every served exit. Transient by design;
         /// a launch without a cached catalog waits and asks again soon.
@@ -106,6 +111,7 @@ actor TonoAPIClient {
             case let .entitlementBlocked(code, _): Self.entitlementDescription(code)
             case .invalidOrExpiredCode: String(localized: "That code is wrong or expired. Request a new one.")
             case .clockSkew: CertificateClock.userMessage
+            case .tlsIntercepted: NetworkInterception.userMessage
             case .exitIdentityPropagating: String(localized: "Tono is still preparing this Mac's secure identity. Try again in a minute.")
             case .credentialPersistence: String(localized: "Tono could not save your sign-in in Keychain. You are signed out. Check that your login keychain is unlocked, then try again.")
             case .credentialRecoveryRecord: String(localized: "Tono could not update its sign-in recovery record. You are signed out. Check available disk space and Tono's Application Support folder permissions, then try again.")
@@ -1149,6 +1155,10 @@ actor TonoAPIClient {
         // #588: a path that failed on a certificate date is the cause to
         // report when no path answers, whatever the next path failed on.
         var clockFailure: (any Error)?
+        // H21-O-F8: likewise a path whose certificate the trust store refused.
+        // Only marked on the error thrown; its code, and so the retry rule, is
+        // the one that would have been thrown anyway.
+        var sawRefusedCertificate = false
         // Every path's failure, `label[detail]`, so the reported error names
         // them all, as the Windows transport's combined message does.
         var failures: [String] = []
@@ -1167,12 +1177,14 @@ actor TonoAPIClient {
                     // This path answered where the ones before it could not.
                     preferredPathLabel = path.label
                 }
+                NetworkInterception.record(intercepted: false)
                 return (answer, path.label)
             } catch {
                 // A preferred attempt that fails or is cancelled puts the
                 // system resolver back in front for the next request.
                 if index == 0, preferredFirst { preferredPathLabel = nil }
                 if CertificateClock.isDateFailure(error) { clockFailure = error }
+                if NetworkInterception.isTrustFailure(error) { sawRefusedCertificate = true }
                 failures.append("\(path.label)[\(Self.failureDetail(error))]")
                 guard index + 1 < order.count,
                       !(error is ControlPlaneExchangeError),
@@ -1192,7 +1204,7 @@ actor TonoAPIClient {
                         throw Self.combined(clockFailure, failures: failures)
                     }
                     if error is ControlPlaneExchangeError || Self.isCancellation(error) { throw error }
-                    throw Self.combined(error, failures: failures)
+                    throw Self.combined(error, failures: failures, intercepted: sawRefusedCertificate)
                 }
                 let failure = error as NSError
                 LocalTrafficAudit.shared.recordEvent(
@@ -1222,11 +1234,15 @@ actor TonoAPIClient {
     /// `error` with every path's failure in its description
     /// (`system_dns[...]; pinned[...]; relay[...]`), same domain and code, so
     /// the retry rule and the clock check still read it as the same failure.
-    nonisolated private static func combined(_ error: any Error, failures: [String]) -> any Error {
+    nonisolated private static func combined(
+        _ error: any Error, failures: [String], intercepted: Bool = false
+    ) -> any Error {
+        // One failure is `error` itself, which already carries its own evidence.
         guard failures.count > 1 else { return error }
         let original = error as NSError
         var userInfo = original.userInfo
         userInfo[NSLocalizedDescriptionKey] = failures.joined(separator: "; ")
+        if intercepted { userInfo[NetworkInterception.evidenceKey] = true }
         return NSError(domain: original.domain, code: original.code, userInfo: userInfo)
     }
 
@@ -1345,6 +1361,10 @@ actor TonoAPIClient {
         )
         guard willRetry else {
             if CertificateClock.isDateFailure(error) { throw APIError.clockSkew }
+            if NetworkInterception.isTrustFailure(error) {
+                NetworkInterception.record(intercepted: true)
+                throw APIError.tlsIntercepted
+            }
             throw APIError.transport(error.localizedDescription)
         }
         try await Task.sleep(for: .seconds(1))

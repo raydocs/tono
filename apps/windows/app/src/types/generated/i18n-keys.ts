@@ -788,6 +788,8 @@ export const translationKeys = [
   'tono.login.errors.codeRejected',
   'tono.login.errors.signInNotSaved',
   'tono.login.errors.clockSkew',
+  'tono.login.errors.captivePortal',
+  'tono.login.errors.tlsIntercepted',
   'tono.login.errors.serverError',
   'tono.pill.title.notConnected',
   'tono.pill.title.connecting',

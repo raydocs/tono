@@ -350,7 +350,7 @@
 | R604-F1 | macOS Core 重启（`/core/sync`、崩溃）期间无隧道，reviewed-bundle 放行仍在 | fixed(c9fe191e) | [#608](https://github.com/raydocs/tono/issues/608)，[#609](https://github.com/raydocs/tono/pull/609) | 高·已确认 | 叠在 #604 上；崩溃窗口至多约 10 s；Core 运行中 utun 消失不覆盖；需实机 |
 | H21-O-F6 | macOS 控制面请求继承他人系统代理，受保护离线下被 PF 挡 | fixed(07faa7c0) | [#587](https://github.com/raydocs/tono/issues/587)，[#617](https://github.com/raydocs/tono/pull/617) | 中·已确认 | 控制面 session 空 `connectionProxyDictionary` |
 | H21-O-F7 | 其他 VPN/TUN 未识别，失败归因错误 | in-PR | [#1480](https://github.com/raydocs/tono/pull/1480) | 中·推导(PLAUSIBLE) | #458/#468 部分覆盖；#1480 两端 App 进程只读识别（macOS getifaddrs，Windows GetIfTable2），网络/TUN 类失败归因「存在其他 VPN」，诊断 `virtualAdapters` 带 `otherVpn`；不识别 PPP 类 VPN（与 PPPoE 无法区分）；待实机 |
-| H21-O-F8 | 强制门户/TLS 拦截代理未识别 | open | 待开 | 低·推导(PLAUSIBLE) | |
+| H21-O-F8 | 强制门户/TLS 拦截代理未识别 | in-PR | [#1488](https://github.com/raydocs/tono/pull/1488) | 低·推导(PLAUSIBLE) | 只做归因与诊断类别：控制面证书被系统信任库按签发者/链/名称拒绝 → 「网络在拦截加密连接」（macOS `APIError.tlsIntercepted`，Windows `TONO_TLS_INTERCEPTED`）；Windows 传输失败且 NLM 报 `ConstrainedInternetAccess`，或 HTTP 511 → 「网络需要网页登录（强制门户）」（`TONO_AUTH_CAPTIVE`）；诊断 `virtualAdapters` 带 `tlsIntercepted`/`captivePortal`；证书校验不变、无新探测；macOS 无公开强制门户信号；待实机 |
 | H21-O-F9 | 系统时钟错误不被点名，保护期间无法校时 | fixed(13983688) | [#588](https://github.com/raydocs/tono/issues/588)，[#623](https://github.com/raydocs/tono/pull/623) | 低·已确认 | 只做分类与文案：macOS `APIError.clockSkew` 与探测 `.clock`，Windows `TONO_CLOCK_SKEW`；按传输失败参与离线准入；未开 NTP 放行；Windows hy2 不拒 NTP |
 | H21-C-F2 | 受保护离线时更新发现失败且不说明原因 | accepted-design | — | 低·推导 | fail-closed 设计；只改文案 |
 | H21-C-F3 | Windows 检查更新失败时显示「已是最新版」 | fixed(52e67294) | [#589](https://github.com/raydocs/tono/issues/589)，[#618](https://github.com/raydocs/tono/pull/618) | 中·已确认 | |
