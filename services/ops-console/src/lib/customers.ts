@@ -4,14 +4,11 @@ import type {
   CustomerDeviceDto,
   CustomerSummaryDto,
   IncidentDto,
-  NodeSummaryDto,
   Platform,
 } from '@contract';
 import { ADOPTION_BUCKETS } from '@contract';
-import { copy } from '@/copy/copy';
 import type { FollowupDto } from './api-followups';
-import { explainCode, isFailure, stageWord } from './codes';
-import { formatWhen } from './display';
+import { isFailure } from './codes';
 import { bucketFor } from './releases';
 
 const DAY = 86_400;
@@ -263,66 +260,7 @@ export function publicIncidentOn(
   )) ?? null;
 }
 
-/**
- * A machine to send the customer to instead.
- *
- * Only the engine's own verdict decides: a node it still calls 正常, listed in
- * the catalogue, and not the one that just failed. A suggestion made from
- * anything softer than that is the console inventing a recovery promise.
- */
-export function spareNode(
-  nodes: readonly NodeSummaryDto[],
-  avoid: string | null,
-): string | null {
-  const usable = nodes.filter((row) => (
-    row.verdict === 'ok' && row.lifecycle === 'listed' && row.name !== avoid
-  ));
-  return usable[0]?.name ?? null;
-}
-
-/** The question worth asking back, chosen by the code the client reported. */
-function questionFor(code: string | null): string {
-  const asks = copy.replyQuestion as Record<string, string>;
-  const key = (code ?? '').toUpperCase();
-  return asks[key] ?? copy.replyQuestion.other;
-}
-
-/**
- * The reply, assembled from fields and nothing else.
- *
- * Six lines, each one traceable: when the attempt was and against which
- * machine, where in the attempt it fell over and what the client called it,
- * whether an incident is already open on that machine, which machine to try
- * instead, and the one question the operator needs answered to get any
- * further. Nothing here names a cause — 被墙, 限速, 运营商 — because no field
- * on this page measures one, and a sentence a customer can quote back has to
- * be a sentence the console can stand behind.
- */
-export function replyDraft(input: {
-  who: string;
-  failure: ConnectionEventDto;
-  incident: IncidentDto | null;
-  spare: string | null;
-}): string {
-  const { who, failure, incident, spare } = input;
-  const said = copy.replyLine;
-  const at = formatWhen(Math.floor(failure.atMs / 1_000));
-  const lines = [
-    said.greeting(who),
-    failure.node === null ? said.attemptNoNode(at) : said.attempt(at, failure.node),
-  ];
-  const stage = stageWord(failure.stage);
-  const why = explainCode(failure.code);
-  if (stage !== null && why !== null) {
-    lines.push(failure.code === null
-      ? said.stage(stage, why)
-      : said.stageCode(stage, failure.code, why));
-  }
-  lines.push(incident === null ? said.incidentNo : said.incidentYes(incident.title));
-  lines.push(spare === null ? said.alternativeNone : said.alternative(spare));
-  lines.push(said.question(questionFor(failure.code)));
-  return lines.join('\n');
-}
+export { REPLY_SECTIONS, replyDraft, replySections, spareNode, type ReplySection } from './reply-draft';
 
 /**
  * The newest thing still owed on each customer.
