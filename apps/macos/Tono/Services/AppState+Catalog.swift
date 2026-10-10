@@ -26,7 +26,7 @@ extension AppState {
             )
         } catch {
             // A17: a refused catalog grants nothing, so no automatic hy2.
-            if ManagedExitCatalogOwnership.currentAccount == owner { hy2AutoSwitch.revoke() }
+            if ManagedExitCatalogOwnership.currentAccount == owner { revokeHy2AutoSwitchForRejectedCatalog() }
             errorMessage = String(localized: "Cloud server update was rejected; the last verified catalog remains active. \(error.localizedDescription)")
             throw error
         }

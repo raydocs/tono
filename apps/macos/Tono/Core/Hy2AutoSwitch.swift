@@ -32,7 +32,8 @@ import Foundation
 ///   So a failed, stalled or cancelled hy2 attempt cannot repeat: at most one
 ///   automatic hy2 attempt per node per window, after fresh strikes. The
 ///   existing reconnect loops supply the backoff between attempts.
-/// - A manual pick (any block of the node) wipes that node's state. Manual hy2
+/// - A manual pick (any block of the node) wipes that node's strikes and
+///   memory (a running block after a failed automatic hy2 stays). Manual hy2
 ///   is never rewritten: only a Reality selection is ever swapped.
 final class Hy2AutoSwitch {
     static let tcpFailureThreshold = 3
@@ -117,9 +118,20 @@ final class Hy2AutoSwitch {
         save()
     }
 
-    /// A refused catalog: no automatic hy2 until the next accepted 200 says
-    /// so. Another account is already excluded by the owner key.
+    /// A refused or undecodable catalog: no automatic hy2 until the next
+    /// accepted 200 says so. Strikes and memory go; a running block after a
+    /// failed automatic hy2 attempt stays.
     func revoke() {
+        permitted = false
+        tcpFailures = [:]
+        remembered = [:]
+        save()
+    }
+
+    /// Sign-out or account switch: nothing of the previous account remains,
+    /// neither permission, strikes, memory nor blocks.
+    func discardAccount() {
+        ownerKey = nil
         permitted = false
         clearCounters()
         remembered = [:]
@@ -216,8 +228,9 @@ final class Hy2AutoSwitch {
             return
         }
         guard !Self.isHy2(dialed) else { return }
+        // The block after a failed automatic hy2 attempt outlives a Reality
+        // success: Reality flapping must not buy a faster hy2 retry.
         tcpFailures[dialed] = nil
-        hy2NotBefore[dialed] = nil
         if remembered.removeValue(forKey: dialed) != nil { save() }
     }
 
@@ -229,7 +242,6 @@ final class Hy2AutoSwitch {
         if activeDial?.hy2 == name { activeDial = nil }
         let base = Self.base(name)
         tcpFailures[base] = nil
-        hy2NotBefore[base] = nil
         if remembered.removeValue(forKey: base) != nil { save() }
     }
 

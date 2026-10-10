@@ -376,14 +376,14 @@ rm -rf "$dir"
 [Amp 待办](amp-backlog-2026-10-10.md) A17 的 macOS 半边，D1-C；取舍见暂定[决定 082](../decisions/082-2026-10-10-hy2-auto-switch-macos-client.md)。
 开关是 A18 的 `hy2AutoSwitch`（目录 200 响应顶层布尔，缺失按 `false`）。代码：`apps/macos/Tono/Core/Hy2AutoSwitch.swift`。
 
-- **前提**：本次启动里本账户最近一次目录 200 带 `hy2AutoSwitch: true`。`false`、缺失、目录被拒、换账户：只走 Reality，
+- **前提**：本次启动里本账户最近一次目录 200 带 `hy2AutoSwitch: true`。`false`、缺失、目录被拒或 200 的正文解不开、换账户：只走 Reality，
   并清掉记忆与计数。开关不跨启动缓存；启动后第一次 200 之前不自动切。
 - **何时切**：同一 Reality 块连续 **3** 次连接失败且分类为 `CORE_EXIT_UNREACHABLE`，下一次连接拨同一节点的
   ` · hy2` 块（基名 + 后缀、`type: hysteria2`、密码等于 Reality 块的 UUID、内核能校验 SPKI 钉扎、不是东京那种
   商家拦 UDP 的块）。DNS、helper、TUN 等失败不计数也不清零。不换到别的节点。
 - **记住**：自动 hy2 走完同样的就绪检查、真正 Connected 之后，记住该节点 **24 h**（UserDefaults，账户按 SHA-256 分开，
   只存基名和时间）；期间连接直接拨 hy2（成功不续期），过期后先试 Reality。开始一次自动 hy2 就消耗该节点的计数和记忆，
-  **30 min** 内不再自动试 hy2；只有 Connected 把记忆还回来，所以失败、看门狗超时、被取消的自动 hy2 都不会重复。
+  **30 min** 内不再自动试 hy2；只有 Connected 把记忆还回来，所以失败、看门狗超时、被取消的自动 hy2 都不会重复；中间 Reality 连上也不解除这 30 min。登出、换账户清空全部状态。
   hy2 块从目录消失、开关变 `false`、用户手选该节点任一块，都会清掉记忆。
 - **不变**：只在内存里换本次拨号的选中块，保存的选择仍是 Reality；PF 按拨号节点放行，与手选 hy2 完全同一条路径，
   不新增放行；helper 协议不变；手选 hy2 照旧。

@@ -2,7 +2,7 @@
 - Status: provisional (backlog A17 macOS half, D1-C, while the owner was asleep; the owner may revisit)
 - Chosen: the client moves only when the signed-in device's last `GET /api/v1/exit-catalog` 200 in this launch
   carried `hy2AutoSwitch: true` (A18, [decision 079](079-2026-10-10-amp-backlog-defaults.md) D1-C). Missing,
-  non-boolean or `false`, a refused catalog, or another account: Reality only, and that account's remembered
+  non-boolean or `false`, a refused catalog or a 200 whose body does not decode, or another account: Reality only, and that account's remembered
   choices and counters are cleared. The value is not cached across launches; until the first 200 of a launch
   the client does not move (the remembered choice survives on disk but is not used).
   After **3** consecutive `CORE_EXIT_UNREACHABLE` connect failures on a Reality block, the next connect attempt dials
@@ -13,7 +13,9 @@
   node for **24 h** (UserDefaults, owner-scoped by SHA-256, base names and dates only); connects in that window dial
   hy2 (a remembered success does not extend it), after it Reality is tried again. Starting an automatic hy2 attempt
   consumes the node's strikes and memory and blocks another automatic hy2 attempt on that node for **30 min**; only
-  Connected gives the memory back, so a failed, stalled (watchdog) or cancelled hy2 attempt cannot repeat. The memory also clears when the twin leaves the
+  Connected gives the memory back, so a failed, stalled (watchdog) or cancelled hy2 attempt cannot repeat; a Reality
+  success does not lift that block. Sign-out or a switch to another account drops all of it (permission, strikes,
+  memory, blocks). The memory also clears when the twin leaves the
   catalog, the flag turns false, or the user picks either block of that node. The swap is in memory only: the saved
   selection stays the Reality block, and PF is armed for the dialed node exactly as for a manual hy2 pick.
   Rejected: caching the flag with the catalog for offline launches (more launches that move without a fresh grant);

@@ -497,6 +497,10 @@ final class AppState {
         RuntimeCleanup.launchProtectionConsumer = { [weak self] protection in
             self?.adoptLaunchProtection(protection)
         }
+        // A17: sign-out or another account leaves no hy2 auto-switch state.
+        ManagedExitCatalogOwnership.accountTeardownObserver = { [weak self] in
+            self?.hy2AutoSwitch.discardAccount()
+        }
         automaticResumeHeldAfterRestart = RuntimeCleanup.holdsAutomaticResume(
             recordedBootSession: RuntimeCleanup.recordedConnectBootSession,
             currentBootSession: RuntimeCleanup.currentBootSession()

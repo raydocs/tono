@@ -53,6 +53,12 @@ extension AppState {
         }
     }
 
+    /// An exit-catalog 200 that was refused, or whose body did not decode:
+    /// it grants nothing, so no automatic hy2 until an accepted 200 does.
+    func revokeHy2AutoSwitchForRejectedCatalog() {
+        hy2AutoSwitch.revoke()
+    }
+
     /// Exit-catalog 200 for `owner`, after its install (or no-op install).
     func applyHy2AutoSwitchPermission(_ permitted: Bool, owner: String) {
         guard ManagedExitCatalogOwnership.currentAccount == owner else { return }

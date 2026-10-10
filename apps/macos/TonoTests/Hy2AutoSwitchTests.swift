@@ -51,6 +51,13 @@ final class Hy2AutoSwitchTests: XCTestCase {
         XCTAssertEqual(dial.tcp, "Buffalo · Niagara")
         XCTAssertEqual(dial.hy2, "Buffalo · Niagara · hy2", "same node and identity, never another node's hy2")
         XCTAssertEqual(permitted.persistedTarget(for: dial.hy2), "Buffalo · Niagara", "the saved choice stays Reality")
+        permitted.noteConnectFailure(dialed: dial.hy2, code: .coreExitUnreachable, now: now)
+        permitted.noteConnected(dialed: dial.tcp, now: now)
+        failReality(permitted, nodes, now: now)
+        XCTAssertNil(
+            permitted.beginAttempt(selected: nodes[0], catalog: nodes, owner: owner, now: now.addingTimeInterval(60)),
+            "the block after a failed automatic hy2 attempt survives a Reality success"
+        )
 
         let refused = Hy2AutoSwitch(defaults: refusedDefaults)
         refused.applyCatalogPermission(false, owner: owner, catalog: nodes)
@@ -98,5 +105,35 @@ final class Hy2AutoSwitchTests: XCTestCase {
         XCTAssertNotNil(relaunched.rememberedUntil(dial.tcp))
         relaunched.applyCatalogPermission(true, owner: owner, catalog: nodes.filter { $0.name != dial.hy2 })
         XCTAssertNil(relaunched.rememberedUntil(dial.tcp), "the hy2 block left the catalog")
+    }
+
+    func testARejectedCatalogAndAnAccountChangeDropAutoSwitchState() throws {
+        let (defaults, suite) = try isolatedDefaults()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            ManagedExitCatalogOwnership.purge()
+        }
+        let nodes = catalog()
+        let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let app = AppState()
+        app.hy2AutoSwitch = Hy2AutoSwitch(defaults: defaults)
+        app.proxyRegions = [.init(id: AppState.managedCatalogRegionID, name: "Tono", nodes: nodes)]
+        ManagedExitCatalogOwnership.adopt(owner)
+
+        app.applyHy2AutoSwitchPermission(true, owner: owner)
+        failReality(app.hy2AutoSwitch, nodes, now: now)
+        app.revokeHy2AutoSwitchForRejectedCatalog()
+        XCTAssertFalse(app.hy2AutoSwitch.permitted, "a refused or undecodable 200 grants nothing")
+        XCTAssertEqual(app.hy2AutoSwitch.consecutiveTcpFailures(nodes[0].name), 0)
+
+        app.applyHy2AutoSwitchPermission(true, owner: owner)
+        failReality(app.hy2AutoSwitch, nodes, now: now)
+        let dial = try XCTUnwrap(app.hy2AutoSwitch.beginAttempt(selected: nodes[0], catalog: nodes, owner: owner, now: now))
+        app.hy2AutoSwitch.noteConnected(dialed: dial.hy2, now: now)
+        XCTAssertNotNil(app.hy2AutoSwitch.rememberedUntil(dial.tcp))
+        ManagedExitCatalogOwnership.adopt("account-b")
+        XCTAssertFalse(app.hy2AutoSwitch.permitted, "another account inherits nothing")
+        XCTAssertNil(app.hy2AutoSwitch.rememberedUntil(dial.tcp))
+        XCTAssertNil(defaults.data(forKey: Hy2AutoSwitch.storageKey))
     }
 }
