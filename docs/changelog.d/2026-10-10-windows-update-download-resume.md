@@ -1,6 +1,6 @@
 ## 2026-10-10 · Windows 安装包下载：中断后从已写字节续传，60 s 无字节算中断
 - 归属：ops 计划（[plan-2026-09-11](../ops/plan-2026-09-11.md)），中国大陆连通性审计（Windows）；`apps/windows/app/src-tauri/src/tono/commands/update.rs`。
-- 来源：基线 origin/main 3d973f95；分支 `amp/win-update-download-resume`；未合 main。
+- 来源：基线 origin/main 3d973f95；分支 `amp/win-update-download-resume`，PR [#1527](https://github.com/raydocs/tono/pull/1527)；未合 main。
 - 缺陷修复（[WIN-UPDATE-DOWNLOAD-NO-RESUME](../findings.d/WIN-UPDATE-DOWNLOAD-NO-RESUME.md)）：安装包下载开始后任何中断都让整次安装失败、下次从 0 开始，
   且没有空闲超时。现在 `download_resuming`：读超时 60 s（与 macOS `idleBudget` 一致），中断后用 `Range: bytes=<已写>-` 经同一路径链
   （先 API 最近走通的中继，再直连，再其余中继）续传，最多 3 次；续传应答必须是该偏移、签名大小的 206，否则失败；大小上限检查不变。
