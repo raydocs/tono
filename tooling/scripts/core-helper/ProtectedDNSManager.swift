@@ -970,23 +970,35 @@ final class ProtectedDNSManager {
     private static func scServiceID(named service: String) throws -> String? {
         let primaryIDs = primaryServiceIDs()
         return try withPreferences(lock: false) { prefs in
-            guard let currentSet = SCNetworkSetCopyCurrent(prefs),
+            guard let all = SCNetworkServiceCopyAll(prefs),
+                  let currentSet = SCNetworkSetCopyCurrent(prefs),
                   let members = SCNetworkSetCopyServices(currentSet) else {
                 throw HelperFailure.system("Could not read the current network location.")
             }
-            var candidates: [ProtectedDNSServiceIdentity.Candidate] = []
+            var services: [ProtectedDNSServiceIdentity.Candidate] = []
+            for index in 0..<CFArrayGetCount(all) {
+                let entry = unsafeBitCast(
+                    CFArrayGetValueAtIndex(all, index),
+                    to: SCNetworkService.self
+                )
+                guard let id = SCNetworkServiceGetServiceID(entry) as String?,
+                      let name = SCNetworkServiceGetName(entry) as String? else { continue }
+                services.append(ProtectedDNSServiceIdentity.Candidate(id: id, name: name))
+            }
+            var currentIDs = Set<String>()
             for index in 0..<CFArrayGetCount(members) {
                 let member = unsafeBitCast(
                     CFArrayGetValueAtIndex(members, index),
                     to: SCNetworkService.self
                 )
-                guard let id = SCNetworkServiceGetServiceID(member) as String?,
-                      let name = SCNetworkServiceGetName(member) as String? else { continue }
-                candidates.append(ProtectedDNSServiceIdentity.Candidate(id: id, name: name))
+                if let id = SCNetworkServiceGetServiceID(member) as String? {
+                    currentIDs.insert(id)
+                }
             }
             return ProtectedDNSServiceIdentity.select(
                 named: service,
-                currentLocation: candidates,
+                services: services,
+                currentLocationIDs: currentIDs,
                 primaryServiceIDs: primaryIDs
             )
         }

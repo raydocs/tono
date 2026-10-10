@@ -42,34 +42,53 @@ final class ProtectedDNSServiceSelectionTests: XCTestCase {
     }
 
     /// R3-O5 regression: the helper's `/dns/enable` took the first service
-    /// named "Wi-Fi" from every Network Location. It now chooses among the
-    /// current location's services (the helper passes only those), the app's
-    /// primary service ID wins, and a name that still matches two services
-    /// without a primary among them is refused rather than guessed.
+    /// named "Wi-Fi" from every Network Location. Only the current location's
+    /// services are candidates now, even when another location's same-named
+    /// copy comes first or is named primary; the app's primary service ID
+    /// wins among them, and a name that still matches two services without a
+    /// primary among them is refused rather than guessed.
     func testDNSEnableTargetsTheServiceIDNotTheFirstSameNamedService() {
         typealias Candidate = ProtectedDNSServiceIdentity.Candidate
-        let current = [
+        let otherLocationWiFi = Candidate(id: "LOCATION-A-WIFI", name: "Wi-Fi")
+        let services = [
+            otherLocationWiFi,
             Candidate(id: "LOCATION-B-WIFI", name: "Wi-Fi"),
             Candidate(id: "LOCATION-B-ETHERNET", name: "Ethernet"),
         ]
+        let current: Set<String> = ["LOCATION-B-WIFI", "LOCATION-B-ETHERNET"]
         XCTAssertEqual(
             ProtectedDNSServiceIdentity.select(
-                named: "Wi-Fi", currentLocation: current, primaryServiceIDs: []
+                named: "Wi-Fi", services: services, currentLocationIDs: current,
+                primaryServiceIDs: []
             ),
             "LOCATION-B-WIFI"
         )
-
-        let twins = [Candidate(id: "WIFI-1", name: "Wi-Fi")] + current
         XCTAssertEqual(
             ProtectedDNSServiceIdentity.select(
-                named: "Wi-Fi", currentLocation: twins,
-                primaryServiceIDs: ["LOCATION-B-WIFI", "WIFI-1"]
+                named: "Wi-Fi", services: services, currentLocationIDs: current,
+                primaryServiceIDs: [otherLocationWiFi.id, "LOCATION-B-WIFI"]
             ),
             "LOCATION-B-WIFI"
         )
         XCTAssertNil(
             ProtectedDNSServiceIdentity.select(
-                named: "Wi-Fi", currentLocation: twins,
+                named: "Wi-Fi", services: [otherLocationWiFi], currentLocationIDs: current,
+                primaryServiceIDs: [otherLocationWiFi.id]
+            )
+        )
+
+        let twins = services + [Candidate(id: "WIFI-1", name: "Wi-Fi")]
+        let currentWithTwin = current.union(["WIFI-1"])
+        XCTAssertEqual(
+            ProtectedDNSServiceIdentity.select(
+                named: "Wi-Fi", services: twins, currentLocationIDs: currentWithTwin,
+                primaryServiceIDs: ["WIFI-1"]
+            ),
+            "WIFI-1"
+        )
+        XCTAssertNil(
+            ProtectedDNSServiceIdentity.select(
+                named: "Wi-Fi", services: twins, currentLocationIDs: currentWithTwin,
                 primaryServiceIDs: ["LOCATION-B-ETHERNET"]
             )
         )

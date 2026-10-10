@@ -7,3 +7,4 @@
 - 验证：Linux 上 `sh tooling/scripts/test-core-helper-contract-guard.sh` → `PASS build-core-helper contract guard`；用假 `xcrun` 跑 `build-core-helper.sh`，契约守卫通过并到达编译（退出 73）；`python3 apps/macos/scripts/test_build_source.py` → `Ran 2 tests … OK`。Swift 编译、XCTest、helper 自测由托管 macOS CI 执行，本机未执行。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：未实机验证（多 Location 同名服务的 Mac）。旧版仅名字的快照与 `networksetup` 回退路径仍按名字定位（只用于恢复，行为未改）。
+- 续记 2026-10-10（独立复核 MINOR 一轮修正）：位置过滤移入共享纯函数，`select` 收全部服务与当前 Location 成员 ID，XCTest 覆盖另一 Location 的同名服务（排在前面或被当作主服务时）都不会被选中；helper 行为不变，仍为 4.52.44，`CONTRACT.sha256` 同步。枚举 System Configuration 的那层（`SCNetworkServiceCopyAll` / `SCNetworkSetCopyServices`）不在 XCTest 内。
