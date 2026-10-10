@@ -1,6 +1,6 @@
 ## 2026-10-10 · macOS helper 受保护 DNS 按服务 ID 定位（R3-O5）
 - 归属：ops 任务（[运维计划](../ops/plan-2026-09-11.md)；backlog A12，[amp-backlog-2026-10-10](../ops/amp-backlog-2026-10-10.md)）；macOS 特权 helper 受保护 DNS。
-- 来源：`main` 4e373f06 → 分支 `amp/a12-dns-service-by-id`（457773ff）；未合 main。
+- 来源：`main` 4e373f06 → 分支 `amp/a12-dns-service-by-id`（457773ff），[#1473](https://github.com/raydocs/tono/pull/1473)；未合 main。
 - 缺陷修复：`/dns/enable` 只收到服务显示名，helper 从 `SCNetworkServiceCopyAll` 里取第一个同名服务；该列表包含所有 Network Location 的服务副本，多个 Location 都有「Wi-Fi」时可能把 127.0.0.1 写进未使用 Location 的副本，活动的 Wi-Fi 仍用局域网解析器。现在 helper 只在当前 Location（`SCNetworkSetCopyCurrent`）的服务里按名字找，IPv4/IPv6 `PrimaryService`（App 取名字的同一来源）优先；仍匹配两个以上且主服务不在其中时拒绝，在任何 DNS 读写之前失败（原有「无法识别服务」错误）。之后的读写、快照、恢复、清扫、状态都按记录的服务 ID，未改。
 - 新增/优化：无。IPC 请求不变（仍只有 `service`），无新特权命令，PF 规则不变。
 - 工程与测试：纯选择逻辑放在 `apps/macos/Tono/Core/ProtectedDNSServiceIdentity.swift`，App 与 helper 共用（加入 `build-core-helper.sh` 清单）；一个 XCTest `ProtectedDNSServiceSelectionTests.testDNSEnableTargetsTheServiceIDNotTheFirstSameNamedService`。helper 4.52.43 → 4.52.44，`CONTRACT.sha256` 同步。
