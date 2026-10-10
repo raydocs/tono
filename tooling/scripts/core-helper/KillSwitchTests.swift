@@ -1279,7 +1279,7 @@ extension KillSwitchManager {
             ]
             let ruleShapesHold = required.allSatisfy(rules.contains)
                 && !forbidden.contains(where: rules.contains)
-                && !rules.contains("to 1.1.1.1 port 443")
+                && !rules.contains("to 1.1.1.1 port 443 user { 0, 501 }")
                 && controlRules.contains(
                     "pass out quick inet proto tcp to 1.1.1.1 port 443 user { 0, 501 } "
                         + "keep state (if-bound) label \"tono-control\""
