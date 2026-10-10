@@ -221,9 +221,11 @@ export const tonoSignInStart = async () => {
       detail: { accountState: 'authenticating' },
     }),
   )
+  await privacyDelay('authDelay')
   return { challengeId: 'synthetic', expiresIn: 600, message: '' }
 }
 export const tonoSignInVerify = async () => {
+  await privacyDelay('authDelay')
   if (params.has('badCode'))
     throw new Error('TONO_AUTH_INVALID_CODE: Synthetic rejected code')
   const suspended = params.has('paused')
