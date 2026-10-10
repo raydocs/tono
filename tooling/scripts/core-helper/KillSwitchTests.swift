@@ -1198,7 +1198,6 @@ extension KillSwitchManager {
                 return gated.count == 8
                     && localNetworkOffRules == expectedOff.joined(separator: "\n") + "\n"
                     && localPasses == allowedLocalPasses
-                    && (pfSyntaxAccepts(localNetworkOffRules) ?? true)
             }()
             if !localNetworkOffKeepsOnlyMDNS {
                 FileHandle.standardError.write(Data(
@@ -1589,15 +1588,18 @@ extension KillSwitchManager {
             // The tunneled set holds every line of `rules` plus the bundle permit.
             let armedParse = pfSyntaxAccepts(tunneledRules)
             let bootstrapParse = pfSyntaxAccepts(cloudRules)
+            // The "Allow local network devices" off ruleset is parsed beside
+            // the on one (`cloudRules`), under the same skip rule.
+            let localNetworkOffParse = pfSyntaxAccepts(localNetworkOffRules)
             let pfParses: Bool
-            switch (armedParse, bootstrapParse) {
-            case (nil, _), (_, nil):
+            switch (armedParse, bootstrapParse, localNetworkOffParse) {
+            case (nil, _, _), (_, nil, _), (_, _, nil):
                 let warning = "warn: PF syntax check skipped (needs root); "
                     + "run `sudo tono-core-helper --self-test` to include it\n"
                 FileHandle.standardError.write(Data(warning.utf8))
                 pfParses = true
-            case let (armed?, bootstrap?):
-                pfParses = armed && bootstrap
+            case let (armed?, bootstrap?, localNetworkOff?):
+                pfParses = armed && bootstrap && localNetworkOff
             }
             // R609-F2: a command past its deadline is killed and fails. It
             // must never hold the helper's request thread, nor read as done.

@@ -1773,7 +1773,12 @@ extension AppState {
         // Never race a node switch or config reload: both arm PF with
         // transaction-specific endpoint unions this reassert would
         // clobber. The flag stays set and retries next cycle.
-        if KillSwitchService.needsSessionExceptionReassert,
+        // The same re-arm applies "Allow local network devices" (D7): it
+        // runs whenever the value the helper last confirmed differs from the
+        // setting or is unknown, and each arm records what it sent, so a
+        // toggle during an in-flight arm is caught on the next tick.
+        let localNetworkDevicesStale = KillSwitchService.localNetworkDevicesNeedReassert
+        if KillSwitchService.needsSessionExceptionReassert || localNetworkDevicesStale,
            self.switchingNodeId == nil,
            self.connectionCoordinator.configReloadTask == nil {
             LocalTrafficAudit.shared.recordEvent(
@@ -1782,6 +1787,7 @@ extension AppState {
                     "session_endpoints": String(
                         self.activeDirectPolicy?.sessionEndpoints.count ?? 0
                     ),
+                    "local_network_devices_stale": String(localNetworkDevicesStale),
                 ]
             )
             do {

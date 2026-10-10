@@ -98,6 +98,33 @@ func runRequestContractSelfTests() -> Bool {
     }
 }
 
+/// D7: `allowLocalNetworkDevices` accepts only a real JSON boolean, read from
+/// serialized bytes the way the request reader parses them. `1`, `0`, a
+/// string or null must be refused, never read as on or off.
+func runLocalNetworkDevicesFieldSelfTest() -> Bool {
+    func parsed(_ json: String) -> Bool? {
+        guard let object = try? JSONSerialization.jsonObject(
+            with: Data(json.utf8)
+        ) as? [String: Any] else { return nil }
+        return try? KillSwitchManager.allowLocalNetworkDevicesField(
+            object["allowLocalNetworkDevices"]
+        )
+    }
+    let passed = parsed(#"{"allowLocalNetworkDevices":true}"#) == true
+        && parsed(#"{"allowLocalNetworkDevices":false}"#) == false
+        && parsed("{}") == false
+        && parsed(#"{"allowLocalNetworkDevices":1}"#) == nil
+        && parsed(#"{"allowLocalNetworkDevices":0}"#) == nil
+        && parsed(#"{"allowLocalNetworkDevices":"true"}"#) == nil
+        && parsed(#"{"allowLocalNetworkDevices":null}"#) == nil
+    if !passed {
+        FileHandle.standardError.write(Data(
+            "self-test: allowLocalNetworkDevices accepted something other than a JSON boolean\n".utf8
+        ))
+    }
+    return passed
+}
+
 struct OwnedProcessIdentity {
     let pid: Int32
     let executablePath: String
@@ -2081,6 +2108,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && ProtectedDNSManager.runSelfTests()
             && TonoPeerAuthorizer.runSelfTests()
             && runRequestContractSelfTests()
+            && runLocalNetworkDevicesFieldSelfTest()
             && runHelperUpgradeAdmissionSelfTest()
             && runUpgradeSourceSelfTest()
             && runSilentUpgradeStagingSelfTest()

@@ -822,12 +822,8 @@ nonisolated struct HelperManager {
     /// that carries it, so off (the default) sends nothing; a helper that
     /// knows the field reads its absence as off. The helper renders the LAN
     /// passes only while a tunnel is up, so bootstrap arms are unaffected.
-    static func localNetworkDevicesArmFields(
-        defaults: UserDefaults = AppProfile.defaults
-    ) -> [String: Any] {
-        SettingsKey.allowsLocalNetworkDevices(defaults: defaults)
-            ? ["allowLocalNetworkDevices": true]
-            : [:]
+    static func localNetworkDevicesArmFields(_ enabled: Bool) -> [String: Any] {
+        enabled ? ["allowLocalNetworkDevices": true] : [:]
     }
 
     static func armKillSwitch(
@@ -841,11 +837,14 @@ nonisolated struct HelperManager {
         bootstrapPins: [String: [String]] = [:],
         // No default: an omitted value silently revokes the permit while the
         // rule engine still routes that bundle direct.
-        reviewedBundleDirect: Bool
+        reviewedBundleDirect: Bool,
+        // No default either: the caller records which value the helper
+        // committed (`KillSwitchService.appliedLocalNetworkDevices`).
+        allowLocalNetworkDevices: Bool
     ) throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool, flushedStates: Bool, killedHosts: Int) {
         var object: [String: Any] = [:]
         if reviewedBundleDirect { object["reviewedBundleDirect"] = true }
-        object.merge(localNetworkDevicesArmFields()) { _, setting in setting }
+        object.merge(localNetworkDevicesArmFields(allowLocalNetworkDevices)) { _, setting in setting }
         if let apiHosts { object["apiHosts"] = apiHosts }
         if let exitNodeHints { object["exitHints"] = exitNodeHints }
         if let tunnelInterfaces { object["tunnelInterfaces"] = tunnelInterfaces }

@@ -408,7 +408,7 @@ nonisolated enum HelperProtocolVersion {
     ///   primary service ID; an ambiguous name refuses (R3-O5). While a
     ///   legacy name-only snapshot is on disk, enable keeps the old lookup.
     /// - 4.52.44 → 4.52.45: the arm request gained optional
-    ///   `allowLocalNetworkDevices` (D7). Absent means off: while a tunnel is
+    ///   `allowLocalNetworkDevices` (D7, JSON boolean only). Absent means off: while a tunnel is
     ///   up the anchor renders no `tono-lan`, `tono-linklocal`,
     ///   `tono-multicast` or `tono-ssdp` pass. True renders the 4.52.44 rules.
     ///   The app sends the field only when the setting is on, so an older

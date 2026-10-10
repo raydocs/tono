@@ -166,6 +166,20 @@ final class KillSwitchManager {
         try restoreAtLaunch()
     }
 
+    /// The arm request's `allowLocalNetworkDevices` (D7). Omission means off
+    /// (an app before the field never sends it). Anything but a real JSON
+    /// boolean is refused, because the flag widens the permit:
+    /// JSONSerialization returns numbers and booleans as NSNumber, and `as
+    /// Bool` would bridge `1` and `0` too, so the CFBoolean type is required.
+    static func allowLocalNetworkDevicesField(_ value: Any?) throws -> Bool {
+        guard let value else { return false }
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) == CFBooleanGetTypeID() else {
+            throw HelperFailure.invalid("allowLocalNetworkDevices must be a boolean.")
+        }
+        return number.boolValue
+    }
+
     /// Whether the idle loop should release a leftover kill switch. The Core
     /// has already been observed down for `consecutiveCoreDownChecks` periods.
     static func watchdogShouldRestoreNetwork(consecutiveCoreDownChecks: Int) -> Bool {
@@ -232,18 +246,9 @@ final class KillSwitchManager {
         default:
             throw HelperFailure.invalid("reviewedBundleDirect must be a boolean.")
         }
-        // Same contract as `reviewedBundleDirect`: omission means off (an older
-        // app never sends it), and a non-boolean is refused because the flag
-        // widens the permit.
-        let allowLocalNetworkDevices: Bool
-        switch object["allowLocalNetworkDevices"] {
-        case nil:
-            allowLocalNetworkDevices = false
-        case let flag as Bool:
-            allowLocalNetworkDevices = flag
-        default:
-            throw HelperFailure.invalid("allowLocalNetworkDevices must be a boolean.")
-        }
+        let allowLocalNetworkDevices = try Self.allowLocalNetworkDevicesField(
+            object["allowLocalNetworkDevices"]
+        )
         var availablePins = previous?.pinnedHosts ?? [:]
         for (host, addresses) in bootstrapPins {
             // Bundle pins seed recovery but must not replace addresses learned

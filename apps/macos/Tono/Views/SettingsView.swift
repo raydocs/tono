@@ -160,18 +160,16 @@ struct SettingsView: View {
         }
     }
 
-    /// A connected session re-arms on its next health check (about five
-    /// seconds) through the path a helper heal uses, so the PF passes follow
-    /// the switch without a reconnect. Disconnected, the next connect reads it.
+    /// Only stores the choice. A connected session's health check (about
+    /// every five seconds) compares it with the value the helper last
+    /// committed and re-arms while they differ, so the PF passes follow the
+    /// switch without a reconnect. Disconnected, the next connect reads it.
     private func setAllowLocalNetworkDevices(_ enabled: Bool) {
         allowLocalNetworkDevices = enabled
         LocalTrafficAudit.shared.recordEvent(
             "local_network_devices_setting",
             details: ["enabled": String(enabled)]
         )
-        if appState.isConnected, KillSwitchService.isArmed {
-            KillSwitchService.needsSessionExceptionReassert = true
-        }
     }
 
     private var auditLogRow: some View {

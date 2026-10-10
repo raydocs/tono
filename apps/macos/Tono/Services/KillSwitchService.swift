@@ -93,6 +93,12 @@ nonisolated enum KillSwitchService {
         }
         do {
             let bootstrapPins = configuredBootstrapPins(for: apiHosts)
+            // D7: read the setting once per arm and record what the helper
+            // committed. Any outcome but a confirmed commit leaves it unknown,
+            // which the health loop treats as a mismatch and re-arms.
+            let allowLocalNetworkDevices = localNetworkDevicesSetting()
+            var committedLocalNetworkDevices: Bool?
+            defer { appliedLocalNetworkDevices = committedLocalNetworkDevices }
             // A superseded arm is retried once, here rather than in the caller.
             //
             // The daemon refuses an arm whose state generation moved while it was
@@ -116,7 +122,8 @@ nonisolated enum KillSwitchService {
                 sessionDirectEndpoints: sessionDirectEndpoints,
                 tailscaleBootstrapEnabled: tailscaleBootstrapEnabled,
                 allowSystemResolution: allowSystemResolution,
-                reviewedBundleDirect: reviewedBundleDirect
+                reviewedBundleDirect: reviewedBundleDirect,
+                allowLocalNetworkDevices: allowLocalNetworkDevices
             )
             guard status.armed, status.wanted, status.live else {
                 // The helper answered, so the outcome is known: a reply that
@@ -152,6 +159,7 @@ nonisolated enum KillSwitchService {
                     ]
                 )
             }
+            committedLocalNetworkDevices = allowLocalNetworkDevices
             isArmed = true
         } catch HelperIPCError.forbidden {
             throw Error.helperRejected
@@ -202,7 +210,8 @@ nonisolated enum KillSwitchService {
         sessionDirectEndpoints: [ConfigPipeline.DirectEndpoint]?,
         tailscaleBootstrapEnabled: Bool?,
         allowSystemResolution: Bool,
-        reviewedBundleDirect: Bool
+        reviewedBundleDirect: Bool,
+        allowLocalNetworkDevices: Bool
     ) throws -> (
         armed: Bool, wanted: Bool, live: Bool,
         healed: Bool, flushedStates: Bool, killedHosts: Int
@@ -221,7 +230,8 @@ nonisolated enum KillSwitchService {
                     tailscaleBootstrapEnabled: tailscaleBootstrapEnabled,
                     allowSystemResolution: allowSystemResolution,
                     bootstrapPins: bootstrapPins,
-                    reviewedBundleDirect: reviewedBundleDirect
+                    reviewedBundleDirect: reviewedBundleDirect,
+                    allowLocalNetworkDevices: allowLocalNetworkDevices
                 )
             }
         }
@@ -367,7 +377,38 @@ nonisolated enum KillSwitchService {
     nonisolated(unsafe) private static var reassertNeeded = false
     static var needsSessionExceptionReassert: Bool {
         get { reassertLock.withLock { reassertNeeded } }
-        set { reassertLock.withLock { reassertNeeded = newValue } }
+        set {
+            reassertLock.withLock { reassertNeeded = newValue }
+            // A heal or release rendered PF from disk, where the local network
+            // setting is always off: what the helper holds is no longer known.
+            if newValue { appliedLocalNetworkDevices = nil }
+        }
+    }
+
+    /// D7 (A29): the "Allow local network devices" value carried by the last
+    /// arm the helper confirmed, or nil when unknown (no confirmed arm yet, an
+    /// arm that failed or whose outcome is unknown, a heal or release). The
+    /// health loop re-arms while this differs from the setting, so a toggle
+    /// that lands while an earlier arm is in flight is applied by the next
+    /// tick instead of being lost. Arms are serialized by
+    /// `PrivilegedRuntimeCoordinator`, so the last confirmed value is the one
+    /// the helper holds. Lock-guarded like the reassert flag.
+    private static let localNetworkLock = NSLock()
+    nonisolated(unsafe) private static var appliedLocalNetwork: Bool?
+    static var appliedLocalNetworkDevices: Bool? {
+        get { localNetworkLock.withLock { appliedLocalNetwork } }
+        set { localNetworkLock.withLock { appliedLocalNetwork = newValue } }
+    }
+
+    /// The setting as each arm reads it. Replaced by tests.
+    nonisolated(unsafe) static var localNetworkDevicesSetting: () -> Bool = {
+        SettingsKey.allowsLocalNetworkDevices()
+    }
+
+    /// Whether a fail-closed session must re-arm because the helper does not
+    /// hold the current setting (or it is unknown).
+    static var localNetworkDevicesNeedReassert: Bool {
+        isArmed && appliedLocalNetworkDevices != localNetworkDevicesSetting()
     }
 
     /// Observes effective helper-owned protection without mutating local intent.
