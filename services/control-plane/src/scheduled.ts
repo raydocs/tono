@@ -1,8 +1,8 @@
 // The five-minute cron (`scheduled` in index.ts): user enforcement, stale
 // pending expiry, the revocation outbox, housekeeping retention, the ops cron
-// and the API relay probe. Revocation helpers shared with request handlers stay
-// in index.ts and arrive through `ScheduledDeps`, so this module never imports
-// index.ts back.
+// and the API relay probe. Revocation helpers shared with request handlers live
+// in devices.ts / tailscale.ts and arrive from index.ts through `ScheduledDeps`,
+// so this module never imports index.ts back.
 
 import { type Env, type Row, now, id, envInt, tailscaleEnrollmentEnabled } from './env';
 import { retainOperationsTimeseries } from './ops-timeseries';

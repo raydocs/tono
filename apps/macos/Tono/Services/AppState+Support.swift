@@ -70,9 +70,11 @@ extension AppState {
             retryAttempt: snapshot.reconnectAttempt,
             totalElapsedMs: steps.isEmpty ? nil : min(steps.reduce(0) { $0 + ($1.elapsedMs ?? 0) }, 86_400_000),
             steps: steps,
-            // H21-O-F7: a class token only, never an interface name.
-            virtualAdapters: OtherVPNDetection.isPresent(OtherVPNDetection.currentInterfaces())
-                ? [OtherVPNDetection.diagnosticsClass] : [],
+            // H21-O-F7: a class token only, never an interface name. H21-O-F8:
+            // likewise interception, never a host name or certificate content.
+            virtualAdapters: (OtherVPNDetection.isPresent(OtherVPNDetection.currentInterfaces())
+                ? [OtherVPNDetection.diagnosticsClass] : [])
+                + (NetworkInterception.wasObserved ? [NetworkInterception.diagnosticsClass] : []),
             auditLogPath: "", serviceLogPath: ""
         )
         let findings: [LocalHealthCheck.Finding] = [

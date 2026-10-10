@@ -83,4 +83,23 @@ export const nodesBoardCopy = {
     reported: (ago: string) => `上报于 ${ago}`,
     loadFailed: 'API 中继状态没拿到',
   },
+  /** Which control-plane path each client ASN came in on over the last week (decision 080). */
+  apiPaths: {
+    title: '客户网络 × 控制面路径 · 7 天',
+    lead: '登录、刷新、拉目录时客户端报的路径（同一设备同一路径每小时最多记一次）。成功率只算会上报先失败路径的新版本；旧版本只计到达，成功率记无数据。经中继、隧道或出口节点进来的请求看不到客户自己的网络，记作未知。',
+    columns: { asn: '客户 ASN', path: '路径', arrived: '到达', failed: '先失败', rate: '成功率' },
+    unknownAsn: '未知（经节点）',
+    asn: (asn: number) => `AS${asn}`,
+    noReports: '无数据',
+    empty: '最近 7 天没有记录。客户端发 X-Tono-Path 后才会有行。',
+    loadFailed: '路径统计没拿到',
+    paths: {
+      pinned: '固定 IP',
+      system_dns: '系统 DNS',
+      relay: 'API 中继',
+      doh: 'DoH',
+      alt_port: '备用端口',
+      tunnel: '隧道',
+    },
+  },
 } as const;

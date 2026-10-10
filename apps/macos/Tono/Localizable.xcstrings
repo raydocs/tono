@@ -833,6 +833,16 @@
         }
       }
     },
+    "This network is intercepting encrypted connections: something between this Mac and Tono replaced Tono's certificate, and Tono will not accept it. If this network has a sign-in page, finish it in a browser; otherwise turn off any proxy or security software that inspects HTTPS, then retry.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "网络在拦截加密连接：这台 Mac 与 Tono 之间有设备或软件替换了 Tono 的证书，Tono 不会接受。如果这个网络有网页登录，请先在浏览器里完成；否则请关闭检查 HTTPS 的代理或安全软件，然后重试。"
+          }
+        }
+      }
+    },
     "This starts a connection only after confirmation. It never switches an already connected exit.": {
       "localizations": {
         "zh-Hans": {

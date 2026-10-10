@@ -1,6 +1,7 @@
 import type {
   ActivityHourDto,
   AdoptionMatrixDto,
+  ApiPathsDto,
   ApiRelaysDto,
   ConnectionEventDto,
   CustomerDetailDto,
@@ -219,6 +220,8 @@ export const opsApi = {
   live: async (signal?: AbortSignal) => (await getJson<{ live: LiveDto }>('live', signal)).live,
   /** The Tono-owned API relays and the cron's last TCP check of each. */
   apiRelays: (signal?: AbortSignal) => getJson<ApiRelaysDto>('api-relays', signal),
+  /** Last week's control-plane arrivals per client ASN and path, with reported success rates. */
+  apiPaths: (signal?: AbortSignal) => getJson<ApiPathsDto>('api-paths', signal),
 
   customers: (signal?: AbortSignal) => getAllJson<CustomerSummaryDto>('customers', signal),
   /**

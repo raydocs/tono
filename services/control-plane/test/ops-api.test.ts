@@ -1389,6 +1389,7 @@ describe('ops v1 api', () => {
       'GET /api/v1/ops/fx',
       'GET /api/v1/ops/slo',
       'GET /api/v1/ops/api-relays',
+      'GET /api/v1/ops/api-paths',
     ];
     expect([...OPS_V1_ROUTES].sort()).toEqual([...tested].sort());
   });

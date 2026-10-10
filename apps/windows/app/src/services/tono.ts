@@ -143,6 +143,11 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   // #588: a certificate the PC's clock cannot date. First, so it wins wherever the
   // transport marked it inside another surface's error (sign-in, diagnostics, catalog).
   { prefix: 'TONO_CLOCK_SKEW', key: 'tono.login.errors.clockSkew' },
+  // H21-O-F8: the OS reports a captive portal, or the trust store refused the control
+  // plane's certificate for its issuer, signature or name. Ahead of the surface's own
+  // prefix for the same reason as the clock.
+  { prefix: 'TONO_CAPTIVE_PORTAL', key: 'tono.login.errors.captivePortal' },
+  { prefix: 'TONO_TLS_INTERCEPTED', key: 'tono.login.errors.tlsIntercepted' },
   // Sign-in could not reach the control plane. Both transport paths carry the same
   // hostname and TLS SNI, so when both fail the failure is about reaching the server at
   // all — not the account, the code, or the app. Without this entry the raw Rust error
@@ -152,7 +157,7 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   { prefix: 'TONO_AUTH_TLS', key: 'tono.login.errors.unreachable' },
   { prefix: 'TONO_AUTH_QUIC', key: 'tono.login.errors.unreachable' },
   { prefix: 'TONO_AUTH_TIMEOUT', key: 'tono.login.errors.unreachable' },
-  { prefix: 'TONO_AUTH_CAPTIVE', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_CAPTIVE', key: 'tono.login.errors.captivePortal' },
   { prefix: 'TONO_AUTH_LOCAL_CONFLICT', key: 'tono.login.errors.unreachable' },
   { prefix: 'TONO_AUTH_API', key: 'tono.login.errors.serverError' },
   { prefix: 'TONO_AUTH_FORBIDDEN', key: 'tono.login.errors.serverError' },
@@ -163,7 +168,7 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   { prefix: 'TONO_CONNECT_QUIC', key: 'tono.dashboard.errors.nodeUnreachable' },
   { prefix: 'TONO_CONNECT_TIMEOUT', key: 'tono.dashboard.errors.nodeUnreachable' },
   { prefix: 'TONO_CONNECT_TUN', key: 'tono.dashboard.errors.tunDataPlaneBroken' },
-  { prefix: 'TONO_CONNECT_CAPTIVE', key: 'tono.dashboard.errors.nodeUnreachable' },
+  { prefix: 'TONO_CONNECT_CAPTIVE', key: 'tono.login.errors.captivePortal' },
   { prefix: 'TONO_CONNECT_LOCAL_CONFLICT', key: 'tono.dashboard.errors.tunIngressBroken' },
   { prefix: 'TONO_AUTH_UNREACHABLE', key: 'tono.login.errors.unreachable' },
   { prefix: 'TONO_AUTH_RATE_LIMITED', key: 'tono.login.errors.rateLimited' },
@@ -397,6 +402,7 @@ const showsSupportCode = (code: string): boolean =>
   code.startsWith('TONO_AUTH_') ||
   code.startsWith('TONO_CONNECT_') ||
   code === 'TONO_CLOCK_SKEW' ||
+  code === 'TONO_TLS_INTERCEPTED' ||
   code === 'TONO_SIGN_IN_NOT_SAVED' ||
   code === 'TONO_NODE_OR_CORE_UNREACHABLE' ||
   code.startsWith('CORE_')

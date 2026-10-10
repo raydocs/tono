@@ -1,4 +1,5 @@
 import XCTest
+import Network
 import Security
 @testable import Tono
 
@@ -222,6 +223,122 @@ final class AccountSessionRequestTests: XCTestCase {
         AppProfile.defaults.removeObject(forKey: TonoAPIClient.preferredPathKey(forHost: host))
     }
 
+    /// Decision 080: an attempt names the paths its request already lost, so
+    /// the control plane can count failures per path; a request that lost
+    /// none sends the header empty, which marks this client as reporting. The
+    /// first-try request crosses a real URLSession to a loopback listener, so
+    /// the empty header is proven on the wire, not only on the URLRequest.
+    func testEachAttemptNamesThePathsItsRequestAlreadyLost() async throws {
+        let key = TonoAPIClient.preferredPathKey(forHost: "localhost")
+        AppProfile.defaults.removeObject(forKey: key)
+        defer { AppProfile.defaults.removeObject(forKey: key) }
+        let heads = PathHeaderLog()
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        let listener = try NWListener(using: parameters)
+        let queue = DispatchQueue(label: "net.tono.tests.path-failed")
+        let ready = expectation(description: "loopback control plane is ready")
+        listener.stateUpdateHandler = { state in
+            if case .ready = state { ready.fulfill() }
+        }
+        listener.newConnectionHandler = { connection in
+            connection.start(queue: queue)
+            Self.answerSignInStart(on: connection, log: heads)
+        }
+        defer {
+            listener.stateUpdateHandler = nil
+            listener.newConnectionHandler = nil
+            listener.cancel()
+        }
+        listener.start(queue: queue)
+        await fulfillment(of: [ready], timeout: 3)
+        let port = try XCTUnwrap(listener.port)
+        let transport = URLSession(configuration: .ephemeral)
+        defer { transport.invalidateAndCancel() }
+        let pinnedHeaders = PathHeaderLog()
+        func client(port: UInt16) -> TonoAPIClient {
+            TonoAPIClient(
+                // The unqualified localhost name permits this HTTP-only
+                // loopback fixture (DEBUG only), as in NativeUpdateDownloadTests.
+                baseURL: URL(string: "http://localhost:\(port)")!,
+                keychain: testKeychain("localhost-080-\(port)"), session: transport,
+                offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+                pinnedPath: ControlPlanePath(label: "pinned") { request, _ in
+                    pinnedHeaders.record(
+                        "\(request.value(forHTTPHeaderField: TonoAPIClient.pathHeader) ?? "-") "
+                            + "lost=\(request.value(forHTTPHeaderField: TonoAPIClient.pathFailedHeader) ?? "absent")"
+                    )
+                    return ControlPlaneAnswer(
+                        status: 202,
+                        body: Data(#"{"challengeId":"c-080b","expiresIn":600,"message":"sent"}"#.utf8),
+                        bodyFailure: nil
+                    )
+                }
+            )
+        }
+        let start = TonoEmailStartRequest(
+            email: "lost-paths@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+        )
+
+        // The system resolver answers the first try: nothing was lost.
+        let answered = try await client(port: port.rawValue).startEmailSignIn(start).challengeId
+        // Nothing listens on loopback port 1: the system resolver is refused
+        // before any byte is sent, and the pinned addresses carry the request.
+        let fellBack = try await client(port: 1).startEmailSignIn(start).challengeId
+
+        XCTAssertEqual([answered, fellBack], ["c-080a", "c-080b"])
+        XCTAssertEqual(
+            heads.entries, ["system_dns lost="],
+            "a first-try success sends the header, present and empty, on the wire"
+        )
+        XCTAssertEqual(
+            pinnedHeaders.entries, ["pinned lost=system_dns"],
+            "the request that lost the system resolver names it"
+        )
+    }
+
+    /// Reads one request to the end of its body and records its
+    /// `X-Tono-Path` and `X-Tono-Path-Failed` values as the wire carried
+    /// them, then answers a sign-in start.
+    private nonisolated static func answerSignInStart(
+        on connection: NWConnection, log: PathHeaderLog, received: Data = Data()
+    ) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 4_096) { data, _, complete, error in
+            guard error == nil, let data, !data.isEmpty, received.count + data.count <= 16_384 else {
+                connection.cancel()
+                return
+            }
+            var request = received
+            request.append(data)
+            guard let end = request.range(of: Data("\r\n\r\n".utf8)) else {
+                if complete { connection.cancel() } else { answerSignInStart(on: connection, log: log, received: request) }
+                return
+            }
+            let lines = String(decoding: request[..<end.lowerBound], as: UTF8.self)
+                .components(separatedBy: "\r\n")
+            func header(_ name: String) -> String? {
+                for line in lines {
+                    guard let colon = line.firstIndex(of: ":"),
+                          line[..<colon].lowercased() == name else { continue }
+                    return line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                }
+                return nil
+            }
+            let length = header("content-length").flatMap(Int.init) ?? 0
+            guard request.count - end.upperBound >= length else {
+                if complete { connection.cancel() } else { answerSignInStart(on: connection, log: log, received: request) }
+                return
+            }
+            log.record("\(header("x-tono-path") ?? "-") lost=\(header("x-tono-path-failed") ?? "absent")")
+            let body = #"{"challengeId":"c-080a","expiresIn":600,"message":"sent"}"#
+            let response = "HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\n"
+                + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+            connection.send(content: Data(response.utf8), isComplete: true, completion: .contentProcessed { _ in
+                connection.cancel()
+            })
+        }
+    }
+
     /// Decision 077: the path that answered is remembered in the app profile,
     /// so a new client for the same host (the next launch) tries it first and
     /// does not pay the dead paths again before its first request.
@@ -263,6 +380,66 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(challengeId, "c-077b")
         XCTAssertEqual(systemRequests.count, 0, "the remembered relay goes first; the system resolver is not tried")
         XCTAssertEqual(pinnedAttempts.count, 0)
+    }
+
+    /// Backlog A4 (D14-A): a pre-login probe that completed a handshake only
+    /// over the relay is kept, so the next launch's first sign-in goes to the
+    /// relay; a probe result more than a day old is ignored and the system
+    /// resolver goes first again.
+    func testAPreLoginProbeThatReachedOnlyTheRelaySendsTheFirstSignInThereUntilItIsADayOld() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        let key = TonoAPIClient.preferredPathKey(forHost: host)
+        AppProfile.defaults.removeObject(forKey: key)
+        defer { AppProfile.defaults.removeObject(forKey: key) }
+        let systemRequests = PathCallCounter()
+        HeldAccountProtocol.install(host) { request in
+            systemRequests.record()
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        let relayAttempts = PathCallCounter()
+        // One launch: a client over the same host and the same paths.
+        func launch() -> TonoAPIClient {
+            var pinned = ControlPlanePath(label: "pinned") { _, _ in throw URLError(.cannotConnectToHost) }
+            pinned.handshake = { false }
+            var relay = ControlPlanePath(label: "relay") { _, _ in
+                relayAttempts.record()
+                return ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-a4","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
+            }
+            relay.handshake = { true }
+            return TonoAPIClient(
+                baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+                offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+                pinnedPath: pinned, relayPath: relay, systemHandshake: { false }
+            )
+        }
+        let request = TonoEmailStartRequest(
+            email: "probe@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+        )
+
+        // Sign-in screen of the first launch: the probe alone, no request.
+        await launch().probePathsBeforeSignIn()
+        XCTAssertEqual(systemRequests.count + relayAttempts.count, 0, "the probe sends no request")
+
+        // The next launch's first sign-in goes to the relay.
+        _ = try await launch().startEmailSignIn(request)
+        XCTAssertEqual(systemRequests.count, 0, "the probed relay goes first; the dead system resolver is not paid")
+        XCTAssertEqual(relayAttempts.count, 1)
+
+        // A day-old probe result is ignored: the system resolver goes first.
+        AppProfile.defaults.set(
+            ["label": "relay", "at": Date().timeIntervalSince1970 - 25 * 60 * 60], forKey: key
+        )
+        _ = try await launch().startEmailSignIn(request)
+        XCTAssertEqual(systemRequests.count, 1, "an expired probe result does not reorder the paths")
+        XCTAssertEqual(relayAttempts.count, 2, "the usual walk still reaches the relay")
     }
 
     /// Decision 077: when no path answers, the transport failure names every
@@ -339,6 +516,41 @@ final class AccountSessionRequestTests: XCTestCase {
             message?.contains("date and time") == true,
             "a certificate date failure must name the clock, got: \(message ?? "no error")"
         )
+    }
+
+    /// H21-O-F8: a server certificate the trust store refused (a TLS-intercepting
+    /// middlebox or a portal answering for Tono's host) names the interception
+    /// and reaches the support report as its class token; a date failure stays
+    /// the clock's.
+    func testACertificateTheTrustStoreRefusedNamesTheInterceptingNetwork() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        HeldAccountProtocol.install(host) { request in
+            request.client?.urlProtocol(request, didFailWithError: URLError(.serverCertificateUntrusted))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory)
+        )
+        NetworkInterception.record(intercepted: false)
+
+        var thrown: (any Error)?
+        do {
+            _ = try await api.startEmailSignIn(TonoEmailStartRequest(
+                email: "intercepted@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+            ))
+        } catch {
+            thrown = error
+        }
+
+        XCTAssertEqual(thrown as? TonoAPIClient.APIError, .tlsIntercepted, "got: \(String(describing: thrown))")
+        XCTAssertEqual((thrown as? LocalizedError)?.errorDescription, NetworkInterception.userMessage)
+        XCTAssertTrue(NetworkInterception.wasObserved)
+        XCTAssertFalse(NetworkInterception.isTrustFailure(URLError(.serverCertificateHasBadDate)))
+        NetworkInterception.record(intercepted: false)
     }
 
     func testLateAuthMethodsFailureDoesNotReplaceAuthenticatedState() async throws {
@@ -2283,6 +2495,20 @@ final class AccountSessionRequestTests: XCTestCase {
 }
 
 /// How often one control-plane path was entered (#584).
+/// What a control-plane path saw, in order.
+nonisolated private final class PathHeaderLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [String] = []
+    func record(_ entry: String) {
+        lock.lock(); defer { lock.unlock() }
+        recorded.append(entry)
+    }
+    var entries: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return recorded
+    }
+}
+
 nonisolated private final class PathCallCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var value = 0

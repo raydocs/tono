@@ -30,14 +30,39 @@ installed as `/etc/nginx/tono-relay.stream.conf` and included from the `stream {
 [`tooling/ops/relay/apply-relay.sh`](../../tooling/ops/relay/apply-relay.sh):
 
 ```sh
-scp tooling/ops/relay/tono-relay.stream.conf tooling/ops/relay/apply-relay.sh root@<node>:/root/
-ssh root@<node> bash /root/apply-relay.sh
+scp tooling/ops/relay/tono-relay.stream.conf tooling/ops/relay/tono-relay.logrotate tooling/ops/relay/apply-relay.sh root@<node>:/root/
+ssh root@<node> bash /root/apply-relay.sh                    # nginx + log rotation
+ssh root@<node> bash /root/apply-relay.sh --logrotate-only   # log rotation only, nginx untouched
 ```
 
 The script backs up `nginx.conf` to `nginx.conf.bak-<UTC>-pre-tono-relay-v2`, installs
 `libnginx-mod-stream` if missing, reloads only when `nginx -t` passes, otherwise restores
-the backup. Log: `/var/log/nginx/tono-relay.log` (only sessions that named an admitted SNI;
-default nginx logrotate, daily, 14 kept). Errors: `/var/log/nginx/tono-relay-error.log`.
+the backup. Log: `/var/log/nginx/tono-relay.log` (only sessions that named an admitted SNI).
+Errors: `/var/log/nginx/tono-relay-error.log`.
+
+### Log rotation
+
+Canonical file: [`tooling/ops/relay/tono-relay.logrotate`](../../tooling/ops/relay/tono-relay.logrotate),
+installed as `/etc/logrotate.d/00-tono-relay` (mode 0644): both relay logs daily, 14 kept,
+`dateext` (`tono-relay.log-YYYYMMDD`), `compress` + `delaycompress`, `missingok`, `notifempty`,
+then `invoke-rc.d nginx rotate` (USR1, nginx reopens its logs), as the distro nginx package does.
+
+The distro's `/etc/logrotate.d/nginx` (Debian/Ubuntu `nginx-common`: `/var/log/nginx/*.log`, daily,
+14 kept, no `dateext`) also matches both files, and logrotate fails the run with `duplicate log
+entry` when two stanzas claim one file. logrotate reads `/etc/logrotate.d` in name order, so the
+`00-` prefix puts the Tono stanza first and its `ignoreduplicates` makes the later distro glob skip
+the two relay files; every other nginx log stays with the distro stanza, whose conffile is not
+edited. `ignoreduplicates` needs logrotate 3.21+ (Debian 12/13, Ubuntu 24.04). On older logrotate
+(Ubuntu 22.04: 3.19) the script skips the install and says so; the distro stanza then still
+rotates the relay logs daily with 14 kept, only without `dateext`. After installing, the script
+runs `logrotate -d /etc/logrotate.conf` and removes its file again if that reports an error for it
+or a duplicate entry.
+
+Check on the node: `logrotate -d /etc/logrotate.conf 2>&1 | grep -E 'tono-relay|duplicate'` (the
+distro glob line shows `ignore duplicate log entry`), and after a day `ls /var/log/nginx/tono-relay.log-*`.
+Numbered files the distro stanza rotated before the install (`tono-relay.log.1`, `.2.gz`, ...)
+do not match the `dateext` pattern and are not pruned; delete them once by hand.
+Undo: `rm /etc/logrotate.d/00-tono-relay` (the distro stanza takes the files back).
 
 ## Verify
 
@@ -106,6 +131,11 @@ carries `X-Tono-Path: <pinned|system_dns|relay|doh|alt_port|tunnel>`, which the 
 records on the device row, because a relayed request otherwise looks like one from an exit
 node. The relay is **not** in the WFP/PF bootstrap permit: while protection is armed it is
 blocked like any other non-permitted address.
+
+Updater: Windows (`commands/update.rs` `get_with_relays`) sends a discovery, signature or
+package GET through the relays when the direct GET got no response. macOS
+(`NativeUpdateDownload.bounded`) does the same for the manifest and signature GETs only; the
+package download stays direct (backlog A2).
 
 ## Rollback
 

@@ -93,7 +93,7 @@ branch does not start the same jobs a second time. In short:
 |---|---|
 | `apps/macos/**`, `tooling/scripts/**` | `macos-ci.yml` |
 | `apps/windows/**` (and the update-contract fixtures it lists) | `windows-ci.yml` |
-| `services/**`, `ops-panel/**` (and the tooling scripts it lists) | `services-ci.yml` |
+| `services/**`, `ops-panel/**` (and the tooling scripts and `screenshots-nightly.yml` it lists) | `services-ci.yml` |
 | `tooling/scripts/sing-box/**`, `tooling/scripts/build-sing-box.sh` | `sing-box-alpha9-check.yml` |
 | `tooling/perf/connect-bench/**` (and the dial files it lists) | `connect-bench.yml` |
 
@@ -107,6 +107,29 @@ not an automatic dual-vendor review for every uncovered path. Changes to routing
 credentials/permissions or release trust still require independent review before merge/deploy.
 Dispatching a promote workflow to "get a check"
 publishes; never do it for that.
+
+**Screenshot tests are not in the PR gate** (owner decision D9-A, 2026-10-10).
+`screenshots-nightly.yml` runs them on `main` every night (and by
+`workflow_dispatch`): the four whole-window `MacSeaPolishRenderTests` captures
+plus their Chinese pass, which `macos-ci.yml` skips, and the ops-console
+Playwright pixel comparisons, which `services-ci.yml` ignores
+(`--ignore-snapshots`), against the macOS baselines on `macos-26`. Windows CI has
+no screenshot test. A failed nightly is red and opens or comments on the issue
+"Screenshots nightly is failing". `MacUsabilityRenderTests` stay in the PR gate
+(they assert labels, identifiers and opacity), and `macos-release.yml` still runs
+the whole XCTest target. `tooling/scripts/tests/screenshot-nightly-split.test.mjs`
+keeps the skip and nightly lists equal.
+
+**Build caches.** The three Cargo jobs in `windows-ci.yml` restore a cache keyed
+on the runner's `rustc -vV`, the lockfiles and the pinned toolchain file, and
+write `Cargo cache (<job>): hit|miss` to the job summary and as a notice. Only
+a push to `main` saves an entry, so pull requests and the merge queue read
+main's cache and never write one; the first PR after a lockfile or runner Rust
+change compiles cold. macOS CI has no Swift build cache and its summary says
+so: the Xcode project has no SwiftPM dependencies, Xcode's incremental build
+compares timestamps that a fresh checkout resets, the build job's Release
+product can feed the paired unsigned candidate, and the privileged helper is
+always compiled from source.
 
 ## Public repository and privileged boundaries
 

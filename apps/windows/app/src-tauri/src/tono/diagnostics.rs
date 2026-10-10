@@ -224,13 +224,21 @@ pub fn classify_virtual_adapters(names: &[String]) -> Vec<String> {
     classes
 }
 
-/// [`classify_virtual_adapters`] plus the `otherVpn` class when another VPN is up.
-fn report_adapter_classes(names: &[String], other_vpn_present: bool) -> Vec<String> {
+/// [`classify_virtual_adapters`] plus the `otherVpn` class when another VPN is up, and the
+/// `captivePortal` / `tlsIntercepted` class the last control-plane exchange named (H21-O-F8).
+fn report_adapter_classes(
+    names: &[String],
+    other_vpn_present: bool,
+    network_interference: Option<tono_core::network_interference::NetworkInterference>,
+) -> Vec<String> {
     let mut classes = classify_virtual_adapters(names);
     if other_vpn_present {
         classes.push(tono_core::other_vpn::DIAGNOSTICS_CLASS.to_string());
-        classes.sort_unstable();
     }
+    if let Some(interference) = network_interference {
+        classes.push(interference.diagnostics_class().to_string());
+    }
+    classes.sort_unstable();
     classes
 }
 
@@ -273,6 +281,10 @@ pub struct DiagnosticsSources<'a> {
     /// H21-O-F7: an up VPN/TUN adapter Tono does not own ([`tono_core::other_vpn`]). Reported
     /// as the `otherVpn` class token only.
     pub other_vpn_present: bool,
+    /// H21-O-F8: a captive portal or a refused (intercepted) certificate the last control-plane
+    /// exchange named ([`crate::tono::network_interference`]). Reported as its class token
+    /// only: no URL, portal host name or certificate content.
+    pub network_interference: Option<tono_core::network_interference::NetworkInterference>,
     /// Live secret values the app is currently holding — the per-start
     /// controller secret, every catalog node's UUID / Reality public key /
     /// Reality short id / address, and the refresh token. They are removed
@@ -353,7 +365,11 @@ pub fn build_report(sources: &DiagnosticsSources<'_>) -> DiagnosticsReport {
         retry_attempt: sources.retry_attempt,
         total_elapsed_ms,
         steps,
-        virtual_adapters: report_adapter_classes(sources.adapter_names, sources.other_vpn_present),
+        virtual_adapters: report_adapter_classes(
+            sources.adapter_names,
+            sources.other_vpn_present,
+            sources.network_interference,
+        ),
         audit_log_path: scrub_home(sources.audit_log_path, sources.home_dir),
         service_log_path: scrub_home(sources.service_log_path, sources.home_dir),
     }
@@ -526,6 +542,7 @@ mod tests {
                 steps: &self.steps,
                 adapter_names: &self.adapters,
                 other_vpn_present: false,
+                network_interference: None,
                 known_secrets: &self.known,
                 audit_log_path: Path::new(r"C:\Users\Jane Doe\AppData\Roaming\io.tono\tono\logs\traffic-audit.jsonl"),
                 service_log_path: Path::new(r"C:\ProgramData\Tono\logs\tono-service.log"),

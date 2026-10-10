@@ -59,6 +59,10 @@ const SHARED_ADMIN: readonly Entry[] = [
   ['POST', at('node-profiles'), 'nodes.write'],
   ['PUT', at('node-profiles/{id}'), 'nodes.write'],
   ['GET', at('audit'), 'audit.read'],
+  ['GET', at('hy2-auto-switch'), 'settings.read'],
+  ['PUT', at('hy2-auto-switch'), 'settings.publish'],
+  ['GET', at('users/{id}/hy2-auto-switch'), 'customers.read'],
+  ['PUT', at('users/{id}/hy2-auto-switch'), 'customers.write'],
 ];
 
 /** Legacy routes `opsRoutes` answers before the v1 dispatcher gets a look. */

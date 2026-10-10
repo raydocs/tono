@@ -403,7 +403,11 @@ nonisolated enum HelperProtocolVersion {
     ///   only under the root update lock; blocked consumed attempts allow repair.
     /// - 4.52.42 → 4.52.43: normal Quit retains the narrow AI recovery floor;
     ///   explicit Restore fully removes it, with authenticated floor readback.
-    static let current = "4.52.43"
+    /// - 4.52.43 → 4.52.44: `/dns/enable` resolves the named service only
+    ///   among the current Network Location's services, preferring the
+    ///   primary service ID; an ambiguous name refuses (R3-O5). While a
+    ///   legacy name-only snapshot is on disk, enable keeps the old lookup.
+    static let current = "4.52.44"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

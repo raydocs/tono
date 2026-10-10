@@ -439,6 +439,7 @@ mod tests {
                 updated_at: None,
                 routing: None,
                 routing_sha256: None,
+                hy2_auto_switch: false,
             };
             let policy = TonoTrafficPolicyResponse {
                 revision: 29,

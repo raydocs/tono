@@ -315,6 +315,9 @@ archive_entries=$(/usr/bin/unzip -Z1 "$named") \
   || fail "the release archive could not be listed"
 [[ ${archive_entries%%$'\n'*} == "Tono.app/" ]] \
   || fail "the release archive does not begin with Tono.app/ but with ${archive_entries%%$'\n'*}"
+# The archive is what ships; its own Tono.app, not only $app, must carry the ticket.
+TONO_NOTARIZATION_TOOLS_DIR= /bin/sh "$repo_root/tooling/scripts/verify-macos-notarization.sh" "$named" \
+  || fail "the release archive's Tono.app has no stapled notarisation ticket or Gatekeeper rejects it"
 signature=$("$sign_update" "$named" 2>/dev/null \
   | /usr/bin/sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')
 [[ -n $signature ]] || fail "signing the archive produced no signature"

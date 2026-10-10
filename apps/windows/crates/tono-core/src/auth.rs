@@ -3400,6 +3400,8 @@ mod tests {
         let catalog = client.exit_catalog().await.unwrap();
         assert_eq!(catalog.revision, 3);
         assert_eq!(catalog.updated_at, Some(42));
+        // A18: a missing `hy2AutoSwitch` is false.
+        assert!(!catalog.hy2_auto_switch);
         let catalog_request = _mock
             .requests()
             .into_iter()
