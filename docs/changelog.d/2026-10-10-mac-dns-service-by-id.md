@@ -3,7 +3,7 @@
 - 来源：`main` 4e373f06 → 分支 `amp/a12-dns-service-by-id`（457773ff），[#1473](https://github.com/raydocs/tono/pull/1473)；未合 main。
 - 缺陷修复：`/dns/enable` 只收到服务显示名，helper 从 `SCNetworkServiceCopyAll` 里取第一个同名服务；该列表包含所有 Network Location 的服务副本，多个 Location 都有「Wi-Fi」时可能把 127.0.0.1 写进未使用 Location 的副本，活动的 Wi-Fi 仍用局域网解析器。现在 helper 只在当前 Location（`SCNetworkSetCopyCurrent`）的服务里按名字找，IPv4/IPv6 `PrimaryService`（App 取名字的同一来源）优先；仍匹配两个以上且主服务不在其中时拒绝，在任何 DNS 读写之前失败（原有「无法识别服务」错误）。之后的读写、快照、恢复、清扫、状态都按记录的服务 ID，未改。
 - 新增/优化：无。IPC 请求不变（仍只有 `service`），无新特权命令，PF 规则不变。
-- 工程与测试：纯选择逻辑放在 `apps/macos/Tono/Core/ProtectedDNSServiceIdentity.swift`，App 与 helper 共用（加入 `build-core-helper.sh` 清单）；一个 XCTest `ProtectedDNSServiceSelectionTests.testDNSEnableTargetsTheServiceIDNotTheFirstSameNamedService`。helper 4.52.43 → 4.52.44，`CONTRACT.sha256` 同步。
-- 验证：Linux 上 `sh tooling/scripts/test-core-helper-contract-guard.sh` → `PASS build-core-helper contract guard`；用假 `xcrun` 跑 `build-core-helper.sh`，契约守卫通过并到达编译（退出 73）。Swift 编译、XCTest、helper 自测由托管 macOS CI 执行，本机未执行。
+- 工程与测试：纯选择逻辑放在 `apps/macos/Tono/Core/ProtectedDNSServiceIdentity.swift`，App 与 helper 共用（加入 `build-core-helper.sh` 清单）；一个 XCTest `ProtectedDNSServiceSelectionTests.testDNSEnableTargetsTheServiceIDNotTheFirstSameNamedService`。helper 4.52.43 → 4.52.44，`CONTRACT.sha256` 同步；`apps/macos/scripts/test_build_source.py` 的 helper 清单副本加入新文件。
+- 验证：Linux 上 `sh tooling/scripts/test-core-helper-contract-guard.sh` → `PASS build-core-helper contract guard`；用假 `xcrun` 跑 `build-core-helper.sh`，契约守卫通过并到达编译（退出 73）；`python3 apps/macos/scripts/test_build_source.py` → `Ran 2 tests … OK`。Swift 编译、XCTest、helper 自测由托管 macOS CI 执行，本机未执行。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：未实机验证（多 Location 同名服务的 Mac）。旧版仅名字的快照与 `networksetup` 回退路径仍按名字定位（只用于恢复，行为未改）。
