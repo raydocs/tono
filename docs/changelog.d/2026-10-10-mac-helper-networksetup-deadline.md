@@ -1,6 +1,6 @@
 ## 2026-10-10 · macOS helper 的 networksetup 回退加期限（MAC-HELPER-NETWORKSETUP-UNBOUNDED）
 - 归属：ops 计划（[plan-2026-09-11](../ops/plan-2026-09-11.md)；所有者要求的 helper 挂起/死锁/永久断网审计）；macOS 特权 helper `tooling/scripts/core-helper/`。
-- 来源：基线 origin/main 437b6138；分支 `amp/helper-networksetup-deadline`；未合 main。
+- 来源：基线 origin/main 437b6138；分支 `amp/helper-networksetup-deadline`，PR [#1542](https://github.com/raydocs/tono/pull/1542)；未合 main。
 - 缺陷修复：`ProtectedDNSManager.runNetworkSetup` 在 System Configuration 读写失败时回退到 `/usr/sbin/networksetup`。它原来用 `waitUntilExit()` 无期限等待，
   等完才读输出。这一步跑在 helper 唯一的请求/看门狗线程上，同时持有更新锁和 DNS 锁。非阻塞 `SCPreferencesLock` 发现别的写者时正好走这条回退，
   而 `networksetup` 自己会等那个写者；子进程卡住时，Disconnect、其他请求和 Core 已停的释放都一起卡住。改为走 `KillSwitchManager.run`：
