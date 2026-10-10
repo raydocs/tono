@@ -617,7 +617,7 @@ const DashboardPage = () => {
     enabled: connected,
     generation: status?.controllerGeneration,
   })
-  // The sea's water sparkle follows live throughput (decision 077).
+  // The sea's water sparkle follows live throughput (decision 078).
   const liveBytes =
     connected && trafficLive ? (traffic?.up ?? 0) + (traffic?.down ?? 0) : null
   useEffect(() => publishSeaTraffic(liveBytes), [liveBytes])
