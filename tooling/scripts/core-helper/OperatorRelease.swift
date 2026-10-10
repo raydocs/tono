@@ -139,6 +139,67 @@ struct HelperTarget: Equatable {
         admission(reading, sessionGeneration: nil) == .allowed
     }
 
+    /// The refusal an operator release (or an unreadable target) means right
+    /// now, read fresh; nil when protection may still change.
+    static func releaseRefusal(reading: () -> Reading = { HelperTarget.read() }) -> HelperFailure? {
+        if case .refused(let code, let message) = admission(reading(), sessionGeneration: nil) {
+            return .coded(code: code, message: message)
+        }
+        return nil
+    }
+
+    static func requireNoRelease() throws {
+        if let failure = releaseRefusal() { throw failure }
+    }
+
+    /// The one shape every irreversible protection effect takes (PF load,
+    /// 127.0.0.1 DNS write, AI sinkhole or route install, app relaunch): the
+    /// target is read right before it and again right after. A release that
+    /// landed in between, however long the effect stalled, wins: the effect
+    /// is undone and the caller stops with the release's refusal.
+    static func guardedEffect<T>(
+        allowed: () -> Bool = { HelperTarget.automaticRearmAllowed(HelperTarget.read()) },
+        refusal: () -> HelperFailure? = { HelperTarget.releaseRefusal() },
+        _ effect: () throws -> T,
+        undo: () -> Void
+    ) throws -> T {
+        guard allowed() else { throw refusal() ?? releasedFailure }
+        let result = try effect()
+        guard allowed() else {
+            undo()
+            throw refusal() ?? releasedFailure
+        }
+        return result
+    }
+
+    /// `guardedEffect` over a sequence of install steps: each runs only while
+    /// the target allows it, and a release seen before or after any step
+    /// undoes the whole install and stops. False when stopped.
+    @discardableResult
+    static func stepsUnlessReleased(
+        _ steps: [() -> Void],
+        allowed: () -> Bool = { HelperTarget.automaticRearmAllowed(HelperTarget.read()) },
+        undo: () -> Void
+    ) -> Bool {
+        for step in steps {
+            guard allowed() else {
+                undo()
+                return false
+            }
+            step()
+        }
+        guard allowed() else {
+            undo()
+            return false
+        }
+        return true
+    }
+
+    static let releasedFailure = HelperFailure.coded(
+        code: "OPERATOR_RELEASED",
+        message: "An administrator released Tono's network protection. Click Connect in Tono to reconnect."
+    )
+
     /// Where the target lives, behind a seam for the self-tests. Every
     /// read-modify-write of the target holds `lockPath` (bounded), in the
     /// daemon's `/session/connect` and in `--emergency-disarm` alike.
@@ -314,6 +375,14 @@ struct OperatorRecoveryBudget {
     /// Each child process the full release starts (TERM, KILL, abandon).
     var child: TimeInterval = 15
     var verify: TimeInterval = 20
+    /// Settle: a gap, a second readback; if anything reappeared (a helper or
+    /// executor that survived the bootout), the PF / DNS / AI steps once
+    /// more and a third readback.
+    var settleGap: TimeInterval = 1
+    var settleRead: TimeInterval = 4
+    var repairPF: TimeInterval = 5
+    var repairDNS: TimeInterval = 10
+    var repairAI: TimeInterval = 5
     /// The on-disk re-read of the target before a restart.
     var recheck: TimeInterval = 2
     var restart: TimeInterval = 10
@@ -321,7 +390,9 @@ struct OperatorRecoveryBudget {
     /// Every phase is waited for at most its budget; the restart's launchctl
     /// at most its deadline plus the kill grace.
     var total: TimeInterval {
-        persist + stop + pf + dns + ai + release + verify + recheck + restart + operatorKillGrace
+        persist + stop + pf + dns + ai + release + verify
+            + settleGap + settleRead + repairPF + repairDNS + repairAI + settleRead
+            + recheck + restart + operatorKillGrace
     }
 }
 
@@ -417,6 +488,11 @@ struct OperatorRecoveryReading: Equatable {
 
     var restored: Bool {
         [pfBlock, dns, aiResolvers, aiRoutes].allSatisfy { $0 == .absent }
+    }
+
+    /// Something of Tono's was read in place (not merely unread).
+    var residuePresent: Bool {
+        [pfBlock, dns, aiResolvers, aiRoutes].contains(.present)
     }
 
     var lines: [String] {
@@ -531,7 +607,13 @@ struct OperatorRecoveryResult {
     var dnsRestored: Bool?
     var aiRemoved: Bool?
     var release: EmergencyReleaseOutcome?
+    /// The first readback, right after the release.
+    var firstReading: OperatorRecoveryReading
+    /// The settled readback every claim is made on.
     var reading: OperatorRecoveryReading
+    /// The PF / DNS / AI steps ran a second time because residue reappeared
+    /// (or stayed) after the settle gap.
+    var reapplied: Bool
     /// nil when the write did not finish within its budget.
     var persisted: Result<HelperTarget, Error>?
     /// The on-disk target re-read after a successful write; nil when not
@@ -576,6 +658,7 @@ func runOperatorEmergencyDisarm(
     removeAI: @escaping () -> Bool = { OperatorReleaseSteps.removeAILayer() },
     release: @escaping () -> EmergencyReleaseOutcome,
     verify: @escaping () -> OperatorRecoveryReading = { OperatorRecoveryReading.readSystem() },
+    pause: (TimeInterval) -> Void = { usleep(useconds_t(max(0, $0) * 1_000_000)) },
     readTarget: @escaping () -> HelperTarget.Reading = { HelperTarget.readFile() },
     restartDaemon: (TimeInterval) -> Int32? = {
         runOperatorLaunchctl(["bootstrap", "system", UpdateExecutor.daemonPlist], deadline: $0)
@@ -589,10 +672,25 @@ func runOperatorEmergencyDisarm(
     let dns = BoundedTask(restoreDNS).wait(budget.dns)
     let ai = BoundedTask(removeAI).wait(budget.ai)
     let outcome = BoundedTask(release).wait(budget.release)
-    let reading = BoundedTask(verify).wait(budget.verify) ?? .unknown
+    let first = BoundedTask(verify).wait(budget.verify) ?? .unknown
+    // Settle (decision 084): a helper or update executor that survived the
+    // bootout may have reinstalled something after the first readback.
+    pause(budget.settleGap)
+    var reading = BoundedTask(verify).wait(budget.settleRead) ?? .unknown
+    var reapplied = false
+    if first.residuePresent || reading.residuePresent {
+        reapplied = true
+        if reading.pfBlock != .absent { _ = BoundedTask(flushPF).wait(budget.repairPF) }
+        if reading.dns != .absent { _ = BoundedTask(restoreDNS).wait(budget.repairDNS) }
+        if reading.aiResolvers != .absent || reading.aiRoutes != .absent {
+            _ = BoundedTask(removeAI).wait(budget.repairAI)
+        }
+        reading = BoundedTask(verify).wait(budget.settleRead) ?? .unknown
+    }
     let persisted = persistence.wait(budget.persist)
     var result = OperatorRecoveryResult(
-        stop: stop, pfFlushed: pf, dnsRestored: dns, aiRemoved: ai, release: outcome, reading: reading,
+        stop: stop, pfFlushed: pf, dnsRestored: dns, aiRemoved: ai, release: outcome,
+        firstReading: first, reading: reading, reapplied: reapplied,
         persisted: persisted, recheck: nil, restart: nil, elapsed: 0
     )
     if result.persistedTarget != nil {
@@ -654,6 +752,9 @@ func operatorRecoveryReport(_ result: OperatorRecoveryResult) -> [String] {
     case .dnsRestoreFailed?: lines.append("Full release: PF released; DNS restore failed.")
     case .coreStillRunning?: lines.append("Full release: PF and DNS released; a Tono Core process survived SIGKILL.")
     case .released?: lines.append("Full release: finished.")
+    }
+    if result.reapplied {
+        lines.append("Settle: residue was found after the release; PF / DNS / AI cleanup ran once more. Final readback:")
     }
     lines += result.reading.lines
     switch result.persisted {
@@ -887,11 +988,12 @@ func runOperatorReleaseSelfTests() -> Bool {
         removeAI: { record("ai"); return true },
         release: { record("release"); return .released },
         verify: { record("verify"); return clean },
+        pause: { _ in },
         readTarget: { record("recheck"); return .recorded(saved) },
         restartDaemon: { _ in record("restart"); return 0 }
     )
     guard ordered.succeeded,
-          events == ["latch", "stop", "pf", "dns", "ai", "release", "verify", "recheck", "restart"] else {
+          events == ["latch", "stop", "pf", "dns", "ai", "release", "verify", "verify", "recheck", "restart"] else {
         return fail("order", events)
     }
 
@@ -905,6 +1007,11 @@ func runOperatorReleaseSelfTests() -> Bool {
     tight.ai = 0.3
     tight.release = 0.3
     tight.verify = 0.3
+    tight.settleGap = 0.1
+    tight.settleRead = 0.3
+    tight.repairPF = 0.2
+    tight.repairDNS = 0.2
+    tight.repairAI = 0.2
     tight.recheck = 0.2
     tight.restart = 0.2
     events = []
@@ -919,6 +1026,7 @@ func runOperatorReleaseSelfTests() -> Bool {
         removeAI: { true },
         release: { sleep(30); return .released },
         verify: { clean },
+        pause: { _ in },
         readTarget: { .recorded(saved) },
         restartDaemon: { _ in 0 }
     )
@@ -927,19 +1035,80 @@ func runOperatorReleaseSelfTests() -> Bool {
         return fail("stalled DNS and update store", "\(events) \(elapsed(since: stalledStart))")
     }
 
+    // Interleaving (decision 084): an effect admitted before the release
+    // stalls until after it, then resumes. The post-effect read sees the
+    // release, undoes the effect, and the caller stops with the refusal; an
+    // effect not yet started never runs.
+    var allowedNow = true
+    var effects = 0
+    var undone = 0
+    var interleavedCode: String?
+    do {
+        try HelperTarget.guardedEffect(allowed: { allowedNow }, refusal: { nil }, {
+            effects += 1
+            allowedNow = false // the CLI released while this PF load / DNS write stalled
+        }, undo: { undone += 1 })
+    } catch let failure as HelperFailure { interleavedCode = failure.code } catch {}
+    do {
+        try HelperTarget.guardedEffect(allowed: { allowedNow }, refusal: { nil }, { effects += 1 }, undo: { undone += 1 })
+    } catch {}
+    guard interleavedCode == "OPERATOR_RELEASED", effects == 1, undone == 1 else {
+        return fail("interleaved effect", "\(interleavedCode ?? "none") \(effects) \(undone)")
+    }
+    // An AI install paused between entries: what went in comes out, the rest
+    // never goes in.
+    allowedNow = true
+    var installed = 0
+    var removedAll = 0
+    let installCompleted = HelperTarget.stepsUnlessReleased(
+        [{ installed += 1; allowedNow = false }, { installed += 1 }],
+        allowed: { allowedNow },
+        undo: { removedAll += 1 }
+    )
+    guard !installCompleted, installed == 1, removedAll == 1 else {
+        return fail("interleaved AI install", "\(installed) \(removedAll)")
+    }
+    // The CLI's settle pass: a block that a surviving helper reloaded after
+    // the first readback is flushed again; residue that stays is reported.
+    func settle(_ readings: [OperatorRecoveryReading]) -> (OperatorRecoveryResult, [String]) {
+        var calls = 0
+        var flushes: [String] = []
+        let lock = NSLock()
+        let result = runOperatorEmergencyDisarm(
+            latch: {}, persist: { saved }, stopDaemon: { _ in .stillLoaded(bootout: 5) },
+            flushPF: { lock.lock(); flushes.append("pf"); lock.unlock(); return true },
+            restoreDNS: { true }, removeAI: { true }, release: { .released },
+            verify: {
+                lock.lock()
+                defer { lock.unlock() }
+                calls += 1
+                return readings[min(calls, readings.count) - 1]
+            },
+            pause: { _ in }, readTarget: { .recorded(saved) }, restartDaemon: { _ in 0 }
+        )
+        return (result, flushes)
+    }
+    let reloaded = OperatorRecoveryReading(pfBlock: .present, dns: .absent, aiResolvers: .absent, aiRoutes: .absent)
+    let (healed, healedFlushes) = settle([clean, reloaded, clean])
+    let (stuck, stuckFlushes) = settle([clean, reloaded, reloaded])
+    guard healed.reapplied, healed.succeeded, healedFlushes == ["pf", "pf"],
+          stuck.reapplied, !stuck.succeeded, stuckFlushes == ["pf", "pf"],
+          operatorRecoveryReport(stuck).contains("PF broad block: NOT restored (Tono's block is still in effect)")
+    else { return fail("settle", "\(healedFlushes) \(stuckFlushes)") }
+
     // Persistence failure, or a target replaced before the restart: no
     // restart, an explicit error, never success.
     events = []
     let unsaved = runOperatorEmergencyDisarm(
         latch: {}, persist: { throw Injected.failure }, stopDaemon: { _ in .stopped },
         flushPF: { true }, restoreDNS: { true }, removeAI: { true }, release: { .released },
-        verify: { clean }, readTarget: { .recorded(saved) },
+        verify: { clean }, pause: { _ in }, readTarget: { .recorded(saved) },
         restartDaemon: { _ in record("restart"); return 0 }
     )
     let replaced = runOperatorEmergencyDisarm(
         latch: {}, persist: { saved }, stopDaemon: { _ in .stopped },
         flushPF: { true }, restoreDNS: { true }, removeAI: { true }, release: { .released },
-        verify: { clean }, readTarget: { .recorded(HelperTarget(mode: .secured, generation: 10)) },
+        verify: { clean }, pause: { _ in }, readTarget: { .recorded(HelperTarget(mode: .secured, generation: 10)) },
         restartDaemon: { _ in record("restart"); return 0 }
     )
     guard !unsaved.succeeded, unsaved.restart == nil, !replaced.succeeded, replaced.restart == nil, events.isEmpty,
@@ -953,7 +1122,7 @@ func runOperatorReleaseSelfTests() -> Bool {
         latch: {}, persist: { saved }, stopDaemon: { _ in .stopped },
         flushPF: { true }, restoreDNS: { false }, removeAI: { true }, release: { .released },
         verify: { OperatorRecoveryReading(pfBlock: .absent, dns: .present, aiResolvers: .absent, aiRoutes: .absent) },
-        readTarget: { .recorded(saved) }, restartDaemon: { _ in 0 }
+        pause: { _ in }, readTarget: { .recorded(saved) }, restartDaemon: { _ in 0 }
     )
     guard !residue.succeeded, residue.restart == .some(.some(0)),
           operatorRecoveryReport(residue).contains("DNS: NOT restored (a service or the active resolver still uses Tono's 127.0.0.1, or a restore is pending)")

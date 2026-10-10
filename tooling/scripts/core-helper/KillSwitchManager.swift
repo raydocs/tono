@@ -370,7 +370,12 @@ final class KillSwitchManager {
         // measuring against a ruleset that was never fully live — which would
         // hide a withdrawn permit and leave its states passing.
         lastLoadedPassRules = nil
+        // Right before and right after the kernel load (decision 084): a
+        // release that landed while this arm stalled wins. A post-load
+        // refusal throws into the catch below, which releases what loaded.
+        try HelperTarget.requireNoRelease()
         try Self.ensureAnchorLoaded(disposal: disposal, loadOutcome: &load)
+        try HelperTarget.requireNoRelease()
         lastLoadedPassRules = passRules
         stateGeneration &+= 1
         openNetworkEpoch &+= 1
@@ -514,6 +519,7 @@ final class KillSwitchManager {
             // An arm prepared against the ruleset being narrowed must not
             // commit it back while the tunnel is gone.
             stateGeneration &+= 1
+            try HelperTarget.requireNoRelease()
             do {
                 try Self.writeRuleText(rules)
                 try Self.ensureAnchorLoaded(disposal: disposal)
@@ -535,7 +541,17 @@ final class KillSwitchManager {
                 }
                 throw Self.withholdFailure(error)
             }
+            try undoLoadIfReleased()
         }
+    }
+
+    /// Right after an automatic PF load: a release that landed while it ran
+    /// wins, so the block is released again (AI hold included) and the
+    /// caller stops with the refusal (decision 084). Caller holds `lock`.
+    private func undoLoadIfReleased() throws {
+        guard let failure = HelperTarget.releaseRefusal() else { return }
+        _ = try? disarmLocked(preserveAIHold: false)
+        throw failure
     }
 
     static func withholdFailure(_ error: Error) -> HelperFailure {
@@ -570,7 +586,10 @@ final class KillSwitchManager {
             let state = Self.emergencyState(preserving: previous)
             try Self.writeRules(state: state, allowedUID: allowedUID)
             try saveState(state)
+            try HelperTarget.requireNoRelease()
             try Self.ensureAnchorLoaded(flushStates: true, loadOutcome: &load)
+            // A release during the load wins: the catch releases it again.
+            try HelperTarget.requireNoRelease()
             // Stale /etc/hosts pins do not permit traffic through the all-block
             // PF state. Clean them best-effort after the kernel barrier commits.
             try? Self.ensureHostsMappings(state: state)
@@ -1067,9 +1086,11 @@ final class KillSwitchManager {
             // disarm clears it.
             lastLoadedPassRules = nil
             repairedSinceArm = true
+            try HelperTarget.requireNoRelease()
             try Self.writeRules(state: Self.restorableState(state), allowedUID: allowedUID)
             Self.pinHostsIfUsable(state: state)
             try Self.ensureAnchorLoaded(flushStates: true)
+            try undoLoadIfReleased()
         } catch {
             // A failed repair must not fall through to an all-block. The next
             // pass retries the saved rules while the Core is running. When the

@@ -29,3 +29,9 @@
   - R7 Connect 可修复目标文件：类型、属主、权限或内容不对的目标记录会被移走，然后重写；确实写不进去时 Connect 报 `TARGET_STATE_UNWRITABLE` 并给出具体提示，不再吞掉，`beginSession` 失败即连接失败。
   - XCTest 改名为 `testOnlyTheUserConnectAttemptBeginsAHelperSession`。
   - 验证（Linux）：契约守卫 PASS；假 `xcrun` 构建在守卫之后到达编译；`test_build_source.py` OK。
+- 续记 2026-10-10（第四次复审 @0372ca99 FAIL：3 个 MAJOR、1 个 minor，都是守护进程或更新执行器熬过 bootout 后「先检查、后生效」的竞争；按建议做结构性修正，仍为 4.52.45）：
+  - 统一原语 `HelperTarget.guardedEffect` / `stepsUnlessReleased`：每个不可逆的保护动作在生效前、生效后各读一次目标。中间若已被释放，就撤销本次动作并以释放拒绝停止。目标锁不跨 PF / SC / 磁盘 I/O 持有。
+  - 覆盖的动作：arm 的内核加载（加载后被拒，由原有 catch 放行已装入的阻断）、PF 监督修复、reviewed-bundle permit 收窄（加载后被拒，用 `disarmLocked` 撤销，AI 层一并移除）、电源屏障、每次写入 127.0.0.1（启用路径与同一属主的重新启用路径都在 `writeManagedDNS` 内，撤销时写回快照原值、快照保留）、AI 层每个条目（逐个 resolver 文件、逐条路由；中途被释放就整体移除、其余不再装；更新执行器的恢复也走这里）、重新拉起 App（代码签名校验之后再读一次）。
+  - CLI 稳定阶段：第一次回读后隔 1 s 再读一次（4 s 预算）。只要读到残留（重新出现或一直还在），就把 PF / DNS / AI 各步骤再跑一次（5 / 10 / 5 s），然后第三次回读。成功只依据最终那次回读判断，报告会写明重跑过。整条命令上限 181.5 s。
+  - 自测新增交错场景：已放行的效果停住，直到 CLI 释放之后才继续，结果被撤销且以 OPERATOR_RELEASED 停止，尚未开始的效果不会执行；AI 安装在条目之间停住，已装的被撤下，其余不装；CLI 稳定阶段遇到被重新加载的阻断会再 flush 一次，若仍在则如实报告 NOT restored。
+  - 验证（Linux）：契约守卫 PASS；假 `xcrun` 构建在守卫之后到达编译；`test_build_source.py` OK。

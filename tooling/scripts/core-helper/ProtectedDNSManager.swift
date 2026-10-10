@@ -141,7 +141,19 @@ final class ProtectedDNSManager {
     /// No earlier retirement may suppress recovery of a new DNS override.
     private func writeManagedDNS(_ servers: [String], _ service: NetworkService) throws {
         try clearCompletedRestore()
-        try Self.writeDNS(servers, on: service)
+        guard servers == [Self.protectedDNSServer] else {
+            try Self.writeDNS(servers, on: service)
+            return
+        }
+        // Every 127.0.0.1 write (enable and the same-owner re-enable): the
+        // target is read right before and right after (decision 084). A
+        // release in between puts the saved original back; the snapshot
+        // stays, so recovery retries if that write fails too.
+        try HelperTarget.guardedEffect({ try Self.writeDNS(servers, on: service) }, undo: {
+            if let snapshot = try? self.loadSnapshot() {
+                try? Self.writeDNS(snapshot.servers, on: service)
+            }
+        })
     }
 
     func enable(service rawService: String) throws -> [String: Any] {

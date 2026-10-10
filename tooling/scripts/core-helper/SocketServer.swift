@@ -568,6 +568,8 @@ final class SocketServer {
     /// by the termination handler and still counts as an attempt.
     static func relaunchInstalledApp(uid: uid_t) throws {
         _ = try UpdatePackage.verifyCode(UpdatePackage.appPath, identifier: "com.raydocs.tono")
+        // Read where it acts: a release during the bundle check wins.
+        try HelperTarget.requireNoRelease()
         let child = Process()
         child.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         child.arguments = ["asuser", String(uid), "/usr/bin/sudo", "-n", "-u", "#\(uid)", "/usr/bin/open", UpdatePackage.appPath]

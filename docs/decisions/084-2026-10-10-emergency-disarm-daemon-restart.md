@@ -24,9 +24,15 @@
     target (2 s) → the daemon is bootstrapped again (10 s) **only when this command's `released` generation is what is
     on disk**, so it comes back refusing every arm while its start and 10 s watchdog keep releasing a leftover block,
     retrying DNS and AI-layer removal. A write that fails, misses its 3 s budget, or was replaced by a later Connect
-    leaves the daemon stopped (nothing can restart unaware of the release) and prints an error. Command ceiling:
-    152.5 s. Exit 0 only when the release finished, all four components read back restored and the release is
-    confirmed on disk.
+    leaves the daemon stopped (nothing can restart unaware of the release) and prints an error. After the first
+    readback the CLI settles: a 1 s gap, a second readback, and if anything reappeared or stayed (a helper or update
+    executor that survived the bootout), the PF / DNS / AI steps once more and a third readback; claims rest on the
+    final one. Command ceiling: 181.5 s. Exit 0 only when the release finished, all four components read back
+    restored and the release is confirmed on disk.
+  - **Every irreversible effect is guarded on both sides** (`HelperTarget.guardedEffect` / `stepsUnlessReleased`): PF
+    loads (arm commit, supervision repair, permit withholding, power barrier), each 127.0.0.1 DNS write, each AI
+    resolver file and route, and the owner app relaunch read the target right before and right after; a release in
+    between undoes the effect and stops. No lock is held across PF, System Configuration or disk I/O.
   - **Readback per component** (PF broad block in `tono.killswitch`, DNS, AI sinkhole resolvers, AI blackhole routes):
     restored / NOT restored (with the residue named) / unknown. A failed query is unknown, never restored.
   - **While `released` or unreadable** the helper refuses `/killswitch/arm` (all callers, the update path's included),
