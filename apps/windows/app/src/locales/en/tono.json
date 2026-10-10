@@ -234,7 +234,7 @@
     "sendNewCode": "Send again",
     "sending": "Sending…",
     "sent": "Sent to your inbox",
-    "trust": "Your email is only used to sign in. Traffic logs are never uploaded unless you turn that on in Settings.",
+    "trust": "Your email is only used to sign in. Traffic log upload is on by default: the hostnames you connect to, the apps that open each connection, and the matched rules and routes, used to diagnose problems. Turn it off in Settings.",
     "resendIn": "Resend in {{seconds}}s",
     "codeSent": "Code sent.",
     "codeSentTo": "Sent to the address above. Check the full address, and spam.",
