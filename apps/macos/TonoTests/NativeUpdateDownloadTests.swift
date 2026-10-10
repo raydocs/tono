@@ -122,6 +122,61 @@ final class NativeUpdateDownloadTests: XCTestCase {
         XCTAssertEqual(afterInterim.entries, ["first"])
     }
 
+    /// #1516 review M3: a relayed package whose signed length is on disk at
+    /// 899 s, on a server that keeps the connection open, is not failed by the
+    /// 900 s total budget during its close grace; the grace ends it as a success.
+    func testPackageCompletedJustBeforeTheTotalBudgetSucceedsAfterTheCloseGrace() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tono-m3-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appendingPathComponent("package.zip")
+        XCTAssertTrue(FileManager.default.createFile(atPath: destination.path, contents: nil))
+        let file = try FileHandle(forWritingTo: destination)
+        defer { try? file.close() }
+        // One byte every 50 s keeps the 60 s idle budget; the last one lands at 899 s.
+        let arrivals: [TimeInterval] = Array(stride(from: 0, through: 850, by: 50)) + [899]
+        let package = Data((0..<arrivals.count).map { UInt8($0) })
+        let sink = PackageResponseSink(size: Int64(package.count), file: file, destination: destination)
+
+        var clock: TimeInterval = 0
+        var timers: [(at: TimeInterval, action: @Sendable () -> Void)] = []
+        var outcomes: [Result<Void, any Error>] = []
+        let transfer = RelayPackageTransfer(
+            label: "relay test", sink: sink, now: { clock },
+            schedule: { delay, action in timers.append((at: clock + delay, action: action)) },
+            isFinished: { !outcomes.isEmpty },
+            end: { outcomes.append($0) }
+        )
+        // Runs every timer due by `time`, in deadline order.
+        func advance(to time: TimeInterval) {
+            while let next = timers.indices.filter({ timers[$0].at <= time }).min(by: { timers[$0].at < timers[$1].at }) {
+                let timer = timers.remove(at: next)
+                clock = timer.at
+                timer.action()
+            }
+            clock = time
+        }
+
+        transfer.begin()
+        transfer.connected()
+        let head = Data("HTTP/1.1 200 OK\r\nContent-Length: \(package.count)\r\n\r\n".utf8)
+        XCTAssertTrue(transfer.received(head, isComplete: false, error: nil))
+        for (index, at) in arrivals.enumerated() {
+            advance(to: at)
+            XCTAssertTrue(outcomes.isEmpty, "nothing ends the transfer while bytes keep arriving")
+            XCTAssertTrue(transfer.received(package.subdata(in: index..<(index + 1)), isComplete: false, error: nil))
+        }
+        XCTAssertTrue(sink.isComplete)
+
+        // The server keeps the connection open: no end, no further byte.
+        advance(to: RelayPackageTransfer.transferBudget)
+        XCTAssertTrue(outcomes.isEmpty, "the total budget must not fail a package already on disk")
+        advance(to: 899 + RelayPackageTransfer.closeGrace)
+        XCTAssertEqual(outcomes.count, 1)
+        XCTAssertNoThrow(try outcomes.first?.get())
+        XCTAssertEqual(try Data(contentsOf: destination), package)
+    }
+
     private nonisolated static func receiveRequest(
         on connection: NWConnection, queue: DispatchQueue, received: Data = Data()
     ) {
