@@ -41,6 +41,40 @@ final class ProtectedDNSServiceSelectionTests: XCTestCase {
         )
     }
 
+    /// R3-O5 regression: the helper's `/dns/enable` took the first service
+    /// named "Wi-Fi" from every Network Location. It now chooses among the
+    /// current location's services (the helper passes only those), the app's
+    /// primary service ID wins, and a name that still matches two services
+    /// without a primary among them is refused rather than guessed.
+    func testDNSEnableTargetsTheServiceIDNotTheFirstSameNamedService() {
+        typealias Candidate = ProtectedDNSServiceIdentity.Candidate
+        let current = [
+            Candidate(id: "LOCATION-B-WIFI", name: "Wi-Fi"),
+            Candidate(id: "LOCATION-B-ETHERNET", name: "Ethernet"),
+        ]
+        XCTAssertEqual(
+            ProtectedDNSServiceIdentity.select(
+                named: "Wi-Fi", currentLocation: current, primaryServiceIDs: []
+            ),
+            "LOCATION-B-WIFI"
+        )
+
+        let twins = [Candidate(id: "WIFI-1", name: "Wi-Fi")] + current
+        XCTAssertEqual(
+            ProtectedDNSServiceIdentity.select(
+                named: "Wi-Fi", currentLocation: twins,
+                primaryServiceIDs: ["LOCATION-B-WIFI", "WIFI-1"]
+            ),
+            "LOCATION-B-WIFI"
+        )
+        XCTAssertNil(
+            ProtectedDNSServiceIdentity.select(
+                named: "Wi-Fi", currentLocation: twins,
+                primaryServiceIDs: ["LOCATION-B-ETHERNET"]
+            )
+        )
+    }
+
     /// MAC-PROXY-PROMPT-UNBOUNDED regression: the administrator prompt behind
     /// `networksetup` used to be waited on forever, wedging every privileged
     /// coordinator caller. The bounded wait must kill a subprocess that

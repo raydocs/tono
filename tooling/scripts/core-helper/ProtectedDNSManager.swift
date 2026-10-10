@@ -963,11 +963,47 @@ final class ProtectedDNSManager {
         return id
     }
 
+    /// Only the current Network Location's services are candidates, and the
+    /// primary service the app took the name from wins (R3-O5). Every other
+    /// location keeps its own same-named copy, which `namedService` would
+    /// return as readily as the live one.
     private static func scServiceID(named service: String) throws -> String? {
-        try withPreferences(lock: false) { prefs in
-            namedService(prefs, service).flatMap {
-                SCNetworkServiceGetServiceID($0) as String?
+        let primaryIDs = primaryServiceIDs()
+        return try withPreferences(lock: false) { prefs in
+            guard let currentSet = SCNetworkSetCopyCurrent(prefs),
+                  let members = SCNetworkSetCopyServices(currentSet) else {
+                throw HelperFailure.system("Could not read the current network location.")
             }
+            var candidates: [ProtectedDNSServiceIdentity.Candidate] = []
+            for index in 0..<CFArrayGetCount(members) {
+                let member = unsafeBitCast(
+                    CFArrayGetValueAtIndex(members, index),
+                    to: SCNetworkService.self
+                )
+                guard let id = SCNetworkServiceGetServiceID(member) as String?,
+                      let name = SCNetworkServiceGetName(member) as String? else { continue }
+                candidates.append(ProtectedDNSServiceIdentity.Candidate(id: id, name: name))
+            }
+            return ProtectedDNSServiceIdentity.select(
+                named: service,
+                currentLocation: candidates,
+                primaryServiceIDs: primaryIDs
+            )
+        }
+    }
+
+    /// IPv4 then IPv6 `PrimaryService`, as the app reads them. Unreadable
+    /// leaves selection to a name that is unique in the current location.
+    private static func primaryServiceIDs() -> [String] {
+        guard let store = SCDynamicStoreCreate(
+            nil, "Tono protected DNS service" as CFString, nil, nil
+        ) else { return [] }
+        return [kSCEntNetIPv4, kSCEntNetIPv6].compactMap { (entity: CFString) -> String? in
+            let key = SCDynamicStoreKeyCreateNetworkGlobalEntity(
+                nil, kSCDynamicStoreDomainState, entity
+            )
+            let value = SCDynamicStoreCopyValue(store, key) as? [String: Any]
+            return value?[kSCDynamicStorePropNetPrimaryService as String] as? String
         }
     }
 
@@ -1048,6 +1084,9 @@ final class ProtectedDNSManager {
         }
     }
 
+    /// First service with this name in any Network Location. Only name-only
+    /// paths (legacy snapshots, enumeration without IDs) use it; `enable`
+    /// resolves through `scServiceID`.
     private static func namedService(_ prefs: SCPreferences, _ name: String) -> SCNetworkService? {
         guard let array = SCNetworkServiceCopyAll(prefs) else { return nil }
         let count = CFArrayGetCount(array)
