@@ -5,5 +5,7 @@
 - 新增/优化：说明 Windows 登录时打开、界面语言即时生效及无需重连/重启；不把 Mac 语言重开/释放保护行为伪装成一致。说明字号与外观卡一致，窄行允许换行，分段控件使用真正 disabled；错误详情折叠，恢复操作可键盘访问。
 - 工程与测试：现有 preferences hook 返回实际读回结果，不忽略 SWR 读回错误；预览改用生产 hook 和共享合成 IO，而非假成功 no-op。新增一条公开设置组件回归，覆盖读取、迟到失败、导航、读取不同实际值、语言保存完成前不切换。
 - 验证：旧行为回归先失败 `expected false to be true`（读取中开关未禁用）；改后 Linux orb `vitest run settings.test.tsx SeaControls.test.tsx AppearanceCard.test.tsx --maxWorkers=1`：3 files / 6 tests passed，`tsc --noEmit`、触及 TS 文件 ESLint exit0，Biome `Checked 8 files in 14ms. No fixes applied.` 首次 lint 的两处无用导入已由 ESLint 修复，未放宽检查；截图与最终 CI 在同 PR 续记。
+- 2026-10-10 续记：重基于 main e2cee91b；读回失败也明确“无法确认”，扩充同一回归。共享操作状态放入 preferences hook，shell 语言同步不能绕过 pending/failed；保护状态映射未变。窄窗标题保留 20px 内边距，旧外观语言选项不再被长说明挤压。含现有 shell 回归的窄检查 4 files / 11 tests passed，tsc exit0；tono-layout 的既有 fast-refresh 导出 warning 记录保留，未压制。
+- 2026-10-10 渲染续记：[12 张检查过的图及源码/执行记录](../screenshots/windows-general-settings-2026-10-10/README.md)，3 before + 9 after；所有 after 对应 e2e75c546。实际浏览器测到未确认时 `storedLanguage=zh, windowTitle=Settings, phase=Saving…, disabled=true`，窄窗 `titleX=20, overflow=false`。初次最终渲染因 Vite 缓存旧 hook 导出而空白，重启本线程受管预览后完整复跑通过；空白/旧迭代图未归档。没有把前次截图当成新 SHA 证据。
 - 候选/发布：仅源码，无新包、无更新源变化；原生 setters/defaults、首页/连接页、transport、PF/WFP/helper 权限未改。
 - 剩余限制：Linux Chromium + 合成 IO 不是 Windows 原生 WebView2/登录项/磁盘故障或完整包验收。Mac 通用设置另一个独立 PR，不碰 #1506 的局域网权限或底层保护逻辑；两端完整系统体验和原生输入/字体/DPI 留最后候选包验收，不自评分。
