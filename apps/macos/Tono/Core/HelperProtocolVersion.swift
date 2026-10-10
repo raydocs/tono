@@ -407,7 +407,11 @@ nonisolated enum HelperProtocolVersion {
     ///   among the current Network Location's services, preferring the
     ///   primary service ID; an ambiguous name refuses (R3-O5). While a
     ///   legacy name-only snapshot is on disk, enable keeps the old lookup.
-    static let current = "4.52.44"
+    /// - 4.52.44 → 4.52.45: the `networksetup` fallback of the DNS manager
+    ///   runs under the same 15 s deadline as `pfctl` instead of being waited
+    ///   on without limit on the single request/watchdog thread
+    ///   (MAC-HELPER-NETWORKSETUP-UNBOUNDED).
+    static let current = "4.52.45"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

@@ -1866,13 +1866,14 @@ extension KillSwitchManager {
         _ executable: String,
         _ arguments: [String],
         deadline: TimeInterval = KillSwitchManager.helperCommandDeadline,
+        environment: [String: String] = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"],
         started: (pid_t) -> Void = { _ in },
         ended: @escaping @Sendable () -> Void = {}
     ) throws -> HelperCommandResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
-        process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+        process.environment = environment
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
