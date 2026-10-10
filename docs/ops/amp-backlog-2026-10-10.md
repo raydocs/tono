@@ -1,8 +1,20 @@
 # Amp 待办全集（2026-10-10）
 
 给 Amp orb 无人跑的任务清单。每条独立成 PR，按 [AGENTS.md](../../AGENTS.md) 的规则合并；
-高风险项（标 **高**）必须有独立评审回执才能合。编号 A 开头的是任务，D 开头的是老板要定的事。
-老板回复格式：`D1-A D2-C …`，没回的按「推荐」执行。
+高风险项（标 **高**）必须有独立评审回执才能合。编号 A 开头的是任务，D 开头的是老板已定的事。
+2026-10-10 老板决定：§7 全部按推荐执行，§6 原先不派的项也一起派（[decision 079](../decisions/079-2026-10-10-amp-backlog-defaults.md)）。
+
+### 给 Amp 的启动提示词（直接粘贴）
+
+```text
+Read AGENTS.md, docs/BUILD_AND_TEST.md and docs/ops/amp-backlog-2026-10-10.md. Work through §8 in order, one task per PR,
+branch from current main, one regression test per behavior, a docs/changelog.d entry per PR. §7 is decided: use the
+chosen option of each D item. High-risk PRs (marked 高, and every PF/WFP item in §6) need an independent review receipt
+in a PR comment before merge (Grok-only while Codex is down: --finders grok). Do not touch tono-xray on port 443, PF/WFP
+permit tables beyond the task text, or production D1. For §6 UI items, attach screenshots to the PR and leave it draft
+for the owner. For §6 hardware items, do the code and tests, record "hardware evidence pending" in the finding.
+Report at the end of each task: PR number, ci-gate run id, review receipt, what is left.
+```
 
 ## 0. Amp 的工作规则（先读）
 
@@ -66,13 +78,16 @@
 | A27 | 本机测试稳定 | `services/control-plane/test/worker.test.ts`（6.6k 行） | 拆文件或给长用例加 timeout，部署脚本不再被偶发超时打断 | 低 | 无 |
 | A28 | 控制面 `index.ts` 拆 cron | 同 A23 的一项，单列因为影响部署脚本 | `enforceAll` 与 ops cron 独立文件，行为不变 | 低 | D6 |
 
-## 6. 不给 Amp 的
+## 6. 原先不派、现在也派（老板 2026-10-10）
 
-- 海面 UI 观感（#1458–#1461 之后的调整）：你亲自看。
-- 需要真机证据的验收：W2、W8、#171、H16-O-F6、I2/#273。
-- D7 私网放行、H1-F5 程序身份：改 PF/WFP 语义，先定 D3 / D4，再派给有评审回执流程的会话。
+| # | 任务 | 范围 | 完成标准 | 风险 | 依赖 |
+|---|---|---|---|---|---|
+| A29 | D7 macOS 连接中私网放行收紧 | `apps/macos` helper PF 规则 `tono-lan` + 设置项「允许局域网设备」（默认关） | 开关关时只放行 LAN DNS（#348 已收紧）和 mDNS，其余私网与 Windows 一致不放行；开关开时恢复现状；XCTest 两条（关 / 开）；helper 协议版本按 AGENTS 升 | **高**（PF 语义，必须评审回执） | D3-A |
+| A30 | H1-F5 bootstrap 窗口缩短并记录为已知风险 | 两端 bootstrap 放行时长 | 放行只存在于控制面握手期间（秒级），完成或失败即撤；`docs/findings.d/H1-F5` 状态改为「已知风险，窗口 ≤ N s」 | **高**（PF/WFP） | D4-A |
+| A31 | 真机验收项的代码侧收口 | W2、W8、#171、H16-O-F6、I2/#273 | 每项：确认修复在 main、补缺失的回归测试、finding 标「fixed·待实机」；真机证据留给老板 | 中 | 无 |
+| A32 | 海面 UI 后续调整 | #1458–#1461 合入后的 `tono-ui/` 与 `SeaScene*` | 按 `MAC-POLISH-SPEC.md` 与 Windows 截图审计剩余项做；PR 保持草稿并附截图，老板看过再合 | 低 | #1458–#1461 合入 |
 
-## 7. 你要定的事（回复编号即可，没回按推荐）
+## 7. 老板已定（2026-10-10「按你推荐的来」；全部取推荐列）
 
 | # | 问题 | 选项 | 推荐 | 影响的任务 |
 |---|---|---|---|---|
@@ -88,7 +103,7 @@
 | D11 | Amp 的 PR 怎么合 | A 按 AGENTS 自动（高风险要回执） · B 每个你看一眼 | **A** | 全部 |
 | D14 | 登录前就发网络探测 | A 允许（只握手，不带身份） · B 等点登录 | **A** | A4 |
 | D15 | 调低设备上限时 | A 立即踢最旧 · B 等下次登录 | **A** | A9 |
-| D16 | #208 需要一个有 D1 导出和 R2 写权限的 Cloudflare token 放进 GitHub secret | 只能你提供 | — | A14 |
+| D16 | #208 需要一个有 D1 导出和 R2 写权限的 Cloudflare token 放进 GitHub secret | 只能你提供（仍待提供） | — | A14 |
 
 ## 8. 建议顺序
 
@@ -97,4 +112,6 @@
 3. A9、A10、A11、A14、A15（账本收口）
 4. A20 → A21（机队）
 5. A16 → A17 → A18（hy2，按 D1/D2）
-6. A23 / A27 / A28 / A25 / A26 当填缝
+6. A31 → A30 → A29（账本与 PF 项，A29/A30 带评审回执）
+7. A32（等 #1458–#1461 合入）
+8. A23 / A27 / A28 / A25 / A26 当填缝
