@@ -130,8 +130,14 @@ async function postHeartbeat(req: Request, e: Env): Promise<Response> {
          first_heartbeat_at = COALESCE(first_heartbeat_at, ?), last_heartbeat_at = ?
      WHERE node_name = ? AND token_id = ? AND token_revoked_at IS NULL`,
   ).bind(reportedIp, observedIp, roles.join(','), agentVersion, t, t, agent.node, agent.tokenId).run();
-  // Rotated or revoked between the check and the write.
-  if (!Number(updated.meta.changes ?? 0)) throw unauthorized();
+  if (!Number(updated.meta.changes ?? 0)) {
+    // Lost a race with revoke (same token id, now revoked) or with re-issue (id gone).
+    const raced = await e.DB.prepare(
+      'SELECT 1 FROM ops_node_agents WHERE token_id = ? AND token_revoked_at IS NOT NULL',
+    ).bind(agent.tokenId).first();
+    if (raced) throw new ApiError(403, 'NODE_AGENT_REVOKED', 'This node agent token was revoked');
+    throw unauthorized();
+  }
   return Response.json({ node: agent.node, receivedAt: t, observedIp });
 }
 

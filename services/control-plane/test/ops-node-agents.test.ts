@@ -59,8 +59,18 @@ describe('node agent self-registration', () => {
     const ips = (await db().prepare('SELECT DISTINCT public_ip FROM ops_node_profiles').all()).results;
     expect(ips).toEqual([{ public_ip: '203.0.113.9' }]);
 
+    const reissued = (await (await issue(NODE_A)).json() as { token: string }).token;
+    expect((await heartbeat(token, NODE_A)).status).toBe(401);
+    expect(await db().prepare('SELECT last_heartbeat_at, roles FROM ops_node_agents WHERE node_name = ?')
+      .bind(NODE_A).first()).toEqual({ last_heartbeat_at: null, roles: null });
+
     expect((await issue(NODE_A, 'DELETE')).status).toBe(200);
-    expect((await heartbeat(token, NODE_A)).status).toBe(403);
+    expect((await issue(NODE_A, 'DELETE')).status).toBe(200);
+    expect((await issue('Nowhere · None', 'DELETE')).status).toBe(404);
+    expect((await heartbeat(reissued, NODE_A)).status).toBe(403);
+    expect((await db().prepare(
+      "SELECT COUNT(*) AS n FROM ops_audit WHERE action = 'node.agent_token.revoke'",
+    ).first())?.n).toBe(1);
   });
 
   it('only an owner can issue a node agent token, and issuing is audited', async () => {

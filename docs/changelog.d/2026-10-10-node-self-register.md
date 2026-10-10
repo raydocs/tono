@@ -25,3 +25,6 @@
 - 验证：见 PR 正文（vitest 全量、typecheck、check:contract、check:budgets、python unittest）。
 - 未做：节点安装待做（orb 无 SSH）；无控制台 UI（列表 / 签发按钮另开）；退役节点不自动吊销 agent token（需手动
   `DELETE`；token 只能写心跳）。
+- 续记（2026-10-10，独立评审 PASS 带 3 个 minor，一轮修正）：再签发清空旧 token 的心跳列（新 token 上报前行里无心跳）；
+  心跳写入时输给吊销的请求回 403 `NODE_AGENT_REVOKED`（输给再签发仍 401）；吊销审计原本已按 `changes() > 0` 条件写，
+  测试补上：未知节点 404、重复 `DELETE` 200 均不再记审计。现有第一个 `it` 扩展，无新测试文件。

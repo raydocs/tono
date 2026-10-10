@@ -67,6 +67,8 @@ export async function getNodeAgents(req: Request, e: Env): Promise<Response> {
  * `POST /api/v1/ops/nodes/{name}/agent-token` (nodes.publish, owner only).
  * Issues the node's heartbeat token, replacing any earlier one, and returns it
  * once. Only a salted hash is stored; the audit row lands in the same batch.
+ * The old token's heartbeat is cleared, so the row shows nothing until the
+ * new token reports.
  * Issuing a token lists nothing: the node's catalog membership is unchanged.
  */
 export async function postNodeAgentToken(req: Request, e: Env, rawName: string, actor: Actor): Promise<Response> {
@@ -86,7 +88,13 @@ export async function postNodeAgentToken(req: Request, e: Env, rawName: string, 
          token_salt = excluded.token_salt,
          token_hash = excluded.token_hash,
          token_issued_at = excluded.token_issued_at,
-         token_revoked_at = NULL`,
+         token_revoked_at = NULL,
+         reported_ip = NULL,
+         observed_ip = NULL,
+         roles = NULL,
+         agent_version = NULL,
+         first_heartbeat_at = NULL,
+         last_heartbeat_at = NULL`,
     ).bind(name, minted.tokenId, minted.salt, minted.hash, t),
     opsAuditStatement(
       e, actor.email, 'node.agent_token.issue', 'node', name,
@@ -97,7 +105,12 @@ export async function postNodeAgentToken(req: Request, e: Env, rawName: string, 
   return jsonNoStore(dto, 201);
 }
 
-/** `DELETE /api/v1/ops/nodes/{name}/agent-token` (nodes.publish): the token stops working at once. */
+/**
+ * `DELETE /api/v1/ops/nodes/{name}/agent-token` (nodes.publish): the token stops
+ * working at once. The audit row is written only when a live token was revoked
+ * (`changes() > 0`): an unknown node is a 404 and a repeat is an idempotent 200,
+ * neither audited.
+ */
 export async function deleteNodeAgentToken(_req: Request, e: Env, rawName: string, actor: Actor): Promise<Response> {
   const name = decodeName(rawName);
   const t = now();
