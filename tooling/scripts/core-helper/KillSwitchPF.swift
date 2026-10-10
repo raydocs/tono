@@ -138,6 +138,45 @@ extension KillSwitchManager {
         return !Set(current).isSubset(of: Set(loaded))
     }
 
+    static let controlRelayLabel = "tono-api-relay"
+
+    /// The control-plane permit for a state (decision 086): the compiled Tono
+    /// relay endpoints, only while protection is armed without a tunnel and
+    /// an API host is active. Never derived from DNS or from the pins.
+    static func controlRelayPermitEndpoints(state: KillSwitchState) -> [KillSwitchEndpoint] {
+        let apiHostActive = !state.apiHosts.isEmpty
+            || state.resolvedHosts.keys.contains { !KillSwitchManager.defaultHosts.contains($0) }
+        guard state.armed, state.tunnelInterfaces.isEmpty, apiHostActive else { return [] }
+        return ControlPlaneRelays.endpoints.map {
+            KillSwitchEndpoint(address: $0.address, transport: "tcp", port: $0.port)
+        }
+    }
+
+    /// The relays are also exit nodes. Withdrawing the relay permit (the
+    /// tunnel arm) must not kill the Core's own connection to the same node
+    /// on its exit port, which a host-wide `pfctl -k` would: a relay address
+    /// that is still the destination of a remaining permit is spared from a
+    /// targeted kill when every withdrawn rule naming it is the relay permit.
+    /// A relay connection open at that moment can then outlive the permit; it
+    /// carries TLS to the Tono API or release host only, and no new one is
+    /// admitted. Every other withdrawal is unchanged.
+    static func sparingSharedRelayHosts(
+        _ disposal: StateDisposal,
+        withdrawn: Set<String>,
+        remaining: Set<String>
+    ) -> StateDisposal {
+        guard case .targeted(let hosts) = disposal else { return disposal }
+        let kept = hosts.filter { host in
+            let needle = " to \(host) port "
+            let withdrawnForHost = withdrawn.filter { $0.contains(needle) }
+            let onlyRelay = !withdrawnForHost.isEmpty
+                && withdrawnForHost.allSatisfy { $0.contains("label \"\(controlRelayLabel)\"") }
+            let stillPermitted = remaining.contains { $0.contains(needle) }
+            return !(onlyRelay && stillPermitted)
+        }
+        return kept.isEmpty ? .keep : .targeted(kept)
+    }
+
     static func renderRules(
         state: KillSwitchState,
         allowedUID: uid_t,
@@ -392,8 +431,20 @@ extension KillSwitchManager {
             )
         }
 
+        // H1-F5, decision 086 (owner's Option A): the Tono API host is fronted
+        // by shared Cloudflare anycast, where any same-user process could reach
+        // any Cloudflare-fronted site by SNI. Its addresses are therefore never
+        // permitted. Without a tunnel the control plane is reached only through
+        // the Tono relays below, which forward the API and release SNIs alone;
+        // with a tunnel it uses the tunnel and nothing is permitted.
+        for endpoint in controlRelayPermitEndpoints(state: state) {
+            lines.append(
+                "pass out quick inet proto tcp to \(endpoint.address) port \(endpoint.port) "
+                    + "user \(allowedUID) keep state (if-bound) label \"\(controlRelayLabel)\""
+            )
+        }
         var controlEndpoints = Set<KillSwitchEndpoint>()
-        for addresses in state.resolvedHosts.values {
+        for (host, addresses) in state.resolvedHosts where KillSwitchManager.defaultHosts.contains(host) {
             for address in addresses {
                 controlEndpoints.insert(
                     .init(address: address, transport: "tcp", port: 443)
@@ -403,6 +454,8 @@ extension KillSwitchManager {
         for endpoint in controlEndpoints.sorted(by: {
             ($0.transport, $0.port, $0.address) < ($1.transport, $1.port, $1.address)
         }) {
+            // Tailscale control hosts only (Home-US bootstrap); the Tono API
+            // host is never rendered here (decision 086, above).
             // Restricted to two UIDs: root (the helper's DERP map refresh) and
             // the interactive user the app runs as (control-plane recovery while
             // the tunnel is down). Without a `user` clause — the only exception

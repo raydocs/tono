@@ -1072,6 +1072,8 @@ pub async fn restore_session_guarded(app: AppHandle, state: Arc<TonoState>) {
         )
     });
     crate::tono::update_handoff::retire_completed_legacy_journal(env!("CARGO_PKG_VERSION"));
+    // WIN-UPDATE-PARTIAL-FILES: packages an earlier run left in Tono's own download directory.
+    AsyncHandler::spawn(|| super::update::sweep_stale_downloads());
     load_credentials(&state).await;
     crate::tono::bootstrap::hydrate_learned_pins_from_service().await;
     let (client, catalog_dir, signed_out) = {

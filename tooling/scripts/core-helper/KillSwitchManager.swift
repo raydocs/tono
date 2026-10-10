@@ -416,7 +416,14 @@ final class KillSwitchManager {
         // there severs every established flow on the host for no protection
         // gain. Any removed pass rule still forces the full flush.
         let passRules = Self.passRules(in: renderedRules)
-        let disposal = Self.stateDisposal(replacing: lastLoadedPassRules, with: passRules)
+        // Decision 086: a withdrawn Cloudflare API permit (a ruleset from
+        // before it) is killed by address like any other; only a relay
+        // address the Core still dials as its exit is spared.
+        let disposal = Self.sparingSharedRelayHosts(
+            Self.stateDisposal(replacing: lastLoadedPassRules, with: passRules),
+            withdrawn: lastLoadedPassRules?.subtracting(passRules) ?? [],
+            remaining: passRules
+        )
         // The kernel takes the new ruleset part-way through the call below, ahead
         // of the PF enable, the state disposal, and the verification probes that
         // can each still throw. Recording nothing across it is what keeps a
@@ -428,8 +435,10 @@ final class KillSwitchManager {
         try Self.ensureAnchorLoaded(disposal: disposal, loadOutcome: &load)
         lastLoadedPassRules = passRules
         lastCommittedLocalNetwork = !state.tunnelInterfaces.isEmpty && state.allowLocalNetworkDevices
-        localNetworkFaultLocked = false
-        Self.clearProtectedFault()
+        if Self.commitEndsProtectedFault(state) {
+            localNetworkFaultLocked = false
+            Self.clearProtectedFault()
+        }
         stateGeneration &+= 1
         openNetworkEpoch &+= 1
         repairedSinceArm = false
@@ -470,14 +479,11 @@ final class KillSwitchManager {
                 tighteningUnconfirmed: tighteningUnconfirmed,
                 installStricterBlock: { try Self.installEmergencyBlock(allowedUID: uid) }
             )
-            if outcome == .faultStricterBlock || outcome == .faultStopCore {
+            var unpersisted = ""
+            if Self.latchesProtectedFault(outcome, liveSessionReArm: liveSessionReArm) {
                 localNetworkFaultLocked = true
-                do {
-                    try Self.recordProtectedFault()
-                } catch {
-                    FileHandle.standardError.write(Data(
-                        "tono: protected fault could not be persisted; it holds until this helper exits\n".utf8
-                    ))
+                if let failure = Self.persistProtectedFault() {
+                    unpersisted = " The fault could not be saved (\(failure)); it holds until this helper exits."
                 }
             }
             switch outcome {
@@ -487,7 +493,7 @@ final class KillSwitchManager {
                     code: Self.localNetworkFaultCode,
                     message: "Could not apply Allow local network devices off: "
                         + "\((error as? HelperFailure)?.message ?? String(describing: error)). "
-                        + "Every connection is blocked until protection is applied again."
+                        + "Every connection is blocked until protection is applied again." + unpersisted
                 )
             case .faultStopCore:
                 stateGeneration &+= 1
@@ -495,6 +501,7 @@ final class KillSwitchManager {
                     code: Self.localNetworkFaultStopCoreCode,
                     message: "Could not apply Allow local network devices off, and the stricter "
                         + "block could not be installed; the Core is stopped and protection stays armed."
+                        + unpersisted
                 )
             case .kept where liveSessionReArm:
                 // Coded so the app holds the session instead of taking its
@@ -504,7 +511,7 @@ final class KillSwitchManager {
                     code: Self.liveReArmFailedCode,
                     message: "Protection could not be updated: "
                         + "\((error as? HelperFailure)?.message ?? String(describing: error)). "
-                        + "The installed block stays."
+                        + "The installed block stays." + unpersisted
                 )
             case .released, .kept:
                 throw error
@@ -544,6 +551,43 @@ final class KillSwitchManager {
     static let localNetworkFaultCode = "KILLSWITCH_LOCAL_NETWORK_FAULT"
     static let localNetworkFaultStopCoreCode = "KILLSWITCH_LOCAL_NETWORK_FAULT_STOP_CORE"
     static let liveReArmFailedCode = "KILLSWITCH_LIVE_REARM_FAILED"
+
+    /// Which failed-arm outcomes leave the helper in the protected fault:
+    /// the stricter block, the stopped Core, and a live-session re-arm that
+    /// kept the installed block. All three wait for the user.
+    static func latchesProtectedFault(_ outcome: FailedArmOutcome, liveSessionReArm: Bool) -> Bool {
+        switch outcome {
+        case .faultStricterBlock, .faultStopCore: true
+        case .kept: liveSessionReArm
+        case .released: false
+        }
+    }
+
+    /// Persists the fault; returns the failure text when it could not be
+    /// saved, so the caller reports it instead of dropping it.
+    static func persistProtectedFault(
+        record: () throws -> Void = { try KillSwitchManager.recordProtectedFault() }
+    ) -> String? {
+        do {
+            try record()
+            return nil
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: protected fault could not be persisted: \(detail)\n".utf8
+            ))
+            return detail
+        }
+    }
+
+    /// Only an arm that commits a tunnel (the user's reconnect, a toggle's
+    /// re-arm, a heal reassert) ends the fault; a disarm (the user's
+    /// Disconnect) does too. A bootstrap restriction (no tunnel), which an
+    /// automatic preserve teardown issues, leaves it, so the core-down
+    /// watchdog cannot release the block afterwards.
+    static func commitEndsProtectedFault(_ state: KillSwitchState) -> Bool {
+        !state.tunnelInterfaces.isEmpty
+    }
 
     /// Persist the protected fault with the boot session it began in. The
     /// effects are injectable for the self-test, which has no root.
@@ -815,14 +859,19 @@ final class KillSwitchManager {
             return true
         } catch {
             stateGeneration &+= 1
-            if Self.failedCommitReleasesInstalledBlock(
-                load: load,
-                strictKillSwitchEnabled: false
-            ) {
+            if Self.powerTransitionFailureReleases(load: load, protectedFault: localNetworkFaultLocked) {
                 Self.releaseInstalledBlock()
             }
             return false
         }
+    }
+
+    /// A sleep or wake barrier that failed after its load may release, as
+    /// any non-strict failure does, except while the A29 protected fault
+    /// holds: then the block stays until the user acts, like a strict kill
+    /// switch.
+    static func powerTransitionFailureReleases(load: KernelLoadOutcome, protectedFault: Bool) -> Bool {
+        failedCommitReleasesInstalledBlock(load: load, strictKillSwitchEnabled: protectedFault)
     }
 
     /// `false` records a pending removal ("releasing"). Only a finished
@@ -1154,16 +1203,22 @@ final class KillSwitchManager {
         var wanted = false
         var live = (try? Self.effectiveStatus()) ?? false
         do {
+            var tunnelArmed: Bool?
             if let state = try loadState() {
                 wanted = state.armed
                 if wanted && live {
                     Self.pinHostsIfUsable(state: state)
                 }
+                // Decision 086: whether the saved arm carries a tunnel, so the
+                // app knows when the relays are its only control-plane path,
+                // including after arms it did not issue (update preparation).
+                tunnelArmed = !state.tunnelInterfaces.isEmpty
                 // Do not load rules from a status read. Update preparation
                 // calls this after the Core has stopped; rewriting PF would
                 // put the block back on a machine whose Core is gone.
             }
             var result = response(armed: live, wanted: wanted, live: live, healed: false)
+            if let tunnelArmed { result["tunnelArmed"] = tunnelArmed }
             // A29: lets an app that restarted, or a helper that restarted
             // under it, show the protected fault instead of a normal block.
             result["protectedFault"] = localNetworkFaultLocked

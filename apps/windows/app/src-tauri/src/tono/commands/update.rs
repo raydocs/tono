@@ -14,6 +14,7 @@ use once_cell::sync::Lazy;
 use serde::Serialize;
 use std::{
     net::SocketAddr,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU8, Ordering},
@@ -23,6 +24,7 @@ use std::{
 use tono_core::auth::{HttpMethod, should_retry_transport};
 use tauri::{AppHandle, ipc::Channel};
 use tokio::{io::AsyncWriteExt as _, sync::Mutex};
+use tokio_util::sync::CancellationToken;
 use tono_logging::{Type, logging};
 use tono_core::connection::ConnectionFsm;
 use tono_service_protocol::{
@@ -33,6 +35,97 @@ use tono_service_protocol::{
 static OFFER: Lazy<Mutex<Option<(String, String, ReleaseManifest)>>> = Lazy::new(|| Mutex::new(None));
 static INSTALL: Mutex<()> = Mutex::const_new(());
 static INCOMPLETE: AtomicBool = AtomicBool::new(false);
+
+/// The marker a cancelled package download fails with. The update dialog does not keep it as
+/// a refusal of the offer: the user may start the same update again.
+pub(crate) const DOWNLOAD_CANCELLED: &str = "TONO_UPDATE_CANCELLED";
+
+/// The token of the update in flight, from the moment the install is admitted until its download
+/// ends (`DownloadCancelSlot`), so Cancel can never reach the proxy clear, Prepare or Install.
+static DOWNLOAD_CANCEL: std::sync::Mutex<Option<CancellationToken>> = std::sync::Mutex::new(None);
+
+/// Holds `DOWNLOAD_CANCEL` for one download and empties it however the download ends,
+/// including when the install command itself is dropped.
+struct DownloadCancelSlot;
+
+impl DownloadCancelSlot {
+    fn open(token: &CancellationToken) -> Self {
+        *DOWNLOAD_CANCEL.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(token.clone());
+        Self
+    }
+}
+
+impl Drop for DownloadCancelSlot {
+    fn drop(&mut self) {
+        DOWNLOAD_CANCEL.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+    }
+}
+
+/// The update dialog's Cancel: abort the package download in flight, wherever it is (the first
+/// request, a chunk, a resume). False when no download is running; nothing after the download
+/// (Prepare, Install) can be cancelled from here.
+#[tauri::command]
+pub fn tono_cancel_update_download() -> bool {
+    let token = DOWNLOAD_CANCEL.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+    token.map(|token| token.cancel()).is_some()
+}
+
+/// Tono's own package download directory under the App data root.
+const DOWNLOADS_DIR: &str = "update-downloads";
+
+/// One downloaded package, removed when this is dropped: on every failure path of the install
+/// (an error, a cancelled download, a refused Prepare) and right after Prepare returned, when
+/// the Service already holds its own private, hash-checked copy (`copy_private`) and never
+/// reads this one again. Best effort: a file the Service still has pinned is left for the next
+/// startup sweep.
+struct DownloadedPackage(PathBuf);
+
+impl Drop for DownloadedPackage {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Whether `name` is a package this updater writes: a 32-digit lowercase hex nonce and `.exe`.
+fn is_download_name(name: &str) -> bool {
+    name.strip_suffix(".exe").is_some_and(|nonce| {
+        nonce.len() == 32 && nonce.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    })
+}
+
+/// Remove the packages earlier runs left in `dir`: regular files named by a download nonce,
+/// directly in `dir`. No recursion, and `DirEntry::file_type` does not follow a link, so
+/// nothing outside Tono's own download directory is touched. Returns how many were removed.
+fn sweep_downloads_in(dir: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if !name.to_str().is_some_and(is_download_name) || !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            continue;
+        }
+        if std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// At startup: remove the packages an earlier run left behind (it failed, was killed, or
+/// handed off and then exited before deleting). Holds the install lock, so a download this
+/// process starts meanwhile is never touched.
+pub async fn sweep_stale_downloads() {
+    let _install = INSTALL.lock().await;
+    let Ok(dir) = dirs::app_home_dir().map(|home| home.join(DOWNLOADS_DIR)) else {
+        return;
+    };
+    let removed = tokio::task::spawn_blocking(move || sweep_downloads_in(&dir)).await.unwrap_or(0);
+    if removed > 0 {
+        logging!(info, Type::Tono, "Tono: removed {removed} update download(s) an earlier run left");
+    }
+}
 
 pub fn incomplete() -> bool {
     INCOMPLETE.load(Ordering::Acquire)
@@ -64,11 +157,20 @@ pub async fn request(request: UpdateRequest) -> Result<UpdateStatus> {
     Ok(status)
 }
 
+/// No byte for this long fails the read, as on macOS (`NativeUpdateDownload.idleBudget`). A
+/// transfer whose link died under a sleep or a network change then stops in a minute and resumes
+/// (`download_resuming`) instead of holding the install until the 600 s request cap.
+const IDLE_BUDGET: Duration = Duration::from_secs(60);
+
+/// How many times a package download that stopped mid-transfer picks up where it stopped.
+const DOWNLOAD_RESUMES: u32 = 3;
+
 fn builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .https_only(true)
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
+        .read_timeout(IDLE_BUDGET)
         .timeout(Duration::from_secs(600))
 }
 
@@ -98,6 +200,7 @@ async fn get_via_relay(
     host: &str,
     relay: SocketAddr,
     timeout: Option<Duration>,
+    from: Option<u64>,
     builder: &impl Fn() -> reqwest::ClientBuilder,
 ) -> Result<Option<Result<reqwest::Response, reqwest::Error>>> {
     let mut relayed = url.clone();
@@ -108,12 +211,18 @@ async fn get_via_relay(
         .connect_timeout(RELAY_CONNECT_TIMEOUT)
         .resolve(host, relay)
         .build()?;
-    Ok(Some(with_timeout(client.get(relayed.as_str()), timeout).send().await))
+    Ok(Some(prepared(client.get(relayed.as_str()), timeout, from).send().await))
 }
 
-fn with_timeout(request: reqwest::RequestBuilder, timeout: Option<Duration>) -> reqwest::RequestBuilder {
-    match timeout {
+/// `request` with its own total `timeout`, when given, and asking only for the bytes from
+/// `from` on, when given (a resumed package download).
+fn prepared(request: reqwest::RequestBuilder, timeout: Option<Duration>, from: Option<u64>) -> reqwest::RequestBuilder {
+    let request = match timeout {
         Some(limit) => request.timeout(limit),
+        None => request,
+    };
+    match from {
+        Some(offset) => request.header(reqwest::header::RANGE, format!("bytes={offset}-")),
         None => request,
     }
 }
@@ -137,6 +246,19 @@ async fn get_with_relays(
     builder: impl Fn() -> reqwest::ClientBuilder,
     preferred: &PathPreference,
 ) -> Result<reqwest::Response> {
+    get_with_relays_from(direct, url, timeout, relays, builder, preferred, None).await
+}
+
+/// [`get_with_relays`] for the bytes from `from` on (`Range`), when given.
+async fn get_with_relays_from(
+    direct: &reqwest::Client,
+    url: &str,
+    timeout: Option<Duration>,
+    relays: &[SocketAddr],
+    builder: impl Fn() -> reqwest::ClientBuilder,
+    preferred: &PathPreference,
+    from: Option<u64>,
+) -> Result<reqwest::Response> {
     let parsed = reqwest::Url::parse(url)?;
     let host = parsed.host_str().map(str::to_owned);
     let mut failures = Vec::new();
@@ -148,7 +270,7 @@ async fn get_with_relays(
     if let (Some(index), Some(host)) = (first, host.as_deref()) {
         let relay = relays[index];
         tried = Some(index);
-        match get_via_relay(&parsed, host, relay, timeout, &builder).await? {
+        match get_via_relay(&parsed, host, relay, timeout, from, &builder).await? {
             Some(Ok(response)) => return Ok(response),
             Some(Err(error)) => {
                 // The transport's rule for an undelivered GET (`should_retry_transport`), and the
@@ -162,7 +284,7 @@ async fn get_with_relays(
         }
         preferred.set_relay(0);
     }
-    let direct_error = match with_timeout(direct.get(url), timeout).send().await {
+    let direct_error = match prepared(direct.get(url), timeout, from).send().await {
         Ok(response) => return Ok(response),
         Err(error) => error,
     };
@@ -175,7 +297,7 @@ async fn get_with_relays(
     };
     for index in (0..relays.len()).filter(|index| Some(*index) != tried) {
         let relay = relays[index];
-        match get_via_relay(&parsed, host, relay, timeout, &builder).await? {
+        match get_via_relay(&parsed, host, relay, timeout, from, &builder).await? {
             Some(Ok(response)) => {
                 preferred.set_relay(index + 1);
                 return Ok(response);
@@ -191,10 +313,153 @@ async fn get_with_relays(
     Err(anyhow::Error::new(direct_error).context(failures.join("; ")))
 }
 
+/// What a package download reports to the progress channel.
+enum DownloadEvent {
+    /// The first response arrived.
+    Started,
+    /// This many more bytes were written.
+    Chunk(usize),
+}
+
+/// Stream the package at `url` into `sink`: exactly `expected` bytes, the signed size.
+///
+/// A transfer that stops after its response started (a reset, a stall past `IDLE_BUDGET`, the
+/// request cap, a body that ends short) asks again, through the same path walk and so first
+/// through the relay the API last reached, for the bytes not yet written (`Range: bytes=<n>-`),
+/// up to `DOWNLOAD_RESUMES` times. A resumed answer counts only as `206` for exactly that offset
+/// and the signed size, so what is on disk stays one contiguous copy. Before, any stop after the
+/// first byte failed the install and the next try started again from zero, on the same flaky
+/// cross-border link. Nothing here is trusted: the Service checks the size and SHA-256 against
+/// the signed manifest before anything runs.
+///
+/// `cancel` aborts it at any point: the request or chunk in flight is dropped, and no resume
+/// follows. The error then carries [`DOWNLOAD_CANCELLED`].
+#[allow(clippy::too_many_arguments)]
+async fn download_resuming(
+    direct: &reqwest::Client,
+    url: &str,
+    relays: &[SocketAddr],
+    builder: impl Fn() -> reqwest::ClientBuilder,
+    preferred: &PathPreference,
+    expected: u64,
+    sink: &mut (impl tokio::io::AsyncWrite + Unpin),
+    cancel: &CancellationToken,
+    progress: impl FnMut(DownloadEvent) -> Result<()>,
+) -> Result<()> {
+    tokio::select! {
+        biased;
+        () = cancel.cancelled() => Err(anyhow::anyhow!("{DOWNLOAD_CANCELLED}: update download cancelled")),
+        result = download_resuming_uncancelled(direct, url, relays, builder, preferred, expected, sink, progress) => result,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn download_resuming_uncancelled(
+    direct: &reqwest::Client,
+    url: &str,
+    relays: &[SocketAddr],
+    builder: impl Fn() -> reqwest::ClientBuilder,
+    preferred: &PathPreference,
+    expected: u64,
+    sink: &mut (impl tokio::io::AsyncWrite + Unpin),
+    mut progress: impl FnMut(DownloadEvent) -> Result<()>,
+) -> Result<()> {
+    let mut written = 0u64;
+    let mut resumes = 0u32;
+    loop {
+        let from = (written > 0).then_some(written);
+        let mut response = get_with_relays_from(direct, url, None, relays, &builder, preferred, from)
+            .await?
+            .error_for_status()?;
+        match from {
+            None => progress(DownloadEvent::Started)?,
+            Some(offset) => ensure!(
+                resumed_at(&response, offset, expected),
+                "package resume was not answered from byte {offset}"
+            ),
+        }
+        let stopped = loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => {
+                    written += chunk.len() as u64;
+                    ensure!(written <= expected, "package exceeds signed size");
+                    sink.write_all(&chunk).await?;
+                    progress(DownloadEvent::Chunk(chunk.len()))?;
+                }
+                Ok(None) => break None,
+                Err(error) => break Some(error),
+            }
+        };
+        if stopped.is_none() && written == expected {
+            return Ok(());
+        }
+        if written >= expected || resumes >= DOWNLOAD_RESUMES {
+            return match stopped {
+                Some(error) => Err(error.into()),
+                None => Err(anyhow::anyhow!("package is truncated")),
+            };
+        }
+        resumes += 1;
+        logging!(
+            warn,
+            Type::Tono,
+            "Tono: update download stopped at {written}/{expected} bytes ({}); resuming ({resumes}/{DOWNLOAD_RESUMES})",
+            stopped.map_or_else(|| "body ended early".to_owned(), |error| error.to_string())
+        );
+    }
+}
+
+/// Whether `response` is the `206` for the bytes from `offset` to the end of a file of
+/// `expected` bytes.
+fn resumed_at(response: &reqwest::Response, offset: u64, expected: u64) -> bool {
+    let Some(range) = response
+        .headers()
+        .get(reqwest::header::CONTENT_RANGE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("bytes "))
+    else {
+        return false;
+    };
+    let Some((span, total)) = range.split_once('/') else {
+        return false;
+    };
+    let Some((start, end)) = span.split_once('-') else {
+        return false;
+    };
+    response.status() == reqwest::StatusCode::PARTIAL_CONTENT
+        && digits(start) == Some(offset)
+        && digits(end) == expected.checked_sub(1)
+        && (total == "*" || digits(total) == Some(expected))
+}
+
+/// A `Content-Range` number: ASCII digits only. `u64::from_str` also takes a leading `+`, and a
+/// sign or whitespace is not the grammar of RFC 9110 `complete-length` / `first-pos`.
+fn digits(text: &str) -> Option<u64> {
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    text.parse().ok()
+}
+
 async fn bounded(client: &reqwest::Client, url: &str, limit: usize, preferred: &PathPreference) -> Result<String> {
-    let mut response = get(client, url, Some(Duration::from_secs(30)), preferred)
-        .await?
-        .error_for_status()?;
+    read_bounded(get(client, url, Some(Duration::from_secs(30)), preferred).await?, limit).await
+}
+
+/// The discovery document, or `None` when the release host answered 404: nothing is published
+/// on the v1 channel, which is no update rather than a failed check. The answer is the release
+/// host's own on every path (a relay passes the TLS session through). Any other 4xx/5xx still
+/// fails (`error_for_status`), and so does a 404 for the signature of a published manifest
+/// (`bounded`). A 3xx is not followed (`Policy::none`) and is not rejected here: its body is
+/// read under the same cap and goes to the Service's signature check like any other answer.
+async fn discovery_document(response: reqwest::Response) -> Result<Option<String>> {
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    read_bounded(response, 16_384).await.map(Some)
+}
+
+async fn read_bounded(response: reqwest::Response, limit: usize) -> Result<String> {
+    let mut response = response.error_for_status()?;
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await? {
         ensure!(bytes.len() + chunk.len() <= limit, "update document exceeds limit");
@@ -218,7 +483,13 @@ pub async fn tono_check_update(state: tauri::State<'_, Arc<TonoState>>) -> Resul
         // starts its update GETs there too (decision 077).
         let api = state.lock().await.client.clone();
         let preferred = api.transport().path_preference();
-        let manifest = bounded(&client, DISCOVERY_URL, 16_384, preferred).await?;
+        let discovered = get(&client, DISCOVERY_URL, Some(Duration::from_secs(30)), preferred).await?;
+        let Some(manifest) = discovery_document(discovered).await? else {
+            // Nothing published: no offer, and SWR keeps its daily cadence instead of the
+            // hourly recheck it gives a failed check.
+            *OFFER.lock().await = None;
+            return Ok(None);
+        };
         let decoded = ReleaseManifest::decode(manifest.as_bytes())?;
         let hash = decoded.sha256()?;
         let signature = bounded(
@@ -251,6 +522,20 @@ pub async fn tono_check_update(state: tauri::State<'_, Arc<TonoState>>) -> Resul
     .map_err(|e| format!("Protected update discovery failed: {e:#}"))
 }
 
+/// Admits one install and registers its Cancel at once. The dialog shows the update running
+/// as soon as it asks for the install, so a Cancel during the preparation before the download
+/// (offer, directory, file) must still stop it: the download then never starts. Before, the
+/// token was registered only when the download began, so an early Cancel reached nothing and
+/// the update went on to download, Prepare and Install unseen.
+fn admit_install() -> Result<(tokio::sync::MutexGuard<'static, ()>, CancellationToken, DownloadCancelSlot), String> {
+    let install = INSTALL
+        .try_lock()
+        .map_err(|_| "An update request is already running".to_string())?;
+    let cancel = CancellationToken::new();
+    let slot = DownloadCancelSlot::open(&cancel);
+    Ok((install, cancel, slot))
+}
+
 #[tauri::command]
 pub async fn tono_install_update(
     app: AppHandle,
@@ -258,9 +543,7 @@ pub async fn tono_install_update(
     manifest_sha256: String,
     progress: Channel<serde_json::Value>,
 ) -> Result<(), String> {
-    let _install = INSTALL
-        .try_lock()
-        .map_err(|_| "An update request is already running".to_string())?;
+    let (_install, cancel, cancel_slot) = admit_install()?;
     // The generation this update retired, if it got that far. Convergence may
     // only fold the attempt this update invalidated, never a live one.
     let mut invalidated = None;
@@ -276,7 +559,7 @@ pub async fn tono_install_update(
             .iter()
             .find(|t| t.id == TargetId::WindowsX86_64)
             .context("no Windows target")?;
-        let root = dirs::app_home_dir()?.join("update-downloads");
+        let root = dirs::app_home_dir()?.join(DOWNLOADS_DIR);
         tokio::fs::create_dir_all(&root).await?;
         let mut random = [0u8; 16];
         getrandom::fill(&mut random).context("download nonce failed")?;
@@ -287,24 +570,34 @@ pub async fn tono_install_update(
             .write(true)
             .open(&path)
             .await?;
+        // Removed on every way out of this block, and right after Prepare below.
+        let package = DownloadedPackage(path.clone());
         let api = state.lock().await.client.clone();
-        let mut response = get(
+        let downloaded = download_resuming(
             &client()?,
             &format!("{RELEASE_ROOT}/{manifest_sha256}/package.windows-x86_64.exe"),
-            None,
+            &bootstrap::api_relays(),
+            builder,
             api.transport().path_preference(),
+            target.artifact_size_bytes,
+            &mut file,
+            &cancel,
+            |event| {
+                progress.send(match event {
+                    DownloadEvent::Started => serde_json::json!(
+                        {"event":"Started", "data":{"contentLength":target.artifact_size_bytes}}
+                    ),
+                    DownloadEvent::Chunk(length) => serde_json::json!(
+                        {"event":"Progress", "data":{"chunkLength":length}}
+                    ),
+                })?;
+                Ok(())
+            },
         )
-        .await?
-        .error_for_status()?;
-        progress.send(serde_json::json!({"event":"Started", "data":{"contentLength":target.artifact_size_bytes}}))?;
-        let mut size = 0u64;
-        while let Some(chunk) = response.chunk().await? {
-            size += chunk.len() as u64;
-            ensure!(size <= target.artifact_size_bytes, "package exceeds signed size");
-            file.write_all(&chunk).await?;
-            progress.send(serde_json::json!({"event":"Progress", "data":{"chunkLength":chunk.len()}}))?;
-        }
-        ensure!(size == target.artifact_size_bytes, "package is truncated");
+        .await;
+        // The download is over: Cancel no longer reaches anything after it.
+        drop(cancel_slot);
+        downloaded?;
         file.sync_all().await?;
         drop(file);
         progress.send(serde_json::json!({"event":"Finished"}))?;
@@ -324,7 +617,10 @@ pub async fn tono_install_update(
             signature,
             package_path: path.to_string_lossy().into_owned(),
         })
-        .await?;
+        .await;
+        // Prepare returned: the Service has its private copy (or refused); this one goes.
+        drop(package);
+        let prepared = prepared?;
         let receipt = prepared.receipt.context("Service omitted durable receipt")?;
         ensure!(
             receipt.phase == Phase::InstallationAuthorized && receipt.manifest_sha256 == manifest_sha256,
@@ -731,6 +1027,252 @@ mod update_relay_tests {
         assert_eq!(preferred.relay(), 2, "the relay that answered is remembered");
     }
 
+    /// A package transfer cut off mid-body (a reset, a stall, a network change; simulated here
+    /// by a server that closes after half the bytes) picks up from the bytes already written
+    /// with `Range`, and the file ends as the one contiguous copy. Before, the install failed and
+    /// the next try started again from byte 0. A resumed answer whose `Content-Range` numbers are
+    /// not plain ASCII digits (`bytes +5-+9/+10`) is refused.
+    #[tokio::test]
+    async fn a_package_download_cut_off_mid_body_resumes_from_the_bytes_written() {
+        const PACKAGE: &[u8] = b"0123456789";
+        // A server that cuts the first transfer off halfway and answers a `Range` request with a
+        // 206, its `Content-Range` numbers written with a leading `+` when `signed`. The Range
+        // header of every request goes to the receiver, empty when absent.
+        fn serve(signed: bool) -> (SocketAddr, std::sync::mpsc::Receiver<String>) {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            let address = listener.local_addr().expect("addr");
+            let (range_tx, range_rx) = std::sync::mpsc::channel::<String>();
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    use std::io::{BufRead as _, BufReader, Write as _};
+                    let Ok(mut stream) = stream else { continue };
+                    let Ok(clone) = stream.try_clone() else { continue };
+                    let mut reader = BufReader::new(clone);
+                    let mut line = String::new();
+                    let mut range = String::new();
+                    while reader.read_line(&mut line).unwrap_or(0) > 0 && line != "\r\n" && line != "\n" {
+                        if let Some((name, value)) = line.split_once(':')
+                            && name.eq_ignore_ascii_case("range")
+                        {
+                            range = value.trim().to_owned();
+                        }
+                        line.clear();
+                    }
+                    let _ = range_tx.send(range.clone());
+                    if let Some(from) = range.strip_prefix("bytes=").and_then(|v| v.strip_suffix('-')) {
+                        let from: usize = from.parse().expect("offset");
+                        let sign = if signed { "+" } else { "" };
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {sign}{from}-{sign}{}/{sign}{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            PACKAGE.len() - 1,
+                            PACKAGE.len(),
+                            PACKAGE.len() - from
+                        );
+                        let _ = stream.write_all(&PACKAGE[from..]);
+                    } else {
+                        // The whole length is announced; half of it arrives, then the link is gone.
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            PACKAGE.len()
+                        );
+                        let _ = stream.write_all(&PACKAGE[..PACKAGE.len() / 2]);
+                    }
+                    let _ = stream.flush();
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                }
+            });
+            (address, range_rx)
+        }
+        async fn download(address: SocketAddr, written: &mut Vec<u8>) -> (Result<()>, usize, usize) {
+            let direct = reqwest::Client::builder()
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none())
+                .resolve("releases.test", address)
+                .build()
+                .expect("direct client");
+            let (mut started, mut reported) = (0, 0);
+            let result = download_resuming(
+                &direct,
+                &format!("http://releases.test:{}/desktop/v1/package.windows-x86_64.exe", address.port()),
+                &[],
+                || reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()),
+                &PathPreference::default(),
+                PACKAGE.len() as u64,
+                written,
+                &CancellationToken::new(),
+                |event| {
+                    match event {
+                        DownloadEvent::Started => started += 1,
+                        DownloadEvent::Chunk(length) => reported += length,
+                    }
+                    Ok(())
+                },
+            )
+            .await;
+            (result, started, reported)
+        }
+
+        let (address, range_rx) = serve(false);
+        let mut written = Vec::new();
+        let (result, started, reported) = download(address, &mut written).await;
+        result.expect("the cut-off download must resume");
+        assert_eq!(written, PACKAGE, "the bytes on disk must be one contiguous copy");
+        assert_eq!((started, reported), (1, PACKAGE.len()));
+        assert_eq!(range_rx.recv_timeout(Duration::from_secs(1)).expect("first request"), "");
+        assert_eq!(
+            range_rx.recv_timeout(Duration::from_secs(1)).expect("the resumed request"),
+            format!("bytes={}-", PACKAGE.len() / 2)
+        );
+
+        // `bytes +5-+9/+10`: `u64::from_str` would take each number; the resume must not.
+        let (signed, _ranges) = serve(true);
+        let mut written = Vec::new();
+        let (result, _, _) = download(signed, &mut written).await;
+        let error = result.expect_err("a signed Content-Range must not be accepted");
+        assert!(
+            error.to_string().contains("package resume was not answered from byte 5"),
+            "{error:#}"
+        );
+        assert_eq!(written, &PACKAGE[..PACKAGE.len() / 2], "nothing after the refused answer is written");
+    }
+
+    /// WIN-UPDATE-PARTIAL-FILES: the dialog's Cancel aborts a download that is stalled
+    /// mid-body (the server sent half and holds the connection open). Before, Cancel only
+    /// closed the dialog and the download ran on until a timeout.
+    #[tokio::test]
+    async fn cancel_aborts_a_download_stalled_mid_body() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let address = listener.local_addr().expect("addr");
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for stream in listener.incoming() {
+                use std::io::{BufRead as _, BufReader, Write as _};
+                let Ok(mut stream) = stream else { continue };
+                let Ok(clone) = stream.try_clone() else { continue };
+                let mut reader = BufReader::new(clone);
+                let mut line = String::new();
+                while reader.read_line(&mut line).unwrap_or(0) > 0 && line != "\r\n" && line != "\n" {
+                    line.clear();
+                }
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n01234");
+                let _ = stream.flush();
+                // Never finished, never closed.
+                held.push(stream);
+            }
+        });
+        let direct = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .resolve("releases.test", address)
+            .build()
+            .expect("direct client");
+        // DOWNLOAD_CANCEL is process-wide: hold INSTALL as an install would, so the other
+        // Cancel test cannot take this token.
+        let _install = INSTALL.lock().await;
+        let cancel = CancellationToken::new();
+        // The download slot as the install command opens it; Cancel reaches it through the command.
+        let slot = DownloadCancelSlot::open(&cancel);
+        let mut written = Vec::new();
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            download_resuming(
+                &direct,
+                &format!("http://releases.test:{}/desktop/v1/package.windows-x86_64.exe", address.port()),
+                &[],
+                || reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()),
+                &PathPreference::default(),
+                10,
+                &mut written,
+                &cancel,
+                |event| {
+                    if matches!(event, DownloadEvent::Chunk(_)) {
+                        assert!(tono_cancel_update_download(), "a download is in flight");
+                    }
+                    Ok(())
+                },
+            ),
+        )
+        .await
+        .expect("Cancel must end the stalled download, not a timeout");
+        let error = result.expect_err("a cancelled download fails");
+        assert!(error.to_string().starts_with(DOWNLOAD_CANCELLED), "{error:#}");
+        assert_eq!(written, b"01234", "nothing is written after the cancel");
+        drop(slot);
+        assert!(!tono_cancel_update_download(), "with no download in flight Cancel reaches nothing");
+    }
+
+    /// Sol review minor (#1540): Cancel pressed while an admitted install is still preparing (before
+    /// the download starts) reaches it, and the download it would start fails as cancelled.
+    #[tokio::test]
+    async fn cancel_before_the_download_starts_stops_the_admitted_install() {
+        // Another test may hold INSTALL for a moment; wait for the slot rather than share it.
+        let (install, cancel, slot) = loop {
+            match admit_install() {
+                Ok(admitted) => break admitted,
+                Err(_) => tokio::time::sleep(Duration::from_millis(20)).await,
+            }
+        };
+        assert!(tono_cancel_update_download(), "the admitted install is cancellable at once");
+        let mut written = Vec::new();
+        let direct = reqwest::Client::builder().no_proxy().build().expect("client");
+        let error = download_resuming(
+            &direct,
+            "http://127.0.0.1:1/desktop/v1/package.windows-x86_64.exe",
+            &[],
+            || reqwest::Client::builder().no_proxy(),
+            &PathPreference::default(),
+            10,
+            &mut written,
+            &cancel,
+            |_| Ok(()),
+        )
+        .await
+        .expect_err("a download after an early Cancel fails");
+        assert!(error.to_string().starts_with(DOWNLOAD_CANCELLED), "{error:#}");
+        assert!(written.is_empty(), "nothing is fetched");
+        drop(slot);
+        drop(install);
+    }
+
+    /// WIN-UPDATE-PARTIAL-FILES: a package file is removed when its install ends (failure,
+    /// cancel, or after the Service's Prepare took its own copy), and the startup sweep removes
+    /// only nonce-named package files left directly in Tono's download directory.
+    #[test]
+    fn package_files_are_removed_and_the_sweep_stays_in_the_download_dir() {
+        let dir = std::env::temp_dir().join(format!("tono-update-downloads-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let nonce = "0123456789abcdef0123456789abcdef";
+
+        let current = dir.join(format!("{nonce}.exe"));
+        std::fs::write(&current, b"partial").expect("partial");
+        drop(DownloadedPackage(current.clone()));
+        assert!(!current.exists(), "an install that ended leaves no package behind");
+
+        let stale = dir.join("fedcba9876543210fedcba9876543210.exe");
+        std::fs::write(&stale, b"left by an earlier run").expect("stale");
+        let kept = [
+            dir.join("notes.txt"),
+            dir.join("setup.exe"),
+            dir.join("0123456789ABCDEF0123456789ABCDEF.exe"),
+        ];
+        for file in &kept {
+            std::fs::write(file, b"not ours").expect("kept");
+        }
+        let nested = dir.join("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.exe");
+        std::fs::create_dir_all(&nested).expect("nested dir");
+        let inside = nested.join("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.exe");
+        std::fs::write(&inside, b"below the download dir").expect("inside");
+
+        assert_eq!(sweep_downloads_in(&dir), 1);
+        assert!(!stale.exists());
+        assert!(kept.iter().all(|file| file.exists()), "only nonce-named packages are removed");
+        assert!(nested.is_dir() && inside.exists(), "the sweep neither recurses nor removes directories");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Backlog A1: once a sign-in went through a relay, the update GET starts at that relay
     /// instead of first paying the direct path (about 21 s of SYN retries on a dead Windows
     /// route). The direct path here answers, so a GET that tried it first reads "direct".
@@ -786,5 +1328,56 @@ mod update_relay_tests {
             "the update GET went to the direct path before the relay the sign-in used"
         );
         assert_eq!(preferred.relay(), 2, "an answering relay stays preferred");
+    }
+
+    /// Nothing is published on the v1 channel yet: the release host answers 404 for
+    /// `latest/manifest.json`. Through a relay as on the direct path, that is no update
+    /// (`Ok(None)`), not a failed check, and the 404 is not sent on to another relay.
+    #[tokio::test]
+    async fn an_unpublished_discovery_manifest_over_a_relay_is_no_update() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let relay = listener.local_addr().expect("addr");
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                use std::io::{BufRead as _, BufReader, Write as _};
+                let Ok(mut stream) = stream else { continue };
+                let Ok(clone) = stream.try_clone() else { continue };
+                let mut reader = BufReader::new(clone);
+                let mut line = String::new();
+                while reader.read_line(&mut line).unwrap_or(0) > 0 && line != "\r\n" && line != "\n" {
+                    line.clear();
+                }
+                let _ = stream.write_all(
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nNot found",
+                );
+                let _ = stream.flush();
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+            }
+        });
+        // The direct path refuses before any response, so the GET goes to the relay.
+        let direct = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .resolve("releases.test", SocketAddr::from(([127, 0, 0, 1], 1)))
+            .build()
+            .expect("direct client");
+        let preferred = PathPreference::default();
+        let response = get_with_relays(
+            &direct,
+            "http://releases.test/desktop/v1/latest/manifest.json",
+            Some(Duration::from_secs(5)),
+            // A second relay that would refuse: a 404 is an answer and must not reach it.
+            &[relay, SocketAddr::from(([127, 0, 0, 1], 1))],
+            || reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()),
+            &preferred,
+        )
+        .await
+        .expect("the relay's 404 is an answer");
+        assert_eq!(response.status(), 404);
+        assert_eq!(
+            discovery_document(response).await.expect("an unpublished channel is not a failed check"),
+            None
+        );
+        assert_eq!(preferred.relay(), 1, "the relay that answered stays preferred");
     }
 }

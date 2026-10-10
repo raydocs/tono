@@ -716,11 +716,39 @@ extension AppState {
                         )
                         self.lastConnectionFailure = preservedFailure
                         self.completedConnectionStages = preservedStages
+                        // The unarmed loop ended when it started this connect
+                        // after a TCP proof. A failure before PF armed (the
+                        // network service gone mid-handoff, a catalog exit it
+                        // cannot dial) would leave nothing to try again: no
+                        // loop, and a network change restarts only a loop that
+                        // still owns the generation. Hand recovery back to the
+                        // loop at its preserved rung, after this release
+                        // (it waits for the teardown). Never for a failure that
+                        // needs the user, nor at helper preparation, which may
+                        // raise an administrator prompt.
+                        if Self.unarmedLoopResumesAfterPreArmFailure(
+                            startedByUnarmedLoop: preservingUnarmedBackoff,
+                            stage: failedStage,
+                            error: error
+                        ) {
+                            self.scheduleUnarmedReconnect()
+                        }
                     }
             }
         }
     )
 }
+
+    /// Whether a connect that failed before PF armed goes back to the
+    /// unarmed reconnect loop: only one that loop started, and only for a
+    /// failure that neither needs the user nor came from helper preparation.
+    static func unarmedLoopResumesAfterPreArmFailure(
+        startedByUnarmedLoop: Bool,
+        stage: ConnectionStage,
+        error: any Error
+    ) -> Bool {
+        startedByUnarmedLoop && stage != .preparingHelper && !failureRequiresUserAction(error)
+    }
 
     /// A released host starts a genuinely new story; stale failure history
     /// must not let a single failure in a future session trip the "repeated

@@ -56,6 +56,10 @@ nonisolated struct HelperManager {
         /// instead of written back. A helper without service-ID snapshots
         /// never sends it.
         let originalDNSRestored: Bool?
+        /// `/killswitch/status` only (decision 086): whether the saved arm
+        /// carries a tunnel. Absent before helper 4.52.45 or without saved
+        /// state.
+        let tunnelArmed: Bool?
         let lastError: String?
         let error: String?
     }
@@ -914,6 +918,15 @@ nonisolated struct HelperManager {
     static func killSwitchStatus() throws -> (
         armed: Bool, wanted: Bool, live: Bool, healed: Bool
     ) {
+        let report = try killSwitchStatusReport()
+        return (report.armed, report.wanted, report.live, report.healed)
+    }
+
+    /// `killSwitchStatus` plus the helper's own word on whether its saved arm
+    /// carries a tunnel (decision 086); nil from an older helper.
+    static func killSwitchStatusReport() throws -> (
+        armed: Bool, wanted: Bool, live: Bool, healed: Bool, tunnelArmed: Bool?
+    ) {
         let result = try sendRequest(method: "GET", path: "/killswitch/status")
         let reply = try requireKillSwitchSuccess(result, operation: "status")
         if (try? JSONDecoder().decode(Envelope.self, from: result.body))?.protectedFault == true {
@@ -922,7 +935,8 @@ nonisolated struct HelperManager {
         // A status query loads nothing, so it can never have flushed anything;
         // dropping the field here keeps callers from reading a stale "no" as a
         // statement about the last arm.
-        return (reply.armed, reply.wanted, reply.live, reply.healed)
+        let tunnelArmed = (try? JSONDecoder().decode(Envelope.self, from: result.body))?.tunnelArmed
+        return (reply.armed, reply.wanted, reply.live, reply.healed, tunnelArmed)
     }
 
     /// Read-only PF liveness for a connected session. Unlike

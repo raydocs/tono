@@ -117,7 +117,15 @@ pub(super) async fn note_hy2_outcome(
     let attempt_generation = match outcome {
         super::Attempt::Connected => owner.1,
         super::Attempt::Failed { generation, .. } => *generation,
-        super::Attempt::GuardRejected(_) | super::Attempt::Stale => return,
+        // Decision 088: a stopped automatic hy2 attempt sends the next one back to the Reality
+        // block. Stale has no generation of its own (it was superseded); the account must match.
+        super::Attempt::Stale => {
+            if inner.sign_in_generation == owner.0 && inner.hy2_switch.note_stopped(preferred, dialed) {
+                persist_hy2_choices(&inner);
+            }
+            return;
+        }
+        super::Attempt::GuardRejected(_) => return,
     };
     if inner.sign_in_generation != owner.0 || inner.connect_generation != attempt_generation {
         return;
@@ -170,6 +178,26 @@ pub(super) async fn recheck_auto_hop(
         "Tono: hy2 auto-switch withdrawn before the tunnel started; dialing the selected Reality block"
     );
     Ok(Some(reality))
+}
+
+/// Decision 088 on the abort path. `invalidate_connection` aborts the registered task that runs
+/// an attempt (reconnect loop, monitor re-entry, node switch, unarmed probe), which drops the
+/// attempt future before `note_hy2_outcome` sees `Stale`. When the attempt still in flight is
+/// the automatic hy2 hop of the selected node (admitted as `live_exit`), settle it as stopped
+/// here, under the same lock as the abort. Idempotent with the `Stale` path.
+pub(crate) fn settle_stopped_auto_hop(inner: &mut TonoInner) {
+    if !inner.fsm.status().is_connecting {
+        return;
+    }
+    let (Some(preferred), Some(dialed)) = (
+        inner.selected_node.clone(),
+        inner.hy2_switch.live_exit().map(|node| node.name.clone()),
+    ) else {
+        return;
+    };
+    if inner.hy2_switch.note_stopped(&preferred, &dialed) {
+        persist_hy2_choices(inner);
+    }
 }
 
 /// A17: apply `hy2AutoSwitch` from a catalog 200 (installed or unchanged).
@@ -370,5 +398,61 @@ mod tests {
         super::super::unarmed_probe::tcp_proof_before_tunnel(&state, &node)
             .await
             .expect("the refine's answer stands in for the pre-tunnel dial");
+    }
+
+    /// Decision 088, registered-caller cancellation: Disconnect invalidates the generation and
+    /// aborts the registered task running the automatic hy2 attempt, so the attempt never
+    /// reaches `note_hy2_outcome`. The next dial must still be the Reality block.
+    #[tokio::test]
+    async fn an_aborted_task_running_the_automatic_hy2_hop_sends_the_next_dial_to_reality() {
+        let reality = ValidatedNode {
+            name: "Buffalo · Niagara".into(),
+            server: std::net::Ipv4Addr::new(203, 0, 113, 10),
+            port: 443,
+            uuid: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d".into(),
+            servername: "www.microsoft.com".into(),
+            flow: None,
+            client_fingerprint: None,
+            reality_public_key: "0123456789abcdef0123456789abcdef0123456789a".into(),
+            reality_short_id: "0123456789abcdef".into(),
+            protocol: tono_core::node::NodeProtocol::VlessReality,
+            tls_fingerprint: None,
+            certificate_public_key_sha256: None,
+        };
+        let hy2 = ValidatedNode {
+            name: "Buffalo · Niagara · hy2".into(),
+            protocol: tono_core::node::NodeProtocol::Hysteria2,
+            ..reality.clone()
+        };
+        let state = TonoState::for_test();
+        let mut inner = state.lock().await;
+        inner.nodes = vec![reality.clone(), hy2.clone()];
+        inner.selected_node = Some(reality.name.clone());
+        let nodes = inner.nodes.clone();
+        inner.hy2_switch.on_catalog(true, &nodes);
+        for _ in 0..tono_core::hy2_switch::TCP_FAILURES_BEFORE_HY2 {
+            inner.hy2_switch.note_failure(&reality.name, &reality.name, "connect failed: tls handshake eof", now_ms());
+        }
+        assert_eq!(dial_name(&inner), hy2.name, "the automatic hop is due");
+
+        // A registered task runs that attempt: admitted under the lock, still connecting.
+        inner.fsm.begin_connect();
+        inner.hy2_switch.note_admitted(&hy2);
+        let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel::<()>();
+        inner.tasks.reconnect = Some(tauri::async_runtime::spawn(async move {
+            let _dropped = dropped_tx;
+            std::future::pending::<()>().await;
+        }));
+        inner.invalidate_connection(false);
+        assert!(inner.tasks.reconnect.is_none(), "Disconnect aborts the registered task");
+        drop(inner);
+        tokio::time::timeout(Duration::from_secs(2), dropped_rx)
+            .await
+            .expect("the aborted attempt is dropped")
+            .expect_err("it never reached an outcome");
+
+        let mut inner = state.lock().await;
+        inner.fsm = tono_core::connection::ConnectionFsm::new();
+        assert_eq!(dial_name(&inner), reality.name, "the next connect dials the Reality block");
     }
 }

@@ -144,6 +144,7 @@ mod app_init {
             cmd::restart_app,
             tono::commands::update::tono_check_update,
             tono::commands::update::tono_install_update,
+            tono::commands::update::tono_cancel_update_download,
             cmd::get_runtime_state,
             cmd::get_tono_preferences,
             cmd::patch_tono_preferences,

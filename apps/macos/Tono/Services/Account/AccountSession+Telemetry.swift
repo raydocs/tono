@@ -581,8 +581,19 @@ extension AccountSession {
         } else {
             guard entitlementRefusals == refusals else { return }
             // Leave kill switch armed if it was armed — prevents IP leak on failed reconnect.
-            state = .error((error as? LocalizedError)?.errorDescription ?? String(localized: "Something went wrong. Please try again."))
+            state = .error(accountErrorMessage(error) ?? String(localized: "Something went wrong. Please try again."))
         }
+    }
+
+    /// The account error's copy. An unreachable control plane while the
+    /// gate's fail-closed barrier holds also says what protection means for
+    /// signing in (`ControlPlaneUnreachable.message(protection:)`);
+    /// nothing here releases it.
+    func accountErrorMessage(_ error: Error) -> String? {
+        if case let .unreachable(paths)? = error as? TonoAPIClient.APIError {
+            return paths.message(protection: gateProtectionHoldConsumer())
+        }
+        return (error as? LocalizedError)?.errorDescription
     }
 
     func pauseAppRoutingResearch() {
