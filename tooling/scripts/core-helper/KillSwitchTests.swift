@@ -345,7 +345,8 @@ extension KillSwitchManager {
             check("child-holds-api-permit", childRules()?.contains("to 1.1.1.1") == true)
             let flushed = try? run("/sbin/pfctl", ["-a", childAnchor, "-F", "rules"])
             check("child-flushes", flushed?.status == 0)
-            check("child-empty-after-flush", childRules().map { !$0.contains("to 1.1.1.1") } == true)
+            // An anchor PF dropped once empty holds no permit either.
+            check("child-empty-after-flush", childRules().map { !$0.contains("to 1.1.1.1") } ?? true)
             let parentAfter = (try? run("/sbin/pfctl", ["-a", testAnchor, "-sr"]))
                 .flatMap { String(data: $0.output, encoding: .utf8) } ?? ""
             check("child-flush-keeps-parent-block", parentAfter.contains("block drop out quick all"))
