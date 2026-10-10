@@ -48,3 +48,6 @@
   接受 `TONO_API_BASE` / `TONO_NODE_NAME` 两个键，其余行、重复键、超 4 KiB 一律拒绝，错误只报行号；token 只从
   `LoadCredential` 读。`node-agent.env.example` 改为 `node-agent.conf.example`，README 安装步骤同步。python 现有测试
   覆盖：未知键（`LD_PRELOAD=<token>`、以 token 为键）拒绝、token 形值放进 API base 拒绝、两行 credential 拒绝，均不回显。
+- 续记（2026-10-10，第六轮评审 FAIL：1 major，仅文档）：README 安装步骤原把 token 写在 `printf` 命令行里（进 shell 历史
+  与终端记录）。改为先建 0600 空文件，再在不回显的提示下粘贴（`stty -echo` + `read`，内建 `printf` 写入），注明勿用
+  `set -x`、清剪贴板；签发步骤注明把响应写入 0600 文件而非终端，用后删除。其余文档无命令行带 token 的写法。无代码改动。

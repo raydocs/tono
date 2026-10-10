@@ -40,10 +40,16 @@ Node install is pending: the agent has not been installed on any node yet.
    carries the token once; it is never shown again. Issuing again replaces the
    old token at once.
 
-   ```sh
+   ```text
    # name is URL-encoded, e.g. "Tokyo · Kite" -> Tokyo%20%C2%B7%20Kite
    POST https://admin.afk.ccwu.cc/api/v1/ops/nodes/<name>/agent-token
    ```
+
+   Send it with your Access session and write the response to a file, not the
+   terminal (for a command-line client: `umask 077` first, then its output
+   option such as `-o agent-token.json`). Never put the token itself on a
+   command line, in an environment variable or in a chat; copy it from that
+   file at step 2, then delete the file.
 
 2. On the node, as root:
 
@@ -51,8 +57,26 @@ Node install is pending: the agent has not been installed on any node yet.
    install -d -m 0755 /opt/tono-node-agent /etc/tono
    install -m 0644 tono_node_agent.py /opt/tono-node-agent/
    install -o root -g root -m 0644 node-agent.conf.example /etc/tono/node-agent.conf   # then edit TONO_NODE_NAME
-   umask 077; printf '%s\n' '<tna1.… token>' > /etc/tono/node-agent.token; chmod 0600 /etc/tono/node-agent.token
    install -m 0644 tono-node-agent.service tono-node-agent.timer /etc/systemd/system/
+   ```
+
+   Install the token without it ever being on a command line (no shell
+   history, no process list) or echoed (no terminal transcript). Do not run
+   this with `set -x`. At the silent prompt, paste the token and press Enter:
+
+   ```sh
+   install -o root -g root -m 0600 /dev/null /etc/tono/node-agent.token
+   sh -c 'umask 077; stty -echo; IFS= read -r t; stty echo; echo; printf "%s\n" "$t" > /etc/tono/node-agent.token'
+   ```
+
+   The token is read from the terminal into a shell variable and written by
+   the shell's built-in `printf`, so it never appears as a process argument.
+   Clear the clipboard afterwards. The file must hold exactly one `tna1.` token
+   on one line; the agent refuses anything else without printing it.
+
+   Then start it:
+
+   ```sh
    systemctl daemon-reload
    systemctl start tono-node-agent.service && journalctl -u tono-node-agent -n 3 --no-pager
    systemctl enable --now tono-node-agent.timer
