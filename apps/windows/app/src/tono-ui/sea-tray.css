@@ -135,3 +135,9 @@
   padding: 0;
   margin: 0;
 }
+
+/* The tray route keeps the shell's .tono-main, whose stable scrollbar gutter
+   reserved 8px on the right that the flyout never paints (it does not scroll). */
+.tono-main:has(.sea-tray) {
+  scrollbar-gutter: auto;
+}
