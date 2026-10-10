@@ -51,6 +51,12 @@ jobs:
 
   windows:
     needs: inputs
+    # A called workflow gets no more than this. Only its provenance-only `attest`
+    # job requests OIDC and attestation write; its build job stays read-only.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     uses: ./.github/workflows/windows-candidate.yml
     with:
       update_release_sequence: ${{ needs.inputs.outputs.sequence }}

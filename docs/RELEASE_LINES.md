@@ -106,6 +106,36 @@ If it already happened, reinstalling 0.0.73+ repairs NRPT and encrypted DNS.
 5. Verify the immutable tag resolves to the source SHA before advancing an
    update feed or channel.
 
+## Auditing a release package (build provenance)
+
+Each package a release workflow builds gets a GitHub build provenance attestation
+([decision 079](decisions/079-2026-10-10-amp-backlog-defaults.md) D8-A: generated and
+audited; Tono clients do not check it): the zip from `macos-release.yml` (release and
+candidate), the image from `macos-dmg.yml`, the installer and its updater `.sig` from
+`windows-release.yml`, the installer from `windows-candidate.yml`, and the signed v1
+`manifest.json` with both `.sig` files from `desktop-update-sign.yml` (the package
+copies in that bundle keep their producer's attestation). A separate `attest` job, the
+only one holding `id-token: write` and `attestations: write`, runs no repository code.
+A failed attestation fails the run, so `macos-dmg.yml` (given a run id) and
+`desktop-update-sign.yml` refuse that run as a producer.
+
+```sh
+gh attestation verify <file> -R raydocs/tono
+# Also pin the producing workflow and line:
+gh attestation verify Tono-<v>-build<n>-arm64.zip -R raydocs/tono \
+  --signer-workflow raydocs/tono/.github/workflows/macos-release.yml \
+  --source-ref refs/heads/release/macos
+```
+
+An attestation names the workflow run, commit and ref that produced the bytes. It does
+not say they are Developer ID signed, notarized, or signed for Sparkle or Tauri. For
+macOS, also check the notarization ticket: `tooling/scripts/verify-macos-notarization.sh
+<zip>` (`xcrun stapler validate` plus `spctl -a -t exec` on the zip's Tono.app; the
+release build and `release-macos.sh` already run it on the zip they ship), and for the
+image `xcrun stapler validate <dmg>` and
+`spctl -a -t open --context context:primary-signature -v <dmg>` (`make-macos-dmg.sh`
+runs both before upload).
+
 ## Customer publish (G4)
 
 When an agent may start is set in [AGENTS.md](../AGENTS.md) (owner-written G1–G3
