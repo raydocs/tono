@@ -5,7 +5,7 @@
 // untracked, ignored or skip-worktree files must stay.
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -163,5 +163,19 @@ test('worktrees: a merged clean worktree is selected; dirty, ignored-file, skip-
     assert.equal(kept['hidden-merged'], 'skip-worktree or assume-unchanged entries')
     assert.equal(kept.unmerged, 'branch not merged into main')
     assert.equal(kept.main, 'main worktree')
+  })
+})
+
+test('worktrees: an index stamped ahead of the clock is idle 0, so --min-idle-hours 0 selects it and 24 keeps it', () => {
+  withRepo(({ root, work }) => {
+    const wt = path.join(root, 'wt-merged')
+    git(work, 'worktree', 'add', '-q', wt, 'merged')
+    // Date.now() is whole milliseconds; a fine-grained mtime written in the same millisecond reads as the future.
+    const now = Date.now()
+    const ahead = (now + 0.5) / 1000
+    utimesSync(path.join(git(wt, 'rev-parse', '--absolute-git-dir'), 'index'), ahead, ahead)
+    assert.deepEqual(selectWorktrees({ cwd: work, minIdleHours: 0, now }).remove.map((w) => w.branch), ['merged'])
+    const kept = selectWorktrees({ cwd: work, minIdleHours: 24, now }).keep.find((w) => w.branch === 'merged')
+    assert.equal(kept?.reason, 'touched in the last 24h')
   })
 })
