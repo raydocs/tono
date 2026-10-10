@@ -201,17 +201,15 @@ nonisolated enum KillSwitchService {
 
     nonisolated(unsafe) static var sessionIPC = SessionIPC()
 
-    /// Only a connect the user asked for begins a helper session. A failed
-    /// begin does not fail the connect: the helper's arm admission decides
-    /// (an operator release then refuses with its own message).
-    static func beginSession() {
+    /// Only a connect the user asked for begins a helper session. A refusal
+    /// fails that connect with the helper's own sentence: a release that
+    /// landed first wins, and an unwritable target is named, not swallowed.
+    static func beginSession() throws {
         do {
             _ = try sessionIPC.begin()
-        } catch {
-            LocalTrafficAudit.shared.recordEvent(
-                "helper_session_begin_failed",
-                details: ["error": String(describing: error)]
-            )
+        } catch HelperIPCError.commandFailed(let message, let code?) where HelperManager.operatorReleaseCodes.contains(code) {
+            LocalTrafficAudit.shared.recordEvent("helper_session_begin_refused", details: ["code": code])
+            throw Error.operatorReleased(message)
         }
     }
 

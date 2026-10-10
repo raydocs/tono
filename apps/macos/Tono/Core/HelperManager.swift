@@ -827,11 +827,20 @@ nonisolated struct HelperManager {
     /// which the helper allows unless an operator release holds.
     nonisolated(unsafe) static var connectSessionGeneration: UInt64?
 
-    /// `/session/connect`. Only `AppState`'s explicit user Connect calls this;
-    /// automatic reconnects, heals and wake re-arms never do.
+    /// `GET /session`, then `/session/connect` with the generation it read:
+    /// the helper refuses (`SESSION_SUPERSEDED`) when anything, an operator
+    /// release above all, changed the target in between. Only `AppState`'s
+    /// explicit user Connect calls this; automatic reconnects, heals and wake
+    /// re-arms never do.
     @discardableResult
     static func beginConnectSession() throws -> UInt64 {
-        let result = try sendRequest(method: "POST", path: "/session/connect")
+        let status = try requireSuccess(try sendRequest(method: "GET", path: "/session"), operation: "session status")
+        guard let current = status.sessionGeneration else { throw HelperIPCError.invalidResponse }
+        let result = try sendJSONObject(
+            method: "POST",
+            path: "/session/connect",
+            object: ["expectedGeneration": NSNumber(value: current)]
+        )
         let envelope = try requireSuccess(result, operation: "session")
         guard let generation = envelope.sessionGeneration else { throw HelperIPCError.invalidResponse }
         connectSessionGeneration = generation
@@ -842,6 +851,7 @@ nonisolated struct HelperManager {
     /// automatic loops stop on them (decision 084).
     static let operatorReleaseCodes: Set<String> = [
         "OPERATOR_RELEASED", "TARGET_STATE_UNREADABLE", "SESSION_SUPERSEDED",
+        "TARGET_STATE_UNWRITABLE", "TARGET_STATE_BUSY",
     ]
 
     static func armKillSwitch(

@@ -410,14 +410,18 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.44 → 4.52.45: operator release (R3-O4, decision 084). A
     ///   persisted target (`secured <n>` / `released <n>`) joins the helper's
     ///   state: `--emergency-disarm` sets `released` in memory first and
-    ///   persists it within a bounded budget, boots the daemon out, releases,
-    ///   reads PF / DNS / AI resolvers / AI routes back (failed read =
-    ///   unknown) and restarts the daemon only once `released` is on disk.
+    ///   persists it within a bounded budget under the target lock, boots the
+    ///   daemon out, releases PF first (Tono's anchor only), then DNS, the AI
+    ///   layer and the rest, reads PF / DNS / AI resolvers / AI routes back
+    ///   (failed read = unknown) and restarts the daemon only once its
+    ///   `released` generation reads back from disk.
     ///   While released (or unreadable) every arm, Core start/sync, DNS
     ///   enable, PF supervision, power barrier and owner relaunch is refused;
-    ///   only `/session/connect` (the app's explicit user Connect) begins a
-    ///   newer `secured` generation, and arms carry it. Every wait of the
-    ///   command is bounded (MAC-EMERGENCY-UNBOUNDED-WAITS).
+    ///   only `/session/connect` (the app's explicit user Connect, a
+    ///   compare-and-swap on the generation from `GET /session`) begins a
+    ///   newer `secured` generation, and arms carry it. AI sinkholes and
+    ///   blackhole routes are removed, never reinstalled, while released.
+    ///   Every wait of the command is bounded (MAC-EMERGENCY-UNBOUNDED-WAITS).
     static let current = "4.52.45"
 }
 

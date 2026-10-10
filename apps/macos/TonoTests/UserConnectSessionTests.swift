@@ -3,12 +3,13 @@ import XCTest
 
 /// A13 / decision 084: after an administrator's `--emergency-disarm` the
 /// helper refuses every arm until a new helper session begins, and only the
-/// user's explicit Connect (or Retry) begins one. Automatic reconnects and
-/// heal re-arms reuse the current session, so they can never end the release;
-/// the helper's refusal stops the automatic loops instead.
+/// user's explicit Connect (or Retry) begins one, through an intent bound to
+/// the attempt it started. Automatic reconnects, server picks and heal
+/// re-arms can never consume it, so they can never end the release; the
+/// helper's refusal stops the automatic loops instead.
 final class UserConnectSessionTests: XCTestCase {
 
-    func testOnlyTheUserConnectBeginsAHelperSession() throws {
+    func testOnlyTheUserConnectAttemptBeginsAHelperSession() throws {
         let savedSession = KillSwitchService.sessionIPC
         let savedArm = KillSwitchService.armIPC
         KillSwitchService.isArmed = false
@@ -26,18 +27,25 @@ final class UserConnectSessionTests: XCTestCase {
         let app = AppState()
         // An automatic reconnect enters through connect(): no intent.
         app.connect()
-        XCTAssertFalse(app.userConnectIntent.consume())
-        // The user's Connect leaves a single-use intent for its perform step.
+        XCTAssertNil(app.userConnectIntent.id)
+        // The user's Connect mints an intent for its own attempt only.
         app.connectFromUser()
-        XCTAssertTrue(app.userConnectIntent.consume())
-        XCTAssertFalse(app.userConnectIntent.consume(), "the intent is single use")
+        let minted = try XCTUnwrap(app.userConnectIntent.id)
+        XCTAssertFalse(app.userConnectIntent.consume(nil), "an automatic attempt carries no intent")
+        XCTAssertFalse(app.userConnectIntent.consume(UUID()), "a server pick's attempt cannot consume it")
+        XCTAssertTrue(app.userConnectIntent.consume(minted), "the attempt that minted it consumes it")
+        XCTAssertFalse(app.userConnectIntent.consume(minted), "single use")
+        // An observed release drops a pending click.
+        let dropped = app.userConnectIntent.mint()
+        app.userConnectIntent.invalidate()
+        XCTAssertFalse(app.userConnectIntent.consume(dropped))
         var stale = UserConnectIntent()
-        stale.mark(now: Date(timeIntervalSince1970: 0))
+        let old = stale.mint(now: Date(timeIntervalSince1970: 0))
         XCTAssertFalse(
-            stale.consume(now: Date(timeIntervalSince1970: UserConnectIntent.lifetime + 1)),
-            "a later automatic connect cannot inherit an old click"
+            stale.consume(old, now: Date(timeIntervalSince1970: UserConnectIntent.lifetime + 1)),
+            "an old click expires"
         )
-        KillSwitchService.beginSession()
+        try KillSwitchService.beginSession()
         XCTAssertEqual(begun, 1, "the perform step of a user Connect begins one session")
 
         // A heal or automatic re-arm goes straight to the arm: no new session.
@@ -59,6 +67,17 @@ final class UserConnectSessionTests: XCTestCase {
             }
             XCTAssertEqual(message, "An administrator released Tono's network protection.")
             XCTAssertTrue(AppState.failureRequiresUserAction(error))
+        }
+        // An unwritable target fails the user's Connect with a concrete
+        // message instead of being swallowed.
+        KillSwitchService.sessionIPC.begin = {
+            throw HelperIPCError.commandFailed("Free some disk space.", code: "TARGET_STATE_UNWRITABLE")
+        }
+        XCTAssertThrowsError(try KillSwitchService.beginSession()) { error in
+            guard case KillSwitchService.Error.operatorReleased(let message) = error else {
+                return XCTFail("unexpected \(error)")
+            }
+            XCTAssertEqual(message, "Free some disk space.")
         }
         XCTAssertEqual(begun, 1)
     }

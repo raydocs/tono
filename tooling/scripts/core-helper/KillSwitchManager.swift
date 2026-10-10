@@ -482,6 +482,9 @@ final class KillSwitchManager {
     func withholdReviewedBundlePermit() throws {
         lock.lock()
         defer { lock.unlock() }
+        // Reloads the blocking anchor: never under an operator release
+        // (decision 084), read where it acts.
+        guard HelperTarget.automaticRearmAllowed(HelperTarget.read()) else { return }
         guard !reviewedBundleFileUnconfirmed else {
             throw Self.withholdFailure(
                 HelperFailure.system("An earlier withhold could not restore the PF rule file.")
@@ -689,10 +692,22 @@ final class KillSwitchManager {
     }
 
     /// Called only with the Core stopped. A retained record alone is enough
-    /// to finish an interrupted release; it never re-arms general PF.
+    /// to finish an interrupted release; it never re-arms general PF. Under an
+    /// operator release it removes the AI layer instead, every pass, until
+    /// the system proves it gone (decision 084).
     func reconcileSelectiveRecoveryIfReleased() {
         lock.lock()
         defer { lock.unlock() }
+        guard HelperTarget.automaticRearmAllowed(HelperTarget.read()) else {
+            selectiveRecoveryReconciled = false
+            Self.reconcileSelectiveRecoveryUnderTarget(
+                rearmAllowed: false,
+                generalIntentPresent: false,
+                disposition: nil,
+                removalPending: true
+            )
+            return
+        }
         guard !selectiveRecoveryReconciled, !Self.stateFileExists() else { return }
         // A failed removal stays unreconciled: the next 10 s pass retries it.
         selectiveRecoveryReconciled = Self.reconcileSelectiveRecovery(
@@ -702,8 +717,45 @@ final class KillSwitchManager {
         )
     }
 
+    /// `reconcileSelectiveRecovery` that consults the target first. Under an
+    /// operator release (or an unreadable target) the AI sinkholes and
+    /// blackhole routes are never reinstalled, whatever the saved
+    /// disposition says: their removal is recorded and retried until the
+    /// system reads them absent. False while they stay.
+    @discardableResult
+    static func reconcileSelectiveRecoveryUnderTarget(
+        rearmAllowed: Bool,
+        generalIntentPresent: Bool,
+        disposition: Bool?,
+        removalPending: Bool,
+        layerProvenAbsent: () -> Bool = { SelectiveFailOpenInstaller.layerProvenAbsent() },
+        markReleasing: () throws -> Void = { try saveSelectiveRecoveryDisposition(false) },
+        applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort,
+        removeSelectiveLayer: () -> Bool = SelectiveFailOpenInstaller.removeBestEffort,
+        completeRemoval: () throws -> Void = { try saveSelectiveRemovalCompleted() }
+    ) -> Bool {
+        guard !rearmAllowed else {
+            return reconcileSelectiveRecovery(
+                generalIntentPresent: generalIntentPresent,
+                disposition: disposition,
+                removalPending: removalPending,
+                applySelectiveLayer: applySelectiveLayer,
+                removeSelectiveLayer: removeSelectiveLayer,
+                completeRemoval: completeRemoval
+            )
+        }
+        if layerProvenAbsent() { return true }
+        try? markReleasing()
+        guard removeSelectiveLayer(), layerProvenAbsent() else { return false }
+        try? completeRemoval()
+        return true
+    }
+
+    /// An operator release is a full release: no automatic release keeps the
+    /// AI hold while it holds (decision 084).
     static func automaticReleasePreservesAIHold() -> Bool {
-        (try? selectiveRecoveryDisposition()) ?? true
+        guard HelperTarget.automaticRearmAllowed(HelperTarget.read()) else { return false }
+        return (try? selectiveRecoveryDisposition()) ?? true
     }
 
     func disarm(preserveAIHold: Bool = false) throws -> [String: Any] {
@@ -759,7 +811,8 @@ final class KillSwitchManager {
     /// has already been removed. It never installs a general block.
     static func releasePersistedBlock() {
         guard stateFileExists() else {
-            reconcileSelectiveRecovery(
+            reconcileSelectiveRecoveryUnderTarget(
+                rearmAllowed: HelperTarget.automaticRearmAllowed(HelperTarget.read()),
                 generalIntentPresent: false,
                 disposition: try? selectiveRecoveryDisposition(),
                 removalPending: selectiveRemovalPending()
@@ -954,6 +1007,7 @@ final class KillSwitchManager {
         guard Self.stateFileExists() else { return }
         lock.lock()
         defer { lock.unlock() }
+        guard HelperTarget.automaticRearmAllowed(HelperTarget.read()) else { return }
         let live: Bool
         let referenced: Bool
         let held: PFEnableReference?

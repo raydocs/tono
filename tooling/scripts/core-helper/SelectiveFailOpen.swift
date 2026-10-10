@@ -359,6 +359,9 @@ enum SelectiveFailOpenInstaller {
 
     static func applyBestEffort() {
         guard SelectiveFailOpen.followUp(.crashOrHang) == .apply else { return }
+        // An operator release is a full release: the AI hold is never
+        // (re)installed while it holds (decision 084).
+        guard HelperTarget.automaticRearmAllowed(HelperTarget.read()) else { return }
         writeResolvers()
         for args in SelectiveFailOpen.routeAddArguments() {
             runRoute(args, logFailure: true)

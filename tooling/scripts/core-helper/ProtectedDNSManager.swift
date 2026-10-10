@@ -228,6 +228,9 @@ final class ProtectedDNSManager {
         // Persist recovery state before changing the first system setting.
         try save(snapshot)
         do {
+            // Where it acts: an operator release that landed since the
+            // request was admitted wins (decision 084).
+            try HelperTarget.requireAdmission(sessionGeneration: nil)
             try writeManagedDNS([Self.protectedDNSServer], selected)
             guard try Self.readDNS(on: selected) == [Self.protectedDNSServer] else {
                 throw HelperFailure.system("The protected DNS transition did not commit.")

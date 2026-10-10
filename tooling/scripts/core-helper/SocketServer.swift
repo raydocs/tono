@@ -189,10 +189,12 @@ final class SocketServer {
     /// left behind then points the system resolver at a listener that is
     /// gone. Failure stays on the snapshot: startup must not turn it into
     /// a PF block.
-    private func recoverDNSAfterStoppedCore() {
+    private func recoverDNSAfterStoppedCore(operatorReleased: Bool = false) {
         let snapshotPresent = protectedDNS.status()["snapshotPresent"] as? Bool == true
         guard ProtectedDNSManager.shouldRecoverDNSAtBoot(
-            coreRunning: core.status().running,
+            // Under an operator release no session may keep 127.0.0.1, even
+            // beside a Core that survived the release.
+            coreRunning: operatorReleased ? false : core.status().running,
             snapshotPresent: snapshotPresent
         ) else { return }
         do {
@@ -354,7 +356,7 @@ final class SocketServer {
         // keeps the block it already has. DNS restore uses the same
         // SCPreferences path as disconnect and has no extra deadline.
         releaseLeftoverBlockIfCoreStopped()
-        recoverDNSAfterStoppedCore()
+        recoverDNSAfterStoppedCore(operatorReleased: !HelperTarget.automaticRearmAllowed(HelperTarget.read()))
         var lastProtectionCheck = Date()
         while helperShutdownRequested == 0 {
             // Low-frequency check between requests. Under the update lock
@@ -406,7 +408,8 @@ final class SocketServer {
     /// Immediate release at start. Idempotent: no state file means no pfctl.
     /// A running Core is not disarmed and is not reinstalled from the file.
     private func releaseLeftoverBlockIfCoreStopped() {
-        guard !core.status().running else { return }
+        // Under an operator release no Core keeps a block (decision 084).
+        guard !core.status().running || !HelperTarget.automaticRearmAllowed(HelperTarget.read()) else { return }
         guard KillSwitchManager.stateFileExists() else {
             killSwitch.reconcileSelectiveRecoveryIfReleased()
             return
@@ -433,49 +436,90 @@ final class SocketServer {
             consecutiveCoreDownChecks = 0
         }
         // An operator release (or an unreadable target) keeps the cleanup
-        // below going but never re-arms or relaunches the app (decision 084).
+        // going but never loads PF, re-arms or relaunches the app; each effect
+        // re-reads the target where it acts (decision 084).
         let rearmAllowed = HelperTarget.automaticRearmAllowed(HelperTarget.read())
-        // The app is the only thing that reconnects or shows the state.
-        // Bring it back before deciding anything about its session.
-        if rearmAllowed { observeOrphanedOwner() }
-        if rearmAllowed, KillSwitchManager.shouldReinstallKillSwitch(coreRunning: core.status().running) {
+        let coreRunning = core.status().running
+        let stateFilePresent = KillSwitchManager.stateFileExists()
+        if rearmAllowed, !coreRunning, stateFilePresent {
+            consecutiveCoreDownChecks += 1
+        } else {
             consecutiveCoreDownChecks = 0
-            // MAC-ORPHAN-BOOTSTRAP-PF: an app that died between /core/start
-            // and the lock arm leaves this branch reinstalling a bootstrap
-            // block nobody is left to lift. Check that before supervising.
-            if observeOrphanedBootstrap() { return }
-            if observeOrphanedTunnel() { return }
-            killSwitch.superviseProtection()
-            return
         }
         // No running Core, no session to probe: an answer from the one that
         // stopped must not count against the next.
-        resetOrphanedTunnel()
-        // The Core took its utun with it (#608). Narrow the reviewed-bundle
-        // permit immediately. The all-block, if still saved, waits for the
-        // threshold below so a connect can start the Core.
-        try? killSwitch.withholdReviewedBundlePermit()
-        if KillSwitchManager.stateFileExists() {
-            consecutiveCoreDownChecks += 1
-            // DNS stays put until the block is released. Restoring it during
-            // the gap between arm and the Core process would undo a connect.
-            guard KillSwitchManager.watchdogShouldRestoreNetwork(
-                consecutiveCoreDownChecks: consecutiveCoreDownChecks
-            ) else { return }
-            do {
-                _ = try killSwitch.disarm(preserveAIHold: KillSwitchManager.automaticReleasePreservesAIHold())
-            } catch {
-                let detail = (error as? HelperFailure)?.message ?? String(describing: error)
-                FileHandle.standardError.write(Data(
-                    "tono: watchdog could not clear the kill switch: \(detail)\n".utf8
-                ))
-                return
+        if !(rearmAllowed && coreRunning) { resetOrphanedTunnel() }
+        for step in Self.watchdogSteps(
+            rearmAllowed: rearmAllowed,
+            coreRunning: coreRunning,
+            stateFilePresent: stateFilePresent,
+            coreDownChecks: consecutiveCoreDownChecks
+        ) {
+            switch step {
+            case .relaunchOwner:
+                // The app is the only thing that reconnects or shows the state.
+                // Bring it back before deciding anything about its session.
+                observeOrphanedOwner()
+            case .supervise:
+                // MAC-ORPHAN-BOOTSTRAP-PF: an app that died between /core/start
+                // and the lock arm leaves this branch reinstalling a bootstrap
+                // block nobody is left to lift. Check that before supervising.
+                if observeOrphanedBootstrap() { return }
+                if observeOrphanedTunnel() { return }
+                killSwitch.superviseProtection()
+            case .withholdPermit:
+                // The Core took its utun with it (#608). Narrow the
+                // reviewed-bundle permit immediately.
+                try? killSwitch.withholdReviewedBundlePermit()
+            case .releaseBlock:
+                do {
+                    _ = try killSwitch.disarm(preserveAIHold: KillSwitchManager.automaticReleasePreservesAIHold())
+                } catch {
+                    let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+                    FileHandle.standardError.write(Data(
+                        "tono: watchdog could not clear the kill switch: \(detail)\n".utf8
+                    ))
+                    return
+                }
+            case .reconcileAI:
+                killSwitch.reconcileSelectiveRecoveryIfReleased()
+            case .recoverDNS:
+                recoverDNSAfterStoppedCore(operatorReleased: !rearmAllowed)
             }
-        } else {
-            consecutiveCoreDownChecks = 0
-            killSwitch.reconcileSelectiveRecoveryIfReleased()
         }
-        recoverDNSAfterStoppedCore()
+    }
+
+    enum WatchdogStep: Equatable {
+        case relaunchOwner, supervise, withholdPermit, releaseBlock, reconcileAI, recoverDNS
+    }
+
+    /// One idle-loop pass. With the target allowing re-arm: a running Core
+    /// keeps its supervised block; a Core down narrows the permit at once and
+    /// releases a saved block after the threshold, so a connect can start the
+    /// Core; DNS stays put until then. Under an operator release (or an
+    /// unreadable target) nothing loads PF: a saved block is released at once,
+    /// the AI layer's removal is retried, DNS is restored even beside a Core
+    /// that survived.
+    static func watchdogSteps(
+        rearmAllowed: Bool,
+        coreRunning: Bool,
+        stateFilePresent: Bool,
+        coreDownChecks: Int
+    ) -> [WatchdogStep] {
+        guard rearmAllowed else {
+            return (stateFilePresent ? [.releaseBlock] : []) + [.reconcileAI, .recoverDNS]
+        }
+        if coreRunning { return [.relaunchOwner, .supervise] }
+        var steps: [WatchdogStep] = [.relaunchOwner, .withholdPermit]
+        if stateFilePresent {
+            guard KillSwitchManager.watchdogShouldRestoreNetwork(consecutiveCoreDownChecks: coreDownChecks) else {
+                return steps
+            }
+            steps.append(.releaseBlock)
+        } else {
+            steps.append(.reconcileAI)
+        }
+        return steps + [.recoverDNS]
     }
 
     /// MAC-ORPHAN-OWNER-RELAUNCH: the app that owns the session died while
@@ -817,11 +861,19 @@ final class SocketServer {
                     object["lastError"] = String(lastError.prefix(600))
                 }
                 sendResponse(client, status: 200, object: object)
+            case ("GET", "/session"):
+                guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
+                sendResponse(client, status: 200, object: HelperTarget.sessionStatus(HelperTarget.readFile()))
             case ("POST", "/session/connect"):
                 // Only the app's explicit user Connect sends this (decision
-                // 084): it is what ends an operator release.
-                guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
-                let generation = try HelperTarget.beginSession()
+                // 084): it is what ends an operator release. `expectedGeneration`
+                // is what its GET /session read; a newer target wins.
+                let object = try jsonObject(request.body)
+                guard object.count == 1,
+                      let expected = try HelperTarget.sessionGeneration(object["expectedGeneration"]) else {
+                    throw HelperFailure.invalid("Invalid session request.")
+                }
+                let generation = try HelperTarget.beginSession(expected: expected)
                 sendResponse(client, status: 200, object: [
                     "ok": true, "sessionGeneration": NSNumber(value: generation),
                 ])
@@ -838,6 +890,7 @@ final class SocketServer {
                     configSHA256: digest,
                     startAllowed: {
                         transitionGate.isAwake() && killSwitch.status()["live"] as? Bool == true
+                            && HelperTarget.automaticRearmAllowed(HelperTarget.read())
                     }
                 )
                 recordSessionOwner(owner)
@@ -855,6 +908,7 @@ final class SocketServer {
                     configSHA256: digest,
                     startAllowed: {
                         transitionGate.isAwake() && killSwitch.status()["live"] as? Bool == true
+                            && HelperTarget.automaticRearmAllowed(HelperTarget.read())
                     },
                     // The old Core's utun goes away with it (#608). A failure
                     // fails the sync with the old Core still running.

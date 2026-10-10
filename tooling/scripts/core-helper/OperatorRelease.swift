@@ -139,23 +139,105 @@ struct HelperTarget: Equatable {
         admission(reading, sessionGeneration: nil) == .allowed
     }
 
-    /// `/session/connect`: an explicit user Connect. The only way out of an
-    /// operator release. A failed write throws; the old target stays.
-    static func beginSession(
-        reading: Reading = HelperTarget.read(),
-        now: Date = Date(),
-        write: (HelperTarget) throws -> Void = { try HelperTarget.write($0) }
-    ) throws -> UInt64 {
-        let generation = nextGeneration(after: reading, now: now)
+    /// Where the target lives, behind a seam for the self-tests. Every
+    /// read-modify-write of the target holds `lockPath` (bounded), in the
+    /// daemon's `/session/connect` and in `--emergency-disarm` alike.
+    struct Store {
+        var path: String = HelperTarget.path
+        var requireRootOwnership = true
+        var lockBudget: TimeInterval = 2
+        var write: (HelperTarget, String) throws -> Void = { target, path in
+            try KillSwitchManager.atomicWrite(path: path, data: HelperTarget.encode(target), permissions: 0o600)
+        }
+
+        var lockPath: String { path + ".lock" }
+
+        func read() -> Reading {
+            HelperTarget.readFile(path: path, requireRootOwnership: requireRootOwnership)
+        }
+
+        func withLock<T>(_ body: () throws -> T) throws -> T {
+            let parent = (path as NSString).deletingLastPathComponent
+            if requireRootOwnership {
+                try KillSwitchManager.ensureRootDirectory(parent, permissions: 0o700)
+            }
+            let fd = open(lockPath, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, 0o600)
+            guard fd >= 0 else { throw HelperFailure.system("The target lock cannot be opened (errno \(errno)).") }
+            defer { close(fd) }
+            var metadata = stat()
+            guard fstat(fd, &metadata) == 0, metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+                  !requireRootOwnership || (metadata.st_uid == 0 && metadata.st_mode & 0o022 == 0) else {
+                throw HelperFailure.system("The target lock is not a private root-owned file.")
+            }
+            do {
+                return try UpdateStorage.withLock(fd, budget: lockBudget, body)
+            } catch let failure as HelperFailure where failure.code == "UPDATE_LOCK_TIMEOUT" {
+                throw HelperFailure.coded(
+                    code: "TARGET_STATE_BUSY",
+                    message: "Tono's helper could not get its connection target in time. Click Connect again."
+                )
+            }
+        }
+
+        /// A record that cannot be read as Tono's (wrong type, owner, mode or
+        /// content) is moved aside, never followed or reused.
+        func quarantine(now: Date) throws {
+            let aside = path + ".invalid-\(UInt64(max(0, now.timeIntervalSince1970) * 1000))"
+            guard rename(path, aside) == 0 || errno == ENOENT else {
+                throw HelperFailure.system("The unreadable target record cannot be moved aside (errno \(errno)).")
+            }
+        }
+    }
+
+    /// 0 when no generation is on record (no file, or an unreadable one).
+    static func currentGeneration(_ reading: Reading) -> UInt64 {
+        if case .recorded(let target) = reading { return target.generation }
+        return 0
+    }
+
+    /// `GET /session`: what an explicit user Connect compares against.
+    static func sessionStatus(_ reading: Reading) -> [String: Any] {
+        switch reading {
+        case .recorded(let target):
+            return ["ok": true, "target": target.mode.rawValue, "sessionGeneration": NSNumber(value: target.generation)]
+        case .missing:
+            return ["ok": true, "target": "missing", "sessionGeneration": NSNumber(value: UInt64(0))]
+        case .unreadable(let detail):
+            return ["ok": true, "target": "unreadable", "sessionGeneration": NSNumber(value: UInt64(0)), "detail": detail]
+        }
+    }
+
+    static let supersededConnectMessage = "Tono's connection target changed while connecting (an administrator "
+        + "released protection, or another Connect began). Click Connect again."
+
+    /// `/session/connect`: an explicit user Connect, the only way out of an
+    /// operator release. Compare-and-swap under the target lock: `expected`
+    /// is the generation the app read just before; anything written since (an
+    /// operator release above all) wins and this Connect fails. An unreadable
+    /// record is moved aside and replaced. A failed write throws a concrete
+    /// `TARGET_STATE_UNWRITABLE`; the old target stays.
+    static func beginSession(expected: UInt64, store: Store = Store(), now: Date = Date()) throws -> UInt64 {
         do {
-            try write(HelperTarget(mode: .secured, generation: generation))
+            return try store.withLock {
+                let reading = store.read()
+                guard currentGeneration(reading) == expected else {
+                    throw HelperFailure.coded(code: "SESSION_SUPERSEDED", message: supersededConnectMessage)
+                }
+                if case .unreadable = reading { try store.quarantine(now: now) }
+                let generation = nextGeneration(after: reading, now: now)
+                try store.write(HelperTarget(mode: .secured, generation: generation), store.path)
+                return generation
+            }
+        } catch let failure as HelperFailure where failure.code == "SESSION_SUPERSEDED" || failure.code == "TARGET_STATE_BUSY" {
+            throw failure
         } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
             throw HelperFailure.coded(
                 code: "TARGET_STATE_UNWRITABLE",
-                message: "Tono's helper could not save the new connection target; protection was not changed."
+                message: "Tono's helper could not save its connection target in /Library/Application Support/Tono "
+                    + "(\(detail)). Free some disk space or repair the startup disk, then click Connect again."
             )
         }
-        return generation
     }
 
     /// The arm field. A JSON integer, never a Boolean or a fraction.
@@ -169,16 +251,17 @@ struct HelperTarget: Equatable {
         return generation
     }
 
-    /// `--emergency-disarm`: `released <n+1>`, written off the release's
-    /// critical path.
-    static func persistOperatorRelease(
-        now: Date = Date(),
-        readFile: () -> Reading = { HelperTarget.readFile() },
-        write: (HelperTarget) throws -> Void = { try HelperTarget.write($0) }
-    ) throws -> HelperTarget {
-        let target = HelperTarget(mode: .released, generation: nextGeneration(after: readFile(), now: now))
-        try write(target)
-        return target
+    /// `--emergency-disarm`: `released <n+1>` under the target lock, so it
+    /// always lands above whatever a concurrent Connect read. Runs off the
+    /// release's critical path. An unreadable record is moved aside.
+    static func persistOperatorRelease(store: Store = Store(), now: Date = Date()) throws -> HelperTarget {
+        try store.withLock {
+            let reading = store.read()
+            if case .unreadable = reading { try store.quarantine(now: now) }
+            let target = HelperTarget(mode: .released, generation: nextGeneration(after: reading, now: now))
+            try store.write(target, store.path)
+            return target
+        }
     }
 }
 
@@ -219,17 +302,32 @@ struct OperatorRecoveryBudget {
     /// Waited for only before a restart; the write runs beside the stop phase.
     var persist: TimeInterval = 3
     var stop: TimeInterval = 20
-    /// Update lock inside the release; past it update cleanup is skipped.
+    /// The release in four independent steps, each on its own thread with
+    /// its own budget, PF first so nothing else can hold the block.
+    var pf: TimeInterval = 15
+    var dns: TimeInterval = 20
+    var ai: TimeInterval = 15
+    /// The full release (stale Core, update ledger, the rest of the disarm).
+    var release: TimeInterval = 45
+    /// Update lock inside the full release; past it update cleanup is skipped.
     var lock: TimeInterval = 5
-    /// Each child process the release starts (TERM, KILL, abandon).
+    /// Each child process the full release starts (TERM, KILL, abandon).
     var child: TimeInterval = 15
-    var release: TimeInterval = 60
     var verify: TimeInterval = 20
+    /// The on-disk re-read of the target before a restart.
+    var recheck: TimeInterval = 2
     var restart: TimeInterval = 10
 
-    /// The restart's launchctl may spend 2 s past its deadline killing it.
-    var total: TimeInterval { persist + stop + release + verify + restart + 2 }
+    /// Every phase is waited for at most its budget; the restart's launchctl
+    /// at most its deadline plus the kill grace.
+    var total: TimeInterval {
+        persist + stop + pf + dns + ai + release + verify + recheck + restart + operatorKillGrace
+    }
 }
+
+/// `KillSwitchManager.run` waits one second after SIGTERM and one after
+/// SIGKILL; this is the margin a launchctl call gets past its deadline.
+let operatorKillGrace: TimeInterval = 2.5
 
 // MARK: - Stopping the daemon
 
@@ -250,17 +348,23 @@ enum OperatorDaemonStop: Equatable {
     static let launchctlNoSuchService: Int32 = 113
 }
 
-/// `/bin/launchctl` through `KillSwitchManager.run`: past `deadline` the child
-/// gets SIGTERM, then SIGKILL, each waited on for one second, and is then
-/// abandoned. nil means no answer (could not start, or ran out of time).
-func runOperatorLaunchctl(_ arguments: [String], deadline: TimeInterval) -> Int32? {
-    (try? KillSwitchManager.run("/bin/launchctl", arguments, deadline: deadline))?.status
+/// `/bin/launchctl` on its own thread: spawn and wait together end by
+/// `deadline + operatorKillGrace`, measured from before the spawn, whatever
+/// `posix_spawn` or the child does. Past it the call is abandoned. nil means
+/// no answer (could not start, or ran out of time).
+func runOperatorLaunchctl(
+    _ arguments: [String],
+    deadline: TimeInterval,
+    runner: @escaping ([String], TimeInterval) -> Int32? = { arguments, deadline in
+        (try? KillSwitchManager.run("/bin/launchctl", arguments, deadline: deadline))?.status
+    }
+) -> Int32? {
+    BoundedTask { runner(arguments, deadline) }.wait(deadline + operatorKillGrace) ?? nil
 }
 
 /// R3-O4: boot the daemon out of the system domain and wait until launchd no
 /// longer has it, so the release below is the only writer. The phase ends by
-/// `budget` seconds of wall time, including the up to two seconds
-/// `runOperatorLaunchctl` may spend killing a child past its deadline.
+/// `budget` seconds of wall time, including each call's kill grace.
 func stopHelperDaemonForOperator(
     launchctl: @escaping ([String], TimeInterval) -> Int32? = { runOperatorLaunchctl($0, deadline: $1) },
     pause: @escaping () -> Void = { usleep(200_000) },
@@ -272,7 +376,7 @@ func stopHelperDaemonForOperator(
     // The deadline left for one launchctl call, keeping its kill grace inside
     // `end`; nil once too little is left to start another.
     func callDeadline(cap: TimeInterval) -> TimeInterval? {
-        let left = end.timeIntervalSince(now()) - 2
+        let left = end.timeIntervalSince(now()) - operatorKillGrace
         return left >= 0.2 ? min(cap, left) : nil
     }
     guard let first = callDeadline(cap: 5) else { return .unknown }
@@ -390,13 +494,49 @@ struct OperatorRecoveryReading: Equatable {
 
 // MARK: - The command
 
+/// The release's independent steps (decision 084). The PF step is
+/// emergency-only, idempotent and scoped to Tono's own anchor: it never
+/// flushes or reloads the main ruleset, and it needs neither System
+/// Configuration, the update store nor the disk, so nothing that can stall
+/// there keeps the broad block.
+enum OperatorReleaseSteps {
+    static func flushTonoAnchor(
+        run: ([String]) -> HelperCommandResult? = { try? KillSwitchManager.run("/sbin/pfctl", $0, deadline: 10) }
+    ) -> Bool {
+        guard let flushed = run(["-a", killSwitchAnchor, "-F", "all"]) else { return false }
+        return flushed.status == 0
+    }
+
+    static func restoreDNS() -> Bool {
+        do {
+            _ = try ProtectedDNSManager().restore(deferringLossNotice: true)
+            return true
+        } catch {
+            fputs("Tono emergency recovery could not restore DNS in its first pass: \(error)\n", stderr)
+            return false
+        }
+    }
+
+    static func removeAILayer() -> Bool {
+        KillSwitchManager.reconcileSelectiveRecoveryUnderTarget(
+            rearmAllowed: false, generalIntentPresent: false, disposition: nil, removalPending: true
+        )
+    }
+}
+
 struct OperatorRecoveryResult {
     var stop: OperatorDaemonStop
-    /// nil: the release did not finish within its budget.
+    /// Each nil: the step did not finish within its budget.
+    var pfFlushed: Bool?
+    var dnsRestored: Bool?
+    var aiRemoved: Bool?
     var release: EmergencyReleaseOutcome?
     var reading: OperatorRecoveryReading
     /// nil when the write did not finish within its budget.
     var persisted: Result<HelperTarget, Error>?
+    /// The on-disk target re-read after a successful write; nil when not
+    /// read, `.some(nil)` when the read did not finish in time.
+    var recheck: HelperTarget.Reading??
     /// nil when no restart was attempted; otherwise launchctl's answer.
     var restart: Int32??
     var elapsed: TimeInterval
@@ -406,25 +546,37 @@ struct OperatorRecoveryResult {
         return nil
     }
 
+    /// `released` with this command's generation is what is on disk now.
+    var targetConfirmed: Bool {
+        guard let persistedTarget, case .some(.some(.recorded(let onDisk))) = recheck else { return false }
+        return onDisk == persistedTarget
+    }
+
     /// Success is claimed only when the release finished, every component
-    /// reads back restored, and the release intent is on disk.
+    /// reads back restored, and this command's `released` is on disk.
     var succeeded: Bool {
-        release == .released && reading.restored && persistedTarget != nil
+        release == .released && reading.restored && targetConfirmed
     }
 }
 
 /// The ordered `--emergency-disarm`: (1) release intent in memory, its write
-/// started beside everything else; (2) bounded bootout; (3) bounded network
-/// release; (4) bounded readback; (5) a restart only once `released` is on
-/// disk, so the daemon comes back refusing every arm but keeps cleaning up.
-/// Persistence failure leaves the daemon stopped: nothing can re-arm.
+/// started beside everything else; (2) bounded bootout; (3) the release in
+/// independent bounded steps, PF first, then DNS, the AI layer, and the full
+/// release; (4) bounded readback; (5) a bounded re-read of the target, and a
+/// restart only when this command's `released` is what is on disk, so the
+/// daemon comes back refusing every arm but keeps cleaning up. Anything else
+/// leaves the daemon stopped: nothing can re-arm unaware of the release.
 func runOperatorEmergencyDisarm(
     budget: OperatorRecoveryBudget = OperatorRecoveryBudget(),
     latch: () -> Void = { HelperTarget.processOverride = HelperTarget(mode: .released, generation: 0) },
     persist: @escaping () throws -> HelperTarget = { try HelperTarget.persistOperatorRelease() },
     stopDaemon: (TimeInterval) -> OperatorDaemonStop = { stopHelperDaemonForOperator(budget: $0) },
+    flushPF: @escaping () -> Bool = { OperatorReleaseSteps.flushTonoAnchor() },
+    restoreDNS: @escaping () -> Bool = { OperatorReleaseSteps.restoreDNS() },
+    removeAI: @escaping () -> Bool = { OperatorReleaseSteps.removeAILayer() },
     release: @escaping () -> EmergencyReleaseOutcome,
     verify: @escaping () -> OperatorRecoveryReading = { OperatorRecoveryReading.readSystem() },
+    readTarget: @escaping () -> HelperTarget.Reading = { HelperTarget.readFile() },
     restartDaemon: (TimeInterval) -> Int32? = {
         runOperatorLaunchctl(["bootstrap", "system", UpdateExecutor.daemonPlist], deadline: $0)
     }
@@ -433,17 +585,24 @@ func runOperatorEmergencyDisarm(
     latch()
     let persistence = BoundedTask { () -> Result<HelperTarget, Error> in Result { try persist() } }
     let stop = stopDaemon(budget.stop)
+    let pf = BoundedTask(flushPF).wait(budget.pf)
+    let dns = BoundedTask(restoreDNS).wait(budget.dns)
+    let ai = BoundedTask(removeAI).wait(budget.ai)
     let outcome = BoundedTask(release).wait(budget.release)
     let reading = BoundedTask(verify).wait(budget.verify) ?? .unknown
     let persisted = persistence.wait(budget.persist)
-    var restart: Int32??
-    if stop != .notLoaded, case .success? = persisted {
-        restart = .some(restartDaemon(budget.restart))
-    }
-    return OperatorRecoveryResult(
-        stop: stop, release: outcome, reading: reading, persisted: persisted,
-        restart: restart, elapsed: Date().timeIntervalSince(started)
+    var result = OperatorRecoveryResult(
+        stop: stop, pfFlushed: pf, dnsRestored: dns, aiRemoved: ai, release: outcome, reading: reading,
+        persisted: persisted, recheck: nil, restart: nil, elapsed: 0
     )
+    if result.persistedTarget != nil {
+        result.recheck = .some(BoundedTask(readTarget).wait(budget.recheck))
+        if result.targetConfirmed, stop != .notLoaded {
+            result.restart = .some(restartDaemon(budget.restart))
+        }
+    }
+    result.elapsed = Date().timeIntervalSince(started)
+    return result
 }
 
 /// The CLI entry: bounds every child and the update lock in this process,
@@ -467,6 +626,13 @@ private let unsavedReleaseAdvice = "This command did not start Tono's helper aga
     + "Click Connect in Tono to reconnect (it asks to start the helper again)."
 
 func operatorRecoveryReport(_ result: OperatorRecoveryResult) -> [String] {
+    func step(_ name: String, _ done: Bool?) -> String {
+        switch done {
+        case true?: return "\(name): done."
+        case false?: return "\(name): FAILED."
+        case nil: return "\(name): did not finish within its time budget."
+        }
+    }
     var lines: [String] = []
     switch result.stop {
     case .notLoaded:
@@ -479,18 +645,26 @@ func operatorRecoveryReport(_ result: OperatorRecoveryResult) -> [String] {
     case .unknown:
         lines.append("Helper daemon: launchctl gave no definite answer; it may have run beside the release.")
     }
+    lines.append(step("PF block flush (Tono's anchor only)", result.pfFlushed))
+    lines.append(step("DNS restore", result.dnsRestored))
+    lines.append(step("AI layer removal", result.aiRemoved))
     switch result.release {
-    case nil: lines.append("Release: did not finish within its time budget.")
-    case .refused?: lines.append("Release: PF could not be released.")
-    case .dnsRestoreFailed?: lines.append("Release: PF released; DNS restore failed.")
-    case .coreStillRunning?: lines.append("Release: PF and DNS released; a Tono Core process survived SIGKILL.")
-    case .released?: lines.append("Release: finished.")
+    case nil: lines.append("Full release: did not finish within its time budget.")
+    case .refused?: lines.append("Full release: PF could not be released.")
+    case .dnsRestoreFailed?: lines.append("Full release: PF released; DNS restore failed.")
+    case .coreStillRunning?: lines.append("Full release: PF and DNS released; a Tono Core process survived SIGKILL.")
+    case .released?: lines.append("Full release: finished.")
     }
     lines += result.reading.lines
     switch result.persisted {
     case .success(let target)?:
-        lines.append("Saved target: released by an administrator (generation \(target.generation)). "
-            + "Tono will not reconnect on its own; click Connect in Tono to reconnect.")
+        if result.targetConfirmed {
+            lines.append("Saved target: released by an administrator (generation \(target.generation)). "
+                + "Tono will not reconnect on its own; click Connect in Tono to reconnect.")
+        } else {
+            lines.append("ERROR: the saved release (generation \(target.generation)) is no longer what is on disk "
+                + "(a Connect replaced it, or it could not be read back in time). " + unsavedReleaseAdvice)
+        }
     case .failure(let error)?:
         lines.append("ERROR: the release could not be saved (\(error)). " + unsavedReleaseAdvice)
     case nil:
@@ -524,6 +698,7 @@ func runOperatorReleaseSelfTests() -> Bool {
     }
     enum Injected: Error { case failure }
     let now = Date(timeIntervalSince1970: 1_000)
+    func elapsed(since start: Date) -> TimeInterval { Date().timeIntervalSince(start) }
 
     // Target record: format, missing, unreadable.
     guard HelperTarget.decode(HelperTarget.encode(HelperTarget(mode: .released, generation: 42)))
@@ -533,27 +708,72 @@ func runOperatorReleaseSelfTests() -> Bool {
           HelperTarget.decode(Data("secured 4".utf8)) == nil else { return fail("record format") }
     let directory = NSTemporaryDirectory() + "tono-target-\(UUID().uuidString)"
     guard mkdir(directory, 0o700) == 0 else { return fail("temporary directory") }
-    defer {
-        unlink(directory + "/target")
-        rmdir(directory)
+    defer { try? FileManager.default.removeItem(atPath: directory) }
+    var store = HelperTarget.Store()
+    store.path = directory + "/target"
+    store.requireRootOwnership = false
+    store.lockBudget = 0.3
+    store.write = { target, path in
+        try HelperTarget.encode(target).write(to: URL(fileURLWithPath: path), options: .atomic)
     }
-    let file = directory + "/target"
-    guard HelperTarget.readFile(path: file, requireRootOwnership: false) == .missing,
-          FileManager.default.createFile(atPath: file, contents: Data("garbage".utf8)),
-          case .unreadable = HelperTarget.readFile(path: file, requireRootOwnership: false) else {
+    func put(_ text: String) -> Bool {
+        FileManager.default.createFile(atPath: store.path, contents: Data(text.utf8))
+    }
+    guard store.read() == .missing, put("garbage"), case .unreadable = store.read() else {
         return fail("missing or unreadable record")
     }
 
-    // Latch semantics: an operator release refuses every arm that is not a
-    // newer user Connect: the old session's generation, a heal or an
+    let later = Date(timeIntervalSince1970: 2_000)
+    // A user Connect repairs an unreadable record (bad content, or a
+    // directory in its place): moved aside, a fresh `secured` written.
+    guard (try? HelperTarget.beginSession(expected: 0, store: store, now: now)) == 1_000_000,
+          store.read() == .recorded(HelperTarget(mode: .secured, generation: 1_000_000)),
+          unlink(store.path) == 0, mkdir(store.path, 0o700) == 0,
+          (try? HelperTarget.beginSession(expected: 0, store: store, now: later)) == 2_000_000,
+          store.read() == .recorded(HelperTarget(mode: .secured, generation: 2_000_000)) else {
+        return fail("repair by Connect", store.read())
+    }
+    // A genuinely unwritable target is a concrete error, never swallowed.
+    var unwritable = store
+    unwritable.write = { _, _ in throw Injected.failure }
+    var unwritableCode: String?
+    do { _ = try HelperTarget.beginSession(expected: 2_000_000, store: unwritable, now: now) }
+    catch let failure as HelperFailure { unwritableCode = failure.code } catch {}
+    guard unwritableCode == "TARGET_STATE_UNWRITABLE",
+          store.read() == .recorded(HelperTarget(mode: .secured, generation: 2_000_000)) else {
+        return fail("unwritable target", unwritableCode ?? "none")
+    }
+
+    // Concurrent Connect vs operator release: the Connect read generation 6,
+    // the release lands (7) before its write: the release wins.
+    guard put("secured 6\n"), HelperTarget.currentGeneration(store.read()) == 6,
+          let released = try? HelperTarget.persistOperatorRelease(store: store, now: now),
+          released == HelperTarget(mode: .released, generation: 7) else { return fail("operator release write") }
+    var staleCode: String?
+    do { _ = try HelperTarget.beginSession(expected: 6, store: store, now: now) }
+    catch let failure as HelperFailure { staleCode = failure.code } catch {}
+    guard staleCode == "SESSION_SUPERSEDED", store.read() == .recorded(released) else {
+        return fail("released must win", staleCode ?? "applied")
+    }
+    // A busy target lock is bounded too.
+    let holder = open(store.lockPath, O_RDWR | O_CLOEXEC)
+    defer { if holder >= 0 { close(holder) } }
+    guard holder >= 0, flock(holder, LOCK_EX | LOCK_NB) == 0 else { return fail("target lock setup") }
+    let busyStart = Date()
+    var busyCode: String?
+    do { _ = try HelperTarget.beginSession(expected: 7, store: store, now: now) }
+    catch let failure as HelperFailure { busyCode = failure.code } catch {}
+    guard busyCode == "TARGET_STATE_BUSY", elapsed(since: busyStart) < 1.5,
+          (try? HelperTarget.persistOperatorRelease(store: store, now: now)) == nil else {
+        return fail("busy target lock", busyCode ?? "acquired")
+    }
+    flock(holder, LOCK_UN)
+
+    // Latch semantics: the release refuses the old generation, a heal or an
     // automatic reconnect (no generation), and so does an unreadable record.
-    var disk = HelperTarget.Reading.recorded(HelperTarget(mode: .secured, generation: 6))
-    let released = try? HelperTarget.persistOperatorRelease(
-        now: now, readFile: { disk }, write: { disk = .recorded($0) }
-    )
-    guard released == HelperTarget(mode: .released, generation: 7),
-          HelperTarget.admission(disk, sessionGeneration: 6)
-            == .refused(code: "OPERATOR_RELEASED", message: operatorReleasedMessage(disk)),
+    let disk = store.read()
+    guard case .refused(let releasedCode, _) = HelperTarget.admission(disk, sessionGeneration: 6),
+          releasedCode == "OPERATOR_RELEASED",
           case .refused = HelperTarget.admission(disk, sessionGeneration: nil),
           case .refused = HelperTarget.admission(disk, sessionGeneration: 7),
           !HelperTarget.automaticRearmAllowed(disk),
@@ -562,29 +782,59 @@ func runOperatorReleaseSelfTests() -> Bool {
           !HelperTarget.automaticRearmAllowed(.unreadable("x")) else {
         return fail("operator release refusals", disk)
     }
-    // A failed Connect write keeps the release.
-    guard (try? HelperTarget.beginSession(reading: disk, now: now, write: { _ in throw Injected.failure })) == nil,
-          case .refused = HelperTarget.admission(disk, sessionGeneration: nil) else {
-        return fail("failed Connect write")
-    }
-    // A user Connect begins generation 8: its arms pass, then a heal or an
-    // automatic reconnect of the same session; generation 6 and 7 never.
-    guard let connected = try? HelperTarget.beginSession(reading: disk, now: now, write: { disk = .recorded($0) }),
+    // A Connect that read the release begins generation 8: its arms pass,
+    // then a heal or automatic reconnect of the same session; 6 and 7 never.
+    guard let connected = try? HelperTarget.beginSession(expected: 7, store: store, now: now),
           connected == 8,
-          HelperTarget.admission(disk, sessionGeneration: 8) == .allowed,
-          HelperTarget.admission(disk, sessionGeneration: nil) == .allowed,
-          case .refused(let staleCode, _) = HelperTarget.admission(disk, sessionGeneration: 6),
-          staleCode == "SESSION_SUPERSEDED",
-          case .refused = HelperTarget.admission(disk, sessionGeneration: 7),
-          HelperTarget.admission(.missing, sessionGeneration: nil) == .allowed,
-          HelperTarget.nextGeneration(after: .unreadable("x"), now: now) == 1_000_000 else {
-        return fail("user Connect", disk)
+          HelperTarget.admission(store.read(), sessionGeneration: 8) == .allowed,
+          HelperTarget.admission(store.read(), sessionGeneration: nil) == .allowed,
+          case .refused(let supersededCode, _) = HelperTarget.admission(store.read(), sessionGeneration: 6),
+          supersededCode == "SESSION_SUPERSEDED",
+          case .refused = HelperTarget.admission(store.read(), sessionGeneration: 7),
+          HelperTarget.admission(.missing, sessionGeneration: nil) == .allowed else {
+        return fail("user Connect", store.read())
     }
     guard (try? HelperTarget.sessionGeneration(NSNumber(value: 8))) == .some(8),
           (try? HelperTarget.sessionGeneration(kCFBooleanTrue)) == nil,
           (try? HelperTarget.sessionGeneration(NSNumber(value: 1.5))) == nil,
           (try? HelperTarget.sessionGeneration(NSNumber(value: -1))) == nil else {
         return fail("sessionGeneration field")
+    }
+
+    // Watchdog under a release: nothing loads PF (no supervision, no permit
+    // withhold, no owner relaunch); a saved block goes at once.
+    guard SocketServer.watchdogSteps(rearmAllowed: false, coreRunning: true, stateFilePresent: true, coreDownChecks: 0)
+            == [.releaseBlock, .reconcileAI, .recoverDNS],
+          SocketServer.watchdogSteps(rearmAllowed: false, coreRunning: false, stateFilePresent: false, coreDownChecks: 0)
+            == [.reconcileAI, .recoverDNS],
+          SocketServer.watchdogSteps(rearmAllowed: true, coreRunning: true, stateFilePresent: true, coreDownChecks: 0)
+            == [.relaunchOwner, .supervise],
+          SocketServer.watchdogSteps(rearmAllowed: true, coreRunning: false, stateFilePresent: true, coreDownChecks: 1)
+            == [.relaunchOwner, .withholdPermit] else {
+        return fail("watchdog plan")
+    }
+
+    // AI hold after a restart under the release: a saved "retain" never
+    // reinstalls it; its removal is retried until the system reads it gone.
+    var applied = 0
+    var removals = 0
+    var present = true
+    let removedNow = KillSwitchManager.reconcileSelectiveRecoveryUnderTarget(
+        rearmAllowed: false, generalIntentPresent: false, disposition: true, removalPending: false,
+        layerProvenAbsent: { !present }, markReleasing: {},
+        applySelectiveLayer: { applied += 1 },
+        removeSelectiveLayer: { removals += 1; return false },
+        completeRemoval: {}
+    )
+    let removedLater = KillSwitchManager.reconcileSelectiveRecoveryUnderTarget(
+        rearmAllowed: false, generalIntentPresent: false, disposition: true, removalPending: false,
+        layerProvenAbsent: { !present }, markReleasing: {},
+        applySelectiveLayer: { applied += 1 },
+        removeSelectiveLayer: { removals += 1; present = false; return true },
+        completeRemoval: {}
+    )
+    guard !removedNow, removedLater, applied == 0, removals == 2 else {
+        return fail("AI hold under release", "\(applied) \(removals)")
     }
 
     // Per-component readback: a failed query is unknown, never restored.
@@ -611,12 +861,14 @@ func runOperatorReleaseSelfTests() -> Bool {
           OperatorRecoveryReading.aiResolversReading(read: { _ in .absent }) == .absent,
           OperatorRecoveryReading.aiResolversReading(read: { _ in .unknown }) == .unknown,
           OperatorRecoveryReading.combine([.absent, .unknown, .present]) == .present,
-          !OperatorRecoveryReading(pfBlock: .absent, dns: .unknown, aiResolvers: .absent, aiRoutes: .absent).restored
+          !OperatorRecoveryReading(pfBlock: .absent, dns: .unknown, aiResolvers: .absent, aiRoutes: .absent).restored,
+          OperatorReleaseSteps.flushTonoAnchor(run: { $0 == ["-a", killSwitchAnchor, "-F", "all"] ? answer("") : nil }),
+          !OperatorReleaseSteps.flushTonoAnchor(run: { _ in nil })
     else { return fail("per-component readback") }
 
-    // Order and restart: the release intent is in memory before the
-    // bootout, the bootout comes before the release, and the daemon comes
-    // back only once `released` is on disk.
+    // Order: release intent in memory before the bootout, the bootout before
+    // the release, PF before DNS before the AI layer before the full release,
+    // and a restart only once this command's `released` reads back.
     var events: [String] = []
     let eventLock = NSLock()
     func record(_ event: String) {
@@ -625,80 +877,114 @@ func runOperatorReleaseSelfTests() -> Bool {
         eventLock.unlock()
     }
     let clean = OperatorRecoveryReading(pfBlock: .absent, dns: .absent, aiResolvers: .absent, aiRoutes: .absent)
+    let saved = HelperTarget(mode: .released, generation: 9)
     let ordered = runOperatorEmergencyDisarm(
         latch: { record("latch") },
-        persist: { HelperTarget(mode: .released, generation: 9) },
+        persist: { saved },
         stopDaemon: { _ in record("stop"); return .stopped },
+        flushPF: { record("pf"); return true },
+        restoreDNS: { record("dns"); return true },
+        removeAI: { record("ai"); return true },
         release: { record("release"); return .released },
         verify: { record("verify"); return clean },
+        readTarget: { record("recheck"); return .recorded(saved) },
         restartDaemon: { _ in record("restart"); return 0 }
     )
-    guard ordered.succeeded, events == ["latch", "stop", "release", "verify", "restart"] else {
+    guard ordered.succeeded,
+          events == ["latch", "stop", "pf", "dns", "ai", "release", "verify", "recheck", "restart"] else {
         return fail("order", events)
     }
 
-    // Persistence failure: no restart, an explicit error, never success.
+    // Stalled System Configuration and update store: PF is still flushed
+    // first, and the command ends within its budget.
+    var tight = OperatorRecoveryBudget()
+    tight.persist = 0.2
+    tight.stop = 0.2
+    tight.pf = 0.3
+    tight.dns = 0.3
+    tight.ai = 0.3
+    tight.release = 0.3
+    tight.verify = 0.3
+    tight.recheck = 0.2
+    tight.restart = 0.2
+    events = []
+    let stalledStart = Date()
+    let stalled = runOperatorEmergencyDisarm(
+        budget: tight,
+        latch: {},
+        persist: { saved },
+        stopDaemon: { _ in .stopped },
+        flushPF: { record("pf"); return true },
+        restoreDNS: { sleep(30); return true },
+        removeAI: { true },
+        release: { sleep(30); return .released },
+        verify: { clean },
+        readTarget: { .recorded(saved) },
+        restartDaemon: { _ in 0 }
+    )
+    guard stalled.pfFlushed == true, stalled.dnsRestored == nil, stalled.release == nil, events == ["pf"],
+          !stalled.succeeded, elapsed(since: stalledStart) < tight.total + 0.5 else {
+        return fail("stalled DNS and update store", "\(events) \(elapsed(since: stalledStart))")
+    }
+
+    // Persistence failure, or a target replaced before the restart: no
+    // restart, an explicit error, never success.
     events = []
     let unsaved = runOperatorEmergencyDisarm(
-        latch: {},
-        persist: { throw Injected.failure },
-        stopDaemon: { _ in .stopped },
-        release: { .released },
-        verify: { clean },
+        latch: {}, persist: { throw Injected.failure }, stopDaemon: { _ in .stopped },
+        flushPF: { true }, restoreDNS: { true }, removeAI: { true }, release: { .released },
+        verify: { clean }, readTarget: { .recorded(saved) },
         restartDaemon: { _ in record("restart"); return 0 }
     )
-    guard !unsaved.succeeded, unsaved.restart == nil, events.isEmpty,
-          operatorRecoveryReport(unsaved).contains(where: { $0.hasPrefix("ERROR: the release could not be saved") })
-    else { return fail("persistence failure", events) }
+    let replaced = runOperatorEmergencyDisarm(
+        latch: {}, persist: { saved }, stopDaemon: { _ in .stopped },
+        flushPF: { true }, restoreDNS: { true }, removeAI: { true }, release: { .released },
+        verify: { clean }, readTarget: { .recorded(HelperTarget(mode: .secured, generation: 10)) },
+        restartDaemon: { _ in record("restart"); return 0 }
+    )
+    guard !unsaved.succeeded, unsaved.restart == nil, !replaced.succeeded, replaced.restart == nil, events.isEmpty,
+          operatorRecoveryReport(unsaved).contains(where: { $0.hasPrefix("ERROR: the release could not be saved") }),
+          operatorRecoveryReport(replaced).contains(where: { $0.hasPrefix("ERROR: the saved release") })
+    else { return fail("unsaved or replaced release", events) }
 
-    // A release that reports success but leaves residue (an update
-    // disconnect that swallowed a DNS write) is not success; the daemon still
-    // comes back, refusing arms, to keep cleaning up.
+    // Residue (an update disconnect that swallowed a DNS write) is not
+    // success; the daemon still comes back, refusing arms, to keep cleaning.
     let residue = runOperatorEmergencyDisarm(
-        latch: {},
-        persist: { HelperTarget(mode: .released, generation: 9) },
-        stopDaemon: { _ in .stopped },
-        release: { .released },
+        latch: {}, persist: { saved }, stopDaemon: { _ in .stopped },
+        flushPF: { true }, restoreDNS: { false }, removeAI: { true }, release: { .released },
         verify: { OperatorRecoveryReading(pfBlock: .absent, dns: .present, aiResolvers: .absent, aiRoutes: .absent) },
-        restartDaemon: { _ in 0 }
+        readTarget: { .recorded(saved) }, restartDaemon: { _ in 0 }
     )
     guard !residue.succeeded, residue.restart == .some(.some(0)),
           operatorRecoveryReport(residue).contains("DNS: NOT restored (a service or the active resolver still uses Tono's 127.0.0.1, or a restore is pending)")
     else { return fail("residue") }
 
     // Overall budget: every phase hangs, the command still ends by `total`.
-    var tight = OperatorRecoveryBudget()
-    tight.persist = 0.2
-    tight.stop = 0.2
-    tight.release = 0.3
-    tight.verify = 0.3
-    tight.restart = 0.2
     let hungStart = Date()
     let hung = runOperatorEmergencyDisarm(
-        budget: tight,
-        latch: {},
-        persist: { sleep(30); return HelperTarget(mode: .released, generation: 9) },
+        budget: tight, latch: {},
+        persist: { sleep(30); return saved },
         stopDaemon: { _ in .stopped },
-        release: { sleep(30); return .released },
-        verify: { sleep(30); return clean },
-        restartDaemon: { _ in record("hung restart"); return 0 }
+        flushPF: { sleep(30); return true }, restoreDNS: { sleep(30); return true },
+        removeAI: { sleep(30); return true }, release: { sleep(30); return .released },
+        verify: { sleep(30); return clean }, readTarget: { .recorded(saved) },
+        restartDaemon: { _ in 0 }
     )
-    let hungElapsed = Date().timeIntervalSince(hungStart)
-    guard hung.release == nil, hung.reading == .unknown, hung.persisted == nil, hung.restart == nil,
-          !hung.succeeded, hungElapsed < tight.total + 0.5 else {
+    let hungElapsed = elapsed(since: hungStart)
+    guard hung.pfFlushed == nil, hung.release == nil, hung.reading == .unknown, hung.persisted == nil,
+          hung.restart == nil, !hung.succeeded, hungElapsed < tight.total + 0.5 else {
         return fail("total budget", hungElapsed)
     }
 
     // Hung update lock: another holder never releases it.
     let lockPath = directory + "/lock"
-    let holder = open(lockPath, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+    let lockHolder = open(lockPath, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
     let waiter = open(lockPath, O_RDWR | O_CLOEXEC)
     defer {
-        if holder >= 0 { close(holder) }
+        if lockHolder >= 0 { close(lockHolder) }
         if waiter >= 0 { close(waiter) }
-        unlink(lockPath)
     }
-    guard holder >= 0, waiter >= 0, flock(holder, LOCK_EX | LOCK_NB) == 0 else { return fail("lock setup") }
+    guard lockHolder >= 0, waiter >= 0, flock(lockHolder, LOCK_EX | LOCK_NB) == 0 else { return fail("lock setup") }
     let lockStart = Date()
     var lockCode: String?
     do {
@@ -706,8 +992,16 @@ func runOperatorReleaseSelfTests() -> Bool {
     } catch let failure as HelperFailure {
         lockCode = failure.code
     } catch {}
-    guard lockCode == "UPDATE_LOCK_TIMEOUT", Date().timeIntervalSince(lockStart) < 1.5 else {
+    guard lockCode == "UPDATE_LOCK_TIMEOUT", elapsed(since: lockStart) < 1.5 else {
         return fail("update lock budget", lockCode ?? "acquired")
+    }
+
+    // A stalled spawn: launchctl calls end by deadline + grace, measured
+    // from before the spawn.
+    let spawnStart = Date()
+    let spawned = runOperatorLaunchctl(["print", "system/x"], deadline: 0.3, runner: { _, _ in sleep(30); return 0 })
+    guard spawned == nil, elapsed(since: spawnStart) < 0.3 + operatorKillGrace + 0.5 else {
+        return fail("stalled spawn", elapsed(since: spawnStart))
     }
 
     // Hung child (SIGTERM ignored) under the operator child deadline, and a
@@ -717,15 +1011,17 @@ func runOperatorReleaseSelfTests() -> Bool {
     let childStart = Date()
     let childEnded = (try? UpdatePackage.run("/bin/sh", hangingChild)) == nil
     UpdatePackage.operatorChildDeadline = nil
-    guard childEnded, Date().timeIntervalSince(childStart) < 3.5 else { return fail("hung child") }
+    guard childEnded, elapsed(since: childStart) < 3.5 else { return fail("hung child") }
     let stopStart = Date()
     let hungStop = stopHelperDaemonForOperator(
-        launchctl: { _, deadline in
-            (try? KillSwitchManager.run("/bin/sh", hangingChild, deadline: deadline))?.status
+        launchctl: { arguments, deadline in
+            runOperatorLaunchctl(arguments, deadline: deadline, runner: { _, deadline in
+                (try? KillSwitchManager.run("/bin/sh", hangingChild, deadline: deadline))?.status
+            })
         },
-        budget: 3
+        budget: 4
     )
-    guard hungStop == .unknown, Date().timeIntervalSince(stopStart) < 4.5 else {
+    guard hungStop == .unknown, elapsed(since: stopStart) < 5 else {
         return fail("hung launchctl", hungStop)
     }
 
@@ -759,9 +1055,4 @@ func runOperatorReleaseSelfTests() -> Bool {
         return fail("stop answers", "\(gone) \(refused) \(silent)")
     }
     return true
-}
-
-private func operatorReleasedMessage(_ reading: HelperTarget.Reading) -> String {
-    if case .refused(_, let message) = HelperTarget.admission(reading, sessionGeneration: nil) { return message }
-    return ""
 }

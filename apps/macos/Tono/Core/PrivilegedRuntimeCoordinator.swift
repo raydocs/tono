@@ -54,8 +54,8 @@ actor PrivilegedRuntimeCoordinator {
     }
 
     /// Decision 084: the explicit user Connect's new helper session.
-    func beginConnectSession() {
-        KillSwitchService.beginSession()
+    func beginConnectSession() throws {
+        try KillSwitchService.beginSession()
     }
 
     func daemonRejectsClient() -> Bool {

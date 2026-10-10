@@ -3006,21 +3006,34 @@ private enum ConnectionByteFormat {
     }()
 }
 
-/// An explicit user Connect, briefly remembered until the connect attempt
-/// it started reaches its perform step. Single use and short-lived, so a
-/// later automatic reconnect cannot inherit it (decision 084).
+/// An explicit user Connect, remembered for the one connect attempt it
+/// started until that attempt's perform step. Single use, short-lived, and
+/// bound to its id: only the attempt that minted it may consume it, and an
+/// observed release or Restore Internet drops it (decision 084).
 nonisolated struct UserConnectIntent: Equatable, Sendable {
     static let lifetime: TimeInterval = 10
-    private(set) var markedAt: Date?
+    private(set) var id: UUID?
+    private(set) var mintedAt: Date?
 
-    mutating func mark(now: Date = Date()) {
-        markedAt = now
+    mutating func mint(now: Date = Date()) -> UUID {
+        let minted = UUID()
+        id = minted
+        mintedAt = now
+        return minted
     }
 
-    mutating func consume(now: Date = Date()) -> Bool {
-        defer { markedAt = nil }
-        guard let markedAt else { return false }
-        let age = now.timeIntervalSince(markedAt)
+    /// True once, for the attempt holding the current id while it is fresh.
+    /// Another id (a server pick, an automatic reconnect: nil) consumes
+    /// nothing and leaves the intent in place.
+    mutating func consume(_ candidate: UUID?, now: Date = Date()) -> Bool {
+        guard let candidate, candidate == id, let mintedAt else { return false }
+        invalidate()
+        let age = now.timeIntervalSince(mintedAt)
         return age >= 0 && age <= Self.lifetime
+    }
+
+    mutating func invalidate() {
+        id = nil
+        mintedAt = nil
     }
 }

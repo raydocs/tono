@@ -19,3 +19,13 @@
     - App XCTest `UserConnectSessionTests.testOnlyTheUserConnectBeginsAHelperSession`。
   - 验证（Linux）：契约守卫 PASS；假 `xcrun` 构建在守卫之后到达编译；`test_build_source.py` OK。Swift 编译、自测、XCTest 由托管 macOS CI 执行。
   - 剩余限制：未实机。放行阶段超时后守护进程会被重启，这时被放弃的放行线程与新守护进程在本命令退出前可能短暂并存。`--emergency-reset` 拒绝删除时回退的 `runEmergencyDisarm` 不走这条路径。
+- 续记 2026-10-10（第三次复审 @382c35c0 FAIL：6 个 MAJOR、1 个 minor，在所有者批准的设计内全部修正，仍为 4.52.45）：
+  - R1 launchctl 有界：每次 launchctl 调用（含 spawn）放到独立线程，从 spawn 之前开始计时，最多等 deadline + 2.5 s 后放弃；停止与重启都走这条路径。自测覆盖 spawn 卡死。
+  - R2 放行不再依赖 SC / 更新存储：拆成相互独立、各自有预算的步骤，依次为 PF（15 s）、DNS（20 s）、AI 层（15 s）、完整放行（45 s）。PF 这一步只执行 `pfctl -a tono.killswitch -F all`：仅限 Tono 自己的 anchor，可重复执行，不碰主规则集，也不需要 SC、更新存储或磁盘。其他调用方的 `emergencyRelease()` 顺序不变。自测覆盖 DNS 与完整放行都卡死时 PF 仍已 flush。
+  - R3 目标写入跨进程串行：`/session/connect` 和 CLI 都在 `target-state.lock`（有界 flock）内完成读改写。Connect 先 `GET /session` 再带 `expectedGeneration` 提交（比较并交换），因此 CLI 的 `released` 总能胜出；重启之前、报告成功之前都会再读一次磁盘，要求读到的是本命令写入的那个代数。自测覆盖 Connect 与 CLI 并发时 released 胜出，以及锁被占用时的有界退出。
+  - R4 在实际生效处检查：PF 监督、reviewed-bundle permit 重载、Core 启动 / 同步（`startAllowed`）、DNS 写入 127.0.0.1 之前，都会重读目标。看门狗改为一个可测试的计划（`SocketServer.watchdogSteps`）：处于 released 时不加载 PF，残留阻断立即放行，有幸存的 Core 也照样恢复 DNS。
+  - R5 AI 层随释放一并移除：处于 released（或目标读不出来）时，自动放行不再保留 AI hold，`applyBestEffort` 不再安装；启动与看门狗的对账每一轮都移除 sinkhole 和黑洞路由，直到系统读回确认已不存在（`reconcileSelectiveRecoveryUnderTarget`）。
+  - R6 intent 与 attempt 绑定：`UserConnectIntent` 改为 mint / consume(id) / invalidate，只有铸造它的那次 attempt 能消费。Retry 的 intent 只交给重连循环的第一次尝试；观察到外部释放、出现 `operatorReleased`、执行 Restore Internet 时都会作废。
+  - R7 Connect 可修复目标文件：类型、属主、权限或内容不对的目标记录会被移走，然后重写；确实写不进去时 Connect 报 `TARGET_STATE_UNWRITABLE` 并给出具体提示，不再吞掉，`beginSession` 失败即连接失败。
+  - XCTest 改名为 `testOnlyTheUserConnectAttemptBeginsAHelperSession`。
+  - 验证（Linux）：契约守卫 PASS；假 `xcrun` 构建在守卫之后到达编译；`test_build_source.py` OK。
