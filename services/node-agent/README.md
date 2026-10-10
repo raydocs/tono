@@ -45,11 +45,17 @@ Node install is pending: the agent has not been installed on any node yet.
    POST https://admin.afk.ccwu.cc/api/v1/ops/nodes/<name>/agent-token
    ```
 
-   Send it with your Access session and write the response to a file, not the
-   terminal (for a command-line client: `umask 077` first, then its output
-   option such as `-o agent-token.json`). Never put the token itself on a
-   command line, in an environment variable or in a chat; copy it from that
-   file at step 2, then delete the file.
+   Send it with your Access session and write the response into a fresh
+   private directory, never the terminal and never a file that may already
+   exist (an existing file keeps its old, possibly world-readable mode):
+
+   ```sh
+   dir=$(mktemp -d)        # new directory, mode 0700, owned by you
+   # point your client's output option at "$dir/agent-token.json"
+   ```
+
+   Never put the token itself on a command line, in an environment variable
+   or in a chat; copy it from that file at step 2, then `rm -r "$dir"`.
 
 2. On the node, as root:
 
