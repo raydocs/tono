@@ -33,6 +33,7 @@ let killSwitchArmFields = Set([
     "allowSystemResolution",
     "bootstrapPins",
     "reviewedBundleDirect",
+    "allowLocalNetworkDevices",
 ])
 
 enum HelperFailure: Error {
@@ -84,6 +85,7 @@ func runRequestContractSelfTests() -> Bool {
             "tailscaleBootstrapEnabled": false,
             "allowSystemResolution": false,
             "bootstrapPins": ["api.example.com": ["1.1.1.1"]],
+            "allowLocalNetworkDevices": true,
         ])
         do {
             try validateKillSwitchArmFields(["unexpected": []])
@@ -94,6 +96,33 @@ func runRequestContractSelfTests() -> Bool {
     } catch {
         return false
     }
+}
+
+/// D7: `allowLocalNetworkDevices` accepts only a real JSON boolean, read from
+/// serialized bytes the way the request reader parses them. `1`, `0`, a
+/// string or null must be refused, never read as on or off.
+func runLocalNetworkDevicesFieldSelfTest() -> Bool {
+    func parsed(_ json: String) -> Bool? {
+        guard let object = try? JSONSerialization.jsonObject(
+            with: Data(json.utf8)
+        ) as? [String: Any] else { return nil }
+        return try? KillSwitchManager.allowLocalNetworkDevicesField(
+            object["allowLocalNetworkDevices"]
+        )
+    }
+    let passed = parsed(#"{"allowLocalNetworkDevices":true}"#) == true
+        && parsed(#"{"allowLocalNetworkDevices":false}"#) == false
+        && parsed("{}") == false
+        && parsed(#"{"allowLocalNetworkDevices":1}"#) == nil
+        && parsed(#"{"allowLocalNetworkDevices":0}"#) == nil
+        && parsed(#"{"allowLocalNetworkDevices":"true"}"#) == nil
+        && parsed(#"{"allowLocalNetworkDevices":null}"#) == nil
+    if !passed {
+        FileHandle.standardError.write(Data(
+            "self-test: allowLocalNetworkDevices accepted something other than a JSON boolean\n".utf8
+        ))
+    }
+    return passed
 }
 
 struct OwnedProcessIdentity {
@@ -1014,7 +1043,8 @@ func runLANScopePreservationSelfTest() -> Bool {
         resolvedHosts: [:], pinnedHosts: [:], derpEndpoints: [],
         cachedDERPEndpoints: [], proxyTargets: [],
         sessionDirectEndpoints: [.init(address: "203.0.113.50", transport: "tcp", port: 443)],
-        reviewedBundleDirectEnabled: true
+        reviewedBundleDirectEnabled: true,
+        allowLocalNetworkDevices: true
     )
     let source = KillSwitchManager.renderRules(
         state: state, allowedUID: 501, physicalInterfaces: ["en0"]
@@ -2078,6 +2108,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && ProtectedDNSManager.runSelfTests()
             && TonoPeerAuthorizer.runSelfTests()
             && runRequestContractSelfTests()
+            && runLocalNetworkDevicesFieldSelfTest()
             && runHelperUpgradeAdmissionSelfTest()
             && runUpgradeSourceSelfTest()
             && runSilentUpgradeStagingSelfTest()
@@ -2093,6 +2124,11 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && runStartupOrderSelfTest()
             && runStartupDNSRecoverySelfTest()
             && KillSwitchManager.runFailedCommitReleaseSelfTest()
+            && KillSwitchManager.runLiveSessionReArmKeepsBlockSelfTest()
+            && KillSwitchManager.runPreserveTeardownKeepsProtectedFaultSelfTest()
+            && KillSwitchManager.runGenericLiveReArmFaultPersistsSelfTest()
+            && KillSwitchManager.runPowerTransitionKeepsProtectedFaultSelfTest()
+            && KillSwitchManager.runHeldFaultFailedArmKeepsBlockSelfTest()
             && KillSwitchManager.runFailedBarrierSelectiveReleaseSelfTest()
             && KillSwitchManager.runFailedBarrierUnreleasedSelfTest()
             && SocketServer.runOrphanedBootstrapSelectiveReleaseSelfTest()

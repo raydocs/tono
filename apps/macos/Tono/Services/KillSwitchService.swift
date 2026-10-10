@@ -12,6 +12,13 @@ nonisolated enum KillSwitchService {
         case commandFailed(String)
         case helperRejected
         case userDenied
+        /// D7: the helper could not apply "Allow local network devices" off
+        /// and holds the protected fault. The helper's message.
+        case localNetworkFault(String)
+        /// D7: the helper does not report what it enforces for the setting.
+        case localNetworkHelperTooOld
+        /// A re-arm of the live session failed; the helper kept the block.
+        case protectionUpdateFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -25,6 +32,12 @@ nonisolated enum KillSwitchService {
                 String(localized: "The installed network helper rejected this copy of Tono.")
             case .userDenied:
                 String(localized: "Administrator privileges were denied for the Kill Switch.")
+            case .localNetworkFault:
+                String(localized: "Tono couldn't block local network devices, so all traffic is blocked to keep you protected. Turn the setting off and on again, or reconnect.")
+            case .localNetworkHelperTooOld:
+                String(localized: "The network helper is too old to block local network devices. Reconnect to update it.")
+            case .protectionUpdateFailed:
+                String(localized: "Tono couldn't update protection, so it keeps blocking traffic. Disconnect or reconnect to continue.")
             }
         }
     }
@@ -41,9 +54,13 @@ nonisolated enum KillSwitchService {
 
     private static let stateKey = "Tono_killSwitchArmed"
 
+    /// `localNetworkDevices` is what the helper says this ruleset enforces
+    /// for "Allow local network devices" (D7); nil from a helper older than
+    /// the setting.
     typealias ArmReply = (
         armed: Bool, wanted: Bool, live: Bool,
-        healed: Bool, flushedStates: Bool, killedHosts: Int
+        healed: Bool, flushedStates: Bool, killedHosts: Int,
+        localNetworkDevices: Bool?
     )
 
     /// Helper IPC boundary of `arm`. Production delivers the prepared
@@ -147,6 +164,15 @@ nonisolated enum KillSwitchService {
         }
         do {
             let bootstrapPins = configuredBootstrapPins(for: apiHosts)
+            // D7: the setting (with its generation) this arm sends. Recorded as
+            // applied only when the helper confirms it enforces exactly that;
+            // every other outcome records unknown at this generation, which
+            // never overwrites a newer result (`LocalNetworkDevicesSync`).
+            let localNetwork = LocalNetworkDevicesSync.desired
+            var localNetworkOutcome = LocalNetworkDevicesSync.Applied.unknown(
+                generation: localNetwork.generation
+            )
+            defer { LocalNetworkDevicesSync.recordPF(localNetworkOutcome) }
             // A superseded arm is retried once, here rather than in the caller.
             //
             // The daemon refuses an arm whose state generation moved while it was
@@ -170,7 +196,8 @@ nonisolated enum KillSwitchService {
                 sessionDirectEndpoints: sessionDirectEndpoints,
                 tailscaleBootstrapEnabled: tailscaleBootstrapEnabled,
                 allowSystemResolution: allowSystemResolution,
-                reviewedBundleDirect: reviewedBundleDirect
+                reviewedBundleDirect: reviewedBundleDirect,
+                allowLocalNetworkDevices: localNetwork.allow
             )
             guard status.armed, status.wanted, status.live else {
                 // The helper answered, so the outcome is known: a reply that
@@ -209,8 +236,29 @@ nonisolated enum KillSwitchService {
             // nil keeps the helper's previous interfaces, and so this flag.
             if let tunnelInterfaces { armedWithTunnel = !tunnelInterfaces.isEmpty }
             isArmed = true
+            // A helper that does not say what it enforces predates the
+            // setting and keeps the LAN passes whatever was asked. Never
+            // report off as applied on it: an explicit error instead.
+            guard status.localNetworkDevices == localNetwork.allow else {
+                LocalNetworkDevicesSync.recordFault(.helperTooOld)
+                throw Error.localNetworkHelperTooOld
+            }
+            localNetworkOutcome = .known(localNetwork)
         } catch HelperIPCError.forbidden {
             throw Error.helperRejected
+        } catch HelperIPCError.commandFailed(let message, let code?)
+            where code.hasPrefix("KILLSWITCH_LOCAL_NETWORK_FAULT") {
+            // The helper could not tighten to off and holds the protected
+            // fault (block-all, or the Core stopped). It is still armed.
+            isArmed = true
+            LocalNetworkDevicesSync.recordFault(.helper(message))
+            throw Error.localNetworkFault(message)
+        } catch HelperIPCError.commandFailed(let message, "KILLSWITCH_LIVE_REARM_FAILED") {
+            // A re-arm of the live session failed and the helper kept the
+            // installed block: the session holds, it is not released.
+            isArmed = true
+            LocalNetworkDevicesSync.recordFault(.reArmFailed(message))
+            throw Error.protectionUpdateFailed(message)
         } catch let error as Error {
             throw error
         } catch {
@@ -258,15 +306,10 @@ nonisolated enum KillSwitchService {
         sessionDirectEndpoints: [ConfigPipeline.DirectEndpoint]?,
         tailscaleBootstrapEnabled: Bool?,
         allowSystemResolution: Bool,
-        reviewedBundleDirect: Bool
-    ) throws -> (
-        armed: Bool, wanted: Bool, live: Bool,
-        healed: Bool, flushedStates: Bool, killedHosts: Int
-    ) {
-        func attempt() throws -> (
-            armed: Bool, wanted: Bool, live: Bool,
-            healed: Bool, flushedStates: Bool, killedHosts: Int
-        ) {
+        reviewedBundleDirect: Bool,
+        allowLocalNetworkDevices: Bool
+    ) throws -> ArmReply {
+        func attempt() throws -> ArmReply {
             try armIPC.deliver {
                 try HelperManager.armKillSwitch(
                     apiHosts: apiHosts,
@@ -277,7 +320,8 @@ nonisolated enum KillSwitchService {
                     tailscaleBootstrapEnabled: tailscaleBootstrapEnabled,
                     allowSystemResolution: allowSystemResolution,
                     bootstrapPins: bootstrapPins,
-                    reviewedBundleDirect: reviewedBundleDirect
+                    reviewedBundleDirect: reviewedBundleDirect,
+                    allowLocalNetworkDevices: allowLocalNetworkDevices
                 )
             }
         }
@@ -423,7 +467,12 @@ nonisolated enum KillSwitchService {
     nonisolated(unsafe) private static var reassertNeeded = false
     static var needsSessionExceptionReassert: Bool {
         get { reassertLock.withLock { reassertNeeded } }
-        set { reassertLock.withLock { reassertNeeded = newValue } }
+        set {
+            reassertLock.withLock { reassertNeeded = newValue }
+            // A heal or release rewrote PF without this session's arm: what
+            // it enforces for the local network is no longer known.
+            if newValue { LocalNetworkDevicesSync.pfBecameUnknown() }
+        }
     }
 
     /// Observes effective helper-owned protection without mutating local intent.

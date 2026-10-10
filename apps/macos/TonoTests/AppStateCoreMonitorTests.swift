@@ -358,7 +358,8 @@ final class AppStateCoreMonitorTests: XCTestCase {
             armedIntentAtRearm.append(KillSwitchService.isArmed)
             return (
                 armed: true, wanted: true, live: true,
-                healed: false, flushedStates: false, killedHosts: 0
+                healed: false, flushedStates: false, killedHosts: 0,
+                localNetworkDevices: LocalNetworkDevicesSync.desired.allow
             )
         }
         var state = AppState.CoreMonitorState()

@@ -211,7 +211,7 @@ final class OptionalPolicyTests: XCTestCase {
         KillSwitchService.armIPC.prepare = { _ in throw HelperIPCError.connectFailed }
         KillSwitchService.armIPC.deliver = { _ in
             arms += 1
-            return (true, true, true, false, false, 0)
+            return (true, true, true, false, false, 0, LocalNetworkDevicesSync.desired.allow)
         }
         defer {
             KillSwitchService.armIPC = savedIPC
@@ -264,7 +264,7 @@ final class OptionalPolicyTests: XCTestCase {
         KillSwitchService.armIPC.deliver = { _ in
             arms += 1
             guard arms.isMultiple(of: 2) else { throw HelperIPCError.connectFailed }
-            return (true, true, true, false, false, 0)
+            return (true, true, true, false, false, 0, LocalNetworkDevicesSync.desired.allow)
         }
         defer {
             KillSwitchService.armIPC = savedIPC

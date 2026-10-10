@@ -105,6 +105,10 @@ struct SettingsView: View {
         SettingsKey.internalFailureReportsOptedOut,
         store: AppProfile.defaults
     ) private var internalFailureReportsOptedOut = false
+    @AppStorage(
+        SettingsKey.allowLocalNetworkDevices,
+        store: AppProfile.defaults
+    ) private var allowLocalNetworkDevices = false
     @AppStorage(SettingsKey.themeMode) private var themeMode = "Adaptive"
     @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults)
     private var seaMotionMode = "Auto"
@@ -212,7 +216,33 @@ struct SettingsView: View {
                 .disabled(loginItems.isUpdating)
             }
 
+            settingDivider
+
+            SettingToggleRow(
+                label: "Allow local network devices",
+                subtitle: "Off by default. While connected, let this Mac reach printers, file shares, casting and other devices on your local network. When off, they are blocked while connected.",
+                seaSummary: "Reach printers and other local devices while connected.",
+                isOn: Binding(
+                    get: { allowLocalNetworkDevices },
+                    set: setAllowLocalNetworkDevices
+                )
+            )
+
+            if let localNetworkFault = appState.localNetworkDevicesFaultMessage {
+                Text(localNetworkFault)
+                    .font(.system(size: seaEnabled ? 12 : 11))
+                    .foregroundStyle(seaEnabled ? SeaTheme.attention : Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
         }
+    }
+
+    /// Stores the choice and hands it to AppState, which applies PF and the
+    /// Core together (a new generation in `LocalNetworkDevicesSync`).
+    private func setAllowLocalNetworkDevices(_ enabled: Bool) {
+        allowLocalNetworkDevices = enabled
+        appState.localNetworkDevicesSettingChanged(enabled)
     }
 
     private var auditLogRow: some View {
