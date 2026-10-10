@@ -286,8 +286,20 @@ While protection is armed without a tunnel (bootstrap, Protected Offline):
   amending 077). No other process matches; connected (`Locked`) the whole channel is
   retracted. A Service at protocol revision 20 or later reports the permit, and the app then
   goes relay-only in this state ([decision 091](../decisions/091-2026-10-10-control-plane-relay-only-without-tunnel.md)).
-- **macOS**: the PF bootstrap permit does not include the relays on `main`; armed, a relay is
-  blocked like any other non-permitted address (decision 086, PR #1507, changes this).
+- **macOS**: the helper's PF permits only the relays, TCP 2053, for the interactive user
+  (decision 086, #1507); no Cloudflare address is permitted in that state.
+
+**macOS, decision 091 (owner, 2026-10-10; supersedes the path order above for this case):**
+whenever no tunnel carries the control plane — unarmed (signed out, first sign-in,
+disconnected) or armed without a tunnel (bootstrap, Protected Offline, drop recovery) —
+`TonoAPIClient` sends API requests to the relays **only**: no system resolver, no pinned
+Cloudflare address, before or after them, and no direct attempt when every relay fails (the
+error names each relay and how it failed). If the tunnel goes away during a walk, the direct
+steps still ahead are skipped. With a tunnel up (`KillSwitchService.tunnelCarriesControlPlane`)
+the order below is unchanged and the request goes through the tunnel. An arm recorded before
+the tunnel flag existed (older helper) reads as a tunnel and keeps the order below. Not
+changed by 091: the updater's GETs (below) keep direct-first with relay fallback, and the
+pre-login handshake probe still probes every path (no request is sent).
 
 macOS sign-in budget, per walk (`TonoAPIClient.exchangeOverPaths`; `sendData` runs at most two
 walks, 1 s apart, and only when the retry rule allows a second one):
