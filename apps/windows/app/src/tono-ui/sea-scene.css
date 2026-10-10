@@ -955,7 +955,7 @@
   transition: opacity var(--sea-day-time) var(--sea-sky-ease);
 }
 
-/* Light pass (decision 077): lit cloud edges, horizon haze, no grain on the
+/* Light pass (decision 078): lit cloud edges, horizon haze, no grain on the
    connected sun. The sky, sun core and glow rules above carry the rest. */
 .sea-cloud::after {
   content: "";
@@ -1009,7 +1009,7 @@
   );
 }
 
-/* Real-time water (decision 077): the canvas fades in over the CSS water, then
+/* Real-time water (decision 078): the canvas fades in over the CSS water, then
    the CSS water layers stop rendering until the canvas goes away. */
 .sea-gl {
   transition: opacity 600ms ease;

@@ -1,4 +1,4 @@
-// Live throughput for the sea's water sparkle (decision 077). The dashboard's
+// Live throughput for the sea's water sparkle (decision 078). The dashboard's
 // existing traffic subscription writes it; the water renderer reads it once per
 // frame. No React state, no second subscription. The feed skips duplicate
 // samples, so a steady rate is never stale: the writer clears it with `null`

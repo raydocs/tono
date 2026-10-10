@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, type RefObject } from 'react'
 
 import { readSeaTraffic } from './sea-traffic'
 
-// Real-time water for the full-quality sea (decision 077). The CSS sky stays
+// Real-time water for the full-quality sea (decision 078). The CSS sky stays
 // the source of truth: every frame reads the sun and moon boxes and their
 // opacities from the DOM, so the reflection follows the CSS transitions
 // exactly. The CSS water layers stay mounted and take over again on any
