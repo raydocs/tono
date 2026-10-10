@@ -1,6 +1,7 @@
 import type {
   ActivityHourDto,
   AdoptionMatrixDto,
+  ApiRelaysDto,
   ConnectionEventDto,
   CustomerDetailDto,
   CustomerSummaryDto,
@@ -216,6 +217,8 @@ export const opsApi = {
   /** Kept for the facts no summary carries: address, system, ports, line tags. */
   fleetNodes: (signal?: AbortSignal) => getJson<FleetDto>('fleet-nodes', signal),
   live: async (signal?: AbortSignal) => (await getJson<{ live: LiveDto }>('live', signal)).live,
+  /** The Tono-owned API relays and the cron's last TCP check of each. */
+  apiRelays: (signal?: AbortSignal) => getJson<ApiRelaysDto>('api-relays', signal),
 
   customers: (signal?: AbortSignal) => getAllJson<CustomerSummaryDto>('customers', signal),
   /**

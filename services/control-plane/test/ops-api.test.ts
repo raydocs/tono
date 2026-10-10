@@ -1388,6 +1388,7 @@ describe('ops v1 api', () => {
       'GET /api/v1/ops/months/{month}/export.csv',
       'GET /api/v1/ops/fx',
       'GET /api/v1/ops/slo',
+      'GET /api/v1/ops/api-relays',
     ];
     expect([...OPS_V1_ROUTES].sort()).toEqual([...tested].sort());
   });

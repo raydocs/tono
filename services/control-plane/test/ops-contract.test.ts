@@ -243,6 +243,8 @@ const customerDetail = () => ({
     lastFailAt: null,
     lastFailCode: null,
     lastFailNode: null,
+    clientPath: 'relay',
+    clientPathAt: 1_757_000_000,
   }],
   chores: [{ id: 'c-1', kind: 'expiry_soon', summary: '7 天后到期', dueAt: 1_757_600_000, createdAt: 1_757_000_000 }],
   billing: {

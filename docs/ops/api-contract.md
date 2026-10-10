@@ -110,6 +110,8 @@
 | `POST replay` | `ReplayDto { rulesVersion, items: ReplayRowDto[], skipped, updatedAt }`。Body `{ since, until?, node? }`（unix 秒）。只读：用当前 `VERDICT_RULES_VERSION` 重判 `ops_node_status_history.evidence_json`，不走迟滞。上限 2000 行；缺证据 / 截断计入 `skipped`。`ReplayRowDto { at, node, wasVerdict, nowVerdict, wouldOpenKind, wouldOpenSeverity, differs }` |
 | `GET nodes/{name}/receipts?limit=` | `ListDto<ChangeReceiptDto>`。按时间倒序。`ChangeReceiptDto { id, kind, subjectType, subjectId, incidentId, jobId, before: unknown, after: unknown, clientAcks: number, rollbackOf, actor, at }` |
 | `GET slo` | `SloResponseDto { items: SloRowDto[], summary: SloSummaryDto, nextCursor, total, updatedAt }`。Query `?range=7d|30d&platform&carrier&node`。`SloRowDto { dayAt, platform, carrier, node, attempts, successes, p50Ms, verifiedOutageMin, unmeasuredMin, rulesVersion }`，`summary { successRate, p50Ms, verifiedOutageMin, unmeasuredMin, coverage }`。 |
+| `GET api-relays` | `ApiRelaysDto { relays: ApiRelayDto[] }`（`nodes.read`）。每个编译进客户端的 Tono API 中继一行（决策 077，`src/api-relays.ts`）：`{ name, host, port, ok, checkedAt, latencyMs, error, okSince, failingSince }`。来自 cron 每 5 分钟对 `host:port` 的 TCP 试连（5 s 超时；Worker 无法指定 SNI，所以只证明端口开着），表 `api_relay_probes`。cron 还没测过的中继各字段为 null，不算不可达 |
+| `GET customers/{id}` | `devices[]` 加 `clientPath` / `clientPathAt`：设备最近一次登录、刷新或拉目录时请求头 `X-Tono-Path` 报的传输路径（`pinned\|system_dns\|relay\|doh\|alt_port\|tunnel`，其它值丢弃）与写入时间（epoch 秒），来自 `devices.client_path(_at)`；同一路径一小时内不重写。不发此头的旧版本为 null |
 
 ### 部门 B
 

@@ -334,6 +334,8 @@ function deviceDto(
     lastFailAt: nullInt(live?.last_fail_at),
     lastFailCode: nullText(live?.last_fail_code),
     lastFailNode: nullText(live?.last_fail_node),
+    clientPath: nullText(row.client_path),
+    clientPathAt: nullInt(row.client_path_at),
   };
 }
 

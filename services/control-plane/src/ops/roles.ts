@@ -80,6 +80,7 @@ const ROUTE_ACTIONS: Record<OpsV1Route, OpsAction> = {
   'GET /api/v1/ops/months/{month}/export.csv': 'ledger.read',
   'GET /api/v1/ops/fx': 'ledger.read',
   'GET /api/v1/ops/slo': 'system.read',
+  'GET /api/v1/ops/api-relays': 'nodes.read',
 };
 
 function patternToRegExp(pattern: string): RegExp {

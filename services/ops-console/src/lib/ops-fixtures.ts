@@ -39,6 +39,9 @@ const SEC_KEYS = new Set([
   // 预计耗尽日.
   'cycleStart',
   'cycleEnd',
+  // When an API relay's current run of successes or failures began.
+  'okSince',
+  'failingSince',
 ]);
 
 function isSecondsKey(key: string): boolean {

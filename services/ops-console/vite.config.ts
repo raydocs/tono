@@ -26,6 +26,7 @@ import nodesEmptyRaw from './fixtures/nodes.empty.json';
 import healthRaw from './fixtures/system-health.json';
 import healthDenseRaw from './fixtures/system-health.dense.json';
 import healthEmptyRaw from './fixtures/system-health.empty.json';
+import apiRelaysRaw from './fixtures/api-relays.json';
 
 /**
  * Fixture sets, chosen per request by `?fixtures=`. The screenshot suite needs
@@ -397,6 +398,11 @@ function fixturesPlugin(): Plugin {
         // Which source is behind, and how far the backfill has left to go.
         if (route === 'system/health') {
           sendJson(res, materializeOps(chosen.health.health, chosen.health.clock));
+          return;
+        }
+        // 节点 · API 中继: the same two relays in every set.
+        if (route === 'api-relays') {
+          sendJson(res, materializeOps(apiRelaysRaw.body, apiRelaysRaw.clock));
           return;
         }
         if (route === 'fleet-nodes') {

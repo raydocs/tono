@@ -256,7 +256,10 @@ export const customerCopy = {
     lastSeen: '最近在线',
     node: '当前节点',
     action: '动作',
+    path: '路径',
   } as const,
+  /** The transport the device last reached the control plane by, as the client named it. */
+  devicePath: (path: string, ago: string) => `${path} · ${ago}`,
   deviceActionBlocked: (platform: string) => `${platform} 客户端还没有这个动作`,
   foldOpen: '展开',
   foldShut: '收起',
