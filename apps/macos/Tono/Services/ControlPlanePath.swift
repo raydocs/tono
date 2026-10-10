@@ -43,34 +43,89 @@ nonisolated struct ControlPlanePath: Sendable {
     /// request and nothing that identifies the user or the device. Nil when
     /// the path cannot be probed; the pre-login probe then says nothing.
     var handshake: (@Sendable () async -> Bool)? = nil
+    /// The same exchange, given up with `URLError(.timedOut)` when no status
+    /// line has arrived within the budget (the last argument, seconds). Only
+    /// the system resolver has one: its `URLSession` otherwise waits out its
+    /// own 30 s request and 45 s resource timeouts on an address that drops
+    /// every packet. The walk uses it for a read with another path behind it,
+    /// never for a mutating request, which may already have arrived.
+    var exchangeWithinHeadBudget: (@Sendable (URLRequest, Int, TimeInterval) async throws -> ControlPlaneAnswer)? = nil
+
+    /// How long a read waits for the system resolver's status line before
+    /// the walk hands it to the next path. A healthy cross-border answer
+    /// takes a few seconds; a resolver answer that leads nowhere would
+    /// otherwise hold the pinned addresses and the relays back for 45 s.
+    static let systemHeadBudget: TimeInterval = 15
 
     /// The system resolver, through the control-plane `URLSession`.
     nonisolated static func systemResolver(_ session: URLSession) -> ControlPlanePath {
-        ControlPlanePath(label: "system_dns") { request, maximumResponseBytes in
-            let (bytes, response) = try await session.bytes(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                throw ControlPlaneExchangeError.invalidResponse
-            }
-            let declared = http.value(forHTTPHeaderField: "Content-Length").flatMap(Int.init)
-            if let declared, declared < 0 || declared > maximumResponseBytes {
-                throw ControlPlaneExchangeError.invalidResponse
-            }
-            var data = Data()
-            data.reserveCapacity(min(declared ?? 0, maximumResponseBytes))
-            do {
-                for try await byte in bytes {
-                    guard data.count < maximumResponseBytes else {
-                        throw ControlPlaneExchangeError.invalidResponse
-                    }
-                    data.append(byte)
-                }
-            } catch let error as ControlPlaneExchangeError {
-                throw error
-            } catch {
-                return ControlPlaneAnswer(status: http.statusCode, body: data, bodyFailure: error)
-            }
-            return ControlPlaneAnswer(status: http.statusCode, body: data, bodyFailure: nil)
+        var path = ControlPlanePath(label: "system_dns") { request, maximumResponseBytes in
+            try await systemExchange(session, request, maximumResponseBytes, headArrived: nil)
         }
+        path.exchangeWithinHeadBudget = { request, maximumResponseBytes, budget in
+            let deadline = HeadDeadline()
+            let work = Task {
+                try await systemExchange(
+                    session, request, maximumResponseBytes, headArrived: { deadline.headArrived() }
+                )
+            }
+            let timer = Task {
+                // Cancelled once the exchange is over: nothing to give up.
+                do { try await Task.sleep(for: .seconds(budget)) } catch { return }
+                if deadline.expireUnlessHeadArrived() { work.cancel() }
+            }
+            defer { timer.cancel() }
+            do {
+                return try await withTaskCancellationHandler {
+                    try await work.value
+                } onCancel: {
+                    work.cancel()
+                }
+            } catch {
+                guard deadline.expired else { throw error }
+                // Nothing came back in time; for a read that is a reason to
+                // try the next path, like any other transport failure.
+                throw URLError(.timedOut, userInfo: [
+                    NSLocalizedDescriptionKey: "system_dns: no status line within \(Int(budget.rounded(.up))) s",
+                ])
+            }
+        }
+        return path
+    }
+
+    /// One exchange over `session`. `headArrived`, when given, is called as
+    /// soon as the status line and headers are in; false means the head
+    /// budget already ran out and the exchange stops there.
+    nonisolated private static func systemExchange(
+        _ session: URLSession,
+        _ request: URLRequest,
+        _ maximumResponseBytes: Int,
+        headArrived: (@Sendable () -> Bool)?
+    ) async throws -> ControlPlaneAnswer {
+        let (bytes, response) = try await session.bytes(for: request)
+        if let headArrived, !headArrived() { throw CancellationError() }
+        guard let http = response as? HTTPURLResponse else {
+            throw ControlPlaneExchangeError.invalidResponse
+        }
+        let declared = http.value(forHTTPHeaderField: "Content-Length").flatMap(Int.init)
+        if let declared, declared < 0 || declared > maximumResponseBytes {
+            throw ControlPlaneExchangeError.invalidResponse
+        }
+        var data = Data()
+        data.reserveCapacity(min(declared ?? 0, maximumResponseBytes))
+        do {
+            for try await byte in bytes {
+                guard data.count < maximumResponseBytes else {
+                    throw ControlPlaneExchangeError.invalidResponse
+                }
+                data.append(byte)
+            }
+        } catch let error as ControlPlaneExchangeError {
+            throw error
+        } catch {
+            return ControlPlaneAnswer(status: http.statusCode, body: data, bodyFailure: error)
+        }
+        return ControlPlaneAnswer(status: http.statusCode, body: data, bodyFailure: nil)
     }
 
     /// The pinned addresses for `baseURL`'s host, or nil when it has none.
@@ -174,6 +229,37 @@ nonisolated struct ControlPlanePath: Sendable {
     static var userAgent: String {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
         return "Tono/\(build)"
+    }
+}
+
+/// Which of the head and the head budget came first, for one system
+/// resolver exchange (`ControlPlanePath.exchangeWithinHeadBudget`).
+nonisolated private final class HeadDeadline: @unchecked Sendable {
+    private let lock = NSLock()
+    // Guarded by `lock`.
+    private var arrived = false
+    private var didExpire = false
+
+    /// The head is in; false when the budget ran out first.
+    func headArrived() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !didExpire else { return false }
+        arrived = true
+        return true
+    }
+
+    /// The budget ran out; true when no head had arrived, so the exchange
+    /// is to be given up.
+    func expireUnlessHeadArrived() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !arrived else { return false }
+        didExpire = true
+        return true
+    }
+
+    var expired: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return didExpire
     }
 }
 
