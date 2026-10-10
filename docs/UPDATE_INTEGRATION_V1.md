@@ -34,7 +34,10 @@ fall back to the legacy installer. One exception (decision 087, provisional): a
 404 for `latest/manifest.json` itself means nothing is published on the channel,
 and both apps report no update (no error, normal check cadence, no fallback),
 on the direct path and over a relay alike. A 404 for a published manifest's
-signature or package is still an error.
+signature or package is still an error. Other statuses: macOS accepts only a 200
+for the exact URL. Windows rejects 4xx/5xx and never follows a redirect, but a
+3xx (or other 2xx) body is still read under the size cap and handed to the
+Service, whose signature check decides; it is not rejected by status.
 
 Compute SHA-256 over the exact manifest bytes and download immutable files from
 `https://releases.afk.ccwu.cc/desktop/v1/<manifest-sha256>/`:

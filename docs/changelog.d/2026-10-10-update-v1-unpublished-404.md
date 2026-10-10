@@ -11,8 +11,9 @@
   「Couldn't check for updates」，后台检查缓存错误后改为每小时重查。改后（[决定 087](../decisions/087-2026-10-10-unpublished-update-channel-is-no-update.md)，
   provisional）：只有发现对象本身的 404 视为「无更新」：macOS 后台静默、6 h 节奏不变，手动检查提示「No update available」
   （不说「已是最新」）；Windows 返回无报价，SWR 维持每日检查，手动检查显示已有的「已是最新版」。经中继时同样处理
-  （中继透传 TLS，404 是发布主机自己的应答，且不会再发给下一台中继）。已发布清单的签名/安装包 404、其他非 200、
-  重定向、超限或无效元数据仍是错误。
+  （中继透传 TLS，404 是发布主机自己的应答，且不会再发给下一台中继）。已发布清单的签名/安装包 404、超限或无效元数据
+  仍是错误；其他状态码行为不变：macOS 只接受对应 URL 的 200（重定向失败）；Windows 拒绝 4xx/5xx、不跟随 3xx，
+  但 3xx（或其他 2xx）的正文仍在同一上限内读出并交 Service 验签（既有行为，按状态码不拒绝，记入 #1521 限制）。
 - 新增/优化：mac 新增两条文案（含简体中文）；`UPDATE_INTEGRATION_V1.md` 的「Missing or mismatched metadata」一句加上这个例外。
 - 工程与测试：macOS `NativeUpdateDownloadTests.testUnpublishedDiscoveryManifestIsNoUpdateDirectlyAndOverTheRelay`
   （本机回环 404 直连、以及直连拒绝后中继回 404，两者都得到 nil，中继只收到清单 GET）；Windows

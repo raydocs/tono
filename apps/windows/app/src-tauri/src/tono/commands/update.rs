@@ -197,8 +197,10 @@ async fn bounded(client: &reqwest::Client, url: &str, limit: usize, preferred: &
 
 /// The discovery document, or `None` when the release host answered 404: nothing is published
 /// on the v1 channel, which is no update rather than a failed check. The answer is the release
-/// host's own on every path (a relay passes the TLS session through). Any other non-200 still
-/// fails, and so does a 404 for the signature of a published manifest (`bounded`).
+/// host's own on every path (a relay passes the TLS session through). Any other 4xx/5xx still
+/// fails (`error_for_status`), and so does a 404 for the signature of a published manifest
+/// (`bounded`). A 3xx is not followed (`Policy::none`) and is not rejected here: its body is
+/// read under the same cap and goes to the Service's signature check like any other answer.
 async fn discovery_document(response: reqwest::Response) -> Result<Option<String>> {
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
