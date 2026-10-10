@@ -152,6 +152,39 @@ With `cooldownSeconds: 0` a flapping relay can send at most one opening and one 
 15 minutes, because each reopening needs three fresh failed checks. Every matching rule sends its
 own copy: with both rules the opening arrives twice and the recovery once.
 
+The same rule from the ops console (owner, Access login): 设置 → 告警 (`https://admin.afk.ccwu.cc/ops/#/settings/alerts`)
+→ 新建规则, then:
+
+| Field | Value |
+|---|---|
+| 名称 | `API 中继` |
+| 启用 | 开 |
+| 最低严重度 | 注意 (`warn`; 严重 would never match, the relay incident is `warn`) |
+| 最少影响人数 | `0` (the relay incident has no customer count) |
+| 什么时候发 | 出事和恢复都发 (`open_resolve`) |
+| 延迟几秒再发 | `0` |
+| 冷却多少秒 | `0` (must be shorter than the outage, or the recovery is recorded 冷却中未发) |
+| 通道 / 发到哪儿 | 邮件 and your address, or a webhook as for the other rules |
+| 只看这类事 | `api-relay-down` |
+| 只看这一个对象 | empty (one rule for both relays) |
+
+Save, then 发送测试 to see the channel works. Check the result read-only with
+[`check-relay-alert-rule.mjs`](../../tooling/scripts/check-relay-alert-rule.mjs), from either export
+(the D1 query leaves out `target`, so no address lands in the file):
+
+```sh
+# ops API, Access session: GET https://admin.afk.ccwu.cc/api/v1/ops/alert-rules > /tmp/rules.json
+# or a remote D1 read from services/control-plane with the tono profile:
+npx wrangler d1 execute tono-control-plane --remote --json --command \
+  "SELECT id, name, enabled, match_kind, match_subject_type, match_subject_id, min_severity, min_impact, fire_on, delay_seconds, cooldown_seconds FROM ops_alert_rules" > /tmp/rules.json
+node tooling/scripts/check-relay-alert-rule.mjs /tmp/rules.json [--outage-seconds 300]
+```
+
+It prints `PASS` for each enabled rule whose match fields admit the relay incident with
+`fire_on=open_resolve` and a cooldown shorter than the outage, `skip <id>: <reason>` for the rest,
+and exits 0 only when one such rule covers every relay (`OK`), else 1 (`MISSING`). The default
+outage, 300 s, is the shortest one that opens an incident: it resolves one 5-minute check later.
+
 ## Client behaviour
 
 Windows (`transport.rs`) and macOS (`TonoAPIClient.exchangeOverPaths`) try a relay only after
