@@ -16,4 +16,4 @@
 - Why stricter: no IP, URL path, user or device id is stored, only day, ASN, AS organisation, path and counts;
   a node's ASN is never attributed to a customer; the rate is unknown rather than optimistic when nobody reports;
   the five-minute catalog poll adds no write; the header widens nothing a client is allowed to do.
-- Applied in: branch `amp/a8-asn-path-success` (backlog A8), `GET /api/v1/ops/api-paths` (`nodes.read`).
+- Applied in: PR #1490, branch `amp/a8-asn-path-success` (backlog A8), `GET /api/v1/ops/api-paths` (`nodes.read`).

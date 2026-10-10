@@ -1,7 +1,7 @@
 ## 2026-10-10 · 运维后台：客户 ASN × 控制面路径 7 天成功率表
 - 归属：运维计划 [§2](../ops/plan-2026-09-11.md)（中继可观测）；[待办](../ops/amp-backlog-2026-10-10.md) A8；
   `services/control-plane`（迁移 0099、`client-identity.ts`、`api-paths.ts`、ops 读接口）与 `services/ops-console`（节点页）。
-- 来源：基线 main → 分支 `amp/a8-asn-path-success`；PR 待开；未合 main。迁移号 0099 由协调者分配（0096–0098 预留给 A5 / A20 / A21）。
+- 来源：基线 main → 分支 `amp/a8-asn-path-success`；PR [#1490](https://github.com/raydocs/tono/pull/1490)；未合 main。迁移号 0099 由协调者分配（0096–0098 预留给 A5 / A20 / A21）。
 - 缺陷修复：无。此前服务端只存设备「最近一次」路径（`devices.client_path`），没有按请求的路径计数，也没有任何路径失败数据：
   客户端不发 `signInFail`，macOS 的 `control_plane_path_failed` 只在本机审计日志里，Windows 还没有对应事件（A19）。
 - 新增/优化：
