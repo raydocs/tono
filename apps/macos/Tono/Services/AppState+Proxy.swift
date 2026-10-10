@@ -515,7 +515,8 @@ extension AppState {
             tonoTransport: tonoTransport,
             claudeHomeNodeName: managedCatalogRouting?.homeProxy,
             defaultNodeName: managedCatalogRouting?.defaultProxy,
-            claudeHomeSocks5: managedCatalogRouting?.homeSocks5
+            claudeHomeSocks5: managedCatalogRouting?.homeSocks5,
+            allowLocalNetworkDevices: SettingsKey.allowsLocalNetworkDevices()
         )
         let selectedExit = selectedExitNode()
         let selectedExitName = selectedExit?.name

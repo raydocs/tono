@@ -481,6 +481,20 @@ extension KillSwitchManager {
             // part of a host specification, so the shorter `proto tcp port {…}`
             // is a parse error that takes the whole ruleset down and leaves the
             // session unable to arm at all.
+            //
+            // With "Allow local network devices" off, the address-free permit
+            // must not carry root (the Core's DIRECT outbounds, which a local
+            // proxy client can steer) to the local network, CGNAT, link-local,
+            // multicast or broadcast on its web ports. Exactly the traffic the
+            // permit below would pass to those ranges is dropped first. On
+            // renders nothing here, as before the setting existed.
+            if !state.allowLocalNetworkDevices {
+                lines.append(
+                    "block drop out quick inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 224.0.0.0/4, 255.255.255.255 } " +
+                    "port { \(reviewedBundleDirectPorts.map(String.init).joined(separator: ", ")) } " +
+                    "user root label \"tono-bundle-local\""
+                )
+            }
             for transport in ["tcp", "udp"] {
                 lines.append(
                     "pass out quick inet proto \(transport) from any to any " +

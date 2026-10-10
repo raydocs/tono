@@ -361,6 +361,7 @@ final class KillSwitchManager {
             )
         }
         var load = KernelLoadOutcome.notIssued
+        var liveSessionReArm = false
         do {
         // Retire an earlier explicit release before saving a new armed intent.
         // If this arm is interrupted, its fallback remains selective.
@@ -376,6 +377,11 @@ final class KillSwitchManager {
         // gain. Any removed pass rule still forces the full flush.
         let passRules = Self.passRules(in: renderedRules)
         let disposal = Self.stateDisposal(replacing: lastLoadedPassRules, with: passRules)
+        liveSessionReArm = Self.isLiveSessionReArm(
+            previous: previous,
+            previousBaseline: lastLoadedPassRules,
+            next: state
+        )
         // The kernel takes the new ruleset part-way through the call below, ahead
         // of the PF enable, the state disposal, and the verification probes that
         // can each still throw. Recording nothing across it is what keeps a
@@ -411,13 +417,9 @@ final class KillSwitchManager {
             // partial commit must not stay until the next helper start.
             // A failure before the load, or a load pfctl rejected, left the
             // previous rules in place: flushing them opens the physical NIC
-            // under a Core that is still running.
-            if Self.failedCommitReleasesInstalledBlock(
-                load: load,
-                strictKillSwitchEnabled: false
-            ) {
-                Self.releaseInstalledBlock()
-            }
+            // under a Core that is still running. A re-arm of the session PF
+            // already holds keeps the block (see `settleFailedCommit`).
+            Self.settleFailedCommit(load: load, liveSessionReArm: liveSessionReArm)
             throw error
         }
     }
@@ -443,12 +445,55 @@ final class KillSwitchManager {
     /// while the Core is still up. A strict kill switch keeps the block.
     static func failedCommitReleasesInstalledBlock(
         load: KernelLoadOutcome,
-        strictKillSwitchEnabled: Bool
+        strictKillSwitchEnabled: Bool,
+        liveSessionReArm: Bool = false
     ) -> Bool {
-        guard failureRecoveryReleasesNetwork(strictKillSwitchEnabled: strictKillSwitchEnabled) else {
+        guard failureRecoveryReleasesNetwork(strictKillSwitchEnabled: strictKillSwitchEnabled),
+              !liveSessionReArm else {
             return false
         }
         return load == .acceptedOrUnknown
+    }
+
+    /// A re-arm of the session PF already holds: the armed state on disk has
+    /// the same non-empty tunnel set, and this process committed the ruleset
+    /// it replaces (a nil baseline is a first arm after daemon start or after
+    /// a partial commit). The app re-arms a live session for a settings
+    /// change, a heal reassert, a node switch or a config reload. The first
+    /// arm of a new session (no tunnel on disk, or another tunnel) is not one.
+    static func isLiveSessionReArm(
+        previous: KillSwitchState?,
+        previousBaseline: Set<String>?,
+        next: KillSwitchState
+    ) -> Bool {
+        guard let previous, previous.armed, previousBaseline != nil,
+              !previous.tunnelInterfaces.isEmpty else { return false }
+        return Set(previous.tunnelInterfaces) == Set(next.tunnelInterfaces)
+    }
+
+    /// After an arm threw. A re-arm of a live session that failed after the
+    /// load keeps whatever the kernel now holds (the just-loaded rules, or the
+    /// previous ones) and its saved intent: releasing it would open the host
+    /// under a session the app still shows as protected. The error still
+    /// reaches the app, and the next arm takes the full flush because the
+    /// baseline was cleared before the load. Every other failure keeps
+    /// today's policy.
+    static func settleFailedCommit(
+        load: KernelLoadOutcome,
+        liveSessionReArm: Bool,
+        release: () -> Void = { KillSwitchManager.releaseInstalledBlock() }
+    ) {
+        if failedCommitReleasesInstalledBlock(
+            load: load,
+            strictKillSwitchEnabled: false,
+            liveSessionReArm: liveSessionReArm
+        ) {
+            release()
+        } else if load == .acceptedOrUnknown, liveSessionReArm {
+            FileHandle.standardError.write(Data(
+                "tono: re-arm of the live session failed after the PF load; the block stays installed\n".utf8
+            ))
+        }
     }
 
     static func passRules(in rules: String) -> Set<String> {

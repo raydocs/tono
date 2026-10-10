@@ -1148,25 +1148,39 @@ extension KillSwitchManager {
                     "self-test: Allow local network devices on does not render main's ruleset\n".utf8
                 ))
             }
-            let localNetworkOffRules = renderRules(
-                state: .init(
-                    armed: true,
-                    tailscaleBootstrapEnabled: false,
-                    apiHosts: ["api.example.com"],
-                    exitHints: [],
-                    tunnelInterfaces: ["utun199"],
-                    resolvedHosts: ["api.example.com": ["1.1.1.1"]],
-                    pinnedHosts: ["api.example.com": ["1.1.1.1"]],
-                    derpEndpoints: [],
-                    cachedDERPEndpoints: [],
-                    proxyTargets: state.proxyTargets,
-                    sessionDirectEndpoints: [],
-                    reviewedBundleDirectEnabled: false,
-                    allowLocalNetworkDevices: false
-                ),
-                allowedUID: 501,
-                physicalInterfaces: ["en0", "en7"]
-            )
+            // The `cloudRules` session with the setting and the reviewed-bundle
+            // permit chosen per case.
+            func localNetworkRules(allow: Bool, bundle: Bool) -> String {
+                renderRules(
+                    state: .init(
+                        armed: true,
+                        tailscaleBootstrapEnabled: false,
+                        apiHosts: ["api.example.com"],
+                        exitHints: [],
+                        tunnelInterfaces: ["utun199"],
+                        resolvedHosts: ["api.example.com": ["1.1.1.1"]],
+                        pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+                        derpEndpoints: [],
+                        cachedDERPEndpoints: [],
+                        proxyTargets: state.proxyTargets,
+                        sessionDirectEndpoints: [],
+                        reviewedBundleDirectEnabled: bundle,
+                        allowLocalNetworkDevices: allow
+                    ),
+                    allowedUID: 501,
+                    physicalInterfaces: ["en0", "en7"]
+                )
+            }
+            let localNetworkOffRules = localNetworkRules(allow: false, bundle: false)
+            // Review R1: with the reviewed-bundle permit (root, any address, web
+            // ports) off must drop exactly that traffic to the local ranges
+            // first; on keeps main's bundle rules with nothing added.
+            let localNetworkOffBundleRules = localNetworkRules(allow: false, bundle: true)
+            let bundlePermits = [
+                "pass out quick inet proto tcp from any to any port { 80, 443, 8000, 8080 } user root keep state (if-bound) label \"tono-bundle\"",
+                "pass out quick inet proto udp from any to any port { 80, 443, 8000, 8080 } user root keep state (if-bound) label \"tono-bundle\"",
+            ]
+            let bundleLocalBlock = "block drop out quick inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 224.0.0.0/4, 255.255.255.255 } port { 80, 443, 8000, 8080 } user root label \"tono-bundle-local\""
             let localNetworkOffKeepsOnlyMDNS: Bool = {
                 let gated = localNetworkOnExpected.filter { line in
                     localNetworkGatedLabels.contains { line.hasSuffix($0) }
@@ -1195,9 +1209,19 @@ extension KillSwitchManager {
                     "pass in quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\"",
                     "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\"",
                 ]
+                var expectedOffBundle = expectedOff
+                expectedOffBundle.insert(
+                    contentsOf: [bundleLocalBlock] + bundlePermits,
+                    at: expectedOffBundle.count - 1
+                )
+                var expectedOnBundle = localNetworkOnExpected
+                expectedOnBundle.insert(contentsOf: bundlePermits, at: expectedOnBundle.count - 1)
                 return gated.count == 8
                     && localNetworkOffRules == expectedOff.joined(separator: "\n") + "\n"
                     && localPasses == allowedLocalPasses
+                    && localNetworkOffBundleRules == expectedOffBundle.joined(separator: "\n") + "\n"
+                    && localNetworkRules(allow: true, bundle: true)
+                        == expectedOnBundle.joined(separator: "\n") + "\n"
             }()
             if !localNetworkOffKeepsOnlyMDNS {
                 FileHandle.standardError.write(Data(
@@ -1588,9 +1612,11 @@ extension KillSwitchManager {
             // The tunneled set holds every line of `rules` plus the bundle permit.
             let armedParse = pfSyntaxAccepts(tunneledRules)
             let bootstrapParse = pfSyntaxAccepts(cloudRules)
-            // The "Allow local network devices" off ruleset is parsed beside
-            // the on one (`cloudRules`), under the same skip rule.
-            let localNetworkOffParse = pfSyntaxAccepts(localNetworkOffRules)
+            // The "Allow local network devices" off ruleset (with the bundle
+            // permit and its local-range block, a superset of the plain off
+            // lines) is parsed beside the on one (`cloudRules`), under the
+            // same skip rule.
+            let localNetworkOffParse = pfSyntaxAccepts(localNetworkOffBundleRules)
             let pfParses: Bool
             switch (armedParse, bootstrapParse, localNetworkOffParse) {
             case (nil, _, _), (_, nil, _), (_, _, nil):
@@ -1966,6 +1992,53 @@ extension KillSwitchManager {
                 load: .acceptedOrUnknown,
                 strictKillSwitchEnabled: true
             )
+    }
+
+    /// A29 review R2: a re-arm of the live session (a settings change, a heal
+    /// reassert) that fails after the PF load keeps the anchor and the saved
+    /// intent; the first arm of a new session keeps the release. The release
+    /// effect is injected, so this runs without root and touches no live
+    /// anchor or state.
+    static func runLiveSessionReArmKeepsBlockSelfTest() -> Bool {
+        func state(tunnels: [String]) -> KillSwitchState {
+            KillSwitchState(
+                armed: true, tailscaleBootstrapEnabled: false,
+                apiHosts: [], exitHints: [], tunnelInterfaces: tunnels,
+                resolvedHosts: [:], pinnedHosts: [:], derpEndpoints: [],
+                cachedDERPEndpoints: [], proxyTargets: [], sessionDirectEndpoints: [],
+                reviewedBundleDirectEnabled: false, allowLocalNetworkDevices: false
+            )
+        }
+        let live = state(tunnels: ["utun199"])
+        let bootstrap = state(tunnels: [])
+        let baseline: Set<String> = ["pass out quick on utun199 all keep state (if-bound) label \"tono-tunnel\""]
+        let reArm = isLiveSessionReArm(previous: live, previousBaseline: baseline, next: live)
+        let firstArmOfSession = !isLiveSessionReArm(previous: bootstrap, previousBaseline: baseline, next: live)
+            && !isLiveSessionReArm(previous: nil, previousBaseline: nil, next: live)
+            && !isLiveSessionReArm(previous: live, previousBaseline: nil, next: live)
+            && !isLiveSessionReArm(previous: live, previousBaseline: baseline, next: state(tunnels: ["utun200"]))
+        // Injected post-load failure: `release` stands for the anchor flush
+        // and intent removal that `releaseInstalledBlock` performs.
+        func settle(_ load: KernelLoadOutcome, liveSessionReArm: Bool) -> (anchorLoaded: Bool, intentKept: Bool) {
+            var anchorLoaded = true
+            var intentKept = true
+            settleFailedCommit(load: load, liveSessionReArm: liveSessionReArm) {
+                anchorLoaded = false
+                intentKept = false
+            }
+            return (anchorLoaded, intentKept)
+        }
+        let reArmFailure = settle(.acceptedOrUnknown, liveSessionReArm: reArm)
+        let newSessionFailure = settle(.acceptedOrUnknown, liveSessionReArm: false)
+        let passed = reArm && firstArmOfSession
+            && reArmFailure.anchorLoaded && reArmFailure.intentKept
+            && !newSessionFailure.anchorLoaded && !newSessionFailure.intentKept
+        if !passed {
+            FileHandle.standardError.write(Data(
+                "self-test: a live-session re-arm that failed after the load released the block\n".utf8
+            ))
+        }
+        return passed
     }
 
     static func runFailedBarrierSelectiveReleaseSelfTest() -> Bool {

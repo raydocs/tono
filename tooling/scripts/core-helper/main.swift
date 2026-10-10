@@ -2123,6 +2123,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && runStartupOrderSelfTest()
             && runStartupDNSRecoverySelfTest()
             && KillSwitchManager.runFailedCommitReleaseSelfTest()
+            && KillSwitchManager.runLiveSessionReArmKeepsBlockSelfTest()
             && KillSwitchManager.runFailedBarrierSelectiveReleaseSelfTest()
             && KillSwitchManager.runFailedBarrierUnreleasedSelfTest()
             && SocketServer.runOrphanedBootstrapSelectiveReleaseSelfTest()

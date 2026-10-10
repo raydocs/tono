@@ -212,7 +212,8 @@ extension AppState {
                     tonoTransport: self.tonoTransport,
                     claudeHomeNodeName: self.managedCatalogRouting?.homeProxy,
                     defaultNodeName: self.managedCatalogRouting?.defaultProxy,
-                    claudeHomeSocks5: self.managedCatalogRouting?.homeSocks5
+                    claudeHomeSocks5: self.managedCatalogRouting?.homeSocks5,
+                    allowLocalNetworkDevices: SettingsKey.allowsLocalNetworkDevices()
                 )
                 let apiHost = (Bundle.main.object(forInfoDictionaryKey: "TonoAPIBaseURL") as? String)
                     .flatMap { URL(string: $0)?.host }

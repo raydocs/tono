@@ -412,7 +412,10 @@ nonisolated enum HelperProtocolVersion {
     ///   up the anchor renders no `tono-lan`, `tono-linklocal`,
     ///   `tono-multicast` or `tono-ssdp` pass. True renders the 4.52.44 rules.
     ///   The app sends the field only when the setting is on, so an older
-    ///   daemon never sees it unless the user turned it on.
+    ///   daemon never sees it unless the user turned it on. Off also drops
+    ///   root's reviewed-bundle web ports to local ranges (`tono-bundle-local`).
+    ///   A re-arm of the live session that fails after the PF load keeps the
+    ///   block instead of releasing it.
     static let current = "4.52.45"
 }
 

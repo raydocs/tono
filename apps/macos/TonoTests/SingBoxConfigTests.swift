@@ -417,9 +417,10 @@ final class SingBoxConfigTests: XCTestCase {
     }
 
     func testContinuityLocalBypassDoesNotForcePublicAppleTrafficDirectWithoutPolicy() throws {
+        // With "Allow local network devices" on, the document main built.
         let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
             externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
-            selectedNodeName: "Fixture Beta")
+            selectedNodeName: "Fixture Beta", allowLocalNetworkDevices: true)
         let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: nodes(), directPlan: nil)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
         let route = try XCTUnwrap(json["route"] as? [String: Any])
@@ -448,6 +449,37 @@ final class SingBoxConfigTests: XCTestCase {
                 && $0["ip_cidr"] == nil
         }, "Apple public TCP traffic must not bypass a healthy tunnel without matching PF authorization")
         XCTAssertEqual(route["final"] as? String, ConfigPipeline.exitGroupName)
+    }
+
+    /// A29 review R1: with "Allow local network devices" off, the Core never
+    /// dials the private, link-local or ULA ranges DIRECT, whether the flow
+    /// came through the TUN, the loopback mixed proxy or a reviewed app's
+    /// route: a reject precedes every direct outbound. On adds nothing.
+    func testLocalNetworkDevicesOffRejectsLocalRangesBeforeAnyDirectRoute() throws {
+        ConfigPipeline.managedDirectBundlePathsOverride = ["/Applications/WeChat.app/"]
+        defer { ConfigPipeline.managedDirectBundlePathsOverride = nil }
+        let plan = ConfigPipeline.ManagedDirectRuntimePolicy(physicalInterface: "en0",
+            domainPins: [], webDomainPins: [], mediaEndpoints: [], trusted: true, nativeAppDirect: true)
+        func rules(allow: Bool) throws -> [[String: Any]] {
+            let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+                externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+                selectedNodeName: "Fixture Beta", allowLocalNetworkDevices: allow)
+            let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: nodes(), directPlan: plan)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+            return try XCTUnwrap((json["route"] as? [String: Any])?["rules"] as? [[String: Any]])
+        }
+        let localReject: NSDictionary = ["ip_cidr": ConfigPipeline.localNetworkDeviceCIDRs,
+                                         "action": "reject", "no_drop": true]
+        let off = try rules(allow: false)
+        let reject = try XCTUnwrap(off.firstIndex { $0 as NSDictionary == localReject })
+        let direct: Set<String> = ["DIRECT", ConfigPipeline.appDirectGroupName, ConfigPipeline.webDirectGroupName]
+        let firstDirect = try XCTUnwrap(off.firstIndex { direct.contains($0["outbound"] as? String ?? "") })
+        XCTAssertLessThan(reject, firstDirect, "the local ranges are refused before any direct route")
+        XCTAssertEqual(Set(ConfigPipeline.localNetworkDeviceCIDRs),
+                       ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fe80::/10", "fc00::/7"])
+        let on = try rules(allow: true)
+        XCTAssertFalse(on.contains { $0 as NSDictionary == localReject })
+        XCTAssertEqual(on.count, off.count - 1, "on is the off document without the reject")
     }
 
     func testWebDirectClientQueriesAreFakeIPBeforeRealResolvers() throws {

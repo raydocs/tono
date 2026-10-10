@@ -10,6 +10,13 @@
   only), `tono-ndp`, and every block rule, including the #348 LAN DNS block `tono-lan-dns`. On renders exactly the
   4.52.44 rules. The setting is ephemeral in the helper like `reviewedBundleDirect`: the persisted state never
   carries it, so a heal, boot restore or emergency state renders off until the app re-arms.
+  Off also covers what the Core carries (review round 2): the sing-box document rejects `10/8`, `172.16/12`,
+  `192.168/16`, `169.254/16`, `fe80::/10`, `fc00::/7` ahead of every DIRECT route (TUN, the loopback mixed proxy,
+  reviewed-app and web-direct routes), and when the reviewed-bundle permit renders, PF drops root's traffic on its web
+  ports to those IPv4 ranges plus `100.64/10`, `224/4` and broadcast first (`tono-bundle-local`). The Core reads the
+  setting when its document is built; a document older than the current setting is either stricter (Core off, PF on)
+  or held by PF (Core on, PF off), so a mismatch fails closed. A re-arm of the live session that fails after the PF
+  load keeps the block and intent instead of releasing them.
   Rejected: (a) a separate explicit LAN DNS permit. The task text read "only LAN DNS (as tightened by #348) and mDNS
   are permitted", but #348 is a block, not a permit: after it, LAN DNS passed only through `tono-lan` on non-`en`
   interfaces (another VPN's utun). Keeping that would add a dedicated DNS permit whose only user is split DNS of a

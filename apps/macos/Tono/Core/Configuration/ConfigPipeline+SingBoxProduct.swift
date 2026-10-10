@@ -44,6 +44,13 @@ nonisolated extension ConfigPipeline {
     /// The pool before #1258. An address an app cached from a build that used
     /// it is refused like one from another slot.
     static let singBoxFormerFakeIPPool = "198.18.16.0/20"
+    /// Destinations "Allow local network devices" governs in the Core: the
+    /// private, link-local and ULA ranges PF's `tono-lan` / `tono-linklocal`
+    /// pass when the setting is on.
+    static let localNetworkDeviceCIDRs = [
+        "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+        "fe80::/10", "fc00::/7",
+    ]
 
     static func buildSingBoxRuntime(
         overlay: OverlayConfig,
@@ -203,6 +210,16 @@ nonisolated extension ConfigPipeline {
             // `no_drop`: sing-box turns a reject into a drop after 50 in 30 s.
             ["ip_cidr": [singBoxFakeIPPool, singBoxFormerFakeIPPool], "action": "reject", "no_drop": true],
         ]
+        if !overlay.allowLocalNetworkDevices {
+            // D7 (A29), "Allow local network devices" off: nothing the Core
+            // carries (TUN packets, the loopback mixed proxy, a reviewed app's
+            // or web-direct route) is dialed DIRECT to the private, link-local
+            // or ULA ranges. Ahead of every DIRECT rule. PF's off ruleset
+            // drops root's packets there too, so a Core still running an
+            // older document fails closed. Loopback, multicast and mDNS keep
+            // the rules below. On adds nothing.
+            rules.append(["ip_cidr": localNetworkDeviceCIDRs, "action": "reject", "no_drop": true])
+        }
         let assistant = home == nil ? exitGroupName : claudeHomeGroupName
         // Always, including when no residential hop is bound. Later reviewed-bundle
         // and suffix rules are first-match DIRECT; without these rows a WeChat
