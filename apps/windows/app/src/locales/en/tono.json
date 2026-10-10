@@ -641,7 +641,14 @@
       "title": "Preferences"
     },
     "privacy": {
-      "title": "Privacy"
+      "title": "Privacy",
+      "effectHint": "Each choice saves automatically. No reconnect or restart is needed. Turning uploads off does not delete data already sent.",
+      "reading": "Reading saved choice…",
+      "readFailed": "Couldn't read the saved choice.",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "saveFailed": "Couldn't confirm the change. Reload the saved choice before trying again.",
+      "reload": "Reload saved choice"
     },
     "general": {
       "title": "General",

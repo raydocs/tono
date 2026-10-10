@@ -6,7 +6,7 @@
   断网时长等于回拨长度。改为 `ProtectionCheckSchedule`：`CLOCK_MONOTONIC`（含睡眠，不会被拨动）计 10 s，读数倒退也立即到期。
 - 新增/优化：无。检查的内容、顺序和 10 s 间隔不变；睡眠后醒来仍立即到期（单调时钟含睡眠时间）。
 - 工程与测试：helper `--self-test` 新增 `ProtectionCheckSchedule.runClockStepSelfTest`（9 s 不到期、10 s 到期；读数回拨一小时立即到期，其后按 10 s 继续）。
-  helper 4.52.44 → 4.52.45，`CONTRACT.sha256` 按 `build-core-helper.sh` 的算法重算。
+  helper 4.52.45 → 4.52.46（合并 main 后在 #1507 的 4.52.45 之上重编号），`CONTRACT.sha256` 按 `build-core-helper.sh` 的算法重算。
 - 验证：Linux orb：`sh tooling/scripts/test-core-helper-contract-guard.sh` → `PASS build-core-helper contract guard`；
   `python3 apps/macos/scripts/test_build_source.py` → `OK`。Swift 编译与 `--self-test` 由托管 macOS CI 执行，本机未执行。
 - 候选/发布：仅源码，无新候选。

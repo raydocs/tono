@@ -581,6 +581,9 @@ impl TonoInner {
     /// token. `release_on_stale` preserves the existing late-commit contract: releasing flows
     /// patch a late arm; protected reconnect/switch flows keep the barrier.
     pub fn invalidate_connection(&mut self, release_on_stale: bool) {
+        // Decision 088: the aborts below drop an in-flight automatic hy2 attempt before it can
+        // report Stale; settle that hop first.
+        crate::tono::connection::settle_stopped_auto_hop(self);
         self.retire_connection_generation(release_on_stale);
         self.tasks.abort_connection_tasks();
     }

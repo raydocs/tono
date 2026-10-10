@@ -2097,6 +2097,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && KillSwitchManager.runFailedBarrierUnreleasedSelfTest()
             && SocketServer.runOrphanedBootstrapSelectiveReleaseSelfTest()
             && KillSwitchManager.runUnprovenHealthSelfTest()
+            && KillSwitchManager.runControlRelayPermitSelfTest()
             && emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: false)
             && !emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: true)
             && emergencyReleaseDespiteStaleCore(strictKillSwitchEnabled: false)

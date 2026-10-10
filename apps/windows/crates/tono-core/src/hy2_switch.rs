@@ -18,6 +18,8 @@
 //! - A failed automatic hy2 attempt goes back to TCP. The node then needs a
 //!   new run of TCP failures, and no automatic hy2 for that node until a
 //!   doubling backoff ([`BACKOFF_BASE_MS`]..=[`BACKOFF_MAX_MS`]) has passed.
+//! - An automatic hy2 attempt stopped before it connected also goes back to
+//!   TCP, without a backoff ([`Hy2AutoSwitch::note_stopped`], decision 088).
 //! - Turning the flag off, a catalog without that node's hy2 block, or the
 //!   user picking either block of that node drops the remembered choice and
 //!   the counters.
@@ -273,6 +275,21 @@ impl Hy2AutoSwitch {
         true
     }
 
+    /// An automatic hy2 attempt for `preferred` that dialed `dialed` was stopped before it
+    /// connected: Disconnect, Quit, sign-out, an update, or the connect timeout superseding it
+    /// (decision 088). A stop is not evidence that hy2 failed, so no backoff starts, but the hop
+    /// is dropped: the remembered choice and the TCP count go, and the next unarmed attempt
+    /// dials the Reality block. Before, nothing changed, so on a network that drops UDP every
+    /// connect the user gave up on dialed hy2 again for up to 24 h. The live in-place session
+    /// (`live_dial`) is not touched. Returns true when the remembered set changed.
+    pub fn note_stopped(&mut self, preferred: &str, dialed: &str) -> bool {
+        if preferred.is_empty() || is_hy2_catalog_name(preferred) || dialed != hy2_name_of(preferred) {
+            return false;
+        }
+        self.tcp_failures.remove(preferred);
+        self.remembered.remove(preferred).is_some()
+    }
+
     /// The user picked either block of this node by hand. Drop its counters,
     /// backoff, and remembered choice. Returns true when the remembered set
     /// changed.
@@ -435,5 +452,45 @@ mod tests {
         let off = run(false);
         assert_eq!(off.dial(selected, &nodes, now), None);
         assert_eq!(Hy2AutoSwitch::default().dial(selected, &nodes, now), None);
+    }
+
+    /// Decision 088: an automatic hy2 attempt that was stopped before it connected (on a
+    /// network that drops UDP it hangs until the user gives up) sends the next attempt back to
+    /// the Reality block, from both a fresh switch and a remembered one, without a backoff.
+    /// Before, a stop changed nothing and every later connect dialed hy2 again.
+    #[test]
+    fn a_stopped_automatic_hy2_attempt_dials_the_reality_block_next() {
+        let nodes = vec![
+            node("Buffalo · Niagara", NodeProtocol::VlessReality),
+            node("Buffalo · Niagara · hy2", NodeProtocol::Hysteria2),
+        ];
+        let (selected, hy2) = ("Buffalo · Niagara", "Buffalo · Niagara · hy2");
+        let now = 1_000;
+        let mut switch = Hy2AutoSwitch::default();
+        switch.on_catalog(true, &nodes);
+        for _ in 0..TCP_FAILURES_BEFORE_HY2 {
+            switch.note_failure(selected, selected, "connect failed: tls handshake eof", now);
+        }
+        assert_eq!(switch.dial(selected, &nodes, now).as_deref(), Some(hy2));
+        assert!(!switch.note_stopped(selected, hy2), "nothing was remembered yet");
+        assert_eq!(switch.dial(selected, &nodes, now), None, "a stopped fresh switch goes back to TCP");
+
+        // A remembered hy2 choice: stopping its attempt forgets it.
+        for _ in 0..TCP_FAILURES_BEFORE_HY2 {
+            switch.note_failure(selected, selected, "connect failed: tls handshake eof", now);
+        }
+        assert!(switch.note_connected(selected, hy2, now));
+        assert_eq!(switch.dial(selected, &nodes, now + 1).as_deref(), Some(hy2));
+        assert!(switch.note_stopped(selected, hy2));
+        assert_eq!(switch.dial(selected, &nodes, now + 1), None);
+        // No backoff: a new run of TCP failures may switch again at once.
+        for _ in 0..TCP_FAILURES_BEFORE_HY2 {
+            switch.note_failure(selected, selected, "connect failed: tls handshake eof", now + 1);
+        }
+        assert_eq!(switch.dial(selected, &nodes, now + 1).as_deref(), Some(hy2));
+        // A stopped Reality attempt or a hand-picked hy2 row changes nothing.
+        assert!(!switch.note_stopped(selected, selected));
+        assert!(!switch.note_stopped(hy2, hy2));
+        assert_eq!(switch.dial(selected, &nodes, now + 1).as_deref(), Some(hy2));
     }
 }
