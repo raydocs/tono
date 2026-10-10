@@ -6,4 +6,9 @@
 - 工程与测试：沿用合成 shell 增加有界 authDelay/relaysDown；生成三个新 i18n 类型键，不改传输语义。归档 [一张 before、十二张 after](../screenshots/windows-login-relays-2026-10-10/README.md)，after 同一源码 SHA、Linux Chromium DPR2，并非原生真机。
 - 验证：新 relay-only UI 回归先失败，再运行 `vitest run src/pages/tono/login.test.tsx src/pages/tono/login-support.test.tsx --maxWorkers=1` 输出 2 files /17 tests passed；`pnpm typecheck` 输出 `unchecked indexed access errors 69 (baseline 79)`，预算未改；定点 ESLint exit0/零 warning。浏览器实际执行 pending/拒码/重试，Enter 展开和 Tab 到客服按钮使内层 main 滚动，英/中按钮完整进入视口、无横向溢出。详见截图 README；不是 native 保护验收。
 - 候选/发布：仅源码/图像，无新候选、无签名设备验收、无客户发布。
-- 剩余限制：#1553 尚未合入；需依赖合入后 rebase、准确 head CI/Sol 和主线程视觉审核，不能自签核或提前合并。真实 Windows Service/WFP、旧版 Service、控制面故障/恢复和全组合包留待设备验收。
+- 剩余限制：准确 head CI/Sol 和主线程视觉审核仍为合并条件，不能自签核或提前合并。真实 Windows Service/WFP、旧版 Service、控制面故障/恢复和全组合包留待设备验收。
+
+### 2026-10-10 · #1553 合入后的 rebase 续记
+- #1553 已合入 [62bab6ed](https://github.com/raydocs/tono/commit/62bab6ed59941026da280d02598682ccd623a4cf)；#1554 的四个提交无冲突 rebase，`git range-diff` 四项均为 `=`。已读实际 native 前缀/编号/分类格式，与 UI 契约一致；没有修改或移植 native transport。
+- Linux 同一定点 login/support 命令重新执行，原始输出 `Test Files 2 passed (2)`、`Tests 17 passed (17)`。截图来源保留原捕获 SHA，不把 rebase 称为重拍；后续类型/lint/CI 的准确 head 证据记在 #1554，不能把本条当签核。
+- 按主线程最新安排：准确 pushed head ci-gate 绿后 Ready，主线程送 Sol、做视觉审核并合并。#1555 独立 transport 续修与 #1478 的 full-walk「Paths tried」/逐路径耗时不属于本轮。
