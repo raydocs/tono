@@ -351,7 +351,14 @@ final class KillSwitchManager {
         // there severs every established flow on the host for no protection
         // gain. Any removed pass rule still forces the full flush.
         let passRules = Self.passRules(in: renderedRules)
-        let disposal = Self.stateDisposal(replacing: lastLoadedPassRules, with: passRules)
+        // Decision 086: a withdrawn Cloudflare API permit (a ruleset from
+        // before it) is killed by address like any other; only a relay
+        // address the Core still dials as its exit is spared.
+        let disposal = Self.sparingSharedRelayHosts(
+            Self.stateDisposal(replacing: lastLoadedPassRules, with: passRules),
+            withdrawn: lastLoadedPassRules?.subtracting(passRules) ?? [],
+            remaining: passRules
+        )
         // The kernel takes the new ruleset part-way through the call below, ahead
         // of the PF enable, the state disposal, and the verification probes that
         // can each still throw. Recording nothing across it is what keeps a
@@ -897,16 +904,23 @@ final class KillSwitchManager {
         var wanted = false
         var live = (try? Self.effectiveStatus()) ?? false
         do {
+            var tunnelArmed: Bool?
             if let state = try loadState() {
                 wanted = state.armed
                 if wanted && live {
                     Self.pinHostsIfUsable(state: state)
                 }
+                // Decision 086: whether the saved arm carries a tunnel, so the
+                // app knows when the relays are its only control-plane path,
+                // including after arms it did not issue (update preparation).
+                tunnelArmed = !state.tunnelInterfaces.isEmpty
                 // Do not load rules from a status read. Update preparation
                 // calls this after the Core has stopped; rewriting PF would
                 // put the block back on a machine whose Core is gone.
             }
-            return response(armed: live, wanted: wanted, live: live, healed: false)
+            var result = response(armed: live, wanted: wanted, live: live, healed: false)
+            if let tunnelArmed { result["tunnelArmed"] = tunnelArmed }
+            return result
         } catch {
             // Unreadable state is not a strict kill switch. Report it.
             // Do not install a block; the startup release and the core-down
