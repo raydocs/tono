@@ -148,6 +148,11 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
     /// Automatic convergence is bounded: after the budget the session holds
     /// an explicit fault with a message, and the user's toggle retries.
     func testAutomaticAttemptsStopAtTheBudgetAndTheTogglesRetry() {
+        // A connected session: an arm and a Core install of generation 0.
+        let initial = LocalNetworkDevicesSync.desired
+        LocalNetworkDevicesSync.recordPF(.known(initial))
+        installCore(initial, digest: "doc-0")
+        XCTAssertFalse(LocalNetworkDevicesSync.takeAutomaticAttempt(), "converged: nothing to do")
         LocalNetworkDevicesSync.settingChanged(true)
         for _ in 0..<LocalNetworkDevicesSync.automaticAttemptLimit {
             XCTAssertTrue(LocalNetworkDevicesSync.takeAutomaticAttempt())
@@ -181,7 +186,8 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
     /// The helper's protected fault (an off re-arm it could not apply) is an
     /// explicit error with intent kept, and stops automatic attempts.
     func testHelperProtectedFaultIsAnExplicitErrorWithoutRetryLoop() {
-        LocalNetworkDevicesSync.settingChanged(false)
+        let off = LocalNetworkDevicesSync.settingChanged(false)
+        installCore(off, digest: "doc-off")
         KillSwitchService.isArmed = false
         KillSwitchService.armIPC.deliver = { _ in
             throw HelperIPCError.commandFailed("block-all installed", code: "KILLSWITCH_LOCAL_NETWORK_FAULT")

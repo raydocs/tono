@@ -151,9 +151,13 @@ nonisolated enum LocalNetworkDevicesSync {
     /// spends one automatic attempt. Converged (for instance after the user
     /// connected again) resets the budget and clears the fault; a fault, or
     /// running out of attempts (which records the fault), answers false.
+    /// Nothing is compared before this process has recorded both an arm and
+    /// a Core install: a connect records both, and that connect applies the
+    /// current setting itself.
     static func takeAutomaticAttempt() -> Bool {
         lock.withLock {
             let desired = desiredLocked()
+            guard pfValue != nil, coreValue != nil else { return false }
             if pfValue == .known(desired) && coreValue == .known(desired) {
                 attempts = 0
                 faultValue = nil
