@@ -21,5 +21,4 @@
 - 续记（Sol 复审 1c06c5db：F1 调用方期限已关闭，新 major F2）：放弃只隔离了结果，没有阻止执行——启动线程在已被放弃后仍可能把命令跑起来，
   旧的 `pfctl -F all` 可能清掉之后新 arm 的锚点，旧 `networksetup` setter 可能在新的恢复之后改 DNS。改为准入闸门：真正启动的是等待 stdin 上
   `go` 的 `/bin/sh`，只有调用方接受这次启动后才写入 `go` 并 `exec` 原命令（PID 不变）；被放弃的启动只得到 EOF，命令永远不会执行。
-  新增自测 `runAbandonedLaunchNeverExecutesSelfTest`（被放弃的命令会写 `released`；期限后写入 `protected`；迟到的启动收尾后标记仍是 `protected`）。
-
+  新增自测 `runAbandonedLaunchNeverExecutesSelfTest`（被放弃的命令会写 `released`；期限后写入 `protected`；迟到的启动收尾后标记仍是 `protected`）；进程立即创建、启动在期限后才报告，旧实现下该自测会失败。

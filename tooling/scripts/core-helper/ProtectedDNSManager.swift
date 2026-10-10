@@ -1314,10 +1314,12 @@ final class ProtectedDNSManager {
     }
 
     /// #1542 review F2: a mutating command whose launch was abandoned must
-    /// never take effect, even if the launch completes later. The stale
-    /// command would write `released`; a newer owner writes `protected`
-    /// after the deadline; the marker must still say `protected` once the
-    /// late launch has settled.
+    /// never take effect, even if the launch completes later. The process is
+    /// spawned at once but the launch only reports after the deadline (the
+    /// child-before-report order), and the stale command would write
+    /// `released` 1.5 s in, after a newer owner wrote `protected` at the
+    /// deadline. Without the admission gate the stale write lands first and
+    /// this fails; with it, the marker still says `protected`.
     static func runAbandonedLaunchNeverExecutesSelfTest() -> Bool {
         let marker = NSTemporaryDirectory() + "tono-abandoned-launch-\(UUID().uuidString)"
         defer { unlink(marker) }
@@ -1327,11 +1329,11 @@ final class ProtectedDNSManager {
         let ended = Ended()
         do {
             _ = try KillSwitchManager.run(
-                "/bin/sh", ["-c", "printf released > \"$1\"", "sh", marker], deadline: 1,
+                "/bin/sh", ["-c", "sleep 1.5; printf released > \"$1\"", "sh", marker], deadline: 1,
                 ended: { ended.semaphore.signal() },
                 launch: { process in
-                    usleep(2_000_000)
                     try process.run()
+                    usleep(2_000_000)
                 }
             )
             return false
@@ -1339,7 +1341,8 @@ final class ProtectedDNSManager {
         guard FileManager.default.createFile(atPath: marker, contents: Data("protected".utf8)) else { return false }
         // The late launch settles: its shell sees end-of-file and exits.
         guard ended.semaphore.wait(timeout: .now() + 5) == .success else { return false }
-        usleep(200_000)
+        // Past the stale command's own 1.5 s, had it been executed.
+        usleep(1_000_000)
         return (try? String(contentsOfFile: marker, encoding: .utf8)) == "protected"
     }
 
