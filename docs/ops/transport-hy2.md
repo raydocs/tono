@@ -373,7 +373,7 @@ rm -rf "$dir"
 
 ## A17 macOS 客户端：同节点自动换到 hy2
 
-[Amp 待办](amp-backlog-2026-10-10.md) A17 的 macOS 半边，D1-C；取舍见暂定[决定 081](../decisions/081-2026-10-10-hy2-auto-switch-macos-client.md)。
+[Amp 待办](amp-backlog-2026-10-10.md) A17 的 macOS 半边，D1-C；取舍见暂定[决定 082](../decisions/082-2026-10-10-hy2-auto-switch-macos-client.md)。
 开关是 A18 的 `hy2AutoSwitch`（目录 200 响应顶层布尔，缺失按 `false`）。代码：`apps/macos/Tono/Core/Hy2AutoSwitch.swift`。
 
 - **前提**：本次启动里本账户最近一次目录 200 带 `hy2AutoSwitch: true`。`false`、缺失、目录被拒、换账户：只走 Reality，

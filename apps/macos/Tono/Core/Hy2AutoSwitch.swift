@@ -9,7 +9,7 @@ import Foundation
 /// automatic hy2 attempt gets exactly the permit a manual hy2 attempt gets;
 /// this type adds none and never touches PF, DNS or the helper.
 ///
-/// Rules (decision 081):
+/// Rules (decision 082):
 /// - Permitted only by `hy2AutoSwitch: true` on a fresh `GET exit-catalog` 200
 ///   for the bound account in this launch. Missing, false, a rejected
 ///   catalog, another account, or no 200 yet: TCP only, and the remembered
