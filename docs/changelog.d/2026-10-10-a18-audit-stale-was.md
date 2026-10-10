@@ -1,6 +1,6 @@
 ## 2026-10-10 · A18 hy2 自动切换审计「was」改为在写入批处理内读取（A18-AUDIT-STALE-WAS）
 - 归属：ops 计划（[amp-backlog-2026-10-10](../ops/amp-backlog-2026-10-10.md) A18 遗留）；控制面 `services/control-plane`。
-- 来源：基线 origin/main a6ebf460；分支 `amp/a18-audit-stale-was`；未合 main。
+- 来源：基线 origin/main a6ebf460；分支 `amp/a18-audit-stale-was`，PR [#1514](https://github.com/raydocs/tono/pull/1514)；未合 main。
 - 缺陷修复：按账户 PUT `users/<id>/hy2-auto-switch` 的审计文案「auto-switch was …」原先用批处理之外读的
   `before.effective`，并发写入时可能写出过时前值。改为审计 `INSERT … SELECT` 排在同一 D1 批处理的 UPDATE 之前、
   用与 UPDATE 相同的「会改变」条件，在同一事务里从更新前的行（连同全局开关）按 `resolveHy2AutoSwitch` 的顺序
