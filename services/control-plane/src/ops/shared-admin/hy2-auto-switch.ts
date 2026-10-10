@@ -70,30 +70,39 @@ export async function hy2AutoSwitchResource(
   if (b.override !== undefined && b.override !== null && b.override !== 'on' && b.override !== 'off') {
     throw new ApiError(400, 'VALIDATION_ERROR', 'override must be on, off or null');
   }
+  // Existence check (404) and the "from" half of the audit line. The write
+  // itself sets only the fields this request names, in SQL, so two concurrent
+  // partial PUTs cannot restore each other's stale value.
   const before = await accountView(e, userId);
-  const internalAccount = b.internalAccount === undefined ? before.internalAccount : b.internalAccount;
-  const override = b.override === undefined ? before.override : hy2Override(b.override);
-  if (internalAccount === before.internalAccount && override === before.override) {
-    return Response.json(before);
-  }
-  const effective = resolveHy2AutoSwitch({
-    override, internalAccount, allAccounts: before.allAccounts,
-  });
-  await e.DB.batch([
+  const setInternal = b.internalAccount !== undefined;
+  const internalValue = b.internalAccount === true ? 1 : 0;
+  const setOverride = b.override !== undefined;
+  const overrideValue = hy2Override(b.override);
+  const changed = [
+    setInternal ? `internal ${b.internalAccount ? 'yes' : 'no'}` : null,
+    setOverride ? `override ${overrideValue ?? 'default'}` : null,
+  ].filter((part): part is string => part !== null).join('; ');
+  const [update] = await e.DB.batch([
     e.DB.prepare(
-      `UPDATE users SET internal_account = ?, hy2_auto_switch = ?, updated_at = ?
-       WHERE id = ? AND (internal_account != ? OR hy2_auto_switch IS NOT ?)`,
-    ).bind(internalAccount ? 1 : 0, override, now(), userId, internalAccount ? 1 : 0, override),
+      `UPDATE users SET
+         internal_account = CASE WHEN ? THEN ? ELSE internal_account END,
+         hy2_auto_switch = CASE WHEN ? THEN ? ELSE hy2_auto_switch END,
+         updated_at = ?
+       WHERE id = ?
+         AND ((? AND internal_account != ?) OR (? AND hy2_auto_switch IS NOT ?))`,
+    ).bind(
+      setInternal ? 1 : 0, internalValue, setOverride ? 1 : 0, overrideValue, now(), userId,
+      setInternal ? 1 : 0, internalValue, setOverride ? 1 : 0, overrideValue,
+    ),
     opsAuditStatement(
       e, actorEmail, 'user.hy2-auto-switch', 'user', userId,
-      `internal ${internalAccount ? 'yes' : 'no'}; override ${override ?? 'default'}; `
-        + `auto-switch ${before.effective ? 'on' : 'off'} -> ${effective ? 'on' : 'off'}`,
+      `set ${changed}; auto-switch was ${before.effective ? 'on' : 'off'}`,
       true,
     ),
   ]);
   // The answer rides the catalog response, so ask this account's devices
   // (and only them) to fetch it now rather than at their next poll.
-  if (effective !== before.effective) await enqueueRefreshCatalogForUser(e, userId);
+  if (update?.meta.changes) await enqueueRefreshCatalogForUser(e, userId);
   return Response.json(await accountView(e, userId));
 }
 

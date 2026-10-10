@@ -335,8 +335,11 @@ export async function publicManagedCatalog(
       && (await userMaySeeHy2Catalog(e, options.userId));
     served = filterHy2CatalogForViewer(served, keepHy2);
     // A permission over blocks this response actually carries: a viewer whose
-    // hy2 blocks were stripped is told `false`, never a stale `true`.
-    hy2AutoSwitch = keepHy2 && (await hy2AutoSwitchForUser(e, options.userId));
+    // hy2 blocks were stripped, or whose only hy2 pair was a restricted home
+    // exit filtered out above, is told `false`, never a stale `true`.
+    hy2AutoSwitch = keepHy2
+      && splitManagedCatalogProxies(served).items.some((item) => item.name.endsWith(HY2_NAME_SUFFIX))
+      && (await hy2AutoSwitchForUser(e, options.userId));
   }
   // The stored digest authenticates the catalog template. Authenticated clients
   // receive a stable per-account identity, so recompute the digest after

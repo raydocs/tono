@@ -82,6 +82,9 @@ describe('hy2 auto-switch', () => {
     expect((await served(other.accessToken)).hy2AutoSwitch).toBe(true);
     expect((await served(pinnedOff.accessToken)).hy2AutoSwitch).toBe(false);
     expect((await served(internal.accessToken)).hy2AutoSwitch).toBe(true);
+    // A partial write touches only its own field: marking internal keeps the "off".
+    expect((await put(`users/${pinnedOff.user.id}/hy2-auto-switch`, { internalAccount: true })).status).toBe(200);
+    expect((await served(pinnedOff.accessToken)).hy2AutoSwitch).toBe(false);
 
     // Membership never moves: same entries before and after, for every account.
     expect((await served(other.accessToken)).yaml).toBe(yamlBefore);
@@ -89,7 +92,11 @@ describe('hy2 auto-switch', () => {
       "SELECT action, target_id FROM ops_audit WHERE action LIKE '%hy2-auto-switch%' ORDER BY at, action",
     ).all<{ action: string; target_id: string }>();
     expect(audit.results.map((row) => row.action).sort()).toEqual([
-      'hy2-auto-switch.global', 'user.hy2-auto-switch', 'user.hy2-auto-switch',
+      'hy2-auto-switch.global', 'user.hy2-auto-switch', 'user.hy2-auto-switch', 'user.hy2-auto-switch',
     ]);
+    // No ` · hy2` block left in what is served → no permission, even when switched on.
+    const tcpOnly = CATALOG.slice(0, CATALOG.indexOf('  - name: Tokyo · Sakura · hy2'));
+    expect((await admin('exit-catalog', { yaml: tcpOnly, expectedRevision: 1 }, 'PUT')).status).toBe(200);
+    expect((await served(internal.accessToken)).hy2AutoSwitch).toBe(false);
   });
 });
