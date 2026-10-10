@@ -1403,6 +1403,91 @@ final class ProtectedDNSManager {
         return ended.semaphore.wait(timeout: .now() + 5) == .success
     }
 
+    /// #1542 review F2: a mutating command whose launch was abandoned must
+    /// never take effect, even if the launch completes later. The process is
+    /// spawned at once but the launch only reports after the deadline (the
+    /// child-before-report order), and the stale command would write
+    /// `released` 1.5 s in, after a newer owner wrote `protected` at the
+    /// deadline. Without the admission gate the stale write lands first and
+    /// this fails; with it, the marker still says `protected`.
+    static func runAbandonedLaunchNeverExecutesSelfTest() -> Bool {
+        let marker = NSTemporaryDirectory() + "tono-abandoned-launch-\(UUID().uuidString)"
+        defer { unlink(marker) }
+        final class Ended: @unchecked Sendable {
+            let semaphore = DispatchSemaphore(value: 0)
+        }
+        let ended = Ended()
+        do {
+            _ = try KillSwitchManager.run(
+                "/bin/sh", ["-c", "sleep 1.5; printf released > \"$1\"", "sh", marker], deadline: 1,
+                ended: { ended.semaphore.signal() },
+                launch: { process in
+                    try process.run()
+                    usleep(2_000_000)
+                }
+            )
+            return false
+        } catch {}
+        guard FileManager.default.createFile(atPath: marker, contents: Data("protected".utf8)) else { return false }
+        // The late launch settles: its shell sees end-of-file and exits.
+        guard ended.semaphore.wait(timeout: .now() + 5) == .success else { return false }
+        // Past the stale command's own 1.5 s, had it been executed.
+        usleep(1_000_000)
+        return (try? String(contentsOfFile: marker, encoding: .utf8)) == "protected"
+    }
+
+    /// #1504 review R5-F1: the Core is launched, not waited on, and must pass
+    /// the same admission gate. A Core-shaped launch (own directory and
+    /// environment, output captured, long-lived) whose `Process.run()`
+    /// returns only after the deadline must never start: the stand-in writes
+    /// its marker the moment it executes, so without the gate the marker
+    /// exists at once; with it, the gate gets end-of-file and never execs.
+    static func runAbandonedCoreLaunchNeverStartsSelfTest() -> Bool {
+        let marker = NSTemporaryDirectory() + "tono-abandoned-core-\(UUID().uuidString)"
+        defer { unlink(marker) }
+        let exited = DispatchSemaphore(value: 0)
+        let child = Process()
+        child.currentDirectoryURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        child.environment = ["HOME": NSTemporaryDirectory(), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+        let output = Pipe()
+        child.standardOutput = output
+        child.standardError = output
+        child.terminationHandler = { _ in exited.signal() }
+        do {
+            try KillSwitchManager.launchAdmitted(
+                child,
+                executable: "/bin/sh",
+                arguments: ["-c", "printf started > \"$1\"; exec /bin/sleep 30", "sh", marker],
+                until: .now() + 1,
+                deadline: 1,
+                launch: { process in
+                    try process.run()
+                    usleep(2_000_000)
+                }
+            )
+            return false
+        } catch {}
+        // The late launch settles: its gate sees end-of-file, it is reaped.
+        guard exited.wait(timeout: .now() + 5) == .success else { return false }
+        usleep(500_000)
+        return !FileManager.default.fileExists(atPath: marker)
+    }
+
+    /// The install guard's script reaches its shell on stdin. Relayed after
+    /// `go` on the admission pipe (never handed to the child directly), it
+    /// still arrives whole, and the gate line is not part of it.
+    static func runAdmittedInputRelaySelfTest() -> Bool {
+        let path = NSTemporaryDirectory() + "tono-admitted-input-\(UUID().uuidString)"
+        defer { unlink(path) }
+        guard FileManager.default.createFile(atPath: path, contents: Data("printf relayed\nexit 7\n".utf8)),
+              let input = FileHandle(forReadingAtPath: path) else { return false }
+        defer { try? input.close() }
+        guard let result = try? KillSwitchManager.run("/bin/sh", [], deadline: 5, standardInput: input) else {
+            return false
+        }
+        return result.status == 7 && String(decoding: result.output, as: UTF8.self) == "relayed"
+    }
+
     static func runNetworkSetupDeadlineSelfTest() -> Bool {
         let started = clock_gettime_nsec_np(CLOCK_MONOTONIC)
         do {
@@ -2358,6 +2443,9 @@ final class ProtectedDNSManager {
                 && runServerCountCapSelfTest()
                 && runNetworkSetupDeadlineSelfTest()
                 && runStalledLaunchDeadlineSelfTest()
+                && runAbandonedLaunchNeverExecutesSelfTest()
+                && runAbandonedCoreLaunchNeverStartsSelfTest()
+                && runAdmittedInputRelaySelfTest()
         } catch {
             return false
         }

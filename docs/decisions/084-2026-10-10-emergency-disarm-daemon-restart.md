@@ -15,7 +15,7 @@
     target before stopping the tunnel; Tono likewise latches before the bootout.
   - **`--emergency-disarm` order, every phase bounded:** `released` in memory first (`HelperTarget.processOverride`),
     its write started beside everything else (under the target lock, generation = old + 1; an unreadable old record
-    is moved aside) → bounded bootout (20 s; every launchctl call, spawn included, on its own thread, abandoned at
+    is replaced in one rename) → bounded bootout (20 s; every launchctl call, spawn included, on its own thread, abandoned at
     deadline + 2.5 s) → the release as independent steps, each on its own thread with its own budget: **PF first**
     (emergency-only, idempotent `pfctl -a tono.killswitch -F all`: Tono's anchor only, never the main ruleset, no
     System Configuration, update store or disk needed; 15 s), then DNS restore (20 s), then AI-layer removal (15 s),
@@ -37,8 +37,13 @@
     since it may have committed first. The undo uses what was captured before the effect (the DNS originals), never
     a re-read that the release's own cleanup may have removed. A released daemon also releases a block it reads in
     Tono's anchor without saved intent. No lock is held across PF, System Configuration or disk I/O.
-  - **Repairing an unreadable target never leaves it missing:** the replacement is written beside it first, then the
-    record is moved aside and the replacement renamed in; a failed rename moves the record back (round 5, F3).
+  - **Repairing an unreadable target never leaves it missing:** the replacement is written beside it first, then one
+    `rename(2)` puts it over the unreadable record (kept as `.invalid-` evidence by a hard link); only a directory in
+    its place is moved aside first, and a record missing beside `.invalid-` / `.staged-` leftovers reads as
+    unreadable, never as missing (round 5 F3, round 6 R5-F2).
+  - **Every helper child passes #1542's admission gate**, the Core included: the shell runs the command only after
+    `go`, written once the launch is accepted inside its deadline; an abandoned launch never executes. Input a
+    command needs (the install guard's script) follows `go` on the same pipe (round 6, R5-F1).
   - **Every helper child and the update lock are bounded**, not only in `--emergency-disarm` (owner requirement,
     round 5): launchctl 60 s, ditto 600 s, the relaunch / successor `open` 60 s, the install guard's script 600 s,
     the Core's launch 10 s and config check 5 s, a staged helper's `--version` 10 s, pfctl and networksetup 15 s,
@@ -63,7 +68,7 @@
     in-flight requests, heals and automatic reconnects of the earlier session never apply and never clear the
     release. Arms without a generation (a relaunched app, helper internal) pass only when no release holds. Server
     picks and the Support remote retry do not begin a session. The Connect also repairs a target record that is
-    not a private root-owned regular file with valid content (moved aside, rewritten); a target it cannot write
+    not a private root-owned regular file with valid content (replaced, the old one kept as evidence); a target it cannot write
     fails the Connect with `TARGET_STATE_UNWRITABLE` and a concrete message.
   - **No one-time token.** The helper cannot tell a user Connect from an automatic one either way: both arrive over the
     same authenticated peer channel. The distinction is the app calling `/session/connect` only from the user's
@@ -75,4 +80,4 @@
 - Why stricter: an operator release can no longer be undone by anything automatic, including a helper restart; the
   escape hatch never waits without limit or fails closed on launchd, the update lock, a child process or the disk;
   success is never claimed on an unread component.
-- Applied in: [#1504](https://github.com/raydocs/tono/pull/1504) (backlog A13, helper 4.52.49).
+- Applied in: [#1504](https://github.com/raydocs/tono/pull/1504) (backlog A13, helper 4.52.50).

@@ -2092,6 +2092,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && ProtectedDNSManager.runPendingDNSWriteAfterReleaseSelfTest()
             && ProtectedDNSManager.runDNSCommitThenApplyFailureSelfTest()
             && runFailedTargetRepairKeepsRefusalSelfTest()
+            && runTargetRepairNeverMissingSelfTest()
             && runOwnerRelaunchReleasedDuringSpawnSelfTest()
             && runUpdateChildBoundedSelfTest()
             && KillSwitchManager.runFailedCommitReleaseSelfTest()

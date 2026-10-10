@@ -429,7 +429,7 @@ nonisolated enum HelperProtocolVersion {
     ///   command's deadline now starts before its launch: a launch that stalls
     ///   before returning a PID fails at the deadline and a child that starts
     ///   late is terminated (#1542 review F1).
-    /// - 4.52.48 → 4.52.49: operator release (R3-O4, decision 084). A
+    /// - 4.52.49 → 4.52.50: operator release (R3-O4, decision 084). A
     ///   persisted target (`secured <n>` / `released <n>`) joins the helper's
     ///   state: `--emergency-disarm` sets `released` in memory first and
     ///   persists it within a bounded budget under the target lock, boots the
@@ -448,10 +448,16 @@ nonisolated enum HelperProtocolVersion {
     ///   load that threw included) and is undone under a release; a released
     ///   daemon also releases a block it reads in Tono's anchor without saved
     ///   intent; a 127.0.0.1 write's undo restores the originals captured
-    ///   before it; repairing an unreadable target never leaves it missing;
-    ///   every helper child (launchctl, ditto, open, the Core's launch and
-    ///   config check, the install script) and the update lock are bounded.
-    static let current = "4.52.49"
+    ///   before it; repairing an unreadable target is one atomic rename, and a
+    ///   target missing beside a repair's leftovers refuses; every helper
+    ///   child (launchctl, ditto, open, the Core's launch and config check,
+    ///   the install script) and the update lock are bounded, and every one,
+    ///   the Core included, passes #1542's admission gate (the install
+    ///   script's stdin is relayed after `go`). A failed update executor run
+    ///   keeps the block and protected DNS unless an operator release, the
+    ///   attempt's Disconnect or no saved protection asks otherwise, and
+    ///   counts a daemon stopped only on launchd's "no such service".
+    static let current = "4.52.50"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

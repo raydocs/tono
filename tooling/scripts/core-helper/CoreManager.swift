@@ -132,8 +132,6 @@ final class CoreManager {
         // Recheck the root-owned binary at launch, including after a sync stop.
         _ = try secureMetadata(mihomoPath, type: mode_t(S_IFREG), owner: 0)
         let child = Process()
-        child.executableURL = URL(fileURLWithPath: mihomoPath)
-        child.arguments = ["run", "-D", runtimeDirectory, "-c", configPath]
         child.currentDirectoryURL = URL(fileURLWithPath: runtimeDirectory, isDirectory: true)
         child.environment = [
             // Never give a root process a user-writable HOME. Mihomo receives
@@ -150,10 +148,14 @@ final class CoreManager {
                     "The system is entering sleep; network protection remains fail-closed."
                 )
             }
-            // Bounded like every helper child: a launch still pending at the
-            // deadline fails the start, and its late child is terminated.
-            try KillSwitchManager.launchWithinDeadline(
+            // Bounded and admitted like every helper child (#1504 review
+            // R5-F1): a launch still pending at the deadline fails the start,
+            // and its late child gets end-of-file at the admission gate, so
+            // an abandoned Core never starts; it is terminated as well.
+            try KillSwitchManager.launchAdmitted(
                 child,
+                executable: mihomoPath,
+                arguments: ["run", "-D", runtimeDirectory, "-c", configPath],
                 until: .now() + HelperChildDeadline.coreLaunch,
                 deadline: HelperChildDeadline.coreLaunch
             )

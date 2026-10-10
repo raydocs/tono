@@ -67,13 +67,33 @@ struct HelperTarget: Equatable {
         var metadata = stat()
         guard lstat(path, &metadata) == 0 else {
             let code = errno
-            return code == ENOENT ? .missing : .unreadable("the target record cannot be inspected (errno \(code))")
+            guard code == ENOENT else { return .unreadable("the target record cannot be inspected (errno \(code))") }
+            // #1504 review R5-F2: a record missing beside a repair's moved-
+            // aside or staged copy was being replaced (or the replacement was
+            // interrupted), never "no release ever recorded": refuse.
+            switch repairResidue(beside: path) {
+            case false?: return .missing
+            case true?: return .unreadable("the target record is being repaired, or its repair was interrupted")
+            case nil: return .unreadable("the target record's directory cannot be read")
+            }
         }
         guard let data = try? KillSwitchManager.secureRead(
             path, maximumBytes: 64, requireRootOwnership: requireRootOwnership
         ) else { return .unreadable("the target record cannot be read") }
         guard let target = decode(data) else { return .unreadable("the target record is not valid") }
         return .recorded(target)
+    }
+
+    /// Whether a repair's `.invalid-` (moved aside) or `.staged-` copy sits
+    /// beside `path`; nil when the directory cannot be listed.
+    static func repairResidue(beside path: String) -> Bool? {
+        let parent = (path as NSString).deletingLastPathComponent
+        let name = (path as NSString).lastPathComponent
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: parent) else {
+            var metadata = stat()
+            return lstat(parent, &metadata) != 0 && errno == ENOENT ? false : nil
+        }
+        return entries.contains { $0.hasPrefix(name + ".invalid-") || $0.hasPrefix(name + ".staged-") }
     }
 
     static func write(_ target: HelperTarget) throws {
@@ -254,13 +274,18 @@ struct HelperTarget: Equatable {
 
         /// Writes `target` over the record (caller holds the lock). A record
         /// that cannot be read as Tono's (wrong type, owner, mode or content)
-        /// is moved aside, never followed or reused, but never before its
-        /// replacement exists (#1504 review F3): the replacement is written
-        /// (synced) beside it first, so a full or failing disk fails here with
-        /// the unreadable record, which refuses every automatic re-arm, still
-        /// in place. Only then is the record moved aside and the replacement
-        /// renamed in; if that rename fails, the record is moved back. A
-        /// missing target would read as "no release ever recorded".
+        /// is replaced, never followed or reused, and never left missing:
+        /// missing reads as "no release ever recorded" (#1504 review F3,
+        /// R5-F2). The replacement is written (synced) beside it first, so a
+        /// full or failing disk fails here with the unreadable record, which
+        /// refuses every automatic re-arm, still in place. The unreadable
+        /// record keeps a second `.invalid-` name as evidence (a hard link,
+        /// never following a symlink), then one `rename(2)` puts the staged
+        /// record over it: atomic, so no reader and no crash ever sees the
+        /// record absent. Only a directory in its place cannot be renamed
+        /// over; that one is moved aside first, and until the staged record
+        /// is in, the `.invalid-` and `.staged-` siblings make every reader
+        /// refuse (`readFile`), a crash there included.
         func commit(_ target: HelperTarget, replacingUnreadable: Bool, now: Date) throws {
             guard replacingUnreadable else {
                 try write(target, path)
@@ -268,24 +293,33 @@ struct HelperTarget: Equatable {
             }
             let staged = path + ".staged-\(UUID().uuidString)"
             try write(target, staged)
-            let aside = path + ".invalid-\(UInt64(max(0, now.timeIntervalSince1970) * 1000))"
-            guard move(path, aside) == 0 || errno == ENOENT else {
-                let code = errno
+            let aside = path + ".invalid-\(UInt64(max(0, now.timeIntervalSince1970) * 1000))-\(UUID().uuidString)"
+            _ = linkat(AT_FDCWD, path, AT_FDCWD, aside, 0)
+            if move(staged, path) == 0 {
+                try KillSwitchManager.fsyncParent(path)
+                return
+            }
+            var code = errno
+            var metadata = stat()
+            guard code == EISDIR || code == ENOTEMPTY || code == EEXIST,
+                  lstat(path, &metadata) == 0, metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR) else {
+                unlink(staged)
+                throw HelperFailure.system("The target record could not be replaced (errno \(code)).")
+            }
+            guard move(path, aside) == 0 else {
+                code = errno
                 unlink(staged)
                 throw HelperFailure.system("The unreadable target record cannot be moved aside (errno \(code)).")
             }
             guard move(staged, path) == 0 else {
-                let code = errno
+                code = errno
+                // The record is missing now, but the `.invalid-` sibling makes
+                // every reader refuse; moving it back restores the original.
+                _ = move(aside, path)
                 unlink(staged)
-                if move(aside, path) != 0 {
-                    // Last resort: an empty record is unreadable too, so the
-                    // target keeps refusing rather than reading as missing.
-                    let fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-                    if fd >= 0 { close(fd) }
-                }
                 throw HelperFailure.system("The target record could not be replaced (errno \(code)).")
             }
-            if requireRootOwnership { try? KillSwitchManager.fsyncParent(path) }
+            try KillSwitchManager.fsyncParent(path)
         }
     }
 
@@ -473,21 +507,28 @@ func runOperatorLaunchctl(
     BoundedTask { runner(arguments, deadline) }.wait(deadline + operatorKillGrace) ?? nil
 }
 
+/// Seconds on the monotonic clock: never set back or forward like wall time.
+func monotonicSeconds() -> TimeInterval {
+    TimeInterval(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000_000
+}
+
 /// R3-O4: boot the daemon out of the system domain and wait until launchd no
 /// longer has it, so the release below is the only writer. The phase ends by
-/// `budget` seconds of wall time, including each call's kill grace.
+/// `budget` seconds, including each call's kill grace, measured on the
+/// monotonic clock (#1504 review R5-M1): a wall clock set back while launchd
+/// is slow must not stretch the phase, nor one set forward cut it short.
 func stopHelperDaemonForOperator(
     launchctl: @escaping ([String], TimeInterval) -> Int32? = { runOperatorLaunchctl($0, deadline: $1) },
     pause: @escaping () -> Void = { usleep(200_000) },
-    now: @escaping () -> Date = { Date() },
+    now: @escaping () -> TimeInterval = { monotonicSeconds() },
     budget: TimeInterval = 20
 ) -> OperatorDaemonStop {
     let service = "system/\(UpdateExecutor.daemonLabel)"
-    let end = now().addingTimeInterval(budget)
+    let end = now() + budget
     // The deadline left for one launchctl call, keeping its kill grace inside
     // `end`; nil once too little is left to start another.
     func callDeadline(cap: TimeInterval) -> TimeInterval? {
-        let left = end.timeIntervalSince(now()) - operatorKillGrace
+        let left = end - now() - operatorKillGrace
         return left >= 0.2 ? min(cap, left) : nil
     }
     guard let first = callDeadline(cap: 5) else { return .unknown }
@@ -704,7 +745,7 @@ func runOperatorEmergencyDisarm(
         runOperatorLaunchctl(["bootstrap", "system", UpdateExecutor.daemonPlist], deadline: $0)
     }
 ) -> OperatorRecoveryResult {
-    let started = Date()
+    let started = monotonicSeconds()
     latch()
     let persistence = BoundedTask { () -> Result<HelperTarget, Error> in Result { try persist() } }
     let stop = stopDaemon(budget.stop)
@@ -739,7 +780,7 @@ func runOperatorEmergencyDisarm(
             result.restart = .some(restartDaemon(budget.restart))
         }
     }
-    result.elapsed = Date().timeIntervalSince(started)
+    result.elapsed = monotonicSeconds() - started
     return result
 }
 
@@ -1239,7 +1280,7 @@ func runOperatorReleaseSelfTests() -> Bool {
     var bootoutStatus: Int32? = 0
     var printAfterBootout: Int32? = OperatorDaemonStop.launchctlNoSuchService
     func scripted() -> OperatorDaemonStop {
-        var clock = Date(timeIntervalSince1970: 0)
+        var clock: TimeInterval = 0
         loaded = true
         return stopHelperDaemonForOperator(
             launchctl: { arguments, _ in
@@ -1249,7 +1290,7 @@ func runOperatorReleaseSelfTests() -> Bool {
                 }
                 return loaded ? 0 : printAfterBootout
             },
-            pause: { clock.addTimeInterval(1) },
+            pause: { clock += 1 },
             now: { clock }
         )
     }
@@ -1440,6 +1481,75 @@ func runFailedTargetRepairKeepsRefusalSelfTest() -> Bool {
     guard let released = try? HelperTarget.persistOperatorRelease(store: store, now: now),
           store.read() == .recorded(released) else {
         return selfTestFail("repair", store.read())
+    }
+    return true
+}
+
+/// R5-F2: repairing an unreadable target used to move the record aside and
+/// then rename the replacement in; an unlocked reader between the two, or a
+/// crash there, saw it missing ("no release ever recorded"). Now (1) the
+/// crash leftover, a moved-aside and a staged copy with no record, refuses;
+/// (2) the repair is one rename, and a reader at every rename of it sees the
+/// record present; (3) a directory in its place, the one record that cannot
+/// be renamed over, refuses between its two renames.
+func runTargetRepairNeverMissingSelfTest() -> Bool {
+    let directory = NSTemporaryDirectory() + "tono-target-window-\(UUID().uuidString)"
+    guard mkdir(directory, 0o700) == 0 else { return selfTestFail("window directory") }
+    defer { try? FileManager.default.removeItem(atPath: directory) }
+    var store = HelperTarget.Store()
+    store.path = directory + "/target"
+    store.requireRootOwnership = false
+    store.lockBudget = 0.3
+    store.write = { target, path in
+        try HelperTarget.encode(target).write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+    func refuses(_ reading: HelperTarget.Reading) -> Bool {
+        reading.isUnreadable && !HelperTarget.automaticRearmAllowed(reading)
+            && HelperTarget.admission(reading, sessionGeneration: 1) != .allowed
+    }
+    let now = Date(timeIntervalSince1970: 4_000)
+    // (1) The old repair's crash window: aside and staged, no record.
+    let aside = store.path + ".invalid-4000000"
+    let staged = store.path + ".staged-\(UUID().uuidString)"
+    guard FileManager.default.createFile(atPath: aside, contents: Data("garbage".utf8)),
+          FileManager.default.createFile(atPath: staged, contents: HelperTarget.encode(
+            HelperTarget(mode: .secured, generation: 9))),
+          refuses(store.read()) else {
+        return selfTestFail("interrupted repair read as missing", store.read())
+    }
+    unlink(staged)
+    guard refuses(store.read()) else { return selfTestFail("moved-aside record read as missing", store.read()) }
+    unlink(aside)
+    guard store.read() == .missing else { return selfTestFail("clean directory", store.read()) }
+    // (2) A garbage record: every rename of the repair is observed.
+    guard FileManager.default.createFile(atPath: store.path, contents: Data("garbage".utf8)) else {
+        return selfTestFail("window setup")
+    }
+    var observed: [HelperTarget.Reading] = []
+    var renames = 0
+    var watched = store
+    watched.move = { from, to in
+        renames += 1
+        observed.append(store.read())
+        let result = rename(from, to)
+        let code = errno
+        observed.append(store.read())
+        errno = code
+        return result
+    }
+    guard let released = try? HelperTarget.persistOperatorRelease(store: watched, now: now),
+          store.read() == .recorded(released), renames == 1,
+          !observed.contains(.missing) else {
+        return selfTestFail("repair window", "\(renames) \(observed)")
+    }
+    // (3) A directory where the record belongs.
+    guard unlink(store.path) == 0, mkdir(store.path, 0o700) == 0 else { return selfTestFail("directory setup") }
+    observed = []
+    renames = 0
+    guard let secured = try? HelperTarget.beginSession(expected: 0, store: watched, now: now),
+          store.read() == .recorded(HelperTarget(mode: .secured, generation: secured)),
+          !observed.contains(.missing), observed.contains(where: { refuses($0) }) else {
+        return selfTestFail("directory repair window", "\(renames) \(observed)")
     }
     return true
 }

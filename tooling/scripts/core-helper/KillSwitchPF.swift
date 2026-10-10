@@ -1981,7 +1981,15 @@ extension KillSwitchManager {
     /// is synchronous and can stall before it returns a PID (executable I/O,
     /// launch validation), so it runs on its own thread, and a launch still
     /// pending at the deadline fails the command; if it returns later, its
-    /// child is terminated at once (#1542 review F1). A launched child gets
+    /// child is terminated at once (#1542 review F1). Termination alone cannot
+    /// undo what a late command already did (a stale `pfctl -F all` flushing
+    /// a newer arm's anchor, a stale `networksetup` setter), so the command
+    /// itself runs only after an admission barrier: the launched process is
+    /// `/bin/sh` waiting on its stdin for `go`, written only once the caller
+    /// has accepted the launch; an abandoned launch gets end-of-file instead
+    /// and exits without ever executing the command (#1542 review F2). `exec`
+    /// keeps the PID, so `started` still names the command's process. A
+    /// launched child gets
     /// SIGTERM, then SIGKILL, each waited on for a second; one stuck in the
     /// kernel beyond that exits on its own. `ended` runs once the child has
     /// exited and been reaped, even after this call has given up on it.
@@ -1989,7 +1997,9 @@ extension KillSwitchManager {
     /// `currentDirectory`, `standardInput` and `output` exist so every child
     /// the helper starts goes through this one runner (#1504: Core config
     /// check, version probe, the install guard's script); the defaults are
-    /// the pfctl shape.
+    /// the pfctl shape. `standardInput` is never handed to the child: it is
+    /// relayed onto the same admission pipe after `go` (#1504 review R5-F1),
+    /// so a command abandoned at the deadline never reads a byte of it.
     static func run(
         _ executable: String,
         _ arguments: [String],
@@ -2004,13 +2014,10 @@ extension KillSwitchManager {
     ) throws -> HelperCommandResult {
         let end = DispatchTime.now() + deadline
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
         process.environment = environment
         if let currentDirectory {
             process.currentDirectoryURL = URL(fileURLWithPath: currentDirectory, isDirectory: true)
         }
-        if let standardInput { process.standardInput = standardInput }
         let pipe = Pipe()
         switch outputMode {
         case .captured:
@@ -2027,13 +2034,18 @@ extension KillSwitchManager {
             ended()
             exited.signal()
         }
-        try launchWithinDeadline(process, until: end, deadline: deadline, launch: launch) { process in
-            // Abandoned: the caller has already failed this command.
-            process.terminate()
-            if exited.wait(timeout: .now() + 1) == .timedOut, process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
+        try launchAdmitted(
+            process, executable: executable, arguments: arguments,
+            until: end, deadline: deadline,
+            relayingInputFrom: standardInput?.fileDescriptor,
+            launch: launch,
+            abandon: { process in
+                process.terminate()
+                if exited.wait(timeout: .now() + 1) == .timedOut, process.isRunning {
+                    kill(process.processIdentifier, SIGKILL)
+                }
             }
-        }
+        )
         started(process.processIdentifier)
         // Drained on its own thread, so a child that fills the pipe still
         // exits. The block holds the read end and the process until the
@@ -2066,16 +2078,31 @@ extension KillSwitchManager {
         )
     }
 
+    /// The admission barrier every helper child passes (#1542 review F2):
+    /// `/bin/sh` reads one line from its stdin and `exec`s the command only
+    /// when that line is `go`; end-of-file or anything else exits 125 first.
+    static let admissionGateScript =
+        #"IFS= read -r gate || exit 125; [ "$gate" = go ] || exit 125; exec "$0" "$@""#
+
     /// The launch half of `run`, shared with the one long-running child the
-    /// helper starts (the Core, which is supervised rather than waited on):
-    /// `Process.run()` on its own thread, the caller waiting until `end`. A
-    /// launch still pending then fails, and when it returns later its child
-    /// goes to `abandon` (#1542 review F1). Not a second runner: `run` itself
-    /// launches through here.
-    static func launchWithinDeadline(
+    /// helper starts (the Core, supervised rather than waited on), so the Core
+    /// passes the same admission gate (#1504 review R5-F1): `process` becomes
+    /// the gate shell for `executable` and `arguments`, launched on its own
+    /// thread while the caller waits until `end`. Only a launch accepted
+    /// inside the deadline is sent `go`; then, when `inputFD` is given, its
+    /// bytes follow on the same pipe until its end-of-file. A launch still
+    /// pending at `end` fails, and when it returns later its pipe is closed
+    /// unwritten (end-of-file: the command never executes) and the shell goes
+    /// to `abandon` (#1542 review F1/F2). The caller sets environment,
+    /// directory, output and termination handler; standard input is the
+    /// gate's. Not a second runner: `run` itself launches through here.
+    static func launchAdmitted(
         _ process: Process,
+        executable: String,
+        arguments: [String],
         until end: DispatchTime,
         deadline: TimeInterval,
+        relayingInputFrom inputFD: Int32? = nil,
         launch: @escaping @Sendable (Process) throws -> Void = { try $0.run() },
         abandon: @escaping @Sendable (Process) -> Void = { process in
             process.terminate()
@@ -2083,6 +2110,10 @@ extension KillSwitchManager {
             if process.isRunning { kill(process.processIdentifier, SIGKILL) }
         }
     ) throws {
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", admissionGateScript, executable] + arguments
+        let admission = Pipe()
+        process.standardInput = admission
         let launched = HelperCommandLaunch()
         DispatchQueue.global(qos: .userInitiated).async {
             do {
@@ -2092,18 +2123,47 @@ extension KillSwitchManager {
                 return
             }
             guard launched.report(.launched) else {
+                // Abandoned: the caller has already failed this command. No
+                // `go`: end-of-file, so the command is never executed.
+                try? admission.fileHandleForWriting.close()
                 abandon(process)
                 return
             }
+            // Accepted: the caller owns this command now, inside its deadline.
+            try? admission.fileHandleForWriting.write(contentsOf: Data("go\n".utf8))
+            if let inputFD {
+                KillSwitchManager.relayAdmittedInput(from: inputFD, to: admission.fileHandleForWriting.fileDescriptor)
+            }
+            try? admission.fileHandleForWriting.close()
         }
         switch launched.wait(until: end) {
         case .launched: return
         case .failed(let error): throw error
         case .abandoned:
-            let name = process.executableURL?.lastPathComponent ?? "A helper command"
+            let name = (executable as NSString).lastPathComponent
             throw HelperFailure.system(
                 "\(name) did not start within \(Int(deadline.rounded(.up))) seconds."
             )
+        }
+    }
+
+    /// Copies `source` to `destination` until end-of-file, a read error, or
+    /// a child that stopped reading (EPIPE; SIGPIPE is ignored in the helper).
+    private static func relayAdmittedInput(from source: Int32, to destination: Int32) {
+        var buffer = [UInt8](repeating: 0, count: 16 * 1024)
+        while true {
+            let count = buffer.withUnsafeMutableBytes { Darwin.read(source, $0.baseAddress, $0.count) }
+            if count < 0, errno == EINTR { continue }
+            guard count > 0 else { return }
+            var offset = 0
+            while offset < count {
+                let written = buffer.withUnsafeBytes {
+                    Darwin.write(destination, $0.baseAddress!.advanced(by: offset), count - offset)
+                }
+                if written < 0, errno == EINTR { continue }
+                guard written > 0 else { return }
+                offset += written
+            }
         }
     }
 

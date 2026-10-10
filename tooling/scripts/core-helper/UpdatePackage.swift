@@ -276,14 +276,21 @@ enum UpdatePackage {
     /// across `perform`, or a recovery behind it (#1504, owner requirement).
     /// A child past its deadline is a failed operation, never a success.
     static func run(_ executable: String, _ arguments: [String], deadline: TimeInterval) throws {
-        let bound = operatorChildDeadline.map { min($0, deadline) } ?? deadline
-        let result = try KillSwitchManager.run(
-            executable, arguments, deadline: bound,
-            environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/var/root"]
-        )
-        guard result.status == 0 else {
+        guard try status(executable, arguments, deadline: deadline) == 0 else {
             throw HelperFailure.system("Native update operation failed: \(URL(fileURLWithPath: executable).lastPathComponent).")
         }
+    }
+
+    /// `run`'s child, its exit status returned rather than judged: for a
+    /// caller that must tell one definite answer (launchctl's "no such
+    /// service") from every other. Throws when there is no answer at all
+    /// (could not start, or ran out of time).
+    static func status(_ executable: String, _ arguments: [String], deadline: TimeInterval) throws -> Int32 {
+        let bound = operatorChildDeadline.map { min($0, deadline) } ?? deadline
+        return try KillSwitchManager.run(
+            executable, arguments, deadline: bound,
+            environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/var/root"]
+        ).status
     }
 
     static func secureTree(_ path: String) throws {
