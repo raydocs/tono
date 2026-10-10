@@ -110,6 +110,9 @@ extension AccountSession {
 
     func periodicTelemetrySettingChanged() {
         routeTelemetryCursor.reset(to: routeSplitConsumer())
+        // Closed before the drain when the switch goes off, so no path
+        // failure lands in the ring after it was emptied.
+        updateControlPlanePathTimeline()
         _ = ConnectionTelemetryBuffer.shared.drain()
         // Turning the switch off drops the waiting timeline and failure
         // bodies, which may carry error text. Lost-protection reports stay.
@@ -117,6 +120,16 @@ extension AccountSession {
             TelemetryOutbox.keepOnlyNetworkLoss()
         }
         updatePeriodicTelemetry()
+    }
+
+    /// A19: a control-plane path that failed before the next one ran joins
+    /// the timeline (`controlPlanePathFail`) only while a verified account is
+    /// ready and the timeline switch is on. Otherwise, including every request
+    /// before sign-in, it stays in the local audit only.
+    func updateControlPlanePathTimeline() {
+        api.controlPlanePathTimeline.admit(
+            state == .ready && user != nil && Self.isPeriodicTelemetryEnabled
+        )
     }
 
     /// Ops "online" is derived from `POST telemetry/windows`. Windows already
@@ -594,6 +607,8 @@ extension AccountSession {
         // would carry the previous account's unreported tail.
         routeTelemetryCursor.setEnabled(false, current: routeSplitConsumer())
         routeTelemetryCursor.reset(to: routeSplitConsumer())
+        // A19: closed before the drain; `user = nil` below keeps it closed.
+        api.controlPlanePathTimeline.admit(false)
         _ = ConnectionTelemetryBuffer.shared.drain()
         // Managed exits carry this account's own client identity, so they are
         // dropped here rather than being left for the next account to connect

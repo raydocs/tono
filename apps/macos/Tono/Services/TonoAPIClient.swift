@@ -236,6 +236,10 @@ actor TonoAPIClient {
     /// writer of the offline grant (#582). Read synchronously by the account
     /// session and by Connect.
     nonisolated let offlineGate: OfflineGrantGate
+    /// A19: where a path that failed before the next one ran goes, for the
+    /// customer timeline. The account session opens it (`admit`) only while a
+    /// verified account is ready and the timeline switch is on.
+    nonisolated let controlPlanePathTimeline: ControlPlanePathTimeline
 
     init(
         baseURL: URL = TonoAPIClient.configuredBaseURL(),
@@ -244,11 +248,13 @@ actor TonoAPIClient {
         offlineGate: OfflineGrantGate = OfflineGrantGate(directory: ConfigStorage.shared.appSupportDirectory),
         pinnedPath: ControlPlanePath? = nil,
         relayPath: ControlPlanePath? = nil,
-        systemHandshake: (@Sendable () async -> Bool)? = nil
+        systemHandshake: (@Sendable () async -> Bool)? = nil,
+        controlPlanePathTimeline: ControlPlanePathTimeline = ControlPlanePathTimeline()
     ) {
         self.baseURL = baseURL
         self.keychain = keychain
         self.offlineGate = offlineGate
+        self.controlPlanePathTimeline = controlPlanePathTimeline
         let urlSession = session ?? URLSession(
             configuration: Self.controlPlaneSessionConfiguration(),
             delegate: TonoNoRedirectDelegate(),
@@ -1045,6 +1051,9 @@ actor TonoAPIClient {
               validOrigin
         else { throw APIError.invalidConfiguration }
         let requestStartedAt = Date()
+        // A19: taken once per request, so its path failures join the timeline
+        // only under the account and consent it started with.
+        let pathTimelineTicket = controlPlanePathTimeline.ticket()
         let auditDetails = [
             "method": method,
             "endpoint": path,
@@ -1075,6 +1084,7 @@ actor TonoAPIClient {
                     request,
                     method: method,
                     auditDetails: auditDetails,
+                    pathTimelineTicket: pathTimelineTicket,
                     requestIsCurrent: requestIsCurrent
                 )
             } catch ControlPlaneExchangeError.invalidResponse {
@@ -1206,6 +1216,7 @@ actor TonoAPIClient {
         _ request: URLRequest,
         method: String,
         auditDetails: [String: String],
+        pathTimelineTicket: UInt64?,
         requestIsCurrent: (@Sendable () -> Bool)?
     ) async throws -> (ControlPlaneAnswer, String) {
         let maximumResponseBytes = 2 * 1024 * 1024
@@ -1299,6 +1310,16 @@ actor TonoAPIClient {
                         "duration_ms": Self.durationMilliseconds(since: startedAt),
                         "detail": String(failure.localizedDescription.prefix(300)),
                     ]) { _, new in new }
+                )
+                // A19: the same pair for the customer timeline, labels, class
+                // and time only. The last failure has no next path and stops
+                // above, so it is never paired with another request's path.
+                controlPlanePathTimeline.record(
+                    path: path.label,
+                    nextPath: order[index + 1].label,
+                    error: error,
+                    elapsedMs: Int(Date().timeIntervalSince(startedAt) * 1_000),
+                    ticket: pathTimelineTicket
                 )
             }
         }

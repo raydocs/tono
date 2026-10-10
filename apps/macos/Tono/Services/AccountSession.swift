@@ -62,6 +62,9 @@ final class AccountSession {
         // Each request carries the revision it started under, so a refusal of
         // a retired presentation cannot suspend the one replacing it (#582).
         api.offlineGate.noteReadScope(accountReadRevision)
+        // A19: and a request started before this change never puts a path
+        // failure on the timeline of what follows it.
+        updateControlPlanePathTimeline()
         discardSupportReport()
     }
 
