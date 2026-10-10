@@ -1,6 +1,6 @@
 ## 2026-10-10 · 两端识别强制门户与 TLS 拦截，失败归因写明并进诊断报告（H21-O-F8）
 - 归属：ops 任务（[运维计划](../ops/plan-2026-09-11.md)，[Amp backlog](../ops/amp-backlog-2026-10-10.md) A11）；macOS App、Windows App 与 tono-core、控制面诊断入口。
-- 来源：origin/main `6b52b07a` → 分支 `amp/a11-captive-portal-attribution`，PR 待开；未合 main。
+- 来源：origin/main `6b52b07a` → 分支 `amp/a11-captive-portal-attribution`，[#1488](https://github.com/raydocs/tono/pull/1488)；未合 main。
 - 缺陷修复：网络要求网页登录（强制门户）或中间设备/本机安全软件替换了 Tono 服务器证书时，登录与目录刷新只显示通用的「无法连接 Tono」/
   「登录没有完成」，诊断报告也看不出（H21-O-F8）→
   - TLS 拦截：只分类现有 TLS 栈已经给出的错误，证书校验不变、被拒的证书从不接受。macOS 新增 `NetworkInterception`：URLSession
