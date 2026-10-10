@@ -10,3 +10,5 @@
 - 工程与测试：仅文档；`node tooling/scripts/records.mjs findings --id MAC-UPDATE-RETAIN-NO-RELAY` 能读到分片。
 - 候选/发布：仅文档，无新候选。
 - 剩余限制：三条发现都未修、未在实机复现；0.0.75 发布说明是否提及由收口索引 PR 决定。
+- 续记（同日）：老板 G1/G2 真机验收最短步骤从 orb 工作区移入仓库：[release-0075-owner-g1-g2-checklist.md](../ops/release-0075-owner-g1-g2-checklist.md)
+  （候选未建；冻结后补 SHA 与包哈希）。
