@@ -1,6 +1,6 @@
 ## 2026-10-10 · 两端识别其他 VPN/TUN，连接失败归因写「存在其他 VPN」（H21-O-F7）
 - 归属：ops 任务（[运维计划](../ops/plan-2026-09-11.md)，[Amp backlog](../ops/amp-backlog-2026-10-10.md) A10）；macOS App、Windows App 与 tono-core、控制面诊断入口。
-- 来源：origin/main `4e373f06` → 分支 `amp/a10-other-vpn-detection`，PR 见下方续记；未合 main。
+- 来源：origin/main `4e373f06` → 分支 `amp/a10-other-vpn-detection`，[#1480](https://github.com/raydocs/tono/pull/1480)；未合 main。
 - 缺陷修复：另一个 VPN/TUN 在跑时，连接失败只显示通用句（「连接没有完成」或 TUN/出口类句子），诊断报告也看不出（H21-O-F7）→
   - macOS：App 进程 `getifaddrs` 只读识别 `utun*`/`ipsec*`/`tun*`/`tap*` 中已启用、带 IPv4 或非链路本地 IPv6、且不是 Tono 的 `utun199` 的接口
     （系统自带 utun 只有 fe80:: 不算；`ppp*` 不算，PPPoE 宽带也是 ppp）。分类为 `TUN_ROUTE_UNAVAILABLE`、`CORE_EXIT_UNREACHABLE`、
