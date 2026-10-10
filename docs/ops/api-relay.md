@@ -18,7 +18,9 @@ Both are exit nodes; `tono-xray` owns 443 and is never touched. Admitted SNIs:
 sent to a closed port.
 
 The same list is compiled into the clients and the control plane; change all four together:
-`apps/windows/app/src-tauri/src/tono/bootstrap.rs` (`API_RELAYS`),
+`apps/windows/service/src/lib.rs` (`API_RELAYS`, re-exported by the Windows app's
+`bootstrap.rs` and rendered into WFP rule C; a change there changes the kill switch permit
+table and its pinned test, decision 090),
 `apps/macos/Tono/Services/ControlPlanePath.swift` (`apiRelays`),
 `services/control-plane/src/api-relays.ts` (probe list), this file.
 
@@ -177,8 +179,18 @@ byte was sent, so a sign-in code is never sent twice. A relay that answered is t
 afterwards (Windows: for the process; macOS: for 24 h via the app profile). Every attempt
 carries `X-Tono-Path: <pinned|system_dns|relay|doh|alt_port|tunnel>`, which the control plane
 records on the device row, because a relayed request otherwise looks like one from an exit
-node. The relay is **not** in the WFP/PF bootstrap permit: while protection is armed it is
-blocked like any other non-permitted address.
+node.
+
+While protection is armed without a tunnel (bootstrap, Protected Offline):
+
+- **Windows**: WFP rule C permits each relay `IP:2053`, TCP, for the installed Tono app only
+  (the same `ALE_APP_ID` condition as the Cloudflare entries, which stay), so sign-in and
+  refresh can go through a relay in that state too (owner decision W-A,
+  [decision 090](../decisions/090-2026-10-10-windows-armed-control-plane-via-relays.md),
+  amending 077). No other process matches; connected (`Locked`) the whole channel is
+  retracted.
+- **macOS**: the PF bootstrap permit does not include the relays on `main`; armed, a relay is
+  blocked like any other non-permitted address (decision 086, PR #1507, changes this).
 
 Updater: Windows (`commands/update.rs` `get_with_relays`) sends a discovery, signature or
 package GET through the relays when the direct GET got no response. macOS does the same:
