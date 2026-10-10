@@ -57,27 +57,38 @@ nonisolated struct ControlPlaneUnreachable: Equatable, Sendable {
     }
 
     /// `userMessage`, or, while a fail-closed barrier without a tunnel holds
-    /// this Mac, the same failure with what that barrier means: PF lets the
-    /// Tono relays through (decision 086) and the walk tried only them
-    /// (decision 091), so the relays are what failed. The copy does not send
+    /// this Mac, the same failure with what that barrier means for it: when
+    /// the walk reached the relays, they are what failed. The copy does not send
     /// the user to turn protection off (owner, decision 091); Tono keeps it
     /// on. An unconfirmed barrier is worded as one that may still be on.
     func message(protection: ProtectionHold) -> String {
         let closing: String
+        // Only a walk that reached the relays may say the relays failed: a
+        // stopped-early POST or an older helper's walk may never have tried
+        // them, and the copy claims nothing about which routes PF admits.
+        let triedRelays = attempts.contains { $0.path == "relay" }
         switch protection {
         case .none: closing = hint
-        case .blocking: closing = Self.protectedHint
-        case .unconfirmed: closing = Self.unconfirmedProtectedHint
+        case .blocking: closing = triedRelays ? Self.protectedHint : Self.protectedNoRelayHint
+        case .unconfirmed: closing = triedRelays ? Self.unconfirmedProtectedHint : Self.unconfirmedNoRelayHint
         }
         return [headline, triedSentence, closing].joined(separator: " ")
     }
 
     static var unconfirmedProtectedHint: String {
-        String(localized: "Protection may still be on from an earlier session. Tono's relays are let through, and none of them answered from this network. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.")
+        String(localized: "Protection may still be on from an earlier session, and Tono's relays did not answer from this network. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.")
+    }
+
+    static var protectedNoRelayHint: String {
+        String(localized: "Protection is on. Tono keeps it on. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.")
+    }
+
+    static var unconfirmedNoRelayHint: String {
+        String(localized: "Protection may still be on from an earlier session. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.")
     }
 
     static var protectedHint: String {
-        String(localized: "Protection is on. It lets Tono's relays through, and none of them answered from this network. Tono keeps protection on. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.")
+        String(localized: "Protection is on, and Tono's relays did not answer from this network. Tono keeps protection on. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.")
     }
 
     var headline: String {

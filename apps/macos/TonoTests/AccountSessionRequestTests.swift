@@ -372,6 +372,64 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(relayAttempts.count, 1, "the relay carries the request")
     }
 
+    /// Decision 091, Sol review F1: a walk that starts on a remembered relay
+    /// with the tunnel up, whose relay fails before anything was sent just as
+    /// the tunnel goes away, ends with that relay's own error. The direct
+    /// steps are dropped, and the retry rule still sees a failure that proves
+    /// nothing was sent, so the second walk (relays only) carries the sign-in.
+    func testATunnelLostAfterAFailedRememberedRelayRetriesOnTheRelaysAlone() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        let key = TonoAPIClient.preferredPathKey(forHost: host)
+        AppProfile.defaults.set(["label": "relay", "at": Date().timeIntervalSince1970], forKey: key)
+        let systemRequests = PathCallCounter()
+        HeldAccountProtocol.install(host) { request in
+            systemRequests.record()
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer {
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            AppProfile.defaults.removeObject(forKey: key)
+        }
+        let tunnelLost = PathCallCounter()
+        let pinnedAttempts = PathCallCounter()
+        let relayAttempts = PathCallCounter()
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                pinnedAttempts.record()
+                throw URLError(.timedOut)
+            },
+            relayPath: ControlPlanePath(label: "relay") { _, _ in
+                relayAttempts.record()
+                if relayAttempts.count == 1 {
+                    // No relay reached TLS; the tunnel drops at the same time.
+                    tunnelLost.record()
+                    throw URLError(.cannotConnectToHost)
+                }
+                return ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-relay-retry","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
+            },
+            relayOnly: { tunnelLost.count > 0 }
+        )
+
+        let challengeId = try await api.startEmailSignIn(TonoEmailStartRequest(
+            email: "relay-retry@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+        )).challengeId
+
+        XCTAssertEqual(challengeId, "c-relay-retry")
+        XCTAssertEqual(relayAttempts.count, 2, "the second walk goes to the relays again")
+        XCTAssertEqual(systemRequests.count, 0, "no direct step after the tunnel went away")
+        XCTAssertEqual(pinnedAttempts.count, 0, "no direct step after the tunnel went away")
+    }
+
     /// Decision 086, review M1: native update preparation arms without a
     /// tunnel inside the helper, so the app's own record (connected before the
     /// update) is stale. When the update then fails, the app follows the

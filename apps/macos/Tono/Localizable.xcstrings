@@ -8902,22 +8902,42 @@
         }
       }
     },
-    "Protection is on. It lets Tono's relays through, and none of them answered from this network. Tono keeps protection on. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.": {
+    "Protection is on. Tono keeps it on. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "保护正在开启，它放行 Tono 中继，但从这个网络连不上任何一台中继。Tono 会保持保护开启。请稍后重试，或换一个网络（例如手机热点）。需要帮助时，选中这段文字发给 Tono 支持。"
+            "value": "保护正在开启，Tono 会保持开启。请稍后重试，或换一个网络（例如手机热点）。需要帮助时，选中这段文字发给 Tono 支持。"
           }
         }
       }
     },
-    "Protection may still be on from an earlier session. Tono's relays are let through, and none of them answered from this network. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.": {
+    "Protection may still be on from an earlier session. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "上一次会话的保护可能仍在生效。Tono 中继会被放行，但从这个网络连不上任何一台中继。Tono 不会改变保护状态。请稍后重试，或换一个网络（例如手机热点）。需要帮助时，选中这段文字发给 Tono 支持。"
+            "value": "上一次会话的保护可能仍在生效，Tono 不会改变保护状态。请稍后重试，或换一个网络（例如手机热点）。需要帮助时，选中这段文字发给 Tono 支持。"
+          }
+        }
+      }
+    },
+    "Protection is on, and Tono's relays did not answer from this network. Tono keeps protection on. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保护正在开启，从这个网络连不上 Tono 中继。Tono 会保持保护开启。请稍后重试，或换一个网络（例如手机热点）。需要帮助时，选中这段文字发给 Tono 支持。"
+          }
+        }
+      }
+    },
+    "Protection may still be on from an earlier session, and Tono's relays did not answer from this network. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一次会话的保护可能仍在生效，从这个网络连不上 Tono 中继。Tono 不会改变保护状态。请稍后重试，或换一个网络（例如手机热点）。需要帮助时，选中这段文字发给 Tono 支持。"
           }
         }
       }

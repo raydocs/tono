@@ -1288,12 +1288,11 @@ actor TonoAPIClient {
         var attempts: [ControlPlaneUnreachable.Attempt] = []
         // Decision 080: the labels of the paths lost so far, each once.
         var lostPaths: [String] = []
-        for (index, path) in order.enumerated() {
+        var index = 0
+        while index < order.count {
+            let path = order[index]
+            defer { index += 1 }
             if index > 0 { try Self.requireCurrent(requestIsCurrent) }
-            // Decision 091: the tunnel went away during this walk (drop,
-            // teardown to bootstrap). The direct steps still ahead would go
-            // out with no tunnel, so only the relays remain.
-            if !relayOnly, index > 0, let relayPath, path.label != relayPath.label, self.relayOnly() { continue }
             let startedAt = Date()
             var attempt = request
             attempt.setValue(path.label, forHTTPHeaderField: Self.pathHeader)
@@ -1328,6 +1327,15 @@ actor TonoAPIClient {
                 if NetworkInterception.isTrustFailure(error) { sawRefusedCertificate = true }
                 failures.append("\(path.label)[\(Self.failureDetail(error))]")
                 attempts.append(.init(path: path.label, failure: ControlPlanePathTimeline.failureClass(error)))
+                // Decision 091: the tunnel went away during this walk (drop,
+                // teardown to bootstrap). The direct steps still ahead would
+                // go out with no tunnel, so only the relays remain of them.
+                // With none left, this failure ends the walk as the last one
+                // would, error and evidence intact, so the retry rule and the
+                // copy see what actually happened.
+                if !relayOnly, let relayPath, self.relayOnly() {
+                    order = Array(order[...index]) + order[(index + 1)...].filter { $0.label == relayPath.label }
+                }
                 if Self.reportablePathLabels.contains(path.label), !lostPaths.contains(path.label) {
                     lostPaths.append(path.label)
                 }
