@@ -1543,8 +1543,6 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
     /// `control_plane_path_failed`). The audit line is what the periodic timeline uploads.
     #[tokio::test]
     async fn a_failed_path_is_reported_with_the_next_path_and_its_time() {
-        // Refused at once: a port that was just free on loopback.
-        let closed = std::net::TcpListener::bind("127.0.0.1:0").expect("bind").local_addr().expect("addr");
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().expect("addr").port();
         std::thread::spawn(move || {
@@ -1570,7 +1568,10 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
         let (failures_tx, failures_rx) = std::sync::mpsc::channel();
         let transport = TonoTransport::with_clients(
             "tono-path-event.test",
-            &[closed],
+            // Dropped, as in `an_unreachable_pinned_address_falls_back_to_the_system_resolver`: a pin
+            // is a different address on the same port (reqwest dials the URL's port), so it cannot
+            // be a closed loopback port.
+            &[std::net::SocketAddr::from(([10, 255, 255, 1], port))],
             &[std::net::SocketAddr::from(([127, 0, 0, 1], port))],
         )
         .expect("transport")

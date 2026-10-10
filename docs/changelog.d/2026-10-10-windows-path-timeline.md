@@ -18,7 +18,7 @@
     截图（fixture 临时加两行，未提交 fixture）：[customer-timeline.png](../ops/evidence/2026-10-10-windows-path-timeline/customer-timeline.png)。
 - 工程与测试：ops 合同的连接事件部分（`EVENT_SOURCES`、`ConnectionEventDto`、`assertConnectionEvent`）原样移到
   `contract/connection-events.ts`，由 `customers.ts` 再导出，让 `customers.ts` 守住 500 行预算。
-  `#[tokio::test] a_failed_path_is_reported_with_the_next_path_and_its_time`（Windows，钉住的本机端口拒绝、
+  `#[tokio::test] a_failed_path_is_reported_with_the_next_path_and_its_time`（Windows，钉住的地址丢包超时、
   系统解析通 → 一条 pinned→system_dns/connect 事件与审计 JSON 形状）；`it('keeps a control-plane path failure with its paths
   and time, without a node')`（控制面 `test/ops-flatten.test.ts`）。
 - 验证：见 PR 正文。Windows `cargo test` 未在本机跑（按 BUILD_AND_TEST 由托管 CI 跑）。
