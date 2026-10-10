@@ -12,12 +12,34 @@ nonisolated enum NativeUpdateDownload {
         let directory: URL
     }
 
-    static func discover() async throws -> Offer {
-        let bytes = try await bounded(URL(string: origin + "latest/manifest.json")!, maximum: UpdateContractV1.maxBytes)
+    /// The release host answered 404 for a metadata GET (over whichever
+    /// path carried it; a relay passes the TLS session through, so the
+    /// answer is the release host's own).
+    nonisolated struct NotPublished: LocalizedError {
+        var errorDescription: String? { "Update discovery metadata is unavailable or invalid." }
+    }
+
+    /// The signed offer, or nil when the discovery object is not published
+    /// (a 404 for `latest/manifest.json`): no update, not an error, never a
+    /// fallback installer. Any other missing or invalid metadata, including
+    /// a 404 for the signature of a published manifest, still throws.
+    static func discover(
+        origin: String = NativeUpdateDownload.origin, fallbacks: [ControlPlanePath]? = nil
+    ) async throws -> Offer? {
+        let bytes: Data
+        do {
+            bytes = try await bounded(
+                URL(string: origin + "latest/manifest.json")!, maximum: UpdateContractV1.maxBytes, fallbacks: fallbacks
+            )
+        } catch is NotPublished {
+            return nil
+        }
         let manifest = try UpdateContractV1.ReleaseManifest.decode(bytes)
         let hash = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
         let directory = URL(string: origin + hash + "/")!
-        let signature = try await bounded(directory.appendingPathComponent("manifest.macos-arm64.sig"), maximum: 4096)
+        let signature = try await bounded(
+            directory.appendingPathComponent("manifest.macos-arm64.sig"), maximum: 4096, fallbacks: fallbacks
+        )
         return .init(bytes: bytes, signature: signature, manifest: manifest, directory: directory)
     }
 
@@ -26,8 +48,16 @@ nonisolated enum NativeUpdateDownload {
     /// `fallbacks(for:)`). Whatever path carries it, the bytes are checked
     /// the same way here, and root verifies the manifest signature.
     static func bounded(
-        _ url: URL, maximum: Int, timeoutInterval: TimeInterval = 30, fallbacks: [ControlPlanePath]? = nil
+        _ url: URL, maximum: Int, timeoutInterval: TimeInterval = 30, fallbacks: [ControlPlanePath]? = nil,
+        armedWithoutTunnel: Bool = KillSwitchService.isArmedWithoutTunnel
     ) async throws -> Data {
+        if armedWithoutTunnel {
+            // Decision 086: armed without a tunnel, PF admits the release host
+            // only through the Tono relays; the direct path and the pinned
+            // Cloudflare addresses would only wait out their timeouts.
+            let relays = (fallbacks ?? Self.fallbacks(for: url)).filter { $0.label == "relay" }
+            return try await fetch(url, maximum: maximum, after: skippedWhileArmedWithoutTunnel, over: relays)
+        }
         let configuration = URLSessionConfiguration.ephemeral
         // The request timeout resets on every received byte. Bound the whole
         // metadata transfer too, so a trickling response cannot hold the updater.
@@ -42,6 +72,7 @@ nonisolated enum NativeUpdateDownload {
             // No response arrived. A GET is safe to send again elsewhere.
             return try await fetch(url, maximum: maximum, after: error, over: fallbacks ?? Self.fallbacks(for: url))
         }
+        if let http = response as? HTTPURLResponse, http.statusCode == 404, http.url == url { throw NotPublished() }
         guard let http = response as? HTTPURLResponse, http.statusCode == 200, http.url == url,
               response.expectedContentLength <= maximum else { throw failure("Update discovery metadata is unavailable or invalid.") }
         var data = Data()
@@ -86,6 +117,7 @@ nonisolated enum NativeUpdateDownload {
                 failures.append("\(path.label)[\(error.localizedDescription)]")
                 continue
             }
+            if answer.status == 404 { throw NotPublished() }
             guard answer.status == 200, answer.bodyFailure == nil, answer.body.count <= maximum else {
                 throw failure("Update discovery metadata is unavailable or invalid.")
             }
@@ -93,6 +125,13 @@ nonisolated enum NativeUpdateDownload {
         }
         throw failure("Update discovery metadata is unreachable: " + failures.joined(separator: "; "))
     }
+
+    /// Stands in for the direct attempt that is not made while protection is
+    /// armed without a tunnel, so the reported failures still name it.
+    private static let skippedWhileArmedWithoutTunnel = NSError(
+        domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet,
+        userInfo: [NSLocalizedDescriptionKey: "not tried: protection is armed without a tunnel (decision 086)"]
+    )
 
     private static func isCancellation(_ error: any Error) -> Bool {
         error is CancellationError || (error as? URLError)?.code == .cancelled
@@ -109,7 +148,16 @@ nonisolated enum NativeUpdateDownload {
     /// (by default `packageRelays(for:)`), streamed to disk under the same
     /// signed size. Whatever path carries it, root copies and hashes this
     /// exact file against the signed manifest before installing.
-    static func package(at url: URL, size: Int64, relays: [PackagePath]? = nil) async throws -> URL {
+    static func package(
+        at url: URL, size: Int64, relays: [PackagePath]? = nil,
+        armedWithoutTunnel: Bool = KillSwitchService.isArmedWithoutTunnel
+    ) async throws -> URL {
+        if armedWithoutTunnel {
+            // Decision 086: the relays are the only path PF admits here.
+            return try await relayedPackage(
+                url, size: size, after: skippedWhileArmedWithoutTunnel, over: relays ?? packageRelays(for: url)
+            )
+        }
         do {
             return try await NativePackageDownload(url: url, size: size).download()
         } catch let undelivered as NativePackageDownload.Undelivered {

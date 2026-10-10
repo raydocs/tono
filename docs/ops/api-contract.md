@@ -120,6 +120,7 @@
 |---|---|
 | `GET customers` | 列表信封加可选 `counts?: { byVerdict: Record<CustomerVerdict, number>; byStage: Record<FunnelStage, number> }`（全量，各 1 条 GROUP BY；没有 `ops_customer_status` 行的用户按漏斗计入 `never_used`）。`total` 为带同一 `q`/`since` 条件的 `COUNT(*)`。分页在 SQL：`WHERE (email, id) > (?, ?)`，再按本页 `user_id IN (…)` 批量读状态 / 设备数 / 服务家族 / 漏斗事实。 |
 | `GET customers/{id}` | 可选 `logWindows?: { id, openedBy, openedAt, expiresAt, reads }[]`。开 / 读 / 关写 `ops_audit` `diagnostics.window.open\|read\|close`（target 为用户 id，summary 为窗口 id 与对象 key）；cron `retention` 把 `expires_at < now` 的窗口关掉并审计 `close(expired)` |
+| `GET customers` | `CustomerSummaryDto` 加可选 `wechatDuplicate?: true`（只在为真时出现）：同一微信号（去首尾空白、不分大小写）还登记在另一位用户或尚未注册的邀请名下，全量 1 条读。带 `q` 时邮箱或微信号与 `q` 完全相等（不分大小写）的行排最前；此时游标的排序键前加名次 `0`/`1`，无 `q` 的游标格式不变；把无 `q` 的游标用在带 `q` 的请求上，排序键首字不是名次时返回 400 |
 
 ### 部门 C
 

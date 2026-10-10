@@ -355,13 +355,12 @@ final class SocketServer {
         // SCPreferences path as disconnect and has no extra deadline.
         releaseLeftoverBlockIfCoreStopped()
         recoverDNSAfterStoppedCore()
-        var lastProtectionCheck = Date()
+        var protectionChecks = ProtectionCheckSchedule(now: ProtectionCheckSchedule.monotonicNow())
         while helperShutdownRequested == 0 {
             // Low-frequency check between requests. Under the update lock
             // like every IPC mutation, so it cannot interleave with an arm
             // or an out-of-process emergency disarm.
-            if Date().timeIntervalSince(lastProtectionCheck) >= 10 {
-                lastProtectionCheck = Date()
+            if protectionChecks.due(now: ProtectionCheckSchedule.monotonicNow()) {
                 // BRICK-M11: deleting the app while this daemon stays up used
                 // to leave PF in place until the next start. This takes the
                 // update lock itself; do not call it from inside locked.
@@ -1088,6 +1087,49 @@ final class SocketServer {
             unlink(mihomoTemp)
             throw error
         }
+    }
+}
+
+/// When the idle loop runs its protection check next: every 10 s on
+/// `CLOCK_MONOTONIC`, which counts through sleep and is never stepped. The
+/// wall clock can be: set back by hand, or by `timed` correcting a clock
+/// that ran ahead. Measured on `Date()`, a step back of an hour held every
+/// check for that hour — the release of a block whose Core died, the
+/// orphaned-session releases and the PF supervision — so a Mac whose Core
+/// died stayed offline that long instead of about 30 s. A reading that goes
+/// backwards anyway counts as due, never as a wait.
+struct ProtectionCheckSchedule {
+    static let interval: UInt64 = 10_000_000_000
+    private(set) var last: UInt64
+
+    init(now: UInt64) {
+        last = now
+    }
+
+    static func monotonicNow() -> UInt64 {
+        clock_gettime_nsec_np(CLOCK_MONOTONIC)
+    }
+
+    mutating func due(now: UInt64) -> Bool {
+        guard now < last || now - last >= Self.interval else { return false }
+        last = now
+        return true
+    }
+
+    /// A reading stepped back an hour, as `Date()` gives after the wall
+    /// clock is set back, must not hold the next check for that hour.
+    static func runClockStepSelfTest() -> Bool {
+        let second: UInt64 = 1_000_000_000
+        let start = 7_200 * second
+        var schedule = ProtectionCheckSchedule(now: start)
+        guard !schedule.due(now: start + 9 * second),
+              schedule.due(now: start + 10 * second) else { return false }
+        let steppedBack = start + 11 * second - 3_600 * second
+        guard schedule.due(now: steppedBack),
+              !schedule.due(now: steppedBack + 9 * second),
+              schedule.due(now: steppedBack + 10 * second) else { return false }
+        let first = monotonicNow()
+        return monotonicNow() >= first
     }
 }
 

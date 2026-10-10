@@ -641,13 +641,25 @@
       "title": "Preferences"
     },
     "privacy": {
-      "title": "Privacy"
+      "title": "Privacy",
+      "effectHint": "Each choice saves automatically. No reconnect or restart is needed. Turning uploads off does not delete data already sent.",
+      "reading": "Reading saved choice…",
+      "readFailed": "Couldn't read the saved choice.",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "saveFailed": "Couldn't confirm the change. Reload the saved choice before trying again.",
+      "reload": "Reload saved choice"
     },
     "general": {
       "title": "General",
-      "launchAtStartup": "Launch at Startup",
-      "launchAtStartupHint": "Turned on after the first successful connect. You can turn it off.",
-      "language": "Interface Language"
+      "effectHint": "Changes save automatically on this PC. They do not change your current connection.",
+      "launchAtStartup": "Open at sign-in",
+      "launchAtStartupHint": "Open Tono at your next Windows sign-in. Enabled after the first successful connection; you can change it here.",
+      "language": "Interface Language",
+      "languageHint": "Applies to this window after saving. No reconnect or restart needed.",
+      "readFailed": "Couldn't read the saved settings.",
+      "saveFailed": "Couldn't confirm the change. Reload the saved choices before trying again.",
+      "reload": "Reload saved choices"
     },
     "appearance": {
       "title": "Appearance",

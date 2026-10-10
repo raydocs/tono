@@ -13,3 +13,8 @@
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：未在真机复现 `networksetup` 卡住。执行器与更新路径里的 `UpdatePackage.run`（launchctl、ditto、open）仍无期限，属于另一条发现，
   见审计报告的剩余风险；#1504 只在 `--emergency-disarm` 进程内给它们加了期限。
+- 续记（Sol 终审 e8e0f012：1 major）：期限原来从 `Process.run()` 返回之后才开始，`run()` 是同步调用，启动本身卡住（可执行文件 I/O、启动校验）时
+  没有任何超时，迟到的启动还会拿到一整段新期限。`KillSwitchManager.run` 现在先算出绝对期限，在独立线程上启动；到期仍未启动即按命令失败，
+  之后才返回的子进程立即 SIGTERM（1 s 后 SIGKILL），其退出码绝不当作结果。`runBoundedSystemLookup`（dscacheutil）改走同一个执行器，
+  启动与等待共用单调时钟期限。新增自测 `runStalledLaunchDeadlineSelfTest`（启动卡 2.5 s、期限 1 s：2 s 内失败，迟到的子进程被终止并回收）。
+  合并 main 后 helper 4.52.47 → 4.52.48，`CONTRACT.sha256` 重算。`UpdatePackage.run`（launchctl/ditto/open）的期限由 A13（#1504）修复轮统一处理。

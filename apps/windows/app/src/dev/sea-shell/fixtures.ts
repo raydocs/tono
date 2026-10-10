@@ -1,6 +1,5 @@
 /* eslint-disable @eslint-react/no-unnecessary-use-prefix -- Stateless adapters retain the production hook names; this dev-only entry has no native hook effects. */
 import { createTheme } from '@mui/material'
-import i18n from 'i18next'
 
 import type {
   TonoDiagnosticsReport,
@@ -28,23 +27,37 @@ const theme = createTheme({
 export const useCustomTheme = () => ({ theme })
 export const useLoadingOverlay = () => {}
 export const useLayoutEvents = () => {}
-export const useI18n = () => ({
-  currentLanguage: i18n.language,
-  supportedLanguages: ['zh', 'en'],
-  switchLanguage: async () => {},
-  isLoading: false,
-  t: i18n.t,
-})
-export const useTonoPreferences = () => ({
-  preferences: {
-    language: params.get('lang') === 'zh' ? 'zh' : 'en',
-    theme_mode: 'dark',
-    enable_auto_launch: false,
-    auto_check_update: false,
-  },
-  patchPreferences: async () => {},
-  mutatePreferences: () => {},
-})
+export { useI18n } from '../../hooks/use-i18n'
+export {
+  useTonoPreferences,
+  readGeneralSave,
+  tonoGeneralSaveQueryKey,
+  type GeneralSave,
+} from '../../hooks/use-tono-preferences'
+let generalPreferences: TonoPreferences = {
+  language: params.get('lang') === 'zh' ? 'zh' : 'en',
+  theme_mode: 'dark',
+  enable_auto_launch: false,
+  auto_check_update: false,
+}
+let generalReadFailed = false
+let generalSaveFailed = false
+export const getTonoPreferences = async () => {
+  await privacyDelay('generalReadDelay')
+  if (params.has('generalReadError') && !generalReadFailed) {
+    generalReadFailed = true
+    throw new Error('Synthetic settings read failure')
+  }
+  return { ...generalPreferences }
+}
+export const patchTonoPreferences = async (value: Partial<TonoPreferences>) => {
+  generalPreferences = { ...generalPreferences, ...value }
+  await privacyDelay('generalSaveDelay')
+  if (params.has('generalSaveError') && !generalSaveFailed) {
+    generalSaveFailed = true
+    throw new Error('Synthetic settings lost reply; value may be saved')
+  }
+}
 export const useUpdate = () => ({
   updateInfo: null,
   checkUpdate: async () => null,
@@ -92,15 +105,49 @@ export const tonoDevices = async () => [
     createdAt: 1790000000,
   },
 ]
-export const tonoAuditEnabled = async () => false
+let auditChoice = false
+let telemetryChoice = false
+let networkChoice = false
+let privacyReadFailed = false
+let privacySaveFailed = false
+const privacyDelay = (name: string) =>
+  new Promise<void>((resolve) =>
+    setTimeout(
+      resolve,
+      Math.max(0, Math.min(30000, Number(params.get(name)) || 0)),
+    ),
+  )
+export const tonoAuditEnabled = async () => auditChoice
+export const tonoSetAuditEnabled = async (value: boolean) => {
+  auditChoice = value
+}
 export const tonoAuditLogPath = async () => ({
   path: 'C:\\Tono-preview\\audit.log',
   exists: false,
   bytes: 0,
 })
 export const tonoInternalBuild = async () => false
-export const tonoPeriodicTelemetryEnabled = async () => false
-export const tonoNetworkLogUploadEnabled = async () => false
+export const tonoPeriodicTelemetryEnabled = async () => telemetryChoice
+export const tonoSetPeriodicTelemetryEnabled = async (value: boolean) => {
+  telemetryChoice = value
+}
+// Privacy feedback uses only synthetic local state; no native consent or upload.
+export const tonoNetworkLogUploadEnabled = async () => {
+  await privacyDelay('privacyReadDelay')
+  if (params.has('privacyReadError') && !privacyReadFailed) {
+    privacyReadFailed = true
+    throw new Error('Synthetic saved-choice read failure')
+  }
+  return networkChoice
+}
+export const tonoSetNetworkLogUploadEnabled = async (value: boolean) => {
+  await privacyDelay('privacySaveDelay')
+  if (params.has('privacySaveError') && !privacySaveFailed) {
+    privacySaveFailed = true
+    throw new Error('Synthetic persistence refusal')
+  }
+  networkChoice = value
+}
 export const tonoCheckTerminalEnv = async () => ({ variables: [], sources: [] })
 export const tonoCancelServerTests = async () => {}
 export const tonoRefreshCatalog = async () => {}

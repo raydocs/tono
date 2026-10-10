@@ -102,7 +102,16 @@ struct TonoApp: App {
             },
             routeSplitConsumer: { appState.appTrafficLedger.cumulative },
             installedCatalogConsumer: { appState.installedManagedCatalogDigests },
-            protectionUnconfirmedConsumer: { appState.isProtectionUnconfirmed }
+            protectionUnconfirmedConsumer: { appState.isProtectionUnconfirmed },
+            gateProtectionHoldConsumer: {
+                // AI recovery rules alone do not block Tono's relays.
+                guard !appState.isConnected else { return .none }
+                switch appState.gateProtectionNotice {
+                case .blocking: return .blocking
+                case .unconfirmed: return .unconfirmed
+                case .selectiveRecovery, nil: return .none
+                }
+            }
         )
         _accountSession = State(initialValue: accountSession)
         // #582: Connect asks the account session's offline grant gate first.

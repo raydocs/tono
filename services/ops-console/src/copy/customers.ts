@@ -83,6 +83,9 @@ export const customerCopy = {
   /** 名单上的人只有一个微信号可以找，所以复制按钮把整串真号放进剪贴板。 */
   copyWechat: '复制微信号',
   copiedWechat: '已复制',
+  /** 同一个微信号挂在两位以上客户（或未注册的邀请）名下。 */
+  wechatDuplicate: '重复',
+  wechatDuplicateTitle: '这个微信号还登记在另一位客户或邀请名下',
   firstConnectedAt: (ago: string, day: string) => `${ago} · ${day}`,
   customerColumns: {
     status: '状态',

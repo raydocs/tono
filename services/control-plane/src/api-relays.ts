@@ -6,15 +6,20 @@ import { connect as socketConnect } from 'cloudflare:sockets';
 // Cloudflare path is dead.
 //
 // Keep in step with the clients' compiled lists:
-// `apps/windows/app/src-tauri/src/tono/bootstrap.rs` `API_RELAYS` and
-// `apps/macos/Tono/Services/ControlPlanePath.swift` `apiRelays`.
+// `apps/windows/service/src/lib.rs` `API_RELAYS` (re-exported by the App's
+// `bootstrap.rs`) and `apps/macos/Tono/Core/ControlPlaneRelays.swift`.
 //
 // `exitNodeId` is the `exit_nodes.id` of the exit agent on the same machine:
 // its token is the only credential that may report this relay's end-to-end
-// check (`POST /api/v1/home/relay-probe`, `src/api-relay-report.ts`).
+// check (`POST /api/v1/home/relay-probe`, `src/api-relay-report.ts`). A relay
+// on a host that is not an exit node has none: nothing may report for it, so
+// it is judged on the TCP probe alone (decision 089, docs/ops/api-relay.md).
 export const API_RELAYS: readonly ApiRelay[] = [
   { name: 'Los Angeles · Westwood', host: '179.253.233.220', port: 2053, exitNodeId: 'los-angeles-westwood' },
   { name: 'Los Angeles · Mesa', host: '179.255.154.17', port: 2053, exitNodeId: 'los-angeles-mesa' },
+  // Arosscloud (AS400619), Los Angeles: another provider and network than the DMIT pair
+  // (same metro); not an exit node.
+  { name: 'Los Angeles · Arosscloud', host: '154.84.56.196', port: 2053 },
 ];
 
 export type ApiRelay = { name: string; host: string; port: number; exitNodeId?: string };

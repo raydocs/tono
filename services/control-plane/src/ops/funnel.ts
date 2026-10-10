@@ -238,6 +238,37 @@ export async function loadFunnelFacts(
   return { people, byUserId };
 }
 
+/** How two WeChat ids are compared: trimmed, case-insensitive. */
+export function wechatKey(value: unknown): string | null {
+  const key = text(value)?.trim().toLowerCase();
+  return key ? key : null;
+}
+
+/**
+ * WeChat ids held by more than one person, fleet-wide: registered users plus
+ * invites not yet registered. One read, so a paged customer list can flag a
+ * duplicate whose twin is on another page.
+ */
+export async function loadDuplicateWechatKeys(db: D1Database): Promise<Set<string>> {
+  const rows = await allRows(
+    db,
+    `SELECT wechat_id FROM users WHERE wechat_id IS NOT NULL AND wechat_id <> ''
+     UNION ALL
+     SELECT a.wechat_id FROM signup_allowlist a
+     WHERE a.wechat_id IS NOT NULL AND a.wechat_id <> ''
+       AND NOT EXISTS (SELECT 1 FROM users u WHERE LOWER(u.email) = LOWER(a.email))`,
+  );
+  const seen = new Set<string>();
+  const duplicate = new Set<string>();
+  for (const row of rows) {
+    const key = wechatKey(row.wechat_id);
+    if (key === null) continue;
+    if (seen.has(key)) duplicate.add(key);
+    seen.add(key);
+  }
+  return duplicate;
+}
+
 export function toFunnelDto(index: FunnelIndex, nowSec: number): FunnelDto {
   const counts = new Map<FunnelStage, number>(FUNNEL_STAGES.map((stage) => [stage, 0]));
   for (const person of index.people) {

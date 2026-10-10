@@ -1,0 +1,14 @@
+## 2026-10-10 · macOS 常规设置的生效说明与 Login Items 回执
+- 归属：SHIP_PLAN G2；有限 UIUX 2/3/4 的 Mac 设置项，不是完整候选包验收。
+- 来源：main `45fd254c` → `amp/macos-settings-feedback`；PR/head 与准确 CI 结果在交付时补记。
+- 缺陷修复：Login Items 的 pending/error 不再随页面卸载丢失；模糊失败不显示 Saved，要求显式读取系统状态后再试。
+- 新增/优化：界面语言提前披露重开及连接/网络保护解除代价；登录项说明下次 macOS 登录生效、不影响当前连接；等待批准时提供打开登录项、刷新及关闭请求的动作；技术错误渐进收纳，经典模式控件不再使用空/错误的无障碍标签。
+- 保留边界：现有 SMAppService API、默认值/键和写回系统实际状态的方式保留；语言受保护确认条件、AppSettings/AppState/helper/PF、A29 的局域网三个修改点、主页/连接页未修改。保存锁迁到设置页共享 UI 状态，须独立精确 head 生命周期评审。
+- 工程与测试：在既有 MacUsabilityRenderTests 增加一条异步回执回归及生产 SettingsView 的 normal/approval/saving/error/saved/unavailable/中文窄窗/经典渲染；只替换 Login Items IO，用一次性 defaults，不操作宿主登录项。
+- 验证：Linux 不执行 xcodebuild/Swift；结构/翻译检查与 hosted macos-26 的编译、XCTest、窗口截图分别记录，不以结构检查替代运行结果。
+- 候选/发布：仅源码，无新候选、无更新源或发布操作。
+- 剩余限制：真实 macOS Login Items 批准/取消、失去回执、VoiceOver/全键盘控制、语言重开与保护释放需要最终原生设备包验收；此处合成 IO 的原生窗口截图不代表这些检查已通过。
+- 2026-10-10 续修：独立 Sol 对 [e1d5118c](https://github.com/raydocs/tono/commit/e1d5118c99cf94c020de5683e607e379e925c2f9) 源码评审 PASS（无 major，1 minor）：failed 后刷新仍返回 unavailable 不得清锁。已定点保留失败，只有可确认的 enabled/notRegistered/requiresApproval 状态才能结束失败；同一回归增加 unavailable→页面重挂→仍拒第二写→显式可确认刷新。新准确 head 的复核/CI/截图仍待结果，不沿用原 head。
+- 2026-10-10 续记：[f699a661](https://github.com/raydocs/tono/commit/f699a661afba06ccfad73f9061a8ab8738cd0d84) 独立Sol精确delta及上下文复核PASS，F1关闭，无剩余major/minor；M1–M5源代码覆盖明确延续，回执已记PR评论，不是设备验收。CI[38083546959](https://github.com/raydocs/tono/actions/runs/38083546959)实际checkout8f3a6a606：编译通过，688 tests/1 skipped/1 failure（唯一新增中文窄窗OCR；en-US误识别Han字）。未报全绿。
+- 工程定点修正：Vision对required Han标签使用zh-Hans/en-US，其余English配置不变；保留置信度、精确文字、原始像素/透明度/窗口范围等全部断言。修正receipt不再冒称中文fixture为English。Linux结构检查raw `All files verified successfully with exact balance!`，不是Swift执行。
+- 已检查并上传[f699原生窗口九状态PNG](../screenshots/macos-general-settings-2026-10-10/README.md)，中文截图真实可读但原OCR验收仍标失败。只归档原始window PNG，不存offscreen/诊断重拍/cache/xcresult。新准确head的CI和独立复核仍待；PR保持Draft，真实系统批准、键盘/VoiceOver与语言quit仍待最终包。

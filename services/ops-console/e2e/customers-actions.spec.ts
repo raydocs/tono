@@ -380,7 +380,7 @@ test.describe('客户回访与草稿', () => {
     await expect(draft).toHaveValue(/ECONNREFUSED/);
     await expect(draft).toHaveValue(/对方端口没人应答/);
     await expect(draft).toHaveValue(/这台机器现在有一条已登记的事故/);
-    await expect(draft).toHaveValue(/建议先在客户端里换到 Tokyo · Fuji/);
+    await expect(draft).toHaveValue(/建议先在客户端里换到 Los Angeles · Pacific-Coast-Highway-Backhaul-01/);
     await expect(draft).toHaveValue(/想请您确认一件事/);
   });
 

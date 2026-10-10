@@ -1284,6 +1284,35 @@ final class ProtectedDNSManager {
 
     /// A child that ignores SIGTERM stands in for a wedged `networksetup`:
     /// the call must fail within its deadline plus the TERM and KILL waits.
+    /// #1542 review F1: a launch that stalls before `Process.run()` returns a
+    /// PID. The command fails at its deadline, measured from before the
+    /// launch, and the child that starts after it is terminated rather than
+    /// left running or read as the outcome.
+    static func runStalledLaunchDeadlineSelfTest() -> Bool {
+        final class Ended: @unchecked Sendable {
+            let semaphore = DispatchSemaphore(value: 0)
+        }
+        let ended = Ended()
+        let started = clock_gettime_nsec_np(CLOCK_MONOTONIC)
+        do {
+            _ = try KillSwitchManager.run(
+                "/bin/sleep", ["30"], deadline: 1,
+                ended: { ended.semaphore.signal() },
+                launch: { process in
+                    usleep(2_500_000)
+                    try process.run()
+                }
+            )
+            return false
+        } catch {
+            let elapsed = clock_gettime_nsec_np(CLOCK_MONOTONIC) - started
+            // Failed at the deadline, not after the stalled launch returned.
+            guard elapsed < 2_000_000_000 else { return false }
+        }
+        // The late child is terminated and reaped, not left for 30 s.
+        return ended.semaphore.wait(timeout: .now() + 5) == .success
+    }
+
     static func runNetworkSetupDeadlineSelfTest() -> Bool {
         let started = clock_gettime_nsec_np(CLOCK_MONOTONIC)
         do {
@@ -2129,6 +2158,7 @@ final class ProtectedDNSManager {
                 && runLegacySnapshotLookupSelfTest()
                 && runServerCountCapSelfTest()
                 && runNetworkSetupDeadlineSelfTest()
+                && runStalledLaunchDeadlineSelfTest()
         } catch {
             return false
         }

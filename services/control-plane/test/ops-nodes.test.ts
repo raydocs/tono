@@ -146,6 +146,10 @@ describe('ops nodes identity', () => {
         name: 'Los Angeles · Mesa', host: '179.255.154.17', port: 2053, ok: null,
         checkedAt: null, latencyMs: null, error: null, okSince: null, failingSince: null,
       },
+      {
+        name: 'Los Angeles · Arosscloud', host: '154.84.56.196', port: 2053, ok: null,
+        checkedAt: null, latencyMs: null, error: null, okSince: null, failingSince: null,
+      },
     ]);
   });
 });
