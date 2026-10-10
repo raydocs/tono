@@ -244,7 +244,33 @@ pub struct TonoTransport {
     /// Auth may try it last. Setting it does not create a tunnel, change a
     /// route, or install a filter. Cleared when the tunnel is released.
     tunnel_port: std::sync::atomic::AtomicU16,
+    /// Tono-owned relays outside Cloudflare (`bootstrap::API_RELAYS`), one client each.
+    ///
+    /// Tried right after the pinned and system-resolved attempts have both failed provably
+    /// undelivered, and before DoH: DoH hands back Cloudflare addresses, which for the customer
+    /// this exists for sit on the same broken path. The relay passes the TLS session through
+    /// unterminated, so the certificate check is the same one as on every other path.
+    relays: Vec<Relay>,
+    /// Index + 1 of the relay that last answered, or 0.
+    ///
+    /// Later requests go to it first, like `alternate_port`: for a customer whose Cloudflare
+    /// path drops, every request would otherwise pay the pinned and the resolved connect
+    /// budgets again before reaching the one path that works. Cleared on a provably
+    /// undelivered failure, so a network that recovers goes back to the pins. Process memory
+    /// only.
+    preferred_relay: std::sync::atomic::AtomicUsize,
 }
+
+/// One compiled relay: where the TCP connection lands and the client that lands it there.
+struct Relay {
+    address: std::net::SocketAddr,
+    client: reqwest::Client,
+}
+
+/// Connect budget of one relay attempt. The relay is on a different network path than
+/// Cloudflare, so it is either reachable within a few round trips or not at all; a long wait
+/// here would only delay the remaining fallbacks for a customer who is already waiting.
+const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// Holds `prefer_resolved` for one preferred attempt and clears it on drop unless the attempt
 /// was answered. A failure, and a cancellation by an outer deadline (launch restore), both
@@ -277,7 +303,32 @@ impl TonoTransport {
                 .build()
                 .context("failed to build the Tono HTTP preferred-fallback client")?,
             tunnel_port: std::sync::atomic::AtomicU16::new(0),
+            relays: Self::build_relays(bootstrap::API_HOST, &bootstrap::api_relays(), || {
+                Self::builder().connect_timeout(RELAY_CONNECT_TIMEOUT)
+            })?,
+            preferred_relay: std::sync::atomic::AtomicUsize::new(0),
         })
+    }
+
+    /// One client per relay, pinned to that relay's socket for `host`. Everything else is the
+    /// shared builder: no proxy, no redirects, full certificate validation against `host`.
+    fn build_relays(
+        host: &str,
+        addresses: &[std::net::SocketAddr],
+        builder: impl Fn() -> reqwest::ClientBuilder,
+    ) -> Result<Vec<Relay>> {
+        addresses
+            .iter()
+            .map(|address| {
+                Ok(Relay {
+                    address: *address,
+                    client: builder()
+                        .resolve_to_addrs(host, std::slice::from_ref(address))
+                        .build()
+                        .context("failed to build a Tono HTTP relay client")?,
+                })
+            })
+            .collect()
     }
 
     /// Publish the live loopback mixed port, or 0 when it is gone.
@@ -330,12 +381,25 @@ impl TonoTransport {
         pinned: &[std::net::SocketAddr],
         resolved: &[std::net::SocketAddr],
     ) -> Result<Self> {
+        Self::with_clients_and_relays(host, pinned, resolved, &[])
+    }
+
+    /// `with_clients` plus the relay sockets, each with the same quick budget.
+    #[cfg(test)]
+    fn with_clients_and_relays(
+        host: &str,
+        pinned: &[std::net::SocketAddr],
+        resolved: &[std::net::SocketAddr],
+        relays: &[std::net::SocketAddr],
+    ) -> Result<Self> {
         let quick = || {
             Self::builder()
                 .connect_timeout(Duration::from_millis(700))
                 .timeout(Duration::from_millis(900))
         };
         Ok(Self {
+            relays: Self::build_relays(host, relays, quick)?,
+            preferred_relay: std::sync::atomic::AtomicUsize::new(0),
             client: tokio::sync::RwLock::new(
                 quick()
                     .resolve_to_addrs(host, pinned)
@@ -573,6 +637,71 @@ impl TonoTransport {
         None
     }
 
+    /// One attempt through relay `index`, with the delivery judgement the rest of this
+    /// file makes.
+    ///
+    /// `Ok` carries a result the caller must return: a response, a server answer, or a
+    /// failure that may already have put the request on the wire. `Err` carries the
+    /// failure text of an attempt that provably delivered nothing, so the walk may go on.
+    ///
+    /// The URL carries the relay's port and the pin carries the same one, as the alternate
+    /// ports do; the SNI is the hostname alone, and the Cloudflare edge the relay forwards to
+    /// ignores the port in `Host` (measured 2026-09-29 and again through the relay 2026-10-10).
+    async fn attempt_one_relay(
+        &self,
+        request: &ApiRequest,
+        index: usize,
+    ) -> Result<Result<ApiResponse, ApiError>, String> {
+        use std::sync::atomic::Ordering;
+        let Some(relay) = self.relays.get(index) else {
+            return Err("no such relay".to_owned());
+        };
+        let Some(url) = Self::with_port(&request.url, relay.address.port()) else {
+            return Err(format!("relay {}: unusable url", relay.address));
+        };
+        let attempt = ApiRequest {
+            url,
+            ..request.clone()
+        };
+        match self.attempt(&relay.client, &attempt).await {
+            Ok(response) => {
+                self.preferred_relay.store(index + 1, Ordering::Relaxed);
+                Ok(Ok(response))
+            }
+            Err(ApiError::Transport { kind, message }) => {
+                if should_retry_transport(request.method, kind) {
+                    Err(format!("{}: {message}", relay.address))
+                } else {
+                    Ok(Err(ApiError::Transport { kind, message }))
+                }
+            }
+            // A non-transport error is a real answer from the server: it arrived.
+            Err(other) => Ok(Err(other)),
+        }
+    }
+
+    /// Walk the compiled relays in order. `note` collects the text of every provably
+    /// undelivered failure for the combined error message, so a support report shows
+    /// that the relay was tried and how it failed.
+    async fn attempt_relays(
+        &self,
+        request: &ApiRequest,
+        note: &mut String,
+    ) -> Option<Result<ApiResponse, ApiError>> {
+        for index in 0..self.relays.len() {
+            match self.attempt_one_relay(request, index).await {
+                Ok(result) => return Some(result),
+                Err(failure) => {
+                    if !note.is_empty() {
+                        note.push_str("; ");
+                    }
+                    note.push_str(&failure);
+                }
+            }
+        }
+        None
+    }
+
     /// DNS-over-HTTPS raced across pinned resolvers. System DNS is not
     /// read or written. A poisoned answer that is not a public IPv4 is ignored.
     async fn attempt_doh(&self, request: &ApiRequest) -> Option<Result<ApiResponse, ApiError>> {
@@ -732,6 +861,26 @@ impl HttpTransport for TonoTransport {
             }
         }
 
+        // A relay that already answered goes first for the same reason: for the customer it
+        // exists for, every Cloudflare path drops, and paying the pinned and resolved connect
+        // budgets before every request would make the app unusable rather than merely slow.
+        // Its failure text joins the combined message below when nothing else answers.
+        let mut relay_note = String::new();
+        let preferred_relay = self
+            .preferred_relay
+            .load(std::sync::atomic::Ordering::Relaxed);
+        if preferred_relay != 0 {
+            match self.attempt_one_relay(&request, preferred_relay - 1).await {
+                Ok(result) => return result,
+                // Provably not delivered: forget it, so the pins run as usual below.
+                Err(failure) => {
+                    self.preferred_relay
+                        .store(0, std::sync::atomic::Ordering::Relaxed);
+                    relay_note = failure;
+                }
+            }
+        }
+
         // The resolved client goes first once it has answered in place of dead pins (#583). Its
         // failure moves on to the pins only when it proves nothing was delivered. Any failure or
         // cancellation clears the preference (`PreferenceLease`).
@@ -795,10 +944,18 @@ impl HttpTransport for TonoTransport {
                 // route around that which needs no server change — Cloudflare answers the same
                 // zone, with the same certificate, on all of these.
                 if should_retry_transport(request.method, fallback_kind) {
-                    // DoH, then the other direct ports, then a tunnel that is
-                    // already up. Each step is skipped when it cannot run.
-                    // A delivered response stops the walk. Nothing here changes
+                    // The Tono relays, then DoH, then the other direct ports, then a
+                    // tunnel that is already up. Each step is skipped when it cannot
+                    // run. A delivered response stops the walk. Nothing here changes
                     // system DNS, routes, or filters.
+                    //
+                    // The relays come first because every later step still lands on
+                    // Cloudflare: DoH resolves to its anycast and the alternate ports
+                    // are its ports, and the customer this exists for cannot reach
+                    // Cloudflare on any of them.
+                    if let Some(result) = self.attempt_relays(&request, &mut relay_note).await {
+                        return result;
+                    }
                     if let Some(result) = self.attempt_doh(&request).await {
                         return result;
                     }
@@ -809,10 +966,15 @@ impl HttpTransport for TonoTransport {
                         return result;
                     }
                 }
+                let relay_part = if relay_note.is_empty() {
+                    String::new()
+                } else {
+                    format!("; relay[{relay_note}]")
+                };
                 Err(ApiError::Transport {
                     kind: fallback_kind,
                     message: format!(
-                        "pinned[{message}]; system-dns[{fallback_message}]"
+                        "pinned[{message}]; system-dns[{fallback_message}]{relay_part}"
                     ),
                 })
             }
@@ -1330,6 +1492,8 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             answers: std::sync::atomic::AtomicU64::new(0),
             resolved_first: TonoTransport::pinned_builder().resolve_to_addrs(host, &live).build().unwrap(),
             tunnel_port: std::sync::atomic::AtomicU16::new(0),
+            relays: Vec::new(),
+            preferred_relay: std::sync::atomic::AtomicUsize::new(0),
         };
         let store = std::sync::Arc::new(MemoryCredentialStore::new());
         store.set_refresh_token("refresh-1").unwrap();
@@ -1358,6 +1522,8 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             answers: std::sync::atomic::AtomicU64::new(0),
             resolved_first: TonoTransport::pinned_builder().resolve_to_addrs(host, &dead).build().unwrap(),
             tunnel_port: std::sync::atomic::AtomicU16::new(0),
+            relays: Vec::new(),
+            preferred_relay: std::sync::atomic::AtomicUsize::new(0),
         };
         let get = || ApiRequest {
             method: HttpMethod::Get,

@@ -26,6 +26,23 @@ pub const API_BOOTSTRAP_IPS: [&str; 2] = ["104.20.26.170", "172.66.162.98"];
 /// The API hostname these pins stand in for.
 pub const API_HOST: &str = "api.afk.ccwu.cc";
 
+/// Tono-owned API relays outside Cloudflare, tried in this order after every
+/// Cloudflare path has failed provably undelivered (decision 077).
+///
+/// Each is an nginx `stream` listener that admits exactly the SNI
+/// `api.afk.ccwu.cc` and passes the bytes to the Cloudflare edge: TLS is not
+/// terminated there, so the client still validates Cloudflare's certificate for
+/// the hostname, and the relay sees what any router on the path sees. They are
+/// for the customer whose ISP cannot carry a TLS session to Cloudflare at all
+/// (China Mobile → anycast, 2026-10-10): for that customer the pins, the system
+/// resolver, DoH and the alternate ports all land on the same broken path.
+///
+/// Deliberately not part of [`API_BOOTSTRAP_IPS`]: the WFP bootstrap permit stays
+/// Cloudflare-only, so an armed kill switch is not widened. A relay is therefore
+/// usable only while protection is not armed, which is exactly when sign-in and
+/// first catalog fetch happen.
+pub const API_RELAYS: [(&str, u16); 1] = [("179.253.233.220", 2053)];
+
 /// Hard cap for `bootstrap_api_hosts` on the wire (F1).
 pub const MAX_BOOTSTRAP_HOSTS: usize = 8;
 /// Learned addresses kept per host. Bounded because the WFP permit is
@@ -44,6 +61,17 @@ pub fn pinned_bootstrap_ips() -> Vec<Ipv4Addr> {
         .iter()
         .filter_map(|text| text.parse::<Ipv4Addr>().ok())
         .filter(|addr| tono_core::node::is_public_ipv4(*addr))
+        .collect()
+}
+
+/// The relay sockets, validated with the same public-IPv4 predicate as the pins
+/// and in the compiled order.
+pub fn api_relays() -> Vec<std::net::SocketAddr> {
+    API_RELAYS
+        .iter()
+        .filter_map(|(text, port)| text.parse::<Ipv4Addr>().ok().map(|ip| (ip, *port)))
+        .filter(|(ip, port)| tono_core::node::is_public_ipv4(*ip) && *port != 0)
+        .map(|(ip, port)| std::net::SocketAddr::new(std::net::IpAddr::V4(ip), port))
         .collect()
 }
 
