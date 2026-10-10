@@ -166,7 +166,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
           {/* The answer, then the record of having given it. Both sit above the
               timeline because both are what the operator came here to do; the
               timeline is what they read to check the draft. */}
-          <ReplyDraft who={privacy.email(row.email)} events={events} />
+          <ReplyDraft who={privacy.email(row.email)} events={events} now={row.now} devices={row.devices} />
 
           <Followups userId={userId} beat={beat} />
 

@@ -2195,6 +2195,57 @@ extension KillSwitchManager {
         return passed
     }
 
+    /// A29 review (2dd4e3d3) F1: while a protected fault is held, a failed
+    /// arm never releases, whatever its tunnel. Drives `failedArm`, the path
+    /// `arm` takes after its commit threw, with the release, stricter block
+    /// and persistence injected: a bootstrap restriction (not a live re-arm)
+    /// whose load PF accepted and whose enable/flush/verification then
+    /// failed keeps the block and the intent; so does a new tunnel's first
+    /// arm (stricter block). Without a fault, the same bootstrap failure
+    /// still takes the ordinary release.
+    static func runHeldFaultFailedArmKeepsBlockSelfTest() -> Bool {
+        struct VerificationFailed: Error {}
+        var released = 0
+        var stricter = 0
+        var persisted = 0
+        func fail(
+            live: Bool, tightening: Bool, faultHeld: inout Bool
+        ) -> (error: Error, bumpsGeneration: Bool) {
+            failedArm(
+                error: VerificationFailed(),
+                load: .acceptedOrUnknown,
+                liveSessionReArm: live,
+                tighteningUnconfirmed: tightening,
+                faultHeld: &faultHeld,
+                release: { released += 1 },
+                installStricterBlock: { stricter += 1 },
+                persist: { persisted += 1; return nil }
+            )
+        }
+        // Held fault → bootstrap arm (no tunnel, so neither live nor a
+        // tightening) → post-load failure.
+        var held = true
+        let bootstrap = fail(live: false, tightening: false, faultHeld: &held)
+        let bootstrapKept = released == 0 && held
+            && (bootstrap.error as? HelperFailure)?.code == liveReArmFailedCode
+        // Held fault → a new tunnel's first arm (off, not live) fails.
+        let newTunnel = fail(live: false, tightening: true, faultHeld: &held)
+        let newTunnelKept = released == 0 && held && stricter == 1
+            && (newTunnel.error as? HelperFailure)?.code == localNetworkFaultCode
+        // No fault: the ordinary first-arm release is unchanged.
+        var noFault = false
+        _ = fail(live: false, tightening: false, faultHeld: &noFault)
+        let ordinaryReleases = released == 1 && !noFault
+        let passed = bootstrapKept && newTunnelKept && ordinaryReleases && persisted == 2
+        if !passed {
+            FileHandle.standardError.write(Data(
+                ("self-test: a failed arm released while the protected fault was held (bootstrap \(bootstrapKept), "
+                    + "new tunnel \(newTunnelKept), ordinary \(ordinaryReleases), persisted \(persisted))\n").utf8
+            ))
+        }
+        return passed
+    }
+
     /// A29 review (f7c83f65) major 2: a live re-arm that kept the block is a
     /// protected fault like the stricter block and the stopped Core, so it
     /// is latched and persisted; a persist failure is reported, not dropped.

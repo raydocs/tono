@@ -473,49 +473,18 @@ final class KillSwitchManager {
             // the protected fault (see `settleFailedArm`).
             lastCommittedLocalNetwork = nil
             let uid = self.allowedUID
-            let outcome = Self.settleFailedArm(
+            var faultHeld = localNetworkFaultLocked
+            let failure = Self.failedArm(
+                error: error,
                 load: load,
                 liveSessionReArm: liveSessionReArm,
                 tighteningUnconfirmed: tighteningUnconfirmed,
+                faultHeld: &faultHeld,
                 installStricterBlock: { try Self.installEmergencyBlock(allowedUID: uid) }
             )
-            var unpersisted = ""
-            if Self.latchesProtectedFault(outcome, liveSessionReArm: liveSessionReArm) {
-                localNetworkFaultLocked = true
-                if let failure = Self.persistProtectedFault() {
-                    unpersisted = " The fault could not be saved (\(failure)); it holds until this helper exits."
-                }
-            }
-            switch outcome {
-            case .faultStricterBlock:
-                stateGeneration &+= 1
-                throw HelperFailure.coded(
-                    code: Self.localNetworkFaultCode,
-                    message: "Could not apply Allow local network devices off: "
-                        + "\((error as? HelperFailure)?.message ?? String(describing: error)). "
-                        + "Every connection is blocked until protection is applied again." + unpersisted
-                )
-            case .faultStopCore:
-                stateGeneration &+= 1
-                throw HelperFailure.coded(
-                    code: Self.localNetworkFaultStopCoreCode,
-                    message: "Could not apply Allow local network devices off, and the stricter "
-                        + "block could not be installed; the Core is stopped and protection stays armed."
-                        + unpersisted
-                )
-            case .kept where liveSessionReArm:
-                // Coded so the app holds the session instead of taking its
-                // automatic release: the block and the intent are still in
-                // place, and only the user decides what happens next.
-                throw HelperFailure.coded(
-                    code: Self.liveReArmFailedCode,
-                    message: "Protection could not be updated: "
-                        + "\((error as? HelperFailure)?.message ?? String(describing: error)). "
-                        + "The installed block stays." + unpersisted
-                )
-            case .released, .kept:
-                throw error
-            }
+            localNetworkFaultLocked = faultHeld
+            if failure.bumpsGeneration { stateGeneration &+= 1 }
+            throw failure.error
         }
     }
 
@@ -551,6 +520,68 @@ final class KillSwitchManager {
     static let localNetworkFaultCode = "KILLSWITCH_LOCAL_NETWORK_FAULT"
     static let localNetworkFaultStopCoreCode = "KILLSWITCH_LOCAL_NETWORK_FAULT_STOP_CORE"
     static let liveReArmFailedCode = "KILLSWITCH_LIVE_REARM_FAILED"
+
+    /// Everything `arm` does after its commit threw, with the effects
+    /// injected (release, stricter block, persistence) so the self-test
+    /// drives this exact path. While a protected fault is held, no failed arm
+    /// releases, whatever its tunnel: a bootstrap restriction from a preserve
+    /// teardown, an arm after a power barrier saved a no-tunnel state, or a
+    /// new tunnel's first arm is settled like a live re-arm (block and intent
+    /// kept, or the stricter block). Without a fault the ordinary first-arm
+    /// policy is unchanged. Returns the error to throw, and whether the state
+    /// generation moves (the fault outcomes).
+    static func failedArm(
+        error: Error,
+        load: KernelLoadOutcome,
+        liveSessionReArm: Bool,
+        tighteningUnconfirmed: Bool,
+        faultHeld: inout Bool,
+        release: () -> Void = { KillSwitchManager.releaseInstalledBlock() },
+        installStricterBlock: () throws -> Void,
+        persist: () -> String? = { KillSwitchManager.persistProtectedFault() }
+    ) -> (error: Error, bumpsGeneration: Bool) {
+        let holdsBlock = liveSessionReArm || faultHeld
+        let outcome = settleFailedArm(
+            load: load,
+            liveSessionReArm: holdsBlock,
+            tighteningUnconfirmed: tighteningUnconfirmed,
+            release: release,
+            installStricterBlock: installStricterBlock
+        )
+        var unpersisted = ""
+        if latchesProtectedFault(outcome, liveSessionReArm: holdsBlock) {
+            faultHeld = true
+            if let failure = persist() {
+                unpersisted = " The fault could not be saved (\(failure)); it holds until this helper exits."
+            }
+        }
+        let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+        switch outcome {
+        case .faultStricterBlock:
+            return (HelperFailure.coded(
+                code: localNetworkFaultCode,
+                message: "Could not apply Allow local network devices off: \(detail). "
+                    + "Every connection is blocked until protection is applied again." + unpersisted
+            ), true)
+        case .faultStopCore:
+            return (HelperFailure.coded(
+                code: localNetworkFaultStopCoreCode,
+                message: "Could not apply Allow local network devices off, and the stricter "
+                    + "block could not be installed; the Core is stopped and protection stays armed."
+                    + unpersisted
+            ), true)
+        case .kept where holdsBlock:
+            // Coded so the app holds the session instead of taking its
+            // automatic release: the block and the intent are still in
+            // place, and only the user decides what happens next.
+            return (HelperFailure.coded(
+                code: liveReArmFailedCode,
+                message: "Protection could not be updated: \(detail). The installed block stays." + unpersisted
+            ), false)
+        case .released, .kept:
+            return (error, false)
+        }
+    }
 
     /// Which failed-arm outcomes leave the helper in the protected fault:
     /// the stricter block, the stopped Core, and a live-session re-arm that

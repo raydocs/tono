@@ -12,7 +12,7 @@
     preceded by `tono-bundle-local`, which drops root's traffic on the bundle's web ports to `10/8`, `172.16/12`,
     `192.168/16`, `100.64/10`, `169.254/16`, `224/4` and broadcast. Kept either way: `tono-mdns` (UDP 5353 to
     `224.0.0.251` / `ff02::fb` only), `tono-igmp`, `tono-continuity` (interface-scoped, decision 045), `tono-dhcp`
-    (broadcast), `tono-ndp`, and every block rule, including the #348 LAN DNS block. On renders exactly the 4.52.45 rules (main, including the decision 086 relay permits).
+    (broadcast), `tono-ndp`, and every block rule, including the #348 LAN DNS block. On renders exactly main's rules (including the decision 086 relay permits).
     No-tunnel states (disconnected, bootstrap, armed-not-connected, emergency, boot restore) are unchanged. Each change is
     one `pfctl -a tono.killswitch -f` load of the complete anchor (PF holds the old or the new ruleset, never a mix), and
     the on → off swap withdraws range passes, which always takes the machine-wide state flush, so no LAN flow survives it.
@@ -43,8 +43,9 @@
     Disconnect, which always releases normally (no permanent offline). Once held, only an arm that commits a tunnel
     (the user's reconnect, a toggle's re-arm) or a disarm ends the fault: a bootstrap restriction from an automatic
     preserve teardown does not, a kept live re-arm is latched and persisted like the stricter block, and a sleep or
-    wake barrier that fails after its load keeps the block instead of releasing it. The first arm of a new session
-    keeps today's failure policy.
+    wake barrier that fails after its load keeps the block instead of releasing it. While a fault is held, no failed
+    arm releases, whatever its tunnel (a bootstrap restriction, an arm after a power barrier saved a no-tunnel state,
+    a new tunnel's first arm). Without a fault, the first arm of a new session keeps today's failure policy.
   - Rejected: (a) a separate LAN DNS permit — #348 is a block, and the only remaining LAN DNS path was another VPN's
     utun, whose other private traffic off blocks anyway; (b) keeping `tono-multicast` / `tono-ssdp` when off; (c) new MLD,
     DHCPv6 or unicast DHCP renewal passes when off; (d) an indefinite heal/retry loop after a failed change (Mullvad's
@@ -60,4 +61,4 @@
   change Windows policy; macOS off is stricter than Windows.
 - Known limits: a reboot during the fault follows the existing boot policy (the leftover block is released at helper
   start); a daemon startup failure also releases as before. No real-hardware evidence yet.
-- Applied in: PR #1506, backlog A29, branch `amp/a29-lan-devices-toggle` (helper 4.52.46).
+- Applied in: PR #1506, backlog A29, branch `amp/a29-lan-devices-toggle` (helper 4.52.47).
