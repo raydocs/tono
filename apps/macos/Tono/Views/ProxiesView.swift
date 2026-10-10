@@ -6,6 +6,7 @@ struct ProxiesView: View {
     @Environment(AppState.self) var appState
     @Environment(AccountSession.self) var accountSession
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.seaAccent) var seaAccent
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @FocusState var isSearchFocused: Bool
     @State var showingAddNode = false

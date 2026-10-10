@@ -148,6 +148,115 @@ final class MacSeaPolishRenderTests: XCTestCase {
         XCTAssertEqual(scene.layer?.sublayers?.first?.speed, 1)
     }
 
+    func testSharedControlSurfacesAndAccessibilityVariants() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["TONO_HOSTED_WINDOW_DIAGNOSTIC"] == "1",
+                          "native controls require the hosted WindowServer")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for language in ["en", "zh-Hans"] {
+            for option in ["normal", "reduce-motion", "reduce-transparency", "increase-contrast"] {
+                let root = SeaControlFixture()
+                    .environment(\.locale, Locale(identifier: language))
+                    .environment(\.colorScheme, .dark)
+                    .environment(\.seaDisplayOverride, SeaDisplayOptions(reduceMotion: option == "reduce-motion",
+                        reduceTransparency: option == "reduce-transparency",
+                        contrast: option == "increase-contrast" ? .increased : .standard))
+                let (window, _) = try await makeNativeWindow(size: CGSize(width: 920, height: 600), root: root)
+                defer { close(window) }
+                await settle(0.2)
+                try await capture("polish-b-controls-\(language)-\(option)", window: window)
+            }
+        }
+    }
+
+    private struct SeaControlFixture: View {
+        @State private var logs = true
+        @State private var choice = "Auto"
+        @State private var menu = "Auto"
+        @State private var email = "fixture@example.test"
+        @State private var expanded = true
+
+        var body: some View {
+            ZStack {
+                SeaSecondaryScene()
+                SeaPanel("Appearance") {
+                    HStack(spacing: 12) {
+                        Button("Connect", action: {}).buttonStyle(SeaButtonStyle(variant: .primary))
+                        Button("Refresh", action: {}).buttonStyle(SeaButtonStyle(size: .row))
+                        Button("Details", action: {}).buttonStyle(SeaButtonStyle(variant: .text, size: .row))
+                        Button("Sign Out", action: {}).buttonStyle(SeaButtonStyle(variant: .danger, size: .row))
+                        Button("Copy", action: {}).buttonStyle(SeaButtonStyle(size: .row)).disabled(true)
+                    }
+                    HStack {
+                        Text("Show Logs page").font(.system(size: 15))
+                        Spacer()
+                        Toggle("Show Logs page", isOn: $logs).toggleStyle(SeaToggleStyle()).labelsHidden()
+                    }.frame(minHeight: 52)
+                    Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+                    HStack {
+                        SeaChoice(label: "Sea motion", selection: $choice, options: SeaAppearance.motionOptions)
+                        Spacer()
+                        SeaChoice(label: "Theme", selection: $menu, options: ["Auto", "Full", "Lite", "Static", "Adaptive"])
+                    }
+                    TextField("Email", text: $email).textFieldStyle(SeaFieldStyle())
+                    HStack {
+                        SeaTag(title: "Selected")
+                        SeaTag(title: "Observed", kind: .good)
+                        SeaTag(title: "Needs attention", kind: .attention)
+                    }
+                    DisclosureGroup("Technical details", isExpanded: $expanded) {
+                        Text("Illustration only · not a live connection or a protection test.")
+                            .font(.system(size: 12)).foregroundStyle(SeaTheme.muted)
+                    }.disclosureGroupStyle(SeaDisclosureStyle())
+                }.padding(32)
+            }.foregroundStyle(SeaTheme.text)
+        }
+    }
+
+    func testNativeResizeCoverageBeforeAndAfterCachedTreeRebuild() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["TONO_HOSTED_WINDOW_DIAGNOSTIC"] == "1",
+                          "native resize evidence requires the hosted WindowServer")
+        try XCTSkipUnless(Locale.preferredLanguages.first?.hasPrefix("zh") != true,
+                          "shared resize evidence is in the English run")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let old = AppProfile.defaults.object(forKey: SeaAppearance.motionKey)
+        AppProfile.defaults.set("Full", forKey: SeaAppearance.motionKey)
+        defer {
+            if let old { AppProfile.defaults.set(old, forKey: SeaAppearance.motionKey) }
+            else { AppProfile.defaults.removeObject(forKey: SeaAppearance.motionKey) }
+        }
+        let fixture = try makeFixture()
+        defer { fixture.clean() }
+        set("connected", app: fixture.app)
+        let (window, host) = try await makeWindow(size: CGSize(width: 1000, height: 680),
+                                                app: fixture.app, account: fixture.account)
+        defer { close(window) }
+        let scene = try XCTUnwrap(findScene(host))
+        let tree = try XCTUnwrap(scene.layer?.sublayers?.first)
+        let grain = try XCTUnwrap(tree.sublayers?.first(where: { $0.name == "grain" }))
+        try await capture("polish-b-resize-original", window: window)
+        // Real AppKit window sizing with the native view's live-resize lifecycle;
+        // no synthetic image resize. The fixture, not an installed WindowGroup,
+        // owns these requested frames, as in every whole-window capture above.
+        scene.viewWillStartLiveResize()
+        (window as? MacSeaPolishWindow)?.requestedSize = CGSize(width: 1280, height: 720)
+        sizeNativeWindow(window, outerSize: CGSize(width: 1280, height: 720))
+        host.layoutSubtreeIfNeeded()
+        XCTAssertTrue(tree.sublayers?.contains(where: { $0 === grain }) == true)
+        try await capture("polish-b-resize-growing-cached", window: window)
+        scene.viewDidEndLiveResize()
+        host.layoutSubtreeIfNeeded()
+        try await capture("polish-b-resize-growing-rebuilt", window: window)
+        scene.viewWillStartLiveResize()
+        (window as? MacSeaPolishWindow)?.requestedSize = CGSize(width: 920, height: 600)
+        sizeNativeWindow(window, outerSize: CGSize(width: 920, height: 600))
+        host.layoutSubtreeIfNeeded()
+        try await capture("polish-b-resize-shrinking-cached", window: window)
+        scene.viewDidEndLiveResize()
+        host.layoutSubtreeIfNeeded()
+        try await capture("polish-b-resize-shrinking-rebuilt", window: window)
+        XCTAssertTrue(CATransform3DIsIdentity(tree.sublayerTransform))
+    }
+
     private struct FixtureState {
         let app: AppState
         let account: AccountSession
@@ -209,6 +318,10 @@ final class MacSeaPolishRenderTests: XCTestCase {
                 reduceTransparency: reduceTransparency, contrast: highContrast ? .increased : .standard))
             .environment(\.colorScheme, .dark)
             .environment(\.locale, Locale(identifier: Locale.preferredLanguages.first ?? "en"))
+        return try await makeNativeWindow(size: size, root: root)
+    }
+
+    private func makeNativeWindow<Root: View>(size: CGSize, root: Root) async throws -> (NSWindow, NSView) {
         let window = MacSeaPolishWindow(contentRect: CGRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.requestedSize = size

@@ -235,7 +235,7 @@ struct LoginView: View {
                                 Text("Retry")
                             }
                         }
-                        .buttonStyle(GateProminentButtonStyle())
+                        .modifier(SeaActionStyle(variant: .primary, legacy: .gatePrimary))
                         .disabled(locked)
                     }
                 }
@@ -283,7 +283,7 @@ struct LoginView: View {
                                             }
                                         }
                                     }
-                                    .buttonStyle(GateSecondaryButtonStyle())
+                                    .modifier(SeaActionStyle(variant: .quiet, legacy: .gateSecondary))
                                     .frame(width: 74)
                                     .disabled(locked)
                                 }
@@ -307,15 +307,16 @@ struct LoginView: View {
                 }
 
                 Button("Retry Tono connection") { Task { await session.retryRuntime() } }
-                    .buttonStyle(GateProminentButtonStyle())
+                    .modifier(SeaActionStyle(variant: .primary, legacy: .gatePrimary))
                 Button("Sign Out", role: .destructive) { Task { await session.logout() } }
+                    .modifier(SeaActionStyle(variant: .danger, legacy: .automatic))
             } else {
                 if let methods {
                     // Email is the primary task. Alternate providers remain
                     // debug-only and do not add a decision to the shipping flow.
                     if showsEmailForm {
                         VStack(spacing: 10) {
-                            gateField("Email", text: $email)
+                            gateField("Email", text: $email, focused: focusedField == .email)
                                 .focused($focusedField, equals: .email)
                                 .disabled(locked || session.emailChallenge != nil)
                             if !showsCodeStep {
@@ -330,6 +331,7 @@ struct LoginView: View {
                                     .contentShape(Rectangle())
                                 }
                                 .font(.caption)
+                                .modifier(SeaDisclosureTreatment())
                                 .disabled(locked)
                                 Label {
                                     Text("Your email is only used to sign in. Traffic logs are never uploaded unless you turn that on in Settings.")
@@ -341,7 +343,7 @@ struct LoginView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                             }
                             if showsCodeStep {
-                                gateField("Six-digit email code", text: $emailCode)
+                                gateField("Six-digit email code", text: $emailCode, focused: focusedField == .code)
                                     .focused($focusedField, equals: .code)
                                     .disabled(locked)
                                     .textContentType(.oneTimeCode)
@@ -353,7 +355,7 @@ struct LoginView: View {
                                 } label: {
                                     busyLabel("Verify email code")
                                 }
-                                .buttonStyle(GateProminentButtonStyle())
+                                .modifier(SeaActionStyle(variant: .primary, legacy: .gatePrimary))
                                 .disabled(locked || emailCode.count != 6)
                             }
                             sendCodeButton
@@ -386,7 +388,7 @@ struct LoginView: View {
                                     resendCountdown = 0
                                     focusedField = .email
                                 }
-                                .buttonStyle(.link)
+                                .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .link))
                                 .disabled(locked)
                             }
 
@@ -440,7 +442,7 @@ struct LoginView: View {
                                     }
                                     .frame(maxWidth: .infinity)
                                 }
-                                .buttonStyle(GateSecondaryButtonStyle())
+                                .modifier(SeaActionStyle(variant: .quiet, legacy: .gateSecondary))
                                 .disabled(locked)
                             }
                             #endif
@@ -464,6 +466,7 @@ struct LoginView: View {
                             .foregroundStyle(.secondary)
                     }
                     Button("Retry") { Task { await session.retryRestore() } }
+                        .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic))
                         .disabled(locked || error == nil)
                     if error != nil {
                         // A launch failure at the gate is exactly when runtime
@@ -474,7 +477,7 @@ struct LoginView: View {
                             let url = LocalTrafficAudit.shared.prepareForReveal()
                             NSWorkspace.shared.activateFileViewerSelecting([url])
                         }
-                        .buttonStyle(.link)
+                        .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .link))
                         .font(.caption)
                     }
                 }
@@ -484,7 +487,7 @@ struct LoginView: View {
             }
         }
         .padding(28)
-        .background(seaAppearance ? SeaTheme.panel
+        .background(seaAppearance ? SeaTheme.opaquePanel
                     : (colorScheme == .dark ? Color(hex: "1B1C36") : .white),
                     in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
@@ -572,7 +575,7 @@ struct LoginView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .buttonStyle(ProgressPillButtonStyle(phase: sendPillPhase))
+            .buttonStyle(ProgressPillButtonStyle(phase: sendPillPhase, seaPrimary: error == nil))
             .disabled(locked || sendPillPhase == .sent)
         }
     }
@@ -621,7 +624,14 @@ struct LoginView: View {
 
     /// A visible boundary even without vibrancy or a focused window.
     @ViewBuilder
-    private func gateField(_ title: LocalizedStringKey, text: Binding<String>) -> some View {
+    private func gateField(_ title: LocalizedStringKey, text: Binding<String>, focused: Bool? = nil) -> some View {
+        if seaAppearance {
+            if let focused {
+                TextField(title, text: text).textFieldStyle(.plain).modifier(SeaFieldSurface(focused: focused))
+            } else {
+                TextField(title, text: text).textFieldStyle(SeaFieldStyle())
+            }
+        } else {
         TextField(title, text: text)
             .textFieldStyle(.plain)
             .font(.system(size: 13))
@@ -640,6 +650,7 @@ struct LoginView: View {
                         lineWidth: 1
                     )
             }
+        }
     }
 
     @ViewBuilder
@@ -720,7 +731,7 @@ struct LoginErrorPreviewCard: View {
             Button {} label: {
                 Text("Retry")
             }
-            .buttonStyle(GateProminentButtonStyle())
+            .modifier(SeaActionStyle(variant: .primary, legacy: .gatePrimary))
         }
         .padding(28)
         .frame(width: 470)

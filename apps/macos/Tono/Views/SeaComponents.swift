@@ -13,10 +13,18 @@ enum SeaTheme {
     static let cool = Color(hex: "D5DAFF")
     static let warm = Color(hex: "FFD58E")
     static let ink = Color(hex: "1A0F0A")
-    static let panel = Color(hex: "211D1E")
-    static let panelTop = Color(hex: "272322")
-    static let panelBottom = Color(hex: "1E1B1B")
+    static let tertiary = text.opacity(0.56)
+    static let subtle = text.opacity(0.42)
+    static let opaquePanel = Color(hex: "17151C")
+    // Reduce Transparency fills: each control's translucent fill flattened onto
+    // the opaque panel, so controls stay visible instead of matching the panel.
+    static let opaqueQuiet = Color(hex: "2A282E")
+    static let opaqueTrack = Color(hex: "232127")
+    static let opaqueGood = Color(hex: "2A3231")
+    static let opaqueAttention = Color(hex: "41352D")
     static let danger = Color(hex: "FF9A8A")
+    static let good = Color(hex: "BFECC9")
+    static let attention = Color(hex: "FFD9A0")
     static let primaryGradient = LinearGradient(
         stops: [.init(color: Color(hex: "FFE9C4"), location: 0),
                 .init(color: Color(hex: "FFB877"), location: 0.6),
@@ -25,33 +33,29 @@ enum SeaTheme {
     )
 }
 
-/// Secondary pages use an opaque/static panel, not compositor-backed glass.
 struct SeaPanelSurface: ViewModifier {
     @SeaAppearancePreference private var enabled
-    @SeaDisplayPreferences private var displayPreferences
-    private var reduceTransparency: Bool { displayPreferences.reduceTransparency }
-    private var contrast: ColorSchemeContrast { displayPreferences.contrast }
+    @SeaDisplayPreferences private var display
 
-    @ViewBuilder
-    func body(content: Content) -> some View {
+    @ViewBuilder func body(content: Content) -> some View {
         if enabled {
             content
                 .background {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(LinearGradient(
-                            colors: reduceTransparency || contrast == .increased
-                                ? [Color(hex: "302A28"), Color(hex: "282323")]
-                                : [SeaTheme.panelTop, SeaTheme.panelBottom],
-                            startPoint: .top, endPoint: .bottom
-                        ))
+                        .fill(display.reduceTransparency || display.contrast == .increased
+                            ? AnyShapeStyle(SeaTheme.opaquePanel)
+                            : AnyShapeStyle(LinearGradient(colors: [.white.opacity(0.075), .white.opacity(0.04)],
+                                                         startPoint: .top, endPoint: .bottom)))
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(.white.opacity(contrast == .increased ? 0.45 : 0.12), lineWidth: 1)
+                        .strokeBorder(.white.opacity(display.contrast == .increased ? 0.45 : (display.reduceTransparency ? 0.14 : 0.06)), lineWidth: 1)
                 }
-        } else {
-            content
-        }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(LinearGradient(colors: [.white.opacity(0.12), .clear], startPoint: .top, endPoint: .bottom), lineWidth: 1)
+                }
+        } else { content }
     }
 }
 
@@ -69,14 +73,10 @@ struct SeaPanel<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             if let title {
-                HStack(spacing: 10) {
-                    if let icon {
-                        Image(systemName: icon).foregroundStyle(SeaTheme.cool).accessibilityHidden(true)
-                    }
-                    Text(LocalizedStringKey(title))
-                        .font(.system(size: 17, weight: .medium))
-                        .accessibilityAddTraits(.isHeader)
-                }
+                Text(LocalizedStringKey(title))
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(SeaTheme.muted)
+                    .accessibilityAddTraits(.isHeader)
             }
             content
         }
@@ -110,7 +110,7 @@ struct SeaPrimaryAction: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if enabled {
-            content.buttonStyle(GateProminentButtonStyle()).controlSize(.small)
+            content.buttonStyle(SeaButtonStyle(variant: .primary))
         } else {
             content.buttonStyle(.borderedProminent)
         }

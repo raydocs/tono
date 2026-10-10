@@ -196,7 +196,9 @@ private struct ActivityCard<Content: View>: View {
 struct ActivityView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.seaAccent) private var seaAccent
     @SeaAppearancePreference private var seaEnabled
+    @FocusState private var connectionSearchFocused: Bool
     @State private var selectedFilter: String = "All"
     @State private var section: Section = .apps
     @State private var connectionQuery = ""
@@ -287,7 +289,8 @@ struct ActivityView: View {
                 ActivityRoutingDetails(entries: appState.connections.filter {
                     ($0.processName ?? AppTrafficLedger.unattributed) == explainingApp
                 })
-                Button("Close") { explainingApp = nil }.padding(16)
+                Button("Close") { explainingApp = nil }
+                    .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic)).padding(16)
             }
         }
         .onChange(of: appState.trafficStats.downloadSpeed) { _, _ in
@@ -309,8 +312,7 @@ struct ActivityView: View {
                 Button("Close All", role: .destructive) {
                     Task { await appState.closeAllConnections() }
                 }
-                .buttonStyle(.bordered)
-                .tint(SeaTheme.danger)
+                .buttonStyle(SeaButtonStyle(variant: .danger))
             }
         }
     }
@@ -322,7 +324,7 @@ struct ActivityView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(appState.proxyService.activeNodeName.map(nodeCityTitle)
                          ?? String(localized: "No exit selected"))
-                        .font(.system(size: 17, weight: .medium))
+                        .font(.system(size: 17))
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     latencyRefreshButton
@@ -339,7 +341,7 @@ struct ActivityView: View {
                 if appState.connectionsFeedLive {
                     let count = appState.connections.count
                     Text("\(count) current connections")
-                        .font(.system(size: 15, weight: .medium))
+                        .font(.system(size: 15)).monospacedDigit()
                     if appState.connectionsDisplayLimited {
                         Text("Route counts show the newest \(ConnectionActivityPresentation.maxDisplayed) connections only.")
                             .font(.system(size: 10))
@@ -351,15 +353,15 @@ struct ActivityView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(SeaTheme.muted)
                 }
-                Divider()
+                Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
                 Text("Traffic by route · this session")
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .foregroundStyle(SeaTheme.muted)
                 RouteSplitBar(split: appState.appTrafficLedger.overall, height: 7)
                 Text(activityBytes(appState.appTrafficLedger.overall.total))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(.system(size: 15)).monospacedDigit()
                 Text("Session bytes include closed connections; they are not current traffic.")
-                    .font(.system(size: 10))
+                    .font(.system(size: 12))
                     .foregroundStyle(SeaTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -377,11 +379,11 @@ struct ActivityView: View {
 
     private func seaRate(_ title: LocalizedStringKey, value: Int64) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.system(size: 11)).foregroundStyle(SeaTheme.muted)
+            Text(title).font(.system(size: 12)).foregroundStyle(SeaTheme.muted)
             Text(appState.trafficFeedLive ? "\(activityBytes(value))/s" : "—")
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .font(.system(size: 15)).monospacedDigit()
             Text(appState.trafficFeedLive ? "Live" : "No live reading")
-                .font(.system(size: 10)).foregroundStyle(SeaTheme.muted)
+                .font(.system(size: 12)).foregroundStyle(SeaTheme.tertiary)
         }
     }
 
@@ -393,7 +395,7 @@ struct ActivityView: View {
                     HStack(spacing: 4) {
                         Circle().fill(seaColor(for: filter)).frame(width: 6, height: 6)
                         Text(LocalizedStringKey(filter))
-                        Text("\(count)").fontDesign(.monospaced)
+                        Text("\(count)").monospacedDigit()
                     }
                     .font(.system(size: 10))
                 }
@@ -549,7 +551,7 @@ struct ActivityView: View {
             Circle().fill(tint).frame(width: 6, height: 6)
             Text(label).font(.system(size: 10)).foregroundStyle(.secondary)
             Text(activityBytes(bytes))
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.system(size: 10, weight: .medium)).monospacedDigit()
                 .foregroundStyle(.tertiary)
         }
     }
@@ -588,6 +590,12 @@ struct ActivityView: View {
 
     private var sectionPicker: some View {
         HStack(spacing: 6) {
+            if seaEnabled {
+                SeaChoice(label: "Activity", selection: Binding(
+                    get: { section.rawValue },
+                    set: { section = Section(rawValue: $0) ?? .apps }),
+                    options: Section.allCases.map(\.rawValue))
+            } else {
             ForEach(Section.allCases, id: \.self) { candidate in
                 Button {
                     withAnimation(.easeInOut(duration: 0.18)) { section = candidate }
@@ -595,13 +603,13 @@ struct ActivityView: View {
                     Text(LocalizedStringKey(candidate.rawValue))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(seaEnabled
-                            ? (section == candidate ? SeaTheme.ink : SeaTheme.muted)
+                            ? (section == candidate ? seaAccent : SeaTheme.muted)
                             : (section == candidate ? Color.white : Color.secondary))
                         .padding(.horizontal, 14)
                         .padding(.vertical, 6)
                         .background(
                             section == candidate
-                                ? AnyShapeStyle(seaEnabled ? SeaTheme.warm : TonoBrand.accent)
+                                ? AnyShapeStyle(seaEnabled ? .white.opacity(0.12) : TonoBrand.accent)
                                 : AnyShapeStyle(.white.opacity(colorScheme == .dark ? 0.08 : 0.4)),
                             in: Capsule()
                         )
@@ -609,11 +617,12 @@ struct ActivityView: View {
                 }
                 .buttonStyle(.plain)
             }
+            }
 
             if section == .connections {
                 Divider().frame(height: 16).padding(.horizontal, 4)
                 filterPills
-                HStack(spacing: 6) {
+                let searchField = HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
@@ -621,16 +630,21 @@ struct ActivityView: View {
                         "Filter by app, domain, or destination",
                         text: $connectionQuery
                     )
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
+                    .textFieldStyle(.plain).focused($connectionSearchFocused)
+                    .font(.system(size: seaEnabled ? 15 : 12))
                     .frame(width: 200)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 5)
-                .background(
-                    .white.opacity(colorScheme == .dark ? 0.08 : 0.4),
-                    in: Capsule()
-                )
+                if seaEnabled {
+                    searchField.modifier(SeaFieldSurface(focused: connectionSearchFocused))
+                } else {
+                    searchField
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(
+                            .white.opacity(colorScheme == .dark ? 0.08 : 0.4),
+                            in: Capsule()
+                        )
+                }
             }
 
             Spacer(minLength: 0)
@@ -650,8 +664,7 @@ struct ActivityView: View {
                             } label: {
                                 HStack {
                                     AppTrafficRow(app: app, peak: appState.appTrafficLedger.apps.first?.total ?? 1)
-                                    Image(systemName: expandedApp == app.id ? "chevron.up" : "chevron.down")
-                                        .font(.system(size: 11, weight: .semibold))
+                                    SeaChevron(expanded: expandedApp == app.id)
                                         .foregroundStyle(SeaTheme.muted)
                                 }
                             }
@@ -707,14 +720,14 @@ struct ActivityView: View {
                         Text(LocalizedStringKey(entry.type.rawValue))
                             .foregroundStyle(SeaRouteTint.color(for: entry.type))
                         Button("Why this route?") { explainingApp = app.id }
-                            .buttonStyle(.link)
+                            .buttonStyle(SeaButtonStyle(variant: .text, size: .row))
                     }
                     .font(.system(size: 11))
                     .foregroundStyle(SeaTheme.text)
                 }
             }
             Button("Full route explanation") { explainingApp = app.id }
-                .buttonStyle(.link)
+                .buttonStyle(SeaButtonStyle(variant: .text, size: .row))
                 .font(.system(size: 11))
         }
         .padding(.horizontal, 12)
@@ -790,7 +803,7 @@ struct ActivityView: View {
 
     private var timelineLine: some View {
         LinearGradient(
-            colors: [TonoBrand.accent, .secondary.opacity(0.3)],
+            colors: [seaEnabled ? seaAccent : TonoBrand.accent, .secondary.opacity(0.3)],
             startPoint: .top,
             endPoint: .bottom
         )
@@ -831,7 +844,15 @@ struct ActivityView: View {
         }
     }
 
-    private var filterPills: some View {
+    @ViewBuilder private var filterPills: some View {
+        if seaEnabled {
+            SeaTabs(label: "Route", selection: $selectedFilter, options: filters)
+        } else {
+            legacyFilterPills
+        }
+    }
+
+    private var legacyFilterPills: some View {
         HStack(spacing: 6) {
             ForEach(filters, id: \.self) { filter in
                 Button {
@@ -840,7 +861,7 @@ struct ActivityView: View {
                     Text(LocalizedStringKey(filter))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(seaEnabled
-                            ? (selectedFilter == filter ? SeaTheme.text : SeaTheme.muted)
+                            ? (selectedFilter == filter ? seaAccent : SeaTheme.muted)
                             : (selectedFilter == filter ? Color.primary : Color.secondary))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 5)
@@ -885,7 +906,8 @@ private struct AppTrafficRow: View {
                         .lineLimit(1)
                     if app.liveConnections > 0, (!seaEnabled || appState.connectionsFeedLive) {
                         Text("\(app.liveConnections)")
-                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 9, weight: .semibold,
+                                          design: seaEnabled ? .default : .monospaced)).monospacedDigit()
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
@@ -893,7 +915,8 @@ private struct AppTrafficRow: View {
                     }
                     Spacer(minLength: 6)
                     Text(activityBytes(app.total))
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 12, weight: .semibold,
+                                      design: seaEnabled ? .default : .monospaced)).monospacedDigit()
                         .foregroundStyle(seaEnabled ? SeaTheme.text : Color.primary)
                 }
 
@@ -923,10 +946,10 @@ private struct AppTrafficRow: View {
                             .foregroundStyle(SeaTheme.muted)
                     }
                     Label(activityBytes(app.upload), systemImage: "arrow.up")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 10, design: seaEnabled ? .default : .monospaced)).monospacedDigit()
                         .foregroundStyle(.secondary)
                     Label(activityBytes(app.download), systemImage: "arrow.down")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 10, design: seaEnabled ? .default : .monospaced)).monospacedDigit()
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                 }
@@ -974,7 +997,8 @@ private struct LogEntryRow: View {
                 .font(.system(size: 8, weight: .bold))
                 .foregroundStyle(tint)
             Text(value.isEmpty ? "0 B" : value)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(.system(size: 11, weight: .medium,
+                              design: seaEnabled ? .default : .monospaced)).monospacedDigit()
                 .foregroundStyle(.primary)
         }
     }
@@ -1008,18 +1032,18 @@ private struct LogEntryRow: View {
                     HStack(spacing: 6) {
                         if let processName = entry.processName {
                             Text(processName)
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(.system(size: seaEnabled ? 15 : 13, weight: seaEnabled ? .regular : .semibold))
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
                                 .layoutPriority(1)
                             Text(entry.domain)
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(.system(size: 12, design: seaEnabled ? .default : .monospaced))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         } else {
                             Text(entry.domain)
-                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                .font(.system(size: seaEnabled ? 15 : 13, weight: seaEnabled ? .regular : .semibold, design: seaEnabled ? .default : .monospaced))
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
@@ -1027,9 +1051,9 @@ private struct LogEntryRow: View {
                     }
 
                     Button("Why this route?") { explainsRoute = true }
-                        .buttonStyle(.plain)
                         .font(.system(size: 10))
                         .foregroundStyle(TonoBrand.accent)
+                        .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .plain))
                         .popover(isPresented: $explainsRoute) {
                             ActivityRoutingDetails(entries: [entry])
                         }
@@ -1041,9 +1065,10 @@ private struct LogEntryRow: View {
                         .filter { !$0.isEmpty }
                         .joined(separator: " • ")
                     )
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: seaEnabled ? 12 : 10, weight: seaEnabled ? .regular : .medium))
+                        .monospacedDigit()
                         .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
+                        .textCase(seaEnabled ? nil : .uppercase)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

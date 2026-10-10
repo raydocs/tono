@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Environment(AccountSession.self) private var accountSession
     @EnvironmentObject private var updater: AppUpdater
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.seaAccent) private var seaAccent
     @SeaAppearancePreference private var seaEnabled
 
     @State private var launchAtStartup =
@@ -92,6 +93,7 @@ struct SettingsView: View {
         .padding(.vertical, 16)
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .modifier(SeaDisclosureTreatment())
     }
 
     // MARK: - Preferences
@@ -119,8 +121,8 @@ struct SettingsView: View {
 
             if let launchAtStartupMessage {
                 Text(launchAtStartupMessage)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.orange)
+                    .font(.system(size: seaEnabled ? 12 : 11))
+                    .foregroundStyle(seaEnabled ? SeaTheme.attention : Color.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -154,15 +156,9 @@ struct SettingsView: View {
 
             SettingRow(label: "Sea motion", subtitle: seaEnabled ? "Choose how much of the sea scene moves on this Mac." : nil) {
                 if seaEnabled {
-                    Picker("Sea motion", selection: Binding(
+                    SeaChoice(label: "Sea motion", selection: Binding(
                         get: { SeaAppearance.displayMotionMode(seaMotionMode) },
-                        set: { seaMotionMode = $0 })) {
-                        ForEach(SeaAppearance.motionOptions, id: \.self) { option in
-                            Text(LocalizedStringKey(option)).tag(option)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
+                        set: { seaMotionMode = $0 }), options: SeaAppearance.motionOptions)
                     .frame(maxWidth: 330)
                 } else {
                     settingsPicker(selection: $seaMotionMode, options: SeaAppearance.motionOptions)
@@ -181,7 +177,7 @@ struct SettingsView: View {
                 settingDivider
                 SettingRow(label: "Cloud protection", subtitle: "See current and uncertain protection details in Support; this is not release attestation.") {
                     Button("Open Support") { appState.selectedPage = .support }
-                        .buttonStyle(.borderless)
+                        .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .borderless))
                 }
                 settingDivider
                 SettingRow(label: "Audit Log") {
@@ -189,7 +185,7 @@ struct SettingsView: View {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(LocalTrafficAudit.shared.logFileURL.path, forType: .string)
                     }
-                    .buttonStyle(.borderless)
+                    .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .borderless))
                 }
             }
         } else {
@@ -228,10 +224,10 @@ struct SettingsView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Tono")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: seaEnabled ? 15 : 14, weight: seaEnabled ? .regular : .semibold))
                     Text(versionLabel)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: seaEnabled ? 12 : 11)).monospacedDigit()
+                        .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
                 }
             }
 
@@ -239,14 +235,14 @@ struct SettingsView: View {
 
             HStack {
                 Text("Updates")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: seaEnabled ? 15 : 13, weight: seaEnabled ? .regular : .medium))
                 Spacer()
                 Button("Check for Updates") {
                     updater.checkForUpdates()
                 }
-                .buttonStyle(.plain)
+                .modifier(SeaActionStyle(variant: .text, size: .row))
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
+                .foregroundStyle(seaEnabled ? seaAccent : TonoBrand.accent)
                 .disabled(!updater.canCheckForUpdates)
             }
         }
@@ -267,7 +263,8 @@ struct SettingsView: View {
     private var privacyCard: some View {
         SettingsCard(icon: "hand.raised", title: "Privacy") {
             Text("Help fix problems")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13, weight: seaEnabled ? .regular : .semibold))
+                .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.primary)
 
             if AccountSession.isInternalBuild() {
                 SettingToggleRow(
@@ -372,9 +369,9 @@ struct SettingsView: View {
                     let url = LocalTrafficAudit.shared.prepareForReveal()
                     NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
-                .buttonStyle(.plain)
+                .modifier(SeaActionStyle(variant: .text, size: .row))
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
+                .foregroundStyle(seaEnabled ? seaAccent : TonoBrand.accent)
             }
 
             settingDivider
@@ -409,10 +406,10 @@ struct SettingsView: View {
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Research programs")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: seaEnabled ? 15 : 13, weight: seaEnabled ? .regular : .medium))
                     Text("Off by default. These only help Tono improve routing.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: seaEnabled ? 12 : 11))
+                        .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -489,12 +486,17 @@ struct SettingsView: View {
     }
 
     private var settingDivider: some View {
-        Divider()
-            .opacity(0.3)
-            .padding(.vertical, 2)
+        Group {
+            if seaEnabled { Rectangle().fill(.white.opacity(0.06)).frame(height: 1) }
+            else { Divider().opacity(0.3).padding(.vertical, 2) }
+        }
     }
 
+    @ViewBuilder
     private func settingsPicker(selection: Binding<String>, options: [String]) -> some View {
+        if seaEnabled {
+            SeaChoice(label: "Language", selection: selection, options: options)
+        } else {
         Menu {
             ForEach(options, id: \.self) { option in
                 Button {
@@ -523,6 +525,7 @@ struct SettingsView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        }
     }
 }
 
@@ -566,6 +569,7 @@ private struct SettingsCard<Content: View>: View {
 }
 
 private struct SettingRow<Trailing: View>: View {
+    @SeaAppearancePreference private var seaEnabled
     let label: String
     var subtitle: String?
     @ViewBuilder let trailing: Trailing
@@ -574,11 +578,12 @@ private struct SettingRow<Trailing: View>: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(LocalizedStringKey(label))
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: seaEnabled ? 15 : 13, weight: seaEnabled ? .regular : .medium))
+                    .foregroundStyle(seaEnabled ? SeaTheme.text : Color.primary)
                 if let subtitle {
                     Text(LocalizedStringKey(subtitle))
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: seaEnabled ? 12 : 11))
+                        .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -586,6 +591,7 @@ private struct SettingRow<Trailing: View>: View {
             trailing
         }
         .padding(.vertical, 2)
+        .frame(minHeight: seaEnabled ? 52 : nil)
     }
 }
 
@@ -600,16 +606,20 @@ private struct SettingToggleRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             SettingRow(label: label, subtitle: seaEnabled ? (seaSummary ?? subtitle) : subtitle) {
-                Toggle("", isOn: $isOn)
+                if seaEnabled {
+                    Toggle(LocalizedStringKey(label), isOn: $isOn)
+                        .toggleStyle(SeaToggleStyle())
+                        .labelsHidden()
+                } else {
+                    Toggle("", isOn: $isOn)
                     .toggleStyle(.switch)
-                    .tint(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
+                    .tint(TonoBrand.accent)
                     .labelsHidden()
+                }
             }
             if seaEnabled, let subtitle, seaSummary != nil {
                 Button("Learn more") { showingDetails = true }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(SeaTheme.cool)
+                    .modifier(SeaActionStyle(variant: .text, size: .row))
                     .popover(isPresented: $showingDetails) {
                         Text(LocalizedStringKey(subtitle))
                             .font(.system(size: 12))

@@ -68,6 +68,7 @@ struct GateProtectionSection: View {
                 Task { await session.restoreDirectInternet() }
             }
             .disabled(disabled)
+            .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .automatic))
         }
     }
 }

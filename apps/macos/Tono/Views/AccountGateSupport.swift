@@ -72,6 +72,7 @@ struct AccountBlockedView: View {
             .disabled(rechecking)
 
             Button("Sign Out", role: .destructive) { Task { await session.logout() } }
+                .modifier(SeaActionStyle(variant: .danger, legacy: .automatic))
 
             // Renewing a plan needs a browser, and this screen is reachable
             // with protection armed and no exit running.
@@ -104,11 +105,14 @@ struct AccountBlockedView: View {
 /// Picks filled or quiet per call site so the screen only ever shows one
 /// filled primary (e.g. while Retry owns it, the send-code button steps back).
 struct GateAdaptiveButtonStyle: ButtonStyle {
+    @SeaAppearancePreference private var seaAppearance
     var prominent: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         Group {
-            if prominent {
+            if seaAppearance {
+                SeaButtonStyle(variant: prominent ? .primary : .quiet).makeBody(configuration: configuration)
+            } else if prominent {
                 GateProminentButtonStyle().makeBody(configuration: configuration)
             } else {
                 GateSecondaryButtonStyle().makeBody(configuration: configuration)
@@ -328,6 +332,7 @@ enum LoginErrorCopy {
 }
 
 struct LoginErrorBlock: View {
+    @SeaAppearancePreference private var seaAppearance
     let message: String
     @Binding var isExpanded: Bool
     var reduceMotion: Bool
@@ -354,8 +359,11 @@ struct LoginErrorBlock: View {
             } label: {
                 HStack(spacing: 4) {
                     Text(isExpanded ? "Hide details" : "Show details")
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
+                    if seaAppearance { SeaChevron(expanded: isExpanded) }
+                    else {
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

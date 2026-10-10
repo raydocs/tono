@@ -5,6 +5,7 @@ struct SupportView: View {
     @Environment(AppState.self) private var appState
     @Environment(AccountSession.self) private var accountSession: AccountSession?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.seaAccent) private var seaAccent
     @SeaAppearancePreference private var seaEnabled
     @AppStorage(SettingsKey.remoteDiagnosticsEnabled)
     private var remoteDiagnosticsEnabled = false
@@ -76,8 +77,9 @@ struct SupportView: View {
                         }
                         VStack(alignment: .leading, spacing: 14) {
                             Text("Support tools")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundStyle(SeaTheme.text)
+                                .font(.system(size: 13))
+                                .foregroundStyle(SeaTheme.muted)
+                                .accessibilityAddTraits(.isHeader)
                             terminalEnvCard
                             webrtcCard
                         }
@@ -87,9 +89,10 @@ struct SupportView: View {
                             }
                             .padding(.top, 12)
                         } label: {
-                            Label("Technical details", systemImage: "chevron.right.circle")
-                                .font(.system(size: 16, weight: .medium))
+                            Text("Technical details")
+                                .font(.system(size: 13, weight: .regular))
                         }
+                        .modifier(SeaDisclosureTreatment())
                         .padding(20)
                         .modifier(SeaPanelSurface())
                     } else {
@@ -163,21 +166,21 @@ struct SupportView: View {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 11))
                     Text(String(localized: "Refresh"))
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: seaEnabled ? 15 : 12, weight: .medium))
                 }
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
+                .foregroundStyle(seaEnabled ? SeaTheme.text : Color.primary)
+                .padding(.horizontal, seaEnabled ? 0 : 12)
+                .padding(.vertical, seaEnabled ? 0 : 6)
+                .background(seaEnabled ? .clear : .white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
                 .overlay(
                     Capsule().strokeBorder(
-                        .white.opacity(colorScheme == .dark ? 0.12 : 0.5),
+                        .white.opacity(seaEnabled ? 0 : (colorScheme == .dark ? 0.12 : 0.5)),
                         lineWidth: 0.5
                     )
                 )
                 .contentShape(Capsule())
             }
-            .buttonStyle(.plain)
+            .modifier(SeaActionStyle(variant: .quiet, legacy: .plain))
             .fixedSize()
             .disabled(isProbing)
         }
@@ -260,9 +263,9 @@ struct SupportView: View {
                 }
             } label: {
                 Text(String(localized: "Open WebRTC check"))
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: seaEnabled ? 15 : 12, weight: .medium))
             }
-            .buttonStyle(.bordered)
+            .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .bordered))
             .controlSize(.small)
         }
     }
@@ -279,7 +282,7 @@ struct SupportView: View {
             icon: "terminal",
             title: String(localized: "Claude Code / Terminal Environment Diagnostics")
         ) {
-            HStack {
+            HStack(alignment: seaEnabled ? .firstTextBaseline : .center) {
                 Text(
                     terminalEnvReport == nil
                         ? String(localized: "Checking terminal proxy sources…")
@@ -289,21 +292,25 @@ struct SupportView: View {
                         ? String(localized: "Residual HTTP_PROXY environment variables detected. This often causes terminal tools (like Claude Code CLI) to fail with connection refused.")
                         : String(localized: "System environment variables are clean. Terminal traffic is transparently routed via Tono TUN virtual adapter. Claude Code, git, npm, and pip work out-of-the-box without manual proxy configuration.")
                 )
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .font(.system(size: seaEnabled ? 12 : 11))
+                .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
                 Spacer()
 
-                Text(
-                    terminalEnvReport == nil
-                        ? String(localized: "Checking…")
-                        : isIncomplete
-                        ? String(localized: "Scan Incomplete")
-                        : hasConflict
-                        ? String(localized: "Proxy Residue Detected")
-                        : String(localized: "Environment Ready")
-                )
+                let status = terminalEnvReport == nil
+                    ? String(localized: "Checking…")
+                    : isIncomplete
+                    ? String(localized: "Scan Incomplete")
+                    : hasConflict
+                    ? String(localized: "Proxy Residue Detected")
+                    : String(localized: "Environment Ready")
+                if seaEnabled {
+                    SeaTag(verbatim: status, kind: terminalEnvReport == nil ? .neutral
+                        : isIncomplete ? .attention : hasConflict ? .danger : .good)
+                        .fixedSize()
+                } else {
+                Text(status)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(statusColor)
                 .padding(.horizontal, 8)
@@ -312,6 +319,7 @@ struct SupportView: View {
                     statusColor.opacity(0.12),
                     in: RoundedRectangle(cornerRadius: 6)
                 )
+                }
             }
 
             if hasConflict {
@@ -319,7 +327,7 @@ struct SupportView: View {
                     ForEach(issues) { issue in
                         VStack(alignment: .leading, spacing: 3) {
                             Text("\(issue.key)=\(issue.value)")
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(.system(size: 11, design: seaEnabled ? .default : .monospaced))
                                 .foregroundStyle(.red)
                                 .textSelection(.enabled)
                             Text(issue.source)
@@ -354,7 +362,7 @@ struct SupportView: View {
                         .foregroundStyle(.orange)
                     ForEach(errors, id: \.self) { error in
                         Text(error)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 11, design: seaEnabled ? .default : .monospaced))
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
@@ -512,9 +520,9 @@ struct SupportView: View {
                             logUploadOutcome = outcome
                         }
                     }
-                    .buttonStyle(.plain)
+                    .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .plain))
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
+                    .foregroundStyle(seaEnabled ? seaAccent : TonoBrand.accent)
                     .disabled(isUploadingLog || logUploadBlockedReason != nil)
                 }
 
@@ -532,9 +540,9 @@ struct SupportView: View {
                             Button(String(localized: "Open Settings")) {
                                 appState.selectedPage = .settings
                             }
-                            .buttonStyle(.plain)
+                            .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .plain))
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
+                            .foregroundStyle(seaEnabled ? seaAccent : TonoBrand.accent)
                         }
                     }
                 } else if let outcome = logUploadOutcome {
@@ -601,7 +609,7 @@ struct SupportView: View {
 
             ScrollView {
                 Text(report)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, design: seaEnabled ? .default : .monospaced))
                     .foregroundStyle(.primary)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -642,9 +650,9 @@ struct SupportView: View {
                     Button(String(localized: "Open Settings")) {
                         appState.selectedPage = .settings
                     }
-                    .buttonStyle(.plain)
+                    .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .plain))
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
+                    .foregroundStyle(seaEnabled ? seaAccent : TonoBrand.accent)
                 }
             }
         }
@@ -660,7 +668,7 @@ struct SupportView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             Text(Self.recoveryCommand)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: seaEnabled ? .default : .monospaced))
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -693,16 +701,16 @@ struct SupportView: View {
                 .foregroundStyle(.primary)
 
             Text(path)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: seaEnabled ? .default : .monospaced))
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 14) {
                 Button(String(localized: "Show in Finder"), action: reveal)
-                    .buttonStyle(.plain)
+                    .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .plain))
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
+                    .foregroundStyle(seaEnabled ? seaAccent : TonoBrand.accent)
 
                 Button(
                     copiedTarget == copyTarget
@@ -711,9 +719,9 @@ struct SupportView: View {
                 ) {
                     copy(path, target: copyTarget)
                 }
-                .buttonStyle(.plain)
+                .modifier(SeaActionStyle(variant: .text, size: .row, legacy: .plain))
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
+                .foregroundStyle(seaEnabled ? seaAccent : TonoBrand.accent)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -731,21 +739,21 @@ struct SupportView: View {
                 Image(systemName: copiedTarget == target ? "checkmark" : "doc.on.doc")
                     .font(.system(size: 11))
                 Text(copiedTarget == target ? String(localized: "Copied") : title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: seaEnabled ? 15 : 12, weight: .medium))
             }
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
+            .foregroundStyle(seaEnabled ? SeaTheme.text : Color.primary)
+            .padding(.horizontal, seaEnabled ? 0 : 12)
+            .padding(.vertical, seaEnabled ? 0 : 6)
+            .background(seaEnabled ? .clear : .white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
             .overlay(
                 Capsule().strokeBorder(
-                    .white.opacity(colorScheme == .dark ? 0.12 : 0.5),
+                    .white.opacity(seaEnabled ? 0 : (colorScheme == .dark ? 0.12 : 0.5)),
                     lineWidth: 0.5
                 )
             )
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .plain))
         .fixedSize()
     }
 
@@ -992,11 +1000,27 @@ struct SupportCard<Content: View>: View {
 // MARK: - Summary Row
 
 private struct SupportRow: View {
+    @SeaAppearancePreference private var seaEnabled
     let label: String
     let value: String
     var monospaced = false
 
     var body: some View {
+        if seaEnabled {
+            // Key-value row: secondary key, regular value, tabular figures.
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                Text(label)
+                    .font(.system(size: 13))
+                    .foregroundStyle(SeaTheme.muted)
+                    .frame(width: 150, alignment: .leading)
+                Text(value)
+                    .font(.system(size: 13)).monospacedDigit()
+                    .foregroundStyle(SeaTheme.text)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
         HStack(alignment: .firstTextBaseline, spacing: 16) {
             Text(label)
                 .font(.system(size: 12))
@@ -1009,6 +1033,7 @@ private struct SupportRow: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        }
         }
     }
 }

@@ -89,6 +89,17 @@ struct ContentView: View {
             .toolbarBackground(.hidden, for: .windowToolbar)
             .environment(\.seaSceneInWindow, seaAppearance)
         }
+        .environment(\.seaAccent, seaAccent)
+        // The one accent also drives system-drawn details inside sea pages
+        // (text caret, progress, focus), instead of the macOS blue.
+        .tint(seaAppearance ? seaAccent : nil)
+    }
+
+    private var seaAccent: Color {
+        SeaPresentationPhase.resolve(
+            status: MenuBarProtectionStatus(appState).kind,
+            disconnecting: appState.isDisconnecting,
+            failed: appState.lastConnectionFailure != nil) == .day ? SeaTheme.warm : SeaTheme.cool
     }
 }
 
@@ -123,20 +134,20 @@ private struct ProtectedOfflineBanner: View {
                 Button("Retry now") {
                     appState.retryProtectedConnectionNow()
                 }
-                .buttonStyle(GateProminentButtonStyle())
+                .modifier(SeaActionStyle(variant: .primary, size: .row, legacy: .gatePrimary))
                 .controlSize(.small)
                 .disabled(!appState.isTonoReady || appState.isDisconnecting)
             }
             Button("Restore internet") {
                 appState.restoreInternet()
             }
-            .buttonStyle(.bordered)
+            .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .bordered))
             .controlSize(.small)
             if !progressCardOwnsRetryAndRoute {
                 Button("Choose another route") {
                     appState.selectedPage = .proxies
                 }
-                .buttonStyle(.bordered)
+                .modifier(SeaActionStyle(variant: .quiet, size: .row, legacy: .bordered))
                 .controlSize(.small)
             }
         }

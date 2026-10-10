@@ -34,6 +34,16 @@
     "Current connections and this session's traffic": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Current connections and this session's traffic"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "查看当前连接与本会话流量"}}}},
     "Routes now": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Routes now"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "当前路由"}}}},
     "%lld current connections": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "%lld current connections"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "%lld 条当前连接"}}}},
+    "Route": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "路线"
+          }
+        }
+      }
+    },
     "Route counts show the newest %lld connections only.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Route counts show the newest %lld connections only."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "路由数量仅包含最新的 %lld 条连接。"}}}},
     "Session bytes include closed connections; they are not current traffic.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Session bytes include closed connections; they are not current traffic."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "会话流量包含已关闭的连接，不代表当前流量。"}}}},
     "No live reading": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "No live reading"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "暂无实时读数"}}}},
@@ -3528,6 +3538,16 @@
         }
       }
     },
+    "Level": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "级别"
+          }
+        }
+      }
+    },
     "Light": {
       "extractionState": "manual",
       "localizations": {
@@ -3750,6 +3770,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "托管的 sing-box 路由仅能通过受保护的配置替换更改。"
+          }
+        }
+      }
+    },
+    "Message": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "消息"
           }
         }
       }
@@ -4762,6 +4792,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "云端保护"
+          }
+        }
+      }
+    },
+    "Recommended": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "推荐"
           }
         }
       }
@@ -6831,6 +6871,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "最近一分钟的吞吐量"
+          }
+        }
+      }
+    },
+    "Time": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "时间"
           }
         }
       }
