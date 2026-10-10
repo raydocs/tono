@@ -1,6 +1,6 @@
 ## 2026-10-10 · macOS 更新：用户在后台检查的提示上点了「安装并重启」后，下载失败要告诉用户
 - 归属：ops 任务（[运维计划](../ops/plan-2026-09-11.md)；中国大陆连通性审计，延续 [Amp backlog](../ops/amp-backlog-2026-10-10.md) A2 / #1516）；macOS App 更新入口。
-- 来源：origin/main `3d973f95` → 分支 `amp/cn5-updater-accepted-failure`；未合 main。
+- 来源：origin/main `3d973f95` → 分支 `amp/cn5-updater-accepted-failure`，[#1531](https://github.com/raydocs/tono/pull/1531)；未合 main。
 - 缺陷修复（MAC-UPDATE-ACCEPTED-FAILURE-SILENT）：后台检查（启动 30 s 后、之后每 6 h）弹出更新提示，用户选「安装并重启」，安装包在直连和中继上都下载失败时，
   `check(userInitiated: false)` 的 catch 只看 `userInitiated || nativeUpdatePending`，两者都为假，失败被吞掉，用户的点击没有任何回应 →
   新增 `AppUpdater.reportsFailure(userInitiated:offerAccepted:updatePending:)`：用户接受提示后的失败照常弹出「更新未完成」并写 errorMessage；用户没看到的后台检查仍静默。
