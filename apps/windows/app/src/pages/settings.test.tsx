@@ -278,4 +278,22 @@ it('general settings confirm saved choices across navigation and apply language 
   ).toBe('true')
   expect(screen.getByRole('status').textContent).toBe('已保存')
   expect(toggle().disabled).toBe(false)
+
+  // A successful write with a failed readback is still unconfirmed, not Saved.
+  mocks.preferenceWrite.mockImplementation(async (value) => {
+    actual = { ...actual, ...value }
+  })
+  mocks.preferenceRead.mockRejectedValueOnce(
+    new Error('Synthetic readback failed'),
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'English' }))
+  expect((await screen.findByRole('alert')).textContent).toContain(
+    '无法确认更改',
+  )
+  expect(i18n.language).toBe('zh')
+  expect(toggle().disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: '重新读取已保存的选择' }))
+  await waitFor(() => expect(i18n.language).toBe('en'))
+  expect(toggle().disabled).toBe(false)
+  expect(screen.queryByText('Saved')).toBeNull()
 })

@@ -348,9 +348,9 @@ export const GeneralCard = () => {
       {error || save?.phase === 'failed' ? (
         <div className="tono-setting-feedback" role="alert">
           {t(
-            error
-              ? 'tono.settings.general.readFailed'
-              : 'tono.settings.general.saveFailed',
+            save?.phase === 'failed'
+              ? 'tono.settings.general.saveFailed'
+              : 'tono.settings.general.readFailed',
           )}
           {failure && (
             <span className="tono-setting-error-detail">{failure.message}</span>
