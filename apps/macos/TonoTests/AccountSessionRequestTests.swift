@@ -372,6 +372,57 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(relayAttempts.count, 1, "the relay carries the request")
     }
 
+    /// Decision 091, Sol review M1: the tunnel goes away after the system
+    /// attempt's failure was classified but before the next step starts. The
+    /// pinned step is dropped there too, and the relay carries the request.
+    func testATunnelLostBetweenStepsSkipsTheNextDirectStep() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        HeldAccountProtocol.install(host) { request in
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer {
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            AppProfile.defaults.removeObject(forKey: TonoAPIClient.preferredPathKey(forHost: host))
+        }
+        // Read at the walk's start and in the system step's failure handling
+        // (tunnel still up), then the tunnel is gone.
+        let reads = PathCallCounter()
+        let pinnedAttempts = PathCallCounter()
+        let relayAttempts = PathCallCounter()
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                pinnedAttempts.record()
+                throw URLError(.timedOut)
+            },
+            relayPath: ControlPlanePath(label: "relay") { _, _ in
+                relayAttempts.record()
+                return ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-between","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
+            },
+            relayOnly: {
+                reads.record()
+                return reads.count > 2
+            }
+        )
+
+        let challengeId = try await api.startEmailSignIn(TonoEmailStartRequest(
+            email: "between-steps@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+        )).challengeId
+
+        XCTAssertEqual(challengeId, "c-between")
+        XCTAssertEqual(pinnedAttempts.count, 0, "the direct step after the flip does not run")
+        XCTAssertEqual(relayAttempts.count, 1)
+    }
+
     /// Decision 091, Sol review F1: a walk that starts on a remembered relay
     /// with the tunnel up, whose relay fails before anything was sent just as
     /// the tunnel goes away, ends with that relay's own error. The direct

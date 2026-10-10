@@ -1288,11 +1288,28 @@ actor TonoAPIClient {
         var attempts: [ControlPlaneUnreachable.Attempt] = []
         // Decision 080: the labels of the paths lost so far, each once.
         var lostPaths: [String] = []
+        // The failure that ended the step before this one, so a walk the
+        // tunnel's loss cuts short ends on it (decision 091).
+        var lastFailure: (any Error)?
         var index = 0
         while index < order.count {
-            let path = order[index]
             defer { index += 1 }
             if index > 0 { try Self.requireCurrent(requestIsCurrent) }
+            // Decision 091, also between steps: the tunnel may go away after
+            // the last failure was classified. Drop the direct steps still
+            // ahead; with none left, the walk ends on that failure.
+            if index > 0, !relayOnly, let relayPath, order[index].label != relayPath.label, self.relayOnly() {
+                order = Array(order[..<index]) + order[index...].filter { $0.label == relayPath.label }
+                if index >= order.count {
+                    guard let lastFailure else { throw APIError.transport("No control-plane path answered.") }
+                    if let clockFailure { throw Self.combined(clockFailure, failures: failures) }
+                    throw Self.combined(
+                        lastFailure, failures: failures, intercepted: sawRefusedCertificate,
+                        attempts: attempts, stoppedEarly: false
+                    )
+                }
+            }
+            let path = order[index]
             let startedAt = Date()
             var attempt = request
             attempt.setValue(path.label, forHTTPHeaderField: Self.pathHeader)
@@ -1325,6 +1342,7 @@ actor TonoAPIClient {
                 if index == 0, preferredFirst { preferredPathLabel = nil }
                 if CertificateClock.isDateFailure(error) { clockFailure = error }
                 if NetworkInterception.isTrustFailure(error) { sawRefusedCertificate = true }
+                lastFailure = error
                 failures.append("\(path.label)[\(Self.failureDetail(error))]")
                 attempts.append(.init(path: path.label, failure: ControlPlanePathTimeline.failureClass(error)))
                 // Decision 091: the tunnel went away during this walk (drop,

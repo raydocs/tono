@@ -20,3 +20,5 @@
   丢掉最后一条失败与路径证据，POST 的第二轮（只走中继）因此不会发生。改为隧道消失时把剩余直连步骤从顺序里去掉，最后一条失败原样结束这轮，
   重试规则与文案都看到真实失败；新增 `testATunnelLostAfterAFailedRememberedRelayRetriesOnTheRelaysAlone`（记住的中继先失败、同时隧道消失，
   第二轮中继成功，直连 0 次）。文案：只有这轮确实试过中继时才说「中继没有应答」，并且不再断言保护放行哪些路径（旧 helper、提前停止的 POST）。
+- 续记（Sol 复审 ec4b56a9：F1/F2 已关闭，M1 minor）：隧道在一步失败已判定之后、下一步开始之前才消失时，下一步直连仍会跑一次。
+  每一步开始前也重新判断，丢掉剩余直连步骤；没有剩余时以上一步的真实失败结束。新增 `testATunnelLostBetweenStepsSkipsTheNextDirectStep`。
