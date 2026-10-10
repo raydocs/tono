@@ -18,6 +18,7 @@ pub mod customer_failure;
 pub mod direct_domains;
 pub mod heal;
 pub mod network_disposition;
+pub mod network_interference;
 pub mod node;
 pub mod other_vpn;
 pub mod policy;

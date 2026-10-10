@@ -341,6 +341,41 @@ final class AccountSessionRequestTests: XCTestCase {
         )
     }
 
+    /// H21-O-F8: a server certificate the trust store refused (a TLS-intercepting
+    /// middlebox or a portal answering for Tono's host) names the interception
+    /// and reaches the support report as its class token; a date failure stays
+    /// the clock's.
+    func testACertificateTheTrustStoreRefusedNamesTheInterceptingNetwork() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        HeldAccountProtocol.install(host) { request in
+            request.client?.urlProtocol(request, didFailWithError: URLError(.serverCertificateUntrusted))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory)
+        )
+        NetworkInterception.record(intercepted: false)
+
+        var thrown: (any Error)?
+        do {
+            _ = try await api.startEmailSignIn(TonoEmailStartRequest(
+                email: "intercepted@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+            ))
+        } catch {
+            thrown = error
+        }
+
+        XCTAssertEqual(thrown as? TonoAPIClient.APIError, .tlsIntercepted, "got: \(String(describing: thrown))")
+        XCTAssertEqual((thrown as? LocalizedError)?.errorDescription, NetworkInterception.userMessage)
+        XCTAssertTrue(NetworkInterception.wasObserved)
+        XCTAssertFalse(NetworkInterception.isTrustFailure(URLError(.serverCertificateHasBadDate)))
+        NetworkInterception.record(intercepted: false)
+    }
+
     func testLateAuthMethodsFailureDoesNotReplaceAuthenticatedState() async throws {
         let (account, transport, host, requests) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }

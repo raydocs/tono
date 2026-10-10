@@ -168,6 +168,19 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(JSON.parse(stored.report_json).virtualAdapters).toEqual(['otherVpn', 'wsl']);
   });
 
+  it('accepts the captivePortal and tlsIntercepted classes from a client that met them (H21-O-F8)', async () => {
+    const account = await createAccount('diagnostics-network-interference');
+    const response = await api('diagnostics/reports', json(
+      diagnosticsPayload({ virtualAdapters: ['captivePortal', 'tlsIntercepted'] }),
+      account.accessToken,
+    ));
+    expect(response.status).toBe(201);
+    const stored = await env.DB.prepare(
+      'SELECT report_json FROM diagnostics_reports WHERE reference_code = ?',
+    ).bind((await response.json() as any).referenceCode).first<any>();
+    expect(JSON.parse(stored.report_json).virtualAdapters).toEqual(['captivePortal', 'tlsIntercepted']);
+  });
+
   it('rejects an oversized diagnostics upload instead of truncating it', async () => {
     const account = await createAccount('diagnostics-oversized');
     const overBodyCap = await api('diagnostics/reports', json(

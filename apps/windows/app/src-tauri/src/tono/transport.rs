@@ -150,7 +150,14 @@ fn kind_label(kind: TransportKind) -> &'static str {
 /// the label says which phase it failed in.
 fn describe(err: &reqwest::Error) -> String {
     use std::error::Error as _;
-    let mut text = format!("{}: {err}", kind_label(classify(err)));
+    let kind = kind_label(classify(err));
+    // H21-O-F8: a refused certificate is named by its class only. rustls renders the names a
+    // mismatched certificate presents (a portal's own host), and those must not reach the
+    // error text that support reports and diagnostics carry.
+    if let Some(refused) = refused_certificate(err) {
+        return mark_tls_interception(err, format!("{kind}: {err} <- invalid peer certificate: {refused}"));
+    }
+    let mut text = format!("{kind}: {err}");
     let mut source = err.source();
     let mut depth = 0;
     while let Some(cause) = source {
@@ -169,7 +176,7 @@ fn describe(err: &reqwest::Error) -> String {
         source = cause.source();
         depth += 1;
     }
-    mark_clock_skew(err, text)
+    mark_tls_interception(err, mark_clock_skew(err, text))
 }
 
 /// Stable marker for a certificate the system clock cannot date (#588).
@@ -194,11 +201,60 @@ pub(crate) fn mark_clock_skew(err: &(dyn std::error::Error + 'static), text: Str
 
 /// Whether the chain holds rustls's expired / not-yet-valid certificate error, from webpki
 /// (`*Context`) or the Windows platform verifier (`CERT_E_EXPIRED` → `Expired`).
+fn is_certificate_time_error(err: &(dyn std::error::Error + 'static)) -> bool {
+    use rustls::CertificateError as Certificate;
+    chain_certificate_error(err, |certificate| {
+        matches!(
+            certificate,
+            Certificate::Expired
+                | Certificate::ExpiredContext { .. }
+                | Certificate::NotValidYet
+                | Certificate::NotValidYetContext { .. }
+        )
+        .then_some(())
+    })
+    .is_some()
+}
+
+/// H21-O-F8: `text`, marked with [`tono_core::network_interference::TLS_INTERCEPTED`] when
+/// `err` carries a certificate the trust store refused for its issuer, signature or name.
+///
+/// Read-only: validation already failed and stays failed; this only names the cause. Neither
+/// the certificate nor its names are added to the text.
+pub(crate) fn mark_tls_interception(err: &(dyn std::error::Error + 'static), text: String) -> String {
+    if is_certificate_trust_error(err) {
+        format!("{}: {text}", tono_core::network_interference::TLS_INTERCEPTED)
+    } else {
+        text
+    }
+}
+
+fn is_certificate_trust_error(err: &(dyn std::error::Error + 'static)) -> bool {
+    refused_certificate(err).is_some()
+}
+
+/// An unknown issuer (the platform verifier's `CERT_E_UNTRUSTEDROOT`), a bad signature, or a
+/// certificate for another name (`CERT_E_CN_NO_MATCH`): what a TLS-intercepting proxy, or a
+/// portal answering for Tono's host, presents. Dates, revocation and encoding do not count.
+/// A fixed label, never the certificate's names.
+fn refused_certificate(err: &(dyn std::error::Error + 'static)) -> Option<&'static str> {
+    use rustls::CertificateError as Certificate;
+    chain_certificate_error(err, |certificate| match certificate {
+        Certificate::UnknownIssuer => Some("unknown issuer"),
+        Certificate::BadSignature => Some("bad signature"),
+        Certificate::NotValidForName | Certificate::NotValidForNameContext { .. } => Some("not valid for this host"),
+        _ => None,
+    })
+}
+
+/// What `pick` makes of the first rustls certificate error in the chain.
 ///
 /// `io::Error::source` skips the error it wraps, and hyper-rustls wraps tokio-rustls's
 /// `io::Error` in another, so each `io::Error` is opened with `get_ref` as well.
-fn is_certificate_time_error(err: &(dyn std::error::Error + 'static)) -> bool {
-    use rustls::CertificateError as Certificate;
+fn chain_certificate_error<T>(
+    err: &(dyn std::error::Error + 'static),
+    pick: fn(&rustls::CertificateError) -> Option<T>,
+) -> Option<T> {
     let mut current = Some(err);
     let mut depth = 0;
     while let Some(cause) = current {
@@ -209,24 +265,18 @@ fn is_certificate_time_error(err: &(dyn std::error::Error + 'static)) -> bool {
         if let Some(rustls::Error::InvalidCertificate(certificate)) =
             cause.downcast_ref::<rustls::Error>()
         {
-            return matches!(
-                certificate,
-                Certificate::Expired
-                    | Certificate::ExpiredContext { .. }
-                    | Certificate::NotValidYet
-                    | Certificate::NotValidYetContext { .. }
-            );
+            return pick(certificate);
         }
         if let Some(io) = cause.downcast_ref::<std::io::Error>()
             && let Some(inner) = io.get_ref()
-            && is_certificate_time_error(inner)
+            && let Some(picked) = chain_certificate_error(inner, pick)
         {
-            return true;
+            return Some(picked);
         }
         current = cause.source();
         depth += 1;
     }
-    false
+    None
 }
 
 pub struct TonoTransport {
@@ -879,7 +929,22 @@ async fn query_one_doh(
 
 #[async_trait]
 impl HttpTransport for TonoTransport {
+    /// Every path below, then H21-O-F8's attribution of the outcome: a refused certificate
+    /// or an OS-reported captive portal is named in the error's support code and kept for the
+    /// diagnostics report. The OS verdict is read only after a transport failure and is not a
+    /// probe; the kind, and so the retry and offline-admission rules, are unchanged.
     async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
+        let result = self.send_over_paths(request).await;
+        let captive = tono_core::network_interference::wants_os_signal(&result)
+            && crate::tono::network_interference::os_reports_captive_portal().await;
+        let (result, observation) = tono_core::network_interference::attribute(result, captive);
+        crate::tono::network_interference::record(observation);
+        result
+    }
+}
+
+impl TonoTransport {
+    async fn send_over_paths(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
         crate::tono::integration_profile::delay_remote_operation().await;
 
         // A port that already worked goes first, ahead of the two 443 attempts.

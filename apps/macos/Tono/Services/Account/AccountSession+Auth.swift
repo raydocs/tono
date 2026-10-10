@@ -195,8 +195,8 @@ extension AccountSession {
         guard let apiError = error as? TonoAPIClient.APIError else { return false }
         switch apiError {
         // #588: a clock error is also a failure before any status line; the
-        // offline grant, not a refusal, decides.
-        case .transport, .clockSkew: return true
+        // offline grant, not a refusal, decides. H21-O-F8: so is interception.
+        case .transport, .clockSkew, .tlsIntercepted: return true
         default: return false
         }
     }

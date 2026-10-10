@@ -71,6 +71,7 @@ const AUTH_ERROR_CODES = new Set([
   'TONO_AUTH_INVALID_CODE',
   'TONO_SIGN_IN_NOT_SAVED',
   'TONO_CLOCK_SKEW',
+  'TONO_TLS_INTERCEPTED',
 ])
 
 // Copy-to-support gets only fixed labels and allowlisted tokens, never the
@@ -90,20 +91,20 @@ const authSupportSummary = (
     foundCode && AUTH_ERROR_CODES.has(foundCode) ? foundCode : '(none)'
   const lines = [`Auth stage: ${stage}`, `Error code: ${code}`]
   const transport = raw.match(
-    /^TONO_(?:AUTH_[A-Z0-9_]+|CLOCK_SKEW): could not reach Tono: ([\s\S]*)$/,
+    /^TONO_(?:AUTH_[A-Z0-9_]+|CLOCK_SKEW|TLS_INTERCEPTED): could not reach Tono: (?:TONO_CAPTIVE_PORTAL: )?([\s\S]*)$/,
   )?.[1]
   if (transport) {
     const pinned = transport.match(
-      /^pinned\[(?:TONO_CLOCK_SKEW: )?(dns|connect|tls|timeout|other): /,
+      /^pinned\[(?:TONO_(?:CLOCK_SKEW|TLS_INTERCEPTED): )?(dns|connect|tls|timeout|other): /,
     )?.[1]
     const resolved = transport.match(
-      /\]; system-dns\[(?:TONO_CLOCK_SKEW: )?(dns|connect|tls|timeout|other): /,
+      /\]; system-dns\[(?:TONO_(?:CLOCK_SKEW|TLS_INTERCEPTED): )?(dns|connect|tls|timeout|other): /,
     )?.[1]
     const relay = transport.match(
-      /\]; relay\[[^\]]*?: (?:TONO_CLOCK_SKEW: )?(dns|connect|tls|timeout|other): /,
+      /\]; relay\[[^\]]*?: (?:TONO_(?:CLOCK_SKEW|TLS_INTERCEPTED): )?(dns|connect|tls|timeout|other): /,
     )?.[1]
     const direct = transport.match(
-      /^(?:TONO_CLOCK_SKEW: )?(dns|connect|tls|timeout|other): /,
+      /^(?:TONO_(?:CLOCK_SKEW|TLS_INTERCEPTED): )?(dns|connect|tls|timeout|other): /,
     )?.[1]
     if (pinned) {
       lines.push(
