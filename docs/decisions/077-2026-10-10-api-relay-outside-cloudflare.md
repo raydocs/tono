@@ -40,3 +40,6 @@
   2026-10-10 (second relay Mesa 179.255.154.17:2053, `releases.afk.ccwu.cc` SNI, `X-Tono-Path`
   header recorded per device, relay probe cron): runbook [docs/ops/api-relay.md](../ops/api-relay.md);
   changelog [2026-10-10-api-relay-followups.md](../changelog.d/2026-10-10-api-relay-followups.md).
+  Windows client side: both relays walked in order, the updater retries an undelivered GET
+  through them, `X-Tono-Path` on every attempt; PR fix/win-api-relay-followups-20261010,
+  changelog [2026-10-10-win-api-relay-followups.md](../changelog.d/2026-10-10-win-api-relay-followups.md).

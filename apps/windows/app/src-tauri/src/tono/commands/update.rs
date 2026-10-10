@@ -1,16 +1,26 @@
 //! The App transports untrusted bytes. Only Service admits, consumes, adopts,
 //! and commits an update. No Tauri updater installation or App journal authority.
-use crate::{core::owner_identity::current_owner_credentials, tono::{connection, state::TonoState}, utils::dirs};
+use crate::{
+    core::owner_identity::current_owner_credentials,
+    tono::{
+        bootstrap, connection,
+        state::TonoState,
+        transport::{RELAY_CONNECT_TIMEOUT, classify},
+    },
+    utils::dirs,
+};
 use anyhow::{Context as _, Result, ensure};
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use std::{
+    net::SocketAddr,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
     },
     time::Duration,
 };
+use tono_core::auth::{HttpMethod, should_retry_transport};
 use tauri::{AppHandle, ipc::Channel};
 use tokio::{io::AsyncWriteExt as _, sync::Mutex};
 use tono_logging::{Type, logging};
@@ -54,20 +64,95 @@ pub async fn request(request: UpdateRequest) -> Result<UpdateStatus> {
     Ok(status)
 }
 
-fn client() -> Result<reqwest::Client> {
-    Ok(reqwest::Client::builder()
+fn builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
         .https_only(true)
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(600))
-        .build()?)
+}
+
+fn client() -> Result<reqwest::Client> {
+    Ok(builder().build()?)
+}
+
+/// Index + 1 of the relay that last carried an update GET, or 0. Process memory only.
+static PREFERRED_RELAY: AtomicUsize = AtomicUsize::new(0);
+
+/// One update GET: direct first, then through the Tono relays (decision 077).
+async fn get(client: &reqwest::Client, url: &str, timeout: Option<Duration>) -> Result<reqwest::Response> {
+    get_with_relays(client, url, timeout, &bootstrap::api_relays(), builder, &PREFERRED_RELAY).await
+}
+
+/// GET `url` through `direct`; when that failed before any response arrived, send the same GET
+/// once through each relay in order (the one that last answered first) until one answers.
+///
+/// The relay passes the TLS session through unterminated: the relayed client resolves the
+/// URL's own host to the relay socket and keeps every setting of `builder`, so SNI and the
+/// certificate check are those of the direct path. The URL carries the relay's port and the
+/// override carries the same one, as in the API transport. Only the transport is changed: what
+/// comes back is checked exactly as a direct answer is (signature by the Service, size here).
+/// An HTTP status is an answer and is never re-sent. The relays sit outside the WFP bootstrap
+/// permit, so while protection is armed this attempt fails like any other blocked address.
+async fn get_with_relays(
+    direct: &reqwest::Client,
+    url: &str,
+    timeout: Option<Duration>,
+    relays: &[SocketAddr],
+    builder: impl Fn() -> reqwest::ClientBuilder,
+    preferred: &AtomicUsize,
+) -> Result<reqwest::Response> {
+    let prepare = |client: &reqwest::Client, url: &str| {
+        let request = client.get(url);
+        match timeout {
+            Some(limit) => request.timeout(limit),
+            None => request,
+        }
+    };
+    let direct_error = match prepare(direct, url).send().await {
+        Ok(response) => return Ok(response),
+        Err(error) => error,
+    };
+    // The transport's rule for an undelivered GET (`should_retry_transport`).
+    if !should_retry_transport(HttpMethod::Get, classify(&direct_error)) || relays.is_empty() {
+        return Err(direct_error.into());
+    }
+    let parsed = reqwest::Url::parse(url)?;
+    let Some(host) = parsed.host_str() else {
+        return Err(direct_error.into());
+    };
+    let first = preferred
+        .load(Ordering::Relaxed)
+        .checked_sub(1)
+        .filter(|index| *index < relays.len());
+    let order = first
+        .into_iter()
+        .chain((0..relays.len()).filter(|index| Some(*index) != first));
+    let mut failures = Vec::new();
+    for index in order {
+        let relay = relays[index];
+        let mut relayed = parsed.clone();
+        if relayed.set_port(Some(relay.port())).is_err() {
+            continue;
+        }
+        let client = builder()
+            .connect_timeout(RELAY_CONNECT_TIMEOUT)
+            .resolve(host, relay)
+            .build()?;
+        match prepare(&client, relayed.as_str()).send().await {
+            Ok(response) => {
+                preferred.store(index + 1, Ordering::Relaxed);
+                return Ok(response);
+            }
+            Err(error) => failures.push(format!("relay {relay}: {error}")),
+        }
+    }
+    preferred.store(0, Ordering::Relaxed);
+    Err(anyhow::Error::new(direct_error).context(failures.join("; ")))
 }
 
 async fn bounded(client: &reqwest::Client, url: &str, limit: usize) -> Result<String> {
-    let mut response = client
-        .get(url)
-        .timeout(Duration::from_secs(30))
-        .send()
+    let mut response = get(client, url, Some(Duration::from_secs(30)))
         .await?
         .error_for_status()?;
     let mut bytes = Vec::new();
@@ -157,11 +242,13 @@ pub async fn tono_install_update(
             .write(true)
             .open(&path)
             .await?;
-        let mut response = client()?
-            .get(format!("{RELEASE_ROOT}/{manifest_sha256}/package.windows-x86_64.exe"))
-            .send()
-            .await?
-            .error_for_status()?;
+        let mut response = get(
+            &client()?,
+            &format!("{RELEASE_ROOT}/{manifest_sha256}/package.windows-x86_64.exe"),
+            None,
+        )
+        .await?
+        .error_for_status()?;
         progress.send(serde_json::json!({"event":"Started", "data":{"contentLength":target.artifact_size_bytes}}))?;
         let mut size = 0u64;
         while let Some(chunk) = response.chunk().await? {
@@ -519,5 +606,81 @@ mod update_quiesce_tests {
             Adoption::Undecided.after(None).after(Some(false)),
             Adoption::Held
         );
+    }
+}
+
+#[cfg(test)]
+mod update_relay_tests {
+    use super::*;
+    use std::{net::SocketAddr, sync::atomic::AtomicUsize};
+
+    /// Decision 077 follow-up: an update GET whose direct path delivered nothing is sent once
+    /// through the relays in order, keeps its hostname (so the certificate check is the same),
+    /// and the relay that answered is remembered.
+    #[tokio::test]
+    async fn an_undelivered_discovery_get_falls_back_to_a_relay() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let relay = listener.local_addr().expect("addr");
+        // The Host header of every request the relay received.
+        let (host_tx, host_rx) = std::sync::mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                use std::io::{BufRead as _, BufReader, Write as _};
+                let Ok(mut stream) = stream else { continue };
+                let mut reader = BufReader::new(match stream.try_clone() {
+                    Ok(clone) => clone,
+                    Err(_) => continue,
+                });
+                let mut line = String::new();
+                let mut host = String::new();
+                while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                    if line == "\r\n" || line == "\n" {
+                        break;
+                    }
+                    if let Some((name, value)) = line.split_once(':')
+                        && name.eq_ignore_ascii_case("host")
+                    {
+                        host = value.trim().to_owned();
+                    }
+                    line.clear();
+                }
+                let _ = host_tx.send(host);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nmanifest",
+                );
+                let _ = stream.flush();
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+            }
+        });
+
+        // The direct path drops packets (unroutable RFC1918), so its connect delivers nothing.
+        let direct = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_millis(700))
+            .resolve("releases.test", SocketAddr::from(([10, 255, 255, 1], 80)))
+            .build()
+            .expect("direct client");
+        // The first relay refuses, so the walk must go on to the second in order.
+        let refused = SocketAddr::from(([127, 0, 0, 1], 1));
+        let preferred = AtomicUsize::new(0);
+        let response = get_with_relays(
+            &direct,
+            "http://releases.test/desktop/v1/latest/manifest.json",
+            Some(Duration::from_secs(5)),
+            &[refused, relay],
+            || reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()),
+            &preferred,
+        )
+        .await
+        .expect("the relay must carry the GET");
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.text().await.expect("body"), "manifest");
+        let host = host_rx.recv_timeout(Duration::from_secs(1)).expect("the relay saw the GET");
+        assert!(
+            host == "releases.test" || host.starts_with("releases.test:"),
+            "the relayed GET must keep the release hostname, got {host:?}"
+        );
+        assert_eq!(preferred.load(Ordering::Relaxed), 2, "the relay that answered is remembered");
     }
 }

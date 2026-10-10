@@ -48,6 +48,41 @@ const PINNED_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// telemetry is sent. Nothing account- or network-specific.
 const CLIENT_HEADER: &str = concat!("windows/", env!("CARGO_PKG_VERSION"));
 
+/// The path carrying one attempt, sent as `X-Tono-Path` on that attempt.
+///
+/// The control plane records it on the device row, so ops can tell which path a device last
+/// used: a relayed request otherwise arrives from the relay node's address, which looks like a
+/// connected exit node. Set per attempt, so the same request re-sent on another path carries
+/// that path's value. Names a path, never an address or anything account-specific.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AttemptPath {
+    /// The compiled and learned Cloudflare pins on 443.
+    Pinned,
+    /// Whatever the system resolver returns, on 443.
+    SystemDns,
+    /// A Tono-owned relay (`bootstrap::API_RELAYS`).
+    Relay,
+    /// Addresses from DNS-over-HTTPS, on 443.
+    Doh,
+    /// The pins on an alternate Cloudflare HTTPS port.
+    AltPort,
+    /// The already-running loopback tunnel.
+    Tunnel,
+}
+
+impl AttemptPath {
+    const fn header_value(self) -> &'static str {
+        match self {
+            AttemptPath::Pinned => "pinned",
+            AttemptPath::SystemDns => "system_dns",
+            AttemptPath::Relay => "relay",
+            AttemptPath::Doh => "doh",
+            AttemptPath::AltPort => "alt_port",
+            AttemptPath::Tunnel => "tunnel",
+        }
+    }
+}
+
 /// Map a reqwest failure onto the retry-policy classification (§1).
 ///
 /// Ordering matters, and it is `is_connect()` first. reqwest sets *both*
@@ -72,7 +107,7 @@ const CLIENT_HEADER: &str = concat!("windows/", env!("CARGO_PKG_VERSION"));
 /// the request may well have arrived, and stays ambiguous.
 /// TLS-layer failures surface only in the debug chain
 /// (handshake/certificate/rustls).
-fn classify(err: &reqwest::Error) -> TransportKind {
+pub(crate) fn classify(err: &reqwest::Error) -> TransportKind {
     if err.is_connect() {
         return TransportKind::Connect;
     }
@@ -270,7 +305,7 @@ struct Relay {
 /// Connect budget of one relay attempt. The relay is on a different network path than
 /// Cloudflare, so it is either reachable within a few round trips or not at all; a long wait
 /// here would only delay the remaining fallbacks for a customer who is already waiting.
-const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
+pub(crate) const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// Holds `prefer_resolved` for one preferred attempt and clears it on drop unless the attempt
 /// was answered. A failure, and a cancellation by an outer deadline (launch restore), both
@@ -454,6 +489,7 @@ impl TonoTransport {
         &self,
         client: &reqwest::Client,
         request: &ApiRequest,
+        path: AttemptPath,
     ) -> Result<ApiResponse, ApiError> {
         let transport = |err: &reqwest::Error| ApiError::Transport {
             kind: classify(err),
@@ -461,7 +497,8 @@ impl TonoTransport {
         };
         let mut builder = client
             .request(method_of(request.method), &request.url)
-            .header("X-Tono-Client", CLIENT_HEADER);
+            .header("X-Tono-Client", CLIENT_HEADER)
+            .header("X-Tono-Path", path.header_value());
         if let Some(bearer) = &request.bearer {
             builder = builder.bearer_auth(bearer);
         }
@@ -579,7 +616,7 @@ impl TonoTransport {
             url,
             ..request.clone()
         };
-        match self.attempt(&client, &attempt).await {
+        match self.attempt(&client, &attempt, AttemptPath::AltPort).await {
             Ok(response) => {
                 self.alternate_port
                     .store(port, std::sync::atomic::Ordering::Relaxed);
@@ -663,7 +700,7 @@ impl TonoTransport {
             url,
             ..request.clone()
         };
-        match self.attempt(&relay.client, &attempt).await {
+        match self.attempt(&relay.client, &attempt, AttemptPath::Relay).await {
             Ok(response) => {
                 self.preferred_relay.store(index + 1, Ordering::Relaxed);
                 Ok(Ok(response))
@@ -723,7 +760,7 @@ impl TonoTransport {
             .resolve_to_addrs(bootstrap::API_HOST, &pinned)
             .build()
             .ok()?;
-        match self.attempt(&client, request).await {
+        match self.attempt(&client, request, AttemptPath::Doh).await {
             Ok(response) => Some(Ok(response)),
             Err(ApiError::Transport { kind, .. }) if should_retry_transport(request.method, kind) => {
                 None
@@ -756,7 +793,7 @@ impl TonoTransport {
     async fn attempt_tunnel_response(
         &self, client: &reqwest::Client, request: &ApiRequest,
     ) -> Option<Result<ApiResponse, ApiError>> {
-        match self.attempt(client, request).await {
+        match self.attempt(client, request, AttemptPath::Tunnel).await {
             Ok(response) => Some(Ok(response)),
             Err(ApiError::Transport { kind, .. }) if should_retry_transport(request.method, kind) => {
                 None
@@ -887,7 +924,7 @@ impl HttpTransport for TonoTransport {
         let mut resolved_failed = None;
         if self.prefer_resolved.load(std::sync::atomic::Ordering::Relaxed) {
             let mut lease = PreferenceLease { flag: &self.prefer_resolved, answered: false };
-            match self.attempt(&self.resolved_first, &request).await {
+            match self.attempt(&self.resolved_first, &request, AttemptPath::SystemDns).await {
                 Err(ApiError::Transport { kind, message })
                     if should_retry_transport(request.method, kind) =>
                 {
@@ -906,7 +943,7 @@ impl HttpTransport for TonoTransport {
             // Each attempt keeps its own pool/pin snapshot. Publishing fresh pins must not
             // wait for a slow response, nor cancel or replay an already delivered request.
             let client = self.client.read().await.clone();
-            self.attempt(&client, &request).await
+            self.attempt(&client, &request, AttemptPath::Pinned).await
         };
         let Err(ApiError::Transport { kind, message }) = pinned else {
             return pinned;
@@ -922,7 +959,7 @@ impl HttpTransport for TonoTransport {
         let fallback = match resolved_failed {
             // Already tried for this request, just before the pins.
             Some(failure) => Err(failure),
-            None => self.attempt(&self.resolved, &request).await,
+            None => self.attempt(&self.resolved, &request, AttemptPath::SystemDns).await,
         };
         match fallback {
             Ok(response) => {
@@ -1153,7 +1190,7 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             binary_body: None,
             headers: Vec::new(),
         };
-        let response = tokio::time::timeout(Duration::from_secs(5), transport.attempt(&client, &request))
+        let response = tokio::time::timeout(Duration::from_secs(5), transport.attempt(&client, &request, super::AttemptPath::Pinned))
             .await
             .expect("the fixture answers at once")
             .expect("a cut-off 401 is the server's answer, not a transport failure");
@@ -1369,6 +1406,8 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
     async fn dead_cloudflare_paths_fall_back_to_a_relay() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().expect("addr").port();
+        // The `X-Tono-Path` value of every request the relay received, `None` when absent.
+        let (paths_tx, paths_rx) = std::sync::mpsc::channel::<Option<String>>();
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 use std::io::{BufRead as _, BufReader, Write as _};
@@ -1378,12 +1417,19 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
                     Err(_) => continue,
                 });
                 let mut line = String::new();
+                let mut path = None;
                 while reader.read_line(&mut line).unwrap_or(0) > 0 {
                     if line == "\r\n" || line == "\n" {
                         break;
                     }
+                    if let Some((name, value)) = line.split_once(':')
+                        && name.eq_ignore_ascii_case("x-tono-path")
+                    {
+                        path = Some(value.trim().to_owned());
+                    }
                     line.clear();
                 }
+                let _ = paths_tx.send(path);
                 let _ = stream.write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nrelay",
                 );
@@ -1414,6 +1460,11 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             .expect("the relay must carry the request");
         assert_eq!(response.status, 200);
         assert_eq!(response.body, b"relay");
+        assert_eq!(
+            paths_rx.recv_timeout(Duration::from_secs(1)).expect("the relay saw the request"),
+            Some("relay".to_owned()),
+            "a relayed attempt must name its path, so the control plane does not take the relay for the device"
+        );
         assert_eq!(
             transport.preferred_relay.load(std::sync::atomic::Ordering::Relaxed),
             1,
