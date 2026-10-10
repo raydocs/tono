@@ -18,11 +18,18 @@
   does not extend it, so Reality is tried again after 24 h. An automatic hy2 attempt that fails goes back to
   Reality, forgets the node, needs 3 new failures, and is blocked for that node for 30 min, doubling per further
   failure up to 6 h. The memory also clears when the node's hy2 block leaves the catalog or the user picks either
-  block of that node. The selection itself stays the Reality block; a hand-picked ` · hy2` row is never counted or
-  changed.
-  Under an armed barrier the dial is not moved; the only case is an automatic hy2 session reconnecting in place,
-  which keeps the hy2 endpoint the barrier already permits (still needs the flag and the block). A hot switch away
-  from an automatic hy2 session is judged by the hy2 block, so it takes the existing rebuild path.
+  block of that node by hand (including re-picking the row already selected), so the next dial is the picked block.
+  The selection itself stays the Reality block; a hand-picked ` · hy2` row is never counted or changed.
+  The grant is checked again right before the tunnel starts: if it was withdrawn (or the block changed) while the
+  attempt waited, that attempt dials the selected Reality block instead, after its own pre-tunnel TCP proof.
+  Under an armed barrier the dial is not moved; the only case is an automatic hy2 session that reached Connected
+  reconnecting in place, and only while the flag is on, no backoff runs, and the catalog's hy2 block is exactly the
+  node the barrier already permits (same IPv4, port, protocol, pin). If the flag was revoked or the block changed,
+  the reconnect rebuilds the selected Reality block with the barrier kept (the existing VLESS/HY2 rebuild path):
+  the fail-closed choice, since keeping hy2 after revocation would be an automatic hy2 dial without a grant. A hot
+  switch away from an automatic hy2 session is judged by the exact node the runtime dials (recorded at admission,
+  before Connected is published), and its rollback and socket cleanup use that dial name; the base name is only the
+  UI selection.
   The sticky healer no longer hops onto a hy2 block by itself (it did after one failure, without any flag:
   [WIN-HEAL-UNGATED-HY2-HOP](../findings.d/WIN-HEAL-UNGATED-HY2-HOP.md)); a hand-picked hy2 row can still fall back
   to TCP as before.

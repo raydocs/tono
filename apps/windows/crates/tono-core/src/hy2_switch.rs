@@ -123,6 +123,10 @@ pub struct Hy2AutoSwitch {
     backoff: BTreeMap<String, Backoff>,
     /// Base name whose last Connected attempt dialed its hy2 block automatically.
     live_hy2: Option<String>,
+    /// Exact node the most recently admitted attempt dials. Set under the
+    /// admission lock, so it is already current when that attempt publishes
+    /// Connected. The runtime and the barrier's permit follow this node.
+    live_exit: Option<ValidatedNode>,
 }
 
 impl Hy2AutoSwitch {
@@ -276,24 +280,57 @@ impl Hy2AutoSwitch {
         let base = catalog_base_name(name);
         self.tcp_failures.remove(base);
         self.backoff.remove(base);
+        if self.live_hy2.as_deref() == Some(base) {
+            self.live_hy2 = None;
+        }
         self.remembered.remove(base).is_some()
     }
 
-    /// Under a live barrier the dial target is not moved, with one case: the
-    /// live session already dials `preferred`'s hy2 block automatically, so an
-    /// in-place reconnect keeps that same endpoint (the permit it already
-    /// holds). Still requires the flag and the block in the catalog.
-    pub fn live_dial(&self, preferred: &str, nodes: &[ValidatedNode]) -> Option<String> {
-        if !self.permitted() || self.live_hy2.as_deref() != Some(preferred) {
-            return None;
-        }
-        same_node_hy2(preferred, nodes).map(|node| node.name.clone())
+    /// An attempt was admitted to dial exactly `node`.
+    pub fn note_admitted(&mut self, node: &ValidatedNode) {
+        self.live_exit = Some(node.clone());
     }
 
-    /// The hy2 name the live session dialed for `preferred`, when it was an
-    /// automatic hop. A stale answer only makes a switch take the rebuild path.
-    pub fn live_hy2_for(&self, preferred: &str) -> Option<String> {
-        (self.live_hy2.as_deref() == Some(preferred)).then(|| hy2_name_of(preferred))
+    /// Exact node of the most recently admitted attempt.
+    pub fn live_exit(&self) -> Option<&ValidatedNode> {
+        self.live_exit.as_ref()
+    }
+
+    /// `node` is still a permitted automatic hop for `preferred`: the flag is
+    /// on and the catalog's hy2 block of that node is exactly `node`. Checked
+    /// again right before the tunnel starts.
+    pub fn auto_hop_permitted(
+        &self,
+        preferred: &str,
+        node: &ValidatedNode,
+        nodes: &[ValidatedNode],
+    ) -> bool {
+        self.permitted() && same_node_hy2(preferred, nodes) == Some(node)
+    }
+
+    /// Under a live barrier the dial target is not moved, with one case: the
+    /// live session already dials `preferred`'s hy2 block automatically and
+    /// reached Connected, so an in-place reconnect keeps that endpoint. Only
+    /// when the flag is still on, no backoff runs, and the catalog's hy2 block
+    /// is exactly the node the barrier already permits (same IPv4, port,
+    /// protocol, pin). Otherwise the selected Reality block is rebuilt with the
+    /// barrier kept, as for any VLESS/HY2 change.
+    pub fn live_dial(
+        &self,
+        preferred: &str,
+        nodes: &[ValidatedNode],
+        now_ms: u64,
+    ) -> Option<String> {
+        if !self.permitted()
+            || self.live_hy2.as_deref() != Some(preferred)
+            || self.backing_off(preferred, now_ms)
+        {
+            return None;
+        }
+        let live = self.live_exit.as_ref()?;
+        same_node_hy2(preferred, nodes)
+            .filter(|node| *node == live)
+            .map(|node| node.name.clone())
     }
 
     pub fn snapshot(&self) -> PersistedHy2Choices {
@@ -379,6 +416,17 @@ mod tests {
         assert!(on.note_connected(selected, next.as_deref().unwrap(), now));
         assert_eq!(on.dial(selected, &nodes, now + REMEMBER_MS - 1), next);
         assert_eq!(on.dial(selected, &nodes, now + REMEMBER_MS), None);
+        // An armed in-place reconnect keeps only the exact block the barrier permits.
+        on.note_admitted(&nodes[1]);
+        assert_eq!(on.live_dial(selected, &nodes, now), next);
+        let mut moved = nodes.clone();
+        moved[1].port = 8443;
+        assert_eq!(on.live_dial(selected, &moved, now), None);
+        // A hand pick of the Reality row forgets it: the next dial is Reality.
+        let mut picked = on.clone();
+        picked.forget_node(selected);
+        assert_eq!(picked.dial(selected, &nodes, now), None);
+        assert_eq!(picked.live_dial(selected, &nodes, now), None);
         // The flag turning off forgets it at once.
         on.on_catalog(false, &nodes);
         assert_eq!(on.dial(selected, &nodes, now), None);

@@ -44,14 +44,15 @@ pub fn prepare(inner: &mut TonoInner) {
 /// permits it, the same node's ` · hy2` block replaces it after
 /// [`tono_core::hy2_switch::TCP_FAILURES_BEFORE_HY2`] TCP failures or while a
 /// hy2 success is remembered. Under an armed barrier it never moves the dial;
-/// it only keeps an automatic hy2 session on the endpoint the barrier already
-/// permits, so an in-place reconnect does not change that permit.
+/// it only keeps an automatic hy2 session on the exact endpoint the barrier
+/// already permits. If the grant was withdrawn or that block changed, the
+/// selected Reality block is rebuilt with the barrier kept (fail-closed).
 pub fn dial_name(inner: &TonoInner) -> String {
     let selected = inner.selected_node.clone().unwrap_or_default();
     if inner.fsm.kill_switch_armed() {
         return inner
             .hy2_switch
-            .live_dial(&selected, &inner.nodes)
+            .live_dial(&selected, &inner.nodes, now_ms())
             .unwrap_or(selected);
     }
     let dial = if inner.nodes.iter().any(|node| node.name == inner.heal.dial) {
@@ -99,32 +100,76 @@ pub fn on_failure(inner: &mut TonoInner, error: &str) -> NetworkEffect {
 
 /// A17: settle one finished attempt. `preferred` is the selection captured
 /// when the attempt was admitted and `dialed` the node it actually dialed.
-/// A superseded attempt (`Stale`) or one from another sign-in counts nothing.
+/// `owner` is (sign-in generation, admitted connection generation). A
+/// superseded attempt (`Stale`, or a connection generation that moved) or one
+/// from another sign-in counts nothing.
 pub(super) async fn note_hy2_outcome(
     state: &Arc<TonoState>,
     preferred: Option<&str>,
     dialed: &str,
-    sign_in_generation: u64,
+    owner: (u64, u64),
     outcome: &super::Attempt,
 ) {
     let Some(preferred) = preferred else {
         return;
     };
     let mut inner = state.lock().await;
-    if inner.sign_in_generation != sign_in_generation {
+    let attempt_generation = match outcome {
+        super::Attempt::Connected => owner.1,
+        super::Attempt::Failed { generation, .. } => *generation,
+        super::Attempt::GuardRejected(_) | super::Attempt::Stale => return,
+    };
+    if inner.sign_in_generation != owner.0 || inner.connect_generation != attempt_generation {
         return;
     }
     let now = now_ms();
     let changed = match outcome {
-        super::Attempt::Connected => inner.hy2_switch.note_connected(preferred, dialed, now),
         super::Attempt::Failed { error, .. } => {
             inner.hy2_switch.note_failure(preferred, dialed, error, now)
         }
-        super::Attempt::GuardRejected(_) | super::Attempt::Stale => return,
+        _ => inner.hy2_switch.note_connected(preferred, dialed, now),
     };
     if changed {
         persist_hy2_choices(&inner);
     }
+}
+
+/// A17: right before the tunnel starts, re-check an automatic hy2 hop against
+/// the live grant and the current catalog. `Ok(None)`: not an automatic hop,
+/// or still permitted. `Ok(Some(reality))`: withdrawn; dial the selected
+/// Reality block instead (recorded as the admitted exit under the lock).
+/// `Err`: withdrawn and the Reality block is gone too.
+pub(super) async fn recheck_auto_hop(
+    state: &Arc<TonoState>,
+    preferred: Option<&str>,
+    node: &ValidatedNode,
+) -> Result<Option<ValidatedNode>, String> {
+    let Some(preferred) = preferred else {
+        return Ok(None);
+    };
+    if tono_core::is_hy2_catalog_name(preferred)
+        || tono_core::catalog_base_name(&node.name) != preferred
+        || !node.is_hysteria2()
+    {
+        return Ok(None);
+    }
+    let mut inner = state.lock().await;
+    if inner.hy2_switch.auto_hop_permitted(preferred, node, &inner.nodes) {
+        return Ok(None);
+    }
+    let reality = inner
+        .nodes
+        .iter()
+        .find(|candidate| candidate.name == preferred && !candidate.is_hysteria2())
+        .cloned()
+        .ok_or_else(|| "the selected server is not in the catalog".to_string())?;
+    inner.hy2_switch.note_admitted(&reality);
+    logging!(
+        info,
+        Type::Service,
+        "Tono: hy2 auto-switch withdrawn before the tunnel started; dialing the selected Reality block"
+    );
+    Ok(Some(reality))
 }
 
 /// A17: apply `hy2AutoSwitch` from a catalog 200 (installed or unchanged).
