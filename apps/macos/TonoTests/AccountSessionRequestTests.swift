@@ -256,7 +256,7 @@ final class AccountSessionRequestTests: XCTestCase {
                     bodyFailure: nil
                 )
             },
-            armedWithoutTunnel: { true }
+            relayOnly: { true }
         )
 
         let challengeId = try await api.startEmailSignIn(TonoEmailStartRequest(
@@ -268,6 +268,108 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(systemRequests.count, 0, "the system resolver path is not tried")
         XCTAssertEqual(pinnedAttempts.count, 0, "the pinned Cloudflare addresses are not tried")
         XCTAssertNil(AppProfile.defaults.object(forKey: key), "no path preference is written")
+    }
+
+    /// Decision 091: signed out and disconnected (first sign-in), no tunnel
+    /// carries the control plane, so the sign-in goes to the relays only,
+    /// read from the production state rather than an injected flag.
+    func testUnarmedFirstSignInGoesToTheRelayOnly() async throws {
+        let armed = KillSwitchService.isArmed
+        defer { KillSwitchService.isArmed = armed }
+        KillSwitchService.isArmed = false
+        XCTAssertFalse(KillSwitchService.tunnelCarriesControlPlane)
+
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        let systemRequests = PathCallCounter()
+        HeldAccountProtocol.install(host) { request in
+            systemRequests.record()
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer {
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            AppProfile.defaults.removeObject(forKey: TonoAPIClient.preferredPathKey(forHost: host))
+        }
+        let pinnedAttempts = PathCallCounter()
+        let relayAttempts = PathCallCounter()
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                pinnedAttempts.record()
+                throw URLError(.timedOut)
+            },
+            relayPath: ControlPlanePath(label: "relay") { _, _ in
+                relayAttempts.record()
+                return ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-091","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
+            },
+            relayOnly: { !KillSwitchService.tunnelCarriesControlPlane }
+        )
+
+        let challengeId = try await api.startEmailSignIn(TonoEmailStartRequest(
+            email: "first-sign-in@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+        )).challengeId
+
+        XCTAssertEqual(challengeId, "c-091")
+        XCTAssertEqual(relayAttempts.count, 1, "the relay carries the first sign-in")
+        XCTAssertEqual(systemRequests.count, 0, "no Cloudflare attempt through the system resolver")
+        XCTAssertEqual(pinnedAttempts.count, 0, "no Cloudflare attempt to the pinned addresses")
+    }
+
+    /// Decision 091: the tunnel goes away while a read is on its first path
+    /// (a drop, then teardown to bootstrap). The pinned step still ahead would
+    /// go out with no tunnel, so it is skipped and the relay answers.
+    func testATunnelLostDuringTheWalkSkipsTheDirectStepsStillAhead() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        let tunnelLost = PathCallCounter()
+        HeldAccountProtocol.install(host) { request in
+            tunnelLost.record()
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer {
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            AppProfile.defaults.removeObject(forKey: TonoAPIClient.preferredPathKey(forHost: host))
+        }
+        let pinnedAttempts = PathCallCounter()
+        let relayAttempts = PathCallCounter()
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                pinnedAttempts.record()
+                throw URLError(.timedOut)
+            },
+            relayPath: ControlPlanePath(label: "relay") { _, _ in
+                relayAttempts.record()
+                return ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-drop","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
+            },
+            // Connected when the walk starts; the system attempt sees the drop.
+            relayOnly: { tunnelLost.count > 0 }
+        )
+
+        let challengeId = try await api.startEmailSignIn(TonoEmailStartRequest(
+            email: "tunnel-drop@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+        )).challengeId
+
+        XCTAssertEqual(challengeId, "c-drop")
+        XCTAssertEqual(tunnelLost.count, 1, "the walk started on the tunnel's path")
+        XCTAssertEqual(pinnedAttempts.count, 0, "no direct step after the tunnel went away")
+        XCTAssertEqual(relayAttempts.count, 1, "the relay carries the request")
     }
 
     /// Decision 086, review M1: native update preparation arms without a
@@ -332,7 +434,7 @@ final class AccountSessionRequestTests: XCTestCase {
                     bodyFailure: nil
                 )
             },
-            armedWithoutTunnel: { KillSwitchService.isArmedWithoutTunnel }
+            relayOnly: { !KillSwitchService.tunnelCarriesControlPlane }
         )
         let challengeId = try await api.startEmailSignIn(TonoEmailStartRequest(
             email: "after-update@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
@@ -378,7 +480,7 @@ final class AccountSessionRequestTests: XCTestCase {
                     NSLocalizedDescriptionKey: "relay: 179.253.233.220:2053 refused; 179.255.154.17:2053 refused",
                 ])
             },
-            armedWithoutTunnel: { true }
+            relayOnly: { true }
         )
 
         var message: String?

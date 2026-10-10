@@ -165,11 +165,12 @@ actor TonoAPIClient {
     /// the system resolver and the pinned addresses both fail before any
     /// status line.
     private let relayPath: ControlPlanePath?
-    /// Decision 086: whether protection is armed without a tunnel, when the
-    /// relays are the only control-plane path PF admits. Production reads
-    /// `KillSwitchService.isArmedWithoutTunnel`; an injected session (tests)
-    /// reads false unless a reader is passed.
-    private let armedWithoutTunnel: @Sendable () -> Bool
+    /// Decision 091 (amends 086): whether the relays are the whole walk,
+    /// which is whenever no tunnel carries the control plane (unarmed, or
+    /// armed without a tunnel). Production reads
+    /// `!KillSwitchService.tunnelCarriesControlPlane`; an injected session
+    /// (tests) reads false unless a reader is passed.
+    private let relayOnly: @Sendable () -> Bool
     /// How long a read waits for a status line on a path that has a head
     /// budget (the system resolver) before the walk moves on
     /// (`ControlPlanePath.systemHeadBudget`).
@@ -265,7 +266,7 @@ actor TonoAPIClient {
         relayPath: ControlPlanePath? = nil,
         systemHandshake: (@Sendable () async -> Bool)? = nil,
         controlPlanePathTimeline: ControlPlanePathTimeline = ControlPlanePathTimeline(),
-        armedWithoutTunnel: (@Sendable () -> Bool)? = nil,
+        relayOnly: (@Sendable () -> Bool)? = nil,
         systemHeadBudget: TimeInterval = ControlPlanePath.systemHeadBudget
     ) {
         self.baseURL = baseURL
@@ -290,9 +291,9 @@ actor TonoAPIClient {
             ?? (session == nil ? ControlPlanePath.pinnedAddresses(for: baseURL) : nil)
         self.relayPath = relayPath
             ?? (session == nil ? ControlPlanePath.relays(for: baseURL) : nil)
-        let protectionReader: @Sendable () -> Bool = { KillSwitchService.isArmedWithoutTunnel }
+        let protectionReader: @Sendable () -> Bool = { !KillSwitchService.tunnelCarriesControlPlane }
         let fixtureReader: @Sendable () -> Bool = { false }
-        self.armedWithoutTunnel = armedWithoutTunnel
+        self.relayOnly = relayOnly
             ?? (session == nil ? protectionReader : fixtureReader)
         preferredPathKey = Self.preferredPathKey(forHost: baseURL.host ?? "")
         preferredPathLabel = Self.loadPreferredPath(key: preferredPathKey)
@@ -1253,13 +1254,16 @@ actor TonoAPIClient {
         // A path that answered where the ones before it could not goes in
         // front; the rest keep their order behind it.
         var order = [systemPath] + fallbacks
-        // Decision 086 (H1-F5, Option A): armed without a tunnel, the helper's
-        // PF permits the control plane only through the Tono relays. The
-        // system resolver and the pinned Cloudflare addresses would only wait
-        // out their timeouts against PF, so the relays are the whole walk,
-        // and the remembered preference is neither read nor changed. TLS
-        // still names the API host and is validated by default trust.
-        let relayOnly = relayPath != nil && armedWithoutTunnel()
+        // Decision 091 (owner, amends 086): with no tunnel carrying the
+        // control plane (signed out, first sign-in, disconnected, bootstrap,
+        // Protected Offline, drop recovery) the relays are the whole walk:
+        // no system resolver, no pinned Cloudflare address, before or after
+        // them. Armed, the helper's PF admits only the relays anyway (086);
+        // unarmed, a mainland path to Cloudflare is the thing that fails. All
+        // relays failing is reported as such, never followed by a direct
+        // attempt. The remembered preference is neither read nor changed.
+        // TLS still names the API host and is validated by default trust.
+        let relayOnly = relayPath != nil && self.relayOnly()
         if relayOnly, let relayPath { order = [relayPath] }
         let preferred = relayOnly ? nil : preferredPathLabel
         let preferredFirst: Bool
@@ -1286,6 +1290,10 @@ actor TonoAPIClient {
         var lostPaths: [String] = []
         for (index, path) in order.enumerated() {
             if index > 0 { try Self.requireCurrent(requestIsCurrent) }
+            // Decision 091: the tunnel went away during this walk (drop,
+            // teardown to bootstrap). The direct steps still ahead would go
+            // out with no tunnel, so only the relays remain.
+            if !relayOnly, index > 0, let relayPath, path.label != relayPath.label, self.relayOnly() { continue }
             let startedAt = Date()
             var attempt = request
             attempt.setValue(path.label, forHTTPHeaderField: Self.pathHeader)
