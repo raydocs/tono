@@ -52,6 +52,7 @@ import { assertFxRate, assertLedgerEntryList, assertMonthSummary } from './ledge
 import { assertChangeReceipt } from './receipts';
 import { assertSloResponse } from './slo';
 import { assertApiRelays } from './api-relays';
+import { assertApiPaths } from './api-paths';
 
 export const assertNodeSummaryList = (value: unknown) => assertList(value, assertNodeSummary);
 export const assertNodeHistoryList = (value: unknown) => assertList(value, assertNodeHistoryEntry);
@@ -132,6 +133,7 @@ export const NAMED_CHECKERS = {
   assertNodeReceiptsList,
   assertSloResponse,
   assertApiRelays,
+  assertApiPaths,
 } as const;
 
 export const CHECKER_BY_NAME = NAMED_CHECKERS;
@@ -197,6 +199,7 @@ export const GET_ROUTE_TABLE: readonly GetRouteBinding[] = [
   { route: 'GET /api/v1/ops/nodes/{name}/receipts', checker: 'assertNodeReceiptsList' },
   { route: 'GET /api/v1/ops/slo', checker: 'assertSloResponse' },
   { route: 'GET /api/v1/ops/api-relays', checker: 'assertApiRelays' },
+  { route: 'GET /api/v1/ops/api-paths', checker: 'assertApiPaths' },
 
   // dept:b
   // append your entries inside your block

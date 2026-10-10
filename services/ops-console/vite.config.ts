@@ -27,6 +27,7 @@ import healthRaw from './fixtures/system-health.json';
 import healthDenseRaw from './fixtures/system-health.dense.json';
 import healthEmptyRaw from './fixtures/system-health.empty.json';
 import apiRelaysRaw from './fixtures/api-relays.json';
+import apiPathsRaw from './fixtures/api-paths.json';
 
 /**
  * Fixture sets, chosen per request by `?fixtures=`. The screenshot suite needs
@@ -403,6 +404,11 @@ function fixturesPlugin(): Plugin {
         // 节点 · API 中继: the same two relays in every set.
         if (route === 'api-relays') {
           sendJson(res, materializeOps(apiRelaysRaw.body, apiRelaysRaw.clock));
+          return;
+        }
+        // 节点 · 客户网络 × 控制面路径: one week, the same rows in every set.
+        if (route === 'api-paths') {
+          sendJson(res, materializeOps(apiPathsRaw.body, apiPathsRaw.clock));
           return;
         }
         if (route === 'fleet-nodes') {
