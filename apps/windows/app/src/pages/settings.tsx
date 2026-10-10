@@ -287,7 +287,7 @@ export const GeneralCard = () => {
             onChange={(language) => void savePreferences({ language })}
           />
         ) : (
-          <span className="tono-segmented">
+          <span className="tono-segmented" style={{ flexShrink: 0 }}>
             {supportedLanguages.map((code) => {
               const active = selectedLanguage === code
               return (
