@@ -45,6 +45,7 @@ import {
 import {
   nodeCityLabel,
   nodeCityParts,
+  byRegionCode,
   nodeCode,
   nodeDisplayName,
   nodeListGroupKey,
@@ -468,7 +469,7 @@ const ServersPage = () => {
       }
       codes.add(nodeCode(server.name))
     }
-    const sorted = Array.from(codes).sort()
+    const sorted = Array.from(codes).sort(byRegionCode)
     return hasUdp ? [UDP_BACKUP_GROUP, ...sorted] : sorted
   }, [servers])
   // zh already has 美国 / 日本 for these, but the chips and group headers
@@ -477,6 +478,8 @@ const ServersPage = () => {
   const regionLabel = useCallback(
     (code: string) => {
       if (code === UDP_BACKUP_GROUP) return t('tono.nodes.regions.udpBackup')
+      // nodeCode's catch-all, not a country; the chip read "GL".
+      if (code === 'GL') return t('tono.nodes.regions.other')
       const key = `tono.nodes.regions.${code.toLowerCase()}`
       const translated = t(key)
       return translated === key ? code : translated
@@ -489,7 +492,7 @@ const ServersPage = () => {
     const tcp = usable.filter((server) => !isHy2CatalogName(server.name))
     const codes = Array.from(
       new Set(tcp.map((server) => nodeCode(server.name))),
-    ).sort()
+    ).sort(byRegionCode)
     return [
       ...(udp.length
         ? [

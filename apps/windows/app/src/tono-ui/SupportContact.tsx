@@ -5,6 +5,7 @@ import { useTonoStatus } from '@/hooks/use-tono'
 import { nodeCityLabel } from '@/pages/tono/node-meta'
 import { showNotice } from '@/services/notice-service'
 import { useThemeMode } from '@/services/states'
+import { useAppearancePreferences } from '@/tono-ui/appearance-preferences'
 import { tonoText } from '@/tono-ui/theme'
 import { version } from '@root/package.json'
 
@@ -41,6 +42,7 @@ export const SupportContact = ({
   compact?: boolean
 }) => {
   const { t } = useTranslation()
+  const { newAppearance } = useAppearancePreferences()
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const { status } = useTonoStatus()
@@ -67,7 +69,8 @@ export const SupportContact = ({
   const button = (
     <button
       type="button"
-      className="tono-button tono-action"
+      // The legacy action fill is violet; the sea uses its own quiet pill.
+      className={newAppearance ? 'sea-button' : 'tono-button tono-action'}
       onClick={() => void copy()}
       style={{
         minHeight: 32,

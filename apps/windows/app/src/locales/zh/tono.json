@@ -429,7 +429,7 @@
   "progress": {
     "total": "总计 {{elapsed}}",
     "tryBadge": "第 {{count}} 次",
-    "failedAt": "失败于 {{stage}}",
+    "failedAt": "在「{{stage}}」这一步没通过",
     "unknownStage": "未知阶段",
     "statusTitle": "当前线路未通过检查",
     "statusBody": "当前连接不可用，直连流量仍被拦截。可以重试，或恢复正常网络。",
@@ -477,6 +477,17 @@
       "securingDNS": "正在保护 DNS…",
       "checkingExit": "正在检查出口…",
       "verifyingTraffic": "正在验证连接…"
+    },
+    "stepNames": {
+      "preparing": "准备",
+      "preparingService": "准备服务",
+      "startingKillSwitch": "启用保护",
+      "startingTunnel": "启动隧道",
+      "lockingTraffic": "锁定流量",
+      "applyingCloudPolicy": "应用路由",
+      "securingDNS": "保护 DNS",
+      "checkingExit": "检查出口",
+      "verifyingTraffic": "验证连接"
     }
   },
   "nodes": {

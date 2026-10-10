@@ -9,6 +9,7 @@ import {
   catalogBaseName,
   hy2UdpIsVendorBlocked,
   nodeCityLabel,
+  byRegionCode,
   nodeCode,
 } from './node-meta'
 import { recentRoutes, type RouteRecommendation } from './route-preferences'
@@ -48,7 +49,7 @@ export const RoutePreferencesPanel = ({
   )
   const regions = [
     ...new Set(available.map((server) => nodeCode(server.name))),
-  ].sort()
+  ].sort(byRegionCode)
   if (preferences?.fixedRegion && !regions.includes(preferences.fixedRegion))
     regions.push(preferences.fixedRegion)
   const favorites =
