@@ -126,17 +126,25 @@
 }
 .sea-sky-day {
   background:
+    linear-gradient(
+      180deg,
+      #1c2640d9 0%,
+      #2b3048a6 20%,
+      #33364a33 40%,
+      transparent 54%
+    ),
     radial-gradient(
       calc(440 * var(--sea-unit)) calc(310 * var(--sea-unit)) at 67.3913%
         calc(100% - 134 * var(--sea-unit)),
-      #ffb4648c,
-      #e260463d 46%,
+      #ffc0749e,
+      #e8684a3d 46%,
       transparent
     ),
-    linear-gradient(180deg, transparent 42%, #ffac6266);
+    linear-gradient(180deg, transparent 46%, #ffb46a70);
 }
 .sea-sky-dusk {
   background:
+    linear-gradient(180deg, #0d1530cc 0%, #141a3666 22%, transparent 40%),
     radial-gradient(
       calc(540 * var(--sea-unit)) calc(210 * var(--sea-unit)) at 67.3913% 100%,
       #ff96549e,
@@ -220,11 +228,12 @@
 .sea-glow-pulse::after {
   content: "";
   position: absolute;
-  inset: calc(-10 * var(--sea-unit));
+  inset: calc(-46 * var(--sea-unit));
   background: radial-gradient(
     ellipse closest-side,
-    #ffe9c280 85%,
-    #ffcb7f66 91%,
+    #fff2d6b3 64%,
+    #ffd7975c 76%,
+    #ffb26a1f 88%,
     transparent
   );
 }
@@ -235,10 +244,16 @@
   border-radius: 50%;
   background: radial-gradient(
     closest-side,
-    transparent calc(100% - 8 * var(--sea-unit)),
-    #ffd59a99 calc(100% - 2 * var(--sea-unit)),
-    #ffe6bfcf
+    #fff9eab8 0%,
+    #fff4d8a0 34%,
+    #ffefc85c 52%,
+    #ffe8b81a 66%,
+    transparent 74%,
+    #c2463414 90%,
+    #9a2c3038 100%
   );
+  opacity: calc(1 - 0.8 * var(--sea-red));
+  transition: opacity 2200ms var(--tono-ambient-ease-sky);
 }
 .sea-sun-glow {
   opacity: var(--sea-glow);
@@ -253,13 +268,14 @@
 .sea-glow-pulse::before {
   content: "";
   position: absolute;
-  inset: calc(-250 * var(--sea-unit));
+  inset: calc(-300 * var(--sea-unit));
   background: radial-gradient(
     ellipse closest-side,
-    #ffaa6080,
-    #ffaa6052 27%,
-    #f0605429 58%,
-    transparent 72%
+    #ffb86a8c,
+    #ffa45c4d 22%,
+    #f0605426 50%,
+    #f060540d 64%,
+    transparent 78%
   );
 }
 .sea-halo {
@@ -937,4 +953,67 @@
   );
   opacity: var(--sea-day);
   transition: opacity var(--sea-day-time) var(--sea-sky-ease);
+}
+
+/* Light pass (decision 078): lit cloud edges, horizon haze, no grain on the
+   connected sun. The sky, sun core and glow rules above carry the rest. */
+.sea-cloud::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, #ffe0a8, #ff9c5c);
+  mask-image: url("./sea-assets/cloud-1.png"), url("./sea-assets/cloud-1.png");
+  mask-size: 60% 100%;
+  mask-repeat: no-repeat;
+  mask-position:
+    0 0,
+    0 3px;
+  mask-composite: subtract;
+  opacity: calc(var(--sea-day) * 0.9);
+  transition: opacity var(--sea-day-time) var(--sea-sky-ease);
+}
+.sea-cloud-2::after {
+  mask-image: url("./sea-assets/cloud-2.png"), url("./sea-assets/cloud-2.png");
+  opacity: calc(var(--sea-day) * 0.6);
+}
+.sea-horizon::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(9px - 34 * var(--sea-unit));
+  height: calc(68 * var(--sea-unit));
+  background:
+    radial-gradient(
+      ellipse calc(320 * var(--sea-unit)) calc(30 * var(--sea-unit)) at 67.3913%
+        50%,
+      #ffdcb066,
+      #ffb07a26 50%,
+      transparent
+    ),
+    linear-gradient(
+      180deg,
+      transparent,
+      #ffc8a01f 44%,
+      #ffd2aa33 50%,
+      #ffc8a014 60%,
+      transparent
+    );
+}
+.sea-scene[data-phase="connected"] .sea-grain {
+  mask-image: radial-gradient(
+    calc(150 * var(--sea-unit)) calc(150 * var(--sea-unit)) at 67.3913%
+      calc(55% - 145 * var(--sea-unit)),
+    transparent 55%,
+    #000
+  );
+}
+
+/* Real-time water (decision 078): the canvas fades in over the CSS water, then
+   the CSS water layers stop rendering until the canvas goes away. */
+.sea-gl {
+  transition: opacity 600ms ease;
+}
+.sea-scene[data-water="gl"] .sea-water > :not(.sea-gl) {
+  display: none;
 }

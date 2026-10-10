@@ -10,6 +10,7 @@ import {
   setMotionPreference,
   useAppearancePreferences,
 } from '@/tono-ui/appearance-preferences'
+import { publishSeaTraffic } from '@/tono-ui/sea-traffic'
 import { SeaScene, type SeaPhase } from '@/tono-ui/SeaScene'
 
 import './preview.css'
@@ -22,6 +23,12 @@ const parameters = new URLSearchParams(window.location.search)
 const initialPhase = parameters.get('phase')
 const initialQuality = parameters.get('quality')
 if (isMotionPreference(initialQuality)) setMotionPreference(initialQuality)
+// `?traffic=<bytes per second>` stands in for the dashboard's live throughput.
+const previewTraffic = Number(parameters.get('traffic') ?? Number.NaN)
+if (Number.isFinite(previewTraffic)) {
+  publishSeaTraffic(previewTraffic)
+  setInterval(() => publishSeaTraffic(previewTraffic), 1000)
+}
 const subscribeMedia = (notify: () => void) => {
   const queries = [
     '(prefers-reduced-motion: reduce)',
