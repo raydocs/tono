@@ -331,25 +331,34 @@ export const TrayPanel = () => {
           ) : null
         }
         picker={
-          <details>
+          <details
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape' || !event.currentTarget.open) return
+              event.preventDefault()
+              event.currentTarget.open = false
+              event.currentTarget.querySelector('summary')?.focus()
+            }}
+          >
             <summary>{t('tono.tray.pickNode')}</summary>
-            {(servers ?? [])
-              .filter((server) => !hy2UdpIsVendorBlocked(server.name))
-              .map((server) => (
-                <button
-                  type="button"
-                  className="sea-tray-quick"
-                  key={server.name}
-                  disabled={!server.available}
-                  onClick={() => {
-                    if (server.selected && !idleSelectShouldConnect(uiState))
-                      return
-                    void pickServer(server.name)
-                  }}
-                >
-                  {nodeCityLabel(server.name, t)}
-                </button>
-              ))}
+            <div className="sea-tray-picker">
+              {(servers ?? [])
+                .filter((server) => !hy2UdpIsVendorBlocked(server.name))
+                .map((server) => (
+                  <button
+                    type="button"
+                    className="sea-tray-quick"
+                    key={server.name}
+                    disabled={!server.available}
+                    onClick={() => {
+                      if (server.selected && !idleSelectShouldConnect(uiState))
+                        return
+                      void pickServer(server.name)
+                    }}
+                  >
+                    {nodeCityLabel(server.name, t)}
+                  </button>
+                ))}
+            </div>
           </details>
         }
         onOpen={() => void invoke('tray_flyout_open_dashboard')}
