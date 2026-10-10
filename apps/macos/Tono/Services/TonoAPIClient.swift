@@ -90,6 +90,11 @@ actor TonoAPIClient {
         /// security software) is intercepting TLS. No status line arrived, so
         /// offline admission reads it as unreachable, like `clockSkew`.
         case tlsIntercepted
+        /// No control-plane path answered: which ones ran and how each
+        /// failed, for copy that says where it failed (mainland audit). No
+        /// status line arrived, so offline admission reads it as unreachable,
+        /// like `transport`.
+        case unreachable(ControlPlaneUnreachable)
         /// HTTP 503 `EXIT_IDENTITY_PROPAGATING`: this device's exit identity
         /// is not yet acknowledged by every served exit. Transient by design;
         /// a launch without a cached catalog waits and asks again soon.
@@ -112,6 +117,7 @@ actor TonoAPIClient {
             case .invalidOrExpiredCode: String(localized: "That code is wrong or expired. Request a new one.")
             case .clockSkew: CertificateClock.userMessage
             case .tlsIntercepted: NetworkInterception.userMessage
+            case let .unreachable(paths): paths.userMessage
             case .exitIdentityPropagating: String(localized: "Tono is still preparing this Mac's secure identity. Try again in a minute.")
             case .credentialPersistence: String(localized: "Tono could not save your sign-in in Keychain. You are signed out. Check that your login keychain is unlocked, then try again.")
             case .credentialRecoveryRecord: String(localized: "Tono could not update its sign-in recovery record. You are signed out. Check available disk space and Tono's Application Support folder permissions, then try again.")
@@ -1255,6 +1261,9 @@ actor TonoAPIClient {
         // Every path's failure, `label[detail]`, so the reported error names
         // them all, as the Windows transport's combined message does.
         var failures: [String] = []
+        // The same failures as labels and classes, for the copy that names
+        // where the request failed (`ControlPlaneUnreachable`).
+        var attempts: [ControlPlaneUnreachable.Attempt] = []
         // Decision 080: the labels of the paths lost so far, each once.
         var lostPaths: [String] = []
         for (index, path) in order.enumerated() {
@@ -1292,6 +1301,7 @@ actor TonoAPIClient {
                 if CertificateClock.isDateFailure(error) { clockFailure = error }
                 if NetworkInterception.isTrustFailure(error) { sawRefusedCertificate = true }
                 failures.append("\(path.label)[\(Self.failureDetail(error))]")
+                attempts.append(.init(path: path.label, failure: ControlPlanePathTimeline.failureClass(error)))
                 if Self.reportablePathLabels.contains(path.label), !lostPaths.contains(path.label) {
                     lostPaths.append(path.label)
                 }
@@ -1323,7 +1333,10 @@ actor TonoAPIClient {
                         throw Self.combined(clockFailure, failures: failures)
                     }
                     if error is ControlPlaneExchangeError || Self.isCancellation(error) { throw error }
-                    throw Self.combined(error, failures: failures, intercepted: sawRefusedCertificate)
+                    throw Self.combined(
+                        error, failures: failures, intercepted: sawRefusedCertificate,
+                        attempts: attempts, stoppedEarly: index + 1 < order.count
+                    )
                 }
                 let failure = error as NSError
                 LocalTrafficAudit.shared.recordEvent(
@@ -1363,15 +1376,24 @@ actor TonoAPIClient {
     /// `error` with every path's failure in its description
     /// (`system_dns[...]; pinned[...]; relay[...]`), same domain and code, so
     /// the retry rule and the clock check still read it as the same failure.
+    /// With `attempts`, also the walk's paths and their failure classes
+    /// (`ControlPlaneUnreachable`), and whether paths were left untried.
     nonisolated private static func combined(
-        _ error: any Error, failures: [String], intercepted: Bool = false
+        _ error: any Error, failures: [String], intercepted: Bool = false,
+        attempts: [ControlPlaneUnreachable.Attempt] = [], stoppedEarly: Bool = false
     ) -> any Error {
         // One failure is `error` itself, which already carries its own evidence.
-        guard failures.count > 1 else { return error }
+        guard failures.count > 1 || !attempts.isEmpty else { return error }
         let original = error as NSError
         var userInfo = original.userInfo
-        userInfo[NSLocalizedDescriptionKey] = failures.joined(separator: "; ")
-        if intercepted { userInfo[NetworkInterception.evidenceKey] = true }
+        if failures.count > 1 {
+            userInfo[NSLocalizedDescriptionKey] = failures.joined(separator: "; ")
+            if intercepted { userInfo[NetworkInterception.evidenceKey] = true }
+        }
+        if !attempts.isEmpty {
+            userInfo[ControlPlaneUnreachable.attemptsKey] = attempts
+            userInfo[ControlPlaneUnreachable.stoppedEarlyKey] = stoppedEarly
+        }
         return NSError(domain: original.domain, code: original.code, userInfo: userInfo)
     }
 
@@ -1494,6 +1516,8 @@ actor TonoAPIClient {
                 NetworkInterception.record(intercepted: true)
                 throw APIError.tlsIntercepted
             }
+            // Where it failed, when the walk said so.
+            if let unreachable = ControlPlaneUnreachable(error) { throw APIError.unreachable(unreachable) }
             throw APIError.transport(error.localizedDescription)
         }
         try await Task.sleep(for: .seconds(1))

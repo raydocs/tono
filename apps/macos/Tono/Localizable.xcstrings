@@ -8691,6 +8691,166 @@
           }
         }
       }
+    },
+    "Tono's service did not answer in time. This request was not sent again on another route, in case it already arrived.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 服务没有及时应答。为免重复提交，这次请求没有改走其他路径重发。"
+          }
+        }
+      }
+    },
+    "Tono could not reach its service on any route, Tono's relays included.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 的所有连接路径都没能连上服务，包括 Tono 中继。"
+          }
+        }
+      }
+    },
+    "Tono could not reach its service on any route.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 的所有连接路径都没能连上服务。"
+          }
+        }
+      }
+    },
+    "%@ (%@)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@（%2$@）"
+          }
+        }
+      }
+    },
+    "Tried: %@.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已尝试：%@。"
+          }
+        }
+      }
+    },
+    "Retry in a moment. If it keeps failing, try another network, for example a phone hotspot.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请稍后重试。如果一直失败，请换一个网络（例如手机热点）。"
+          }
+        }
+      }
+    },
+    "This network's DNS did not return Tono's address. Try another network, for example a phone hotspot, then retry. For help, select this text and send it to Tono support.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这个网络的 DNS 没有返回 Tono 的地址。请换一个网络（例如手机热点）后重试。需要帮助时，可选中这段文字发给 Tono 客服。"
+          }
+        }
+      }
+    },
+    "Try another network, for example a phone hotspot, then retry. For help, select this text and send it to Tono support.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请换一个网络（例如手机热点）后重试。需要帮助时，可选中这段文字发给 Tono 客服。"
+          }
+        }
+      }
+    },
+    "direct connection": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直连"
+          }
+        }
+      }
+    },
+    "Tono's fixed addresses": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 固定地址"
+          }
+        }
+      }
+    },
+    "Tono's relays": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 中继"
+          }
+        }
+      }
+    },
+    "name lookup failed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "域名解析失败"
+          }
+        }
+      }
+    },
+    "no connection": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连不上"
+          }
+        }
+      }
+    },
+    "secure connection failed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加密连接失败"
+          }
+        }
+      }
+    },
+    "timed out": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "超时"
+          }
+        }
+      }
+    },
+    "failed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "失败"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

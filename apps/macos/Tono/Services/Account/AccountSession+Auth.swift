@@ -202,7 +202,7 @@ extension AccountSession {
         switch apiError {
         // #588: a clock error is also a failure before any status line; the
         // offline grant, not a refusal, decides. H21-O-F8: so is interception.
-        case .transport, .clockSkew, .tlsIntercepted: return true
+        case .transport, .clockSkew, .tlsIntercepted, .unreachable: return true
         default: return false
         }
     }
