@@ -47,3 +47,7 @@
   状态，再决定是否以 `TONO_RELAYS_UNREACHABLE` 走最后一轮中继。新增回归 `a_tunnel_lost_after_the_doh_check_sends_no_doh_query`、
   `a_tunnel_lost_during_the_loopback_request_ends_with_the_relay_unreachable_error`；去掉修复后两者都失败，恢复后通过。本机
   `cargo test --lib tono::transport`（Linux，资源文件用占位）35 通过。
+- 续记（2026-10-10，#1553 合入 `62bab6ed` 后的 Sol M2 minor，单独小 PR）：`direct_step_allowed` 只在等待 `relays_only`（可能等
+  Service 探测）之前看 `WalkGate`；DoH 查询现在并发调用它，A 恢复时看到 `Unarmed` 锁存，隧道又回来，B 恢复后仍被放行，违背“一次遍历内
+  锁存不撤销”。改为等待之后再读一次锁存。回归 `a_step_waiting_on_the_service_probe_honours_a_latch_set_meanwhile`（去掉修复即失败）；
+  本机 `cargo test --lib tono::transport` 36 通过。

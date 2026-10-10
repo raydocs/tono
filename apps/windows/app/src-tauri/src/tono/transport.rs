@@ -1226,7 +1226,9 @@ impl TonoTransport {
             gate.0.store(true, std::sync::atomic::Ordering::Release);
             return false;
         }
-        true
+        // Read again after the await: the walk's concurrent DoH queries share the gate, and
+        // another one may have latched it while this one waited on the Service probe.
+        !gate.lost()
     }
 
     fn is_relay_host(&self, url: &str) -> bool {
@@ -2995,6 +2997,36 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
                 .expect("the pins answer");
             assert_eq!(response.body, b"direct");
             assert_eq!(relay.connections(), 0, "a legacy Service's WFP blocks the relays");
+        }
+
+        /// Two direct steps of one walk wait on the same unanswered Service probe; another
+        /// step latches the walk to the relays, and the tunnel returns before this one resumes:
+        /// it is refused all the same, since the latch holds for the rest of the walk.
+        #[tokio::test]
+        async fn a_step_waiting_on_the_service_probe_honours_a_latch_set_meanwhile() {
+            let relay = fixture("relay", false).await;
+            let loopback = SocketAddr::from(([127, 0, 0, 1], 0));
+            let mut transport =
+                TonoTransport::with_clients_and_relays("localhost", &[loopback], &[loopback], &[relay.address]).unwrap();
+            let release = Arc::new(tokio::sync::Notify::new());
+            let wait = Arc::clone(&release);
+            transport.relay_permit_probe = Some(Box::new(move || {
+                let wait = Arc::clone(&wait);
+                Box::pin(async move {
+                    wait.notified().await;
+                    None
+                })
+            }));
+            transport.set_control_plane_reach(ControlPlaneReach::ArmedWithoutTunnel);
+            let gate = super::super::WalkGate::default();
+            let request = request(HttpMethod::Get, closed_port());
+            let mut step = std::pin::pin!(transport.direct_step_allowed(&request, &gate));
+            assert!(futures::poll!(step.as_mut()).is_pending(), "the step waits on the probe");
+
+            gate.0.store(true, SeqCst);
+            transport.set_control_plane_reach(ControlPlaneReach::Tunnel);
+            release.notify_one();
+            assert!(!step.await, "a direct step was granted after the walk was latched to the relays");
         }
 
         /// Exception 2: a base URL whose host the relays do not serve (the integration profile)
