@@ -11,6 +11,7 @@ import {
   HY2_NAME_SUFFIX,
 } from './catalog-yaml';
 import { ApiError } from './errors';
+import { hy2AutoSwitchForUser } from './hy2-auto-switch';
 
 // Home-exit and binding writes change a user's served catalog (filtered node
 // set) and its routing directive without touching the raw catalog YAML. The
@@ -276,6 +277,11 @@ export async function routingSha256(routing: CatalogRouting | undefined) {
  * - `routingSha256` covers the sibling routing document and is present only on
  *   the per-account view (the ops/admin plaintext catalog carries no routing).
  *   It moves on its own when routing rotates under an unchanged revision.
+ * - `hy2AutoSwitch` (per-account view only) permits the client to fall back on
+ *   its own to the ` · hy2` block of the same node (A18, D1-C). It is outside
+ *   both digests on purpose — older clients verify `routingSha256` against a
+ *   fixed recipe — so clients read it from every response, including one
+ *   whose (revision, sha256, routingSha256) key is unchanged.
  */
 export async function publicManagedCatalog(
   e: Env,
@@ -323,10 +329,17 @@ export async function publicManagedCatalog(
       served = filterCatalogYamlForUser(served, home.restricted, home.allowed);
     }
   }
+  let hy2AutoSwitch: boolean | undefined;
   if (options?.userId) {
     const keepHy2 = (Boolean(options.acceptHy2) || requestAcceptsHy2Catalog(options.hy2AcceptHeader))
       && (await userMaySeeHy2Catalog(e, options.userId));
     served = filterHy2CatalogForViewer(served, keepHy2);
+    // A permission over blocks this response actually carries: a viewer whose
+    // hy2 blocks were stripped, or whose only hy2 pair was a restricted home
+    // exit filtered out above, is told `false`, never a stale `true`.
+    hy2AutoSwitch = keepHy2
+      && splitManagedCatalogProxies(served).items.some((item) => item.name.endsWith(HY2_NAME_SUFFIX))
+      && (await hy2AutoSwitchForUser(e, options.userId));
   }
   // The stored digest authenticates the catalog template. Authenticated clients
   // receive a stable per-account identity, so recompute the digest after
@@ -358,6 +371,7 @@ export async function publicManagedCatalog(
     updatedAt,
     ...(routedUserId ? { routingSha256: await routingSha256(routing) } : {}),
     ...(routing ? { routing } : {}),
+    ...(hy2AutoSwitch === undefined ? {} : { hy2AutoSwitch }),
   };
 }
 

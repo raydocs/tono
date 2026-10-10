@@ -9,7 +9,7 @@ import { useTonoPreferences } from '@/hooks/use-tono-preferences'
 import { useUpdate } from '@/hooks/use-update'
 import { resolveLanguage, supportedLanguages } from '@/services/i18n'
 import { showNotice } from '@/services/notice-service'
-import { setCacheData, useQuery } from '@/services/query-client'
+import { getCacheData, setCacheData, useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
   tonoAuditEnabled,
@@ -21,6 +21,8 @@ import {
   tonoNetworkLogUploadEnabled,
   tonoSetNetworkLogUploadEnabled,
   formatTonoActionError,
+  describeTonoActionError,
+  type TonoActionErrorDescription,
 } from '@/services/tono'
 import { TONO_UPDATES_CONFIGURED } from '@/services/update'
 import { useAppearancePreferences } from '@/tono-ui/appearance-preferences'
@@ -46,6 +48,13 @@ const tonoNetworkLogUploadEnabledQueryKey = [
   'tonoNetworkLogUploadEnabled',
 ] as const
 const tonoInternalBuildQueryKey = ['tonoInternalBuild'] as const
+const tonoPrivacySavesQueryKey = ['tonoPrivacySaves'] as const
+type PrivacySaves = Record<
+  string,
+  { phase: 'saving' | 'saved' | 'failed'; error?: TonoActionErrorDescription }
+>
+const readPrivacySaves = () =>
+  getCacheData<PrivacySaves>(tonoPrivacySavesQueryKey) ?? {}
 
 const LANGUAGE_LABELS: Record<string, string> = {
   en: 'English',
@@ -100,10 +109,12 @@ const CardHeader = ({
 const Row = ({
   label,
   subtitle,
+  feedback,
   children,
 }: {
   label: string
   subtitle?: ReactNode
+  feedback?: ReactNode
   children?: React.ReactNode
 }) => {
   const { newAppearance } = useAppearancePreferences()
@@ -111,7 +122,7 @@ const Row = ({
   const text = tonoText(dark)
   return (
     <div className="tono-row">
-      <span
+      <div
         style={{
           display: 'flex',
           flexDirection: 'column',
@@ -133,7 +144,8 @@ const Row = ({
             {subtitle}
           </span>
         )}
-      </span>
+        {feedback}
+      </div>
       {children}
     </div>
   )
@@ -273,7 +285,18 @@ export const PrivacyCard = () => {
   const { t } = useTranslation()
   const { newAppearance } = useAppearancePreferences()
   const Toggle = newAppearance ? SeaToggle : TonoToggle
-  const { data: auditEnabled } = useQuery({
+  // The operation outlives this page. Keep its lock/outcome in the existing
+  // shared cache so navigating away cannot admit a second write before its ACK.
+  const { data: saves = {} } = useQuery({
+    queryKey: tonoPrivacySavesQueryKey,
+    queryFn: readPrivacySaves,
+    initialData: readPrivacySaves,
+  })
+  const setSaves = (update: (previous: PrivacySaves) => PrivacySaves) =>
+    setCacheData<PrivacySaves>(tonoPrivacySavesQueryKey, (previous) =>
+      update(previous ?? {}),
+    )
+  const auditQuery = useQuery({
     queryKey: tonoAuditEnabledQueryKey,
     queryFn: tonoAuditEnabled,
   })
@@ -281,11 +304,11 @@ export const PrivacyCard = () => {
     queryKey: tonoAuditLogPathQueryKey,
     queryFn: tonoAuditLogPath,
   })
-  const { data: periodicTelemetryEnabled } = useQuery({
+  const telemetryQuery = useQuery({
     queryKey: tonoPeriodicTelemetryEnabledQueryKey,
     queryFn: tonoPeriodicTelemetryEnabled,
   })
-  const { data: networkLogUploadEnabled } = useQuery({
+  const networkQuery = useQuery({
     queryKey: tonoNetworkLogUploadEnabledQueryKey,
     queryFn: tonoNetworkLogUploadEnabled,
   })
@@ -295,38 +318,117 @@ export const PrivacyCard = () => {
   })
   const logPath = auditLogInfo?.path
 
-  const handleAudit = useLockFn(async (value: boolean) => {
-    const previous = auditEnabled ?? true
-    setCacheData(tonoAuditEnabledQueryKey, value)
+  const saveChoice = async (
+    queryKey: readonly [string],
+    value: boolean,
+    write: (value: boolean) => Promise<void>,
+  ) => {
+    const key = queryKey[0]
+    const phase = readPrivacySaves()[key]?.phase
+    if (phase === 'saving' || phase === 'failed') return
+    setSaves((previous) => ({ ...previous, [key]: { phase: 'saving' } }))
     try {
-      await tonoSetAuditEnabled(value)
+      await write(value)
+      setCacheData(queryKey, value)
+      setSaves((previous) => ({ ...previous, [key]: { phase: 'saved' } }))
     } catch (error) {
-      setCacheData(tonoAuditEnabledQueryKey, previous)
-      showNotice.error(formatTonoActionError(error, t))
+      setSaves((previous) => ({
+        ...previous,
+        [key]: { phase: 'failed', error: describeTonoActionError(error, t) },
+      }))
     }
-  })
+  }
 
-  const handlePeriodicTelemetry = useLockFn(async (value: boolean) => {
-    const previous = periodicTelemetryEnabled ?? true
-    setCacheData(tonoPeriodicTelemetryEnabledQueryKey, value)
-    try {
-      await tonoSetPeriodicTelemetryEnabled(value)
-    } catch (error) {
-      setCacheData(tonoPeriodicTelemetryEnabledQueryKey, previous)
-      showNotice.error(formatTonoActionError(error, t))
-    }
-  })
+  const handleAudit = useLockFn((value: boolean) =>
+    saveChoice(tonoAuditEnabledQueryKey, value, tonoSetAuditEnabled),
+  )
+  const handlePeriodicTelemetry = useLockFn((value: boolean) =>
+    saveChoice(
+      tonoPeriodicTelemetryEnabledQueryKey,
+      value,
+      tonoSetPeriodicTelemetryEnabled,
+    ),
+  )
+  const handleNetworkLogUpload = useLockFn((value: boolean) =>
+    saveChoice(
+      tonoNetworkLogUploadEnabledQueryKey,
+      value,
+      tonoSetNetworkLogUploadEnabled,
+    ),
+  )
 
-  const handleNetworkLogUpload = useLockFn(async (value: boolean) => {
-    const previous = networkLogUploadEnabled ?? false
-    setCacheData(tonoNetworkLogUploadEnabledQueryKey, value)
-    try {
-      await tonoSetNetworkLogUploadEnabled(value)
-    } catch (error) {
-      setCacheData(tonoNetworkLogUploadEnabledQueryKey, previous)
-      showNotice.error(formatTonoActionError(error, t))
+  const choiceFeedback = (
+    queryKey: readonly [string],
+    query: typeof auditQuery,
+  ) => {
+    const save = saves[queryKey[0]]
+    const error = query.error
+      ? describeTonoActionError(query.error, t)
+      : save?.error
+    if (query.error || save?.phase === 'failed') {
+      return (
+        <div className="tono-setting-feedback" role="alert">
+          {t(
+            query.error
+              ? 'tono.settings.privacy.readFailed'
+              : 'tono.settings.privacy.saveFailed',
+          )}
+          {error && (
+            <span className="tono-setting-error-detail">{error.message}</span>
+          )}
+          {error?.detail && (
+            <details className="tono-setting-error-detail">
+              <summary>{t('tono.progress.technicalDetails')}</summary>
+              <code>{error.detail}</code>
+            </details>
+          )}
+          <button
+            type="button"
+            className="tono-link"
+            disabled={query.isFetching || save?.phase === 'saving'}
+            onClick={() => {
+              setSaves((previous) => {
+                const next = { ...previous }
+                delete next[queryKey[0]]
+                return next
+              })
+              void query.refetch()
+            }}
+          >
+            {t(
+              query.isFetching
+                ? 'tono.settings.privacy.reading'
+                : 'tono.settings.privacy.reload',
+            )}
+          </button>
+        </div>
+      )
     }
-  })
+    if (query.isFetching || query.data === undefined || save) {
+      return (
+        <span className="tono-setting-feedback" role="status">
+          {t(
+            save?.phase === 'saving'
+              ? 'tono.settings.privacy.saving'
+              : query.isFetching || query.data === undefined
+                ? 'tono.settings.privacy.reading'
+                : 'tono.settings.privacy.saved',
+          )}
+        </span>
+      )
+    }
+    return null
+  }
+
+  const choiceDisabled = (
+    queryKey: readonly [string],
+    query: typeof auditQuery,
+  ) =>
+    query.data === undefined ||
+    query.isFetching ||
+    Boolean(query.error) ||
+    saves[queryKey[0]]?.phase === 'saving' ||
+    saves[queryKey[0]]?.phase === 'failed'
 
   const handleCopyPath = useLockFn(async () => {
     if (!logPath) return
@@ -346,7 +448,10 @@ export const PrivacyCard = () => {
         title={t('tono.settings.privacy.title')}
         tint={`${TONO_COLORS.protectedOffline}26`}
       />
-      {internalBuild && (auditEnabled ?? true) && (
+      <p className="tono-settings-effect-hint">
+        {t('tono.settings.privacy.effectHint')}
+      </p>
+      {internalBuild && (auditQuery.data ?? true) && (
         <Row label={t('settings.sections.tono.internalDiagnostics')} />
       )}
       <Row
@@ -361,9 +466,11 @@ export const PrivacyCard = () => {
             t('settings.sections.tono.auditLog.description')
           )
         }
+        feedback={choiceFeedback(tonoAuditEnabledQueryKey, auditQuery)}
       >
         <Toggle
-          checked={auditEnabled ?? true}
+          checked={auditQuery.data ?? true}
+          disabled={choiceDisabled(tonoAuditEnabledQueryKey, auditQuery)}
           onChange={(value) => void handleAudit(value)}
           label={t('settings.sections.tono.auditLog.label')}
         />
@@ -380,9 +487,17 @@ export const PrivacyCard = () => {
             t('settings.sections.tono.periodicTelemetry.description')
           )
         }
+        feedback={choiceFeedback(
+          tonoPeriodicTelemetryEnabledQueryKey,
+          telemetryQuery,
+        )}
       >
         <Toggle
-          checked={periodicTelemetryEnabled ?? true}
+          checked={telemetryQuery.data ?? true}
+          disabled={choiceDisabled(
+            tonoPeriodicTelemetryEnabledQueryKey,
+            telemetryQuery,
+          )}
           onChange={(value) => void handlePeriodicTelemetry(value)}
           label={t('settings.sections.tono.periodicTelemetry.label')}
         />
@@ -399,9 +514,17 @@ export const PrivacyCard = () => {
             t('settings.sections.tono.networkLogUpload.description')
           )
         }
+        feedback={choiceFeedback(
+          tonoNetworkLogUploadEnabledQueryKey,
+          networkQuery,
+        )}
       >
         <Toggle
-          checked={networkLogUploadEnabled ?? false}
+          checked={networkQuery.data ?? false}
+          disabled={choiceDisabled(
+            tonoNetworkLogUploadEnabledQueryKey,
+            networkQuery,
+          )}
           onChange={(value) => void handleNetworkLogUpload(value)}
           label={t('settings.sections.tono.networkLogUpload.label')}
         />

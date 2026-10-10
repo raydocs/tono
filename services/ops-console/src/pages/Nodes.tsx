@@ -22,6 +22,7 @@ import type { FleetNodeDto } from '@/lib/types';
 import type { FleetState } from '@/lib/use-fleet';
 import '@/styles/nodes.css';
 import { toNodeView } from './node-metrics';
+import { ApiPaths } from './nodes/ApiPaths';
 import { ApiRelays } from './nodes/ApiRelays';
 import { FleetBand } from './nodes/FleetBand';
 import { FleetLoad } from './nodes/FleetLoad';
@@ -62,6 +63,7 @@ export default function NodesPage({
   const week = useResource(range === '7d' ? 'fleet-load-7d' : null, (signal) => nodeLegacyApi.fleetLoad('7d', signal));
   const load = range === '24h' ? day : week;
   const slo = useResource('nodes-slo-7d', (signal) => sloApi.get({ range: '7d' }, signal));
+  const apiPaths = useResource('api-paths-7d', (signal) => opsApi.apiPaths(signal));
   const month = monthOf(nowSec());
   const ledger = useResource(`ledger-month-${month}`, (signal) => ledgerApi.month(month, signal));
   const relays = useResource('api-relays', (signal) => opsApi.apiRelays(signal));
@@ -129,6 +131,8 @@ export default function NodesPage({
 
       {/* On a phone the list is what the page is opened for, so the charts follow it. */}
       {phone ? <FleetLoad load={load} range={range} onRange={setRange} /> : null}
+
+      <ApiPaths paths={apiPaths} />
 
       <DetailDrawer
         open={Boolean(selectedView)}

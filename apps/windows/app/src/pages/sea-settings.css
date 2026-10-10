@@ -49,6 +49,34 @@
   color: var(--sea-secondary);
 }
 
+.tono-settings-effect-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--sea-secondary, var(--tono-text-secondary));
+}
+.tono-setting-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--sea-secondary, var(--tono-text-secondary));
+  overflow-wrap: anywhere;
+}
+.tono-setting-feedback[role="alert"] {
+  color: var(--tono-text-error);
+}
+.tono-setting-feedback .tono-link {
+  color: var(--sea-accent, var(--tono-text-link));
+  text-decoration: underline;
+}
+.tono-setting-error-detail {
+  flex-basis: 100%;
+}
+
 .sea-appearance-legacy {
   --sea-accent: #8e81ff;
   --sea-text: var(--tono-text-primary);

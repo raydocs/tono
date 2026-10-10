@@ -156,6 +156,36 @@ describe('login paused screen', () => {
   })
 })
 
+describe('login while protection blocks the network', () => {
+  it('says signing in needs protection off and what that does, and releases only on the explicit button', async () => {
+    mocks.status = {
+      accountState: 'signedOut',
+      uiState: 'protectedOffline',
+      protectionBlocked: true,
+      killSwitch: { wanted: true, live: true, mode: 'blocked' },
+    }
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    const explanation = screen.getByText(enTono.login.networkBlocked.description)
+    // Why sign-in cannot get through (the relays are blocked too), what turns it off, and
+    // the impact: traffic leaves this PC outside Tono until the next connect.
+    expect(explanation.textContent).toMatch(/relays/)
+    expect(explanation.textContent).toMatch(/turns protection off/)
+    expect(explanation.textContent).toMatch(/not through Tono/)
+    expect(
+      screen.getByRole<HTMLButtonElement>('button', { name: 'Send code' }).disabled,
+    ).toBe(true)
+    expect(mocks.disconnect).not.toHaveBeenCalled()
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Restore network' })),
+    )
+    expect(mocks.disconnect).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('login request exclusion', () => {
   it('announces the inbox step, focuses code, and returns to the original email', async () => {
     await enterCodeStep()

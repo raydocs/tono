@@ -5,7 +5,14 @@ import { encryptCatalog, sha256 } from '../src/crypto';
 import { coverageOf } from '../src/ops/coverage';
 import { getNodes } from '../src/ops/handlers/nodes';
 import { reconcileIncidents } from '../src/ops/evaluate';
-import { runCustomerVerdictPass, runNodeVerdictPass, toAlertTransitions } from '../src/ops/verdict-run';
+import {
+  planAndSendAlerts,
+  runCustomerVerdictPass,
+  runNodeVerdictPass,
+  runVerdictPass,
+  toAlertTransitions,
+} from '../src/ops/verdict-run';
+import { API_RELAYS, probeApiRelays, type RelayConnect } from '../src/api-relays';
 import { buildVerdictInput } from '../src/ops/verdict-facts';
 import { type IncidentDesire } from '../src/ops/verdict';
 
@@ -54,6 +61,43 @@ describe('runCustomerVerdictPass', () => {
     expect(JSON.parse(after?.evidence_json ?? '{}')).toEqual({ sweep: 'LIKELY_BLOCKED' });
     expect(Number(after?.last_seen_at)).toBe(Number(before?.last_seen_at));
     expect(Number(after?.updated_at)).toBe(Number(before?.updated_at));
+  });
+});
+
+describe('api relay alerts', () => {
+  it('alerts once on the third consecutive failed probe and once on recovery', async () => {
+    const e = env as unknown as Env;
+    await db().prepare(
+      `INSERT INTO ops_alert_rules(id, name, enabled, match_kind, min_severity, min_impact, fire_on,
+         delay_seconds, cooldown_seconds, channel, target, template, created_at, updated_at)
+       VALUES('relay', 'relay', 1, 'api-relay-down', 'warn', 0, 'open_resolve', 0, 0,
+         'webhook', 'https://hooks.slack.com/services/relay', 'generic', ?, ?)`,
+    ).bind(NOW, NOW).run();
+    const westwood = API_RELAYS[0]!.host;
+    const connect = (westwoodUp: boolean): RelayConnect => ({ hostname }) => ({
+      opened: hostname === westwood && !westwoodUp ? Promise.reject(new Error('refused')) : Promise.resolve(),
+      close: () => undefined,
+    });
+    const sent: string[] = [];
+    const fetchStub = async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      sent.push(`${body.event} ${body.incident.subject.id}`);
+      return new Response('ok');
+    };
+    // Production order inside one scheduled tick is probe-after-ops; here the
+    // probe runs first so each pass sees the check it is counting.
+    const tick = async (n: number, westwoodUp: boolean) => {
+      const t = NOW + n * 300 + (n % 2) * 7; // a few seconds of cron jitter
+      await probeApiRelays(db(), t, connect(westwoodUp));
+      const pass = await runVerdictPass(e, t, 'all');
+      await planAndSendAlerts(e, pass.transitions, t, fetchStub);
+      return sent.splice(0);
+    };
+    expect(await tick(0, false)).toEqual([]);
+    expect(await tick(1, false)).toEqual([]);
+    expect(await tick(2, false)).toEqual([`incident.open ${westwood}:2053`]);
+    expect(await tick(3, false)).toEqual([]);
+    expect(await tick(4, true)).toEqual([`incident.resolve ${westwood}:2053`]);
   });
 });
 

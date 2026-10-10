@@ -81,6 +81,11 @@ const ROUTE_ACTIONS: Record<OpsV1Route, OpsAction> = {
   'GET /api/v1/ops/fx': 'ledger.read',
   'GET /api/v1/ops/slo': 'system.read',
   'GET /api/v1/ops/api-relays': 'nodes.read',
+  'GET /api/v1/ops/api-paths': 'nodes.read',
+  // A node agent credential: owner-only, like an exit node token.
+  'GET /api/v1/ops/node-agents': 'nodes.read',
+  'POST /api/v1/ops/nodes/{name}/agent-token': 'nodes.publish',
+  'DELETE /api/v1/ops/nodes/{name}/agent-token': 'nodes.publish',
 };
 
 function patternToRegExp(pattern: string): RegExp {

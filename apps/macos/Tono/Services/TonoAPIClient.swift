@@ -85,6 +85,16 @@ actor TonoAPIClient {
         /// this Mac's clock is wrong. No status line arrived: offline
         /// admission reads it as unreachable, but the user is told the clock.
         case clockSkew
+        /// H21-O-F8: the system trust store refused the control plane's
+        /// certificate for its issuer, chain or name: the network (or local
+        /// security software) is intercepting TLS. No status line arrived, so
+        /// offline admission reads it as unreachable, like `clockSkew`.
+        case tlsIntercepted
+        /// No control-plane path answered: which ones ran and how each
+        /// failed, for copy that says where it failed (mainland audit). No
+        /// status line arrived, so offline admission reads it as unreachable,
+        /// like `transport`.
+        case unreachable(ControlPlaneUnreachable)
         /// HTTP 503 `EXIT_IDENTITY_PROPAGATING`: this device's exit identity
         /// is not yet acknowledged by every served exit. Transient by design;
         /// a launch without a cached catalog waits and asks again soon.
@@ -106,6 +116,8 @@ actor TonoAPIClient {
             case let .entitlementBlocked(code, _): Self.entitlementDescription(code)
             case .invalidOrExpiredCode: String(localized: "That code is wrong or expired. Request a new one.")
             case .clockSkew: CertificateClock.userMessage
+            case .tlsIntercepted: NetworkInterception.userMessage
+            case let .unreachable(paths): paths.userMessage
             case .exitIdentityPropagating: String(localized: "Tono is still preparing this Mac's secure identity. Try again in a minute.")
             case .credentialPersistence: String(localized: "Tono could not save your sign-in in Keychain. You are signed out. Check that your login keychain is unlocked, then try again.")
             case .credentialRecoveryRecord: String(localized: "Tono could not update its sign-in recovery record. You are signed out. Check available disk space and Tono's Application Support folder permissions, then try again.")
@@ -153,6 +165,15 @@ actor TonoAPIClient {
     /// the system resolver and the pinned addresses both fail before any
     /// status line.
     private let relayPath: ControlPlanePath?
+    /// Decision 086: whether protection is armed without a tunnel, when the
+    /// relays are the only control-plane path PF admits. Production reads
+    /// `KillSwitchService.isArmedWithoutTunnel`; an injected session (tests)
+    /// reads false unless a reader is passed.
+    private let armedWithoutTunnel: @Sendable () -> Bool
+    /// How long a read waits for a status line on a path that has a head
+    /// budget (the system resolver) before the walk moves on
+    /// (`ControlPlanePath.systemHeadBudget`).
+    private let systemHeadBudget: TimeInterval
     /// #584: the label of a later path that answered where the paths before
     /// it failed, so later requests try it first. Cleared when a preferred
     /// attempt fails, is cancelled or its body fails. Kept in the app
@@ -160,8 +181,15 @@ actor TonoAPIClient {
     /// same network does not pay the dead paths again before the first
     /// sign-in or refresh; the Windows client remembers per process (#583).
     private var preferredPathLabel: String? {
-        didSet { persistPreferredPath() }
+        didSet {
+            preferredPathRevision &+= 1
+            persistPreferredPath()
+        }
     }
+    /// Bumped on every change of `preferredPathLabel`, so a pre-login probe
+    /// (backlog A4) that finishes after a real exchange has moved the
+    /// preference leaves it alone: an answer outranks a handshake.
+    private var preferredPathRevision: UInt64 = 0
     private let preferredPathKey: String
     /// A remembered path older than this is forgotten at launch: the network
     /// that needed it has likely changed.
@@ -170,6 +198,17 @@ actor TonoAPIClient {
     /// plane can tell a relayed request from one that arrived through an exit
     /// node (decision 077). Values are the path labels.
     static let pathHeader = "X-Tono-Path"
+    /// Decision 080: the paths this request already lost on its walk, in
+    /// attempt order, comma-separated, on every attempt; present and empty
+    /// when none was, which marks this client as reporting. Labels only:
+    /// no address, timing, error text or account value.
+    static let pathFailedHeader = "X-Tono-Path-Failed"
+    /// The labels the control plane reads in either header; any other label
+    /// (a test path's) is never reported as lost. Six labels and their
+    /// commas fit in 43 characters, under the server's 96.
+    nonisolated private static let reportablePathLabels: Set<String> = [
+        "pinned", "system_dns", "relay", "doh", "alt_port", "tunnel",
+    ]
     private let keychain: KeychainStore
     private var accessToken: String?
     /// A failed credential adoption must not use either account's credentials
@@ -212,6 +251,10 @@ actor TonoAPIClient {
     /// writer of the offline grant (#582). Read synchronously by the account
     /// session and by Connect.
     nonisolated let offlineGate: OfflineGrantGate
+    /// A19: where a path that failed before the next one ran goes, for the
+    /// customer timeline. The account session opens it (`admit`) only while a
+    /// verified account is ready and the timeline switch is on.
+    nonisolated let controlPlanePathTimeline: ControlPlanePathTimeline
 
     init(
         baseURL: URL = TonoAPIClient.configuredBaseURL(),
@@ -219,23 +262,38 @@ actor TonoAPIClient {
         session: URLSession? = nil,
         offlineGate: OfflineGrantGate = OfflineGrantGate(directory: ConfigStorage.shared.appSupportDirectory),
         pinnedPath: ControlPlanePath? = nil,
-        relayPath: ControlPlanePath? = nil
+        relayPath: ControlPlanePath? = nil,
+        systemHandshake: (@Sendable () async -> Bool)? = nil,
+        controlPlanePathTimeline: ControlPlanePathTimeline = ControlPlanePathTimeline(),
+        armedWithoutTunnel: (@Sendable () -> Bool)? = nil,
+        systemHeadBudget: TimeInterval = ControlPlanePath.systemHeadBudget
     ) {
         self.baseURL = baseURL
+        self.systemHeadBudget = systemHeadBudget
         self.keychain = keychain
         self.offlineGate = offlineGate
+        self.controlPlanePathTimeline = controlPlanePathTimeline
         let urlSession = session ?? URLSession(
             configuration: Self.controlPlaneSessionConfiguration(),
             delegate: TonoNoRedirectDelegate(),
             delegateQueue: nil
         )
-        systemPath = ControlPlanePath.systemResolver(urlSession)
+        var system = ControlPlanePath.systemResolver(urlSession)
+        // Backlog A4: an injected session (tests) has no handshake unless one
+        // is passed.
+        system.handshake = systemHandshake
+            ?? (session == nil ? ControlPlanePath.systemResolverHandshake(for: baseURL) : nil)
+        systemPath = system
         // #584: production falls back to the pinned addresses. An injected
         // session (tests) has none unless one is passed.
         self.pinnedPath = pinnedPath
             ?? (session == nil ? ControlPlanePath.pinnedAddresses(for: baseURL) : nil)
         self.relayPath = relayPath
             ?? (session == nil ? ControlPlanePath.relays(for: baseURL) : nil)
+        let protectionReader: @Sendable () -> Bool = { KillSwitchService.isArmedWithoutTunnel }
+        let fixtureReader: @Sendable () -> Bool = { false }
+        self.armedWithoutTunnel = armedWithoutTunnel
+            ?? (session == nil ? protectionReader : fixtureReader)
         preferredPathKey = Self.preferredPathKey(forHost: baseURL.host ?? "")
         preferredPathLabel = Self.loadPreferredPath(key: preferredPathKey)
     }
@@ -265,6 +323,55 @@ actor TonoAPIClient {
         } else {
             AppProfile.defaults.removeObject(forKey: preferredPathKey)
         }
+    }
+
+    /// Backlog A4 (D14-A, decision 079): the pre-login network self-check.
+    /// Handshakes every path in parallel (`ControlPlanePath.handshake`: TCP
+    /// and TLS only, no request, nothing identifying, at most
+    /// `ControlPlaneHandshake.budget` each) and makes the first path in the
+    /// usual order that completed one the remembered path, exactly as if a
+    /// request had answered there: kept in the app profile for
+    /// `preferredPathLifetime` and tried first by the next sign-in. The
+    /// system resolver completing puts the usual order back. Nothing reached,
+    /// or a path that cannot be probed ahead of the first one that was, says
+    /// nothing and leaves the preference as it was, as does a real exchange
+    /// that moved it while the probe ran. The walk itself is unchanged: a
+    /// preferred path that fails hands over to the usual order under the same
+    /// retry rule, so a request that may have arrived is never sent again.
+    func probePathsBeforeSignIn() async {
+        let paths = [systemPath] + [pinnedPath, relayPath].compactMap { $0 }
+        guard paths.count > 1 else { return }
+        let revision = preferredPathRevision
+        let startedAt = Date()
+        let reached: [Bool?] = await withTaskGroup(of: (Int, Bool?).self) { group in
+            for (index, path) in paths.enumerated() {
+                let handshake = path.handshake
+                group.addTask {
+                    let result = await handshake?()
+                    return (index, result)
+                }
+            }
+            var results = [Bool?](repeating: nil, count: paths.count)
+            for await (index, result) in group { results[index] = result }
+            return results
+        }
+        var details = ["duration_ms": Self.durationMilliseconds(since: startedAt)]
+        for (path, result) in zip(paths, reached) {
+            details[path.label] = result.map { $0 ? "reached" : "failed" } ?? "not_probed"
+        }
+        var winner: Int?
+        for (index, result) in reached.enumerated() {
+            guard let result else { break }
+            if result {
+                winner = index
+                break
+            }
+        }
+        let adopted = winner != nil && revision == preferredPathRevision
+        details["adopted"] = adopted ? paths[winner ?? 0].label : "none"
+        LocalTrafficAudit.shared.recordEvent("control_plane_path_probe", details: details)
+        guard adopted, let winner else { return }
+        preferredPathLabel = winner == 0 ? nil : paths[winner].label
     }
 
     /// The production control-plane session configuration. An injected
@@ -966,6 +1073,9 @@ actor TonoAPIClient {
               validOrigin
         else { throw APIError.invalidConfiguration }
         let requestStartedAt = Date()
+        // A19: taken once per request, so its path failures join the timeline
+        // only under the account and consent it started with.
+        let pathTimelineTicket = controlPlanePathTimeline.ticket()
         let auditDetails = [
             "method": method,
             "endpoint": path,
@@ -996,6 +1106,7 @@ actor TonoAPIClient {
                     request,
                     method: method,
                     auditDetails: auditDetails,
+                    pathTimelineTicket: pathTimelineTicket,
                     requestIsCurrent: requestIsCurrent
                 )
             } catch ControlPlaneExchangeError.invalidResponse {
@@ -1127,18 +1238,30 @@ actor TonoAPIClient {
         _ request: URLRequest,
         method: String,
         auditDetails: [String: String],
+        pathTimelineTicket: UInt64?,
         requestIsCurrent: (@Sendable () -> Bool)?
     ) async throws -> (ControlPlaneAnswer, String) {
         let maximumResponseBytes = 2 * 1024 * 1024
         let fallbacks = [pinnedPath, relayPath].compactMap { $0 }
         guard !fallbacks.isEmpty else {
-            let answer = try await systemPath.exchange(request, maximumResponseBytes)
+            var attempt = request
+            attempt.setValue(systemPath.label, forHTTPHeaderField: Self.pathHeader)
+            attempt.setValue("", forHTTPHeaderField: Self.pathFailedHeader)
+            let answer = try await systemPath.exchange(attempt, maximumResponseBytes)
             return (answer, systemPath.label)
         }
         // A path that answered where the ones before it could not goes in
         // front; the rest keep their order behind it.
         var order = [systemPath] + fallbacks
-        let preferred = preferredPathLabel
+        // Decision 086 (H1-F5, Option A): armed without a tunnel, the helper's
+        // PF permits the control plane only through the Tono relays. The
+        // system resolver and the pinned Cloudflare addresses would only wait
+        // out their timeouts against PF, so the relays are the whole walk,
+        // and the remembered preference is neither read nor changed. TLS
+        // still names the API host and is validated by default trust.
+        let relayOnly = relayPath != nil && armedWithoutTunnel()
+        if relayOnly, let relayPath { order = [relayPath] }
+        let preferred = relayOnly ? nil : preferredPathLabel
         let preferredFirst: Bool
         if let preferred, let index = order.firstIndex(where: { $0.label == preferred }), index > 0 {
             order.insert(order.remove(at: index), at: 0)
@@ -1149,16 +1272,36 @@ actor TonoAPIClient {
         // #588: a path that failed on a certificate date is the cause to
         // report when no path answers, whatever the next path failed on.
         var clockFailure: (any Error)?
+        // H21-O-F8: likewise a path whose certificate the trust store refused.
+        // Only marked on the error thrown; its code, and so the retry rule, is
+        // the one that would have been thrown anyway.
+        var sawRefusedCertificate = false
         // Every path's failure, `label[detail]`, so the reported error names
         // them all, as the Windows transport's combined message does.
         var failures: [String] = []
+        // The same failures as labels and classes, for the copy that names
+        // where the request failed (`ControlPlaneUnreachable`).
+        var attempts: [ControlPlaneUnreachable.Attempt] = []
+        // Decision 080: the labels of the paths lost so far, each once.
+        var lostPaths: [String] = []
         for (index, path) in order.enumerated() {
             if index > 0 { try Self.requireCurrent(requestIsCurrent) }
             let startedAt = Date()
             var attempt = request
             attempt.setValue(path.label, forHTTPHeaderField: Self.pathHeader)
+            attempt.setValue(lostPaths.joined(separator: ","), forHTTPHeaderField: Self.pathFailedHeader)
             do {
-                let answer = try await path.exchange(attempt, maximumResponseBytes)
+                let answer: ControlPlaneAnswer
+                // A read with another path behind it waits for a status line
+                // only `systemHeadBudget` on a path that can bound it, so a
+                // resolver answer that drops every packet cannot hold the
+                // remaining paths back for the session's 45 s. A mutating
+                // request keeps the full wait: it may already have arrived.
+                if method == "GET", index + 1 < order.count, let bounded = path.exchangeWithinHeadBudget {
+                    answer = try await bounded(attempt, maximumResponseBytes, systemHeadBudget)
+                } else {
+                    answer = try await path.exchange(attempt, maximumResponseBytes)
+                }
                 if answer.bodyFailure != nil {
                     // A body that failed after the status line, or was
                     // cancelled, neither keeps nor earns the preference.
@@ -1167,32 +1310,51 @@ actor TonoAPIClient {
                     // This path answered where the ones before it could not.
                     preferredPathLabel = path.label
                 }
+                NetworkInterception.record(intercepted: false)
                 return (answer, path.label)
             } catch {
                 // A preferred attempt that fails or is cancelled puts the
                 // system resolver back in front for the next request.
                 if index == 0, preferredFirst { preferredPathLabel = nil }
                 if CertificateClock.isDateFailure(error) { clockFailure = error }
+                if NetworkInterception.isTrustFailure(error) { sawRefusedCertificate = true }
                 failures.append("\(path.label)[\(Self.failureDetail(error))]")
+                attempts.append(.init(path: path.label, failure: ControlPlanePathTimeline.failureClass(error)))
+                if Self.reportablePathLabels.contains(path.label), !lostPaths.contains(path.label) {
+                    lostPaths.append(path.label)
+                }
                 guard index + 1 < order.count,
                       !(error is ControlPlaneExchangeError),
                       !Self.isCancellation(error),
                       // The retry rule itself, as if this were a first attempt
-                      // with one retry left.
+                      // with one retry left, or a TLS failure that proves no
+                      // request byte left on this path.
                       Self.shouldRetry(
                         method: method,
                         error: error as NSError,
                         responseReceived: false,
                         attempt: 1,
                         maximumAttempts: 2
-                      )
+                      ) || Self.failedBeforeRequest(error)
                 else {
+                    // A mutating request the first path may have delivered (a
+                    // timeout) ends its walk here. Handshake every path now, as
+                    // the pre-login probe does (no request, nothing
+                    // identifying), so the user's retry goes first to one that
+                    // completes TLS instead of waiting out the same dead path.
+                    if index == 0, index + 1 < order.count, method != "GET",
+                       !(error is ControlPlaneExchangeError), !Self.isCancellation(error) {
+                        Task { await self.probePathsBeforeSignIn() }
+                    }
                     if let clockFailure, !(error is ControlPlaneExchangeError),
                        !Self.isCancellation(error) {
                         throw Self.combined(clockFailure, failures: failures)
                     }
                     if error is ControlPlaneExchangeError || Self.isCancellation(error) { throw error }
-                    throw Self.combined(error, failures: failures)
+                    throw Self.combined(
+                        error, failures: failures, intercepted: sawRefusedCertificate,
+                        attempts: attempts, stoppedEarly: index + 1 < order.count
+                    )
                 }
                 let failure = error as NSError
                 LocalTrafficAudit.shared.recordEvent(
@@ -1205,6 +1367,16 @@ actor TonoAPIClient {
                         "duration_ms": Self.durationMilliseconds(since: startedAt),
                         "detail": String(failure.localizedDescription.prefix(300)),
                     ]) { _, new in new }
+                )
+                // A19: the same pair for the customer timeline, labels, class
+                // and time only. The last failure has no next path and stops
+                // above, so it is never paired with another request's path.
+                controlPlanePathTimeline.record(
+                    path: path.label,
+                    nextPath: order[index + 1].label,
+                    error: error,
+                    elapsedMs: Int(Date().timeIntervalSince(startedAt) * 1_000),
+                    ticket: pathTimelineTicket
                 )
             }
         }
@@ -1222,11 +1394,24 @@ actor TonoAPIClient {
     /// `error` with every path's failure in its description
     /// (`system_dns[...]; pinned[...]; relay[...]`), same domain and code, so
     /// the retry rule and the clock check still read it as the same failure.
-    nonisolated private static func combined(_ error: any Error, failures: [String]) -> any Error {
-        guard failures.count > 1 else { return error }
+    /// With `attempts`, also the walk's paths and their failure classes
+    /// (`ControlPlaneUnreachable`), and whether paths were left untried.
+    nonisolated private static func combined(
+        _ error: any Error, failures: [String], intercepted: Bool = false,
+        attempts: [ControlPlaneUnreachable.Attempt] = [], stoppedEarly: Bool = false
+    ) -> any Error {
+        // One failure is `error` itself, which already carries its own evidence.
+        guard failures.count > 1 || !attempts.isEmpty else { return error }
         let original = error as NSError
         var userInfo = original.userInfo
-        userInfo[NSLocalizedDescriptionKey] = failures.joined(separator: "; ")
+        if failures.count > 1 {
+            userInfo[NSLocalizedDescriptionKey] = failures.joined(separator: "; ")
+            if intercepted { userInfo[NetworkInterception.evidenceKey] = true }
+        }
+        if !attempts.isEmpty {
+            userInfo[ControlPlaneUnreachable.attemptsKey] = attempts
+            userInfo[ControlPlaneUnreachable.stoppedEarlyKey] = stoppedEarly
+        }
         return NSError(domain: original.domain, code: original.code, userInfo: userInfo)
     }
 
@@ -1345,6 +1530,12 @@ actor TonoAPIClient {
         )
         guard willRetry else {
             if CertificateClock.isDateFailure(error) { throw APIError.clockSkew }
+            if NetworkInterception.isTrustFailure(error) {
+                NetworkInterception.record(intercepted: true)
+                throw APIError.tlsIntercepted
+            }
+            // Where it failed, when the walk said so.
+            if let unreachable = ControlPlaneUnreachable(error) { throw APIError.unreachable(unreachable) }
             throw APIError.transport(error.localizedDescription)
         }
         try await Task.sleep(for: .seconds(1))
@@ -1371,6 +1562,26 @@ actor TonoAPIClient {
             NSURLErrorDNSLookupFailed,
             NSURLErrorNotConnectedToInternet,
         ].contains(error.code)
+    }
+
+    /// A URLSession failure in the TLS handshake: the handshake did not
+    /// complete (`secureConnectionFailed`, e.g. a reset in the middle of it)
+    /// or the trust store refused the certificate (a poisoned resolver answer
+    /// that leads to another site's certificate, an intercepting network). TLS
+    /// comes before the request, so no request byte left on this path, and
+    /// the walk may hand a mutating request to the next path as it does after
+    /// `cannotConnectToHost`. Only the walk reads this: the retry rule for the
+    /// same path, and a certificate date the clock cannot pass (#588), are
+    /// unchanged. The pinned client already files its own TLS failures as
+    /// not connected.
+    nonisolated private static func failedBeforeRequest(_ error: any Error) -> Bool {
+        let failure = error as NSError
+        guard failure.domain == NSURLErrorDomain else { return false }
+        if failure.code == NSURLErrorSecureConnectionFailed { return true }
+        return [
+            NSURLErrorServerCertificateUntrusted,
+            NSURLErrorServerCertificateHasUnknownRoot,
+        ].contains(failure.code) && NetworkInterception.isTrustFailure(error)
     }
 
     nonisolated private static func durationMilliseconds(since startedAt: Date) -> String {

@@ -151,7 +151,22 @@ final class ProtectedDNSManager {
         let service = try Self.validateService(rawService)
         // Resolve the selected service ID before reading or writing DNS;
         // name-only fallback is for services without an ID, not failed ID I/O.
-        let serviceID = try Self.requireServiceID(named: service, lookup: Self.scServiceID)
+        // A legacy name-only snapshot keeps the pre-R3-O5 first-match lookup
+        // until a normal restore retires it (see `serviceLookup`).
+        let existing: Snapshot?
+        do {
+            existing = try loadSnapshot()
+        } catch HelperFailure.invalid {
+            // Quarantined below, exactly as before; a transient read
+            // failure still refuses, so the lookup is never guessed.
+            existing = nil
+        }
+        let lookup: (String) throws -> String?
+        switch Self.serviceLookup(forExisting: existing) {
+        case .legacyFirstMatch: lookup = Self.scLegacyServiceID
+        case .currentLocation: lookup = Self.scServiceID
+        }
+        let serviceID = try Self.requireServiceID(named: service, lookup: lookup)
         let selected = NetworkService(id: serviceID, name: service)
         let previous = try loadSnapshotQuarantiningCorruption()
         let existingServers: [String]
@@ -963,11 +978,88 @@ final class ProtectedDNSManager {
         return id
     }
 
-    private static func scServiceID(named service: String) throws -> String? {
+    /// How `enable` turns the app's service name into an ID.
+    private enum ServiceLookup: Equatable {
+        /// First service with the name in any Network Location (pre-R3-O5).
+        case legacyFirstMatch
+        /// `ProtectedDNSServiceIdentity.select` over the current location.
+        case currentLocation
+    }
+
+    /// A snapshot without `serviceID` was written by a helper that matched
+    /// names alone; re-enable and restore pair it with a service by that
+    /// name. Choosing a different same-named service under it would write
+    /// the listener to a service the snapshot does not describe, so such a
+    /// device keeps the old lookup, with unchanged behaviour, until a normal
+    /// restore retires that snapshot; the next enable then records an ID.
+    /// An unreadable snapshot is quarantined by `enable` as before and
+    /// counts as none.
+    private static func serviceLookup(forExisting snapshot: Snapshot?) -> ServiceLookup {
+        guard let snapshot, snapshot.serviceID == nil else { return .currentLocation }
+        return .legacyFirstMatch
+    }
+
+    private static func scLegacyServiceID(named service: String) throws -> String? {
         try withPreferences(lock: false) { prefs in
             namedService(prefs, service).flatMap {
                 SCNetworkServiceGetServiceID($0) as String?
             }
+        }
+    }
+
+    /// Only the current Network Location's services are candidates, and the
+    /// primary service the app took the name from wins (R3-O5). Every other
+    /// location keeps its own same-named copy, which `namedService` would
+    /// return as readily as the live one.
+    private static func scServiceID(named service: String) throws -> String? {
+        let primaryIDs = primaryServiceIDs()
+        return try withPreferences(lock: false) { prefs in
+            guard let all = SCNetworkServiceCopyAll(prefs),
+                  let currentSet = SCNetworkSetCopyCurrent(prefs),
+                  let members = SCNetworkSetCopyServices(currentSet) else {
+                throw HelperFailure.system("Could not read the current network location.")
+            }
+            var services: [ProtectedDNSServiceIdentity.Candidate] = []
+            for index in 0..<CFArrayGetCount(all) {
+                let entry = unsafeBitCast(
+                    CFArrayGetValueAtIndex(all, index),
+                    to: SCNetworkService.self
+                )
+                guard let id = SCNetworkServiceGetServiceID(entry) as String?,
+                      let name = SCNetworkServiceGetName(entry) as String? else { continue }
+                services.append(ProtectedDNSServiceIdentity.Candidate(id: id, name: name))
+            }
+            var currentIDs = Set<String>()
+            for index in 0..<CFArrayGetCount(members) {
+                let member = unsafeBitCast(
+                    CFArrayGetValueAtIndex(members, index),
+                    to: SCNetworkService.self
+                )
+                if let id = SCNetworkServiceGetServiceID(member) as String? {
+                    currentIDs.insert(id)
+                }
+            }
+            return ProtectedDNSServiceIdentity.select(
+                named: service,
+                services: services,
+                currentLocationIDs: currentIDs,
+                primaryServiceIDs: primaryIDs
+            )
+        }
+    }
+
+    /// IPv4 then IPv6 `PrimaryService`, as the app reads them. Unreadable
+    /// leaves selection to a name that is unique in the current location.
+    private static func primaryServiceIDs() -> [String] {
+        guard let store = SCDynamicStoreCreate(
+            nil, "Tono protected DNS service" as CFString, nil, nil
+        ) else { return [] }
+        return [kSCEntNetIPv4, kSCEntNetIPv6].compactMap { (entity: CFString) -> String? in
+            let key = SCDynamicStoreKeyCreateNetworkGlobalEntity(
+                nil, kSCDynamicStoreDomainState, entity
+            )
+            let value = SCDynamicStoreCopyValue(store, key) as? [String: Any]
+            return value?[kSCDynamicStorePropNetPrimaryService as String] as? String
         }
     }
 
@@ -1048,6 +1140,9 @@ final class ProtectedDNSManager {
         }
     }
 
+    /// First service with this name in any Network Location. Only name-only
+    /// paths (legacy snapshots, enumeration without IDs) use it; `enable`
+    /// resolves through `scServiceID` unless a legacy snapshot is on disk.
     private static func namedService(_ prefs: SCPreferences, _ name: String) -> SCNetworkService? {
         guard let array = SCNetworkServiceCopyAll(prefs) else { return nil }
         let count = CFArrayGetCount(array)
@@ -1771,6 +1866,24 @@ final class ProtectedDNSManager {
         return true
     }
 
+    /// R3-O5 gate: with a legacy name-only snapshot on disk, `enable` keeps
+    /// the pre-R3-O5 first-match lookup, so every later step (same-owner
+    /// re-enable, retire, restore) sees the service it always did. Only no
+    /// snapshot, or one with an ID, takes the current-location selection.
+    static func runLegacySnapshotLookupSelfTest() -> Bool {
+        let legacy = serviceLookup(forExisting: Snapshot(service: "Wi-Fi", servers: ["10.0.0.53"]))
+        let withID = serviceLookup(
+            forExisting: Snapshot(service: "Wi-Fi", serviceID: "S1", servers: ["10.0.0.53"])
+        )
+        let none = serviceLookup(forExisting: nil)
+        guard legacy == .legacyFirstMatch, withID == .currentLocation, none == .currentLocation else {
+            print("DNS legacy-snapshot lookup regression FAILED: legacy=\(legacy), withID=\(withID), none=\(none)")
+            return false
+        }
+        print("DNS legacy-snapshot lookup regression passed: a name-only snapshot keeps the old lookup")
+        return true
+    }
+
     /// A renamed service still answers by `serviceID`. The display name in
     /// the snapshot is stale and must not be the status key.
     static func runRenamedServiceStatusSelfTest() -> Bool {
@@ -1990,6 +2103,7 @@ final class ProtectedDNSManager {
                 && runEnableIdentityFailureSelfTest()
                 && runBootDNSRecoveryDecisionSelfTest()
                 && runRenamedServiceStatusSelfTest()
+                && runLegacySnapshotLookupSelfTest()
                 && runServerCountCapSelfTest()
         } catch {
             return false

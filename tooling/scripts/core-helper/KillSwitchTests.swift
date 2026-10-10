@@ -47,8 +47,10 @@ extension KillSwitchManager {
                 apiHosts: [],
                 exitHints: [],
                 tunnelInterfaces: ["utun199"],
-                resolvedHosts: ["api.example.com": ["1.1.1.1"]],
-                pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+                // A Tailscale control host: only those keep a `tono-control`
+                // permit (decision 086 never permits the Tono API host's addresses).
+                resolvedHosts: ["controlplane.tailscale.com": ["1.1.1.1"]],
+                pinnedHosts: ["controlplane.tailscale.com": ["1.1.1.1"]],
                 derpEndpoints: [],
                 cachedDERPEndpoints: [],
                 proxyTargets: [
@@ -222,10 +224,10 @@ extension KillSwitchManager {
                     exitHints: [],
                     tunnelInterfaces: ["utun199"],
                     resolvedHosts: [
-                        "api.example.com": ["1.1.1.1"],
-                        "extra.example.com": ["9.9.9.9"],
+                        "controlplane.tailscale.com": ["1.1.1.1"],
+                        "login.tailscale.com": ["9.9.9.9"],
                     ],
-                    pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+                    pinnedHosts: ["controlplane.tailscale.com": ["1.1.1.1"]],
                     derpEndpoints: [],
                     cachedDERPEndpoints: [],
                     proxyTargets: [
@@ -305,6 +307,31 @@ extension KillSwitchManager {
             )
         } else {
             check("standalone-emergency-main-written", false)
+        }
+
+        // 8b. Decision 086: the tunnel-less ruleset's relay permit is accepted
+        //     by the kernel as rendered, and no Cloudflare address reaches it.
+        let relayState = KillSwitchState(
+            armed: true, tailscaleBootstrapEnabled: false, apiHosts: ["api.afk.ccwu.cc"],
+            exitHints: [], tunnelInterfaces: [],
+            resolvedHosts: ["api.afk.ccwu.cc": ["104.20.26.170", "172.66.162.98"]],
+            pinnedHosts: ["api.afk.ccwu.cc": ["104.20.26.170", "172.66.162.98"]],
+            derpEndpoints: [], cachedDERPEndpoints: [], proxyTargets: [],
+            sessionDirectEndpoints: [], reviewedBundleDirectEnabled: false
+        )
+        if let relayShown = load(renderRules(
+            state: relayState, allowedUID: 501, physicalInterfaces: physicalInterfaces
+        )) {
+            check("kernel-holds-relay-permit",
+                  relayShown.contains("179.253.233.220 port = 2053")
+                    && relayShown.contains("179.255.154.17 port = 2053"))
+            check("kernel-relay-permit-is-user-only", relayShown.split(separator: "\n")
+                .filter { $0.contains("2053") }
+                .allSatisfy { $0.contains("user = 501") && !$0.contains("user = 0") })
+            check("kernel-has-no-cloudflare-permit",
+                  !relayShown.contains("104.20.26.170") && !relayShown.contains("172.66.162.98"))
+        } else {
+            check("relay-ruleset-loads", false)
         }
 
         // 9. The helper holds a PF enable reference of its own. Before, it ran
@@ -1191,7 +1218,9 @@ extension KillSwitchManager {
                     "port { 80, 443, 8000, 8080 } user root keep state (if-bound)",
             ]
             let required = [
-                "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound)",
+                // Decision 086: without a tunnel the control plane is the relays.
+                "pass out quick inet proto tcp to 179.253.233.220 port 2053 user 501 "
+                    + "keep state (if-bound) label \"tono-api-relay\"",
                 "to 8.8.8.8 port 443 user root keep state (if-bound)",
                 "proto udp",
                 "to 8.8.4.4 port 8443 user root keep state (if-bound)",
@@ -1227,6 +1256,10 @@ extension KillSwitchManager {
             ]
             let ruleShapesHold = required.allSatisfy(rules.contains)
                 && !forbidden.contains(where: rules.contains)
+                // The API host's own address (here 1.1.1.1) is never a
+                // control permit; 1.1.1.1:443 for root below is a session
+                // direct endpoint this state also carries.
+                && !rules.contains("to 1.1.1.1 port 443 user { 0, 501 }")
             let bundleShapesHold = bundleRequired.allSatisfy(tunneledRules.contains)
                 && !forbidden.contains(where: tunneledRules.contains)
             // #586: the connect's first arm runs before the TUN exists, where
@@ -1427,7 +1460,6 @@ extension KillSwitchManager {
             let cloudRequired = [
                 "pass in quick on utun199 all keep state (if-bound)",
                 "pass out quick on utun199 all keep state (if-bound)",
-                "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound)",
                 // DHCP leaves only as a limited broadcast, and a reply creates no
                 // state that could carry port 68 back out to its sender.
                 "from any port 68 to 255.255.255.255 port 67 keep state (if-bound)",
@@ -1443,6 +1475,10 @@ extension KillSwitchManager {
                 "to 8.8.4.4 port 443",
                 // A session that did not ask for it must not inherit the permit.
                 "port { 80, 443, 8000, 8080 }",
+                // Decision 086: connected, the control plane uses the tunnel;
+                // neither the API host's address nor a relay is permitted.
+                "to 1.1.1.1 port 443",
+                "label \"tono-api-relay\"",
             ]
             let cloudShapesHold = cloudRequired.allSatisfy(cloudRules.contains)
                 && !cloudForbidden.contains(where: cloudRules.contains)
@@ -1471,15 +1507,18 @@ extension KillSwitchManager {
             // The tunneled set holds every line of `rules` plus the bundle permit.
             let armedParse = pfSyntaxAccepts(tunneledRules)
             let bootstrapParse = pfSyntaxAccepts(cloudRules)
+            // Decision 086: the tunnel-less set carries the relay permit
+            // (`user <uid>`, a form no other rule uses).
+            let relayParse = pfSyntaxAccepts(rules)
             let pfParses: Bool
-            switch (armedParse, bootstrapParse) {
-            case (nil, _), (_, nil):
+            switch (armedParse, bootstrapParse, relayParse) {
+            case (nil, _, _), (_, nil, _), (_, _, nil):
                 let warning = "warn: PF syntax check skipped (needs root); "
                     + "run `sudo tono-core-helper --self-test` to include it\n"
                 FileHandle.standardError.write(Data(warning.utf8))
                 pfParses = true
-            case let (armed?, bootstrap?):
-                pfParses = armed && bootstrap
+            case let (armed?, bootstrap?, relay?):
+                pfParses = armed && bootstrap && relay
             }
             // R609-F2: a command past its deadline is killed and fails. It
             // must never hold the helper's request thread, nor read as done.
@@ -1893,6 +1932,109 @@ extension KillSwitchManager {
             return false
         }
         return agreedFiltering(first: .success(false), confirmDown: { throw Unreadable() }) == nil
+    }
+
+    /// H1-F5, decision 086 (owner's Option A). Armed without a tunnel, the
+    /// control-plane permit is exactly the compiled relay endpoints, TCP, for
+    /// the interactive user: no Cloudflare address (bundled, learned or
+    /// resolved), no root. Connected, there is none. Moving off a ruleset that
+    /// still permitted the API's Cloudflare addresses kills their states; the
+    /// tunnel arm spares only a relay address the Core still dials as its exit.
+    static func runControlRelayPermitSelfTest() -> Bool {
+        var failures: [String] = []
+        func check(_ name: String, _ ok: Bool) {
+            if !ok { failures.append(name) }
+        }
+        let cloudflare = ["104.20.26.170", "172.66.162.98"]
+        func state(tunnel: Bool, exit: String = "203.0.113.7") -> KillSwitchState {
+            KillSwitchState(
+                armed: true, tailscaleBootstrapEnabled: false,
+                apiHosts: ["api.afk.ccwu.cc"], exitHints: [],
+                tunnelInterfaces: tunnel ? ["utun199"] : [],
+                // Bundled pins plus a learned one: none may be permitted.
+                resolvedHosts: ["api.afk.ccwu.cc": cloudflare + ["104.20.27.170"]],
+                pinnedHosts: ["api.afk.ccwu.cc": cloudflare],
+                derpEndpoints: [], cachedDERPEndpoints: [],
+                proxyTargets: [.init(host: exit, transport: "tcp", port: 443, addresses: [exit])],
+                sessionDirectEndpoints: [], reviewedBundleDirectEnabled: false
+            )
+        }
+        let bootstrap = renderRules(state: state(tunnel: false), allowedUID: 501, physicalInterfaces: ["en0"])
+        let relayRules = bootstrap.split(separator: "\n").filter { $0.contains("tono-api-relay") }
+        check("relay-permit-is-exactly-the-compiled-relays", relayRules == [
+            "pass out quick inet proto tcp to 179.253.233.220 port 2053 user 501 keep state (if-bound) label \"tono-api-relay\"",
+            "pass out quick inet proto tcp to 179.255.154.17 port 2053 user 501 keep state (if-bound) label \"tono-api-relay\"",
+        ])
+        check("relays-match-the-app-list", ControlPlaneRelays.endpoints.map { "\($0.address):\($0.port)" }
+              == ["179.253.233.220:2053", "179.255.154.17:2053"])
+        check("no-cloudflare-address-permitted",
+              !cloudflare.contains { bootstrap.contains($0) } && !bootstrap.contains("104.20.27.170"))
+        check("no-tono-control-for-the-api-host", !bootstrap.contains("tono-control"))
+        check("no-root-on-the-relay-permit", !relayRules.contains { $0.contains("user root") || $0.contains("{ 0") })
+        check("relay-permit-precedes-block", {
+            guard let relay = bootstrap.range(of: "tono-api-relay"),
+                  let block = bootstrap.range(of: "block drop out quick all") else { return false }
+            return relay.lowerBound < block.lowerBound
+        }())
+        let connected = renderRules(state: state(tunnel: true), allowedUID: 501, physicalInterfaces: ["en0"])
+        check("connected-has-no-api-permit",
+              !connected.contains("tono-api-relay") && !cloudflare.contains { connected.contains($0) })
+        let noAPIHost = KillSwitchState(
+            armed: true, tailscaleBootstrapEnabled: false, apiHosts: [], exitHints: [],
+            tunnelInterfaces: [], resolvedHosts: [:], pinnedHosts: [:], derpEndpoints: [],
+            cachedDERPEndpoints: [], proxyTargets: [], sessionDirectEndpoints: [],
+            reviewedBundleDirectEnabled: false
+        )
+        check("no-api-host-no-relay-permit", controlRelayPermitEndpoints(state: noAPIHost).isEmpty)
+
+        // The transition from a ruleset that still permitted the API host's
+        // Cloudflare addresses (every arm before decision 086) kills them.
+        let newPass = passRules(in: bootstrap)
+        let legacyPass = newPass
+            .filter { !$0.contains("tono-api-relay") }
+            .union(cloudflare.map {
+                "pass out quick inet proto tcp to \($0) port 443 user { 0, 501 } keep state (if-bound) label \"tono-control\""
+            })
+        let fromLegacy = sparingSharedRelayHosts(
+            stateDisposal(replacing: legacyPass, with: newPass),
+            withdrawn: legacyPass.subtracting(newPass), remaining: newPass
+        )
+        check("legacy-cloudflare-states-killed", fromLegacy == .targeted(cloudflare.sorted()))
+
+        // Tunnel arm: the relay permit goes and its states are killed, unless
+        // the Core's exit is that relay node, whose exit states are spared.
+        let toTunnel = passRules(in: connected)
+        let tunnelDisposal = sparingSharedRelayHosts(
+            stateDisposal(replacing: newPass, with: toTunnel),
+            withdrawn: newPass.subtracting(toTunnel), remaining: toTunnel
+        )
+        check("tunnel-arm-kills-relay-states",
+              tunnelDisposal == .targeted(["179.253.233.220", "179.255.154.17"]))
+        let relayExitBootstrap = passRules(in: renderRules(
+            state: state(tunnel: false, exit: "179.253.233.220"), allowedUID: 501, physicalInterfaces: ["en0"]
+        ))
+        let relayExitConnected = passRules(in: renderRules(
+            state: state(tunnel: true, exit: "179.253.233.220"), allowedUID: 501, physicalInterfaces: ["en0"]
+        ))
+        let relayExitDisposal = sparingSharedRelayHosts(
+            stateDisposal(replacing: relayExitBootstrap, with: relayExitConnected),
+            withdrawn: relayExitBootstrap.subtracting(relayExitConnected), remaining: relayExitConnected
+        )
+        check("exit-on-a-relay-node-is-spared", relayExitDisposal == .targeted(["179.255.154.17"]))
+        // An exit permit withdrawn from the same address is still killed.
+        let exitMoved = sparingSharedRelayHosts(
+            .targeted(["179.253.233.220"]),
+            withdrawn: ["pass out quick inet proto tcp to 179.253.233.220 port 443 user root keep state (if-bound) label \"tono-exit\""],
+            remaining: ["pass out quick inet proto tcp to 179.253.233.220 port 2053 user 501 keep state (if-bound) label \"tono-api-relay\""]
+        )
+        check("withdrawn-exit-still-killed", exitMoved == .targeted(["179.253.233.220"]))
+
+        if !failures.isEmpty {
+            FileHandle.standardError.write(Data(
+                "control relay self-test failed: \(failures.joined(separator: ", "))\n".utf8
+            ))
+        }
+        return failures.isEmpty
     }
 
     static func runNetworkSelfTest() -> Bool {

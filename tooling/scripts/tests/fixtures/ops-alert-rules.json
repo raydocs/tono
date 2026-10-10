@@ -1,0 +1,46 @@
+{
+  "items": [
+    {
+      "id": "2dd81896-28cb-4cbc-b332-9ff7fa0631f0",
+      "name": "Email: warn and above",
+      "enabled": true,
+      "matchKind": null,
+      "matchSubjectType": null,
+      "matchSubjectId": null,
+      "minSeverity": "warn",
+      "minImpact": 0,
+      "fireOn": "open",
+      "delaySeconds": 0,
+      "cooldownSeconds": 3600,
+      "channel": "email",
+      "target": "owner@example.invalid",
+      "template": "generic",
+      "secretRef": null,
+      "lastFiredAt": null,
+      "createdAt": 1791100000,
+      "updatedAt": 1791100000
+    },
+    {
+      "id": "fixture-webhook-severe",
+      "name": "Webhook: severe",
+      "enabled": true,
+      "matchKind": null,
+      "matchSubjectType": null,
+      "matchSubjectId": null,
+      "minSeverity": "severe",
+      "minImpact": 0,
+      "fireOn": "open_resolve",
+      "delaySeconds": 90,
+      "cooldownSeconds": 0,
+      "channel": "webhook",
+      "target": "https://api.telegram.org/bot/sendMessage",
+      "template": "telegram",
+      "secretRef": "TELEGRAM_BOT_TOKEN",
+      "lastFiredAt": null,
+      "createdAt": 1791100000,
+      "updatedAt": 1791100000
+    }
+  ],
+  "nextCursor": null,
+  "updatedAt": 1791100000
+}

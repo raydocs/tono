@@ -1,0 +1,181 @@
+name: Screenshots nightly
+
+# Owner decision D9-A (docs/ops/amp-backlog-2026-10-10.md §7): screenshot and
+# window-capture tests are not part of the pull-request gate (ci-gate). They
+# run here once a night on main, and on demand.
+#
+# - macOS: the four MacSeaPolishRenderTests methods gated on
+#   TONO_HOSTED_WINDOW_DIAGNOSTIC (whole-window captures through
+#   ScreenCaptureKit) plus the Chinese whole-window pass. macos-ci.yml skips
+#   exactly these four; tooling/scripts/tests/screenshot-nightly-split.test.mjs
+#   holds the two lists equal. MacUsabilityRenderTests stay in the PR gate:
+#   they assert native labels, identifiers and opacity, not pixels.
+#   macos-release.yml still runs the whole target, these captures included.
+# - Ops console: Playwright pixel comparisons (`toHaveScreenshot`). The PR gate
+#   runs the same specs with --ignore-snapshots on Linux; the baselines were
+#   captured on macOS at DPR 2, so they are compared here on macOS.
+# - Windows: the PR gate has no screenshot test, so nothing moved.
+#
+# A failure is a red run in the Actions tab, and a scheduled or dispatched run
+# on main opens (or comments on) one tracking issue so it is not missed.
+
+on:
+  schedule:
+    - cron: '23 18 * * *' # 02:23 Asia/Shanghai
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: screenshots-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sing-box-input:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Build and verify fixed darwin-arm64 input
+        run: sh tooling/scripts/prepare-macos-sing-box.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sing-box-darwin-arm64-nightly
+          path: apps/macos/Tono/Resources/sing-box
+          if-no-files-found: error
+          retention-days: 3
+
+  macos-window-captures:
+    needs: sing-box-input
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: sing-box-darwin-arm64-nightly
+          path: apps/macos/Tono/Resources
+      - name: Verify core and build current helper
+        run: |
+          chmod +x apps/macos/Tono/Resources/sing-box
+          sh tooling/scripts/verify-macos-sing-box.sh
+          tooling/scripts/build-core-helper.sh
+
+      - name: Whole-window Mac polish captures (English)
+        env:
+          TEST_RUNNER_TONO_HOSTED_WINDOW_DIAGNOSTIC: "1"
+        run: |
+          xcodebuild \
+            -project apps/macos/Tono.xcodeproj \
+            -scheme Tono \
+            -configuration Debug \
+            -only-testing:TonoTests/MacSeaPolishRenderTests/testWholeWindowStatesAndAccessibility \
+            -only-testing:TonoTests/MacSeaPolishRenderTests/testFullTransitionsWaterAndProcessCPU \
+            -only-testing:TonoTests/MacSeaPolishRenderTests/testSharedControlSurfacesAndAccessibilityVariants \
+            -only-testing:TonoTests/MacSeaPolishRenderTests/testNativeResizeCoverageBeforeAndAfterCachedTreeRebuild \
+            -resultBundlePath apps/macos/test-results/TonoTests-polish.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            test
+
+      - name: Whole-window Mac polish captures (Chinese)
+        env:
+          TEST_RUNNER_TONO_HOSTED_WINDOW_DIAGNOSTIC: "1"
+        run: |
+          xcodebuild \
+            -project apps/macos/Tono.xcodeproj \
+            -scheme Tono \
+            -configuration Debug \
+            -testLanguage zh-Hans -testRegion CN \
+            -only-testing:TonoTests/MacSeaPolishRenderTests/testWholeWindowStatesAndAccessibility \
+            -resultBundlePath apps/macos/test-results/TonoTests-zh.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            test
+
+      - name: Preserve captures and result bundles
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: tono-macos-window-captures-${{ github.sha }}
+          path: |
+            apps/macos/test-results/TonoTests-polish.xcresult
+            apps/macos/test-results/TonoTests-zh.xcresult
+            apps/macos/test-results/renders/*.png
+            apps/macos/test-results/renders/*.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+  ops-console-screenshots:
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: services/ops-console
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Install exactly what the lockfile pins
+        run: npm ci
+
+      - name: Install Playwright's Chromium
+        run: npx playwright install chromium
+
+      - name: Screenshot baselines compared
+        # The same specs as the PR gate, without --ignore-snapshots, so every
+        # toHaveScreenshot assertion compares against e2e/__screenshots__.
+        run: npx playwright test
+
+      - name: Preserve diffs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ops-console-screenshot-diffs-${{ github.sha }}
+          path: services/ops-console/test-results
+          if-no-files-found: warn
+          retention-days: 7
+
+  report-failure:
+    needs: [sing-box-input, macos-window-captures, ops-console-screenshots]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the tracking issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const title = 'Screenshots nightly is failing';
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `Run ${run} (${context.eventName}, \`${context.sha}\`) failed. ` +
+              'Diffs and captures are in that run\'s artifacts. Close this issue when the nightly is green again.';
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              creator: 'github-actions[bot]',
+            });
+            const open = issues.find((issue) => !issue.pull_request && issue.title === title);
+            if (open) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: open.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+              });
+            }
