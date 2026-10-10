@@ -246,7 +246,10 @@ walks, 1 s apart, and only when the retry rule allows a second one):
 | `pinned` | 10 s connect, split across the addresses | same |
 | `relay` | 5 s connect, split across both relays (a dead first relay leaves the second the rest) | same |
 
-So a read reaches the relays at most 25 s after it starts, whatever the system resolver does.
+So when the pinned connects fail, a read reaches the relays at most 25 s after it starts, whatever
+the system resolver does. A pinned address that accepts the connection and then never answers has no
+head budget: the read waits for it up to the session's timeout, so the relays can start about 60 s in
+(#1523 review minor M2, finding MAC-CP-PINNED-SILENT-WAIT).
 A POST whose system attempt timed out is not re-sent, because it may have arrived. The client
 handshakes every path straight away instead (no request, nothing identifying, as the pre-login
 probe does), and the user's retry goes first to a path that completed TLS. A path remembered
