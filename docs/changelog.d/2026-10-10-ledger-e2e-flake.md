@@ -1,0 +1,16 @@
+## 2026-10-10 · ops 控制台：账目冲正 e2e 偶发失败的根因修复
+- 归属：ops 计划（[plan-2026-09-11](../ops/plan-2026-09-11.md)），[Amp 待办](../ops/amp-backlog-2026-10-10.md) §9 工程项（`e2e/ledger.spec.ts:155`）。只改 ops 控制台账目页的渲染方式和这一个 spec；不改接口、文案和加载后的页面外观。
+- 来源：main `a6ebf460` → 分支 `amp/ledger-e2e-flake`，PR #PRNUM；未合 main。
+- 缺陷修复：无客户可见缺陷。
+- 新增/优化：账目页每次写入（冲正、记一笔、改备注、锁定）都会给月汇总换 key，汇总重读期间 `month0 === null` 把下面四节整块卸掉，其中 SLO 表（fixture 约一千行）跟着卸载、重新请求 `/slo`、重新画。现在 SLO 那一节在汇总重读时只加 `hidden`、不卸载，`LedgerSlo` 用 `memo` 包起来，页面其余部分重渲时不再重画它。加载完成后的 DOM 和以前一样；SLO 不再因为账目写入顺带重拉（它本来就不读账目）。
+- 工程与测试：
+  - 根因：[ci-gate 38056004583](https://github.com/raydocs/tono/actions/runs/38056004583) 第 1 次尝试 shard 1 的失败是 `toHaveCount(2)` 5 s 内一直拿到 0 行。本地复现时页面内采样显示：点了「冲正」之后对话框一直开着（`#root` 有 `aria-hidden`，所以 `getByRole('row')` 是 0），要到 SLO 表卸载/重拉/重画那段长任务结束才关。CPU 剖析（1x，点击后 2.5 s 窗口）：改前主线程几乎全忙（空闲约 40 ms，忙约 3.5 s），改后忙约 1.5 s。不是 fixture 共享状态问题：这条用例的会话本来就是每个 project 独立、CI 每个分片一个新 dev server。
+  - spec：冲正后先等对话框关掉（写入落地、页面已重读），行只在「条目」那一节里找（不再每次轮询都走一遍 SLO 那一千行）；写入类用例的 fixture 会话名加上 `repeatEachIndex` 和 `retry`，`--repeat-each` 和重试不再接着上一次留下的已冲正/已锁定状态（之前本地 `--repeat-each` 第二轮必挂）。没加重试，没调全局超时。
+  - 历史：近 150 次 ci-gate（含所有重跑尝试）里 `ledger.spec.ts` 只失败过这一次；另一处 e2e 失败（run 38046466558 的 `nodes-phone.spec.ts:12`，light/dark 都挂、溢出 208 px）是那条分支上的确定性回归，不是偶发。
+- 验证（Linux 云端，Playwright 1.63，用本机缓存的 Chrome 155 通过临时 config 的 `executablePath` 跑，临时 config 未提交）：
+  - `npx playwright test e2e/ledger.spec.ts --repeat-each=20 --ignore-snapshots`（CI=1，1 worker，light+dark）：600 passed（33.8 min）。
+  - 冲正用例「点确认 → 对话框关」耗时，3 worker 并发、各 24 次：改前中位 973 ms、最大 6547 ms（超过 5 s 就是 CI 那次的样子）；改后中位 1514 ms、最大 2324 ms。1 worker 各 8 次：改前最大 4344 ms（行出现最大 5595 ms），改后最大 1543 ms（行出现最大 1603 ms）；另一轮 1 worker 各 20 次两边都没有超过 2 s 的（改前最大 1673 ms，改后 1654 ms），长尾是偶发的。改后中位反而慢一点（SLO 一节显隐要重排一次），但长尾没了。
+  - `npx vitest run`：45 files / 347 tests passed；`npm run typecheck` 通过；`npx eslint src --max-warnings=0` 通过。
+  - 未执行：macOS 像素基线对比（nightly 跑；加载后的页面结构没变）。
+- 候选/发布：无新包，仅源码。
+- 剩余限制：CPU 降速 4x 且 6 个 worker 并发这种极端负载下，改前改后这条用例都大多超过 5 s（改后单轮用时约少一半），根子是这一页一次画约一千行 SLO 表、每次显隐都要整表重排；要彻底轻下来得给 SLO 表分页或虚拟化，那是 UI 改动，本 PR 不做。
