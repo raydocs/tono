@@ -175,6 +175,7 @@ export const customerCopy = {
     appCrash: '崩溃',
     networkRestore: '网络恢复',
     killSwitchFail: '断网保护失败',
+    controlPlanePathFail: '换路径',
   } as const,
   stageWord: {
     dial: '拨号',

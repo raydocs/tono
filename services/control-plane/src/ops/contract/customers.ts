@@ -81,6 +81,14 @@ export interface ConnectionEventDto {
   edgeViaExit: boolean;
   /** Present when the client reported the attempt's transport. */
   transport?: 'tcp' | 'hy2' | null;
+  /**
+   * Present when the client reported them. `nodeSwitch`: node names.
+   * `controlPlanePathFail`: the failed and the next control-plane path label
+   * (`pinned`, `system_dns`, `relay`, …) and the failure class; never an address.
+   */
+  from?: string | null;
+  to?: string | null;
+  reason?: string | null;
 }
 
 /** One hour of one customer: 在线 / 已连接 heat bar plus bytes. */
@@ -237,7 +245,7 @@ const EVENT_KEYS = [
   'id', 'atMs', 'receivedAt', 'source', 'userId', 'deviceId', 'platform', 'appVersion', 'osVersion',
   'kind', 'node', 'stage', 'outcome', 'code', 'error', 'elapsedMs', 'delayMs', 'tcpDelayMs',
   'exitDelayMs', 'catalogRevision', 'edgeAsn', 'edgeAsOrg', 'edgeCountry', 'edgeRegion', 'edgeViaExit',
-  'transport',
+  'transport', 'from', 'to', 'reason',
 ];
 
 export function assertConnectionEvent(value: unknown, path = 'connectionEvent'): ConnectionEventDto {
@@ -269,6 +277,9 @@ export function assertConnectionEvent(value: unknown, path = 'connectionEvent'):
     edgeRegion: optText(row, path, 'edgeRegion'),
     edgeViaExit: bool(row, path, 'edgeViaExit'),
     ...(row.transport === undefined ? {} : { transport: optOneOf(row, path, 'transport', ['tcp', 'hy2'] as const) }),
+    ...(row.from === undefined ? {} : { from: optText(row, path, 'from') }),
+    ...(row.to === undefined ? {} : { to: optText(row, path, 'to') }),
+    ...(row.reason === undefined ? {} : { reason: optText(row, path, 'reason') }),
   };
 }
 

@@ -83,6 +83,27 @@ impl AttemptPath {
     }
 }
 
+/// A19: one control-plane path that failed provably undelivered, reported when the next path
+/// starts, like the macOS `control_plane_path_failed` audit event. Path labels (the
+/// `X-Tono-Path` values), the failure class and the time spent: never an address, URL, host or
+/// account value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PathFailure {
+    pub path: &'static str,
+    pub next_path: &'static str,
+    pub reason: &'static str,
+    pub elapsed_ms: u64,
+}
+
+/// Receives each [`PathFailure`]. Must not block: it runs inline before the next attempt.
+pub(crate) type PathFailureSink = Box<dyn Fn(PathFailure) + Send + Sync>;
+
+tokio::task_local! {
+    /// The failed attempt of the current `send` waiting to learn which path follows it. Scoped
+    /// per `send`, so a failure is never paired with another request's attempt.
+    static PENDING_PATH_FAILURE: std::cell::Cell<Option<(AttemptPath, &'static str, u64)>>;
+}
+
 /// Map a reqwest failure onto the retry-policy classification (§1).
 ///
 /// Ordering matters, and it is `is_connect()` first. reqwest sets *both*
@@ -344,6 +365,9 @@ pub struct TonoTransport {
     /// undelivered failure, so a network that recovers goes back to the pins. Process memory
     /// only.
     preferred_relay: std::sync::atomic::AtomicUsize,
+    /// A19: where path failures go (the audit log, then the periodic timeline). None in tests
+    /// that do not ask for it.
+    path_failure_sink: Option<PathFailureSink>,
 }
 
 /// One compiled relay: where the TCP connection lands and the client that lands it there.
@@ -392,7 +416,14 @@ impl TonoTransport {
                 Self::builder().connect_timeout(RELAY_CONNECT_TIMEOUT)
             })?,
             preferred_relay: std::sync::atomic::AtomicUsize::new(0),
+            path_failure_sink: None,
         })
+    }
+
+    /// Report every path failure that is followed by another path to `sink` (A19).
+    pub(crate) fn with_path_failure_sink(mut self, sink: PathFailureSink) -> Self {
+        self.path_failure_sink = Some(sink);
+        self
     }
 
     /// One client per relay, pinned to that relay's socket for `host`. Everything else is the
@@ -511,6 +542,7 @@ impl TonoTransport {
                 .build()
                 .context("failed to build the preferred resolving test client")?,
             tunnel_port: std::sync::atomic::AtomicU16::new(0),
+            path_failure_sink: None,
         })
     }
 
@@ -541,9 +573,40 @@ fn method_of(method: HttpMethod) -> reqwest::Method {
 }
 
 impl TonoTransport {
+    /// [`Self::exchange`] on `path`, timed. A transport failure waits for the next attempt of
+    /// the same `send`; when one starts, the failure is reported with it as `next_path` (A19).
+    /// The last failure of a walk has no successor and is not reported, as on macOS.
+    async fn attempt(
+        &self,
+        client: &reqwest::Client,
+        request: &ApiRequest,
+        path: AttemptPath,
+    ) -> Result<ApiResponse, ApiError> {
+        let _ = PENDING_PATH_FAILURE.try_with(|pending| {
+            if let (Some((failed, reason, elapsed_ms)), Some(sink)) =
+                (pending.take(), self.path_failure_sink.as_ref())
+            {
+                sink(PathFailure {
+                    path: failed.header_value(),
+                    next_path: path.header_value(),
+                    reason,
+                    elapsed_ms,
+                });
+            }
+        });
+        let started = tokio::time::Instant::now();
+        let result = self.exchange(client, request, path).await;
+        if let Err(ApiError::Transport { kind, .. }) = &result {
+            let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let _ = PENDING_PATH_FAILURE
+                .try_with(|pending| pending.set(Some((path, kind_label(*kind), elapsed_ms))));
+        }
+        result
+    }
+
     /// One attempt over one client. Shared so the pinned and system-resolved
     /// paths cannot drift in how they read a response.
-    async fn attempt(
+    async fn exchange(
         &self,
         client: &reqwest::Client,
         request: &ApiRequest,
@@ -934,7 +997,10 @@ impl HttpTransport for TonoTransport {
     /// diagnostics report. The OS verdict is read only after a transport failure and is not a
     /// probe; the kind, and so the retry and offline-admission rules, are unchanged.
     async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
-        let result = self.send_over_paths(request).await;
+        // A19: each request's path failures wait for their successor within this `send` only.
+        let result = PENDING_PATH_FAILURE
+            .scope(std::cell::Cell::new(None), self.send_over_paths(request))
+            .await;
         let captive = tono_core::network_interference::wants_os_signal(&result)
             && crate::tono::network_interference::os_reports_captive_portal().await;
         let (result, observation) = tono_core::network_interference::attribute(result, captive);
@@ -1470,6 +1536,82 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             .expect("the fallback must carry the request");
         assert_eq!(response.status, 200);
         assert_eq!(response.body, b"hi");
+    }
+
+    /// A19: a path that fails undelivered before the next one runs is reported with that next
+    /// path, its failure class and its time, and with nothing else (the macOS
+    /// `control_plane_path_failed`). The audit line is what the periodic timeline uploads.
+    #[tokio::test]
+    async fn a_failed_path_is_reported_with_the_next_path_and_its_time() {
+        // Refused at once: a port that was just free on loopback.
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").expect("bind").local_addr().expect("addr");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                use std::io::{BufRead as _, BufReader, Write as _};
+                let Ok(mut stream) = stream else { continue };
+                let mut reader = BufReader::new(match stream.try_clone() {
+                    Ok(clone) => clone,
+                    Err(_) => continue,
+                });
+                let mut line = String::new();
+                while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                    if line == "\r\n" || line == "\n" {
+                        break;
+                    }
+                    line.clear();
+                }
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi");
+                let _ = stream.flush();
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+            }
+        });
+        let (failures_tx, failures_rx) = std::sync::mpsc::channel();
+        let transport = TonoTransport::with_clients(
+            "tono-path-event.test",
+            &[closed],
+            &[std::net::SocketAddr::from(([127, 0, 0, 1], port))],
+        )
+        .expect("transport")
+        .with_path_failure_sink(Box::new(move |failure| {
+            let _ = failures_tx.send(failure);
+        }));
+        let response = transport
+            .send(ApiRequest {
+                method: HttpMethod::Get,
+                url: format!("http://tono-path-event.test:{port}/"),
+                bearer: None,
+                json_body: None,
+                binary_body: None,
+                headers: Vec::new(),
+            })
+            .await
+            .expect("the system resolver answers");
+        assert_eq!(response.status, 200);
+
+        let failures: Vec<super::PathFailure> = failures_rx.try_iter().collect();
+        assert_eq!(failures.len(), 1, "{failures:?}");
+        let failure = failures[0];
+        assert_eq!((failure.path, failure.next_path, failure.reason), ("pinned", "system_dns", "connect"));
+        assert!(failure.elapsed_ms < 5_000, "{failure:?}");
+        let line = serde_json::to_value(crate::tono::audit::AuditEvent::ControlPlanePathFail {
+            from: failure.path,
+            to: failure.next_path,
+            reason: failure.reason,
+            elapsed_ms: failure.elapsed_ms,
+        })
+        .expect("serialize");
+        assert_eq!(
+            line,
+            serde_json::json!({
+                "kind": "controlPlanePathFail",
+                "from": "pinned",
+                "to": "system_dns",
+                "reason": "connect",
+                "elapsedMs": failure.elapsed_ms,
+            })
+        );
     }
 
     /// Decision 077: when the pinned addresses and the system resolver both fail provably

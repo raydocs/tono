@@ -193,6 +193,7 @@ export const CONNECTION_EVENT_KINDS = [
   'appCrash',
   'networkRestore',
   'killSwitchFail',
+  'controlPlanePathFail',
 ] as const;
 export type ConnectionEventKind = (typeof CONNECTION_EVENT_KINDS)[number];
 
