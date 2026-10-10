@@ -132,7 +132,7 @@
 | R3-O2 | Windows 外层超时丢弃 restore future 时自写窗口提前关闭，自写通知被当外部变化 | fixed(f80951fb) | [#841](https://github.com/raydocs/tono/pull/841) | 低·推导 | 注册表写入在阻塞线程上另持一把自写窗口，直到写入返回；60 秒年龄上限仍会重新发布。异步调用方自己的 guard 超时仍会放下 |
 | R3-O3 | 无快照时把静态 DNS 改为 DHCP 的孤儿修复 | accepted-design | — | 低 | 有意取舍 |
 | R3-O4 | macOS `--emergency-disarm` 不先 bootout daemon，与在线 daemon 双写 | open | 待开 | 低·推导 | 观察项；操作员手动路径 |
-| R3-O5 | macOS 按名字取第一个网络服务，多 Network Location 同名时可能写错服务 | in-PR | [#1473](https://github.com/raydocs/tono/pull/1473) | 低·实机 | helper 4.52.44：`/dns/enable` 只在当前 Location 里按名字找，主服务 ID 优先，仍有歧义则拒绝；之后按 ID 读写。合入后改 fixed(<SHA>)；实机证据待补；旧版仅名字快照的恢复路径仍按名字 |
+| R3-O5 | macOS 按名字取第一个网络服务，多 Network Location 同名时可能写错服务 | in-PR | [#1473](https://github.com/raydocs/tono/pull/1473) | 低·实机 | helper 4.52.44：`/dns/enable` 只在当前 Location 里按名字找，主服务 ID 优先，仍有歧义则拒绝；之后按 ID 读写。合入后改 fixed(<SHA>)；实机证据待补；旧版仅名字快照不再被复用，退休/恢复时同名服务全部处理 |
 | R3-O6 | Windows 卸载器在 owner lock 不可得且无 pid 文件时仍 disarm，可能与存活 Service 并发写 DNS | open | 待开 | 低·推导 | 观察项 |
 | R3-O7 | 无快照守卫只认 TUN 地址，旧版遗留 127.0.0.1 被当作用户本地解析器 | accepted-design | — | 低 | 有意取舍，源码有注释 |
 | X2-2 | Windows NRPT 漂移未计入受保护 DNS 健康状态 | fixed(d98b217d) | [#467](https://github.com/raydocs/tono/issues/467)，[#468](https://github.com/raydocs/tono/pull/468) | 中·实机 | 需实机 |

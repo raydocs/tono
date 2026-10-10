@@ -34,7 +34,11 @@ final class ProtectedDNSManager {
 
     /// Where a snapshot's original servers go back to.
     private enum SnapshotOwner {
-        case service(NetworkService)
+        /// Never empty. One service for a snapshot with `serviceID`. A
+        /// name-only (legacy) snapshot cannot say which same-named service
+        /// across Network Locations it was applied to, so every service with
+        /// that name is a candidate, in a fixed order (R3-O5).
+        case services([NetworkService])
         /// No service can take them: an enumeration that carries IDs has no
         /// service with the recorded ID (macOS deleted it), or a name-only
         /// snapshot's name is gone.
@@ -154,7 +158,7 @@ final class ProtectedDNSManager {
         let serviceID = try Self.requireServiceID(named: service, lookup: Self.scServiceID)
         let selected = NetworkService(id: serviceID, name: service)
         let previous = try loadSnapshotQuarantiningCorruption()
-        let existingServers: [String]
+        var existingServers: [String]
         do {
             existingServers = try Self.readDNS(on: selected)
         } catch {
@@ -165,7 +169,7 @@ final class ProtectedDNSManager {
         }
 
         if let previous {
-            if !Self.isSameService(previous, name: service, id: serviceID) {
+            if !Self.isSameService(previous, id: serviceID) {
                 try Self.retirePreviousSnapshot(
                     previous,
                     services: try Self.allServices(),
@@ -175,6 +179,9 @@ final class ProtectedDNSManager {
                     archiveSnapshot: { try Self.quarantineSnapshot(reason: "superseded") },
                     recordCompletedRestore: recordCompletedRestore
                 )
+                // A legacy name-only snapshot may have owned the selected
+                // service itself; read what retiring it left there.
+                existingServers = try Self.readDNS(on: selected)
             } else {
                 try Self.reenableSameOwner(
                     previous,
@@ -375,25 +382,31 @@ final class ProtectedDNSManager {
             }
         }
 
-        var target: NetworkService?
+        var targets: [NetworkService] = []
         var ownerMissing = false
         var superseded = false
         if let snapshot {
             switch owner(of: snapshot, in: services) {
-            case .service(let service):
-                target = service
-                do {
-                    let current = try read(service)
-                    // A prior restore can commit these originals to disk
-                    // before Apply fails. Reapply before retiring its snapshot.
-                    if current == [Self.protectedDNSServer] || current == snapshot.servers {
-                        attempt(snapshot.servers, for: service)
-                    } else if current != snapshot.servers {
-                        superseded = true
+            case .services(let owners):
+                targets = owners
+                // Superseded only when every candidate owner holds a DNS
+                // choice of its own; an ID-bearing snapshot has one owner.
+                var foreign = 0
+                for service in owners {
+                    do {
+                        let current = try read(service)
+                        // A prior restore can commit these originals to disk
+                        // before Apply fails. Reapply before retiring its snapshot.
+                        if current == [Self.protectedDNSServer] || current == snapshot.servers {
+                            attempt(snapshot.servers, for: service)
+                        } else {
+                            foreign += 1
+                        }
+                    } catch {
+                        failure = failure ?? error
                     }
-                } catch {
-                    failure = failure ?? error
                 }
+                superseded = foreign == owners.count
             case .missing:
                 ownerMissing = true
             case .unresolved:
@@ -424,7 +437,7 @@ final class ProtectedDNSManager {
             // retained proof that this is only repeated cleanup.
             guard current == [Self.protectedDNSServer] else { continue }
             if snapshot != nil {
-                guard let target, service == target, !superseded else { continue }
+                guard targets.contains(service), !superseded else { continue }
                 attempt(snapshot?.servers ?? [], for: service)
             } else {
                 attempt([], for: service)
@@ -459,19 +472,23 @@ final class ProtectedDNSManager {
         archiveSnapshot: () throws -> Void,
         recordCompletedRestore: () -> Void = {}
     ) throws {
-        guard case .service(let owner) = owner(of: snapshot, in: services) else {
+        guard case .services(let owners) = owner(of: snapshot, in: services) else {
             throw HelperFailure.invalid("The previously protected network service is unavailable.")
         }
-        let current = try read(owner)
-        if current == [Self.protectedDNSServer] || current == snapshot.servers {
+        var restored = false
+        for owner in owners {
+            let current = try read(owner)
+            guard current == [Self.protectedDNSServer] || current == snapshot.servers else { continue }
             try write(snapshot.servers, owner)
             guard try read(owner) == snapshot.servers else {
                 throw HelperFailure.system("The protected DNS transition did not commit.")
             }
-            recordCompletedRestore()
+            restored = true
+        }
+        recordCompletedRestore()
+        if restored {
             try removeSnapshot()
         } else {
-            recordCompletedRestore()
             try archiveSnapshot()
         }
     }
@@ -514,19 +531,20 @@ final class ProtectedDNSManager {
             guard !services.isEmpty, services.allSatisfy({ $0.id != nil }) else {
                 return .unresolved
             }
-            return services.first(where: { $0.id == id }).map(SnapshotOwner.service) ?? .missing
+            return services.first(where: { $0.id == id }).map { SnapshotOwner.services([$0]) } ?? .missing
         }
-        if let service = services.first(where: { $0.name == snapshot.service }) {
-            return .service(service)
-        }
-        return snapshot.serviceID == nil ? .missing : .unresolved
+        let named = services
+            .filter { $0.name == snapshot.service }
+            .sorted { ($0.id ?? "") < ($1.id ?? "") }
+        return named.isEmpty ? .missing : .services(named)
     }
 
-    private static func isSameService(_ snapshot: Snapshot, name: String, id: String?) -> Bool {
-        if let recorded = snapshot.serviceID {
-            return id.map({ recorded == $0 }) ?? false
-        }
-        return snapshot.service == name
+    /// Only a recorded ID proves sameness. A legacy name-only snapshot may
+    /// belong to a same-named service in another Network Location, so
+    /// `enable` retires it first and records a fresh ID-bearing snapshot
+    /// before writing the listener (R3-O5).
+    private static func isSameService(_ snapshot: Snapshot, id: String) -> Bool {
+        snapshot.serviceID == id
     }
 
     /// The restore transaction over an injected snapshot outcome, mirroring
@@ -1822,6 +1840,47 @@ final class ProtectedDNSManager {
         return true
     }
 
+    /// R3-O5: a legacy name-only snapshot cannot say which same-named
+    /// service across Network Locations it was applied to. Re-enable must
+    /// not adopt it as the selected service's record, and restore returns
+    /// every same-named service left on the listener, never one picked by
+    /// Set order, while another service's own DNS stays.
+    static func runLegacySameNamedRestoreSelfTest() -> Bool {
+        let snapshot = Snapshot(service: "Wi-Fi", servers: ["10.0.0.53"])
+        let locationA = NetworkService(id: "A-WIFI", name: "Wi-Fi")
+        let locationB = NetworkService(id: "B-WIFI", name: "Wi-Fi")
+        let ethernet = NetworkService(id: "B-ETHERNET", name: "Ethernet")
+        var settings = [
+            locationA: [protectedDNSServer],
+            locationB: [protectedDNSServer],
+            ethernet: ["8.8.4.4"],
+        ]
+        var removed = false
+        do {
+            _ = try restoreServices(
+                snapshot: snapshot,
+                services: Set(settings.keys),
+                read: { settings[$0]! },
+                write: { settings[$1] = $0 },
+                removeSnapshot: { removed = true },
+                archiveSnapshot: { _ in }
+            )
+        } catch {
+            print("DNS legacy same-named regression FAILED: restore threw \(error)")
+            return false
+        }
+        guard !isSameService(snapshot, id: locationB.id!),
+              removed,
+              settings[locationA] == ["10.0.0.53"],
+              settings[locationB] == ["10.0.0.53"],
+              settings[ethernet] == ["8.8.4.4"] else {
+            print("DNS legacy same-named regression FAILED: removed=\(removed), settings=\(settings)")
+            return false
+        }
+        print("DNS legacy same-named regression passed: name-only snapshot is never re-adopted and restores every same-named service")
+        return true
+    }
+
     /// A renamed service still answers by `serviceID`. The display name in
     /// the snapshot is stale and must not be the status key.
     static func runRenamedServiceStatusSelfTest() -> Bool {
@@ -2041,6 +2100,7 @@ final class ProtectedDNSManager {
                 && runEnableIdentityFailureSelfTest()
                 && runBootDNSRecoveryDecisionSelfTest()
                 && runRenamedServiceStatusSelfTest()
+                && runLegacySameNamedRestoreSelfTest()
                 && runServerCountCapSelfTest()
         } catch {
             return false
