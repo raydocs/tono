@@ -98,3 +98,7 @@ Ops tables after the sequence was unique. Applied in numeric order:
 ## 0099
 
 - `0099_ops_api_path_daily.sql` — `ops_api_path_daily`: per UTC day, client ASN (0 = unknown: relay, tunnel, exit ASN) and `X-Tono-Path`, stamped arrivals plus the `X-Tono-Path-Failed` success/failure counts from reporting clients (decision 080). 0096–0098 are reserved for parallel work
+
+## 0100
+
+- `0100_hy2_auto_switch.sql` — `users.internal_account` (ops-set) and `users.hy2_auto_switch` (`NULL` | `on` | `off`) plus singleton `hy2_auto_switch_settings.all_accounts`; the per-device exit catalog serves the resolved `hy2AutoSwitch` (D1-C: internal accounts on, everyone else off until an operator flips the global switch)
