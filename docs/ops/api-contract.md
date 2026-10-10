@@ -128,6 +128,9 @@
 | `GET nodes` / `GET nodes/{name}` | 可选 `nodeId`、`displayName`、`failureDomain`、`replaces`。展示名只影响 UI；`catalog_name` / `node_name` 仍是所有表的键 |
 | `GET nodes/{name}` | `facts.capacityUsers?`：资料里登记的可坐人数。有值时验收单 `capacity`：占用 < 容量为 pass，否则 fail；无值仍 unknown |
 | `PATCH nodes/{name}/profile` | 加可选 `capacityUsers`（正整数）、`displayName`（≤60）、`failureDomain`（≤60，建议 `商家/机房`）、`replaces`（必须是已有 catalog_name，不能是自己） |
+| `GET node-agents` | `NodeAgentsDto { agents: NodeAgentDto[] }`（`nodes.read`）。节点自注册（A20）：每个签发过 agent token 的节点一行，表 `ops_node_agents`。`NodeAgentDto { node, tokenIssuedAt, tokenRevokedAt, reportedIp, observedIp, roles: ('xray'\|'hy2'\|'relay')[], agentVersion, firstHeartbeatAt, lastHeartbeatAt }`；签发后未上报的心跳字段为 null。`reportedIp` 是节点自报，`observedIp` 是 Cloudflare 看到的 `CF-Connecting-IP`；两者都只记录，不改路由、目录或资料里的 `public_ip` |
+| `POST nodes/{name}/agent-token` | 201 `NodeAgentTokenDto { node, token, tokenIssuedAt }`，`cache-control: no-store`（`nodes.publish`，仅 owner）。节点须存在（同 `GET nodes/{name}`），已退役 409 `NODE_RETIRED`。token 只在这次返回；库里只存加盐 SHA-256。再签发立即作废旧 token。审计 `node.agent_token.issue` 与写入同一批。签发不上架、不改目录 |
+| `DELETE nodes/{name}/agent-token` | `{ node, tokenRevokedAt }`（`nodes.publish`）。立即作废；之后心跳 403 `NODE_AGENT_REVOKED`。没有 token 的节点 404。审计 `node.agent_token.revoke` |
 
 ### 部门 D
 

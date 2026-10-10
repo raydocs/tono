@@ -99,6 +99,10 @@ Ops tables after the sequence was unique. Applied in numeric order:
 
 - `0096_api_relay_reports.sql` — `api_relay_reports`: each relay node's own end-to-end HTTPS check through its local `:2053`, reported with its exit-node token, with `ok_since` / `failing_since`
 
+## 0097
+
+- `0097_ops_node_agents.sql` — `ops_node_agents`: per-node heartbeat token (salted SHA-256 only, revocable) and the node's last self-reported IP / roles / agent version next to the observed `CF-Connecting-IP` (A20). Never read for routing or listing.
+
 ## 0099
 
 - `0099_ops_api_path_daily.sql` — `ops_api_path_daily`: per UTC day, client ASN (0 = unknown: relay, tunnel, exit ASN) and `X-Tono-Path`, stamped arrivals plus the `X-Tono-Path-Failed` success/failure counts from reporting clients (decision 080). 0096–0098 are reserved for parallel work

@@ -176,6 +176,11 @@ jobs:
       - name: Node restart verification fixtures
         run: python3 tooling/scripts/remote/test_node_verification.py
 
+      - name: Node self-registration agent
+        # Reports only running Tono services and never sends its token anywhere
+        # but a bare HTTPS origin.
+        run: python3 services/node-agent/test_tono_node_agent.py
+
       - name: Operator SSH collector jobs
         run: python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'
 

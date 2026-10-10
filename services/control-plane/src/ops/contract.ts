@@ -55,6 +55,7 @@ export * from './contract/api-paths';
 
 // dept:c
 // append your entries inside your block
+export * from './contract/node-agents';
 
 // dept:d
 // append your entries inside your block
