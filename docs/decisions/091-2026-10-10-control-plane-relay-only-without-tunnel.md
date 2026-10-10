@@ -37,6 +37,6 @@
 - Exposure: a relay operator sees client IP, SNI, sizes and timing for every request without a tunnel (as 077 records),
   not only for those whose Cloudflare paths failed. If every relay is down, the control plane is unreachable without a
   tunnel (sign-in, refresh and catalog recovery fail with the relay error) until a relay recovers.
-- Applied in: Windows PR `amp/win-relay-only-without-tunnel`; changelog
+- Applied in: Windows PR [#1553](https://github.com/raydocs/tono/pull/1553) (`amp/win-relay-only-without-tunnel`); changelog
   [2026-10-10-win-relay-only-without-tunnel.md](../changelog.d/2026-10-10-win-relay-only-without-tunnel.md); runbook
   [docs/ops/api-relay.md](../ops/api-relay.md).

@@ -3,7 +3,7 @@
   [决定 091](../decisions/091-2026-10-10-control-plane-relay-only-without-tunnel.md)，修订 077/086/090 的路径顺序）；Windows
   客户端 `apps/windows/app/src-tauri/src/tono/{transport.rs,commands/mod.rs}`，共享协议常量
   `apps/windows/service/src/{lib.rs,core/structure.rs}`。高风险：路由、断网保护恢复。
-- 来源：基线 2ad39dba（main）→ 分支 `amp/win-relay-only-without-tunnel`；PR 待记；未合 main。
+- 来源：基线 2ad39dba（main）→ 分支 `amp/win-relay-only-without-tunnel`；PR [#1553](https://github.com/raydocs/tono/pull/1553)；未合 main。
 - 缺陷修复：原失败：没有隧道时（首次登录、续期、目录/权益检查、断网保护、掉线恢复），每个请求先付固定 IP（10 s）和系统
   DNS（10 s）的连接预算才轮到中继；到 Cloudflare 线路不通的客户，第二个中继约 24 s 才开始，第三个中继约 28 s，启动恢复
   30 s 预算里 refresh + `me` 走不完。改后：对生产 API 主机的请求只走中继：上次应答的中继在前，其余按 `API_RELAYS` 顺序，
