@@ -14,6 +14,7 @@ use once_cell::sync::Lazy;
 use serde::Serialize;
 use std::{
     net::SocketAddr,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU8, Ordering},
@@ -23,6 +24,7 @@ use std::{
 use tono_core::auth::{HttpMethod, should_retry_transport};
 use tauri::{AppHandle, ipc::Channel};
 use tokio::{io::AsyncWriteExt as _, sync::Mutex};
+use tokio_util::sync::CancellationToken;
 use tono_logging::{Type, logging};
 use tono_core::connection::ConnectionFsm;
 use tono_service_protocol::{
@@ -33,6 +35,97 @@ use tono_service_protocol::{
 static OFFER: Lazy<Mutex<Option<(String, String, ReleaseManifest)>>> = Lazy::new(|| Mutex::new(None));
 static INSTALL: Mutex<()> = Mutex::const_new(());
 static INCOMPLETE: AtomicBool = AtomicBool::new(false);
+
+/// The marker a cancelled package download fails with. The update dialog does not keep it as
+/// a refusal of the offer: the user may start the same update again.
+pub(crate) const DOWNLOAD_CANCELLED: &str = "TONO_UPDATE_CANCELLED";
+
+/// The token of the package download in flight. Set only while bytes are being fetched
+/// (`DownloadCancelSlot`), so Cancel can never reach the proxy clear, Prepare or Install.
+static DOWNLOAD_CANCEL: std::sync::Mutex<Option<CancellationToken>> = std::sync::Mutex::new(None);
+
+/// Holds `DOWNLOAD_CANCEL` for one download and empties it however the download ends,
+/// including when the install command itself is dropped.
+struct DownloadCancelSlot;
+
+impl DownloadCancelSlot {
+    fn open(token: &CancellationToken) -> Self {
+        *DOWNLOAD_CANCEL.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(token.clone());
+        Self
+    }
+}
+
+impl Drop for DownloadCancelSlot {
+    fn drop(&mut self) {
+        DOWNLOAD_CANCEL.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+    }
+}
+
+/// The update dialog's Cancel: abort the package download in flight, wherever it is (the first
+/// request, a chunk, a resume). False when no download is running; nothing after the download
+/// (Prepare, Install) can be cancelled from here.
+#[tauri::command]
+pub fn tono_cancel_update_download() -> bool {
+    let token = DOWNLOAD_CANCEL.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+    token.map(|token| token.cancel()).is_some()
+}
+
+/// Tono's own package download directory under the App data root.
+const DOWNLOADS_DIR: &str = "update-downloads";
+
+/// One downloaded package, removed when this is dropped: on every failure path of the install
+/// (an error, a cancelled download, a refused Prepare) and right after Prepare returned, when
+/// the Service already holds its own private, hash-checked copy (`copy_private`) and never
+/// reads this one again. Best effort: a file the Service still has pinned is left for the next
+/// startup sweep.
+struct DownloadedPackage(PathBuf);
+
+impl Drop for DownloadedPackage {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Whether `name` is a package this updater writes: a 32-digit lowercase hex nonce and `.exe`.
+fn is_download_name(name: &str) -> bool {
+    name.strip_suffix(".exe").is_some_and(|nonce| {
+        nonce.len() == 32 && nonce.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    })
+}
+
+/// Remove the packages earlier runs left in `dir`: regular files named by a download nonce,
+/// directly in `dir`. No recursion, and `DirEntry::file_type` does not follow a link, so
+/// nothing outside Tono's own download directory is touched. Returns how many were removed.
+fn sweep_downloads_in(dir: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if !name.to_str().is_some_and(is_download_name) || !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            continue;
+        }
+        if std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// At startup: remove the packages an earlier run left behind (it failed, was killed, or
+/// handed off and then exited before deleting). Holds the install lock, so a download this
+/// process starts meanwhile is never touched.
+pub async fn sweep_stale_downloads() {
+    let _install = INSTALL.lock().await;
+    let Ok(dir) = dirs::app_home_dir().map(|home| home.join(DOWNLOADS_DIR)) else {
+        return;
+    };
+    let removed = tokio::task::spawn_blocking(move || sweep_downloads_in(&dir)).await.unwrap_or(0);
+    if removed > 0 {
+        logging!(info, Type::Tono, "Tono: removed {removed} update download(s) an earlier run left");
+    }
+}
 
 pub fn incomplete() -> bool {
     INCOMPLETE.load(Ordering::Acquire)
@@ -238,8 +331,30 @@ enum DownloadEvent {
 /// first byte failed the install and the next try started again from zero, on the same flaky
 /// cross-border link. Nothing here is trusted: the Service checks the size and SHA-256 against
 /// the signed manifest before anything runs.
+///
+/// `cancel` aborts it at any point: the request or chunk in flight is dropped, and no resume
+/// follows. The error then carries [`DOWNLOAD_CANCELLED`].
 #[allow(clippy::too_many_arguments)]
 async fn download_resuming(
+    direct: &reqwest::Client,
+    url: &str,
+    relays: &[SocketAddr],
+    builder: impl Fn() -> reqwest::ClientBuilder,
+    preferred: &PathPreference,
+    expected: u64,
+    sink: &mut (impl tokio::io::AsyncWrite + Unpin),
+    cancel: &CancellationToken,
+    progress: impl FnMut(DownloadEvent) -> Result<()>,
+) -> Result<()> {
+    tokio::select! {
+        biased;
+        () = cancel.cancelled() => Err(anyhow::anyhow!("{DOWNLOAD_CANCELLED}: update download cancelled")),
+        result = download_resuming_uncancelled(direct, url, relays, builder, preferred, expected, sink, progress) => result,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn download_resuming_uncancelled(
     direct: &reqwest::Client,
     url: &str,
     relays: &[SocketAddr],
@@ -411,7 +526,7 @@ pub async fn tono_install_update(
             .iter()
             .find(|t| t.id == TargetId::WindowsX86_64)
             .context("no Windows target")?;
-        let root = dirs::app_home_dir()?.join("update-downloads");
+        let root = dirs::app_home_dir()?.join(DOWNLOADS_DIR);
         tokio::fs::create_dir_all(&root).await?;
         let mut random = [0u8; 16];
         getrandom::fill(&mut random).context("download nonce failed")?;
@@ -422,8 +537,12 @@ pub async fn tono_install_update(
             .write(true)
             .open(&path)
             .await?;
+        // Removed on every way out of this block, and right after Prepare below.
+        let package = DownloadedPackage(path.clone());
         let api = state.lock().await.client.clone();
-        download_resuming(
+        let cancel = CancellationToken::new();
+        let cancel_slot = DownloadCancelSlot::open(&cancel);
+        let downloaded = download_resuming(
             &client()?,
             &format!("{RELEASE_ROOT}/{manifest_sha256}/package.windows-x86_64.exe"),
             &bootstrap::api_relays(),
@@ -431,6 +550,7 @@ pub async fn tono_install_update(
             api.transport().path_preference(),
             target.artifact_size_bytes,
             &mut file,
+            &cancel,
             |event| {
                 progress.send(match event {
                     DownloadEvent::Started => serde_json::json!(
@@ -443,7 +563,10 @@ pub async fn tono_install_update(
                 Ok(())
             },
         )
-        .await?;
+        .await;
+        // The download is over: Cancel no longer reaches anything after it.
+        drop(cancel_slot);
+        downloaded?;
         file.sync_all().await?;
         drop(file);
         progress.send(serde_json::json!({"event":"Finished"}))?;
@@ -463,7 +586,10 @@ pub async fn tono_install_update(
             signature,
             package_path: path.to_string_lossy().into_owned(),
         })
-        .await?;
+        .await;
+        // Prepare returned: the Service has its private copy (or refused); this one goes.
+        drop(package);
+        let prepared = prepared?;
         let receipt = prepared.receipt.context("Service omitted durable receipt")?;
         ensure!(
             receipt.phase == Phase::InstallationAuthorized && receipt.manifest_sha256 == manifest_sha256,
@@ -944,6 +1070,7 @@ mod update_relay_tests {
                 &PathPreference::default(),
                 PACKAGE.len() as u64,
                 written,
+                &CancellationToken::new(),
                 |event| {
                     match event {
                         DownloadEvent::Started => started += 1,
@@ -978,6 +1105,105 @@ mod update_relay_tests {
             "{error:#}"
         );
         assert_eq!(written, &PACKAGE[..PACKAGE.len() / 2], "nothing after the refused answer is written");
+    }
+
+    /// WIN-UPDATE-PARTIAL-FILES: the dialog's Cancel aborts a download that is stalled
+    /// mid-body (the server sent half and holds the connection open). Before, Cancel only
+    /// closed the dialog and the download ran on until a timeout.
+    #[tokio::test]
+    async fn cancel_aborts_a_download_stalled_mid_body() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let address = listener.local_addr().expect("addr");
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for stream in listener.incoming() {
+                use std::io::{BufRead as _, BufReader, Write as _};
+                let Ok(mut stream) = stream else { continue };
+                let Ok(clone) = stream.try_clone() else { continue };
+                let mut reader = BufReader::new(clone);
+                let mut line = String::new();
+                while reader.read_line(&mut line).unwrap_or(0) > 0 && line != "\r\n" && line != "\n" {
+                    line.clear();
+                }
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n01234");
+                let _ = stream.flush();
+                // Never finished, never closed.
+                held.push(stream);
+            }
+        });
+        let direct = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .resolve("releases.test", address)
+            .build()
+            .expect("direct client");
+        let cancel = CancellationToken::new();
+        // The download slot as the install command opens it; Cancel reaches it through the command.
+        let slot = DownloadCancelSlot::open(&cancel);
+        let mut written = Vec::new();
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            download_resuming(
+                &direct,
+                &format!("http://releases.test:{}/desktop/v1/package.windows-x86_64.exe", address.port()),
+                &[],
+                || reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()),
+                &PathPreference::default(),
+                10,
+                &mut written,
+                &cancel,
+                |event| {
+                    if matches!(event, DownloadEvent::Chunk(_)) {
+                        assert!(tono_cancel_update_download(), "a download is in flight");
+                    }
+                    Ok(())
+                },
+            ),
+        )
+        .await
+        .expect("Cancel must end the stalled download, not a timeout");
+        let error = result.expect_err("a cancelled download fails");
+        assert!(error.to_string().starts_with(DOWNLOAD_CANCELLED), "{error:#}");
+        assert_eq!(written, b"01234", "nothing is written after the cancel");
+        drop(slot);
+        assert!(!tono_cancel_update_download(), "with no download in flight Cancel reaches nothing");
+    }
+
+    /// WIN-UPDATE-PARTIAL-FILES: a package file is removed when its install ends (failure,
+    /// cancel, or after the Service's Prepare took its own copy), and the startup sweep removes
+    /// only nonce-named package files left directly in Tono's download directory.
+    #[test]
+    fn package_files_are_removed_and_the_sweep_stays_in_the_download_dir() {
+        let dir = std::env::temp_dir().join(format!("tono-update-downloads-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let nonce = "0123456789abcdef0123456789abcdef";
+
+        let current = dir.join(format!("{nonce}.exe"));
+        std::fs::write(&current, b"partial").expect("partial");
+        drop(DownloadedPackage(current.clone()));
+        assert!(!current.exists(), "an install that ended leaves no package behind");
+
+        let stale = dir.join("fedcba9876543210fedcba9876543210.exe");
+        std::fs::write(&stale, b"left by an earlier run").expect("stale");
+        let kept = [
+            dir.join("notes.txt"),
+            dir.join("setup.exe"),
+            dir.join("0123456789ABCDEF0123456789ABCDEF.exe"),
+        ];
+        for file in &kept {
+            std::fs::write(file, b"not ours").expect("kept");
+        }
+        let nested = dir.join("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.exe");
+        std::fs::create_dir_all(&nested).expect("nested dir");
+        let inside = nested.join("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.exe");
+        std::fs::write(&inside, b"below the download dir").expect("inside");
+
+        assert_eq!(sweep_downloads_in(&dir), 1);
+        assert!(!stale.exists());
+        assert!(kept.iter().all(|file| file.exists()), "only nonce-named packages are removed");
+        assert!(nested.is_dir() && inside.exists(), "the sweep neither recurses nor removes directories");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Backlog A1: once a sign-in went through a relay, the update GET starts at that relay
