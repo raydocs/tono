@@ -264,7 +264,24 @@ enum UpdatePackage {
         try UpdateStorage.syncDirectory(URL(fileURLWithPath: destination).deletingLastPathComponent().path)
     }
 
+    /// Set only by `--emergency-disarm`: every child this process starts
+    /// through `run` (or `ProtectedDNSManager`'s networksetup) then ends by
+    /// this deadline — SIGTERM, SIGKILL, abandoned — instead of waiting
+    /// without limit (MAC-EMERGENCY-UNBOUNDED-WAITS). nil keeps the daemon's
+    /// and the update executor's behavior unchanged.
+    nonisolated(unsafe) static var operatorChildDeadline: TimeInterval?
+
     static func run(_ executable: String, _ arguments: [String]) throws {
+        if let deadline = operatorChildDeadline {
+            let result = try KillSwitchManager.run(
+                executable, arguments, deadline: deadline,
+                environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/var/root"]
+            )
+            guard result.status == 0 else {
+                throw HelperFailure.system("Native update operation failed: \(URL(fileURLWithPath: executable).lastPathComponent).")
+            }
+            return
+        }
         let child = Process()
         child.executableURL = URL(fileURLWithPath: executable)
         child.arguments = arguments

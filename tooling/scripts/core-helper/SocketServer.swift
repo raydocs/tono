@@ -432,10 +432,13 @@ final class SocketServer {
             openNetworkEpoch = epoch
             consecutiveCoreDownChecks = 0
         }
+        // An operator release (or an unreadable target) keeps the cleanup
+        // below going but never re-arms or relaunches the app (decision 084).
+        let rearmAllowed = HelperTarget.automaticRearmAllowed(HelperTarget.read())
         // The app is the only thing that reconnects or shows the state.
         // Bring it back before deciding anything about its session.
-        observeOrphanedOwner()
-        if KillSwitchManager.shouldReinstallKillSwitch(coreRunning: core.status().running) {
+        if rearmAllowed { observeOrphanedOwner() }
+        if rearmAllowed, KillSwitchManager.shouldReinstallKillSwitch(coreRunning: core.status().running) {
             consecutiveCoreDownChecks = 0
             // MAC-ORPHAN-BOOTSTRAP-PF: an app that died between /core/start
             // and the lock arm leaves this branch reinstalling a bootstrap
@@ -814,7 +817,16 @@ final class SocketServer {
                     object["lastError"] = String(lastError.prefix(600))
                 }
                 sendResponse(client, status: 200, object: object)
+            case ("POST", "/session/connect"):
+                // Only the app's explicit user Connect sends this (decision
+                // 084): it is what ends an operator release.
+                guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
+                let generation = try HelperTarget.beginSession()
+                sendResponse(client, status: 200, object: [
+                    "ok": true, "sessionGeneration": NSNumber(value: generation),
+                ])
             case ("POST", "/core/start"):
+                try HelperTarget.requireAdmission(sessionGeneration: nil)
                 let object = try jsonObject(request.body)
                 guard object.count == 2,
                       let directory = object["configDir"] as? String,
@@ -831,6 +843,7 @@ final class SocketServer {
                 recordSessionOwner(owner)
                 sendResponse(client, status: 200, object: ["ok": true])
             case ("POST", "/core/sync"):
+                try HelperTarget.requireAdmission(sessionGeneration: nil)
                 let object = try jsonObject(request.body)
                 guard object.count == 2,
                       let directory = object["configDir"] as? String,
@@ -875,6 +888,7 @@ final class SocketServer {
                 try validateKillSwitchArmFields(object)
                 let response = try killSwitch.arm(
                     object,
+                    sessionGeneration: try HelperTarget.sessionGeneration(object["sessionGeneration"]),
                     commitAllowed: { transitionGate.isAwake() }
                 )
                 recordSessionOwner(owner)
@@ -900,6 +914,7 @@ final class SocketServer {
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
                 sendResponse(client, status: 200, object: protectedDNS.status())
             case ("POST", "/dns/enable"):
+                try HelperTarget.requireAdmission(sessionGeneration: nil)
                 let object = try jsonObject(request.body)
                 guard object.count == 1,
                       let service = object["service"] as? String else {

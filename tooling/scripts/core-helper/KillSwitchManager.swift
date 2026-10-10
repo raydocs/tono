@@ -166,10 +166,17 @@ final class KillSwitchManager {
         consecutiveCoreDownChecks >= coreDownRestoreThreshold
     }
 
+    /// `sessionGeneration` is the session an app arm belongs to (decision
+    /// 084). Every arm, the update path's included, is refused while the
+    /// persisted target is released by an operator or unreadable, and an arm
+    /// of an older session is refused once a newer Connect began; both are
+    /// checked before the network work and again at commit.
     func arm(
         _ object: [String: Any],
+        sessionGeneration: UInt64? = nil,
         commitAllowed: () -> Bool = { true }
     ) throws -> [String: Any] {
+        try HelperTarget.requireAdmission(sessionGeneration: sessionGeneration)
         // Name resolution and DERP refresh can block under packet loss. Read a
         // stable fallback snapshot under the manager lock, then perform all
         // network work unlocked so the power callback can close its gate
@@ -330,6 +337,9 @@ final class KillSwitchManager {
                     + "protection remains fail-closed."
             )
         }
+        // An operator release or a newer Connect that landed during the
+        // network work above wins over this arm.
+        try HelperTarget.requireAdmission(sessionGeneration: sessionGeneration)
         guard commitAllowed() else {
             throw HelperFailure.invalid(
                 "The machine began sleeping during Kill Switch preparation; "
@@ -541,6 +551,9 @@ final class KillSwitchManager {
     func secureForPowerTransition() -> Bool {
         lock.lock()
         defer { lock.unlock() }
+        // An operator release (or a target that cannot be read) installs no
+        // new block, not even the power barrier (decision 084).
+        guard HelperTarget.automaticRearmAllowed(HelperTarget.read()) else { return false }
 
         var load = KernelLoadOutcome.notIssued
         do {

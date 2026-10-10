@@ -53,6 +53,11 @@ actor PrivilegedRuntimeCoordinator {
         try HelperManager.installIfNeeded()
     }
 
+    /// Decision 084: the explicit user Connect's new helper session.
+    func beginConnectSession() {
+        KillSwitchService.beginSession()
+    }
+
     func daemonRejectsClient() -> Bool {
         HelperManager.daemonRejectsClient()
     }

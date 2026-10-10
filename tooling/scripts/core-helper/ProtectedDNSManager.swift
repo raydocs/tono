@@ -335,6 +335,43 @@ final class ProtectedDNSManager {
         }
     }
 
+    /// `--emergency-disarm` readback (decision 084): `verifyRestored`'s checks,
+    /// read as a component state. `.present`: a restore is still pending or a
+    /// service or the active resolver still uses the stopped 127.0.0.1.
+    /// A read that fails is `.unknown`, never restored.
+    func operatorResidueReading() -> SelectiveFailOpen.LayerReading {
+        lock.lock()
+        defer { lock.unlock() }
+        let snapshot: Snapshot?
+        do { snapshot = try loadSnapshot() } catch { return .unknown }
+        if snapshot != nil { return .present }
+        var unread = false
+        do {
+            for service in try Self.allServices() {
+                do {
+                    let servers = try Self.readDNS(on: service)
+                    if Self.isStoppedTonoResolver(servers) { return .present }
+                } catch {
+                    unread = true
+                }
+            }
+        } catch {
+            return .unknown
+        }
+        guard let store = SCDynamicStoreCreate(nil, "Tono operator DNS readback" as CFString, nil, nil),
+              let values = SCDynamicStoreCopyMultiple(store, nil,
+                ["State:/Network/Service/.*/DNS", "State:/Network/Global/DNS"] as CFArray) as? [String: Any] else {
+            return .unknown
+        }
+        for case let config as [String: Any] in values.values {
+            if let servers = config[kSCPropNetDNSServerAddresses as String] as? [String],
+               Self.isStoppedTonoResolver(servers) {
+                return .present
+            }
+        }
+        return unread ? .unknown : .absent
+    }
+
     /// Whether a DNS server list may be Tono's resolver left behind by a
     /// stopped Core. Tono writes DNS only as exactly `[127.0.0.1]`; a list
     /// that merely contains it is another product's and blocked every native
@@ -1250,6 +1287,21 @@ final class ProtectedDNSManager {
     }
 
     private static func runNetworkSetup(_ arguments: [String]) throws -> CommandResult {
+        if let deadline = UpdatePackage.operatorChildDeadline {
+            let result: HelperCommandResult
+            do {
+                result = try KillSwitchManager.run(
+                    "/usr/sbin/networksetup", arguments, deadline: deadline,
+                    environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"]
+                )
+            } catch {
+                throw HelperFailure.system("Could not run the protected DNS command.")
+            }
+            guard result.output.count <= 64 * 1024 else {
+                throw HelperFailure.system("Protected DNS command output is too large.")
+            }
+            return .init(status: result.status, output: String(decoding: result.output, as: UTF8.self))
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
         process.arguments = arguments

@@ -407,12 +407,17 @@ nonisolated enum HelperProtocolVersion {
     ///   among the current Network Location's services, preferring the
     ///   primary service ID; an ambiguous name refuses (R3-O5). While a
     ///   legacy name-only snapshot is on disk, enable keeps the old lookup.
-    /// - 4.52.44 → 4.52.45: the operator's `--emergency-disarm` boots the
-    ///   running daemon out of launchd (bounded wait) before releasing, so
-    ///   only one process writes PF and DNS; a failed bootout still releases,
-    ///   every launchctl call is hard-bounded, and a release that is refused
-    ///   or does not read back clean (DNS off 127.0.0.1, PF block gone)
-    ///   bootstraps the daemon again (R3-O4).
+    /// - 4.52.44 → 4.52.45: operator release (R3-O4, decision 084). A
+    ///   persisted target (`secured <n>` / `released <n>`) joins the helper's
+    ///   state: `--emergency-disarm` sets `released` in memory first and
+    ///   persists it within a bounded budget, boots the daemon out, releases,
+    ///   reads PF / DNS / AI resolvers / AI routes back (failed read =
+    ///   unknown) and restarts the daemon only once `released` is on disk.
+    ///   While released (or unreadable) every arm, Core start/sync, DNS
+    ///   enable, PF supervision, power barrier and owner relaunch is refused;
+    ///   only `/session/connect` (the app's explicit user Connect) begins a
+    ///   newer `secured` generation, and arms carry it. Every wait of the
+    ///   command is bounded (MAC-EMERGENCY-UNBOUNDED-WAITS).
     static let current = "4.52.45"
 }
 

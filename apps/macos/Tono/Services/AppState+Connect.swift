@@ -7,6 +7,15 @@ extension AppState {
         connect(preservingUnarmedBackoff: false)
     }
 
+    /// The user's explicit Connect (Connect toggle, Connect and Retry
+    /// buttons). The only path that may begin a new helper session, which is
+    /// what ends an administrator's `--emergency-disarm` (decision 084).
+    /// Automatic reconnects, wake, heals and launch resume call `connect()`.
+    func connectFromUser() {
+        userConnectIntent.mark()
+        connect()
+    }
+
     func connect(preservingUnarmedBackoff: Bool) {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
         if !preservingUnarmedBackoff { unarmedReconnectAttempt = 0 }
@@ -192,6 +201,9 @@ extension AppState {
             },
             perform: { [weak self, coreRuntime] attemptID, generation in
                 guard let self else { return }
+                // Taken before helper preparation, whose administrator prompt
+                // can outlast the intent's lifetime (decision 084).
+                let userRequestedSession = self.userConnectIntent.consume(now: Date())
                 // Kept locally: a Disconnect that cancels this attempt resets
                 // connectionStartedAt before the cancel reaches the catch below.
                 let attemptStartedAt = self.connectionStartedAt ?? Date()
@@ -304,6 +316,9 @@ extension AppState {
                     throw error
                 }
                 try Task.checkCancellation()
+                if userRequestedSession {
+                    await PrivilegedRuntimeCoordinator.shared.beginConnectSession()
+                }
                 let protectedDNSState =
                     await PrivilegedRuntimeCoordinator.shared.protectedDNSStatus()
                 // System resolution is allowed only on a clean, unprotected
@@ -638,14 +653,20 @@ extension AppState {
                     // H21-O-F7: a tunnel/exit-class failure while another VPN's
                     // interface is up names that VPN. Read-only getifaddrs; only
                     // the sentence (and the repeat signature built from it) changes.
-                    let failureMessage = coreErrors.contains(where: Hy2IdleSupport.isQuicIdle)
-                        ? Hy2IdleSupport.userMessage
-                        : OtherVPNDetection.attributedMessage(
-                            for: self.lastClassifiedFailure,
-                            interfaces: OtherVPNDetection.currentInterfaces()
-                        ) ?? ConnectionFailurePresentation.userFacingMessage(
-                            classified: self.lastClassifiedFailure
-                        )
+                    let failureMessage: String
+                    if case KillSwitchService.Error.operatorReleased(let message) = error {
+                        // The helper's own sentence: it says Connect is the way back.
+                        failureMessage = message
+                    } else {
+                        failureMessage = coreErrors.contains(where: Hy2IdleSupport.isQuicIdle)
+                            ? Hy2IdleSupport.userMessage
+                            : OtherVPNDetection.attributedMessage(
+                                for: self.lastClassifiedFailure,
+                                interfaces: OtherVPNDetection.currentInterfaces()
+                            ) ?? ConnectionFailurePresentation.userFacingMessage(
+                                classified: self.lastClassifiedFailure
+                            )
+                    }
                     // Deterministic failures repeat verbatim; a fourth try of
                     // three identical same-stage outcomes will not differ.
                     // Environmental failures (no network service while Wi-Fi
@@ -2339,6 +2360,7 @@ extension AppState {
         case KillSwitchService.Error.userDenied,
              KillSwitchService.Error.installFailed,
              KillSwitchService.Error.helperRejected,
+             KillSwitchService.Error.operatorReleased(_),
              HelperInstallError.userDenied,
              HelperInstallError.resourceNotFound,
              HelperInstallError.installFailed,
@@ -2762,8 +2784,11 @@ extension AppState {
     /// `repairHelper` is false only for the Support remote retry: a helper
     /// rejection must not put an administrator prompt in front of a user who
     /// did not ask for it.
-    func retryProtectedConnectionNow(repairHelper: Bool = true) {
+    /// `userInitiated`: a Retry/Repair button. The Support remote retry
+    /// passes false and so never begins a new helper session.
+    func retryProtectedConnectionNow(repairHelper: Bool = true, userInitiated: Bool = true) {
         guard isProtectionBlocked, !isConnected, !isConnecting else { return }
+        if userInitiated { userConnectIntent.mark() }
         protectedReconnectPausedForUserAction = false
         protectedReconnectPauseLiftsOnNetworkChange = false
         // An explicit retry is the user's connect after an unexpected restart.
@@ -2831,7 +2856,7 @@ extension AppState {
         if isProtectionBlocked {
             retryProtectedConnectionNow()
         } else {
-            connect()
+            connectFromUser()
         }
     }
 

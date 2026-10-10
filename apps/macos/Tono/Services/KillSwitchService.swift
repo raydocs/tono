@@ -12,9 +12,15 @@ nonisolated enum KillSwitchService {
         case commandFailed(String)
         case helperRejected
         case userDenied
+        /// The helper refused because an administrator released protection
+        /// (or its saved target cannot be read, or a newer Connect began).
+        /// Only an explicit user Connect resolves it (decision 084).
+        case operatorReleased(String)
 
         var errorDescription: String? {
             switch self {
+            case .operatorReleased(let message):
+                message
             case .installFailed(let message):
                 String(localized: "Kill Switch install failed: \(message)")
             case .notInstalled:
@@ -178,7 +184,34 @@ nonisolated enum KillSwitchService {
                 // mode, and the protected reconnect loop retries from there.
                 isArmed = true
             }
+            if case HelperIPCError.commandFailed(let message, let code?) = error,
+               HelperManager.operatorReleaseCodes.contains(code) {
+                throw Error.operatorReleased(message)
+            }
             throw Error.commandFailed(error.localizedDescription)
+        }
+    }
+
+    /// `/session/connect` behind a seam: tests count which connects begin a
+    /// helper session. Production stores the generation every later arm
+    /// carries (`HelperManager.connectSessionGeneration`).
+    nonisolated struct SessionIPC {
+        var begin: () throws -> UInt64 = { try HelperManager.beginConnectSession() }
+    }
+
+    nonisolated(unsafe) static var sessionIPC = SessionIPC()
+
+    /// Only a connect the user asked for begins a helper session. A failed
+    /// begin does not fail the connect: the helper's arm admission decides
+    /// (an operator release then refuses with its own message).
+    static func beginSession() {
+        do {
+            _ = try sessionIPC.begin()
+        } catch {
+            LocalTrafficAudit.shared.recordEvent(
+                "helper_session_begin_failed",
+                details: ["error": String(describing: error)]
+            )
         }
     }
 

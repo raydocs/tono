@@ -71,6 +71,13 @@ final class UpdateStorage {
         try Self.withLock(lockFD, body)
     }
 
+    /// `locked` that gives up after `budget` seconds instead of waiting for
+    /// the holder. Only `--emergency-disarm` uses it: update cleanup must
+    /// never hold the network release behind a busy lock (decision 084).
+    func locked<T>(within budget: TimeInterval, _ body: () throws -> T) throws -> T {
+        try Self.withLock(lockFD, budget: budget, body)
+    }
+
     /// Recovery after normal store opening fails may still inspect saved
     /// protection intent, but only while holding the same trusted root lock.
     /// Do not create or repair any parent directory in this path.
@@ -106,7 +113,8 @@ final class UpdateStorage {
         return try withLock(fd, body)
     }
 
-    private static func withLock<T>(_ fd: Int32, _ body: () throws -> T) throws -> T {
+    static func withLock<T>(_ fd: Int32, budget: TimeInterval? = nil, _ body: () throws -> T) throws -> T {
+        let deadline = budget.map { Date().addingTimeInterval($0) }
         // launchctl bootout must be able to stop a daemon waiting behind the
         // executor. A blocking flock would otherwise deadlock that bootout.
         while flock(fd, LOCK_EX | LOCK_NB) != 0 {
@@ -118,6 +126,12 @@ final class UpdateStorage {
             // daemon can exit without arming fail-closed evidence barriers.
             guard helperShutdownRequested == 0 else {
                 throw HelperFailure.stopping("Update lock unavailable or helper stopping.")
+            }
+            if let deadline, Date() >= deadline {
+                throw HelperFailure.coded(
+                    code: "UPDATE_LOCK_TIMEOUT",
+                    message: "The update lock stayed busy; update cleanup was skipped."
+                )
             }
             usleep(50_000)
         }

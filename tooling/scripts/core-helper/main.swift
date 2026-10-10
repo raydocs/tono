@@ -33,6 +33,7 @@ let killSwitchArmFields = Set([
     "allowSystemResolution",
     "bootstrapPins",
     "reviewedBundleDirect",
+    "sessionGeneration",
 ])
 
 enum HelperFailure: Error {
@@ -1242,8 +1243,13 @@ func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool
 }
 
 /// `runEmergencyDisarm` with the DNS result kept apart, for the callers that
-/// remove the installation afterwards.
-func emergencyRelease(underLock suppliedStorage: UpdateStorage? = nil) -> EmergencyReleaseOutcome {
+/// remove the installation afterwards. `lockBudget` (only `--emergency-disarm`)
+/// bounds the wait for the update lock: past it the update cleanup is skipped
+/// and the network is released without the ledger, as for an unreadable one.
+func emergencyRelease(
+    underLock suppliedStorage: UpdateStorage? = nil,
+    lockBudget: TimeInterval? = nil
+) -> EmergencyReleaseOutcome {
     guard geteuid() == 0 else {
         fputs("Tono emergency recovery must be run with sudo.\n", stderr)
         return .refused
@@ -1355,7 +1361,9 @@ func emergencyRelease(underLock suppliedStorage: UpdateStorage? = nil) -> Emerge
         }
         return emergencyReleaseOutcome(dnsRestored: dnsRestored, coreSurvived: coreSurvived)
         }
-        return try suppliedStorage == nil ? storage.locked(disarm) : disarm()
+        if suppliedStorage != nil { return try disarm() }
+        if let lockBudget { return try storage.locked(within: lockBudget, disarm) }
+        return try storage.locked(disarm)
     } catch {
         fputs(
             "Tono emergency recovery could not use update evidence (\(error)). Releasing the network.\n",
@@ -1366,271 +1374,6 @@ func emergencyRelease(underLock suppliedStorage: UpdateStorage? = nil) -> Emerge
         }
         return releaseNetworkWithoutLedger()
     }
-}
-
-/// What `--emergency-disarm` learned when it tried to stop the daemon first.
-/// Only launchd's definite "no such service" counts as gone; a launchctl that
-/// failed or ran out of time is `unknown`, never `stopped` or `notLoaded`.
-enum OperatorDaemonStop: Equatable {
-    /// launchd had no such service before any bootout.
-    case notLoaded
-    /// After this command's bootout, launchd had no such service.
-    case stopped
-    /// launchd still listed the service when the time ran out.
-    case stillLoaded(bootout: Int32?)
-    /// launchctl gave no definite answer in time.
-    case unknown
-
-    /// `launchctl print`'s exit status for a service launchd does not have.
-    static let launchctlNoSuchService: Int32 = 113
-}
-
-/// `/bin/launchctl` through `KillSwitchManager.run`: past `deadline` the child
-/// gets SIGTERM, then SIGKILL, each waited on for one second, and is then
-/// abandoned. nil means no answer (could not start, or ran out of time).
-func runOperatorLaunchctl(_ arguments: [String], deadline: TimeInterval) -> Int32? {
-    (try? KillSwitchManager.run("/bin/launchctl", arguments, deadline: deadline))?.status
-}
-
-/// R3-O4: the operator's `--emergency-disarm` used to run beside a live
-/// daemon, so both wrote PF and DNS (the daemon's watchdog, power callback or
-/// a GUI request could re-arm right after the release). Boot the daemon out of
-/// the system domain first and wait until launchd no longer has it. The whole
-/// phase ends by `budget` seconds of wall time, including the up to two
-/// seconds `runOperatorLaunchctl` may spend killing a child past its deadline,
-/// whatever launchctl does. Never throws and never blocks the release.
-func stopHelperDaemonForOperator(
-    launchctl: @escaping ([String], TimeInterval) -> Int32? = { runOperatorLaunchctl($0, deadline: $1) },
-    pause: @escaping () -> Void = { usleep(200_000) },
-    now: @escaping () -> Date = { Date() },
-    budget: TimeInterval = 20
-) -> OperatorDaemonStop {
-    let service = "system/\(UpdateExecutor.daemonLabel)"
-    let end = now().addingTimeInterval(budget)
-    // The deadline left for one launchctl call, keeping its kill grace inside
-    // `end`; nil once too little is left to start another.
-    func callDeadline(cap: TimeInterval) -> TimeInterval? {
-        let left = end.timeIntervalSince(now()) - 2
-        return left >= 0.2 ? min(cap, left) : nil
-    }
-    guard let first = callDeadline(cap: 5) else { return .unknown }
-    let before = launchctl(["print", service], first)
-    if before == OperatorDaemonStop.launchctlNoSuchService { return .notLoaded }
-    // Loaded, or launchd gave no answer: bootout of an absent service only fails.
-    guard let bootoutDeadline = callDeadline(cap: 15) else { return .unknown }
-    let bootout = launchctl(["bootout", service], bootoutDeadline)
-    var lastAnswer: Int32?
-    while let deadline = callDeadline(cap: 5) {
-        let status = launchctl(["print", service], deadline)
-        if status == OperatorDaemonStop.launchctlNoSuchService {
-            // Gone after a failed bootout of a service nobody saw loaded:
-            // it may never have been there, so this command does not claim it.
-            return bootout == 0 || before == 0 ? .stopped : .unknown
-        }
-        lastAnswer = status
-        // A failed bootout gets one look, not the full wait: the release
-        // must not sit behind a daemon launchd refused to stop.
-        if bootout != 0 { break }
-        pause()
-    }
-    return lastAnswer == 0 ? .stillLoaded(bootout: bootout) : .unknown
-}
-
-/// Reads back what a release reported: no pending DNS snapshot, no service or
-/// active resolver left on Tono's stopped 127.0.0.1 (`verifyRestored`, the
-/// update path's check), and Tono's PF block not in effect. A read failure is
-/// "not confirmed". An update disconnect inside the release can swallow a DNS
-/// write failure and still report `.released`.
-func verifyOperatorRelease() -> Bool {
-    do {
-        try ProtectedDNSManager().verifyRestored()
-        guard try !KillSwitchManager.effectiveStatus() else {
-            throw HelperFailure.invalid("Tono's PF block is still in effect.")
-        }
-        return true
-    } catch {
-        let detail = (error as? HelperFailure)?.message ?? String(describing: error)
-        fputs("Tono emergency recovery could not confirm the release: \(detail)\n", stderr)
-        return false
-    }
-}
-
-/// Bootstrap the daemon again, bounded like the bootout. Already loaded (a
-/// bootout that did not happen) only fails, which is reported.
-func restartHelperDaemonForOperator() {
-    let status = runOperatorLaunchctl(["bootstrap", "system", UpdateExecutor.daemonPlist], deadline: 15)
-    if status == 0 {
-        fputs("Tono emergency recovery started the helper daemon again so it can retry the release.\n", stderr)
-    } else {
-        let answer = status.map { "exit \($0)" } ?? "no answer"
-        fputs(
-            "Tono emergency recovery asked launchd to start the helper daemon again so it can retry the "
-                + "release (launchctl bootstrap: \(answer)); "
-                + "reopen Tono if the network is still not back.\n",
-            stderr
-        )
-    }
-}
-
-/// `--emergency-disarm` as an administrator runs it from Terminal. Only this
-/// CLI entry stops the daemon: `emergencyRelease` also runs inside the daemon
-/// (removal check) and in `--emergency-reset`, which boots out on its own.
-/// A release that finished and reads back clean leaves the daemon stopped.
-/// Otherwise (PF refused, DNS not restored, or the readback fails) the daemon
-/// is bootstrapped again, as `--emergency-reset` does, because its start
-/// releases a leftover block and retries the DNS restore (#1165); nothing
-/// else would. A daemon launchd never had is left alone, as before.
-func runOperatorEmergencyDisarm(
-    isRoot: Bool = geteuid() == 0,
-    stopDaemon: () -> OperatorDaemonStop = { stopHelperDaemonForOperator() },
-    release: () -> EmergencyReleaseOutcome = { emergencyRelease() },
-    releaseVerified: () -> Bool = { verifyOperatorRelease() },
-    restartDaemon: () -> Void = { restartHelperDaemonForOperator() }
-) -> Bool {
-    guard isRoot else {
-        fputs("Tono emergency recovery must be run with sudo.\n", stderr)
-        return false
-    }
-    let stop = stopDaemon()
-    switch stop {
-    case .notLoaded:
-        print("The Tono helper daemon was not running.")
-    case .stopped:
-        print("Stopped the Tono helper daemon so it cannot change PF or DNS during this release.")
-    case .stillLoaded(let bootout):
-        let answer = bootout.map { "exit \($0)" } ?? "no answer"
-        fputs(
-            "Tono emergency recovery still sees the helper daemon registered after launchctl bootout "
-                + "(\(answer)); it may still be running. "
-                + "Releasing the network anyway.\n",
-            stderr
-        )
-    case .unknown:
-        fputs(
-            "Tono emergency recovery could not tell whether the helper daemon stopped (launchctl gave no "
-                + "definite answer in time); it may still be running. Releasing the network anyway.\n",
-            stderr
-        )
-    }
-    let outcome = release()
-    guard stop != .notLoaded else { return outcome != .refused }
-    let finished = (outcome == .released || outcome == .coreStillRunning) && releaseVerified()
-    if finished {
-        let restore = "To restore normal operation, reopen Tono and approve the administrator prompt, or run: "
-            + "sudo launchctl bootstrap system \(UpdateExecutor.daemonPlist) "
-            + "(it also starts again at the next restart)."
-        print(stop == .stopped
-            ? "The Tono helper daemon stays stopped. " + restore
-            : "The Tono helper daemon may have stopped. If Tono does not reconnect: " + restore)
-    } else {
-        restartDaemon()
-    }
-    return outcome != .refused
-}
-
-/// R3-O4 regressions: the bootout comes before the first release write; a
-/// failed bootout still releases; a hung launchctl (SIGTERM ignored) still
-/// reaches the release within the budget; a print that never answers is
-/// `unknown`, not `stopped`; a release that reports success but does not read
-/// back clean (an update disconnect swallowing a DNS failure) restarts the
-/// daemon.
-func runOperatorEmergencyDisarmSelfTest() -> Bool {
-    func fail(_ label: String, _ detail: Any) -> Bool {
-        FileHandle.standardError.write(Data("operator disarm \(label): \(detail)\n".utf8))
-        return false
-    }
-    var events: [String] = []
-    var loaded = true
-    var bootoutStatus: Int32? = 0
-    var printAfterBootout: Int32? = OperatorDaemonStop.launchctlNoSuchService
-    var verified = true
-    var stop: OperatorDaemonStop?
-    func disarm(_ stopDaemon: @escaping () -> OperatorDaemonStop) -> Bool {
-        runOperatorEmergencyDisarm(
-            isRoot: true,
-            stopDaemon: {
-                let result = stopDaemon()
-                stop = result
-                return result
-            },
-            release: {
-                events.append("release")
-                return .released
-            },
-            releaseVerified: {
-                events.append("verify")
-                return verified
-            },
-            restartDaemon: { events.append("bootstrap") }
-        )
-    }
-    func scripted() -> OperatorDaemonStop {
-        var clock = Date(timeIntervalSince1970: 0)
-        return stopHelperDaemonForOperator(
-            launchctl: { arguments, _ in
-                events.append(arguments[0])
-                if arguments[0] == "bootout" {
-                    loaded = false
-                    return bootoutStatus
-                }
-                return loaded ? 0 : printAfterBootout
-            },
-            pause: { clock.addTimeInterval(1) },
-            now: { clock }
-        )
-    }
-
-    guard disarm(scripted), stop == .stopped,
-          events == ["print", "bootout", "print", "release", "verify"] else {
-        return fail("order", events)
-    }
-
-    events = []
-    loaded = true
-    bootoutStatus = 5
-    printAfterBootout = 0
-    guard disarm(scripted), stop == .stillLoaded(bootout: 5),
-          events == ["print", "bootout", "print", "release", "verify"] else {
-        return fail("after failed bootout", events)
-    }
-
-    events = []
-    loaded = true
-    bootoutStatus = 0
-    printAfterBootout = nil
-    guard disarm(scripted), stop == .unknown, events.first == "print", events.contains("release") else {
-        return fail("print timeout", "\(String(describing: stop)) \(events)")
-    }
-
-    events = []
-    loaded = true
-    printAfterBootout = OperatorDaemonStop.launchctlNoSuchService
-    verified = false
-    guard disarm(scripted), stop == .stopped,
-          events == ["print", "bootout", "print", "release", "verify", "bootstrap"] else {
-        return fail("unconfirmed release", events)
-    }
-
-    events = []
-    verified = true
-    let started = Date()
-    let hung = {
-        stopHelperDaemonForOperator(
-            launchctl: { arguments, deadline in
-                events.append(arguments[0])
-                return (try? KillSwitchManager.run(
-                    "/bin/sh", ["-c", "trap '' TERM; exec /bin/sleep 30"], deadline: deadline
-                ))?.status
-            },
-            budget: 3
-        )
-    }
-    let hungReleased = disarm(hung)
-    let elapsed = Date().timeIntervalSince(started)
-    guard hungReleased, stop == .unknown, events.contains("release"), elapsed < 4.5 else {
-        return fail("hung launchctl", "\(String(describing: stop)) \(events) \(elapsed)s")
-    }
-    return true
 }
 
 /// One-command recovery for a daemon that refuses its own GUI (a stale
@@ -2356,7 +2099,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && PowerTransitionGate.runSelfTests()
             && runStartupOrderSelfTest()
             && runStartupDNSRecoverySelfTest()
-            && runOperatorEmergencyDisarmSelfTest()
+            && runOperatorReleaseSelfTests()
             && KillSwitchManager.runFailedCommitReleaseSelfTest()
             && KillSwitchManager.runFailedBarrierSelectiveReleaseSelfTest()
             && KillSwitchManager.runFailedBarrierUnreleasedSelfTest()
@@ -2374,7 +2117,7 @@ if CommandLine.arguments.dropFirst() == ["--network-self-test"] {
     exit(KillSwitchManager.runNetworkSelfTest() ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--emergency-disarm"] {
-    exit(runOperatorEmergencyDisarm() ? 0 : 1)
+    exit(runOperatorEmergencyDisarmCommand() ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--emergency-reset"] {
     exit(runEmergencyReset() ? 0 : 1)

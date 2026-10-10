@@ -50,6 +50,9 @@ nonisolated struct HelperManager {
         /// instead of written back. A helper without service-ID snapshots
         /// never sends it.
         let originalDNSRestored: Bool?
+        /// `/session/connect` only: the session an explicit user Connect began
+        /// (decision 084). Absent before helper 4.52.45.
+        let sessionGeneration: UInt64?
         let lastError: String?
         let error: String?
     }
@@ -817,6 +820,30 @@ nonisolated struct HelperManager {
 
     // MARK: - Kill Switch
 
+    /// The helper session the last explicit user Connect began (decision 084).
+    /// Every arm carries it, so the helper refuses an arm of an older session
+    /// and, after `--emergency-disarm`, every arm until the next user Connect
+    /// begins a newer one. In memory only: a relaunched app arms without it,
+    /// which the helper allows unless an operator release holds.
+    nonisolated(unsafe) static var connectSessionGeneration: UInt64?
+
+    /// `/session/connect`. Only `AppState`'s explicit user Connect calls this;
+    /// automatic reconnects, heals and wake re-arms never do.
+    @discardableResult
+    static func beginConnectSession() throws -> UInt64 {
+        let result = try sendRequest(method: "POST", path: "/session/connect")
+        let envelope = try requireSuccess(result, operation: "session")
+        guard let generation = envelope.sessionGeneration else { throw HelperIPCError.invalidResponse }
+        connectSessionGeneration = generation
+        return generation
+    }
+
+    /// Helper refusal codes that only a new explicit user Connect resolves:
+    /// automatic loops stop on them (decision 084).
+    static let operatorReleaseCodes: Set<String> = [
+        "OPERATOR_RELEASED", "TARGET_STATE_UNREADABLE", "SESSION_SUPERSEDED",
+    ]
+
     static func armKillSwitch(
         apiHosts: [String]? = nil,
         exitNodeHints: [String]? = nil,
@@ -859,6 +886,9 @@ nonisolated struct HelperManager {
         object["allowSystemResolution"] = allowSystemResolution
         if !bootstrapPins.isEmpty {
             object["bootstrapPins"] = bootstrapPins
+        }
+        if let connectSessionGeneration {
+            object["sessionGeneration"] = NSNumber(value: connectSessionGeneration)
         }
         let result = try sendJSONObject(
             method: "POST",

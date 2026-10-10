@@ -61,7 +61,9 @@ extension AppState {
                 connected: false,
                 protectionBlocked: isProtectionBlocked
             ) {
-                retryProtectedConnectionNow()
+                // A server pick is not the explicit Connect that may end an
+                // administrator's release (decision 084).
+                retryProtectedConnectionNow(userInitiated: false)
             } else if IdleCatalogSelect.shouldConnect(
                 connected: false,
                 protectionBlocked: isProtectionBlocked,

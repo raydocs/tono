@@ -317,6 +317,9 @@ final class AppState {
     /// resume, the reconnect loop, wake recovery) connects. Lifted by the
     /// user's connect or Retry, or by a completed release.
     var automaticResumeHeldAfterRestart = false
+    /// Set by an explicit user Connect or Retry, consumed by the next connect
+    /// attempt's perform step (decision 084).
+    var userConnectIntent = UserConnectIntent()
     var managedCatalogRevision = -1
     var managedCatalogDigest: String?
     /// Freshness of the sibling routing document. The fleet-wide revision and
@@ -3001,4 +3004,23 @@ private enum ConnectionByteFormat {
         formatter.allowsNonnumericFormatting = false
         return formatter
     }()
+}
+
+/// An explicit user Connect, briefly remembered until the connect attempt
+/// it started reaches its perform step. Single use and short-lived, so a
+/// later automatic reconnect cannot inherit it (decision 084).
+nonisolated struct UserConnectIntent: Equatable, Sendable {
+    static let lifetime: TimeInterval = 10
+    private(set) var markedAt: Date?
+
+    mutating func mark(now: Date = Date()) {
+        markedAt = now
+    }
+
+    mutating func consume(now: Date = Date()) -> Bool {
+        defer { markedAt = nil }
+        guard let markedAt else { return false }
+        let age = now.timeIntervalSince(markedAt)
+        return age >= 0 && age <= Self.lifetime
+    }
 }
