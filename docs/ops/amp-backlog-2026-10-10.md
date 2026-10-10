@@ -93,8 +93,8 @@ Report at the end of each task: PR number, ci-gate run id, review receipt, what 
 |---|---|---|---|---|
 | D1 | hy2 自动切换默认开不开 | A 全员默认开 · B 默认关，手选 · C 内部账号先开，两周后转 A | **C** | A17、A18 |
 | D2 | Amp 能不能改生产节点上的 hy2 配置 | A 能（先备份，不碰 443 的 xray） · B 不能，只读探测 | **A** | A16 |
-| D3 | D7 macOS 连接中的私网放行 | A 和 Windows 对齐，全封（加「允许局域网设备」开关，默认关） · B 保持现状 · C 只放同网段 + mDNS | **A** | 未派 |
-| D4 | H1-F5 bootstrap 期间非 Tono 进程能到共享 anycast | A 记为已知风险 + 把窗口缩到几秒 · B helper 代理控制面请求（大改） | **A** | 未派 |
+| D3 | D7 macOS 连接中的私网放行 | A 和 Windows 对齐，全封（加「允许局域网设备」开关，默认关） · B 保持现状 · C 只放同网段 + mDNS | **A** | A29 |
+| D4 | H1-F5 bootstrap 期间非 Tono 进程能到共享 anycast | A 记为已知风险 + 把窗口缩到几秒 · B helper 代理控制面请求（大改） | **A** | A30 |
 | D6 | 大文件纯拆分要不要做 | A 做，一次一个文件 · B 不做 | **A** | A23、A28 |
 | D7 | 节点身份方案 | A 节点持 token 自注册 · B 后台 SSH 拉取 | **A** | A20 |
 | D8 | 构建来源证明 | A 先只生成和审计，客户端不校验 · B 客户端也校验 | **A** | A24 |
