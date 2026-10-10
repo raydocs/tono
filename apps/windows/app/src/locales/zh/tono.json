@@ -283,6 +283,20 @@
       "signInNotSaved": "无法在这台电脑上保存登录。请重新获取验证码后再试。",
       "clockSkew": "登录没有完成。",
       "serverError": "登录服务暂时繁忙或不可用，请稍后重试或联系客服。"
+    },
+    "paths": {
+      "title": "已尝试的连接路径",
+      "system_dns": "系统 DNS",
+      "pinned": "固定地址",
+      "relay": "Tono 中继",
+      "kind": {
+        "dns": "域名解析失败",
+        "connect": "无法连接",
+        "tls": "安全连接失败",
+        "timeout": "超时",
+        "other": "失败"
+      },
+      "elapsed": "{{seconds}} 秒"
     }
   },
   "pill": {
