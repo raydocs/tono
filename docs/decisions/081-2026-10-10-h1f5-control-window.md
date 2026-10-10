@@ -10,7 +10,8 @@
   and a timer there would need a new Service IPC revision without narrowing the H1-F5 exposure. Rejected: a helper
   proxy for control-plane requests (D4-B, rejected in decision 079); a window that each new exchange extends (it could
   stay open indefinitely under steady traffic); a Windows timer in this PR.
-- Why stricter: the macOS permit used to exist for the whole armed period, connected included. It now exists only
+- Why stricter: the macOS permit used to exist for as long as protection was armed without a tunnel (bootstrap,
+  Protected Offline; the connected arm already dropped it). It now exists only
   inside an exchange, for at most 15 s, with the same addresses, port, protocol and UIDs as before; nothing is added to
   the ruleset. Every failure path (exchange error, lost lease, helper restart, failed load) ends with the permit
   withdrawn or the emergency block. Windows keeps the binding that already excludes every other process.

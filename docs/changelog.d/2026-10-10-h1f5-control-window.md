@@ -1,7 +1,7 @@
 ## 2026-10-10 · H1-F5：macOS 控制面放行只在交换期间存在（≤ 15 s）
 - 归属：ops 计划 [plan-2026-09-11](../ops/plan-2026-09-11.md)，Amp 待办 A30（[amp-backlog-2026-10-10](../ops/amp-backlog-2026-10-10.md) §6，D4-A）；macOS helper、macOS app。
 - 来源：origin/main `d12e2f9f` 起，分支 `amp/a30-bootstrap-window`，PR [#1507](https://github.com/raydocs/tono/pull/1507)；未合 main。
-- 缺陷修复：H1-F5 macOS 一半。以前只要保护开着（含已连接），helper 的 PF 就一直放行 API 主机的固定地址（TCP 443，
+- 缺陷修复：H1-F5 macOS 一半。以前保护开着而没有隧道时（连接前的引导、断网保护），helper 的 PF 一直放行 API 主机的固定地址（TCP 443，
   root 与当前用户 UID），同 UID 的非 Tono 进程在断网保护期间可到达共享 anycast。现在这条放行只在控制窗口内渲染：
   `TonoAPIClient` 每次交换前向 helper 取窗口（`POST /killswitch/control-window`），交换应答、失败或取消后立即归还
   （`/killswitch/control-window/close`）；helper 在窗口打开 15 s 后自行撤回（加入的交换不延长），睡眠时随紧急全封一起撤，
@@ -19,4 +19,4 @@
 - 验证：Linux orb 只做源码检查；Swift/helper 自测与 XCTest 由托管 macOS CI 运行（见 PR 的 ci-gate）。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：窗口内（≤ 15 s）同 UID 进程仍可到达共享 anycast 的 TCP 443（PF 无程序身份）；交换超过 15 s 时失去放行、
-  按失败处理；已连接会话中 helper 升级后，旧 helper 留下的常驻放行要到下一次 arm 才去掉；未实机验证。
+  按失败处理；helper 在有隧道的会话中重启时不重载规则（已连接的 arm 本来就不带 API 主机）；未实机验证。
