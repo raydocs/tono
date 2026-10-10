@@ -166,6 +166,59 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(pinnedAttempts.count, 1, "the pinned addresses receive the request exactly once")
     }
 
+    /// Decision 077: when the system resolver and the pinned addresses both
+    /// fail before any request byte is sent, the request goes to the Tono
+    /// relay outside Cloudflare, exactly once (a sign-in POST), and the relay
+    /// that answered goes in front for the next request, so the dead direct
+    /// paths are not paid again.
+    func testDeadSystemAndPinnedPathsHandTheRequestToTheRelayOnceAndKeepIt() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        let systemRequests = PathCallCounter()
+        HeldAccountProtocol.install(host) { request in
+            systemRequests.record()
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        let pinnedAttempts = PathCallCounter()
+        let relayAttempts = PathCallCounter()
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                pinnedAttempts.record()
+                // No pin reached TLS: nothing was sent.
+                throw URLError(.cannotConnectToHost)
+            },
+            relayPath: ControlPlanePath(label: "relay") { _, _ in
+                relayAttempts.record()
+                return ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-077","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
+            }
+        )
+
+        var challengeIds: [String] = []
+        for _ in 0..<2 {
+            do {
+                challengeIds.append(try await api.startEmailSignIn(TonoEmailStartRequest(
+                    email: "relay@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+                )).challengeId)
+            } catch {
+                challengeIds.append("error: \(error)")
+            }
+        }
+
+        XCTAssertEqual(challengeIds, ["c-077", "c-077"], "the relay answers both sign-ins")
+        XCTAssertEqual(relayAttempts.count, 2, "the relay receives each request exactly once")
+        XCTAssertEqual(systemRequests.count, 1, "the second request goes to the relay first")
+        XCTAssertEqual(pinnedAttempts.count, 1, "the dead pins are not paid again once the relay answered")
+    }
+
     /// #588: a server certificate this Mac's clock cannot date names the
     /// clock. NTP is blocked while protection is on, so the generic
     /// "could not reach Tono" leaves the user nothing to fix.

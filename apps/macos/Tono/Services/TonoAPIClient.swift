@@ -149,11 +149,15 @@ actor TonoAPIClient {
     /// #584: the bundled pinned addresses, tried when the system resolver
     /// fails before any status line.
     private let pinnedPath: ControlPlanePath?
-    /// #584: the pinned addresses answered where the system resolver failed,
-    /// so later requests try them first. Cleared when a preferred attempt
-    /// fails, is cancelled or its body fails. Process memory only, like the Windows
-    /// client's learned preference (#583).
-    private var prefersPinnedAddresses = false
+    /// Decision 077: the Tono-owned relays outside Cloudflare, tried when
+    /// the system resolver and the pinned addresses both fail before any
+    /// status line.
+    private let relayPath: ControlPlanePath?
+    /// #584: the label of a later path that answered where the paths before
+    /// it failed, so later requests try it first. Cleared when a preferred
+    /// attempt fails, is cancelled or its body fails. Process memory only,
+    /// like the Windows client's learned preference (#583).
+    private var preferredPathLabel: String?
     private let keychain: KeychainStore
     private var accessToken: String?
     /// A failed credential adoption must not use either account's credentials
@@ -202,7 +206,8 @@ actor TonoAPIClient {
         keychain: KeychainStore = KeychainStore(),
         session: URLSession? = nil,
         offlineGate: OfflineGrantGate = OfflineGrantGate(directory: ConfigStorage.shared.appSupportDirectory),
-        pinnedPath: ControlPlanePath? = nil
+        pinnedPath: ControlPlanePath? = nil,
+        relayPath: ControlPlanePath? = nil
     ) {
         self.baseURL = baseURL
         self.keychain = keychain
@@ -217,6 +222,8 @@ actor TonoAPIClient {
         // session (tests) has none unless one is passed.
         self.pinnedPath = pinnedPath
             ?? (session == nil ? ControlPlanePath.pinnedAddresses(for: baseURL) : nil)
+        self.relayPath = relayPath
+            ?? (session == nil ? ControlPlanePath.relays(for: baseURL) : nil)
     }
 
     /// The production control-plane session configuration. An injected
@@ -1064,9 +1071,10 @@ actor TonoAPIClient {
         throw APIError.transport("Retry attempts exhausted.")
     }
 
-    /// #584: one exchange, over the system resolver first and then the
-    /// pinned addresses. A healthy network keeps today's path; the pinned
-    /// client only runs where the system resolver could not deliver.
+    /// #584: one exchange, over the system resolver first, then the pinned
+    /// addresses, then the relays (decision 077). A healthy network keeps
+    /// today's path; the pinned client only runs where the system resolver
+    /// could not deliver, and the relays only where neither direct path could.
     ///
     /// A request moves to the next path only on a failure `shouldRetry`
     /// would replay for its method: a read after any failure, a mutating
@@ -1081,12 +1089,22 @@ actor TonoAPIClient {
         requestIsCurrent: (@Sendable () -> Bool)?
     ) async throws -> (ControlPlaneAnswer, String) {
         let maximumResponseBytes = 2 * 1024 * 1024
-        guard let pinnedPath else {
+        let fallbacks = [pinnedPath, relayPath].compactMap { $0 }
+        guard !fallbacks.isEmpty else {
             let answer = try await systemPath.exchange(request, maximumResponseBytes)
             return (answer, systemPath.label)
         }
-        let pinnedFirst = prefersPinnedAddresses
-        let order = pinnedFirst ? [pinnedPath, systemPath] : [systemPath, pinnedPath]
+        // A path that answered where the ones before it could not goes in
+        // front; the rest keep their order behind it.
+        var order = [systemPath] + fallbacks
+        let preferred = preferredPathLabel
+        let preferredFirst: Bool
+        if let preferred, let index = order.firstIndex(where: { $0.label == preferred }), index > 0 {
+            order.insert(order.remove(at: index), at: 0)
+            preferredFirst = true
+        } else {
+            preferredFirst = false
+        }
         // #588: a path that failed on a certificate date is the cause to
         // report when no path answers, whatever the next path failed on.
         var clockFailure: (any Error)?
@@ -1097,16 +1115,16 @@ actor TonoAPIClient {
                 if answer.bodyFailure != nil {
                     // A body that failed after the status line, or was
                     // cancelled, neither keeps nor earns the preference.
-                    if index == 0, pinnedFirst { prefersPinnedAddresses = false }
-                } else if index > 0, !pinnedFirst {
-                    // The pins answered where the system resolver could not.
-                    prefersPinnedAddresses = true
+                    if index == 0, preferredFirst { preferredPathLabel = nil }
+                } else if index > 0, !preferredFirst {
+                    // This path answered where the ones before it could not.
+                    preferredPathLabel = path.label
                 }
                 return (answer, path.label)
             } catch {
                 // A preferred attempt that fails or is cancelled puts the
                 // system resolver back in front for the next request.
-                if index == 0, pinnedFirst { prefersPinnedAddresses = false }
+                if index == 0, preferredFirst { preferredPathLabel = nil }
                 if CertificateClock.isDateFailure(error) { clockFailure = error }
                 guard index + 1 < order.count,
                       !(error is ControlPlaneExchangeError),
