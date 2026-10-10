@@ -215,15 +215,24 @@ export const tonoUpdateRoutePreferences = async (
 }
 
 // Sign-in fixture uses no credentials or network; only synthetic status events.
+const signInFixtureIO = async () => {
+  await privacyDelay('authDelay')
+  if (params.has('relaysDown'))
+    throw new Error(
+      'TONO_AUTH_TCP: could not reach Tono: TONO_RELAYS_UNREACHABLE: relay 2 (192.0.2.2:2053) timeout: synthetic timeout; relay 3 (192.0.2.3:2053) tls: synthetic TLS failure; relay 1 (192.0.2.1:2053) connect: synthetic connection failure',
+    )
+}
 export const tonoSignInStart = async () => {
   window.dispatchEvent(
     new CustomEvent('preview-home-state', {
       detail: { accountState: 'authenticating' },
     }),
   )
+  await signInFixtureIO()
   return { challengeId: 'synthetic', expiresIn: 600, message: '' }
 }
 export const tonoSignInVerify = async () => {
+  await signInFixtureIO()
   if (params.has('badCode'))
     throw new Error('TONO_AUTH_INVALID_CODE: Synthetic rejected code')
   const suspended = params.has('paused')

@@ -157,27 +157,49 @@ describe('login paused screen', () => {
 })
 
 describe('login while protection blocks the network', () => {
-  it('says signing in needs protection off and what that does, and releases only on the explicit button', async () => {
+  it('permits code requests and verification while the barrier stays held, retaining request locks and explicit release', async () => {
     mocks.status = {
       accountState: 'signedOut',
       uiState: 'protectedOffline',
       protectionBlocked: true,
       killSwitch: { wanted: true, live: true, mode: 'blocked' },
     }
-    render(
-      <MemoryRouter>
-        <LoginPage />
-      </MemoryRouter>,
+    const resend = await enterCodeStep()
+    const explanation = screen.getByText(
+      enTono.login.networkBlocked.description,
     )
-    const explanation = screen.getByText(enTono.login.networkBlocked.description)
-    // Why sign-in cannot get through (the relays are blocked too), what turns it off, and
-    // the impact: traffic leaves this PC outside Tono until the next connect.
-    expect(explanation.textContent).toMatch(/relays/)
+    expect(explanation.textContent).toMatch(/relay routes/)
     expect(explanation.textContent).toMatch(/turns protection off/)
-    expect(explanation.textContent).toMatch(/not through Tono/)
+    expect(explanation.textContent).toMatch(/without turning it off/)
+    expect(mocks.start).toHaveBeenCalledTimes(1)
+    expect(resend.disabled).toBe(false)
+    let rejectVerification!: (error: Error) => void
+    mocks.verify.mockReturnValueOnce(
+      new Promise((_, reject) => {
+        rejectVerification = reject
+      }),
+    )
+    const code = screen.getByLabelText<HTMLInputElement>('6-digit code')
+    expect(code.disabled).toBe(false)
+    await act(async () =>
+      fireEvent.change(code, { target: { value: '654321' } }),
+    )
     expect(
-      screen.getByRole<HTMLButtonElement>('button', { name: 'Send code' }).disabled,
+      screen.getByRole<HTMLButtonElement>('button', { name: 'Verifying…' })
+        .disabled,
     ).toBe(true)
+    expect(resend.disabled).toBe(true)
+    expect(mocks.verify).toHaveBeenCalledTimes(1)
+    expect(mocks.disconnect).not.toHaveBeenCalled()
+    await act(async () =>
+      rejectVerification(new Error('Synthetic verification failure')),
+    )
+    expect(screen.getByText('Synthetic verification failure')).toBeDefined()
+    expect(
+      screen.getByText(enTono.login.networkBlocked.description),
+    ).toBeDefined()
+    expect(code.disabled).toBe(false)
+    expect(resend.disabled).toBe(false)
     expect(mocks.disconnect).not.toHaveBeenCalled()
     await act(async () =>
       fireEvent.click(screen.getByRole('button', { name: 'Restore network' })),
