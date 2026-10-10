@@ -64,6 +64,43 @@ final class NativeUpdateDownloadTests: XCTestCase {
         XCTAssertEqual(NativeUpdateDownload.fallbacks(for: production).map(\.label), ["relay"])
     }
 
+    /// A2 follow-up (WIN-AUTH-CN-CF-PATH): a package GET whose direct path
+    /// dies before any response goes to the relay, and the relay's body is
+    /// written to disk piece by piece as it arrives, never held whole. The
+    /// release host's package paths are its relays, in order.
+    func testDeadDirectPathStreamsThePackageFromTheRelayToDisk() async throws {
+        // Nothing listens on loopback port 1: refused before any response.
+        let url = try XCTUnwrap(URL(string: "http://localhost:1/desktop/v1/abc/package.macos-arm64.zip"))
+        let piece = 16 * 1024
+        let package = Data((0..<(16 * piece)).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ $0 / 251) })
+        let requested = UpdatePathLog()
+        let onDisk = UpdatePathLog()
+        let saved = try await NativeUpdateDownload.package(at: url, size: Int64(package.count), relays: [
+            PackagePath(label: "relay") { relayURL, sink in
+                requested.record(relayURL.absoluteString)
+                let head = "HTTP/1.1 200 OK\r\nContent-Length: \(package.count)\r\nConnection: close\r\n\r\n"
+                XCTAssertFalse(try sink.receive(Data(head.utf8)))
+                for offset in stride(from: 0, to: package.count, by: piece) {
+                    let done = try sink.receive(package.subdata(in: offset..<(offset + piece)))
+                    XCTAssertEqual(done, offset + piece == package.count)
+                    // Each piece is on disk before the next one arrives.
+                    let size = try FileManager.default.attributesOfItem(atPath: sink.destination.path)[.size]
+                    onDisk.record("\((size as? NSNumber)?.intValue ?? -1)")
+                }
+            },
+        ])
+        defer { try? FileManager.default.removeItem(at: saved.deletingLastPathComponent()) }
+
+        XCTAssertEqual(requested.entries, [url.absoluteString])
+        XCTAssertEqual(onDisk.entries, stride(from: piece, through: package.count, by: piece).map { "\($0)" })
+        XCTAssertEqual(try Data(contentsOf: saved), package)
+        let permissions = try FileManager.default.attributesOfItem(atPath: saved.path)[.posixPermissions]
+        XCTAssertEqual((permissions as? NSNumber)?.intValue, 0o600)
+        let production = try XCTUnwrap(URL(string: NativeUpdateDownload.origin + "abc/package.macos-arm64.zip"))
+        XCTAssertEqual(NativeUpdateDownload.packageRelays(for: production).map(\.label),
+                       ["relay 179.253.233.220:2053", "relay 179.255.154.17:2053"])
+    }
+
     private nonisolated static func receiveRequest(
         on connection: NWConnection, queue: DispatchQueue, received: Data = Data()
     ) {
