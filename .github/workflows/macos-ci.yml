@@ -120,6 +120,13 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # The hosted-window flag stays on: MacUsabilityRenderTests fail without it
+      # and assert native labels, identifiers and opacity, not pixels. The four
+      # whole-window MacSeaPolishRenderTests captures (and their Chinese pass)
+      # run in screenshots-nightly.yml after merge instead (D9-A); the skip list
+      # here and the only-testing list there are held equal by
+      # tooling/scripts/tests/screenshot-nightly-split.test.mjs. macos-release.yml
+      # still runs the whole target, captures included.
       - name: Run the TonoTests unit tests
         env:
           TEST_RUNNER_TONO_EMIT_SINGBOX: ${{ runner.temp }}/sing-box-product.json
@@ -131,24 +138,25 @@ jobs:
             -scheme Tono \
             -configuration Debug \
             -resultBundlePath apps/macos/test-results/TonoTests.xcresult \
+            -skip-testing:TonoTests/MacSeaPolishRenderTests/testWholeWindowStatesAndAccessibility \
+            -skip-testing:TonoTests/MacSeaPolishRenderTests/testFullTransitionsWaterAndProcessCPU \
+            -skip-testing:TonoTests/MacSeaPolishRenderTests/testSharedControlSurfacesAndAccessibilityVariants \
+            -skip-testing:TonoTests/MacSeaPolishRenderTests/testNativeResizeCoverageBeforeAndAfterCachedTreeRebuild \
             CODE_SIGNING_ALLOWED=NO \
             ENABLE_USER_SCRIPT_SANDBOXING=NO \
             test
 
-      - name: Capture the whole-window Mac polish fixtures in Chinese
-        env:
-          TEST_RUNNER_TONO_HOSTED_WINDOW_DIAGNOSTIC: "1"
+      - name: Swift build cache (none, by design)
+        # Reported so the cache line is in every run's summary next to the
+        # Cargo ones. The Xcode project has no SwiftPM package dependencies;
+        # Xcode's incremental build compares timestamps a fresh checkout resets;
+        # this job's Release product can feed the paired unsigned candidate
+        # (desktop-update-candidate.yml); the privileged helper is compiled from
+        # source on purpose. So no DerivedData is restored here.
         run: |
-          xcodebuild \
-            -project apps/macos/Tono.xcodeproj \
-            -scheme Tono \
-            -configuration Debug \
-            -testLanguage zh-Hans -testRegion CN \
-            -only-testing:TonoTests/MacSeaPolishRenderTests/testWholeWindowStatesAndAccessibility \
-            -resultBundlePath apps/macos/test-results/TonoTests-zh.xcresult \
-            CODE_SIGNING_ALLOWED=NO \
-            ENABLE_USER_SCRIPT_SANDBOXING=NO \
-            test
+          line="Swift build cache (macos / build): none — no SwiftPM dependencies; DerivedData and helper are always built from source"
+          echo "$line"
+          echo "$line" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Require the shared update contract XCTest to execute
         run: |
@@ -167,7 +175,6 @@ jobs:
           name: tono-macos-tests-${{ github.sha }}
           path: |
             apps/macos/test-results/TonoTests.xcresult
-            apps/macos/test-results/TonoTests-zh.xcresult
             apps/macos/test-results/renders/*.png
             apps/macos/test-results/renders/*.txt
           if-no-files-found: warn
@@ -261,6 +268,11 @@ jobs:
 
       - name: Appcast publisher validation
         run: node --test tooling/scripts/tests/publish-macos-appcast.test.mjs
+
+      - name: Skipped window captures still run in the nightly
+        # The build job's -skip-testing list must equal screenshots-nightly.yml's
+        # -only-testing list; an edit to either runs this check.
+        run: node --test tooling/scripts/tests/screenshot-nightly-split.test.mjs
 
   # Split out because these need root. Locally the helper's own self-test prints
   # `PF syntax check skipped (needs root)` and the lifecycle test refuses

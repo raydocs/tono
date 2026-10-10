@@ -20,6 +20,8 @@ name: Services CI
 #
 # Playwright shards run the ops-console specs for behaviour, not pixels: the
 # screenshot baselines were captured on macOS and Linux fonts would fail them.
+# The pixel comparisons run after merge in screenshots-nightly.yml on macOS
+# (D9-A); --ignore-snapshots below must stay, or they return to the PR gate.
 #
 # After a green console build, a markdown size table is posted on the PR so a
 # ratchet that is still under budget is visible before it is not.
@@ -66,6 +68,8 @@ on:
       - .github/workflows/services-ci.yml
       # desktop-update-sign-workflow.test.mjs guards this file; run it on every edit.
       - .github/workflows/desktop-update-sign.yml
+      # screenshot-nightly-split.test.mjs guards this file the same way.
+      - .github/workflows/screenshots-nightly.yml
 
 permissions:
   contents: read
