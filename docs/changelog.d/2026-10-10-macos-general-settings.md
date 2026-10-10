@@ -9,3 +9,6 @@
 - 候选/发布：仅源码，无新候选、无更新源或发布操作。
 - 剩余限制：真实 macOS Login Items 批准/取消、失去回执、VoiceOver/全键盘控制、语言重开与保护释放需要最终原生设备包验收；此处合成 IO 的原生窗口截图不代表这些检查已通过。
 - 2026-10-10 续修：独立 Sol 对 [e1d5118c](https://github.com/raydocs/tono/commit/e1d5118c99cf94c020de5683e607e379e925c2f9) 源码评审 PASS（无 major，1 minor）：failed 后刷新仍返回 unavailable 不得清锁。已定点保留失败，只有可确认的 enabled/notRegistered/requiresApproval 状态才能结束失败；同一回归增加 unavailable→页面重挂→仍拒第二写→显式可确认刷新。新准确 head 的复核/CI/截图仍待结果，不沿用原 head。
+- 2026-10-10 续记：[f699a661](https://github.com/raydocs/tono/commit/f699a661afba06ccfad73f9061a8ab8738cd0d84) 独立Sol精确delta及上下文复核PASS，F1关闭，无剩余major/minor；M1–M5源代码覆盖明确延续，回执已记PR评论，不是设备验收。CI[38083546959](https://github.com/raydocs/tono/actions/runs/38083546959)实际checkout8f3a6a606：编译通过，688 tests/1 skipped/1 failure（唯一新增中文窄窗OCR；en-US误识别Han字）。未报全绿。
+- 工程定点修正：Vision对required Han标签使用zh-Hans/en-US，其余English配置不变；保留置信度、精确文字、原始像素/透明度/窗口范围等全部断言。修正receipt不再冒称中文fixture为English。Linux结构检查raw `All files verified successfully with exact balance!`，不是Swift执行。
+- 已检查并上传[f699原生窗口九状态PNG](../screenshots/macos-general-settings-2026-10-10/README.md)，中文截图真实可读但原OCR验收仍标失败。只归档原始window PNG，不存offscreen/诊断重拍/cache/xcresult。新准确head的CI和独立复核仍待；PR保持Draft，真实系统批准、键盘/VoiceOver与语言quit仍待最终包。

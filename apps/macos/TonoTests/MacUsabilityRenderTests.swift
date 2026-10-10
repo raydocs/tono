@@ -693,7 +693,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         let processLanguage = Locale.preferredLanguages.first ?? "missing"
         let bundleLanguage = Bundle.main.preferredLocalizations.first ?? "missing"
         let testBundleLanguage = Bundle(for: type(of: self)).preferredLocalizations.first ?? "missing"
-        receipt.append("language source=English fixture strings processPreferred=\(processLanguage) bundlePreferred=\(bundleLanguage) testBundlePreferred=\(testBundleLanguage) AppleLanguages=\(ProcessInfo.processInfo.environment["AppleLanguages"] ?? "unset") SwiftUILocale=en")
+        receipt.append("language processPreferred=\(processLanguage) bundlePreferred=\(bundleLanguage) testBundlePreferred=\(testBundleLanguage) AppleLanguages=\(ProcessInfo.processInfo.environment["AppleLanguages"] ?? "unset"); fixture locale override may differ; requiredLabels=\(requiredLabels)")
         guard processLanguage.lowercased().hasPrefix("en"), bundleLanguage.lowercased().hasPrefix("en") else {
             receipt.append("acceptance=failed: process or app bundle preferred language is not English")
             XCTFail("\(name): English native-text source not established before capture")
@@ -908,7 +908,12 @@ final class MacUsabilityRenderTests: XCTestCase {
     ) -> Bool {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
-        request.recognitionLanguages = ["en-US"]
+        // Fixture locale can differ from the English test process. Preserve the
+        // English recognizer for existing fixtures; Chinese labels need Han OCR.
+        let hasChineseLabels = required.contains { label in
+            label.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) }
+        }
+        request.recognitionLanguages = hasChineseLabels ? ["zh-Hans", "en-US"] : ["en-US"]
         request.usesLanguageCorrection = true
         do {
             try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
@@ -923,7 +928,7 @@ final class MacUsabilityRenderTests: XCTestCase {
             if abs(left.2.midY - right.2.midY) > 0.015 { return left.2.midY > right.2.midY }
             return left.2.minX < right.2.minX
         }
-        receipt.append("Vision lines=\(lines.count) recognition=accurate language=en-US correction=true")
+        receipt.append("Vision lines=\(lines.count) recognition=accurate languages=\(request.recognitionLanguages) correction=true")
         for (index, line) in lines.prefix(80).enumerated() {
             receipt.append("OCR[\(index)] text=\(line.0.debugDescription) confidence=\(line.1) box=\(line.2)")
         }
