@@ -62,8 +62,10 @@ does not depend on `AppState`. Do not merge `Core/` into `Services/`.
 | `service/src/core/` | Privileged WFP, DNS, Mihomo supervision |
 | `crates/tono-core/` | Portable catalog, policy, connect FSM |
 
-`tono/connection.rs` still owns the outer attempt, disconnect, switching,
-monitoring, probes and DIRECT lifecycle. `connection/stages.rs` now owns
+`tono/connection.rs` is the module facade (`mod`/`use` surface, session clock). The outer
+attempt lives in `connection/attempt.rs` (with `entry.rs`, `guards.rs` and the failure
+decision table in `outcome.rs`); disconnect, switching, monitoring, probes and the DIRECT
+lifecycle have their own `connection/` files. `connection/stages.rs` owns
 `run_stages`; `connection/transaction.rs` owns the shared deadline and cancellation;
 `connection/failure.rs` owns stable error mapping. Health, decision tables and route
 classification remain in `connection_health.rs`, `connection_plan.rs`, and
