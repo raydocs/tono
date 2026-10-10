@@ -1369,6 +1369,8 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
     async fn dead_cloudflare_paths_fall_back_to_a_relay() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().expect("addr").port();
+        // The `X-Tono-Path` value of every request the relay received, `None` when absent.
+        let (paths_tx, paths_rx) = std::sync::mpsc::channel::<Option<String>>();
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 use std::io::{BufRead as _, BufReader, Write as _};
@@ -1378,12 +1380,19 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
                     Err(_) => continue,
                 });
                 let mut line = String::new();
+                let mut path = None;
                 while reader.read_line(&mut line).unwrap_or(0) > 0 {
                     if line == "\r\n" || line == "\n" {
                         break;
                     }
+                    if let Some((name, value)) = line.split_once(':')
+                        && name.eq_ignore_ascii_case("x-tono-path")
+                    {
+                        path = Some(value.trim().to_owned());
+                    }
                     line.clear();
                 }
+                let _ = paths_tx.send(path);
                 let _ = stream.write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nrelay",
                 );
@@ -1414,6 +1423,11 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             .expect("the relay must carry the request");
         assert_eq!(response.status, 200);
         assert_eq!(response.body, b"relay");
+        assert_eq!(
+            paths_rx.recv_timeout(Duration::from_secs(1)).expect("the relay saw the request"),
+            Some("relay".to_owned()),
+            "a relayed attempt must name its path, so the control plane does not take the relay for the device"
+        );
         assert_eq!(
             transport.preferred_relay.load(std::sync::atomic::Ordering::Relaxed),
             1,

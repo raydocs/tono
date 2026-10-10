@@ -521,3 +521,79 @@ mod update_quiesce_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod update_relay_tests {
+    use super::*;
+    use std::{net::SocketAddr, sync::atomic::AtomicUsize};
+
+    /// Decision 077 follow-up: an update GET whose direct path delivered nothing is sent once
+    /// through the relays in order, keeps its hostname (so the certificate check is the same),
+    /// and the relay that answered is remembered.
+    #[tokio::test]
+    async fn an_undelivered_discovery_get_falls_back_to_a_relay() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let relay = listener.local_addr().expect("addr");
+        // The Host header of every request the relay received.
+        let (host_tx, host_rx) = std::sync::mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                use std::io::{BufRead as _, BufReader, Write as _};
+                let Ok(mut stream) = stream else { continue };
+                let mut reader = BufReader::new(match stream.try_clone() {
+                    Ok(clone) => clone,
+                    Err(_) => continue,
+                });
+                let mut line = String::new();
+                let mut host = String::new();
+                while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                    if line == "\r\n" || line == "\n" {
+                        break;
+                    }
+                    if let Some((name, value)) = line.split_once(':')
+                        && name.eq_ignore_ascii_case("host")
+                    {
+                        host = value.trim().to_owned();
+                    }
+                    line.clear();
+                }
+                let _ = host_tx.send(host);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nmanifest",
+                );
+                let _ = stream.flush();
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+            }
+        });
+
+        // The direct path drops packets (unroutable RFC1918), so its connect delivers nothing.
+        let direct = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_millis(700))
+            .resolve("releases.test", SocketAddr::from(([10, 255, 255, 1], 80)))
+            .build()
+            .expect("direct client");
+        // The first relay refuses, so the walk must go on to the second in order.
+        let refused = SocketAddr::from(([127, 0, 0, 1], 1));
+        let preferred = AtomicUsize::new(0);
+        let response = get_with_relays(
+            &direct,
+            "http://releases.test/desktop/v1/latest/manifest.json",
+            Some(Duration::from_secs(5)),
+            &[refused, relay],
+            || reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()),
+            &preferred,
+        )
+        .await
+        .expect("the relay must carry the GET");
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.text().await.expect("body"), "manifest");
+        let host = host_rx.recv_timeout(Duration::from_secs(1)).expect("the relay saw the GET");
+        assert!(
+            host == "releases.test" || host.starts_with("releases.test:"),
+            "the relayed GET must keep the release hostname, got {host:?}"
+        );
+        assert_eq!(preferred.load(Ordering::Relaxed), 2, "the relay that answered is remembered");
+    }
+}
