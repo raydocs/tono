@@ -405,9 +405,8 @@ nonisolated enum HelperProtocolVersion {
     ///   explicit Restore fully removes it, with authenticated floor readback.
     /// - 4.52.43 → 4.52.44: `/dns/enable` resolves the named service only
     ///   among the current Network Location's services, preferring the
-    ///   primary service ID; an ambiguous name refuses (R3-O5). A legacy
-    ///   name-only snapshot is never re-adopted by ID; it is retired first,
-    ///   and restore returns every same-named service left on the listener.
+    ///   primary service ID; an ambiguous name refuses (R3-O5). While a
+    ///   legacy name-only snapshot is on disk, enable keeps the old lookup.
     static let current = "4.52.44"
 }
 
