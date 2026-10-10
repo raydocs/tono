@@ -115,3 +115,46 @@ Report at the end of each task: PR number, ci-gate run id, review receipt, what 
 6. A31 → A30 → A29（账本与 PF 项，A29/A30 带评审回执）
 7. A32（等 #1458–#1461 合入）
 8. A23 / A27 / A28 / A25 / A26 当填缝
+
+## 9. 执行状态（2026-10-10 夜间 Amp 会话）
+
+「已合」= 源码进 main，均未部署、未实机。控制面部署等所有者：迁移 0096（A5）、0097（A20）、0099（A8）、0100（A18）先在 preview 演练。
+节点侧（A5、A7、A16 握手探针、A20）等所有者 SSH 安装。评审遗留的 minor 已记 `docs/findings.d/`（下表「遗留」）。
+
+| # | 状态 | PR / 说明 |
+|---|---|---|
+| A1 | 已合 | #1474 |
+| A2 | 已合 | #1472 |
+| A3 | 草稿，等 UI 评审 | #1478 |
+| A4 | 已合 | #1498；遗留 A4-STARTUP-CACHE-OVERWRITE、A4-UPDATER-REVISION |
+| A5 | 已合，节点待装 | #1489（0096） |
+| A6 | 已合 | #1510；修 OPS-ALERT-RESOLVE-SUPPRESSED；恢复告警要所有者建一条 `fire_on=open_resolve` 规则 |
+| A7 | 已合，节点待装 | #1486 |
+| A8 | 已合 | #1490（0099），续 #1508（决定 080） |
+| A9 | 已合 | #1487；遗留 A9-RAISE-EVICTS-OVERCAP |
+| A10 | 已合 | #1480；先部署控制面再发客户端 |
+| A11 | 已合 | #1488 |
+| A12 | 已合 | #1473 |
+| A13 | 草稿，等所有者决定 | #1504 评审 FAIL：操作员释放互锁 / 不重启 / 保持现状三选一；新发现 MAC-EMERGENCY-UNBOUNDED-WAITS（main 上已有） |
+| A14 | 一半已合，阻塞 | 失败告警 #1475；备份本身等 D16 的 Cloudflare token |
+| A15 | 已合 | #1479 |
+| A16 | 已合，节点待装 | #1485；三网家宽握手实测待所有者探测点 |
+| A17 | 已合 | macOS #1499、Windows #1500（顺带修 WIN-HEAL-UNGATED-HY2-HOP）；遗留 A17M-RESTORE-PROMOTES-AUTO、A17W-*（四条，仅开关开时） |
+| A18 | 已合 | #1492（0100）；遗留 A18-AUDIT-STALE-WAS |
+| A19 | 已合 | #1494，续 #1503 |
+| A20 | 已合，节点待装 | #1491（0097）；生产尚未发节点 token |
+| A21 | 已在 main | 无新 PR |
+| A22 | 部分已在 main，其余草稿 | 4.1/4.2/4.5 已在 main；4.3 #1493、4.4 #1496、4.6 #1497 草稿等 UI 评审 |
+| A23 | 已合 4 个文件 | #1501 `windows_kill_switch.rs`、#1502 `dns/mod.rs`、#1509 `connection.rs`、#1511 `index.ts`；`auth.rs` 未拆（与草稿 #1478 冲突） |
+| A24 | 已合 | #1481，续 #1505（A24-PAIR-STALE-WINDOWS-ARTIFACT） |
+| A25 | 已合 | #1482；nightly 截图要在 Mac 上重录 ops-console 基线 |
+| A26 | 已合 | #1476 |
+| A27 | 已合 | #1484 |
+| A28 | 已合 | #1477 |
+| A29 | 草稿，等所有者决定 | #1506：helper 重新 arm 失败策略（live-session 身份要扛过失败尝试）；决定 085 的前提「与 Windows 一致」不成立（Windows 规则 I 连接中仍放行私网，决定 048） |
+| A30 | 评审中 | #1507（非草稿） |
+| A31 | 已合 | #1483 |
+| A32 | 草稿，等 UI 评审 | #1495 |
+
+工程项（不进发现总账）：`services/ops-console` e2e `e2e/ledger.spec.ts:155` 在 ci-gate run
+[38056004583](https://github.com/raydocs/tono/actions/runs/38056004583) 第 1 次尝试失败（#1511，未改相关文件），重跑通过；偶发，未处理。

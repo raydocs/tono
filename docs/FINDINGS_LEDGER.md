@@ -132,7 +132,7 @@
 | R3-O2 | Windows 外层超时丢弃 restore future 时自写窗口提前关闭，自写通知被当外部变化 | fixed(f80951fb) | [#841](https://github.com/raydocs/tono/pull/841) | 低·推导 | 注册表写入在阻塞线程上另持一把自写窗口，直到写入返回；60 秒年龄上限仍会重新发布。异步调用方自己的 guard 超时仍会放下 |
 | R3-O3 | 无快照时把静态 DNS 改为 DHCP 的孤儿修复 | accepted-design | — | 低 | 有意取舍 |
 | R3-O4 | macOS `--emergency-disarm` 不先 bootout daemon，与在线 daemon 双写 | open | 待开 | 低·推导 | 观察项；操作员手动路径 |
-| R3-O5 | macOS 按名字取第一个网络服务，多 Network Location 同名时可能写错服务 | in-PR | [#1473](https://github.com/raydocs/tono/pull/1473) | 低·实机 | helper 4.52.44：`/dns/enable` 只在当前 Location 里按名字找，主服务 ID 优先，仍有歧义则拒绝；之后按 ID 读写。合入后改 fixed(<SHA>)；实机证据待补；磁盘上有旧版仅名字快照时 enable 仍走旧的首个同名匹配（与 main 相同），该设备要等一次正常断开退休旧快照后才生效 |
+| R3-O5 | macOS 按名字取第一个网络服务，多 Network Location 同名时可能写错服务 | fixed(2453dec5) | [#1473](https://github.com/raydocs/tono/pull/1473) | 低·实机 | helper 4.52.44：`/dns/enable` 只在当前 Location 里按名字找，主服务 ID 优先，仍有歧义则拒绝；之后按 ID 读写。#1473 合 main `2453dec5`；待实机（多个同名 Location 的 Mac 上 enable/restore 证据）；磁盘上有旧版仅名字快照时 enable 仍走旧的首个同名匹配（与 main 相同），该设备要等一次正常断开退休旧快照后才生效 |
 | R3-O6 | Windows 卸载器在 owner lock 不可得且无 pid 文件时仍 disarm，可能与存活 Service 并发写 DNS | open | 待开 | 低·推导 | 观察项 |
 | R3-O7 | 无快照守卫只认 TUN 地址，旧版遗留 127.0.0.1 被当作用户本地解析器 | accepted-design | — | 低 | 有意取舍，源码有注释 |
 | X2-2 | Windows NRPT 漂移未计入受保护 DNS 健康状态 | fixed(d98b217d) | [#467](https://github.com/raydocs/tono/issues/467)，[#468](https://github.com/raydocs/tono/pull/468) | 中·实机 | 需实机 |
@@ -191,7 +191,7 @@
 | H17-G-F2 | Tailscale enrollment 关闭（生产配置）时吊销任务永不执行，带 tailnet 绑定设备的账户停用或销户后重新启用永远返回 409（= H17-O-F5） | fixed(3e64707e6) | [#522](https://github.com/raydocs/tono/issues/522)，[#523](https://github.com/raydocs/tono/pull/523)（409 不再永久），[#1442](https://github.com/raydocs/tono/pull/1442)（注册暂停时吊销任务照常执行） | 中·推导 | 2026-10-07 生产 D1 只读：0 台设备带 `tailscale_node_id`，1 条未完成吊销任务（设备行已不存在、从未尝试）。注册暂停时孤儿 pending 节点清扫仍不跑（新注册已被围栏；ephemeral 节点离线后由 Tailscale 自删）；token-admin 恢复路径不写审计 |
 | H17-C-F2 | 退款销户由多次独立提交组成，中途失败可留下「住宅线与产品账户已回收、VPN 仍有效」的账户 | fixed(61abd20b) | [#524](https://github.com/raydocs/tono/issues/524)，[#525](https://github.com/raydocs/tono/pull/525) | 中·推导 | 停用与全部回收是一个 `DB.batch`，停用在前；故障注入回归 `close reclaims nothing when disabling the account fails`。batch 之后的设备/会话撤销若失败，账户已停用，鉴权立即拒绝，cron 按「停用且仍有 live 设备/会话」补完。2026-10-07 核对 main，此行此前漏更新 |
 | H17-G-F5 | 同一设备再次登录或登出只作废当前会话，更早签发的 refresh token 仍然有效 | fixed | [#833](https://github.com/raydocs/tono/pull/833) | 中·已确认 | 同一设备的再次登录、refresh 与登出都会作废该设备其余未吊销会话；其他设备保持登录。refresh 有效期默认仍为 30 天 |
-| H17-C-F1 | 调低账户设备上限不会移除已超出上限的设备，直到有新设备登录（= H17-G-F1） | in-PR | [#1487](https://github.com/raydocs/tono/pull/1487) | 低·已确认 | token-admin PATCH 调低上限时在同一事务里写上限并按 LRU 撤销超额设备 |
+| H17-C-F1 | 调低账户设备上限不会移除已超出上限的设备，直到有新设备登录（= H17-G-F1） | fixed(9bc77231) | [#1487](https://github.com/raydocs/tono/pull/1487) | 低·已确认 | token-admin PATCH 调低上限时在同一事务里写上限并按 LRU 撤销超额设备（#1487 合 main `9bc77231`）；控制面未部署；待实机（部署后在生产账户上调低上限的证据）；遗留：对本 PR 之前已超额的账户调高上限也会按新上限踢设备，另记 A9-RAISE-EVICTS-OVERCAP（open） |
 
 ## 6. 客户端信任与账户隔离
 
@@ -349,8 +349,8 @@
 | H21-O-F5 | macOS 每次连接首次 arm 在无 TUN 时放行 root web 端口 | fixed(9bf349f7) | [#586](https://github.com/raydocs/tono/issues/586)，[#604](https://github.com/raydocs/tono/pull/604) | 高·已确认 | 仅存在 DIRECT plan 时；泄漏量需实机 |
 | R604-F1 | macOS Core 重启（`/core/sync`、崩溃）期间无隧道，reviewed-bundle 放行仍在 | fixed(c9fe191e) | [#608](https://github.com/raydocs/tono/issues/608)，[#609](https://github.com/raydocs/tono/pull/609) | 高·已确认 | 叠在 #604 上；崩溃窗口至多约 10 s；Core 运行中 utun 消失不覆盖；需实机 |
 | H21-O-F6 | macOS 控制面请求继承他人系统代理，受保护离线下被 PF 挡 | fixed(07faa7c0) | [#587](https://github.com/raydocs/tono/issues/587)，[#617](https://github.com/raydocs/tono/pull/617) | 中·已确认 | 控制面 session 空 `connectionProxyDictionary` |
-| H21-O-F7 | 其他 VPN/TUN 未识别，失败归因错误 | in-PR | [#1480](https://github.com/raydocs/tono/pull/1480) | 中·推导(PLAUSIBLE) | #458/#468 部分覆盖；#1480 两端 App 进程只读识别（macOS getifaddrs，Windows GetIfTable2），网络/TUN 类失败归因「存在其他 VPN」，诊断 `virtualAdapters` 带 `otherVpn`；不识别 PPP 类 VPN（与 PPPoE 无法区分）；待实机 |
-| H21-O-F8 | 强制门户/TLS 拦截代理未识别 | in-PR | [#1488](https://github.com/raydocs/tono/pull/1488) | 低·推导(PLAUSIBLE) | 只做归因与诊断类别：控制面证书被系统信任库按签发者/链/名称拒绝 → 「网络在拦截加密连接」（macOS `APIError.tlsIntercepted`，Windows `TONO_TLS_INTERCEPTED`）；Windows 传输失败且 NLM 报 `ConstrainedInternetAccess`，或 HTTP 511 → 「网络需要网页登录（强制门户）」（`TONO_AUTH_CAPTIVE`）；诊断 `virtualAdapters` 带 `tlsIntercepted`/`captivePortal`；证书校验不变、无新探测；macOS 无公开强制门户信号；待实机 |
+| H21-O-F7 | 其他 VPN/TUN 未识别，失败归因错误 | fixed(beb871d1) | [#1480](https://github.com/raydocs/tono/pull/1480) | 中·推导(PLAUSIBLE) | #458/#468 部分覆盖；#1480（合 main `beb871d1`）两端 App 进程只读识别（macOS getifaddrs，Windows GetIfTable2），网络/TUN 类失败归因「存在其他 VPN」，诊断 `virtualAdapters` 带 `otherVpn`；不识别 PPP 类 VPN（与 PPPoE 无法区分）；需先部署控制面 `routes.ts` 再发客户端；待实机（装有其他 VPN 的两端设备上的归因与诊断证据） |
+| H21-O-F8 | 强制门户/TLS 拦截代理未识别 | fixed(44dcb4fe) | [#1488](https://github.com/raydocs/tono/pull/1488) | 低·推导(PLAUSIBLE) | 只做归因与诊断类别：控制面证书被系统信任库按签发者/链/名称拒绝 → 「网络在拦截加密连接」（macOS `APIError.tlsIntercepted`，Windows `TONO_TLS_INTERCEPTED`）；Windows 传输失败且 NLM 报 `ConstrainedInternetAccess`，或 HTTP 511 → 「网络需要网页登录（强制门户）」（`TONO_AUTH_CAPTIVE`）；诊断 `virtualAdapters` 带 `tlsIntercepted`/`captivePortal`；证书校验不变、无新探测；macOS 无公开强制门户信号；#1488 合 main `44dcb4fe`；待实机（强制门户与 TLS 拦截网络上的两端证据） |
 | H21-O-F9 | 系统时钟错误不被点名，保护期间无法校时 | fixed(13983688) | [#588](https://github.com/raydocs/tono/issues/588)，[#623](https://github.com/raydocs/tono/pull/623) | 低·已确认 | 只做分类与文案：macOS `APIError.clockSkew` 与探测 `.clock`，Windows `TONO_CLOCK_SKEW`；按传输失败参与离线准入；未开 NTP 放行；Windows hy2 不拒 NTP |
 | H21-C-F2 | 受保护离线时更新发现失败且不说明原因 | accepted-design | — | 低·推导 | fail-closed 设计；只改文案 |
 | H21-C-F3 | Windows 检查更新失败时显示「已是最新版」 | fixed(52e67294) | [#589](https://github.com/raydocs/tono/issues/589)，[#618](https://github.com/raydocs/tono/pull/618) | 中·已确认 | |
