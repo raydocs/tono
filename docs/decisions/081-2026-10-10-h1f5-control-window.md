@@ -14,4 +14,4 @@
   inside an exchange, for at most 15 s, with the same addresses, port, protocol and UIDs as before; nothing is added to
   the ruleset. Every failure path (exchange error, lost lease, helper restart, failed load) ends with the permit
   withdrawn or the emergency block. Windows keeps the binding that already excludes every other process.
-- Applied in: A30 PR (`amp/a30-bootstrap-window`), helper 4.52.45; H1-F5 recorded as 已知风险，窗口 ≤ 15 s.
+- Applied in: PR #1507 (`amp/a30-bootstrap-window`, A30), helper 4.52.45; H1-F5 recorded as 已知风险，窗口 ≤ 15 s.
