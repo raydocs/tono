@@ -2,7 +2,7 @@
 - 归属：运维计划 [plan-2026-09-11](../ops/plan-2026-09-11.md)；Amp 待办 [A19](../ops/amp-backlog-2026-10-10.md) 的发现
   [OPS-TIMELINE-CONNECT-CANCEL-KIND](../findings.d/OPS-TIMELINE-CONNECT-CANCEL-KIND.md)。`services/control-plane`（ops 合同）、
   `services/ops-console`（客户时间线文案）。
-- 来源：基线 main（#1494 合入后）→ 分支 `amp/a19-connect-cancel-kind`；PR 见分支；未合 main。
+- 来源：基线 main（#1494 合入后）→ 分支 `amp/a19-connect-cancel-kind`；PR [#1503](https://github.com/raydocs/tono/pull/1503)；未合 main。
 - 缺陷修复：控制面展平（`FLATTEN_KINDS`）早已存 `connectCancel`（用户取消的连接），但 ops 合同 `CONNECTION_EVENT_KINDS`
   和控制台 `eventWord` 没有它：客户时间线这一行结果列为空，严格合同模式（`OPS_CONTRACT_STRICT=1`）下连接列表断言失败。
   → 合同词表加 `connectCancel`；控制台显示「取消连接」，灰色（不算失败、成功或换节点，天汇总计数不变）。
