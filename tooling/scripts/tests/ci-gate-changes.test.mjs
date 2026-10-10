@@ -57,6 +57,8 @@ const SERVICES_PATHS = [
   'tooling/scripts/generate-release-center.mjs',
   'tooling/scripts/tests/generate-release-center.test.mjs',
   'tooling/scripts/check-migration-numbers.mjs',
+  'tooling/scripts/check-migrations-additive.mjs',
+  'tooling/scripts/rehearse-control-plane-migrations.sh',
   'tooling/scripts/check-ops-budgets.mjs',
   'tooling/scripts/compare-connect-performance.mjs',
   'tooling/scripts/windows-package-components.mjs',
