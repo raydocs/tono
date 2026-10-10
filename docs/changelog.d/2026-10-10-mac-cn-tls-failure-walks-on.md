@@ -1,6 +1,6 @@
 ## 2026-10-10 · macOS 控制面：系统 DNS 路径 TLS 握手失败或证书被拒时，POST 继续走 pinned / 中继
 - 归属：ops 任务（[运维计划](../ops/plan-2026-09-11.md)；中国大陆连通性审计，延续 [Amp backlog](../ops/amp-backlog-2026-10-10.md) A4/A11 与决定 077）；macOS App 控制面客户端。
-- 来源：origin/main `3d973f95` → 分支 `amp/cn1-tls-failure-walks-on`；未合 main。
+- 来源：origin/main `3d973f95` → 分支 `amp/cn1-tls-failure-walks-on`，[#1519](https://github.com/raydocs/tono/pull/1519)；未合 main。
 - 缺陷修复（MAC-CN-TLS-POST-STOPS）：系统 DNS 被污染、答案指向出示别人证书的服务器，或网络在 TLS 握手中途重置时，发验证码 / 验证 / 刷新这些 POST
   在系统 DNS 路径就结束（前者报「网络在拦截加密连接」），从不试 pinned 与中继 → 路径链把 URLSession 的 `secureConnectionFailed`
   和信任库拒绝的证书（`ServerCertificateUntrusted` / `HasUnknownRoot`，非日期）视为「请求字节没有离开本机」（TLS 在请求之前），
