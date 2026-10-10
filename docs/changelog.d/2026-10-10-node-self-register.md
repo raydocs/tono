@@ -28,3 +28,8 @@
 - 续记（2026-10-10，独立评审 PASS 带 3 个 minor，一轮修正）：再签发清空旧 token 的心跳列（新 token 上报前行里无心跳）；
   心跳写入时输给吊销的请求回 403 `NODE_AGENT_REVOKED`（输给再签发仍 401）；吊销审计原本已按 `changes() > 0` 条件写，
   测试补上：未知节点 404、重复 `DELETE` 200 均不再记审计。现有第一个 `it` 扩展，无新测试文件。
+- 续记（2026-10-10，第二轮评审 FAIL：1 major + 1 minor）：major——节点 agent 只查 `tna1.` 前缀，token 文件里两行同一 token
+  会进到 HTTP 头，urllib 抛 `ValueError` 带整个 Authorization 值，systemd 日志记下 token。改后按完整语法（前缀 + 定长 +
+  字符集，单行，只去一个结尾换行）校验，不合即拒；`main` 外包一层，任何异常只打印类名，不回显异常文本。python 现有
+  测试加：两行 token 文件 → 非零退出，stderr 不含 token。minor——控制面心跳的 IPv6 校验改为严格解析（≤8 段、至多一个
+  `::`、可选合法尾部 IPv4），`::999.999.999.999` 等回 400；现有第一个 `it` 加一条。

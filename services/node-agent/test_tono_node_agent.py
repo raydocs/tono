@@ -1,6 +1,10 @@
+import contextlib
 import importlib.util
+import io
+import os
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -25,6 +29,21 @@ class NodeAgentTest(unittest.TestCase):
         for bad in ("http://api.afk.ccwu.cc", "https://api.afk.ccwu.cc:8443", "https://api.afk.ccwu.cc/x"):
             with self.assertRaises(agent.Refusal, msg=bad):
                 agent.api_base(bad)
+
+        token = "tna1." + "A" * 16 + "." + "b" * 43
+        with tempfile.TemporaryDirectory() as tmp:
+            token_file = Path(tmp) / "node-agent.token"
+            env = {"TONO_API_BASE": "https://api.afk.ccwu.cc", "TONO_NODE_NAME": "Tokyo · Kite",
+                   "TONO_NODE_AGENT_TOKEN_FILE": str(token_file)}
+            token_file.write_text(token + "\n")
+            with mock.patch.dict(os.environ, env):
+                self.assertEqual(agent.read_token(), token)
+            token_file.write_text(f"{token}\n{token}\n")
+            stderr = io.StringIO()
+            with mock.patch.dict(os.environ, env), contextlib.redirect_stderr(stderr):
+                self.assertNotEqual(agent.main(), 0)
+        self.assertNotIn(token[5:], stderr.getvalue())
+        self.assertIn("refused", stderr.getvalue())
 
 
 if __name__ == "__main__":

@@ -55,8 +55,32 @@ export async function mintNodeAgentToken(): Promise<MintedNodeAgentToken> {
 export function ipOrNull(value: unknown): string | null {
   if (typeof value !== 'string' || value.length < 2 || value.length > 45) return null;
   if (IPV4_SHAPE.test(value)) return value;
-  if (value.includes(':') && /^[0-9A-Fa-f:.]+$/.test(value)) return value.toLowerCase();
+  if (value.includes(':') && isIpv6(value)) return value.toLowerCase();
   return null;
+}
+
+/**
+ * RFC 4291 text form: hextets of 1–4 hex digits, at most one `::`, optionally
+ * ending in a dotted IPv4 that counts as two hextets. No zone index.
+ */
+function isIpv6(value: string): boolean {
+  let head = value;
+  let embedded = 0;
+  const lastColon = value.lastIndexOf(':');
+  const tail = value.slice(lastColon + 1);
+  if (tail.includes('.')) {
+    if (!IPV4_SHAPE.test(tail)) return false;
+    head = value.slice(0, lastColon + 1);
+    if (!head.endsWith('::')) head = head.slice(0, -1);
+    embedded = 2;
+  }
+  const halves = head.split('::');
+  if (halves.length > 2) return false;
+  const groups = (text: string | undefined) => (text ? text.split(':') : []);
+  const hextets = [...groups(halves[0]), ...groups(halves[1])];
+  if (!hextets.every((group) => /^[0-9A-Fa-f]{1,4}$/.test(group))) return false;
+  const count = hextets.length + embedded;
+  return halves.length === 2 ? count <= 7 : count === 8;
 }
 
 const unauthorized = () => new ApiError(401, 'UNAUTHORIZED', 'Invalid node agent token');

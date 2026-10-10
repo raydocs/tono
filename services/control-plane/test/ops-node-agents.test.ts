@@ -23,14 +23,14 @@ async function issue(name: string, method = 'POST') {
   });
 }
 
-const heartbeat = (token: string, node: string) => api('node-agent/heartbeat', {
+const heartbeat = (token: string, node: string, ip = '203.0.113.200') => api('node-agent/heartbeat', {
   method: 'POST',
   headers: {
     authorization: `Bearer ${token}`,
     'content-type': 'application/json',
     'cf-connecting-ip': '198.51.100.7',
   },
-  body: JSON.stringify({ node, ip: '203.0.113.200', roles: ['hy2', 'xray'], agentVersion: '1.0.0' }),
+  body: JSON.stringify({ node, ip, roles: ['hy2', 'xray'], agentVersion: '1.0.0' }),
 });
 
 describe('node agent self-registration', () => {
@@ -44,6 +44,7 @@ describe('node agent self-registration', () => {
     const forged = `${token.slice(0, -1)}${token.endsWith('A') ? 'B' : 'A'}`;
     expect((await heartbeat(forged, NODE_A)).status).toBe(401);
     expect((await heartbeat(token, NODE_B)).status).toBe(403);
+    expect((await heartbeat(token, NODE_A, '::999.999.999.999')).status).toBe(400);
 
     expect((await heartbeat(token, NODE_A)).status).toBe(200);
     const rows = (await db().prepare(
