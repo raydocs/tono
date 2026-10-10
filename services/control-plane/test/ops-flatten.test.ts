@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { accrueActivityHours } from '../src/ops/customers';
-import { assertConnectionEvent } from '../src/ops/contract/customers';
+import { assertConnectionEvent } from '../src/ops/contract/connection-events';
 import { eventDto } from '../src/ops/handlers/nodes-data';
 import {
   edgeAttribution,
