@@ -30,7 +30,9 @@ final class NativeUpdateDownloadTests: XCTestCase {
         // fixture without adding an ATS exception to the product.
         let url = try XCTUnwrap(URL(string: "http://localhost:\(port.rawValue)/manifest.json"))
         do {
-            _ = try await NativeUpdateDownload.bounded(url, maximum: 80, timeoutInterval: 1)
+            _ = try await NativeUpdateDownload.bounded(
+                url, maximum: 80, timeoutInterval: 1, armedWithoutTunnel: false
+            )
             XCTFail("a progressing transfer must still meet the whole-resource deadline")
         } catch let error as URLError {
             XCTAssertEqual(error.code, .timedOut)
@@ -56,7 +58,7 @@ final class NativeUpdateDownloadTests: XCTestCase {
                 XCTAssertEqual(maximumResponseBytes, 80, "the relay is held to the same cap")
                 return ControlPlaneAnswer(status: 200, body: Data("signed-manifest".utf8), bodyFailure: nil)
             },
-        ])
+        ], armedWithoutTunnel: false)
 
         XCTAssertEqual(data, Data("signed-manifest".utf8))
         XCTAssertEqual(attempts.entries, ["pinned GET \(url.absoluteString)", "relay GET \(url.absoluteString)"])
@@ -91,7 +93,7 @@ final class NativeUpdateDownloadTests: XCTestCase {
                 // A byte past the signed length is refused.
                 XCTAssertThrowsError(try sink.receive(Data([0])))
             },
-        ])
+        ], armedWithoutTunnel: false)
         defer { try? FileManager.default.removeItem(at: saved.deletingLastPathComponent()) }
 
         XCTAssertEqual(requested.entries, [url.absoluteString])
@@ -114,7 +116,7 @@ final class NativeUpdateDownloadTests: XCTestCase {
                     throw URLError(.networkConnectionLost)
                 },
                 PackagePath(label: "relay") { _, _ in afterInterim.record("second") },
-            ])
+            ], armedWithoutTunnel: false)
             XCTFail("a disconnect after a status line must fail the download")
         } catch let error as URLError {
             XCTAssertEqual(error.code, .networkConnectionLost)

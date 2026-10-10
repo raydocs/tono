@@ -176,21 +176,21 @@ nonisolated struct ControlPlanePath: Sendable {
     /// the Windows client's `bootstrap::API_RELAYS`). Each is an nginx
     /// `ssl_preread` listener that admits only this host's SNI and forwards
     /// the unterminated TLS session to the Cloudflare edge, so the client
-    /// validates the same certificate it does on every other path. Not in
-    /// the PF bootstrap permit: while protection is armed the relay is
-    /// blocked like any other non-permitted address.
-    /// Kept in step with the Windows client's `bootstrap::API_RELAYS` and the
-    /// control plane's `api-relays.ts`. The same relays admit the release
-    /// host's SNI, which the updater's metadata GETs use (backlog A2).
+    /// validates the same certificate it does on every other path. Decision
+    /// 086 (H1-F5, Option A): while protection is armed without a tunnel the
+    /// helper's PF permits only these endpoints for the control plane, so
+    /// then they are the only path (`TonoAPIClient`); while connected PF
+    /// permits none of them. The list is `ControlPlaneRelays`, compiled into
+    /// the helper too. The same relays admit the release host's SNI, which
+    /// the updater's metadata GETs use (backlog A2).
     static let apiRelays: [String: [ControlPlaneEndpoint]] = [
         "api.afk.ccwu.cc": relayEndpoints,
         "releases.afk.ccwu.cc": relayEndpoints,
     ]
 
-    private static let relayEndpoints = [
-        ControlPlaneEndpoint(address: "179.253.233.220", port: 2053), // Los Angeles · Westwood
-        ControlPlaneEndpoint(address: "179.255.154.17", port: 2053), // Los Angeles · Mesa
-    ]
+    private static let relayEndpoints = ControlPlaneRelays.endpoints.map {
+        ControlPlaneEndpoint(address: $0.address, port: $0.port)
+    }
 
     /// The relays for `baseURL`'s host, or nil when it has none. Only the
     /// production API and release hosts have relays; a debug base URL never

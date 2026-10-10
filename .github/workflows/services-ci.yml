@@ -205,7 +205,9 @@ jobs:
       - name: API relay end-to-end probe
         # Default certificate verification is the point of the probe: an
         # untrusted certificate through the relay must report a failure.
-        run: python3 tooling/ops/relay/test_relay_probe.py
+        # test_relay_stream_conf.py: the SNI allow-list the armed macOS
+        # permit relies on (decision 086).
+        run: python3 -m unittest discover -s tooling/ops/relay -p 'test_*.py'
 
       - name: Mainland acceptance tool classification
         run: python3 -m unittest discover -s tooling/ops/cn-acceptance -p 'test_*.py'
