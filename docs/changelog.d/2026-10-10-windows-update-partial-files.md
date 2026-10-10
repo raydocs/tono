@@ -1,7 +1,7 @@
 ## 2026-10-10 · Windows 更新：下载的包在每条路径上清理，「取消」真正中止下载
 - 归属：ops 计划（[plan-2026-09-11](../ops/plan-2026-09-11.md)），中国大陆连通性审计（Windows）更新下载；`apps/windows/app/src-tauri/src/tono/commands/update.rs`、`restore.rs`、`lib.rs`，
   前端 `services/update.ts`、`components/setting/mods/update-viewer.tsx`。
-- 来源：叠在 #1527（`amp/win-update-download-resume`）上；分支 `amp/win-update-partial-files`；未合 main。
+- 来源：叠在 #1527（`amp/win-update-download-resume`）上；分支 `amp/win-update-partial-files`，PR [#1540](https://github.com/raydocs/tono/pull/1540)；未合 main。
 - 缺陷修复（[WIN-UPDATE-PARTIAL-FILES](../findings.d/WIN-UPDATE-PARTIAL-FILES.md)）：
   - `DownloadedPackage`：本次下载的 `update-downloads/<nonce>.exe` 在安装的每条出口（出错、取消、命令被丢弃）以及 Prepare 返回之后删除；
     此时 Service 已有自己的私有副本（`copy_private`，大小与 SHA-256 已校验），之后不再读 App 副本。
