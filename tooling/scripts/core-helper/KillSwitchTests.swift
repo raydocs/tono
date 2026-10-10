@@ -2081,13 +2081,54 @@ extension KillSwitchManager {
             && settle(.rejected, live: false, tightening: false) == .kept
             && released == 1
 
+        // The protected fault persists beside the saved state: a simulated
+        // helper restart in the same boot keeps it and skips the startup
+        // release; a disarm (the user's Disconnect) clears it; a fault from
+        // another boot is dropped (that boot follows the existing launch
+        // policy); an unreadable marker holds.
+        let markerDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-a29-fault-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: markerDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: markerDirectory) }
+        let marker = markerDirectory.appendingPathComponent("protected-fault").path
+        let plainWrite: (String, Data) throws -> Void = { try $1.write(to: URL(fileURLWithPath: $0)) }
+        let plainRead: (String) throws -> Data = { try Data(contentsOf: URL(fileURLWithPath: $0)) }
+        let persisted: Bool = {
+            guard (try? recordProtectedFault(path: marker, bootSession: { "boot-A" }, write: plainWrite)) != nil
+            else { return false }
+            let survivesRestart = persistedProtectedFaultHolds(
+                path: marker, bootSession: { "boot-A" }, read: plainRead
+            )
+            let startupKeepsBlock = !startupReleasesLeftoverBlock(
+                coreRunning: false, stateFilePresent: true, protectedFault: survivesRestart
+            )
+            let startupReleasesOtherwise = startupReleasesLeftoverBlock(
+                coreRunning: false, stateFilePresent: true, protectedFault: false
+            )
+            clearProtectedFault(path: marker)
+            let disconnectClears = !persistedProtectedFaultHolds(
+                path: marker, bootSession: { "boot-A" }, read: plainRead
+            )
+            _ = try? recordProtectedFault(path: marker, bootSession: { "boot-A" }, write: plainWrite)
+            let otherBootDropped = !persistedProtectedFaultHolds(
+                path: marker, bootSession: { "boot-B" }, read: plainRead
+            ) && !FileManager.default.fileExists(atPath: marker)
+            _ = try? recordProtectedFault(path: marker, bootSession: { "boot-A" }, write: plainWrite)
+            let unreadableHolds = persistedProtectedFaultHolds(
+                path: marker, bootSession: { "boot-A" }, read: { _ in throw InstallFailed() }
+            )
+            return survivesRestart && startupKeepsBlock && startupReleasesOtherwise
+                && disconnectClears && otherBootDropped && unreadableHolds
+        }()
+
         let passed = identity && consecutive && tighteningDetected && fault
-            && watchdogHolds && nothingReleasedYet && newSession
+            && watchdogHolds && nothingReleasedYet && newSession && persisted
         if !passed {
             FileHandle.standardError.write(Data(
                 ("self-test: failed-arm settlement (identity \(identity), consecutive \(consecutive), "
                     + "tightening \(tighteningDetected), fault \(fault), watchdog \(watchdogHolds), "
-                    + "unreleased \(nothingReleasedYet), new session \(newSession))\n").utf8
+                    + "unreleased \(nothingReleasedYet), new session \(newSession), "
+                    + "persisted \(persisted))\n").utf8
             ))
         }
         return passed

@@ -17,6 +17,8 @@ nonisolated enum KillSwitchService {
         case localNetworkFault(String)
         /// D7: the helper does not report what it enforces for the setting.
         case localNetworkHelperTooOld
+        /// A re-arm of the live session failed; the helper kept the block.
+        case protectionUpdateFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -34,6 +36,8 @@ nonisolated enum KillSwitchService {
                 String(localized: "Tono couldn't block local network devices, so all traffic is blocked to keep you protected. Turn the setting off and on again, or reconnect.")
             case .localNetworkHelperTooOld:
                 String(localized: "The network helper is too old to block local network devices. Reconnect to update it.")
+            case .protectionUpdateFailed:
+                String(localized: "Tono couldn't update protection, so it keeps blocking traffic. Disconnect or reconnect to continue.")
             }
         }
     }
@@ -193,6 +197,12 @@ nonisolated enum KillSwitchService {
             isArmed = true
             LocalNetworkDevicesSync.recordFault(.helper(message))
             throw Error.localNetworkFault(message)
+        } catch HelperIPCError.commandFailed(let message, "KILLSWITCH_LIVE_REARM_FAILED") {
+            // A re-arm of the live session failed and the helper kept the
+            // installed block: the session holds, it is not released.
+            isArmed = true
+            LocalNetworkDevicesSync.recordFault(.reArmFailed(message))
+            throw Error.protectionUpdateFailed(message)
         } catch let error as Error {
             throw error
         } catch {

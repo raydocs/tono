@@ -40,6 +40,10 @@ nonisolated enum LocalNetworkDevicesSync {
         /// older than the setting, which would keep the LAN open while the
         /// app showed off.
         case helperTooOld
+        /// A re-arm of the live session failed and the helper kept the
+        /// installed block (`KILLSWITCH_LIVE_REARM_FAILED`), or a reload that
+        /// was applying a pending generation failed. Its message.
+        case reArmFailed(String)
         /// The automatic attempts for this generation all failed.
         case attemptsExhausted
     }
@@ -136,6 +140,25 @@ nonisolated enum LocalNetworkDevicesSync {
     }
 
     static var fault: Fault? { lock.withLock { faultValue } }
+
+    /// A fault the session must hold in: protection armed, the Core as the
+    /// helper left it, no automatic release and no automatic reconnect. Only
+    /// the user proceeds (toggle, Reconnect, Disconnect). An exhausted budget
+    /// stops automatic attempts but is not a held failure.
+    static var holdsProtectedFault: Bool {
+        switch fault {
+        case .helper, .helperTooOld, .reArmFailed: true
+        case .attemptsExhausted, nil: false
+        }
+    }
+
+    /// The user acted (Disconnect, Connect): the fault is theirs to retry.
+    static func clearFaultForUserAction() {
+        lock.withLock {
+            faultValue = nil
+            attempts = 0
+        }
+    }
     static var pfApplied: Applied? { lock.withLock { pfValue } }
     static var coreApplied: Applied? { lock.withLock { coreValue } }
 
@@ -180,6 +203,8 @@ nonisolated enum LocalNetworkDevicesSync {
             String(localized: "Tono couldn't block local network devices, so all traffic is blocked to keep you protected. Turn the setting off and on again, or reconnect.")
         case .helperTooOld:
             String(localized: "The network helper is too old to block local network devices. Reconnect to update it.")
+        case .reArmFailed:
+            String(localized: "Tono couldn't update protection, so it keeps blocking traffic. Disconnect or reconnect to continue.")
         case .attemptsExhausted:
             String(localized: "Tono couldn't apply the local network devices setting. Reconnect to try again.")
         case nil:
@@ -230,11 +255,42 @@ extension AppState {
     }
 
     /// A fault is an explicit error state: shown once in the banner and kept
-    /// under the setting until the user acts or PF and the Core converge.
+    /// under the setting until the user acts or PF and the Core converge. A
+    /// held fault also pauses every automatic reconnect for the user.
     func showLocalNetworkDevicesFault() {
+        if LocalNetworkDevicesSync.holdsProtectedFault {
+            protectedReconnectPausedForUserAction = true
+            protectedReconnectPauseLiftsOnNetworkChange = false
+            localNetworkDevicesHoldPaused = true
+        } else if localNetworkDevicesHoldPaused {
+            // The fault ended (the user toggled, or PF and the Core were seen
+            // converged): lift only the pause this fault set.
+            protectedReconnectPausedForUserAction = false
+            localNetworkDevicesHoldPaused = false
+        }
         let message = LocalNetworkDevicesSync.faultMessage
         guard message != localNetworkDevicesFaultMessage else { return }
         localNetworkDevicesFaultMessage = message
         if let message { errorMessage = message }
+    }
+
+    /// Where every automatic failure path ends while a protected fault holds
+    /// (exhausted failure, automatic release, scheduled reconnects): nothing
+    /// is torn down, released or retried. Protection stays armed and the Core
+    /// stays as the helper left it until the user toggles the setting,
+    /// reconnects or disconnects.
+    func holdProtectedFault() {
+        LocalTrafficAudit.shared.recordEvent("protected_fault_held")
+        showLocalNetworkDevicesFault()
+    }
+
+    /// The user's own Disconnect or Connect ends the held fault.
+    func clearProtectedFaultForUserAction() {
+        LocalNetworkDevicesSync.clearFaultForUserAction()
+        localNetworkDevicesFaultMessage = nil
+        if localNetworkDevicesHoldPaused {
+            protectedReconnectPausedForUserAction = false
+            localNetworkDevicesHoldPaused = false
+        }
     }
 }

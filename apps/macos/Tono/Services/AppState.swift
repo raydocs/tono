@@ -474,6 +474,9 @@ final class AppState {
     /// D7: the "Allow local network devices" fault shown under the setting,
     /// or nil (see `LocalNetworkDevicesSync`).
     var localNetworkDevicesFaultMessage: String?
+    /// The automatic-reconnect pause was set by a held A29 fault (and is
+    /// lifted with it), not by another cause.
+    var localNetworkDevicesHoldPaused = false
     var pendingOptionalPolicyReload = false
     /// Applies of one accepted document that failed on this session before
     /// touching the Core and were queued again.

@@ -106,6 +106,9 @@ extension AppState {
                 // Any fresh connect attempt is user-visible intent to try again; the
                 // reconnect loop re-pauses if the same user-action failure repeats.
                 self.protectedReconnectPausedForUserAction = false
+                // A29: every automatic caller refuses while a protected fault
+                // holds, so a connect admitted here is the user's Reconnect.
+                self.clearProtectedFaultForUserAction()
                 // This boot now has a session: a launch in a later boot that
                 // finds this record restarted without a clean release, and
                 // does not reconnect by itself. Every automatic caller refuses
@@ -790,6 +793,16 @@ extension AppState {
         automaticFailureRelease: Bool = false,
         ordinaryQuit: Bool = false
     ) {
+        // A29: while a protected fault holds, no automatic release runs; the
+        // user's own Disconnect (or Restore internet, or Quit) proceeds and
+        // ends the fault.
+        if LocalNetworkDevicesSync.holdsProtectedFault {
+            if automaticFailureRelease {
+                holdProtectedFault()
+                return
+            }
+            if releaseKillSwitch || ordinaryQuit { clearProtectedFaultForUserAction() }
+        }
         if nativeUpdatePending || RuntimeCleanup.nativeUpdateBlocksConnect
             || (releaseKillSwitch && RuntimeCleanup.nativeUpdatePending) {
             if ordinaryQuit { return } // The native executor owns teardown.
@@ -2367,6 +2380,12 @@ extension AppState {
         resumeWhenReachable: Bool,
         exhaustedTunnelLoss: Bool = false
     ) async {
+        // A29: a protected fault is not an exhausted failure. Hold it: no
+        // release, no teardown, no reconnect.
+        if LocalNetworkDevicesSync.holdsProtectedFault {
+            holdProtectedFault()
+            return
+        }
         let releases = ExhaustedFailureNetwork.afterFailure(strictKillSwitchExplicit: false)
             .releasesSystemNetwork
         let preferred = selectedExitNode()?.name ?? ConfigPipeline.homeNodeName
@@ -2446,6 +2465,10 @@ extension AppState {
             try await Task.sleep(for: .seconds(delay))
         }
     ) {
+        if LocalNetworkDevicesSync.holdsProtectedFault {
+            holdProtectedFault()
+            return
+        }
         if protectedReconnectPausedForUserAction { return }
         connectionCoordinator.protectedReconnectTask?.cancel()
         connectionCoordinator.protectedReconnectTask = nil
@@ -2551,6 +2574,10 @@ extension AppState {
         repairRequested: Bool = false
     ) {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
+        if LocalNetworkDevicesSync.holdsProtectedFault {
+            holdProtectedFault()
+            return
+        }
         // A network-change kick carries new information: a repeated-failure
         // pause may be lifted (the environment changed, the outcome can
         // differ). A user-action pause stays — only Retry Now lifts it, or

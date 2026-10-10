@@ -4,6 +4,9 @@ import Darwin
 let selectiveRecoveryStatePath = "/Library/Application Support/Tono/selective-recovery.state"
 let killSwitchStatePath = "/Library/Application Support/Tono/killswitch.state"
 let killSwitchPFPath = "/Library/Application Support/Tono/pf.tono.conf"
+/// A29 protected fault, persisted beside the saved state so a helper restart
+/// in the same boot keeps the block. Holds the boot session it was set in.
+let killSwitchProtectedFaultPath = "/Library/Application Support/Tono/killswitch.protected-fault"
 /// The `pfctl -E` token this helper holds, bound to its boot session.
 let killSwitchPFReferencePath = "/Library/Application Support/Tono/pf.reference"
 let killSwitchMainPFPath = "/etc/pf.conf"
@@ -426,6 +429,7 @@ final class KillSwitchManager {
         lastLoadedPassRules = passRules
         lastCommittedLocalNetwork = !state.tunnelInterfaces.isEmpty && state.allowLocalNetworkDevices
         localNetworkFaultLocked = false
+        Self.clearProtectedFault()
         stateGeneration &+= 1
         openNetworkEpoch &+= 1
         repairedSinceArm = false
@@ -466,9 +470,18 @@ final class KillSwitchManager {
                 tighteningUnconfirmed: tighteningUnconfirmed,
                 installStricterBlock: { try Self.installEmergencyBlock(allowedUID: uid) }
             )
+            if outcome == .faultStricterBlock || outcome == .faultStopCore {
+                localNetworkFaultLocked = true
+                do {
+                    try Self.recordProtectedFault()
+                } catch {
+                    FileHandle.standardError.write(Data(
+                        "tono: protected fault could not be persisted; it holds until this helper exits\n".utf8
+                    ))
+                }
+            }
             switch outcome {
             case .faultStricterBlock:
-                localNetworkFaultLocked = true
                 stateGeneration &+= 1
                 throw HelperFailure.coded(
                     code: Self.localNetworkFaultCode,
@@ -477,12 +490,21 @@ final class KillSwitchManager {
                         + "Every connection is blocked until protection is applied again."
                 )
             case .faultStopCore:
-                localNetworkFaultLocked = true
                 stateGeneration &+= 1
                 throw HelperFailure.coded(
                     code: Self.localNetworkFaultStopCoreCode,
                     message: "Could not apply Allow local network devices off, and the stricter "
                         + "block could not be installed; the Core is stopped and protection stays armed."
+                )
+            case .kept where liveSessionReArm:
+                // Coded so the app holds the session instead of taking its
+                // automatic release: the block and the intent are still in
+                // place, and only the user decides what happens next.
+                throw HelperFailure.coded(
+                    code: Self.liveReArmFailedCode,
+                    message: "Protection could not be updated: "
+                        + "\((error as? HelperFailure)?.message ?? String(describing: error)). "
+                        + "The installed block stays."
                 )
             case .released, .kept:
                 throw error
@@ -521,6 +543,50 @@ final class KillSwitchManager {
 
     static let localNetworkFaultCode = "KILLSWITCH_LOCAL_NETWORK_FAULT"
     static let localNetworkFaultStopCoreCode = "KILLSWITCH_LOCAL_NETWORK_FAULT_STOP_CORE"
+    static let liveReArmFailedCode = "KILLSWITCH_LIVE_REARM_FAILED"
+
+    /// Persist the protected fault with the boot session it began in. The
+    /// effects are injectable for the self-test, which has no root.
+    static func recordProtectedFault(
+        path: String = killSwitchProtectedFaultPath,
+        bootSession: () throws -> String = { try TonoAuthenticatedPeer.bootSession() },
+        write: (String, Data) throws -> Void = {
+            try KillSwitchManager.atomicWrite(path: $0, data: $1, permissions: 0o600)
+        }
+    ) throws {
+        try write(path, Data(try bootSession().utf8))
+    }
+
+    static func clearProtectedFault(path: String = killSwitchProtectedFaultPath) {
+        try? FileManager.default.removeItem(atPath: path)
+    }
+
+    /// Whether a persisted protected fault holds now. Same boot only: a fault
+    /// from an earlier boot is removed, and that boot's start follows the
+    /// existing launch policy for a leftover block. A marker that exists but
+    /// cannot be read, or a boot session that cannot be read, holds: unknown
+    /// never lifts a block.
+    static func persistedProtectedFaultHolds(
+        path: String = killSwitchProtectedFaultPath,
+        bootSession: () throws -> String = { try TonoAuthenticatedPeer.bootSession() },
+        read: (String) throws -> Data = { try KillSwitchManager.secureRead($0, maximumBytes: 256) }
+    ) -> Bool {
+        guard FileManager.default.fileExists(atPath: path) else { return false }
+        guard let data = try? read(path), let boot = try? bootSession() else { return true }
+        if String(decoding: data, as: UTF8.self) == boot { return true }
+        clearProtectedFault(path: path)
+        return false
+    }
+
+    /// The helper start releases a leftover block when the Core is down,
+    /// except while a protected fault from this boot holds.
+    static func startupReleasesLeftoverBlock(
+        coreRunning: Bool,
+        stateFilePresent: Bool,
+        protectedFault: Bool
+    ) -> Bool {
+        !coreRunning && stateFilePresent && !protectedFault
+    }
 
     /// A re-arm of the session PF already holds: the armed state on disk has
     /// the same non-empty tunnel set. The saved state is the session identity
@@ -927,6 +993,7 @@ final class KillSwitchManager {
         lastLoadedPassRules = nil
         lastCommittedLocalNetwork = nil
         localNetworkFaultLocked = false
+        Self.clearProtectedFault()
         repairedSinceArm = false
         return response(armed: false, wanted: false, live: false)
     }
@@ -1096,7 +1163,11 @@ final class KillSwitchManager {
                 // calls this after the Core has stopped; rewriting PF would
                 // put the block back on a machine whose Core is gone.
             }
-            return response(armed: live, wanted: wanted, live: live, healed: false)
+            var result = response(armed: live, wanted: wanted, live: live, healed: false)
+            // A29: lets an app that restarted, or a helper that restarted
+            // under it, show the protected fault instead of a normal block.
+            result["protectedFault"] = localNetworkFaultLocked
+            return result
         } catch {
             // Unreadable state is not a strict kill switch. Report it.
             // Do not install a block; the startup release and the core-down
@@ -1331,7 +1402,10 @@ final class KillSwitchManager {
     func restoreAtLaunch() throws {
         // No block at launch. The Core is constructed after this init, so
         // SocketServer.run decides: release a leftover when the Core is not
-        // running, and leave a live session's rules alone.
+        // running, and leave a live session's rules alone. A protected fault
+        // persisted in this boot comes back first, so neither that startup
+        // release nor the core-down watchdog lifts its block.
+        localNetworkFaultLocked = Self.persistedProtectedFaultHolds()
     }
 
     /// What PF renders when the supervisor reinstalls saved state while the

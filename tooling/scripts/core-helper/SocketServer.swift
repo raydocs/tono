@@ -411,6 +411,18 @@ final class SocketServer {
             killSwitch.reconcileSelectiveRecoveryIfReleased()
             return
         }
+        // A29: a protected fault from this boot keeps its block until the
+        // user disconnects (release) or reconnects (re-arm) from the app.
+        guard KillSwitchManager.startupReleasesLeftoverBlock(
+            coreRunning: false,
+            stateFilePresent: true,
+            protectedFault: killSwitch.localNetworkFault
+        ) else {
+            FileHandle.standardError.write(Data(
+                "tono: protected fault from this boot holds; leftover block kept\n".utf8
+            ))
+            return
+        }
         do {
             _ = try killSwitch.disarm(preserveAIHold: KillSwitchManager.automaticReleasePreservesAIHold())
         } catch {
@@ -440,8 +452,12 @@ final class SocketServer {
             // MAC-ORPHAN-BOOTSTRAP-PF: an app that died between /core/start
             // and the lock arm leaves this branch reinstalling a bootstrap
             // block nobody is left to lift. Check that before supervising.
-            if observeOrphanedBootstrap() { return }
-            if observeOrphanedTunnel() { return }
+            // A29: an orphaned-session release would lift the protected
+            // fault's block; the fault waits for the user instead.
+            if !killSwitch.localNetworkFault {
+                if observeOrphanedBootstrap() { return }
+                if observeOrphanedTunnel() { return }
+            }
             killSwitch.superviseProtection()
             return
         }

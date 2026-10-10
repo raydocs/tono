@@ -32,9 +32,16 @@
     unknown), the helper installs the block-all emergency ruleset (one verified anchor load) and reports
     `KILLSWITCH_LOCAL_NETWORK_FAULT`; if even that cannot be installed it stops the Core (its DIRECT dials and the local
     mixed proxy) and reports `KILLSWITCH_LOCAL_NETWORK_FAULT_STOP_CORE`, and the core-down watchdog does not release the
-    block while that fault holds. The app shows the fault, stops automatic attempts, and retries only when the user
-    toggles the setting or connects again (or when PF and the Core are seen converged). The first arm of a new session
-    keeps today's failure policy.
+    block while that fault holds. Any other failed re-arm of the live session is reported as
+    `KILLSWITCH_LIVE_REARM_FAILED` with the block kept. The fault is persisted beside the saved state with its boot
+    session: a helper restart in the same boot keeps the block (no startup leftover release, no watchdog or
+    orphaned-session release) and reports it in `/killswitch/status`; a reboot drops it and follows the existing boot
+    policy. In the app every held fault (helper fault, too-old helper, failed live re-arm, a failed reload that was
+    applying a pending generation) is an Error-like state: protection armed, the Core as the helper left it, no
+    automatic release (the exhausted-failure handler and every automatic release hold instead), no automatic reconnect,
+    the message in the banner and under the setting. Only the user proceeds: toggling the setting, Connect, or
+    Disconnect, which always releases normally (no permanent offline). The first arm of a new session keeps today's
+    failure policy.
   - Rejected: (a) a separate LAN DNS permit — #348 is a block, and the only remaining LAN DNS path was another VPN's
     utun, whose other private traffic off blocks anyway; (b) keeping `tono-multicast` / `tono-ssdp` when off; (c) new MLD,
     DHCPv6 or unicast DHCP renewal passes when off; (d) an indefinite heal/retry loop after a failed change (Mullvad's
@@ -48,6 +55,6 @@
 - Windows: Windows does **not** block private ranges while connected. Its rule I (decision 048, #1355) permits the same
   ranges and discovery multicast with no setting. This decision does not claim alignment with Windows and does not
   change Windows policy; macOS off is stricter than Windows.
-- Known limits: the protected-fault flag lives in helper memory; a helper restart while the Core is stopped falls back
-  to the existing launch policy for a leftover block. No real-hardware evidence yet.
+- Known limits: a reboot during the fault follows the existing boot policy (the leftover block is released at helper
+  start); a daemon startup failure also releases as before. No real-hardware evidence yet.
 - Applied in: PR #1506, backlog A29, branch `amp/a29-lan-devices-toggle` (helper 4.52.45).

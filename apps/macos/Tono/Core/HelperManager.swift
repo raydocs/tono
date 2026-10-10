@@ -42,6 +42,9 @@ nonisolated struct HelperManager {
         /// What the committed ruleset enforces for "Allow local network
         /// devices" (D7). Absent from a helper older than the setting.
         let allowLocalNetworkDevices: Bool?
+        /// The helper holds the A29 protected fault (also after it restarted
+        /// in the same boot). Absent from older helpers.
+        let protectedFault: Bool?
         /// Machine-readable refusal code, for the refusals whose correct handling
         /// is a decision rather than a message. Absent from a pre-3.11.2 daemon.
         let code: String?
@@ -913,6 +916,9 @@ nonisolated struct HelperManager {
     ) {
         let result = try sendRequest(method: "GET", path: "/killswitch/status")
         let reply = try requireKillSwitchSuccess(result, operation: "status")
+        if (try? JSONDecoder().decode(Envelope.self, from: result.body))?.protectedFault == true {
+            LocalNetworkDevicesSync.recordFault(.helper("reported by the helper"))
+        }
         // A status query loads nothing, so it can never have flushed anything;
         // dropping the field here keeps callers from reading a stale "no" as a
         // statement about the last arm.

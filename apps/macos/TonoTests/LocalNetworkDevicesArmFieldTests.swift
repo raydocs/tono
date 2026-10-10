@@ -201,4 +201,70 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
         XCTAssertEqual(LocalNetworkDevicesSync.fault, .helper("block-all installed"))
         XCTAssertFalse(LocalNetworkDevicesSync.takeAutomaticAttempt())
     }
+    /// An app whose helper I/O is replaced, so a disconnect runs its whole
+    /// sequence without touching the machine.
+    private func makeApp(releases: @escaping () -> Void) -> AppState {
+        let app = AppState()
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = { releases() }
+        runtime.releaseAfterFailure = { releases() }
+        runtime.restrictToBootstrap = {}
+        runtime.refreshKillSwitchStatus = { .confirmed(requiresProtectionRecovery: false) }
+        app.networkProtection = runtime
+        return app
+    }
+
+    /// Review F1: while the helper's protected fault holds, no automatic path
+    /// releases PF, tears the session down or reconnects: not the exhausted
+    /// failure, not an automatic release, not a scheduled reconnect. The
+    /// session keeps protection armed and shows the fault.
+    func testProtectedFaultHoldsWithoutAutomaticReleaseOrReconnect() async {
+        var releases = 0
+        let app = makeApp { releases += 1 }
+        app.isConnected = true
+        KillSwitchService.isArmed = true
+        LocalNetworkDevicesSync.recordFault(.helper("block-all installed"))
+        defer { app.connectionCoordinator.cancelReconnectTasks() }
+
+        await app.applyExhaustedArmedFailure(message: "generic failure", resumeWhenReachable: true)
+        app.disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
+        app.scheduleProtectedReconnect()
+        app.scheduleUnarmedReconnect()
+        await app.connectionCoordinator.disconnectSequence?.value
+
+        XCTAssertEqual(releases, 0, "no automatic release while the fault holds")
+        XCTAssertNil(app.connectionCoordinator.disconnectSequence, "no teardown")
+        XCTAssertTrue(app.isConnected)
+        XCTAssertTrue(KillSwitchService.isArmed)
+        XCTAssertNil(app.connectionCoordinator.protectedReconnectTask, "no automatic reconnect")
+        XCTAssertTrue(app.protectedReconnectPausedForUserAction)
+        XCTAssertEqual(app.errorMessage, LocalNetworkDevicesSync.faultMessage)
+        XCTAssertNotNil(app.localNetworkDevicesFaultMessage)
+    }
+
+    /// No permanent offline: the user's Disconnect from a held fault ends the
+    /// fault and releases protection the normal way.
+    func testUserDisconnectEndsTheProtectedFaultAndReleases() async {
+        var releases = 0
+        let app = makeApp { releases += 1 }
+        app.isConnected = true
+        KillSwitchService.isArmed = true
+        LocalNetworkDevicesSync.recordFault(.reArmFailed("re-arm failed"))
+        app.showLocalNetworkDevicesFault()
+        XCTAssertTrue(app.protectedReconnectPausedForUserAction)
+
+        app.disconnect(releaseKillSwitch: true)
+        await app.connectionCoordinator.disconnectSequence?.value
+
+        XCTAssertNil(LocalNetworkDevicesSync.fault)
+        XCTAssertNil(app.localNetworkDevicesFaultMessage)
+        XCTAssertFalse(app.protectedReconnectPausedForUserAction, "the fault's pause is lifted with it")
+        XCTAssertEqual(releases, 1, "the user's Disconnect releases")
+        XCTAssertFalse(app.isConnected)
+    }
 }
