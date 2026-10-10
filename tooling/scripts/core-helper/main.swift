@@ -2086,6 +2086,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && runLanDNSScopeSelfTest()
             && runLANScopePreservationSelfTest()
             && runReadRequestBoundSelfTest()
+            && ProtectionCheckSchedule.runClockStepSelfTest()
             && runCoreLifecyclePolicySelfTests()
             && runOwnedRuntimeContractSelfTests()
             && PowerTransitionGate.runSelfTests()

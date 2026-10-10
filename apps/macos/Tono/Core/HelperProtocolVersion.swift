@@ -414,7 +414,11 @@ nonisolated enum HelperProtocolVersion {
     ///   spares a relay address the Core still dials as its exit from the
     ///   targeted state kill, and `/killswitch/status` reports `tunnelArmed`
     ///   (H1-F5, decision 086).
-    static let current = "4.52.45"
+    /// - 4.52.45 → 4.52.46: the idle loop's 10 s protection check runs on the
+    ///   monotonic clock, so a wall clock set back no longer holds the
+    ///   core-down release, the orphaned-session releases and PF supervision
+    ///   for the length of the step (MAC-HELPER-WATCHDOG-WALLCLOCK).
+    static let current = "4.52.46"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
