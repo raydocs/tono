@@ -627,9 +627,15 @@ extension AppState {
                     // and the copyable classified detail. The dashboard must
                     // not interpolate them — handshake eof used to land as
                     // English debug on the main card.
+                    // H21-O-F7: a tunnel/exit-class failure while another VPN's
+                    // interface is up names that VPN. Read-only getifaddrs; only
+                    // the sentence (and the repeat signature built from it) changes.
                     let failureMessage = coreErrors.contains(where: Hy2IdleSupport.isQuicIdle)
                         ? Hy2IdleSupport.userMessage
-                        : ConnectionFailurePresentation.userFacingMessage(
+                        : OtherVPNDetection.attributedMessage(
+                            for: self.lastClassifiedFailure,
+                            interfaces: OtherVPNDetection.currentInterfaces()
+                        ) ?? ConnectionFailurePresentation.userFacingMessage(
                             classified: self.lastClassifiedFailure
                         )
                     // Deterministic failures repeat verbatim; a fourth try of

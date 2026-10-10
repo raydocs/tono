@@ -8354,6 +8354,19 @@ ${nameLine}
     expect((await api('diagnostics/reports', json(payload))).status).toBe(401);
   });
 
+  it('accepts the otherVpn adapter class from a client that saw another VPN (H21-O-F7)', async () => {
+    const account = await createAccount('diagnostics-other-vpn');
+    const response = await api('diagnostics/reports', json(
+      diagnosticsPayload({ virtualAdapters: ['otherVpn', 'wsl'] }),
+      account.accessToken,
+    ));
+    expect(response.status).toBe(201);
+    const stored = await env.DB.prepare(
+      'SELECT report_json FROM diagnostics_reports WHERE reference_code = ?',
+    ).bind((await response.json() as any).referenceCode).first<any>();
+    expect(JSON.parse(stored.report_json).virtualAdapters).toEqual(['otherVpn', 'wsl']);
+  });
+
   it('rejects an oversized diagnostics upload instead of truncating it', async () => {
     const account = await createAccount('diagnostics-oversized');
     const overBodyCap = await api('diagnostics/reports', json(

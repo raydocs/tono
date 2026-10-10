@@ -326,6 +326,11 @@ const actionErrorRaw = (error: unknown): string =>
       : String(error)
 
 const mappedTonoActionErrorKey = (raw: string): string | null => {
+  // H21-O-F7: the backend appends this only to a network/TUN-class connect
+  // failure while another VPN adapter is up, so it is the likelier cause.
+  if (raw.includes('TONO_OTHER_VPN_PRESENT:')) {
+    return 'tono.dashboard.errors.otherVpnPresent'
+  }
   if (
     (raw.includes('TONO_NODE_OR_CORE_UNREACHABLE') ||
       raw.includes('CORE_EXIT_UNREACHABLE')) &&

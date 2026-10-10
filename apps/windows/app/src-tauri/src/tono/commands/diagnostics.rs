@@ -162,6 +162,7 @@ pub(super) async fn collect_diagnostics_report(
     })
     .await
     .unwrap_or_else(|| ("Unknown".to_string(), Vec::new()));
+    let other_vpn_present = tono_core::other_vpn::foreign_vpn_count(&crate::tono::other_vpn::adapters().await) > 0;
 
     let audit_log_path = state.audit().log_path().to_path_buf();
     let service_log_path = crate::tono::diagnostics::service_log_path();
@@ -195,6 +196,7 @@ pub(super) async fn collect_diagnostics_report(
         retry_attempt: inner.retry_attempt,
         steps: &steps,
         adapter_names: &adapters,
+        other_vpn_present,
         known_secrets: &known_secrets,
         audit_log_path: &audit_log_path,
         service_log_path: &service_log_path,

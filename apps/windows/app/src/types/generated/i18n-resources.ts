@@ -1064,6 +1064,7 @@ export interface TranslationResources {
           encryptedDns: string
           hy2Idle: string
           nodeUnreachable: string
+          otherVpnPresent: string
           protectedHttpsFailed: string
           protectionHeldByAnotherUser: string
           protectionReleaseFailed: string
