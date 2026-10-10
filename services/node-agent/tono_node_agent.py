@@ -37,7 +37,12 @@ TOKEN_SHAPE = re.compile(r"tna1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{43}")
 
 
 class Refusal(RuntimeError):
-    """Configuration this agent will not send a token with."""
+    """Configuration this agent will not send a token with.
+
+    Messages are fixed text naming a variable at most. They never include an
+    environment value, a path, file contents or another exception's text: any
+    of those may be the token, and this line goes to the journal.
+    """
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -53,7 +58,7 @@ def api_base(raw: str) -> str:
         parsed = urllib.parse.urlsplit(raw)
         port = parsed.port
     except ValueError as error:
-        raise Refusal("TONO_API_BASE must be an HTTPS origin on port 443") from error
+        raise Refusal("TONO_API_BASE must be an HTTPS origin on port 443") from None
     if (
         parsed.scheme != "https"
         or not parsed.hostname
@@ -109,8 +114,11 @@ def read_token() -> str:
     path = Path(os.environ.get("TONO_NODE_AGENT_TOKEN_FILE", "").strip() or default)
     try:
         text = path.read_text()
-    except (OSError, UnicodeDecodeError):
-        raise Refusal(f"cannot read the node agent token at {path}") from None
+    except (OSError, ValueError) as error:
+        # Never the path: an operator may have put the token itself in the variable.
+        raise Refusal(
+            f"cannot read the file named by TONO_NODE_AGENT_TOKEN_FILE ({type(error).__name__})"
+        ) from None
     token = text[:-1] if text.endswith("\n") else text
     if not TOKEN_SHAPE.fullmatch(token):
         raise Refusal("the node agent token file must hold exactly one tna1 token on one line")
@@ -145,7 +153,7 @@ def run() -> int:
     )
     try:
         with urllib.request.build_opener(NoRedirect).open(request, timeout=15) as response:
-            print(f"ok {response.status}: {node} roles={','.join(payload['roles']) or '-'} ip={payload.get('ip', '-')}")
+            print(f"ok {response.status}: roles={','.join(payload['roles']) or '-'}")
             return 0
     except urllib.error.HTTPError as error:
         print(f"heartbeat refused: HTTP {error.code}", file=sys.stderr)

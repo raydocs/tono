@@ -45,6 +45,13 @@ class NodeAgentTest(unittest.TestCase):
         self.assertNotIn(token[5:], stderr.getvalue())
         self.assertIn("refused", stderr.getvalue())
 
+        stderr = io.StringIO()
+        with mock.patch.dict(os.environ, {**env, "TONO_NODE_AGENT_TOKEN_FILE": token}), \
+                contextlib.redirect_stderr(stderr):
+            self.assertNotEqual(agent.main(), 0)
+        self.assertNotIn(token[5:], stderr.getvalue())
+        self.assertIn("TONO_NODE_AGENT_TOKEN_FILE", stderr.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
