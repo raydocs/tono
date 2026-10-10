@@ -39,6 +39,7 @@ import {
   text,
   textList,
 } from './checkers';
+import { assertLogWindow, type LogWindowDto } from './log-windows';
 
 /** Where a flattened event came from. `failure` is the client's immediate report. */
 export const EVENT_SOURCES = ['window', 'direct', 'diagnostics', 'failure'] as const;
@@ -201,14 +202,8 @@ export interface CustomerSummaryDto {
   stageSinceAt: number;
   firstConnectedAt: number | null;
   updatedAt: number;
-}
-
-export interface LogWindowDto {
-  id: string;
-  openedBy: string | null;
-  openedAt: number;
-  expiresAt: number;
-  reads: number;
+  /** Sent only as true: another customer or pending invite has the same WeChat id. */
+  wechatDuplicate?: boolean;
 }
 
 export interface CustomerDetailDto {
@@ -414,6 +409,7 @@ const CUSTOMER_SUMMARY_KEYS = [
   'userId', 'email', 'wechatId', 'verdict', 'health', 'tone', 'reason', 'lifecycle', 'deviceCount',
   'platforms', 'selectedServer', 'connected', 'lastFailure', 'usageBytes', 'quotaBytes', 'services',
   'minAppVersion', 'expiresAt', 'lastSeenAt', 'stage', 'stageSinceAt', 'firstConnectedAt', 'updatedAt',
+  'wechatDuplicate',
 ];
 
 export function assertCustomerSummary(value: unknown, path = 'customerSummary'): CustomerSummaryDto {
@@ -444,19 +440,7 @@ export function assertCustomerSummary(value: unknown, path = 'customerSummary'):
     stageSinceAt: int(row, path, 'stageSinceAt'),
     firstConnectedAt: optInt(row, path, 'firstConnectedAt'),
     updatedAt: int(row, path, 'updatedAt'),
-  };
-}
-
-const LOG_WINDOW_KEYS = ['id', 'openedBy', 'openedAt', 'expiresAt', 'reads'];
-
-export function assertLogWindow(value: unknown, path = 'logWindow'): LogWindowDto {
-  const row = fields(value, path, LOG_WINDOW_KEYS);
-  return {
-    id: text(row, path, 'id'),
-    openedBy: optText(row, path, 'openedBy'),
-    openedAt: int(row, path, 'openedAt'),
-    expiresAt: int(row, path, 'expiresAt'),
-    reads: int(row, path, 'reads'),
+    ...(row.wechatDuplicate === undefined ? {} : { wechatDuplicate: bool(row, path, 'wechatDuplicate') }),
   };
 }
 
@@ -493,6 +477,7 @@ export function assertCustomerDetail(value: unknown, path = 'customerDetail'): C
   };
 }
 
+export { assertLogWindow, type LogWindowDto } from './log-windows';
 export {
   assertCustomerDiagnostics,
   assertFailureClusterList,
