@@ -104,7 +104,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
                 window.standardWindowButton(kind)?.isHidden = true
             }
             await settle(0.4)
-            try await capture("polish-c-\(language)-menubar-\(state)", window: window)
+            try await capture("polish-c-\(language)-menubar-\(state)", window: window, trafficLights: false)
         }
         set("idle", app: fixture.app)
     }
@@ -454,7 +454,7 @@ final class MacSeaPolishRenderTests: XCTestCase {
     }
 
     @discardableResult
-    private func capture(_ name: String, window: NSWindow) async throws -> CGImage {
+    private func capture(_ name: String, window: NSWindow, trafficLights: Bool = true) async throws -> CGImage {
         let pid = ProcessInfo.processInfo.processIdentifier
         let registration = try await registeredWindow(window)
         let target = registration.target
@@ -462,9 +462,10 @@ final class MacSeaPolishRenderTests: XCTestCase {
         let requestedSize = try XCTUnwrap((window as? MacSeaPolishWindow)?.requestedSize)
         // A fixed AppKit surface can have real titlebar controls without an
         // NSToolbar. Verify the visible native chrome, not that internal object.
+        // A menu bar panel fixture hides its own traffic lights; verify that too.
         for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             let button = try XCTUnwrap(window.standardWindowButton(type))
-            XCTAssertFalse(button.isHidden)
+            XCTAssertEqual(button.isHidden, !trafficLights)
             XCTAssertTrue(button.window === window)
         }
         XCTAssertEqual(expectedID, CGWindowID(window.windowNumber))
