@@ -1,0 +1,299 @@
+// @vitest-environment jsdom
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
+import i18n from 'i18next'
+import { initReactI18next } from 'react-i18next'
+import { SWRConfig } from 'swr'
+import { afterEach, expect, it, vi } from 'vitest'
+
+import enSettings from '@/locales/en/settings.json'
+import enTono from '@/locales/en/tono.json'
+import zhTono from '@/locales/zh/tono.json'
+import { setPreloadConfig } from '@/services/preload'
+import { removeCacheData, swrConfig } from '@/services/query-client'
+import { setNewAppearance } from '@/tono-ui/appearance-preferences'
+
+const mocks = vi.hoisted(() => ({
+  read: vi.fn(),
+  write: vi.fn(),
+  preferenceRead: vi.fn(),
+  preferenceWrite: vi.fn(),
+}))
+vi.mock('@/services/cmds', () => ({
+  getTonoPreferences: mocks.preferenceRead,
+  patchTonoPreferences: mocks.preferenceWrite,
+}))
+vi.mock('@/services/tono', async (original) => ({
+  ...(await original<typeof import('@/services/tono')>()),
+  tonoAuditEnabled: async () => true,
+  tonoAuditLogPath: async () => ({ path: 'synthetic.log' }),
+  tonoPeriodicTelemetryEnabled: async () => false,
+  tonoInternalBuild: async () => false,
+  tonoNetworkLogUploadEnabled: mocks.read,
+  tonoSetNetworkLogUploadEnabled: mocks.write,
+}))
+vi.mock('@/services/states', () => ({ useThemeMode: () => 'dark' }))
+vi.mock('@/components/setting/mods/update-viewer', () => ({
+  UpdateViewer: () => null,
+}))
+
+import { GeneralCard, PrivacyCard } from './settings'
+
+afterEach(async () => {
+  cleanup()
+  setPreloadConfig(null)
+  await Promise.all(
+    [
+      'tonoAuditEnabled',
+      'tonoPeriodicTelemetryEnabled',
+      'tonoNetworkLogUploadEnabled',
+      'tonoPrivacySaves',
+      'getTonoPreferences',
+      'tonoGeneralSave',
+    ].map((key) => removeCacheData([key])),
+  )
+  mocks.read.mockReset()
+  mocks.write.mockReset()
+  mocks.preferenceRead.mockReset()
+  mocks.preferenceWrite.mockReset()
+})
+
+it('privacy choices wait for confirmation and recover failed reads or ambiguous saves by reloading', async () => {
+  await i18n.use(initReactI18next).init({
+    resources: { en: { translation: { tono: enTono, settings: enSettings } } },
+    lng: 'en',
+  })
+  setNewAppearance(true)
+  let rejectRead!: (error: Error) => void
+  mocks.read.mockReturnValueOnce(
+    new Promise<boolean>((_, reject) => {
+      rejectRead = reject
+    }),
+  )
+  render(
+    <SWRConfig
+      value={{
+        errorRetryCount: 0,
+        dedupingInterval: 0,
+        revalidateOnFocus: false,
+      }}
+    >
+      <PrivacyCard />
+    </SWRConfig>,
+  )
+  const toggle = screen.getByRole('switch', {
+    name: 'Upload the full traffic log',
+  }) as HTMLButtonElement
+  expect(toggle.disabled).toBe(true)
+  await waitFor(() =>
+    expect(
+      (
+        screen.getByRole('switch', {
+          name: 'Local diagnostic log',
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false),
+  )
+  expect(screen.getByRole('status').textContent).toBe('Reading saved choice…')
+  await act(async () => rejectRead(new Error('Synthetic read failed')))
+  expect((await screen.findByRole('alert')).textContent).toContain(
+    "Couldn't read the saved choice.",
+  )
+  expect(toggle.disabled).toBe(true)
+
+  mocks.read.mockResolvedValue(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Reload saved choice' }))
+  await waitFor(() => expect(toggle.disabled).toBe(false))
+  expect(toggle.getAttribute('aria-checked')).toBe('false')
+  let rejectSave!: (error: Error) => void
+  mocks.write.mockReturnValueOnce(
+    new Promise<void>((_, reject) => {
+      rejectSave = reject
+    }),
+  )
+  fireEvent.click(toggle)
+  expect(toggle.disabled).toBe(true)
+  expect(toggle.getAttribute('aria-checked')).toBe('false')
+  expect(screen.getByRole('status').textContent).toBe('Saving…')
+  await act(async () => rejectSave(new Error('Synthetic lost reply')))
+  expect(screen.getByRole('alert').textContent).toContain(
+    "Couldn't confirm the change.",
+  )
+  expect(screen.getByText('Synthetic lost reply')).toBeDefined()
+  expect(screen.getByText('Technical details').closest('details')?.open).toBe(
+    false,
+  )
+  expect(screen.queryByText('Saved')).toBeNull()
+  expect(toggle.disabled).toBe(true)
+
+  // A lost reply can leave the actual saved value different from the old cache.
+  mocks.read.mockResolvedValue(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Reload saved choice' }))
+  await waitFor(() => expect(toggle.getAttribute('aria-checked')).toBe('true'))
+  expect(screen.queryByRole('alert')).toBeNull()
+  mocks.write.mockResolvedValue(undefined)
+  fireEvent.click(toggle)
+  await waitFor(() => expect(toggle.getAttribute('aria-checked')).toBe('false'))
+  expect(toggle.disabled).toBe(false)
+  expect(screen.getByRole('status').textContent).toBe('Saved')
+  expect(screen.getByText(/does not delete data already sent/)).toBeDefined()
+})
+
+it('a pending privacy save remains locked across navigation until its reply arrives', async () => {
+  await i18n.use(initReactI18next).init({
+    resources: { en: { translation: { tono: enTono, settings: enSettings } } },
+    lng: 'en',
+  })
+  setNewAppearance(true)
+  let actual = true
+  let acknowledge!: () => void
+  mocks.read.mockImplementation(async () => actual)
+  mocks.write.mockImplementation(async (enabled: boolean) => {
+    actual = enabled
+    if (!enabled) {
+      await new Promise<void>((resolve) => {
+        acknowledge = resolve
+      })
+    }
+  })
+  const page = (settings: boolean) => (
+    <SWRConfig value={swrConfig}>
+      {settings ? <PrivacyCard /> : <p>Other page</p>}
+    </SWRConfig>
+  )
+  const { rerender } = render(page(true))
+  const choice = () =>
+    screen.getByRole('switch', {
+      name: 'Upload the full traffic log',
+    }) as HTMLButtonElement
+  await waitFor(() => expect(choice().disabled).toBe(false))
+  expect(choice().getAttribute('aria-checked')).toBe('true')
+  fireEvent.click(choice())
+  expect(actual).toBe(false)
+  expect(choice().disabled).toBe(true)
+  rerender(page(false))
+  // Use the production cache and wait past its normal deduplication window.
+  await new Promise((resolve) => setTimeout(resolve, 2200))
+  rerender(page(true))
+  await waitFor(() =>
+    expect(choice().getAttribute('aria-checked')).toBe('false'),
+  )
+  expect(choice().disabled).toBe(true)
+  expect(screen.getByRole('status').textContent).toBe('Saving…')
+  fireEvent.click(choice())
+  expect(actual).toBe(false)
+  await act(async () => acknowledge())
+  await waitFor(() => expect(choice().disabled).toBe(false))
+  fireEvent.click(choice())
+  await waitFor(() =>
+    expect(choice().getAttribute('aria-checked')).toBe('true'),
+  )
+  expect(actual).toBe(true)
+  expect(screen.getByRole('status').textContent).toBe('Saved')
+})
+
+it('general settings confirm saved choices across navigation and apply language only after a successful save', async () => {
+  await i18n.use(initReactI18next).init({
+    resources: {
+      en: { translation: { tono: enTono, settings: enSettings } },
+      zh: { translation: { tono: zhTono } },
+    },
+    lng: 'en',
+  })
+  setNewAppearance(true)
+  setPreloadConfig(null)
+  let actual = { enable_auto_launch: false, language: 'en' }
+  let finishRead!: () => void
+  mocks.preferenceRead.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishRead = () => resolve(actual)
+      }),
+  )
+  const page = (settings: boolean) => (
+    <SWRConfig value={{ ...swrConfig, errorRetryCount: 0 }}>
+      {settings ? <GeneralCard /> : <p>Other page</p>}
+    </SWRConfig>
+  )
+  const { rerender } = render(page(true))
+  const toggle = () => screen.getByRole('switch') as HTMLButtonElement
+  expect(toggle().disabled).toBe(true)
+  await act(async () => finishRead())
+  await waitFor(() => expect(toggle().disabled).toBe(false))
+  expect(toggle().getAttribute('aria-checked')).toBe('false')
+  let refuse!: () => void
+  mocks.preferenceRead.mockImplementation(async () => actual)
+  mocks.preferenceWrite.mockImplementationOnce(async (value) => {
+    actual = { ...actual, ...value }
+    await new Promise((_, reject) => {
+      refuse = () => reject(new Error('Synthetic lost reply'))
+    })
+  })
+  fireEvent.click(toggle())
+  expect(toggle().disabled).toBe(true)
+  expect(toggle().getAttribute('aria-checked')).toBe('false')
+  expect(screen.queryByText('Saved')).toBeNull()
+  rerender(page(false))
+  rerender(page(true))
+  expect(toggle().disabled).toBe(true)
+  await act(async () => refuse())
+  expect((await screen.findByRole('alert')).textContent).toContain(
+    "Couldn't confirm",
+  )
+  rerender(page(false))
+  rerender(page(true))
+  expect(toggle().disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Reload saved choices' }))
+  await waitFor(() => expect(toggle().disabled).toBe(false))
+  expect(toggle().getAttribute('aria-checked')).toBe('true')
+  expect(screen.queryByText('Saved')).toBeNull()
+
+  let acknowledge!: () => void
+  mocks.preferenceWrite.mockImplementationOnce(async (value) => {
+    actual = { ...actual, ...value }
+    await new Promise<void>((resolve) => {
+      acknowledge = resolve
+    })
+  })
+  fireEvent.click(screen.getByRole('button', { name: '简体中文' }))
+  expect(i18n.language).toBe('en')
+  expect(toggle().disabled).toBe(true)
+  expect(
+    screen
+      .getByRole('button', { name: 'English' })
+      .getAttribute('aria-pressed'),
+  ).toBe('true')
+  await act(async () => acknowledge())
+  await waitFor(() => expect(i18n.language).toBe('zh'))
+  expect(
+    screen
+      .getByRole('button', { name: '简体中文' })
+      .getAttribute('aria-pressed'),
+  ).toBe('true')
+  expect(screen.getByRole('status').textContent).toBe('已保存')
+  expect(toggle().disabled).toBe(false)
+
+  // A successful write with a failed readback is still unconfirmed, not Saved.
+  mocks.preferenceWrite.mockImplementation(async (value) => {
+    actual = { ...actual, ...value }
+  })
+  mocks.preferenceRead.mockRejectedValueOnce(
+    new Error('Synthetic readback failed'),
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'English' }))
+  expect((await screen.findByRole('alert')).textContent).toContain(
+    '无法确认更改',
+  )
+  expect(i18n.language).toBe('zh')
+  expect(toggle().disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: '重新读取已保存的选择' }))
+  await waitFor(() => expect(i18n.language).toBe('en'))
+  expect(toggle().disabled).toBe(false)
+  expect(screen.queryByText('Saved')).toBeNull()
+})

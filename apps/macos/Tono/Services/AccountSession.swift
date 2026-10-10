@@ -62,6 +62,9 @@ final class AccountSession {
         // Each request carries the revision it started under, so a refusal of
         // a retired presentation cannot suspend the one replacing it (#582).
         api.offlineGate.noteReadScope(accountReadRevision)
+        // A19: and a request started before this change never puts a path
+        // failure on the timeline of what follows it.
+        updateControlPlanePathTimeline()
         discardSupportReport()
     }
 
@@ -100,6 +103,9 @@ final class AccountSession {
     let sidecar: TonoSidecarService
     let descriptorConsumer: @MainActor (TonoTransportDescriptor?) async -> Void
     let catalogConsumer: @MainActor (TonoExitCatalogResponse) async throws -> Void
+    /// A 2xx exit-catalog answer whose body did not decode (A17: it grants no
+    /// hy2 auto-switch either).
+    let catalogUndecodableConsumer: @MainActor () -> Void
     let trafficPolicyConsumer: @MainActor (TonoTrafficPolicyResponse) async throws -> Int
     let cloudFallbackPreferred: @MainActor () -> Bool
     let cloudFallbackConsumer: @MainActor (Bool) throws -> Void
@@ -113,6 +119,10 @@ final class AccountSession {
     let claudeTrafficResearchConsumer:
         @MainActor () async -> TonoClaudeTrafficResearchSnapshot
     let protectionBlockedConsumer: @MainActor () -> Bool
+    /// Whether a fail-closed barrier without a tunnel may hold this Mac, so
+    /// the account gate offers Restore internet and PF blocks Tono's relays.
+    /// Read only to word an unreachable control plane; never to release.
+    let gateProtectionHoldConsumer: @MainActor () -> ControlPlaneUnreachable.ProtectionHold
     /// Whether automatic reconnects are paused until the user acts (a denied
     /// administrator prompt, a failed helper install). No account path may
     /// lift that pause by requesting a resume on its own.
@@ -284,6 +294,7 @@ final class AccountSession {
          exitNode: String = Bundle.main.object(forInfoDictionaryKey: "TonoExitNode") as? String ?? "",
          descriptorConsumer: @escaping @MainActor (TonoTransportDescriptor?) async -> Void,
          catalogConsumer: @escaping @MainActor (TonoExitCatalogResponse) async throws -> Void = { _ in },
+         catalogUndecodableConsumer: @escaping @MainActor () -> Void = {},
          trafficPolicyConsumer: @escaping @MainActor (TonoTrafficPolicyResponse) async throws -> Int = { $0.revision },
          cloudFallbackPreferred: @escaping @MainActor () -> Bool = { false },
          cloudFallbackConsumer: @escaping @MainActor (Bool) throws -> Void = { _ in },
@@ -347,7 +358,8 @@ final class AccountSession {
              AppTrafficLedger.RouteSplit()
          },
          installedCatalogConsumer: @escaping @MainActor () -> InstalledCatalogDigests? = { nil },
-         protectionUnconfirmedConsumer: @escaping @MainActor () -> Bool = { false }) {
+         protectionUnconfirmedConsumer: @escaping @MainActor () -> Bool = { false },
+         gateProtectionHoldConsumer: @escaping @MainActor () -> ControlPlaneUnreachable.ProtectionHold = { .none }) {
         // Apply the one-shot default-off migration before Settings can present
         // or change the AppStorage value. A later user opt-in then sees the v2
         // marker and is never reset on a subsequent callback or launch.
@@ -360,6 +372,7 @@ final class AccountSession {
         self.exitNode = exitNode
         self.descriptorConsumer = descriptorConsumer
         self.catalogConsumer = catalogConsumer
+        self.catalogUndecodableConsumer = catalogUndecodableConsumer
         self.trafficPolicyConsumer = trafficPolicyConsumer
         self.cloudFallbackPreferred = cloudFallbackPreferred
         self.cloudFallbackConsumer = cloudFallbackConsumer
@@ -376,6 +389,7 @@ final class AccountSession {
         self.routeSplitConsumer = routeSplitConsumer
         self.installedCatalogConsumer = installedCatalogConsumer
         self.protectionUnconfirmedConsumer = protectionUnconfirmedConsumer
+        self.gateProtectionHoldConsumer = gateProtectionHoldConsumer
         installConnectFailureReporting()
         installSessionVerdictSink()
     }

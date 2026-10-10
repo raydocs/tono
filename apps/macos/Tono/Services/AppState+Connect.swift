@@ -22,6 +22,9 @@ extension AppState {
             prepare: { [weak self] in
                 guard let self else { return (false, UUID()) }
                 guard !self.isConnected && !self.isConnecting else { return (false, UUID()) }
+                // A17: every attempt is judged from the user's own block, not
+                // from the previous attempt's automatic hy2 dial.
+                self.restoreSelectionAfterHy2AutoDial()
                 guard !self.catalogSelectionRequiresChoice else {
                     self.errorMessage = String(localized: "Choose an available cloud server before reconnecting.")
                     return (false, UUID())
@@ -122,6 +125,9 @@ extension AppState {
                 self.config.mode = ProxyMode.rule.rawValue.lowercased()
                 self.proxyMode = .rule
 
+                // A17: the admitted attempt may dial the same node's hy2 block
+                // (in memory only; PF follows the dialed node like a manual pick).
+                self.applyHy2AutoSwitchForConnect()
                 let selectedExit = self.preferManagedCatalogExitForConnect()
                 let selectedExitName = selectedExit?.name ?? ConfigPipeline.homeNodeName
                 LocalTrafficAudit.shared.recordEvent(
@@ -517,6 +523,8 @@ extension AppState {
                 // round trip and could interrupt a healthy first connection.
                 let committed = await self.onCoreStarted(api: api)
                 guard committed else { return }
+                // Only past the same readiness checks as any attempt.
+                self.hy2AutoSwitch.noteConnected(dialed: selectedExitName, now: Date())
                 self.recordVerifiedRouteSuccess(selectedExitName, owner: routeOwner, generation: generation,
                                                 catalogDigest: routeCatalogDigest)
                 // Pins are for the *next* fail-closed window, not this
@@ -655,6 +663,7 @@ extension AppState {
                     ) {
                         _ = self.rotateCatalogExitAfterConnectFailure()
                     }
+                    self.noteHy2AutoSwitchConnectFailure(dialed: selectedExitName)
                     if environmentalFailure {
                         // Leave the counter untouched either way.
                         self.consecutiveNoNetworkServiceFailures += 1
@@ -701,11 +710,39 @@ extension AppState {
                         )
                         self.lastConnectionFailure = preservedFailure
                         self.completedConnectionStages = preservedStages
+                        // The unarmed loop ended when it started this connect
+                        // after a TCP proof. A failure before PF armed (the
+                        // network service gone mid-handoff, a catalog exit it
+                        // cannot dial) would leave nothing to try again: no
+                        // loop, and a network change restarts only a loop that
+                        // still owns the generation. Hand recovery back to the
+                        // loop at its preserved rung, after this release
+                        // (it waits for the teardown). Never for a failure that
+                        // needs the user, nor at helper preparation, which may
+                        // raise an administrator prompt.
+                        if Self.unarmedLoopResumesAfterPreArmFailure(
+                            startedByUnarmedLoop: preservingUnarmedBackoff,
+                            stage: failedStage,
+                            error: error
+                        ) {
+                            self.scheduleUnarmedReconnect()
+                        }
                     }
             }
         }
     )
 }
+
+    /// Whether a connect that failed before PF armed goes back to the
+    /// unarmed reconnect loop: only one that loop started, and only for a
+    /// failure that neither needs the user nor came from helper preparation.
+    static func unarmedLoopResumesAfterPreArmFailure(
+        startedByUnarmedLoop: Bool,
+        stage: ConnectionStage,
+        error: any Error
+    ) -> Bool {
+        startedByUnarmedLoop && stage != .preparingHelper && !failureRequiresUserAction(error)
+    }
 
     /// A released host starts a genuinely new story; stale failure history
     /// must not let a single failure in a future session trip the "repeated
@@ -2812,9 +2849,11 @@ extension AppState {
         )
     }
 
-    /// User-tapped next hand. Does not run on its own (G2.8 stays off).
+    /// User-tapped next hand. The automatic same-node move is A17
+    /// (`Hy2AutoSwitch`), gated by the catalog's `hy2AutoSwitch`.
     func tryBackupChannelManually() {
         guard let backup = backupHy2SiblingName() else { return }
+        hy2AutoSwitch.noteManualSelection(backup)
         guard applyProxySelection(backup) else { return }
         persistProxySelection(backup)
         if isProtectionBlocked {

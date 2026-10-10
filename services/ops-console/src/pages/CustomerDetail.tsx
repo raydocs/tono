@@ -20,9 +20,11 @@ import { CarrierMatrix } from './customer/CarrierMatrix';
 import { ClaudeAccount } from './customer/ClaudeAccount';
 import { Destinations } from './customer/Destinations';
 import { Devices } from './customer/Devices';
+import { Experience } from './customer/Experience';
 import { Followups } from './customer/Followups';
 import { CustomerHeader, CustomerWechat } from './customer/Header';
 import { HomeLine } from './customer/HomeLine';
+import { Hy2Switch } from './customer/Hy2Switch';
 import { nowFacts } from './customer/now-facts';
 import { Proof } from './customer/Proof';
 import { Quota } from './customer/Quota';
@@ -162,10 +164,12 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
             </div>
           </Section>
 
+          <Experience now={row.now} devices={row.devices} />
+
           {/* The answer, then the record of having given it. Both sit above the
               timeline because both are what the operator came here to do; the
               timeline is what they read to check the draft. */}
-          <ReplyDraft who={privacy.email(row.email)} events={events} />
+          <ReplyDraft who={privacy.email(row.email)} events={events} now={row.now} devices={row.devices} />
 
           <Followups userId={userId} beat={beat} />
 
@@ -215,6 +219,8 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
             message={homeSide.message}
             onChanged={refresh}
           />
+
+          <Hy2Switch userId={userId} email={privacy.email(row.email)} />
 
           <ClaudeAccount
             userId={userId}

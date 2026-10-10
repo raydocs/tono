@@ -2,6 +2,7 @@ import i18n from 'i18next'
 import { createRoot } from 'react-dom/client'
 import { initReactI18next } from 'react-i18next'
 import { createMemoryRouter, RouterProvider } from 'react-router'
+import { SWRConfig } from 'swr'
 
 import enSettings from '@/locales/en/settings.json'
 import enShared from '@/locales/en/shared.json'
@@ -19,6 +20,7 @@ import LoginPage from '@/pages/tono/login'
 import ServersPage from '@/pages/tono/servers'
 import SupportPage from '@/pages/tono/support'
 import TrayPage from '@/pages/tono/tray'
+import { swrConfig } from '@/services/query-client'
 import {
   setNewAppearance,
   setMotionPreference,
@@ -62,4 +64,8 @@ const router = createMemoryRouter(
 )
 const mount = document.getElementById('root')
 if (!mount) throw new Error('Missing shell mount')
-createRoot(mount).render(<RouterProvider router={router} />)
+createRoot(mount).render(
+  <SWRConfig value={swrConfig}>
+    <RouterProvider router={router} />
+  </SWRConfig>,
+)

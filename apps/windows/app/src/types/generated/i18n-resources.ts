@@ -1284,6 +1284,7 @@ export interface TranslationResources {
         emailLabel: string
         emailPlaceholder: string
         errors: {
+          captivePortal: string
           clockSkew: string
           codeRejected: string
           deviceLimit: string
@@ -1291,6 +1292,7 @@ export interface TranslationResources {
           serverError: string
           sessionExpired: string
           signInNotSaved: string
+          tlsIntercepted: string
           unreachable: string
         }
         inboxInstructions: string
@@ -1626,15 +1628,27 @@ export interface TranslationResources {
           title: string
         }
         general: {
+          effectHint: string
           language: string
+          languageHint: string
           launchAtStartup: string
           launchAtStartupHint: string
+          readFailed: string
+          reload: string
+          saveFailed: string
           title: string
         }
         preferences: {
           title: string
         }
         privacy: {
+          effectHint: string
+          readFailed: string
+          reading: string
+          reload: string
+          saved: string
+          saveFailed: string
+          saving: string
           title: string
         }
         title: string

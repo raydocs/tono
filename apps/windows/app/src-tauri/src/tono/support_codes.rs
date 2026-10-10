@@ -11,7 +11,7 @@ pub fn stage_for_support_code(code: &str) -> Option<&'static str> {
     match code {
         "TONO_AUTH_DNS" | "TONO_CONNECT_DNS" => Some("dns"),
         "TONO_AUTH_TCP" | "TONO_CONNECT_TCP" => Some("tcp"),
-        "TONO_AUTH_TLS" | "TONO_CONNECT_TLS" => Some("tls"),
+        "TONO_AUTH_TLS" | "TONO_CONNECT_TLS" | "TONO_TLS_INTERCEPTED" => Some("tls"),
         "TONO_AUTH_QUIC" | "TONO_CONNECT_QUIC" => Some("quic"),
         "TONO_AUTH_TIMEOUT" | "TONO_CONNECT_TIMEOUT" => Some("timeout"),
         "TONO_CLOCK_SKEW" => Some("clock"),

@@ -8,12 +8,16 @@ import { connect as socketConnect } from 'cloudflare:sockets';
 // Keep in step with the clients' compiled lists:
 // `apps/windows/app/src-tauri/src/tono/bootstrap.rs` `API_RELAYS` and
 // `apps/macos/Tono/Services/ControlPlanePath.swift` `apiRelays`.
+//
+// `exitNodeId` is the `exit_nodes.id` of the exit agent on the same machine:
+// its token is the only credential that may report this relay's end-to-end
+// check (`POST /api/v1/home/relay-probe`, `src/api-relay-report.ts`).
 export const API_RELAYS: readonly ApiRelay[] = [
-  { name: 'Los Angeles · Westwood', host: '179.253.233.220', port: 2053 },
-  { name: 'Los Angeles · Mesa', host: '179.255.154.17', port: 2053 },
+  { name: 'Los Angeles · Westwood', host: '179.253.233.220', port: 2053, exitNodeId: 'los-angeles-westwood' },
+  { name: 'Los Angeles · Mesa', host: '179.255.154.17', port: 2053, exitNodeId: 'los-angeles-mesa' },
 ];
 
-export type ApiRelay = { name: string; host: string; port: number };
+export type ApiRelay = { name: string; host: string; port: number; exitNodeId?: string };
 
 /** The slice of a `cloudflare:sockets` socket the probe uses, so tests can stand in for it. */
 export type RelaySocket = { opened: Promise<unknown>; close: () => Promise<unknown> | unknown };

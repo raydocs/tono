@@ -423,7 +423,7 @@ fn repair_rank(
     if same_base {
         if let Some(current) = current {
             if current.transport != candidate.transport
-                && transport_matches(failure, candidate.transport)
+                && transport_matches(failure, current.transport, candidate.transport)
             {
                 return Some((0, DialChange::Transport));
             }
@@ -445,11 +445,18 @@ fn repair_rank(
     Some((4, DialChange::SameRegion))
 }
 
-fn transport_matches(failure: FailureClass, transport: Transport) -> bool {
+/// Whether moving from `current` to `candidate` on the same node is the repair for `failure`.
+///
+/// A failed hy2 dial goes to the same node's Reality block whatever its text says. A UDP path
+/// that drops everything rarely reports "quic" or "hysteria": the post-lock probe reports a
+/// timeout (classified `Tcp`) or a TLS failure. Those used to rank the Reality block only by a
+/// different port, SNI or address, and the catalog's ` · hy2` block shares all three, so the
+/// healer skipped the node's own Reality block and moved to another node.
+fn transport_matches(failure: FailureClass, current: Transport, candidate: Transport) -> bool {
     match failure {
-        FailureClass::QuicHandshake => transport == Transport::Tcp,
+        FailureClass::QuicHandshake => candidate == Transport::Tcp,
         FailureClass::Auth => false,
-        _ => transport == Transport::Hy2,
+        _ => candidate == Transport::Hy2 || current == Transport::Hy2,
     }
 }
 
@@ -718,6 +725,26 @@ mod tests {
             catalog_base_name("Buffalo · Other"),
             catalog_base_name("Tokyo · Sakura")
         );
+    }
+
+    /// A hand-picked ` · hy2` row on a network that drops UDP fails with a timeout, not a QUIC
+    /// error. The next dial must be the same node's Reality block (same address, port and SNI
+    /// in the catalog), not another node of the region.
+    #[test]
+    fn a_hy2_dial_that_timed_out_goes_to_the_same_nodes_reality_block() {
+        let mut session = Session::for_preferred("Buffalo · Niagara · hy2", "none");
+        let effect = observe(
+            &mut session,
+            Some(classify_failure("TONO_NODE_OR_CORE_UNREACHABLE: generate_204 timed out")),
+            &pool(),
+            KillSwitchStance::Ordinary,
+            0,
+        );
+        assert_eq!(effect, NetworkEffect::DialBeforeArm {
+            name: "Buffalo · Niagara".to_string(),
+            change: DialChange::Transport,
+            dialer_changed: false,
+        });
     }
 
     #[test]

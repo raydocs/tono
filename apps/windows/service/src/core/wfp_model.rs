@@ -86,8 +86,9 @@ pub const MAX_API_HOST_IPS: usize = 8;
 /// DHCP/NDP permits (#343); v11: `…9e0a…` DHCP client permits bounded to broadcast/multicast
 /// and non-public servers (#345); v12: `…9e0b…` intent-floor loopback/DHCP/NDP permits
 /// persistent alongside the block-alls; v13: `…9e0c…` local-network permits while locked,
-/// never on the DNS ports and never for the core (decision 048).)
-const FILTER_NAMESPACE: u128 = 0x2f7c_9e0c_0000_4a6c_0000_0000_0000_0000;
+/// never on the DNS ports and never for the core (decision 048); v14: `…9e0d…` the Tono API
+/// relays in the app-scoped bootstrap API channel (decision 090).)
+const FILTER_NAMESPACE: u128 = 0x2f7c_9e0d_0000_4a6c_0000_0000_0000_0000;
 
 const fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
@@ -835,7 +836,8 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
     }
 
     // C: the bounded bootstrap API channel. Open in bootstrap, retracted at lock, and open
-    // again in blocked mode as the recovery channel.
+    // again in blocked mode as the recovery channel. Its destinations are the admitted API
+    // addresses on `CONTROL_PLANE_PORTS` and the compiled Tono relays (decision 090).
     //
     // Scoped to the installed Tono app. The pinned addresses are shared Cloudflare anycast, so
     // an address-only permit let any local process reach any origin behind them from the
@@ -860,6 +862,40 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
                     vec![
                         C::AleAppIdTonoApp,
                         remote_address_condition(*ip),
+                        C::Protocol(IpProtocol::Tcp),
+                        C::RemotePort(port),
+                    ],
+                    false,
+                ));
+            }
+        }
+
+        // The Tono API relays (owner decision W-A, decision 090, amending 077): the same
+        // channel, for the customer whose carrier cannot reach the Cloudflare addresses above
+        // at all. Exactly the compiled `crate::API_RELAYS` tuples — the list the App walks —
+        // with the same Tono app id as every permit above: TCP, one exact address and one exact
+        // port each, no range, nothing resolved. The relays admit only the Tono API and release
+        // SNIs and pass TLS through unterminated, so this reaches nothing the permits above do
+        // not already reach. Rendered only where this channel is (some API address admitted):
+        // a record with none, such as the ownerless emergency block, gets no relay either.
+        if !config.api_host_ips.is_empty() {
+            for (ip, port) in crate::API_RELAYS {
+                let ip = IpAddr::V4(ip);
+                if port == 0 || !is_public_api_ip(&ip) {
+                    continue;
+                }
+                filters.push(spec(
+                    format!(
+                        "session/permit-api-relay/ale/{}/{ip}/{port}",
+                        config.tono_app_path
+                    ),
+                    "session permit bootstrap API relay",
+                    ale_layer_for(ip),
+                    WEIGHT_INFRA_PERMIT,
+                    A::Permit,
+                    vec![
+                        C::AleAppIdTonoApp,
+                        remote_address_condition(ip),
                         C::Protocol(IpProtocol::Tcp),
                         C::RemotePort(port),
                     ],
@@ -1370,7 +1406,7 @@ mod tests {
         // Upgrade safety: the key-only diff adopts anything with a matching key, so the
         // namespace must change whenever the rule tables do. Pin the current marker (see the
         // constant's doc comment); any rule-table change must bump it and this pin.
-        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e0c_0000_4a6c);
+        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e0d_0000_4a6c);
     }
 
     #[test]
@@ -2267,6 +2303,160 @@ mod tests {
             FilterAction::Block,
             "locked must retract the bootstrap API channel"
         );
+    }
+
+    /// Owner decision W-A (decision 090): armed without a tunnel, rule C also carries the Tono
+    /// API relays — exactly the compiled tuples, TCP, Tono app id, nothing broader.
+    #[test]
+    fn bootstrap_channel_adds_exactly_the_tono_relays_for_the_tono_app_over_tcp() {
+        // Pinned literally: changing the relay list changes the WFP permit table.
+        assert_eq!(
+            crate::API_RELAYS,
+            [
+                (std::net::Ipv4Addr::new(179, 253, 233, 220), 2053),
+                (std::net::Ipv4Addr::new(179, 255, 154, 17), 2053),
+            ]
+        );
+        for mode in [
+            KillSwitchStatusMode::Bootstrap,
+            KillSwitchStatusMode::Blocked,
+        ] {
+            let config = config(mode);
+            let filters = expected_filters(&config);
+            let relay_permits = filters
+                .iter()
+                .filter(|filter| {
+                    filter.conditions.contains(&Condition::AleAppIdTonoApp)
+                        && !config
+                            .api_host_ips
+                            .iter()
+                            .any(|ip| filter.conditions.contains(&remote_address_condition(*ip)))
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(relay_permits.len(), crate::API_RELAYS.len(), "{mode:?}");
+            for ((ip, port), filter) in crate::API_RELAYS.iter().zip(&relay_permits) {
+                assert_eq!(
+                    filter.conditions,
+                    vec![
+                        Condition::AleAppIdTonoApp,
+                        Condition::RemoteAddressV4 {
+                            addr: ip.octets(),
+                            prefix: 32
+                        },
+                        Condition::Protocol(IpProtocol::Tcp),
+                        Condition::RemotePort(*port),
+                    ],
+                    "{mode:?}: one exact address, one exact port, TCP, the Tono app only"
+                );
+                assert_eq!(filter.layer, LayerKind::AleAuthConnectV4, "{mode:?}");
+                assert_eq!(filter.action, FilterAction::Permit, "{mode:?}");
+                assert_eq!(filter.weight, WEIGHT_INFRA_PERMIT, "{mode:?}");
+                assert!(!filter.hard_permit && !filter.persistent, "{mode:?}");
+
+                let mut tono_app = packet(
+                    LayerKind::AleAuthConnectV4,
+                    IpProtocol::Tcp,
+                    &ip.to_string(),
+                    *port,
+                );
+                tono_app.tono_app_id_matches = true;
+                assert_eq!(
+                    arbitrate(&filters, &tono_app),
+                    FilterAction::Permit,
+                    "{mode:?}"
+                );
+                let mut other_process = tono_app.clone();
+                other_process.tono_app_id_matches = false;
+                assert_eq!(
+                    arbitrate(&filters, &other_process),
+                    FilterAction::Block,
+                    "{mode:?}: another process cannot use the relay"
+                );
+                let mut udp = tono_app.clone();
+                udp.protocol = IpProtocol::Udp;
+                assert_eq!(arbitrate(&filters, &udp), FilterAction::Block, "{mode:?}");
+                let mut other_port = tono_app.clone();
+                other_port.remote_port = 443;
+                assert_eq!(
+                    arbitrate(&filters, &other_port),
+                    FilterAction::Block,
+                    "{mode:?}"
+                );
+            }
+        }
+
+        // Nowhere rule C is absent: connected, or a record with no admitted API address.
+        let mut tono_app = packet(
+            LayerKind::AleAuthConnectV4,
+            IpProtocol::Tcp,
+            "179.253.233.220",
+            2053,
+        );
+        tono_app.tono_app_id_matches = true;
+        assert_eq!(
+            arbitrate(
+                &expected_filters(&config(KillSwitchStatusMode::Locked)),
+                &tono_app
+            ),
+            FilterAction::Block,
+            "locked retracts the relays with the rest of the channel"
+        );
+        let mut no_channel = config(KillSwitchStatusMode::Blocked);
+        no_channel.api_host_ips.clear();
+        assert!(
+            !expected_filters(&no_channel)
+                .iter()
+                .any(|filter| filter.conditions.contains(&Condition::AleAppIdTonoApp)),
+            "no admitted API address, no relay permit"
+        );
+    }
+
+    /// The Cloudflare half of rule C is what it was before the relays: every admitted address on
+    /// every `CONTROL_PLANE_PORTS` port, same identity tags, same conditions (owner kept them).
+    #[test]
+    fn bootstrap_channel_keeps_the_cloudflare_entries_unchanged() {
+        let mut config = config(KillSwitchStatusMode::Blocked);
+        config.api_host_ips = vec![
+            "104.20.26.170".parse().unwrap(),
+            "172.66.162.98".parse().unwrap(),
+        ];
+        let filters = expected_filters(&config);
+        let cloudflare = filters
+            .iter()
+            .filter(|filter| {
+                filter.conditions.contains(&Condition::AleAppIdTonoApp)
+                    && !crate::API_RELAYS.iter().any(|(ip, _)| {
+                        filter
+                            .conditions
+                            .contains(&remote_address_condition(IpAddr::V4(*ip)))
+                    })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut expected = Vec::new();
+        for ip in &config.api_host_ips {
+            for port in [443, 2053, 2083, 2087, 2096, 8443] {
+                expected.push(FilterSpec {
+                    key: key_for(&format!(
+                        "session/permit-api/ale/{}/{ip}/{port}",
+                        config.tono_app_path
+                    )),
+                    name: "Tono session permit bootstrap API".to_owned(),
+                    layer: LayerKind::AleAuthConnectV4,
+                    weight: WEIGHT_INFRA_PERMIT,
+                    action: FilterAction::Permit,
+                    conditions: vec![
+                        Condition::AleAppIdTonoApp,
+                        remote_address_condition(*ip),
+                        Condition::Protocol(IpProtocol::Tcp),
+                        Condition::RemotePort(port),
+                    ],
+                    hard_permit: false,
+                    persistent: false,
+                });
+            }
+        }
+        assert_eq!(cloudflare, expected);
     }
 
     #[test]

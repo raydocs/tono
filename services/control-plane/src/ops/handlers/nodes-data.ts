@@ -352,6 +352,9 @@ export function eventDto(row: Row): ConnectionEventDto {
     edgeAsOrg: nullText(row.edge_as_org), edgeCountry: nullText(row.edge_country),
     edgeRegion: nullText(row.edge_region), edgeViaExit: Number(row.edge_via_exit) === 1,
     ...(row.transport === 'tcp' || row.transport === 'hy2' ? { transport: row.transport } : {}),
+    ...(nullText(row.from_node) === null ? {} : { from: nullText(row.from_node) }),
+    ...(nullText(row.to_node) === null ? {} : { to: nullText(row.to_node) }),
+    ...(nullText(row.reason) === null ? {} : { reason: nullText(row.reason) }),
   };
 }
 

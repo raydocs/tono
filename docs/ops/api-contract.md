@@ -111,6 +111,7 @@
 | `GET nodes/{name}/receipts?limit=` | `ListDto<ChangeReceiptDto>`。按时间倒序。`ChangeReceiptDto { id, kind, subjectType, subjectId, incidentId, jobId, before: unknown, after: unknown, clientAcks: number, rollbackOf, actor, at }` |
 | `GET slo` | `SloResponseDto { items: SloRowDto[], summary: SloSummaryDto, nextCursor, total, updatedAt }`。Query `?range=7d|30d&platform&carrier&node`。`SloRowDto { dayAt, platform, carrier, node, attempts, successes, p50Ms, verifiedOutageMin, unmeasuredMin, rulesVersion }`，`summary { successRate, p50Ms, verifiedOutageMin, unmeasuredMin, coverage }`。 |
 | `GET api-relays` | `ApiRelaysDto { relays: ApiRelayDto[] }`（`nodes.read`）。每个编译进客户端的 Tono API 中继一行（决策 077，`src/api-relays.ts`）：`{ name, host, port, ok, checkedAt, latencyMs, error, okSince, failingSince }`。来自 cron 每 5 分钟对 `host:port` 的 TCP 试连（5 s 超时；Worker 无法指定 SNI，所以只证明端口开着），表 `api_relay_probes`。cron 还没测过的中继各字段为 null，不算不可达 |
+| `GET api-paths` | `ApiPathsDto { since, days, rows: ApiPathRowDto[] }`（`nodes.read`）。最近 7 个 UTC 日（含今天，`since` 为首日零点）每个客户 ASN × 控制面路径一行：`{ asn, asOrg, path, arrived, ok, fail, successRate: Measured<number\|null> }`，表 `ops_api_path_daily`（迁移 0099，决策 080）。`path` 取 `X-Tono-Path` 词表；`arrived` 是所有客户端被 `recordClient` 打戳的到达数（同设备同路径一小时最多一次）；`ok` / `fail` 只来自发送 `X-Tono-Path-Failed` 的客户端（到达记 `ok`，头里列出的先失败路径各记一次 `fail`，同一 ASN）。`successRate = ok/(ok+fail)`，没有上报客户端时 `value`/`asOfSec` 为 null（显示无数据，不是 100%）。`asn` 为 null 表示未知：经 `relay` / `tunnel` 或来自已知出口 ASN 的请求，边缘 ASN 是节点不是客户。不存 IP、URL 路径、用户或设备 id。最多 300 行，按 `arrived+fail` 降序 |
 | `GET customers/{id}` | `devices[]` 加 `clientPath` / `clientPathAt`：设备最近一次登录、刷新或拉目录时请求头 `X-Tono-Path` 报的传输路径（`pinned\|system_dns\|relay\|doh\|alt_port\|tunnel`，其它值丢弃）与写入时间（epoch 秒），来自 `devices.client_path(_at)`；同一路径一小时内不重写。不发此头的旧版本为 null |
 
 ### 部门 B
@@ -119,6 +120,7 @@
 |---|---|
 | `GET customers` | 列表信封加可选 `counts?: { byVerdict: Record<CustomerVerdict, number>; byStage: Record<FunnelStage, number> }`（全量，各 1 条 GROUP BY；没有 `ops_customer_status` 行的用户按漏斗计入 `never_used`）。`total` 为带同一 `q`/`since` 条件的 `COUNT(*)`。分页在 SQL：`WHERE (email, id) > (?, ?)`，再按本页 `user_id IN (…)` 批量读状态 / 设备数 / 服务家族 / 漏斗事实。 |
 | `GET customers/{id}` | 可选 `logWindows?: { id, openedBy, openedAt, expiresAt, reads }[]`。开 / 读 / 关写 `ops_audit` `diagnostics.window.open\|read\|close`（target 为用户 id，summary 为窗口 id 与对象 key）；cron `retention` 把 `expires_at < now` 的窗口关掉并审计 `close(expired)` |
+| `GET customers` | `CustomerSummaryDto` 加可选 `wechatDuplicate?: true`（只在为真时出现）：同一微信号（去首尾空白、不分大小写）还登记在另一位用户或尚未注册的邀请名下，全量 1 条读。带 `q` 时邮箱或微信号与 `q` 完全相等（不分大小写）的行排最前；此时游标的排序键前加名次 `0`/`1`，无 `q` 的游标格式不变；把无 `q` 的游标用在带 `q` 的请求上，排序键首字不是名次时返回 400 |
 
 ### 部门 C
 
@@ -127,6 +129,9 @@
 | `GET nodes` / `GET nodes/{name}` | 可选 `nodeId`、`displayName`、`failureDomain`、`replaces`。展示名只影响 UI；`catalog_name` / `node_name` 仍是所有表的键 |
 | `GET nodes/{name}` | `facts.capacityUsers?`：资料里登记的可坐人数。有值时验收单 `capacity`：占用 < 容量为 pass，否则 fail；无值仍 unknown |
 | `PATCH nodes/{name}/profile` | 加可选 `capacityUsers`（正整数）、`displayName`（≤60）、`failureDomain`（≤60，建议 `商家/机房`）、`replaces`（必须是已有 catalog_name，不能是自己） |
+| `GET node-agents` | `NodeAgentsDto { agents: NodeAgentDto[] }`（`nodes.read`）。节点自注册（A20）：每个签发过 agent token 的节点一行，表 `ops_node_agents`。`NodeAgentDto { node, tokenIssuedAt, tokenRevokedAt, reportedIp, observedIp, roles: ('xray'\|'hy2'\|'relay')[], agentVersion, firstHeartbeatAt, lastHeartbeatAt }`；签发后未上报的心跳字段为 null。`reportedIp` 是节点自报，`observedIp` 是 Cloudflare 看到的 `CF-Connecting-IP`；两者都只记录，不改路由、目录或资料里的 `public_ip` |
+| `POST nodes/{name}/agent-token` | 201 `NodeAgentTokenDto { node, token, tokenIssuedAt }`，`cache-control: no-store`（`nodes.publish`，仅 owner）。节点须存在（同 `GET nodes/{name}`），已退役 409 `NODE_RETIRED`。token 只在这次返回；库里只存加盐 SHA-256。再签发立即作废旧 token。审计 `node.agent_token.issue` 与写入同一批。签发不上架、不改目录 |
+| `DELETE nodes/{name}/agent-token` | `{ node, tokenRevokedAt }`（`nodes.publish`）。立即作废；之后心跳 403 `NODE_AGENT_REVOKED`。没有 token 的节点 404。审计 `node.agent_token.revoke` |
 
 ### 部门 D
 
@@ -157,4 +162,4 @@
 
 环境变量 `OPS_ROLES` 是 JSON 对象（email → 角色）；解析时 email 一律小写。非法 JSON、非对象、非字符串值、未知角色：忽略并 `console.warn` 一次，不抛错。未列出的 Access 邮箱默认为 `owner`（今天的行为不变）。邮箱写错时也会静默得到 `owner`。
 
-闸门：匹配到的 v1 路由在 `dispatchOpsV1` 里检查。Access 门（`/api/v1/ops/*`）进入 shared-admin 之前先查 `src/ops/access-roles.ts`：shared-admin 资源与 legacy 路由各有一张表（例：`PUT exit-catalog`、`PUT traffic-policy`、`home-exits` 写 → `settings.publish`；`exit-nodes` 写与 `exit-credential-rollout` POST → `nodes.publish`；全部 `diagnostics-logs` / `diagnostics/logs*` → `customers.raw-logs`；`POST users/{id}/close` 仅 owner；`device-actions` POST、`users/{id}/home-binding` 写、`POST signup-allowlist` → `customers.write`；legacy 读按资源归 `nodes.read` / `customers.read` / `settings.read` / `system.read` / `incidents.read`）。三张表都不认识的路径仅 owner 可用。五条 legacy 写在 `opsRoutes` 里另有同样的检查。不通过则 `403` `{ error: { code: "ROLE_FORBIDDEN" } }`。bearer 门（`/api/v1/admin/*`）不分角色。`ops_audit` 行上的 `actor_role` 仍记为 `owner`，本版不改。
+闸门：匹配到的 v1 路由在 `dispatchOpsV1` 里检查。Access 门（`/api/v1/ops/*`）进入 shared-admin 之前先查 `src/ops/access-roles.ts`：shared-admin 资源与 legacy 路由各有一张表（例：`PUT exit-catalog`、`PUT traffic-policy`、`home-exits` 写 → `settings.publish`；`exit-nodes` 写与 `exit-credential-rollout` POST → `nodes.publish`；全部 `diagnostics-logs` / `diagnostics/logs*` → `customers.raw-logs`；`POST users/{id}/close` 仅 owner；`device-actions` POST、`users/{id}/home-binding` 写、`PUT users/{id}/hy2-auto-switch`、`POST signup-allowlist` → `customers.write`；`PUT hy2-auto-switch` → `settings.publish`；legacy 读按资源归 `nodes.read` / `customers.read` / `settings.read` / `system.read` / `incidents.read`）。三张表都不认识的路径仅 owner 可用。五条 legacy 写在 `opsRoutes` 里另有同样的检查。不通过则 `403` `{ error: { code: "ROLE_FORBIDDEN" } }`。bearer 门（`/api/v1/admin/*`）不分角色。`ops_audit` 行上的 `actor_role` 仍记为 `owner`，本版不改。

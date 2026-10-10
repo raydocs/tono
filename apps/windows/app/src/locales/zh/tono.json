@@ -261,27 +261,29 @@
       "signIn": "重新登录"
     },
     "restoreFailed": {
-      "title": "登录状态已失效",
-      "description": "请重试，或重新登录。",
+      "title": "没能恢复登录",
+      "description": "Tono 没能和服务器确认你的登录状态，这个网络现在可能连不上服务器。请重试；一直失败再重新登录。",
       "retry": "重试"
     },
     "networkBlocked": {
       "title": "网络已被保护拦住",
-      "description": "上次连接的防泄漏还在。先恢复网络，再登录。",
+      "description": "上次连接的防泄漏还开着，它拦住了这台电脑的网络，包括 Tono 中继，登录过不去。要登录，请点「恢复网络」：这会关闭保护，在你重新连接之前，这台电脑的流量直接出网、不经过 Tono。",
       "restore": "恢复网络",
       "restoring": "正在恢复…",
-      "unverifiedDescription": "Tono 无法确认上次连接的防泄漏是否还在。先点「恢复网络」，再登录。",
+      "unverifiedDescription": "Tono 无法确认上次连接的防泄漏是否还在。要登录，请点「恢复网络」：这会关闭保护，在你重新连接之前，这台电脑的流量直接出网、不经过 Tono。",
       "stillRunningTitle": "上次的连接仍在运行",
       "stillRunningDescription": "上次会话的隧道仍在转发流量。恢复网络会停止它。"
     },
     "errors": {
-      "unreachable": "登录没有完成。",
+      "unreachable": "这个网络暂时连不上 Tono 的登录服务器。请确认电脑能上网，等一分钟再试；一直失败请复制详情发给客服。",
       "rateLimited": "尝试过多，请稍后再试。",
-      "deviceLimit": "登录没有完成。",
+      "deviceLimit": "这个账号的设备数已满。请在已登录的设备上打开「账号」，移除一台设备，然后重试。",
       "sessionExpired": "验证码已过期，请重新获取。",
       "codeRejected": "验证码错误或已过期，请重新获取。",
       "signInNotSaved": "无法在这台电脑上保存登录。请重新获取验证码后再试。",
-      "clockSkew": "登录没有完成。",
+      "clockSkew": "这台电脑的日期和时间不对，Tono 无法验证服务器。请在「设置 > 时间和语言 > 日期和时间」里改正，然后重试。",
+      "captivePortal": "网络需要网页登录（强制门户）：这个网络要先在浏览器里完成登录，Tono 才能连到服务器。请打开浏览器完成这个网络的登录页面，然后重试。",
+      "tlsIntercepted": "网络在拦截加密连接：这台电脑与 Tono 之间有设备或软件替换了 Tono 的证书，Tono 不会接受。如果这个网络有网页登录，请先在浏览器里完成；否则请关闭检查 HTTPS 的代理或安全软件，然后重试。",
       "serverError": "登录服务暂时繁忙或不可用，请稍后重试或联系客服。"
     }
   },
@@ -639,13 +641,25 @@
       "title": "偏好设置"
     },
     "privacy": {
-      "title": "隐私"
+      "title": "隐私",
+      "effectHint": "每项选择自动保存，无需重连或重启。关闭上传不会删除已经发送的数据。",
+      "reading": "正在读取已保存的选择…",
+      "readFailed": "无法读取已保存的选择。",
+      "saving": "正在保存…",
+      "saved": "已保存",
+      "saveFailed": "无法确认更改是否成功。请重新读取已保存的选择，再试一次。",
+      "reload": "重新读取已保存的选择"
     },
     "general": {
       "title": "通用",
-      "launchAtStartup": "开机自启",
-      "launchAtStartupHint": "第一次连上后会打开，可随时关掉。",
-      "language": "界面语言"
+      "effectHint": "更改会自动保存在这台电脑上，不改变当前连接。",
+      "launchAtStartup": "登录电脑时打开",
+      "launchAtStartupHint": "下次登录 Windows 时打开 Tono。首次连上后默认启用，可在这里更改。",
+      "language": "界面语言",
+      "languageHint": "保存后在当前窗口生效，无需重连或重启。",
+      "readFailed": "无法读取已保存的设置。",
+      "saveFailed": "无法确认更改是否成功。请重新读取已保存的选择，再试一次。",
+      "reload": "重新读取已保存的选择"
     },
     "appearance": {
       "title": "外观",

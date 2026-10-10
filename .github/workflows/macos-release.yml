@@ -417,10 +417,33 @@ jobs:
           security default-keychain -s login.keychain-db || true
           security delete-keychain "$KEYCHAIN_PATH" || true
 
+  # Build provenance for the exact notarized zip the build job uploaded, release or
+  # candidate (decision 079 D8-A: generated and auditable with `gh attestation
+  # verify`; clients do not check it). The only job holding an OIDC token or
+  # attestation write; it checks out and runs no repository code and sees no
+  # secret. No condition and no continue-on-error: a failed attestation fails
+  # the run and stops validate-appcast (no Sparkle signature or release proof),
+  # and macos-dmg.yml and desktop-update-sign.yml take only a successful run.
+  attest:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ${{ needs.build.outputs.artifact_name }}
+          path: ${{ runner.temp }}/attest
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/attest/${{ needs.build.outputs.artifact_name }}.zip
+
   validate-appcast:
     # A local physical-test candidate must never obtain the Sparkle signing key.
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.candidate_only) }}
-    needs: build
+    needs: [build, attest]
     runs-on: macos-26
     environment: macos-appcast
     env:

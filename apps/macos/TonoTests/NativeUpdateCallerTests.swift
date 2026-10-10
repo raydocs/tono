@@ -245,6 +245,15 @@ final class NativeUpdateCallerTests: XCTestCase {
         XCTAssertThrowsError(try HelperManager.updatePackagePath(package.appendingPathExtension("missing")))
     }
 
+    /// Simulated blocked release host: a background check offered the
+    /// update, the user chose Install and Restart, and the package could not
+    /// be downloaded on any path. That failure answers the user's click and
+    /// is shown; a background check the user never saw stays quiet.
+    func testAPackageFailureAfterTheUserAcceptedABackgroundOfferIsShown() {
+        XCTAssertTrue(AppUpdater.reportsFailure(userInitiated: false, offerAccepted: true, updatePending: false))
+        XCTAssertFalse(AppUpdater.reportsFailure(userInitiated: false, offerAccepted: false, updatePending: false))
+    }
+
     func testNativeUpdateOfferAndFailureRender() async throws {
         let offer = AppUpdater.offerAlert(version: "0.0.73")
         XCTAssertEqual(offer.buttons.map(\.title), ["Install and Restart", "Not Now"])

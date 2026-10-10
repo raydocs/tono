@@ -51,11 +51,18 @@ const SERVICES_PATHS = [
   'services/**',
   'ops-panel/**',
   'tooling/scripts/remote/**',
+  'tooling/ops/relay/**',
+  'tooling/ops/node-install/**',
   'tooling/scripts/provision-tono-node.py',
   'tooling/scripts/tests/test_provision_tono_node.py',
   'tooling/scripts/generate-release-center.mjs',
   'tooling/scripts/tests/generate-release-center.test.mjs',
   'tooling/scripts/check-migration-numbers.mjs',
+  'tooling/scripts/check-relay-alert-rule.mjs',
+  'tooling/scripts/tests/fixtures/ops-alert-rules.json',
+  'docs/ops/api-relay.md',
+  'tooling/scripts/check-migrations-additive.mjs',
+  'tooling/scripts/rehearse-control-plane-migrations.sh',
   'tooling/scripts/check-ops-budgets.mjs',
   'tooling/scripts/compare-connect-performance.mjs',
   'tooling/scripts/windows-package-components.mjs',
@@ -67,8 +74,10 @@ const SERVICES_PATHS = [
   'tooling/scripts/provision-reality-node.rb',
   'tooling/scripts/tests/provision-reality-node.test.rb',
   'tooling/ops/hy2/**',
+  'tooling/ops/cn-acceptance/**',
   '.github/workflows/services-ci.yml',
   '.github/workflows/desktop-update-sign.yml',
+  '.github/workflows/screenshots-nightly.yml',
 ]
 const SING_BOX_PATHS = [
   '.github/workflows/sing-box-alpha9-check.yml',
@@ -146,6 +155,13 @@ test('a touched path selects the workflow that lists it', () => {
   assert.equal(bench.connectBench, true)
   assert.equal(bench.macos, false)
   assert.equal(bench.windows, false)
+})
+
+test('a screenshots-nightly edit runs the services gate that holds its split test', () => {
+  const nightly = matchingWorkflows(['.github/workflows/screenshots-nightly.yml'], filters)
+  assert.equal(nightly.services, true)
+  assert.equal(nightly.macos, false)
+  assert.equal(nightly.windows, false)
 })
 
 test('aggregate fails when a relevant job failed or was cancelled', () => {
