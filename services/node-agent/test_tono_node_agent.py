@@ -31,26 +31,31 @@ class NodeAgentTest(unittest.TestCase):
                 agent.api_base(bad)
 
         token = "tna1." + "A" * 16 + "." + "b" * 43
-        with tempfile.TemporaryDirectory() as tmp:
-            token_file = Path(tmp) / "node-agent.token"
-            env = {"TONO_API_BASE": "https://api.afk.ccwu.cc", "TONO_NODE_NAME": "Tokyo · Kite",
-                   "TONO_NODE_AGENT_TOKEN_FILE": str(token_file)}
-            token_file.write_text(token + "\n")
-            with mock.patch.dict(os.environ, env):
-                self.assertEqual(agent.read_token(), token)
-            token_file.write_text(f"{token}\n{token}\n")
-            stderr = io.StringIO()
-            with mock.patch.dict(os.environ, env), contextlib.redirect_stderr(stderr):
-                self.assertNotEqual(agent.main(), 0)
-        self.assertNotIn(token[5:], stderr.getvalue())
-        self.assertIn("refused", stderr.getvalue())
+        good = "TONO_API_BASE=https://api.afk.ccwu.cc\nTONO_NODE_NAME=Tokyo · Kite\n"
 
-        stderr = io.StringIO()
-        with mock.patch.dict(os.environ, {**env, "TONO_NODE_AGENT_TOKEN_FILE": token}), \
-                contextlib.redirect_stderr(stderr):
-            self.assertNotEqual(agent.main(), 0)
-        self.assertNotIn(token[5:], stderr.getvalue())
-        self.assertIn("TONO_NODE_AGENT_TOKEN_FILE", stderr.getvalue())
+        def run_with(config_text: str, token_text: str) -> str:
+            with tempfile.TemporaryDirectory() as tmp:
+                config = Path(tmp) / "node-agent.conf"
+                config.write_text(config_text)
+                (Path(tmp) / "node-agent-token").write_text(token_text)
+                stderr = io.StringIO()
+                with mock.patch.dict(os.environ, {"CREDENTIALS_DIRECTORY": tmp}), \
+                        contextlib.redirect_stderr(stderr):
+                    self.assertNotEqual(agent.main(["--config", str(config)]), 0)
+            self.assertNotIn(token[5:], stderr.getvalue())
+            return stderr.getvalue()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "node-agent.conf").write_text(good)
+            (Path(tmp) / "node-agent-token").write_text(token + "\n")
+            self.assertEqual(agent.load_config(Path(tmp) / "node-agent.conf")["TONO_NODE_NAME"], "Tokyo · Kite")
+            self.assertEqual(agent.read_token(Path(tmp) / "node-agent-token"), token)
+        # The token twice in the credential, the token as an unknown key, a token-shaped
+        # value where the API base belongs: each refused, none echoed.
+        self.assertIn("refused", run_with(good, f"{token}\n{token}\n"))
+        self.assertIn("config line 3", run_with(good + f"LD_PRELOAD={token}\n", token))
+        self.assertIn("config line 1", run_with(f"{token}=1\n", token))
+        self.assertIn("refused", run_with(f"TONO_API_BASE={token}\nTONO_NODE_NAME=x\n", token))
 
         # A child process sees neither this environment nor the journal: a stub
         # systemctl that dumps its env and args writes nothing that reaches fd 1/2.

@@ -42,3 +42,9 @@
   脚本里没有别的子进程调用。python 现有测试加：桩 `systemctl` 把环境与参数写到 fd 2，环境里放合成 token，fd 1/2 均不含
   token。minor——吊销回执改在同一 batch 里读（事务内 SELECT），不再事后另查；现有 `it` 加：两次 `DELETE` 回同一
   `tokenRevokedAt`。
+- 续记（2026-10-10，第五轮评审 FAIL：1 major）：unit 的 `EnvironmentFile` 把任意变量交给解释器，token 误填进
+  `LD_PRELOAD` / `LD_AUDIT` / `LD_DEBUG` 时 ld.so 会在 Python 启动前把它写进日志。改后 unit 去掉 `EnvironmentFile`，
+  不设任何运营者可写的环境；配置改为 root 所有的 `/etc/tono/node-agent.conf`（unit 用 `--config` 固定路径），脚本只
+  接受 `TONO_API_BASE` / `TONO_NODE_NAME` 两个键，其余行、重复键、超 4 KiB 一律拒绝，错误只报行号；token 只从
+  `LoadCredential` 读。`node-agent.env.example` 改为 `node-agent.conf.example`，README 安装步骤同步。python 现有测试
+  覆盖：未知键（`LD_PRELOAD=<token>`、以 token 为键）拒绝、token 形值放进 API base 拒绝、两行 credential 拒绝，均不回显。

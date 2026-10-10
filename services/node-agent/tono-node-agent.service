@@ -5,10 +5,12 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-EnvironmentFile=/etc/tono/node-agent.env
+# No EnvironmentFile: nothing operator-written reaches the interpreter's
+# environment (ld.so and Python read variables before the script runs).
+# Configuration is an allow-listed file the script parses itself.
 # The token file stays root-only (0600); systemd hands this unit a private copy.
 LoadCredential=node-agent-token:/etc/tono/node-agent.token
-ExecStart=/usr/bin/python3 -I /opt/tono-node-agent/tono_node_agent.py
+ExecStart=/usr/bin/python3 -I /opt/tono-node-agent/tono_node_agent.py --config /etc/tono/node-agent.conf
 DynamicUser=yes
 NoNewPrivileges=yes
 ProtectSystem=strict

@@ -7,10 +7,14 @@ once by an owner in the ops console API, and only ever authenticates this
 heartbeat; it cannot list, publish or change any node. Run from the systemd
 timer next to this file. Python 3 standard library only.
 
-Environment (see node-agent.env.example):
+Configuration is a root-owned file (default /etc/tono/node-agent.conf, see
+node-agent.conf.example) of KEY=value lines; only these keys are accepted:
   TONO_API_BASE      bare HTTPS origin, e.g. https://api.afk.ccwu.cc
   TONO_NODE_NAME     the node's catalog name, exactly as in the ops console
-  TONO_NODE_AGENT_TOKEN_FILE  defaults to $CREDENTIALS_DIRECTORY/node-agent-token
+The token comes only from the systemd credential node-agent-token
+($CREDENTIALS_DIRECTORY/node-agent-token). The environment is not read for
+configuration, and no output line ever carries a configured value, a path,
+file contents or exception text.
 """
 
 from __future__ import annotations
@@ -35,6 +39,9 @@ CHILD_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C"}
 # The exact token grammar (see the control plane's node-agent.ts). Anything
 # else is refused before it can reach an HTTP header, so a malformed file can
 # never surface the token in an exception message or the journal.
+CONFIG_PATH = Path("/etc/tono/node-agent.conf")
+CONFIG_KEYS = ("TONO_API_BASE", "TONO_NODE_NAME")
+CONFIG_MAX_BYTES = 4096
 TOKEN_SHAPE = re.compile(r"tna1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{43}")
 
 
@@ -120,38 +127,78 @@ def heartbeat_payload(node: str, roles: list[str], ip: str | None) -> dict:
     return payload
 
 
-def read_token() -> str:
-    default = Path(os.environ.get("CREDENTIALS_DIRECTORY", "/nonexistent")) / "node-agent-token"
-    path = Path(os.environ.get("TONO_NODE_AGENT_TOKEN_FILE", "").strip() or default)
+def load_config(path: Path) -> dict[str, str]:
+    """Allow-listed KEY=value lines. Errors name a line number at most."""
+    try:
+        raw = path.read_bytes()
+    except (OSError, ValueError) as error:
+        raise Refusal(f"cannot read the config file ({type(error).__name__})") from None
+    if len(raw) > CONFIG_MAX_BYTES:
+        raise Refusal("the config file is too large")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise Refusal("the config file is not UTF-8") from None
+    config: dict[str, str] = {}
+    for number, line in enumerate(text.splitlines(), start=1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, value = line.partition("=")
+        key = key.strip()
+        if not sep or key not in CONFIG_KEYS:
+            raise Refusal(f"config line {number} is not one of {', '.join(CONFIG_KEYS)}")
+        if key in config:
+            raise Refusal(f"config line {number} repeats a key")
+        config[key] = value.strip()
+    missing = [key for key in CONFIG_KEYS if not config.get(key)]
+    if missing:
+        raise Refusal(f"the config file must set {', '.join(missing)}")
+    node = config["TONO_NODE_NAME"]
+    if len(node) > 200 or any(ord(char) < 32 or ord(char) == 127 for char in node):
+        raise Refusal("TONO_NODE_NAME is not a catalog name")
+    return config
+
+
+def read_token(path: Path) -> str:
     try:
         text = path.read_text()
     except (OSError, ValueError) as error:
-        # Never the path: an operator may have put the token itself in the variable.
         raise Refusal(
-            f"cannot read the file named by TONO_NODE_AGENT_TOKEN_FILE ({type(error).__name__})"
+            f"cannot read the node-agent-token credential ({type(error).__name__})"
         ) from None
     token = text[:-1] if text.endswith("\n") else text
     if not TOKEN_SHAPE.fullmatch(token):
-        raise Refusal("the node agent token file must hold exactly one tna1 token on one line")
+        raise Refusal("the node-agent-token credential must hold exactly one tna1 token on one line")
     return token
 
 
-def main() -> int:
+def config_path(argv: list[str]) -> Path:
+    if not argv:
+        return CONFIG_PATH
+    if len(argv) == 2 and argv[0] == "--config":
+        return Path(argv[1])
+    raise Refusal("usage: tono_node_agent.py [--config PATH]")
+
+
+def main(argv: list[str] | None = None) -> int:
     """Every exit path prints a secret-free line; no exception text is echoed."""
     try:
-        return run()
-    except Exception as error:  # noqa: BLE001 - the message may carry the header value
+        return run(sys.argv[1:] if argv is None else argv)
+    except Exception as error:  # noqa: BLE001 - the message may carry a secret
         print(f"heartbeat failed: {type(error).__name__}", file=sys.stderr)
         return 1
 
 
-def run() -> int:
+def run(argv: list[str]) -> int:
     try:
-        base = api_base(os.environ.get("TONO_API_BASE", ""))
-        node = os.environ.get("TONO_NODE_NAME", "").strip()
-        if not node:
-            raise Refusal("TONO_NODE_NAME must be set")
-        token = read_token()
+        config = load_config(config_path(argv))
+        base = api_base(config["TONO_API_BASE"])
+        node = config["TONO_NODE_NAME"]
+        credentials = os.environ.get("CREDENTIALS_DIRECTORY", "")
+        if not credentials:
+            raise Refusal("no systemd credentials: run from tono-node-agent.service")
+        token = read_token(Path(credentials) / "node-agent-token")
     except Refusal as error:
         print(f"refused: {error}", file=sys.stderr)
         return 2

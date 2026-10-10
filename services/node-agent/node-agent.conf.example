@@ -1,4 +1,5 @@
-# /etc/tono/node-agent.env (mode 0644; holds no secret — the token is a separate file)
+# /etc/tono/node-agent.conf — root:root 0644, holds no secret.
+# Only these two keys are accepted; any other line is refused.
 TONO_API_BASE=https://api.afk.ccwu.cc
 # Exactly the node's catalog name as shown in the ops console.
 TONO_NODE_NAME=Tokyo · Example

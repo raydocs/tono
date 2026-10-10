@@ -6,7 +6,7 @@ table. Every 5 minutes `tono_node_agent.py` sends one heartbeat:
 
 | Field | Source |
 |---|---|
-| `node` | `TONO_NODE_NAME`, the catalog name exactly as in the ops console |
+| `node` | `TONO_NODE_NAME` in `/etc/tono/node-agent.conf`, the catalog name exactly as in the ops console |
 | `ip` | the node's primary outbound address (reported; may be a private address behind NAT) |
 | `roles` | Tono services running now: `xray` (`tono-xray` active), `hy2` (`tono-hy2` active), `relay` (`nginx` active and `/etc/nginx/tono-relay.stream.conf` present) |
 | `agentVersion` | `AGENT_VERSION` in the script |
@@ -50,7 +50,7 @@ Node install is pending: the agent has not been installed on any node yet.
    ```sh
    install -d -m 0755 /opt/tono-node-agent /etc/tono
    install -m 0644 tono_node_agent.py /opt/tono-node-agent/
-   install -m 0644 node-agent.env.example /etc/tono/node-agent.env   # then edit TONO_NODE_NAME
+   install -o root -g root -m 0644 node-agent.conf.example /etc/tono/node-agent.conf   # then edit TONO_NODE_NAME
    umask 077; printf '%s\n' '<tna1.… token>' > /etc/tono/node-agent.token; chmod 0600 /etc/tono/node-agent.token
    install -m 0644 tono-node-agent.service tono-node-agent.timer /etc/systemd/system/
    systemctl daemon-reload
@@ -59,7 +59,11 @@ Node install is pending: the agent has not been installed on any node yet.
    ```
 
    The unit runs as a dynamic user with a private copy of the token
-   (`LoadCredential`). It does not touch `tono-xray`, `tono-hy2` or nginx; it
+   (`LoadCredential`). It has no `EnvironmentFile`: the config file holds only
+   `TONO_API_BASE` and `TONO_NODE_NAME`, the script parses those two keys
+   itself and refuses any other line, and no output line ever carries a
+   configured value, a path or the token. Never put the token in the config
+   file or in any environment variable. It does not touch `tono-xray`, `tono-hy2` or nginx; it
    only asks systemd whether they are active.
 
 3. Check `GET /api/v1/ops/node-agents`: the node's `lastHeartbeatAt` is recent,
