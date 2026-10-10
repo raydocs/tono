@@ -387,8 +387,10 @@ final class AccountSessionRequestTests: XCTestCase {
                 email: "relays-down@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
             ))
             XCTFail("with both relays down the request must fail")
-        } catch TonoAPIClient.APIError.transport(let detail) {
-            message = detail
+        } catch TonoAPIClient.APIError.unreachable(let unreachable) {
+            // MAC-CN-UNREACHABLE-NO-WHERE (#1528): every path failing is `.unreachable`.
+            XCTAssertEqual(unreachable.attempts.map(\.path), ["relay"], "only the relays were tried")
+            message = unreachable.detail
         } catch {
             XCTFail("unexpected error \(error)")
         }
