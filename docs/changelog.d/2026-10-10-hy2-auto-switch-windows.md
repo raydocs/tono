@@ -13,7 +13,7 @@
     开关变 false、hy2 块消失、用户手选该节点任一块时清掉。手选 hy2 不受影响。
   - 开关开且节点有合格 hy2 块时，自愈停在选中节点上（不先换到同区其他节点）；屏障已武装时不改拨号目标，
     只让自动 hy2 会话原地重连沿用屏障已放行的同一 hy2 端点；从自动 hy2 会话热切换按 hy2 判定，走重建路径。
-  - 详细口径见暂定[决定 082](../decisions/082-2026-10-10-hy2-auto-switch-windows-client.md)。
+  - 详细口径见暂定[决定 083](../decisions/083-2026-10-10-hy2-auto-switch-windows-client.md)。
 - 工程与测试：一个 `#[test]`：`hy2_switch::tests::three_tcp_failures_dial_the_same_nodes_hy2_only_when_the_flag_is_on`
   （开关 true：3 次 TCP 失败后拨同节点 hy2、不是另一节点的 hy2，记住 24 h 后回 TCP，开关转 false 立即清；开关 false/未读：保持 TCP）；
   `exit_catalog_decodes_response` 加一条断言（缺字段 = false）。

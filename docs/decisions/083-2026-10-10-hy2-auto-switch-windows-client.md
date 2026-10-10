@@ -26,6 +26,14 @@
   The sticky healer no longer hops onto a hy2 block by itself (it did after one failure, without any flag:
   [WIN-HEAL-UNGATED-HY2-HOP](../findings.d/WIN-HEAL-UNGATED-HY2-HOP.md)); a hand-picked hy2 row can still fall back
   to TCP as before.
+  Same as macOS (#1499): N = 3, 24 h memory not extended by reuse, a first 30 min block after a failed automatic
+  hy2 attempt, flag not cached across launches, cleared on flag false / block gone / account change / manual pick.
+  Different on purpose: Windows also counts its pre-tunnel TCP proof failure, `tls handshake eof` and
+  `TONO_NODE_OR_CORE_UNREACHABLE` (the Windows connect path reports a dead Reality path under those, and they are
+  what the Windows dashboard already treats as "try the backup channel"); the block doubles per further failure up to
+  6 h instead of staying 30 min (fewer automatic retries of a hy2 path that keeps failing); the twin must also have
+  the same IPv4 (stricter same-node check); and the Windows healer is held on the selected node while the switch
+  holds (macOS has no live healer hop).
   Rejected: trusting the cached flag offline (moves without a fresh grant); counting every failure class (a local
   Service or DNS failure says nothing about Reality); extending the 24 h on each reconnect (Reality would never be
   retried); persisting the hy2 name as the selection.
