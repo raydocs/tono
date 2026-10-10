@@ -168,7 +168,12 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// Revision 19 replaces a running sing-box process for reviewed-app DIRECT and installs the
 /// physical permits while the tunnel stays Locked. It does not use the mihomo reload bracket.
 /// A revision-18 Service keeps the proven full tunnel. MIN_REQUIRED stays 14.
-pub const PROTOCOL_REVISION: u16 = 19;
+/// Revision 20 reports what decision 090 (W-A) already rendered: rule C permits the
+/// [`API_RELAYS`] for the Tono app while armed without a tunnel. Nothing on the wire changed; the
+/// App reads the number to decide whether, armed without a tunnel, it may send the control plane
+/// through the relays alone (decision 091). An older Service, including a revision-19 build that
+/// already carried the permit, keeps the App on the full walk. MIN_REQUIRED stays 14.
+pub const PROTOCOL_REVISION: u16 = 20;
 /// Revision that introduced the Service-owned, detached-manifest update transaction.
 pub const MIN_SERVICE_REVISION_FOR_UPDATE_TRANSACTION: u16 = 16;
 /// Revision whose `POST /clash/prepare-start` compares the request's client-snapshotted
@@ -180,6 +185,8 @@ pub const MIN_SERVICE_REVISION_FOR_SING_BOX: u16 = 18;
 /// Revision that restarts sing-box for reviewed-app DIRECT and reads the rules back.
 /// Older Services keep the full tunnel; they do not enter the mihomo reload bracket.
 pub const MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT: u16 = 19;
+/// First revision that reports the relay permit in rule C (decision 090) to the App.
+pub const MIN_SERVICE_REVISION_FOR_API_RELAY_PERMIT: u16 = 20;
 /// Revisions 7 through 12 are wire/behaviour incompatible with older peers. Reject a mismatch at
 /// the protocol probe rather than failing later during a required mutation. Revision 13 is
 /// additive: a revision-12 client may still pair.

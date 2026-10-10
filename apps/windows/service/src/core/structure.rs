@@ -142,6 +142,13 @@ impl ProtocolInfo {
         self.protocol.epoch == ProtocolVersion::current().epoch
             && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT
     }
+
+    /// Whether, armed without a tunnel, rule C permits the [`crate::API_RELAYS`] for the Tono
+    /// app (decision 090), so the App may reach the control plane through them alone (091).
+    pub const fn supports_api_relay_permit(&self) -> bool {
+        self.protocol.epoch == ProtocolVersion::current().epoch
+            && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_API_RELAY_PERMIT
+    }
 }
 
 /// The image file name selects the engine. Omitted and unknown names stay mihomo,
@@ -1423,6 +1430,17 @@ mod tests {
         assert!(!info.supports_sing_box_direct());
         info.protocol.revision = 19;
         assert!(info.supports_sing_box_direct());
+    }
+
+    /// Decision 091: a revision-19 Service, which may predate the relay permit, keeps the App's
+    /// full walk while armed without a tunnel.
+    #[test]
+    fn api_relay_permit_requires_revision_twenty() {
+        let mut info = ProtocolInfo::current();
+        info.protocol.revision = 19;
+        assert!(!info.supports_api_relay_permit());
+        info.protocol.revision = 20;
+        assert!(info.supports_api_relay_permit());
     }
 
     #[test]
