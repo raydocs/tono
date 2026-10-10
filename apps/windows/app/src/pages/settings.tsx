@@ -1,5 +1,5 @@
 import { useLockFn } from 'ahooks'
-import { useRef, useState, type ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { DialogRef } from '@/components/base'
@@ -9,7 +9,7 @@ import { useTonoPreferences } from '@/hooks/use-tono-preferences'
 import { useUpdate } from '@/hooks/use-update'
 import { resolveLanguage, supportedLanguages } from '@/services/i18n'
 import { showNotice } from '@/services/notice-service'
-import { setCacheData, useQuery } from '@/services/query-client'
+import { getCacheData, setCacheData, useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
   tonoAuditEnabled,
@@ -48,6 +48,13 @@ const tonoNetworkLogUploadEnabledQueryKey = [
   'tonoNetworkLogUploadEnabled',
 ] as const
 const tonoInternalBuildQueryKey = ['tonoInternalBuild'] as const
+const tonoPrivacySavesQueryKey = ['tonoPrivacySaves'] as const
+type PrivacySaves = Record<
+  string,
+  { phase: 'saving' | 'saved' | 'failed'; error?: TonoActionErrorDescription }
+>
+const readPrivacySaves = () =>
+  getCacheData<PrivacySaves>(tonoPrivacySavesQueryKey) ?? {}
 
 const LANGUAGE_LABELS: Record<string, string> = {
   en: 'English',
@@ -278,15 +285,17 @@ export const PrivacyCard = () => {
   const { t } = useTranslation()
   const { newAppearance } = useAppearancePreferences()
   const Toggle = newAppearance ? SeaToggle : TonoToggle
-  const [saves, setSaves] = useState<
-    Record<
-      string,
-      {
-        phase: 'saving' | 'saved' | 'failed'
-        error?: TonoActionErrorDescription
-      }
-    >
-  >({})
+  // The operation outlives this page. Keep its lock/outcome in the existing
+  // shared cache so navigating away cannot admit a second write before its ACK.
+  const { data: saves = {} } = useQuery({
+    queryKey: tonoPrivacySavesQueryKey,
+    queryFn: readPrivacySaves,
+    initialData: readPrivacySaves,
+  })
+  const setSaves = (update: (previous: PrivacySaves) => PrivacySaves) =>
+    setCacheData<PrivacySaves>(tonoPrivacySavesQueryKey, (previous) =>
+      update(previous ?? {}),
+    )
   const auditQuery = useQuery({
     queryKey: tonoAuditEnabledQueryKey,
     queryFn: tonoAuditEnabled,
@@ -315,6 +324,8 @@ export const PrivacyCard = () => {
     write: (value: boolean) => Promise<void>,
   ) => {
     const key = queryKey[0]
+    const phase = readPrivacySaves()[key]?.phase
+    if (phase === 'saving' || phase === 'failed') return
     setSaves((previous) => ({ ...previous, [key]: { phase: 'saving' } }))
     try {
       await write(value)
@@ -374,7 +385,7 @@ export const PrivacyCard = () => {
           <button
             type="button"
             className="tono-link"
-            disabled={query.isFetching}
+            disabled={query.isFetching || save?.phase === 'saving'}
             onClick={() => {
               setSaves((previous) => {
                 const next = { ...previous }

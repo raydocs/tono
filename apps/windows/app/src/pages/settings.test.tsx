@@ -14,6 +14,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 
 import enSettings from '@/locales/en/settings.json'
 import enTono from '@/locales/en/tono.json'
+import { removeCacheData, swrConfig } from '@/services/query-client'
 import { setNewAppearance } from '@/tono-ui/appearance-preferences'
 
 const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn() }))
@@ -33,7 +34,19 @@ vi.mock('@/components/setting/mods/update-viewer', () => ({
 
 import { PrivacyCard } from './settings'
 
-afterEach(cleanup)
+afterEach(async () => {
+  cleanup()
+  await Promise.all(
+    [
+      'tonoAuditEnabled',
+      'tonoPeriodicTelemetryEnabled',
+      'tonoNetworkLogUploadEnabled',
+      'tonoPrivacySaves',
+    ].map((key) => removeCacheData([key])),
+  )
+  mocks.read.mockReset()
+  mocks.write.mockReset()
+})
 
 it('privacy choices wait for confirmation and recover failed reads or ambiguous saves by reloading', async () => {
   await i18n.use(initReactI18next).init({
@@ -114,4 +127,57 @@ it('privacy choices wait for confirmation and recover failed reads or ambiguous 
   expect(toggle.disabled).toBe(false)
   expect(screen.getByRole('status').textContent).toBe('Saved')
   expect(screen.getByText(/does not delete data already sent/)).toBeDefined()
+})
+
+it('a pending privacy save remains locked across navigation until its reply arrives', async () => {
+  await i18n.use(initReactI18next).init({
+    resources: { en: { translation: { tono: enTono, settings: enSettings } } },
+    lng: 'en',
+  })
+  setNewAppearance(true)
+  let actual = true
+  let acknowledge!: () => void
+  mocks.read.mockImplementation(async () => actual)
+  mocks.write.mockImplementation(async (enabled: boolean) => {
+    actual = enabled
+    if (!enabled) {
+      await new Promise<void>((resolve) => {
+        acknowledge = resolve
+      })
+    }
+  })
+  const page = (settings: boolean) => (
+    <SWRConfig value={swrConfig}>
+      {settings ? <PrivacyCard /> : <p>Other page</p>}
+    </SWRConfig>
+  )
+  const { rerender } = render(page(true))
+  const choice = () =>
+    screen.getByRole('switch', {
+      name: 'Upload the full traffic log',
+    }) as HTMLButtonElement
+  await waitFor(() => expect(choice().disabled).toBe(false))
+  expect(choice().getAttribute('aria-checked')).toBe('true')
+  fireEvent.click(choice())
+  expect(actual).toBe(false)
+  expect(choice().disabled).toBe(true)
+  rerender(page(false))
+  // Use the production cache and wait past its normal deduplication window.
+  await new Promise((resolve) => setTimeout(resolve, 2200))
+  rerender(page(true))
+  await waitFor(() =>
+    expect(choice().getAttribute('aria-checked')).toBe('false'),
+  )
+  expect(choice().disabled).toBe(true)
+  expect(screen.getByRole('status').textContent).toBe('Saving…')
+  fireEvent.click(choice())
+  expect(actual).toBe(false)
+  await act(async () => acknowledge())
+  await waitFor(() => expect(choice().disabled).toBe(false))
+  fireEvent.click(choice())
+  await waitFor(() =>
+    expect(choice().getAttribute('aria-checked')).toBe('true'),
+  )
+  expect(actual).toBe(true)
+  expect(screen.getByRole('status').textContent).toBe('Saved')
 })
