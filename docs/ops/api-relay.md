@@ -17,8 +17,22 @@ Both are exit nodes; `tono-xray` owns 443 and is never touched. Admitted SNIs:
 `api.afk.ccwu.cc` (control plane), `releases.afk.ccwu.cc` (installers). Anything else is
 sent to a closed port.
 
+### Common-failure risk (open)
+
+Both relays sit at one provider in one city: ipinfo on 2026-10-10 reports **AS906 DMIT Cloud
+Services, Los Angeles** for 179.253.233.220 and for 179.255.154.17 (hostname `host-by.dmit.com`,
+same postal code). Different hosts protect against one VM failing, not against a DMIT network or
+data-centre outage, a DMIT route change towards Chinese carriers, or a block of DMIT's address
+space; any of those takes both relays down together, and clients fall back to today's
+behaviour (no relay). Owner action: add a relay on a different provider and region
+(different ASN, ideally not Los Angeles) and list it in all four places below. Nothing has been
+bought or deployed for this. Finding [API-RELAY-SAME-PROVIDER](../findings.d/API-RELAY-SAME-PROVIDER.md).
+A field check of both relays from a mainland network: [cn-acceptance.md](cn-acceptance.md) (3c, 4.x).
+
 The same list is compiled into the clients and the control plane; change all four together:
-`apps/windows/app/src-tauri/src/tono/bootstrap.rs` (`API_RELAYS`),
+`apps/windows/service/src/lib.rs` (`API_RELAYS`, re-exported by the Windows app's
+`bootstrap.rs` and rendered into WFP rule C; a change there changes the kill switch permit
+table and its pinned test, decision 090),
 `apps/macos/Tono/Services/ControlPlanePath.swift` (`apiRelays`),
 `services/control-plane/src/api-relays.ts` (probe list), this file.
 
@@ -169,6 +183,39 @@ With `cooldownSeconds: 0` a flapping relay can send at most one opening and one 
 15 minutes, because each reopening needs three fresh failed checks. Every matching rule sends its
 own copy: with both rules the opening arrives twice and the recovery once.
 
+The same rule from the ops console (owner, Access login): 设置 → 告警 (`https://admin.afk.ccwu.cc/ops/#/settings/alerts`)
+→ 新建规则, then:
+
+| Field | Value |
+|---|---|
+| 名称 | `API 中继` |
+| 启用 | 开 |
+| 最低严重度 | 注意 (`warn`; 严重 would never match, the relay incident is `warn`) |
+| 最少影响人数 | `0` (the relay incident has no customer count) |
+| 什么时候发 | 出事和恢复都发 (`open_resolve`) |
+| 延迟几秒再发 | `0` |
+| 冷却多少秒 | `0` (must be shorter than the outage, or the recovery is recorded 冷却中未发) |
+| 通道 / 发到哪儿 | 邮件 and your address, or a webhook as for the other rules |
+| 只看这类事 | `api-relay-down` |
+| 只看这一个对象 | empty (one rule for both relays) |
+
+Save, then 发送测试 to see the channel works. Check the result read-only with
+[`check-relay-alert-rule.mjs`](../../tooling/scripts/check-relay-alert-rule.mjs), from either export
+(the D1 query leaves out `target`, so no address lands in the file):
+
+```sh
+# ops API, Access session: GET https://admin.afk.ccwu.cc/api/v1/ops/alert-rules > /tmp/rules.json
+# or a remote D1 read from services/control-plane with the tono profile:
+npx wrangler d1 execute tono-control-plane --remote --json --command \
+  "SELECT id, name, enabled, match_kind, match_subject_type, match_subject_id, min_severity, min_impact, fire_on, delay_seconds, cooldown_seconds FROM ops_alert_rules" > /tmp/rules.json
+node tooling/scripts/check-relay-alert-rule.mjs /tmp/rules.json [--outage-seconds 300]
+```
+
+It prints `PASS` for each enabled rule whose match fields admit the relay incident with
+`fire_on=open_resolve` and a cooldown shorter than the outage, `skip <id>: <reason>` for the rest,
+and exits 0 only when one such rule covers every relay (`OK`), else 1 (`MISSING`). The default
+outage, 300 s, is the shortest one that opens an incident: it resolves one 5-minute check later.
+
 ## Client behaviour
 
 Windows (`transport.rs`) and macOS (`TonoAPIClient.exchangeOverPaths`) try a relay only after
@@ -177,8 +224,18 @@ byte was sent, so a sign-in code is never sent twice. A relay that answered is t
 afterwards (Windows: for the process; macOS: for 24 h via the app profile). Every attempt
 carries `X-Tono-Path: <pinned|system_dns|relay|doh|alt_port|tunnel>`, which the control plane
 records on the device row, because a relayed request otherwise looks like one from an exit
-node. The relay is **not** in the WFP/PF bootstrap permit: while protection is armed it is
-blocked like any other non-permitted address.
+node.
+
+While protection is armed without a tunnel (bootstrap, Protected Offline):
+
+- **Windows**: WFP rule C permits each relay `IP:2053`, TCP, for the installed Tono app only
+  (the same `ALE_APP_ID` condition as the Cloudflare entries, which stay), so sign-in and
+  refresh can go through a relay in that state too (owner decision W-A,
+  [decision 090](../decisions/090-2026-10-10-windows-armed-control-plane-via-relays.md),
+  amending 077). No other process matches; connected (`Locked`) the whole channel is
+  retracted.
+- **macOS**: the PF bootstrap permit does not include the relays on `main`; armed, a relay is
+  blocked like any other non-permitted address (decision 086, PR #1507, changes this).
 
 macOS sign-in budget, per walk (`TonoAPIClient.exchangeOverPaths`; `sendData` runs at most two
 walks, 1 s apart, and only when the retry rule allows a second one):

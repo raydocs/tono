@@ -218,6 +218,187 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertFalse(text.contains("timeline@example.test"), text)
     }
 
+    /// Decision 086 (H1-F5, Option A): armed without a tunnel, PF admits the
+    /// control plane only through the Tono relays, so a request goes to the
+    /// relay first and only there: the system resolver and the pinned
+    /// Cloudflare addresses are not tried, and no path preference is written.
+    func testArmedWithoutATunnelTheRequestGoesToTheRelayOnly() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        let systemRequests = PathCallCounter()
+        HeldAccountProtocol.install(host) { request in
+            systemRequests.record()
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        let key = TonoAPIClient.preferredPathKey(forHost: host)
+        defer {
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            AppProfile.defaults.removeObject(forKey: key)
+        }
+        let pinnedAttempts = PathCallCounter()
+        let relayAttempts = PathCallCounter()
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                pinnedAttempts.record()
+                throw URLError(.timedOut)
+            },
+            relayPath: ControlPlanePath(label: "relay") { request, _ in
+                relayAttempts.record()
+                XCTAssertEqual(request.value(forHTTPHeaderField: TonoAPIClient.pathHeader), "relay")
+                return ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-086","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
+            },
+            armedWithoutTunnel: { true }
+        )
+
+        let challengeId = try await api.startEmailSignIn(TonoEmailStartRequest(
+            email: "relay-only@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+        )).challengeId
+
+        XCTAssertEqual(challengeId, "c-086")
+        XCTAssertEqual(relayAttempts.count, 1, "the relay carries the request")
+        XCTAssertEqual(systemRequests.count, 0, "the system resolver path is not tried")
+        XCTAssertEqual(pinnedAttempts.count, 0, "the pinned Cloudflare addresses are not tried")
+        XCTAssertNil(AppProfile.defaults.object(forKey: key), "no path preference is written")
+    }
+
+    /// Decision 086, review M1: native update preparation arms without a
+    /// tunnel inside the helper, so the app's own record (connected before the
+    /// update) is stale. When the update then fails, the app follows the
+    /// helper's reported state and the next request goes to the relay only.
+    func testAFailedUpdateAfterPreparationSendsTheNextRequestToTheRelayOnly() async throws {
+        let armed = KillSwitchService.isArmed
+        let tunnelRecord = AppProfile.defaults.object(forKey: "Tono_killSwitchArmedWithTunnel")
+        let report = KillSwitchService.statusReport
+        defer {
+            KillSwitchService.isArmed = armed
+            KillSwitchService.statusReport = report
+            if let tunnelRecord {
+                AppProfile.defaults.set(tunnelRecord, forKey: "Tono_killSwitchArmedWithTunnel")
+            } else {
+                AppProfile.defaults.removeObject(forKey: "Tono_killSwitchArmedWithTunnel")
+            }
+        }
+        KillSwitchService.isArmed = true
+        KillSwitchService.armedWithTunnel = true // connected before the update
+        // The helper after Prepare: armed, its saved arm without a tunnel.
+        KillSwitchService.statusReport = {
+            (armed: true, wanted: true, live: true, healed: false, tunnelArmed: false)
+        }
+        let app = AppState()
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent("tono-missing-" + UUID().uuidString)
+        do {
+            try await app.installNativeUpdate(manifest: Data(), signature: Data(), package: missing)
+            XCTFail("a missing package must fail the update")
+        } catch {}
+        XCTAssertTrue(KillSwitchService.isArmedWithoutTunnel, "the helper's state replaces the stale record")
+
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        let systemRequests = PathCallCounter()
+        HeldAccountProtocol.install(host) { request in
+            systemRequests.record()
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer {
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            AppProfile.defaults.removeObject(forKey: TonoAPIClient.preferredPathKey(forHost: host))
+        }
+        let pinnedAttempts = PathCallCounter()
+        let relayAttempts = PathCallCounter()
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                pinnedAttempts.record()
+                throw URLError(.timedOut)
+            },
+            relayPath: ControlPlanePath(label: "relay") { _, _ in
+                relayAttempts.record()
+                return ControlPlaneAnswer(
+                    status: 202,
+                    body: Data(#"{"challengeId":"c-update","expiresIn":600,"message":"sent"}"#.utf8),
+                    bodyFailure: nil
+                )
+            },
+            armedWithoutTunnel: { KillSwitchService.isArmedWithoutTunnel }
+        )
+        let challengeId = try await api.startEmailSignIn(TonoEmailStartRequest(
+            email: "after-update@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+        )).challengeId
+
+        XCTAssertEqual(challengeId, "c-update")
+        XCTAssertEqual(relayAttempts.count, 1)
+        XCTAssertEqual(systemRequests.count, 0, "no wait on the system resolver PF blocks")
+        XCTAssertEqual(pinnedAttempts.count, 0, "no wait on the pinned Cloudflare addresses PF blocks")
+    }
+
+    /// Decision 086: armed without a tunnel with both relays down, there is no
+    /// fallback to the system resolver or the pinned Cloudflare addresses, and
+    /// the failure names the relays.
+    func testArmedWithoutATunnelBothRelaysDownFailsWithoutAnyOtherPath() async throws {
+        let host = "\(UUID().uuidString.lowercased()).invalid"
+        let systemRequests = PathCallCounter()
+        HeldAccountProtocol.install(host) { request in
+            systemRequests.record()
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldAccountProtocol.self]
+        let transport = URLSession(configuration: config)
+        defer {
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            AppProfile.defaults.removeObject(forKey: TonoAPIClient.preferredPathKey(forHost: host))
+        }
+        let pinnedAttempts = PathCallCounter()
+        let relayAttempts = PathCallCounter()
+        let api = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory),
+            pinnedPath: ControlPlanePath(label: "pinned") { _, _ in
+                pinnedAttempts.record()
+                throw URLError(.timedOut)
+            },
+            relayPath: ControlPlanePath(label: "relay") { _, _ in
+                relayAttempts.record()
+                // What the relay client reports when neither relay connects.
+                throw URLError(.cannotConnectToHost, userInfo: [
+                    NSLocalizedDescriptionKey: "relay: 179.253.233.220:2053 refused; 179.255.154.17:2053 refused",
+                ])
+            },
+            armedWithoutTunnel: { true }
+        )
+
+        var message: String?
+        do {
+            _ = try await api.startEmailSignIn(TonoEmailStartRequest(
+                email: "relays-down@example.test", deviceName: "Test Mac", installationId: UUID().uuidString
+            ))
+            XCTFail("with both relays down the request must fail")
+        } catch TonoAPIClient.APIError.transport(let detail) {
+            message = detail
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
+
+        XCTAssertGreaterThanOrEqual(relayAttempts.count, 1)
+        XCTAssertEqual(systemRequests.count, 0, "no fallback to the system resolver")
+        XCTAssertEqual(pinnedAttempts.count, 0, "no fallback to the pinned Cloudflare addresses")
+        XCTAssertTrue(message?.contains("relay") == true, "the error names the relays: \(message ?? "nil")")
+    }
+
     /// Decision 077: when the system resolver and the pinned addresses both
     /// fail before any request byte is sent, the request goes to the Tono
     /// relay outside Cloudflare, exactly once (a sign-in POST), and the relay
