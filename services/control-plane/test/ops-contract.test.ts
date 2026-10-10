@@ -737,6 +737,11 @@ describe('ops contract checkers', () => {
     drifted.forwardPath.value[0].carrier = 'starlink' as never;
     expect(() => assertNodeDetail(drifted)).toThrow('nodeDetail.forwardPath.value[0].carrier');
   });
+
+  it('accepts a user-cancelled connect row the flattener stores', () => {
+    const row = { ...connectionEvent(), kind: 'connectCancel' as const, stage: 'startingCore', outcome: null, code: null, error: null };
+    expect(assertConnectionEvent(row)).toEqual(row);
+  });
 });
 
 describe('Measured', () => {

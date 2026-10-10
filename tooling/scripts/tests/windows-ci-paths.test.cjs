@@ -222,6 +222,15 @@ test('paired candidates share one source and sequence without granting signing o
   const assembly = pair.jobs.pair.steps.find(step => step.run?.includes('desktop-update-v1.mjs assemble'))
   assert.ok(assembly?.run.includes('--source "$GITHUB_SHA"'))
   assert.ok(assembly.run.includes('manifest.unsigned.json'))
+  // A24-PAIR-STALE-WINDOWS-ARTIFACT: the pair job reads the version the build is gated on, never a literal.
+  const pairSteps = pair.jobs.pair.steps
+  const versionAt = pairSteps.findIndex(step => step.id === 'windows-version')
+  const winDownloadAt = pairSteps.findIndex(step => step.with?.name?.startsWith('tono-windows-'))
+  const winUpload = win.jobs.build.steps.find(step => step.uses?.startsWith('actions/upload-artifact@')).with.name
+  const appVersion = JSON.parse(readFileSync(path.join(root, 'apps/windows/app/package.json'), 'utf8')).version
+  assert.ok(versionAt >= 0 && versionAt < winDownloadAt && pairSteps[versionAt].run.includes("require('./apps/windows/app/package.json').version"))
+  assert.ok(!/\d+\.\d+\.\d+/.test(pairSteps[winDownloadAt].with.name), 'pair download must not hard-code a version')
+  assert.equal(pairSteps[winDownloadAt].with.name.replace('${{ steps.windows-version.outputs.version }}', appVersion), winUpload)
   assert.ok(workflow.jobs.app.steps.some(step => step.run?.includes('node --test ../../../tooling/scripts/tests/desktop-update-v1.test.mjs')))
   for (const changed of ['.github/workflows/desktop-update-candidate.yml', 'tooling/scripts/desktop-update-v1.mjs', 'tooling/scripts/tests/desktop-update-v1.test.mjs']) {
     assert.ok(workflow.on.push.paths.some(pattern => path.matchesGlob(changed, pattern)), changed)

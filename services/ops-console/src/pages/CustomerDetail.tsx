@@ -23,6 +23,7 @@ import { Devices } from './customer/Devices';
 import { Followups } from './customer/Followups';
 import { CustomerHeader, CustomerWechat } from './customer/Header';
 import { HomeLine } from './customer/HomeLine';
+import { Hy2Switch } from './customer/Hy2Switch';
 import { nowFacts } from './customer/now-facts';
 import { Proof } from './customer/Proof';
 import { Quota } from './customer/Quota';
@@ -215,6 +216,8 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
             message={homeSide.message}
             onChanged={refresh}
           />
+
+          <Hy2Switch userId={userId} email={privacy.email(row.email)} />
 
           <ClaudeAccount
             userId={userId}

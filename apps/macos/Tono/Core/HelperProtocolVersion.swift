@@ -403,7 +403,18 @@ nonisolated enum HelperProtocolVersion {
     ///   only under the root update lock; blocked consumed attempts allow repair.
     /// - 4.52.42 → 4.52.43: normal Quit retains the narrow AI recovery floor;
     ///   explicit Restore fully removes it, with authenticated floor readback.
-    static let current = "4.52.43"
+    /// - 4.52.43 → 4.52.44: `/dns/enable` resolves the named service only
+    ///   among the current Network Location's services, preferring the
+    ///   primary service ID; an ambiguous name refuses (R3-O5). While a
+    ///   legacy name-only snapshot is on disk, enable keeps the old lookup.
+    /// - 4.52.44 → 4.52.45: armed without a tunnel, the control-plane permit is
+    ///   the compiled Tono relays (`ControlPlaneRelays`, TCP 2053, the
+    ///   interactive user only) instead of the API host's Cloudflare anycast
+    ///   addresses, which are never permitted; connected, none. A tunnel arm
+    ///   spares a relay address the Core still dials as its exit from the
+    ///   targeted state kill, and `/killswitch/status` reports `tunnelArmed`
+    ///   (H1-F5, decision 086).
+    static let current = "4.52.45"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

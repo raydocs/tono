@@ -197,6 +197,7 @@ pub(super) async fn collect_diagnostics_report(
         steps: &steps,
         adapter_names: &adapters,
         other_vpn_present,
+        network_interference: crate::tono::network_interference::last_observed(),
         known_secrets: &known_secrets,
         audit_log_path: &audit_log_path,
         service_log_path: &service_log_path,
@@ -439,6 +440,30 @@ mod tests {
             message,
         });
         assert!(shown.starts_with("TONO_CLOCK_SKEW: "), "{shown}");
+    }
+
+    /// H21-O-F8: a certificate the trust store refused for its issuer (a TLS-intercepting
+    /// middlebox) is named as interception, in the same hyper-rustls chain shape; a date
+    /// failure stays the clock's.
+    #[test]
+    fn a_certificate_from_an_unknown_issuer_is_named_as_interception() {
+        let chain = |error: rustls::CertificateError| {
+            std::io::Error::other(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                rustls::Error::InvalidCertificate(error),
+            ))
+        };
+        let shown = |handshake: &std::io::Error| {
+            let message = crate::tono::transport::mark_tls_interception(
+                handshake,
+                crate::tono::transport::mark_clock_skew(handshake, "connect: error sending request".into()),
+            );
+            auth_error(&ApiError::Transport { kind: tono_core::auth::TransportKind::Connect, message })
+        };
+        let intercepted = shown(&chain(rustls::CertificateError::UnknownIssuer));
+        assert!(intercepted.starts_with("TONO_TLS_INTERCEPTED: "), "{intercepted}");
+        let clock = shown(&chain(rustls::CertificateError::Expired));
+        assert!(clock.starts_with("TONO_CLOCK_SKEW: ") && !clock.contains("TONO_TLS_INTERCEPTED"), "{clock}");
     }
 
     #[tokio::test(start_paused = true)]

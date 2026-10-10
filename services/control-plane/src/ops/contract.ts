@@ -48,12 +48,14 @@ export * from './contract/route-table';
 export * from './contract/receipts';
 export * from './contract/slo';
 export * from './contract/api-relays';
+export * from './contract/api-paths';
 
 // dept:b
 // append your entries inside your block
 
 // dept:c
 // append your entries inside your block
+export * from './contract/node-agents';
 
 // dept:d
 // append your entries inside your block

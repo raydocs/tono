@@ -92,15 +92,49 @@ export const tonoDevices = async () => [
     createdAt: 1790000000,
   },
 ]
-export const tonoAuditEnabled = async () => false
+let auditChoice = false
+let telemetryChoice = false
+let networkChoice = false
+let privacyReadFailed = false
+let privacySaveFailed = false
+const privacyDelay = (name: string) =>
+  new Promise<void>((resolve) =>
+    setTimeout(
+      resolve,
+      Math.max(0, Math.min(30000, Number(params.get(name)) || 0)),
+    ),
+  )
+export const tonoAuditEnabled = async () => auditChoice
+export const tonoSetAuditEnabled = async (value: boolean) => {
+  auditChoice = value
+}
 export const tonoAuditLogPath = async () => ({
   path: 'C:\\Tono-preview\\audit.log',
   exists: false,
   bytes: 0,
 })
 export const tonoInternalBuild = async () => false
-export const tonoPeriodicTelemetryEnabled = async () => false
-export const tonoNetworkLogUploadEnabled = async () => false
+export const tonoPeriodicTelemetryEnabled = async () => telemetryChoice
+export const tonoSetPeriodicTelemetryEnabled = async (value: boolean) => {
+  telemetryChoice = value
+}
+// Privacy feedback uses only synthetic local state; no native consent or upload.
+export const tonoNetworkLogUploadEnabled = async () => {
+  await privacyDelay('privacyReadDelay')
+  if (params.has('privacyReadError') && !privacyReadFailed) {
+    privacyReadFailed = true
+    throw new Error('Synthetic saved-choice read failure')
+  }
+  return networkChoice
+}
+export const tonoSetNetworkLogUploadEnabled = async (value: boolean) => {
+  await privacyDelay('privacySaveDelay')
+  if (params.has('privacySaveError') && !privacySaveFailed) {
+    privacySaveFailed = true
+    throw new Error('Synthetic persistence refusal')
+  }
+  networkChoice = value
+}
 export const tonoCheckTerminalEnv = async () => ({ variables: [], sources: [] })
 export const tonoCancelServerTests = async () => {}
 export const tonoRefreshCatalog = async () => {}
