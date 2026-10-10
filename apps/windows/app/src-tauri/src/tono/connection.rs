@@ -100,8 +100,8 @@ pub use crate::tono::connection_health::{
     protected_dns_unhealthy, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
 };
 pub use crate::tono::connection_plan::{
-    FailurePlan, SelectAction, guard_rejection_is_transient, plan_failure, plan_failure_using,
-    reconnect_allowed, retry_now_is_noop, select_action, sign_out_needs_release, single_flight_begin,
+    FailurePlan, SelectAction, failure_released_the_network, guard_rejection_is_transient, plan_failure,
+    plan_failure_using, reconnect_allowed, retry_now_is_noop, select_action, sign_out_needs_release, single_flight_begin,
     stale_exit_needs_release,
 };
 #[cfg(any(not(windows), test))]

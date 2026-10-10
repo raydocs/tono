@@ -12,7 +12,9 @@ use crate::tono::{
     audit::AuditEvent,
     commands,
     connection_health::{startup_resume_guards_hold, startup_runtime_is_resume_candidate},
-    connection_plan::{guard_rejection_is_transient, reconnect_allowed, retry_now_is_noop},
+    connection_plan::{
+        failure_released_the_network, guard_rejection_is_transient, reconnect_allowed, retry_now_is_noop,
+    },
     state::{AccountState, TonoInner, TonoState},
 };
 use super::{Attempt, BoxedTask, attempt_for_generation, fail_connect, seed_autostart_after_connect};
@@ -45,6 +47,33 @@ pub(super) async fn schedule_reconnect_for_generation(state: &Arc<TonoState>, ap
     if inner.connect_generation == generation {
         schedule_reconnect_locked(&mut inner, state, app);
     }
+}
+
+/// After `fail_connect` settled a protected reconnect's failure for `generation` (it returned
+/// true): the ladder while the barrier still holds, otherwise the unarmed probe
+/// ([`failure_released_the_network`]). Without the probe a reconnect that failed once and
+/// released the network left nothing retrying it.
+pub(super) async fn follow_failed_reconnect(state: &Arc<TonoState>, app: &AppHandle, generation: u64) {
+    if released_after_failure(state, generation).await {
+        super::unarmed_probe::spawn_after_release(state, app, generation);
+    } else {
+        schedule_reconnect_for_generation(state, app, generation).await;
+    }
+}
+
+/// Whether `generation` is still current and its failure released the original network.
+async fn released_after_failure(state: &Arc<TonoState>, generation: u64) -> bool {
+    let inner = state.lock().await;
+    let released = inner.connect_generation == generation
+        && failure_released_the_network(inner.fsm.status(), inner.fsm.kill_switch_armed());
+    if released {
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: the reconnect failed and released the original network; probing a node without a tunnel"
+        );
+    }
+    released
 }
 
 /// Run one protected reconnect **now**, for an explicit user action.
@@ -320,6 +349,11 @@ pub(super) async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_
             Attempt::Failed { generation: failed_generation, error, account_owner } => {
                 generation = failed_generation;
                 if !fail_connect(&state, &app, generation, error, account_owner).await {
+                    return;
+                }
+                if released_after_failure(&state, generation).await {
+                    publish_next_retry(&state, generation, None).await;
+                    super::unarmed_probe::spawn_after_release(&state, &app, generation);
                     return;
                 }
                 let (next, spent) = {

@@ -18,7 +18,9 @@ Both are exit nodes; `tono-xray` owns 443 and is never touched. Admitted SNIs:
 sent to a closed port.
 
 The same list is compiled into the clients and the control plane; change all four together:
-`apps/windows/app/src-tauri/src/tono/bootstrap.rs` (`API_RELAYS`),
+`apps/windows/service/src/lib.rs` (`API_RELAYS`, re-exported by the Windows app's
+`bootstrap.rs` and rendered into WFP rule C; a change there changes the kill switch permit
+table and its pinned test, decision 090),
 `apps/macos/Tono/Services/ControlPlanePath.swift` (`apiRelays`),
 `services/control-plane/src/api-relays.ts` (probe list), this file.
 
@@ -117,7 +119,24 @@ ssh root@<node> '
 ```
 
 The first run must log `relay-probe: reported, HTTP 200`. A `report refused: HTTP 403` means
-the node's `exit_nodes.id` is not the relay's `exitNodeId`. Rollback:
+the node's `exit_nodes.id` is not the relay's `exitNodeId`.
+
+Check the install (read-only, sends nothing; also after the log rotation install below):
+
+```sh
+scp tooling/ops/node-install/check-node-install.py root@<node>:/root/
+ssh root@<node> python3 -I /root/check-node-install.py relay-probe relay-logrotate node-agent
+```
+
+[`check-node-install.py`](../../tooling/ops/node-install/check-node-install.py) prints one
+`PASS` / `WARN` / `FAIL` line per check and exits 1 on any `FAIL`: files present, `root:root`, with
+the install modes (script 0755, units 0644, `/etc/tono-exit-agent/env` 0600 and setting
+`TONO_HOME_AGENT_TOKEN` and `TONO_API_BASE`), timer enabled and active, the service loaded and its
+last run not failed, then one probe through `127.0.0.1:2053` with the installed script's own
+`probe()` (printed, **not** reported). `relay-logrotate` checks `/etc/logrotate.d/00-tono-relay`
+(0644, daily, 14, `ignoreduplicates`; on logrotate < 3.21 its absence is a `WARN`), `nginx -t` and
+`logrotate -d`. Omit `node-agent` until that agent is installed. `--no-smoke` skips the probe,
+`nginx -t` and `logrotate -d`. No line carries a token, a config value or file contents. Rollback:
 `systemctl disable --now tono-relay-probe.timer`; nothing else on the node changes (nginx and
 `tono-xray` are not touched).
 
@@ -160,14 +179,42 @@ byte was sent, so a sign-in code is never sent twice. A relay that answered is t
 afterwards (Windows: for the process; macOS: for 24 h via the app profile). Every attempt
 carries `X-Tono-Path: <pinned|system_dns|relay|doh|alt_port|tunnel>`, which the control plane
 records on the device row, because a relayed request otherwise looks like one from an exit
-node. The relay is **not** in the WFP/PF bootstrap permit: while protection is armed it is
-blocked like any other non-permitted address.
+node.
+
+While protection is armed without a tunnel (bootstrap, Protected Offline):
+
+- **Windows**: WFP rule C permits each relay `IP:2053`, TCP, for the installed Tono app only
+  (the same `ALE_APP_ID` condition as the Cloudflare entries, which stay), so sign-in and
+  refresh can go through a relay in that state too (owner decision W-A,
+  [decision 090](../decisions/090-2026-10-10-windows-armed-control-plane-via-relays.md),
+  amending 077). No other process matches; connected (`Locked`) the whole channel is
+  retracted.
+- **macOS**: the PF bootstrap permit does not include the relays on `main`; armed, a relay is
+  blocked like any other non-permitted address (decision 086, PR #1507, changes this).
+
+macOS sign-in budget, per walk (`TonoAPIClient.exchangeOverPaths`; `sendData` runs at most two
+walks, 1 s apart, and only when the retry rule allows a second one):
+
+| Path, in the usual order | Read (GET) | Mutating request (POST, DELETE) |
+|---|---|---|
+| `system_dns` (URLSession) | at most 15 s with no status line (`ControlPlanePath.systemHeadBudget`), then the next path | up to the session's 30 s request / 45 s resource timeout; moves on only after a failure that proves nothing was sent |
+| `pinned` | 10 s connect, split across the addresses | same |
+| `relay` | 5 s connect, split across both relays (a dead first relay leaves the second the rest) | same |
+
+So a read reaches the relays at most 25 s after it starts, whatever the system resolver does.
+A POST whose system attempt timed out is not re-sent, because it may have arrived. The client
+handshakes every path straight away instead (no request, nothing identifying, as the pre-login
+probe does), and the user's retry goes first to a path that completed TLS. A path remembered
+from an earlier answer or probe goes first, so a network that needs the relays pays the dead
+paths once per 24 h. After a connection is up, each exchange has 45 s.
 
 Updater: Windows (`commands/update.rs` `get_with_relays`) sends a discovery, signature or
 package GET through the relays when the direct GET got no response. macOS does the same:
 `NativeUpdateDownload.bounded` for the manifest and signature GETs (backlog A2), and
 `NativeUpdateDownload.package(at:size:)` for the package, streamed to disk under the signed
-size with the direct download's 60 s idle and 900 s total budgets (A2 follow-up). Any status
+size with the direct download's 60 s idle and 900 s total budgets (A2 follow-up); once the
+signed size is on disk, the 2 s wait for the connection's end decides and the total budget no
+longer fails it (#1516 review M3). Any status
 line is the answer and is not sent again on another path.
 
 ## Rollback

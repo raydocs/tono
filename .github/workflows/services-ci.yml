@@ -47,6 +47,8 @@ on:
       - tooling/scripts/remote/**
       # The relay nodes' end-to-end probe script and its test.
       - tooling/ops/relay/**
+      # Post-install validator for the relay probe, relay logrotate and node agent.
+      - tooling/ops/node-install/**
       - tooling/scripts/provision-tono-node.py
       - tooling/scripts/tests/test_provision_tono_node.py
       # The download-page check and its tests live here. Without these two the
@@ -56,6 +58,9 @@ on:
       # The migration-number checker and the *.test.mjs glob live outside
       # services/**; without these the new steps could be edited without running.
       - tooling/scripts/check-migration-numbers.mjs
+      # Local migration rehearsal: its additive checker is tested by the glob below.
+      - tooling/scripts/check-migrations-additive.mjs
+      - tooling/scripts/rehearse-control-plane-migrations.sh
       - tooling/scripts/check-ops-budgets.mjs
       - tooling/scripts/compare-connect-performance.mjs
       - tooling/scripts/windows-package-components.mjs
@@ -196,6 +201,11 @@ jobs:
         # test_relay_stream_conf.py: the SNI allow-list the armed macOS
         # permit relies on (decision 086).
         run: python3 -m unittest discover -s tooling/ops/relay -p 'test_*.py'
+
+      - name: Node install validator
+        # Stubbed node root: a broken install must fail each check, and no
+        # credential value may reach the output.
+        run: python3 tooling/ops/node-install/test_check_node_install.py
 
   ops-contract:
     runs-on: ubuntu-24.04

@@ -1637,6 +1637,13 @@ export interface TranslationResources {
           title: string
         }
         privacy: {
+          effectHint: string
+          readFailed: string
+          reading: string
+          reload: string
+          saved: string
+          saveFailed: string
+          saving: string
           title: string
         }
         title: string
