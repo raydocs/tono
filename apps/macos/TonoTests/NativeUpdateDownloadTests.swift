@@ -67,7 +67,8 @@ final class NativeUpdateDownloadTests: XCTestCase {
     /// A2 follow-up (WIN-AUTH-CN-CF-PATH): a package GET whose direct path
     /// dies before any response goes to the relay, and the relay's body is
     /// written to disk piece by piece as it arrives, never held whole. The
-    /// release host's package paths are its relays, in order.
+    /// release host's package paths are its relays, in order. Once any status
+    /// line has arrived, the GET is not sent to another relay.
     func testDeadDirectPathStreamsThePackageFromTheRelayToDisk() async throws {
         // Nothing listens on loopback port 1: refused before any response.
         let url = try XCTUnwrap(URL(string: "http://localhost:1/desktop/v1/abc/package.macos-arm64.zip"))
@@ -87,6 +88,8 @@ final class NativeUpdateDownloadTests: XCTestCase {
                     let size = try FileManager.default.attributesOfItem(atPath: sink.destination.path)[.size]
                     onDisk.record("\((size as? NSNumber)?.intValue ?? -1)")
                 }
+                // A byte past the signed length is refused.
+                XCTAssertThrowsError(try sink.receive(Data([0])))
             },
         ])
         defer { try? FileManager.default.removeItem(at: saved.deletingLastPathComponent()) }
@@ -99,6 +102,24 @@ final class NativeUpdateDownloadTests: XCTestCase {
         let production = try XCTUnwrap(URL(string: NativeUpdateDownload.origin + "abc/package.macos-arm64.zip"))
         XCTAssertEqual(NativeUpdateDownload.packageRelays(for: production).map(\.label),
                        ["relay 179.253.233.220:2053", "relay 179.255.154.17:2053"])
+
+        // Any status line, an interim 103 included, means the relay saw the
+        // GET: a disconnect after it is not sent to the next relay.
+        let afterInterim = UpdatePathLog()
+        do {
+            _ = try await NativeUpdateDownload.package(at: url, size: Int64(package.count), relays: [
+                PackagePath(label: "relay") { _, sink in
+                    afterInterim.record("first")
+                    XCTAssertFalse(try sink.receive(Data("HTTP/1.1 103 Early Hints\r\n\r\n".utf8)))
+                    throw URLError(.networkConnectionLost)
+                },
+                PackagePath(label: "relay") { _, _ in afterInterim.record("second") },
+            ])
+            XCTFail("a disconnect after a status line must fail the download")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .networkConnectionLost)
+        }
+        XCTAssertEqual(afterInterim.entries, ["first"])
     }
 
     private nonisolated static func receiveRequest(

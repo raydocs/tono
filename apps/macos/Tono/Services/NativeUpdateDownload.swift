@@ -282,7 +282,8 @@ nonisolated final class PackageResponseSink: @unchecked Sendable {
     private let file: FileHandle
     private let lock = NSLock()
     // Guarded by `lock`.
-    private var status: Int?
+    /// Any status line, interim (1xx) included, has arrived. Sticky.
+    private var sawStatus = false
     private var headRead = false
     private var pending = Data()
     private var written: Int64 = 0
@@ -293,10 +294,11 @@ nonisolated final class PackageResponseSink: @unchecked Sendable {
         self.destination = destination
     }
 
-    /// A final status line arrived: the server's answer, never sent again.
+    /// A status line arrived, interim (1xx) included: the server saw the
+    /// request, so it is never sent again on another path.
     var answered: Bool {
         lock.lock(); defer { lock.unlock() }
-        return status != nil
+        return sawStatus
     }
 
     /// The whole package is on disk.
@@ -325,9 +327,9 @@ nonisolated final class PackageResponseSink: @unchecked Sendable {
                 return false
             }
             guard let code = PinnedResponse.parseStatusLine(bytes[0..<lineEnd]) else { throw invalid }
-            // An interim response such as 103 is not the answer; the final one follows it.
+            sawStatus = true
+            // An interim response such as 103 is not the final answer; that one follows it.
             let interim = (100..<200).contains(code)
-            if !interim { status = code }
             guard let headEnd = PinnedResponse.find([13, 10, 13, 10], in: bytes, from: lineEnd) else {
                 guard bytes.count <= PinnedResponse.headLimit else { throw invalid }
                 return false
@@ -368,9 +370,13 @@ nonisolated final class PackageResponseSink: @unchecked Sendable {
 /// proxy. One request, no redirects. The body goes to the sink piece by
 /// piece as it arrives. The budgets are the direct download's: 60 s without
 /// a byte (`URLSession`'s request timeout), 900 s for the whole transfer.
+/// Once the signed length is on disk the transfer ends at the connection's
+/// end, or after `closeGrace`; a byte past the length in that window fails it.
 nonisolated final class RelayPackageConnection: @unchecked Sendable {
     static let idleBudget: TimeInterval = 60
     static let transferBudget: TimeInterval = 900
+    /// After the signed length, how long to wait for the connection's end.
+    static let closeGrace: TimeInterval = 2
 
     private let connection: NWConnection
     private let label: String
@@ -385,6 +391,8 @@ nonisolated final class RelayPackageConnection: @unchecked Sendable {
     private var connected = false
     private var lastWaiting: String?
     private var lastActivity: TimeInterval = 0
+    /// The signed length is on disk; only the connection's end may follow.
+    private var bodyComplete = false
 
     init(endpoint: ControlPlaneEndpoint, host: String, message: Data, sink: PackageResponseSink) {
         connection = PinnedTLS.connection(to: endpoint, host: host)
@@ -481,9 +489,14 @@ nonisolated final class RelayPackageConnection: @unchecked Sendable {
             if let data, !data.isEmpty {
                 lastActivity = ProcessInfo.processInfo.systemUptime
                 do {
-                    if try sink.receive(data) {
-                        finish(.success(()))
-                        return
+                    // A byte past the signed length throws here.
+                    if try sink.receive(data), !bodyComplete {
+                        // `Connection: close`: wait briefly for the end, so
+                        // excess bytes fail the transfer instead of passing.
+                        bodyComplete = true
+                        queue.asyncAfter(deadline: .now() + Self.closeGrace) { [weak self] in
+                            self?.finish(.success(()))
+                        }
                     }
                 } catch {
                     finish(.failure(error))
@@ -491,6 +504,10 @@ nonisolated final class RelayPackageConnection: @unchecked Sendable {
                 }
             }
             guard !isComplete, error == nil else {
+                if bodyComplete {
+                    finish(.success(()))
+                    return
+                }
                 finish(.failure(URLError(.networkConnectionLost, userInfo: [
                     NSLocalizedDescriptionKey: "\(label): the connection closed before the whole package"
                         + (error.map { " (\($0))" } ?? ""),
