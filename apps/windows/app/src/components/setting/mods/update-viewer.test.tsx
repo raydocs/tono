@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   install: vi.fn(),
   downloadAndInstall: vi.fn(),
   nativeInstall: vi.fn(),
+  cancel: vi.fn(),
   error: vi.fn(),
 }))
 vi.mock('@/hooks/use-update', () => ({
@@ -32,6 +33,8 @@ vi.mock('@/hooks/use-update', () => ({
 }))
 vi.mock('@/services/update', () => ({
   installUpdate: mocks.nativeInstall,
+  cancelUpdateDownload: mocks.cancel,
+  UPDATE_DOWNLOAD_CANCELLED: 'TONO_UPDATE_CANCELLED',
 }))
 vi.mock('@/services/notice-service', () => ({
   showNotice: { error: mocks.error },
@@ -128,5 +131,34 @@ describe('Windows Service-owned update caller', () => {
     expect(mocks.download).not.toHaveBeenCalled()
     expect(mocks.install).not.toHaveBeenCalled()
     expect(mocks.downloadAndInstall).not.toHaveBeenCalled()
+  })
+
+  it('cancels a download in flight and leaves the same offer available again', async () => {
+    let stop!: (error: Error) => void
+    mocks.nativeInstall.mockReturnValue(
+      new Promise<void>((_, reject) => {
+        stop = reject
+      }),
+    )
+    mocks.cancel.mockResolvedValue(true)
+    const ref = clickUpdate()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'shared.actions.cancel' }),
+    )
+    expect(mocks.cancel).toHaveBeenCalledOnce()
+    await act(async () =>
+      stop(
+        new Error(
+          'Protected update stopped: TONO_UPDATE_CANCELLED: update download cancelled',
+        ),
+      ),
+    )
+    act(() => ref.current!.open())
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(
+      screen.getByRole('button', {
+        name: 'settings.modals.update.actions.update',
+      }),
+    ).toBeDefined()
   })
 })
