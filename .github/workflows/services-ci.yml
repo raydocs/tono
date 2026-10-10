@@ -47,6 +47,8 @@ on:
       - tooling/scripts/remote/**
       # The relay nodes' end-to-end probe script and its test.
       - tooling/ops/relay/**
+      # Post-install validator for the relay probe, relay logrotate and node agent.
+      - tooling/ops/node-install/**
       - tooling/scripts/provision-tono-node.py
       - tooling/scripts/tests/test_provision_tono_node.py
       # The download-page check and its tests live here. Without these two the
@@ -197,6 +199,11 @@ jobs:
         # Default certificate verification is the point of the probe: an
         # untrusted certificate through the relay must report a failure.
         run: python3 tooling/ops/relay/test_relay_probe.py
+
+      - name: Node install validator
+        # Stubbed node root: a broken install must fail each check, and no
+        # credential value may reach the output.
+        run: python3 tooling/ops/node-install/test_check_node_install.py
 
   ops-contract:
     runs-on: ubuntu-24.04

@@ -117,7 +117,24 @@ ssh root@<node> '
 ```
 
 The first run must log `relay-probe: reported, HTTP 200`. A `report refused: HTTP 403` means
-the node's `exit_nodes.id` is not the relay's `exitNodeId`. Rollback:
+the node's `exit_nodes.id` is not the relay's `exitNodeId`.
+
+Check the install (read-only, sends nothing; also after the log rotation install below):
+
+```sh
+scp tooling/ops/node-install/check-node-install.py root@<node>:/root/
+ssh root@<node> python3 -I /root/check-node-install.py relay-probe relay-logrotate node-agent
+```
+
+[`check-node-install.py`](../../tooling/ops/node-install/check-node-install.py) prints one
+`PASS` / `WARN` / `FAIL` line per check and exits 1 on any `FAIL`: files present, `root:root`, with
+the install modes (script 0755, units 0644, `/etc/tono-exit-agent/env` 0600 and setting
+`TONO_HOME_AGENT_TOKEN` and `TONO_API_BASE`), timer enabled and active, the service loaded and its
+last run not failed, then one probe through `127.0.0.1:2053` with the installed script's own
+`probe()` (printed, **not** reported). `relay-logrotate` checks `/etc/logrotate.d/00-tono-relay`
+(0644, daily, 14, `ignoreduplicates`; on logrotate < 3.21 its absence is a `WARN`), `nginx -t` and
+`logrotate -d`. Omit `node-agent` until that agent is installed. `--no-smoke` skips the probe,
+`nginx -t` and `logrotate -d`. No line carries a token, a config value or file contents. Rollback:
 `systemctl disable --now tono-relay-probe.timer`; nothing else on the node changes (nginx and
 `tono-xray` are not touched).
 
