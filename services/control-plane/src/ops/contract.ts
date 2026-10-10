@@ -47,6 +47,7 @@ export * from './contract/route-table';
 // append your entries inside your block
 export * from './contract/receipts';
 export * from './contract/slo';
+export * from './contract/api-relays';
 
 // dept:b
 // append your entries inside your block

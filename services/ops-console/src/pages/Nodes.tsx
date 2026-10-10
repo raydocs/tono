@@ -5,6 +5,7 @@ import { PageNote } from '@/components/ops/PageNote';
 import type { PanelState } from '@/components/ops/Panel';
 import { StatusWord } from '@/components/ops/StatusWord';
 import { copy } from '@/copy/copy';
+import { opsApi } from '@/lib/api';
 import { ledgerApi } from '@/lib/api-ledger';
 import { sloApi } from '@/lib/api-slo';
 import { nowSec } from '@/lib/clock';
@@ -21,6 +22,7 @@ import type { FleetNodeDto } from '@/lib/types';
 import type { FleetState } from '@/lib/use-fleet';
 import '@/styles/nodes.css';
 import { toNodeView } from './node-metrics';
+import { ApiRelays } from './nodes/ApiRelays';
 import { FleetBand } from './nodes/FleetBand';
 import { FleetLoad } from './nodes/FleetLoad';
 import { FleetTable } from './nodes/FleetTable';
@@ -62,6 +64,7 @@ export default function NodesPage({
   const slo = useResource('nodes-slo-7d', (signal) => sloApi.get({ range: '7d' }, signal));
   const month = monthOf(nowSec());
   const ledger = useResource(`ledger-month-${month}`, (signal) => ledgerApi.month(month, signal));
+  const relays = useResource('api-relays', (signal) => opsApi.apiRelays(signal));
 
   const all = useMemo(() => (nodes.status === 'ready' ? nodes.data : []), [nodes]);
   const inService = useMemo(() => selectLifecycle(all, null), [all]);
@@ -121,6 +124,8 @@ export default function NodesPage({
         onRetry={nodes.reload}
         initialQuery={query}
       />
+
+      <ApiRelays relays={relays} />
 
       {/* On a phone the list is what the page is opened for, so the charts follow it. */}
       {phone ? <FleetLoad load={load} range={range} onRange={setRange} /> : null}

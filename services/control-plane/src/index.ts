@@ -31,6 +31,7 @@ import { opsIngestRoutes } from './ops/ingest';
 import { tokenAdminWrite } from './ops/token-admin';
 import { ApiError } from './errors';
 import { recordClient } from './client-identity';
+import { probeApiRelays } from './api-relays';
 import { exitIdentityRosterResponse } from './exit-identity-roster';
 import { parseBytesRange } from './http';
 import {
@@ -1686,11 +1687,7 @@ async function enforceAll(e: Env) {
     console.error('processRevocations failed', x instanceof Error ? x.message : String(x));
   }
   await runHousekeepingRetention(e, t);
-  try {
-    await retainOperationsTimeseries(e.DB, t);
-  } catch (x) {
-    console.error('ops timeseries retention failed', x instanceof Error ? x.message : String(x));
-  }
+  await cronStep('ops timeseries retention', () => retainOperationsTimeseries(e.DB, t));
   try {
     await snapshotUserUsageHours(e.DB, t);
   } catch (x) {
@@ -1708,6 +1705,7 @@ async function enforceAll(e: Env) {
   await cronStep('routing research retention', () =>
     e.DB.prepare('DELETE FROM routing_research_snapshots WHERE received_at <= ?')
       .bind(t - routingResearchRetention).run());
+  await cronStep('api relay probe', () => probeApiRelays(e.DB, t)); // last: up to 5 s of wall time, after enforcement
 }
 
 async function issueEnrollment(e: Env, d: Row) {

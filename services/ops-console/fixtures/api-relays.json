@@ -1,0 +1,29 @@
+{
+  "clock": 1725000000,
+  "body": {
+    "relays": [
+      {
+        "name": "Los Angeles · Westwood",
+        "host": "179.253.233.220",
+        "port": 2053,
+        "ok": true,
+        "checkedAt": 1724999880,
+        "latencyMs": 142,
+        "error": null,
+        "okSince": 1724913600,
+        "failingSince": null
+      },
+      {
+        "name": "Los Angeles · Mesa",
+        "host": "179.255.154.17",
+        "port": 2053,
+        "ok": false,
+        "checkedAt": 1724999880,
+        "latencyMs": null,
+        "error": "tcp connect: timed out after 5000 ms",
+        "okSince": null,
+        "failingSince": 1724998800
+      }
+    ]
+  }
+}

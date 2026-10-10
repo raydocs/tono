@@ -867,6 +867,8 @@ function quietDevice(spec) {
     lastFailAt: null,
     lastFailCode: null,
     lastFailNode: null,
+    clientPath: null,
+    clientPathAt: null,
   };
 }
 
@@ -889,6 +891,8 @@ function buildDevices(spec, rng) {
         lastFailAt: null,
         lastFailCode: null,
         lastFailNode: null,
+        clientPath: 'pinned',
+        clientPathAt: CLOCK - 180,
       },
       {
         id: 'dev-u04-air',
@@ -904,6 +908,8 @@ function buildDevices(spec, rng) {
         lastFailAt: null,
         lastFailCode: null,
         lastFailNode: null,
+        clientPath: null,
+        clientPathAt: null,
       },
       {
         id: 'dev-u04-win',
@@ -919,6 +925,8 @@ function buildDevices(spec, rng) {
         lastFailAt: CLOCK - 5 * DAY,
         lastFailCode: 'ETIMEDOUT',
         lastFailNode: '香港 · 中环',
+        clientPath: 'relay',
+        clientPathAt: CLOCK - 5 * DAY,
       },
     ];
   }
@@ -943,6 +951,8 @@ function buildDevices(spec, rng) {
       lastFailAt: i === 0 && spec.lastFailure ? spec.lastFailure.at : null,
       lastFailCode: i === 0 && spec.lastFailure ? spec.lastFailure.code : null,
       lastFailNode: i === 0 && spec.lastFailure ? spec.lastFailure.node : null,
+      clientPath: null,
+      clientPathAt: null,
     });
   });
   if (plats.length === 1 && rng() < 0.35) {
@@ -961,6 +971,8 @@ function buildDevices(spec, rng) {
       lastFailAt: null,
       lastFailCode: null,
       lastFailNode: null,
+      clientPath: null,
+      clientPathAt: null,
     });
   }
   return devices;

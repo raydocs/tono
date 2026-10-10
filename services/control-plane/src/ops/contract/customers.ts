@@ -145,6 +145,8 @@ export interface CustomerDeviceDto {
   lastFailAt: number | null;
   lastFailCode: string | null;
   lastFailNode: string | null;
+  /** `X-Tono-Path` of the last sign-in/refresh/catalog fetch and when stamped; null for older builds. */
+  clientPath: string | null; clientPathAt: number | null;
 }
 
 /** 待办 rows. Always the `rem` tone, never an incident, never a colour decision. */
@@ -343,7 +345,7 @@ export function assertCustomerNow(value: unknown, path = 'now'): CustomerNowDto 
 
 const DEVICE_KEYS = [
   'id', 'name', 'platform', 'appVersion', 'osVersion', 'status', 'selectedServer', 'lastSeenAt', 'createdAt',
-  'connected', 'lastFailAt', 'lastFailCode', 'lastFailNode',
+  'connected', 'lastFailAt', 'lastFailCode', 'lastFailNode', 'clientPath', 'clientPathAt',
 ];
 
 export function assertCustomerDevice(value: unknown, path = 'device'): CustomerDeviceDto {
@@ -362,6 +364,7 @@ export function assertCustomerDevice(value: unknown, path = 'device'): CustomerD
     lastFailAt: optInt(row, path, 'lastFailAt'),
     lastFailCode: optText(row, path, 'lastFailCode'),
     lastFailNode: optText(row, path, 'lastFailNode'),
+    clientPath: optText(row, path, 'clientPath'), clientPathAt: optInt(row, path, 'clientPathAt'),
   };
 }
 

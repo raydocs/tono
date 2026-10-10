@@ -62,21 +62,23 @@ export function StatusWord({
   tone: given,
   size = 'micro',
   className,
-}: {
-  word: AnyHealthWord;
-  reason?: string | null;
+}: (
   /**
    * The tone the side that judged this subject chose, when it sent one. The
    * table above is the fallback for rows that arrived carrying only a word;
    * passing the engine's own tone is what lets a retired machine keep its word
-   * without wearing an alarm nobody can act on.
+   * without wearing an alarm nobody can act on. A word outside the health
+   * vocabulary (an API relay's reachability) has no fallback, so it must bring a tone.
    */
-  tone?: Tone;
+  | { word: AnyHealthWord; tone?: Tone }
+  | { word: string; tone: Tone }
+) & {
+  reason?: string | null;
   /** `row` is the 15 px/500 tier a card headline sits at; tables stay at 11 px. */
   size?: 'micro' | 'row';
   className?: string;
 }) {
-  const tone = given ?? toneForWord(word);
+  const tone = given ?? toneForWord(word as AnyHealthWord);
   const type = size === 'row' ? 'text-row' : 'text-micro';
   if (!isAlarm(tone)) {
     return (

@@ -120,6 +120,18 @@ function DeviceCard({
           {copy.deviceColumns.version}
           <Value value={device.appVersion} source={copy.sourceWord.telemetry} tier="body" mono />
         </span>
+        {/* Builds before the path header send nothing; an absent path is no fact, so no cell. */}
+        {device.clientPath === null ? null : (
+          <span className="flex items-baseline gap-1.5">
+            {copy.deviceColumns.path}
+            <Value
+              value={copy.devicePath(device.clientPath, formatWhenAgo(device.clientPathAt))}
+              source={copy.sourceWord.telemetry}
+              tier="body"
+              mono
+            />
+          </span>
+        )}
         <span className="flex items-baseline gap-1.5">
           {copy.deviceColumns.os}
           <Value value={device.osVersion} source={copy.sourceWord.telemetry} tier="body" />

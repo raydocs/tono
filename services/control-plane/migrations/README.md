@@ -89,3 +89,8 @@ Ops tables after the sequence was unique. Applied in numeric order:
 ## 0091
 
 - `0091_signup_allowlist_entitlement.sql` — `signup_allowlist.expires_at` / `plan` set at onboard before register, copied onto `users` at first sign-in
+
+## 0094–0095
+
+- `0094_device_client_path.sql` — `devices.client_path` / `client_path_at`: the transport path (`X-Tono-Path`) that carried the device's last sign-in, refresh or catalog fetch
+- `0095_api_relay_probes.sql` — `api_relay_probes`: the cron's last TCP check of each Tono-owned API relay, with `ok_since` / `failing_since`

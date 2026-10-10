@@ -42,7 +42,9 @@
       "connected": false,
       "lastFailAt": null,
       "lastFailCode": null,
-      "lastFailNode": null
+      "lastFailNode": null,
+      "clientPath": null,
+      "clientPathAt": null
     }
   ],
   "chores": [

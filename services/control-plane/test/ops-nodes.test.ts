@@ -1,7 +1,7 @@
 import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker, { type Env } from '../src/index';
-import { assertNodeDetail } from '../src/ops/contract';
+import { assertApiRelays, assertNodeDetail } from '../src/ops/contract';
 
 const ACCESS_TEAM_DOMAIN = 'test-team.cloudflareaccess.com';
 const ACCESS_AUDIENCE = 'test-access-audience-0001';
@@ -119,5 +119,25 @@ describe('ops nodes identity', () => {
     ).bind(NODE).first<{ node_name: string; verdict: string }>();
     expect(status?.node_name).toBe(NODE);
     expect(status?.verdict).toBe('ok');
+  });
+
+  it('GET api-relays lists every compiled relay with its last probe, unprobed ones as null', async () => {
+    await db().prepare(
+      `INSERT INTO api_relay_probes(relay, checked_at, ok, latency_ms, error, ok_since, failing_since)
+       VALUES('179.253.233.220:2053', ?, 1, 142, NULL, ?, NULL)`,
+    ).bind(NOW, NOW - 600).run();
+    const res = await ops('api-relays');
+    expect(res.status).toBe(200);
+    const body = assertApiRelays(await res.json());
+    expect(body.relays).toEqual([
+      {
+        name: 'Los Angeles · Westwood', host: '179.253.233.220', port: 2053, ok: true,
+        checkedAt: NOW, latencyMs: 142, error: null, okSince: NOW - 600, failingSince: null,
+      },
+      {
+        name: 'Los Angeles · Mesa', host: '179.255.154.17', port: 2053, ok: null,
+        checkedAt: null, latencyMs: null, error: null, okSince: null, failingSince: null,
+      },
+    ]);
   });
 });
