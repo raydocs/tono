@@ -113,3 +113,13 @@ export const installUpdate = async (
   progress.onmessage = onDownloadEvent
   return invoke<void>('tono_install_update', { manifestSha256, progress })
 }
+
+/** The failure a cancelled package download carries; not a refusal of the offer. */
+export const UPDATE_DOWNLOAD_CANCELLED = 'TONO_UPDATE_CANCELLED'
+
+/**
+ * Abort the package download in flight. Nothing after the download (the Service's Prepare and
+ * Install) can be cancelled; false when no download is running.
+ */
+export const cancelUpdateDownload = async (): Promise<boolean> =>
+  invoke<boolean>('tono_cancel_update_download')

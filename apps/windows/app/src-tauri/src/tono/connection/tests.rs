@@ -25,7 +25,7 @@ use super::{
     plan_failure_using,
     protected_dns_unhealthy, prove_service_endpoint_digest, prove_service_reload_mode, proxy_endpoint_of,
     unique_proxy_endpoints,
-    reconnect_allowed, retry_now_is_noop, select_action, sign_out_needs_release, single_flight_begin,
+    failure_released_the_network, reconnect_allowed, retry_now_is_noop, select_action, sign_out_needs_release, single_flight_begin,
     stale_exit_needs_release, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
     fake_ip_attempt_timeout, stop_core_before_release, tun_probe_stagger, validate_direct_reload_result,
     verify_lock_retry_window,
@@ -1138,6 +1138,37 @@ fn reconnect_only_in_armed_idle_protected_offline_without_choice() {
     assert!(!reconnect_allowed(false, &disconnecting, true));
     let plain_idle = ConnectionStatus::default();
     assert!(!reconnect_allowed(false, &plain_idle, true));
+}
+
+/// A protected reconnect (startup resume, Retry now, a rebuild switch, a policy rebuild) that
+/// fails takes the non-strict plan and releases the original network. The ladder cannot run
+/// there, so that failure must hand over to the unarmed probe, as a user connect's fail-open and
+/// a health release already do. Before, the reconnect simply ended: the PC stayed disconnected
+/// with nothing retrying after a drop, a sleep or a network change.
+#[test]
+fn a_failed_reconnect_that_released_the_network_hands_over_to_the_unarmed_probe() {
+    let mut fsm = tono_core::connection::ConnectionFsm::new();
+    fsm.begin_connect();
+    fsm.mark_kill_switch_armed();
+    fsm.mark_session_verified();
+    fsm.connect_succeeded().expect("a verified armed connect");
+    fsm.tunnel_died();
+    // Protected Offline is the ladder's own state, not a released one.
+    assert!(reconnect_allowed(false, fsm.status(), fsm.kill_switch_armed()));
+    assert!(!failure_released_the_network(fsm.status(), fsm.kill_switch_armed()));
+
+    // The reconnect attempt fails. Armed, verified, no strict kill switch: release.
+    fsm.begin_connect();
+    let plan = plan_failure_using(true, true, false, false, None);
+    assert_eq!((plan.mark_armed, plan.stop_core), (false, Some(true)));
+    // `fail_connect`: the explicit release's FSM step (`disconnect.rs`), then the failure.
+    fsm.sign_out_or_quit();
+    fsm.connect_failed();
+    assert_eq!(fsm.next_reconnect_delay(), None, "the ladder cannot retry a released network");
+    assert!(
+        failure_released_the_network(fsm.status(), fsm.kill_switch_armed()),
+        "a released reconnect failure must start the unarmed probe"
+    );
 }
 
 #[test]

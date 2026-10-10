@@ -58,4 +58,61 @@ final class UnarmedConnectFailureTests: XCTestCase {
         XCTAssertTrue(message.hasPrefix("Protected DNS restore failed"), "a real DNS restore failure stays visible")
         XCTAssertFalse(message.contains("Kill Switch"), "no Kill Switch holds this host")
     }
+
+    /// Simulated drop recovery: after a released session, the unarmed loop
+    /// proves TCP and starts a connect that fails before PF arms. The loop
+    /// had ended when it started that connect; recovery goes back to it, so
+    /// the Mac is not left disconnected with nothing scheduled, and a later
+    /// network change still restarts it.
+    @MainActor
+    func testAnAutomaticConnectThatFailsBeforeArmingHandsRecoveryBackToTheUnarmedLoop() async {
+        let app = AppState()
+        let savedArmed = KillSwitchService.isArmed
+        let savedUpdateBlock = RuntimeCleanup.nativeUpdateBlocksConnect
+        let savedUpdatePending = RuntimeCleanup.nativeUpdatePending
+        KillSwitchService.isArmed = false
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
+        // Passes selection and the TCP proof, then cannot be dialled: the
+        // connect fails before helper preparation or any PF arm.
+        var catalogNode = Fixture.realityNode()
+        catalogNode.uuid = nil
+        app.proxyRegions = [
+            ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [catalogNode])
+        ]
+        app.applyProxySelection(catalogNode.name)
+        app.tonoTransport = TonoTransportDescriptor(port: 1080)
+        app.recordConnectBootSession = {}
+        app.unarmedTcpProof = { _ in true }
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = {}
+        runtime.restrictToBootstrap = {}
+        app.networkProtection = runtime
+        defer {
+            app.connectionCoordinator.unarmedReconnectTask?.cancel()
+            app.connectionCoordinator.cancelConnectionTasks()
+            KillSwitchService.isArmed = savedArmed
+            RuntimeCleanup.nativeUpdateBlocksConnect = savedUpdateBlock
+            RuntimeCleanup.nativeUpdatePending = savedUpdatePending
+            AppProfile.defaults.removeObject(forKey: SettingsKey.selectedProxyTargetName)
+        }
+
+        app.scheduleUnarmedReconnect(sleep: { _ in })
+        await app.connectionCoordinator.unarmedReconnectTask?.value
+        await app.connectionCoordinator.connectTask?.value
+        await app.finishPendingDisconnect()
+
+        XCTAssertFalse(app.isConnected)
+        XCTAssertNotNil(app.lastConnectionFailure, "the automatic connect did fail")
+        XCTAssertFalse(KillSwitchService.isArmed, "PF never armed")
+        XCTAssertTrue(
+            app.unarmedReconnectAwaitsNetwork,
+            "a loop owns recovery again, so its next rung or a network change reconnects"
+        )
+    }
 }

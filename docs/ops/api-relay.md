@@ -1,4 +1,4 @@
-# API relay (decisions 077, 089)
+# API relay (decision 077)
 
 Tono-owned TCP relays outside Cloudflare for clients whose carrier path to the Cloudflare
 edge is broken (first case: China Mobile Shanghai, 2026-10-10). The relay is nginx
@@ -12,51 +12,27 @@ the node; the client validates the normal Cloudflare certificate.
 |---|---|---|---|
 | Los Angeles · Westwood (DMIT) | 179.253.233.220 | 2053 | 2026-10-10 03:04 UTC |
 | Los Angeles · Mesa (DMIT) | 179.255.154.17 | 2053 | 2026-10-10 03:59 UTC |
-| San Jose · Uscloud (AS402169) | 38.14.195.144 | 2053 | 2026-10-10 (node side; see below) |
 
-Westwood and Mesa are exit nodes; `tono-xray` owns 443 and is never touched. Admitted SNIs:
+Both are exit nodes; `tono-xray` owns 443 and is never touched. Admitted SNIs:
 `api.afk.ccwu.cc` (control plane), `releases.afk.ccwu.cc` (installers). Anything else is
 sent to a closed port.
 
-Clients walk the relays in the table's order. The third is appended last so a walk that
-reaches a DMIT relay is unchanged and a remembered relay index (Windows) keeps its meaning.
+### Common-failure risk (open)
 
-### San Jose · Uscloud (decision 089)
+Both relays sit at one provider in one city: ipinfo on 2026-10-10 reports **AS906 DMIT Cloud
+Services, Los Angeles** for 179.253.233.220 and for 179.255.154.17 (hostname `host-by.dmit.com`,
+same postal code). Different hosts protect against one VM failing, not against a DMIT network or
+data-centre outage, a DMIT route change towards Chinese carriers, or a block of DMIT's address
+space; any of those takes both relays down together, and clients fall back to today's
+behaviour (no relay). Owner action: add a relay on a different provider and region
+(different ASN, ideally not Los Angeles) and list it in all four places below. Nothing has been
+bought or deployed for this. Finding [API-RELAY-SAME-PROVIDER](../findings.d/API-RELAY-SAME-PROVIDER.md).
+A field check of both relays from a mainland network: [cn-acceptance.md](cn-acceptance.md) (3c, 4.x).
 
-- **Failure domain.** Uscloud Inc (AS402169), San Jose: another provider, ASN and city than
-  the two DMIT nodes (both DMIT, Los Angeles), so one provider's outage or one city's transit
-  problem no longer takes every relay down. Not CN-optimised transit like the DMIT pair:
-  expect a higher round trip from mainland carriers.
-- **Not an exit node.** No `tono-xray`, no exit agent, no `exit_nodes` row. It carries only the
-  relay.
-- **Deploy.** Done by the coordinator session on 2026-10-10 (owner-approved via Puck the same
-  day): nginx `stream` + `ssl_preread` with the same SNI map and Cloudflare upstream as
-  [`tono-relay.stream.conf`](../../tooling/ops/relay/tono-relay.stream.conf), TLS passed
-  through unterminated, logs and 14-day rotation as below.
-- **Limits on this node** (in addition to the canonical file, which the DMIT nodes run without):
-  `limit_conn` 64 per client IP; nginx's systemd unit capped at `MemoryMax=256M`,
-  `CPUQuota=100%`, `TasksMax=64`, `LimitNOFILE=8192`; logrotate 14 days. These live only on
-  the node today; they are not in the canonical file, so `apply-relay.sh` on this node would
-  replace the stream config without the `limit_conn` line. Re-apply them by hand after any
-  `apply-relay.sh` run here until they are committed.
-- **Rollback.** `/root/tono-relay-rollback.sh` on the node restores the pre-relay nginx state.
-  Clients then fail over the third relay within its connect budget, as for any dead relay.
-- **Status 2026-10-10: not reachable from outside.** The relay answers locally on the node,
-  but the provider's network firewall drops inbound TCP 2053 (Globalping TCP 2053: 100 %
-  loss from US, DE and CN probes while 443 on the same address connects). The owner must
-  open 2053 in the provider's panel. Until then, clients that reach this relay pay its
-  connect budget and move on; the Worker probe reads it as down. External acceptance
-  (below, "Verify") must pass before the client change merges.
-- **End-to-end monitoring gap.** The node-side probe (below) reports with an exit agent's
-  node token, and this host has none, so `api-relays.ts` gives it no `exitNodeId`: no report
-  is accepted for it, the console's "端到端可用" column stays 「节点未上报」, and alerts judge it on
-  the Worker's TCP-open probe alone. An open port does not prove the SNI pass-through reaches
-  the API. Closing the gap needs a relay-only credential (or an exit agent on the host);
-  neither exists yet. Until then, check it by hand with the "Verify" commands.
-
-The same list, in the same order, is compiled into the clients and the control plane; change
-all four together:
-`apps/windows/app/src-tauri/src/tono/bootstrap.rs` (`API_RELAYS`),
+The same list is compiled into the clients and the control plane; change all four together:
+`apps/windows/service/src/lib.rs` (`API_RELAYS`, re-exported by the Windows app's
+`bootstrap.rs` and rendered into WFP rule C; a change there changes the kill switch permit
+table and its pinned test, decision 090),
 `apps/macos/Tono/Services/ControlPlanePath.swift` (`apiRelays`),
 `services/control-plane/src/api-relays.ts` (probe list), this file.
 
@@ -110,7 +86,6 @@ From any machine outside the node:
 curl -s -o /dev/null -w '%{http_code}\n' --resolve api.afk.ccwu.cc:2053:<node> https://api.afk.ccwu.cc:2053/api/v1/health      # 200
 curl -s -o /dev/null -w '%{http_code}\n' -r 0-1023 --resolve releases.afk.ccwu.cc:2053:<node> https://releases.afk.ccwu.cc:2053/download/<file>  # 206
 curl -s --max-time 6 --resolve example.invalid:2053:<node> https://example.invalid:2053/; echo $?  # 35, connection closed
-openssl s_client -connect <node>:2053 -noservername </dev/null 2>&1 | grep -c 'BEGIN CERTIFICATE'  # 0, no SNI is closed too
 ```
 
 Mainland reachability: `https://tcp.ping.pe/<node>:2053` (China Mobile / Telecom / Unicom
@@ -156,7 +131,24 @@ ssh root@<node> '
 ```
 
 The first run must log `relay-probe: reported, HTTP 200`. A `report refused: HTTP 403` means
-the node's `exit_nodes.id` is not the relay's `exitNodeId`. Rollback:
+the node's `exit_nodes.id` is not the relay's `exitNodeId`.
+
+Check the install (read-only, sends nothing; also after the log rotation install below):
+
+```sh
+scp tooling/ops/node-install/check-node-install.py root@<node>:/root/
+ssh root@<node> python3 -I /root/check-node-install.py relay-probe relay-logrotate node-agent
+```
+
+[`check-node-install.py`](../../tooling/ops/node-install/check-node-install.py) prints one
+`PASS` / `WARN` / `FAIL` line per check and exits 1 on any `FAIL`: files present, `root:root`, with
+the install modes (script 0755, units 0644, `/etc/tono-exit-agent/env` 0600 and setting
+`TONO_HOME_AGENT_TOKEN` and `TONO_API_BASE`), timer enabled and active, the service loaded and its
+last run not failed, then one probe through `127.0.0.1:2053` with the installed script's own
+`probe()` (printed, **not** reported). `relay-logrotate` checks `/etc/logrotate.d/00-tono-relay`
+(0644, daily, 14, `ignoreduplicates`; on logrotate < 3.21 its absence is a `WARN`), `nginx -t` and
+`logrotate -d`. Omit `node-agent` until that agent is installed. `--no-smoke` skips the probe,
+`nginx -t` and `logrotate -d`. No line carries a token, a config value or file contents. Rollback:
 `systemctl disable --now tono-relay-probe.timer`; nothing else on the node changes (nginx and
 `tono-xray` are not touched).
 
@@ -191,6 +183,39 @@ With `cooldownSeconds: 0` a flapping relay can send at most one opening and one 
 15 minutes, because each reopening needs three fresh failed checks. Every matching rule sends its
 own copy: with both rules the opening arrives twice and the recovery once.
 
+The same rule from the ops console (owner, Access login): 设置 → 告警 (`https://admin.afk.ccwu.cc/ops/#/settings/alerts`)
+→ 新建规则, then:
+
+| Field | Value |
+|---|---|
+| 名称 | `API 中继` |
+| 启用 | 开 |
+| 最低严重度 | 注意 (`warn`; 严重 would never match, the relay incident is `warn`) |
+| 最少影响人数 | `0` (the relay incident has no customer count) |
+| 什么时候发 | 出事和恢复都发 (`open_resolve`) |
+| 延迟几秒再发 | `0` |
+| 冷却多少秒 | `0` (must be shorter than the outage, or the recovery is recorded 冷却中未发) |
+| 通道 / 发到哪儿 | 邮件 and your address, or a webhook as for the other rules |
+| 只看这类事 | `api-relay-down` |
+| 只看这一个对象 | empty (one rule for both relays) |
+
+Save, then 发送测试 to see the channel works. Check the result read-only with
+[`check-relay-alert-rule.mjs`](../../tooling/scripts/check-relay-alert-rule.mjs), from either export
+(the D1 query leaves out `target`, so no address lands in the file):
+
+```sh
+# ops API, Access session: GET https://admin.afk.ccwu.cc/api/v1/ops/alert-rules > /tmp/rules.json
+# or a remote D1 read from services/control-plane with the tono profile:
+npx wrangler d1 execute tono-control-plane --remote --json --command \
+  "SELECT id, name, enabled, match_kind, match_subject_type, match_subject_id, min_severity, min_impact, fire_on, delay_seconds, cooldown_seconds FROM ops_alert_rules" > /tmp/rules.json
+node tooling/scripts/check-relay-alert-rule.mjs /tmp/rules.json [--outage-seconds 300]
+```
+
+It prints `PASS` for each enabled rule whose match fields admit the relay incident with
+`fire_on=open_resolve` and a cooldown shorter than the outage, `skip <id>: <reason>` for the rest,
+and exits 0 only when one such rule covers every relay (`OK`), else 1 (`MISSING`). The default
+outage, 300 s, is the shortest one that opens an incident: it resolves one 5-minute check later.
+
 ## Client behaviour
 
 Windows (`transport.rs`) and macOS (`TonoAPIClient.exchangeOverPaths`) try a relay only after
@@ -199,37 +224,49 @@ byte was sent, so a sign-in code is never sent twice. A relay that answered is t
 afterwards (Windows: for the process; macOS: for 24 h via the app profile). Every attempt
 carries `X-Tono-Path: <pinned|system_dns|relay|doh|alt_port|tunnel>`, which the control plane
 records on the device row, because a relayed request otherwise looks like one from an exit
-node. The relay is **not** in the WFP/PF bootstrap permit: while protection is armed it is
-blocked like any other non-permitted address.
+node.
+
+While protection is armed without a tunnel (bootstrap, Protected Offline):
+
+- **Windows**: WFP rule C permits each relay `IP:2053`, TCP, for the installed Tono app only
+  (the same `ALE_APP_ID` condition as the Cloudflare entries, which stay), so sign-in and
+  refresh can go through a relay in that state too (owner decision W-A,
+  [decision 090](../decisions/090-2026-10-10-windows-armed-control-plane-via-relays.md),
+  amending 077). No other process matches; connected (`Locked`) the whole channel is
+  retracted.
+- **macOS**: the PF bootstrap permit does not include the relays on `main`; armed, a relay is
+  blocked like any other non-permitted address (decision 086, PR #1507, changes this).
+
+macOS sign-in budget, per walk (`TonoAPIClient.exchangeOverPaths`; `sendData` runs at most two
+walks, 1 s apart, and only when the retry rule allows a second one):
+
+| Path, in the usual order | Read (GET) | Mutating request (POST, DELETE) |
+|---|---|---|
+| `system_dns` (URLSession) | at most 15 s with no status line (`ControlPlanePath.systemHeadBudget`), then the next path | up to the session's 30 s request / 45 s resource timeout; moves on only after a failure that proves nothing was sent |
+| `pinned` | 10 s connect, split across the addresses | same |
+| `relay` | 5 s connect, split across both relays (a dead first relay leaves the second the rest) | same |
+
+So when the pinned connects fail, a read reaches the relays at most 25 s after it starts, whatever
+the system resolver does. A pinned address that accepts the connection and then never answers has no
+head budget: the read waits for it up to the session's timeout, so the relays can start about 60 s in
+(#1523 review minor M2, finding MAC-CP-PINNED-SILENT-WAIT).
+A POST whose system attempt timed out is not re-sent, because it may have arrived. The client
+handshakes every path straight away instead (no request, nothing identifying, as the pre-login
+probe does), and the user's retry goes first to a path that completed TLS. A path remembered
+from an earlier answer or probe goes first, so a network that needs the relays pays the dead
+paths once per 24 h. After a connection is up, each exchange has 45 s.
 
 Updater: Windows (`commands/update.rs` `get_with_relays`) sends a discovery, signature or
 package GET through the relays when the direct GET got no response. macOS does the same:
 `NativeUpdateDownload.bounded` for the manifest and signature GETs (backlog A2), and
 `NativeUpdateDownload.package(at:size:)` for the package, streamed to disk under the signed
-size with the direct download's 60 s idle and 900 s total budgets (A2 follow-up). Any status
+size with the direct download's 60 s idle and 900 s total budgets (A2 follow-up); once the
+signed size is on disk, the 2 s wait for the connection's end decides and the total budget no
+longer fails it (#1516 review M3). Any status
 line is the answer and is not sent again on another path.
-
-### Connect budgets with three relays
-
-Each relay gets a bounded connect (TCP and TLS) budget; a relay that answers ends the walk.
-
-| Client | Per relay | Whole walk (three dead relays) |
-|---|---|---|
-| Windows API transport and updater (`RELAY_CONNECT_TIMEOUT`) | 4 s | 12 s |
-| macOS API exchange (`PinnedControlPlaneExchange.relayWalkBudget`) | 5 s | 15 s (a relay that fails sooner leaves its rest to the next) |
-| macOS updater package GET (`relayConnectBudget`) | 5 s | 15 s |
-| Pre-login handshake probe (both) | parallel | 5 s (macOS `ControlPlaneHandshake.budget`) |
-
-Before the third relay the macOS API exchange split one 5 s budget across all relays; with
-three, a relay that drops packets would have left the next only 1.7 s, too little for the
-San Jose relay's longer mainland round trip. The walk runs only after every direct
-Cloudflare path failed undelivered, or first when a relay answered before (Windows remembers
-which one; macOS remembers only "relay", so a dead Westwood costs a relayed Mac up to 5 s per
-request until it recovers).
 
 ## Rollback
 
 On the node: restore the latest `/etc/nginx/nginx.conf.bak-*-pre-tono-relay*` over
-`/etc/nginx/nginx.conf`, `nginx -t`, `systemctl reload nginx` (San Jose ·
-Uscloud: `/root/tono-relay-rollback.sh`). Clients then fail over the relay within their
-connect budget (above) and behave as before the relay.
+`/etc/nginx/nginx.conf`, `nginx -t`, `systemctl reload nginx`. Clients then fail over the
+relay within their connect budget (Windows 4 s, macOS 5 s) and behave as before the relay.
