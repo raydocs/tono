@@ -6,6 +6,11 @@
   display: grid;
   gap: 22px;
 }
+@media (max-width: 800px) {
+  .tono-sea-page > .tono-page.sea-settings {
+    padding-inline: 20px;
+  }
+}
 .sea-settings .tono-row {
   min-height: 56px;
   padding: 12px 0;
