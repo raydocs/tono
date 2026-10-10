@@ -1,6 +1,6 @@
 ## 2026-10-10 · H1-F5：macOS 控制面放行只在交换期间存在（≤ 15 s）
 - 归属：ops 计划 [plan-2026-09-11](../ops/plan-2026-09-11.md)，Amp 待办 A30（[amp-backlog-2026-10-10](../ops/amp-backlog-2026-10-10.md) §6，D4-A）；macOS helper、macOS app。
-- 来源：origin/main `d12e2f9f` 起，分支 `amp/a30-bootstrap-window`，PR [#1507](https://github.com/raydocs/tono/pull/1507)；未合 main。
+- 来源：origin/main `681f1e6f` 起，分支 `amp/a30-bootstrap-window`，PR [#1507](https://github.com/raydocs/tono/pull/1507)；未合 main。
 - 缺陷修复：H1-F5 macOS 一半。以前保护开着而没有隧道时（连接前的引导、断网保护），helper 的 PF 一直放行 API 主机的固定地址（TCP 443，
   root 与当前用户 UID），同 UID 的非 Tono 进程在断网保护期间可到达共享 anycast。现在这条放行只在控制窗口内渲染：
   `TonoAPIClient` 每次交换前向 helper 取窗口（`POST /killswitch/control-window`），交换应答、失败或取消后立即归还
