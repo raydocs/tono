@@ -1,0 +1,11 @@
+## 2026-10-10 · Orb setup：复用锁定依赖，延后任务专属安装
+- 归属：运维计划 §2.6 验证与构建成本；Linux orb 开发环境，不改变 G1–G4 客户发布门。
+- 来源：基线 [e421d3a4](https://github.com/raydocs/tono/commit/e421d3a4ce5749a5b7dd4248dd5c36cab6725729)；分支 `amp/orb-setup-fast`，本 PR；仅源码。
+- 缺陷修复：setup 对 vendored kode-bridge 执行 `cargo fetch --locked` 因锁文件不匹配退出 101，无法正常完成；不在公共 Linux setup 预取原生客户端 Rust workspace，未修改或绕过锁文件。
+- 新增/优化：保留便携脚本运行时、Node 24.18.0 的 SHA-256 校验；pnpm 版本读取 packageManager；安装 control-plane、ops-console、Windows web 与插件 JS 依赖。npm 仅复用成功锁定安装的 package/lockfile/Node/npm 指纹并检查直接依赖；输入变化或缺依赖重新执行 npm ci，失败继续传播。
+- 工程与测试：不默认安装 Linux Tauri SDK、Rust 工具链或 Pillow；任务需要时按其工作流安装。既有工具链、下载缓存和 .venv 不删除。resume 不变；无需要常驻的服务，未新增 services.yaml。项目 pre-clone/pre-setup 原值均为空，未改设置、规格、模型、凭据或快照。
+- 验证：当前 Linux x64 orb 实际 `/usr/bin/time`：旧暖运行 `elapsed=12.50 user=11.08 sys=5.76 exit=101`；新首次运行 `elapsed=25.51 user=19.92 sys=14.30 exit=0`（包括首次补装 ops-console）；新暖运行 `elapsed=4.46 user=4.72 sys=0.91 exit=0`；resume `elapsed=0.00 exit=0`。`bash -n`、干净非交互 login shell Node/pnpm 路径版本与锁文件未改变检查通过。
+- 回归：`node --test .agents/setup.test.mjs`，`tests 1 / pass 1 / fail 0`；以真实 offline npm 与临时数据执行公共 setup，覆盖暖复用、删除依赖后的修复、有效锁文件变化后的重装，以及无效锁文件失败传播。系统/pnpm 工具安装边界为测试替身，不冒充冷安装验证。
+- 候选/发布：无新包、无部署、无客户更新源变化。
+- 剩余限制：初始 setup.log 的完成步骤为 apt 28s、Node/pnpm 9s、Rust 15s、JS 依赖 21s、Pillow 6s，之后 Rust 预取失败；无总耗时或新冷启动/快照命中证据。首次新运行不等同冷启动。失败可能阻止快照发布，但尚未核实平台侧快照状态，不因此删除或重建快照。
+- 回滚：撤销本 PR 的 `.agents/setup` 改动即可，项目设置无需恢复；旧脚本已知的 kode-bridge 锁文件失败会同时恢复。正常合入后由下一次生命周期按快照身份处理，无需主动删除快照。
