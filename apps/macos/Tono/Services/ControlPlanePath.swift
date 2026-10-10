@@ -102,8 +102,13 @@ nonisolated struct ControlPlanePath: Sendable {
     /// validates the same certificate it does on every other path. Not in
     /// the PF bootstrap permit: while protection is armed the relay is
     /// blocked like any other non-permitted address.
+    /// Kept in step with the Windows client's `bootstrap::API_RELAYS` and the
+    /// control plane's `api-relays.ts`.
     static let apiRelays: [String: [ControlPlaneEndpoint]] = [
-        "api.afk.ccwu.cc": [ControlPlaneEndpoint(address: "179.253.233.220", port: 2053)],
+        "api.afk.ccwu.cc": [
+            ControlPlaneEndpoint(address: "179.253.233.220", port: 2053), // Los Angeles · Westwood
+            ControlPlaneEndpoint(address: "179.255.154.17", port: 2053), // Los Angeles · Mesa
+        ],
     ]
 
     /// The relays for `baseURL`'s host, or nil when it has none. Only the

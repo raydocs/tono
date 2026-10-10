@@ -1,5 +1,5 @@
 ## 2026-10-10 · Sign in through a Tono-owned API relay when Cloudflare is unreachable
-- Status: provisional
+- Status: owner (approach in chat 2026-10-09/10: "嗯我感觉这样可以", host choice "这里面有两台 dmit 你放一台"; follow-ups incl. second node, releases SNI and client path header confirmed 2026-10-10: "继续做 123456")
 - Chosen: a TCP relay on the Tono node "Los Angeles · Westwood" (DMIT, 179.253.233.220,
   CN-optimised transit), nginx `stream` with `ssl_preread` on port 2053, admitting exactly
   the SNI `api.afk.ccwu.cc` and forwarding the unterminated TLS session to the Cloudflare
@@ -36,9 +36,10 @@
   fix/mac-api-relay-20261010 (`apps/macos/Tono/Services/{ControlPlanePath,TonoAPIClient}.swift`,
   `ControlPlanePath.apiRelays`, tried after the system resolver and the pinned addresses both
   fail before any request byte; not in the PF bootstrap permit); changelog
-  [2026-10-10-mac-api-relay.md](../changelog.d/2026-10-10-mac-api-relay.md).
-- Follow-up 2026-10-10: a second relay on "Mesa" (179.255.154.17:2053, same nginx shape); both
-  now admit the SNIs `api.afk.ccwu.cc` and `releases.afk.ccwu.cc`. The Windows client walks both
-  in order, its updater retries an undelivered GET through them, and every control-plane attempt
-  carries `X-Tono-Path` naming its path. Windows PR fix/win-api-relay-followups-20261010;
+  [2026-10-10-mac-api-relay.md](../changelog.d/2026-10-10-mac-api-relay.md). Follow-ups
+  2026-10-10 (second relay Mesa 179.255.154.17:2053, `releases.afk.ccwu.cc` SNI, `X-Tono-Path`
+  header recorded per device, relay probe cron): runbook [docs/ops/api-relay.md](../ops/api-relay.md);
+  changelog [2026-10-10-api-relay-followups.md](../changelog.d/2026-10-10-api-relay-followups.md).
+  Windows client side: both relays walked in order, the updater retries an undelivered GET
+  through them, `X-Tono-Path` on every attempt; PR fix/win-api-relay-followups-20261010,
   changelog [2026-10-10-win-api-relay-followups.md](../changelog.d/2026-10-10-win-api-relay-followups.md).

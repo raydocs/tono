@@ -155,9 +155,21 @@ actor TonoAPIClient {
     private let relayPath: ControlPlanePath?
     /// #584: the label of a later path that answered where the paths before
     /// it failed, so later requests try it first. Cleared when a preferred
-    /// attempt fails, is cancelled or its body fails. Process memory only,
-    /// like the Windows client's learned preference (#583).
-    private var preferredPathLabel: String?
+    /// attempt fails, is cancelled or its body fails. Kept in the app
+    /// profile for a day (`preferredPathKey`), so the next launch on the
+    /// same network does not pay the dead paths again before the first
+    /// sign-in or refresh; the Windows client remembers per process (#583).
+    private var preferredPathLabel: String? {
+        didSet { persistPreferredPath() }
+    }
+    private let preferredPathKey: String
+    /// A remembered path older than this is forgotten at launch: the network
+    /// that needed it has likely changed.
+    private static let preferredPathLifetime: TimeInterval = 24 * 60 * 60
+    /// The header naming the path that carries each attempt, so the control
+    /// plane can tell a relayed request from one that arrived through an exit
+    /// node (decision 077). Values are the path labels.
+    static let pathHeader = "X-Tono-Path"
     private let keychain: KeychainStore
     private var accessToken: String?
     /// A failed credential adoption must not use either account's credentials
@@ -224,6 +236,35 @@ actor TonoAPIClient {
             ?? (session == nil ? ControlPlanePath.pinnedAddresses(for: baseURL) : nil)
         self.relayPath = relayPath
             ?? (session == nil ? ControlPlanePath.relays(for: baseURL) : nil)
+        preferredPathKey = Self.preferredPathKey(forHost: baseURL.host ?? "")
+        preferredPathLabel = Self.loadPreferredPath(key: preferredPathKey)
+    }
+
+    /// The app-profile key under which the remembered path for `host` lives.
+    nonisolated static func preferredPathKey(forHost host: String) -> String {
+        "controlPlanePreferredPath:" + host.lowercased()
+    }
+
+    /// The remembered path label, or nil when none was stored, it is older
+    /// than `preferredPathLifetime`, or it names no path this client has.
+    nonisolated private static func loadPreferredPath(key: String) -> String? {
+        guard let stored = AppProfile.defaults.dictionary(forKey: key),
+              let label = stored["label"] as? String,
+              let at = stored["at"] as? Double,
+              Date().timeIntervalSince1970 - at < preferredPathLifetime,
+              Date().timeIntervalSince1970 >= at else { return nil }
+        return label
+    }
+
+    private func persistPreferredPath() {
+        if let preferredPathLabel {
+            AppProfile.defaults.set(
+                ["label": preferredPathLabel, "at": Date().timeIntervalSince1970],
+                forKey: preferredPathKey
+            )
+        } else {
+            AppProfile.defaults.removeObject(forKey: preferredPathKey)
+        }
     }
 
     /// The production control-plane session configuration. An injected
@@ -1108,10 +1149,16 @@ actor TonoAPIClient {
         // #588: a path that failed on a certificate date is the cause to
         // report when no path answers, whatever the next path failed on.
         var clockFailure: (any Error)?
+        // Every path's failure, `label[detail]`, so the reported error names
+        // them all, as the Windows transport's combined message does.
+        var failures: [String] = []
         for (index, path) in order.enumerated() {
             if index > 0 { try Self.requireCurrent(requestIsCurrent) }
+            let startedAt = Date()
+            var attempt = request
+            attempt.setValue(path.label, forHTTPHeaderField: Self.pathHeader)
             do {
-                let answer = try await path.exchange(request, maximumResponseBytes)
+                let answer = try await path.exchange(attempt, maximumResponseBytes)
                 if answer.bodyFailure != nil {
                     // A body that failed after the status line, or was
                     // cancelled, neither keeps nor earns the preference.
@@ -1126,6 +1173,7 @@ actor TonoAPIClient {
                 // system resolver back in front for the next request.
                 if index == 0, preferredFirst { preferredPathLabel = nil }
                 if CertificateClock.isDateFailure(error) { clockFailure = error }
+                failures.append("\(path.label)[\(Self.failureDetail(error))]")
                 guard index + 1 < order.count,
                       !(error is ControlPlaneExchangeError),
                       !Self.isCancellation(error),
@@ -1141,9 +1189,10 @@ actor TonoAPIClient {
                 else {
                     if let clockFailure, !(error is ControlPlaneExchangeError),
                        !Self.isCancellation(error) {
-                        throw clockFailure
+                        throw Self.combined(clockFailure, failures: failures)
                     }
-                    throw error
+                    if error is ControlPlaneExchangeError || Self.isCancellation(error) { throw error }
+                    throw Self.combined(error, failures: failures)
                 }
                 let failure = error as NSError
                 LocalTrafficAudit.shared.recordEvent(
@@ -1153,6 +1202,7 @@ actor TonoAPIClient {
                         "next_path": order[index + 1].label,
                         "error_domain": failure.domain,
                         "error_code": String(failure.code),
+                        "duration_ms": Self.durationMilliseconds(since: startedAt),
                         "detail": String(failure.localizedDescription.prefix(300)),
                     ]) { _, new in new }
                 )
@@ -1160,6 +1210,24 @@ actor TonoAPIClient {
         }
         // Unreachable: the last path either answers or throws above.
         throw APIError.transport("No control-plane path answered.")
+    }
+
+    /// The failure's own words, one line, bounded.
+    nonisolated private static func failureDetail(_ error: any Error) -> String {
+        let text = (error as NSError).localizedDescription
+            .replacingOccurrences(of: "\n", with: " ")
+        return String(text.prefix(200))
+    }
+
+    /// `error` with every path's failure in its description
+    /// (`system_dns[...]; pinned[...]; relay[...]`), same domain and code, so
+    /// the retry rule and the clock check still read it as the same failure.
+    nonisolated private static func combined(_ error: any Error, failures: [String]) -> any Error {
+        guard failures.count > 1 else { return error }
+        let original = error as NSError
+        var userInfo = original.userInfo
+        userInfo[NSLocalizedDescriptionKey] = failures.joined(separator: "; ")
+        return NSError(domain: original.domain, code: original.code, userInfo: userInfo)
     }
 
     /// #582: the one place this client reads the server's answer about the
@@ -1265,6 +1333,8 @@ actor TonoAPIClient {
             "error_domain": networkError.domain,
             "error_code": String(networkError.code),
             "will_retry": String(willRetry),
+            // Every path's failure (`system_dns[...]; pinned[...]; relay[...]`).
+            "detail": String(networkError.localizedDescription.prefix(300)),
         ]) { _, new in new }
         if let httpStatus {
             failureDetails["http_status"] = String(httpStatus)
