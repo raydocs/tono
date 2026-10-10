@@ -36,7 +36,7 @@ final class Hy2AutoSwitchTests: XCTestCase {
 
     func testThreeRealityFailuresDialTheSameNodesHy2OnlyWhenTheCatalogPermits() throws {
         let nodes = catalog()
-        let now = Date()
+        let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
 
         let (permittedDefaults, permittedSuite) = try isolatedDefaults()
         let (refusedDefaults, refusedSuite) = try isolatedDefaults()
@@ -65,7 +65,7 @@ final class Hy2AutoSwitchTests: XCTestCase {
         let (defaults, suite) = try isolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
         let nodes = catalog()
-        let now = Date()
+        let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
         let first = Hy2AutoSwitch(defaults: defaults)
         first.applyCatalogPermission(true, owner: owner, catalog: nodes)
         failReality(first, nodes, now: now)
@@ -79,9 +79,14 @@ final class Hy2AutoSwitchTests: XCTestCase {
             "persisted memory is not a permission; a fresh exit-catalog 200 is"
         )
         relaunched.applyCatalogPermission(true, owner: owner, catalog: nodes)
+        let again = try XCTUnwrap(relaunched.beginAttempt(selected: nodes[0], catalog: nodes, owner: owner, now: later))
+        XCTAssertTrue(again.remembered)
+        relaunched.noteConnected(dialed: again.hy2, now: later)
         XCTAssertEqual(
-            relaunched.beginAttempt(selected: nodes[0], catalog: nodes, owner: owner, now: later)?.remembered,
-            true
+            try XCTUnwrap(relaunched.rememberedUntil(dial.tcp)).timeIntervalSinceReferenceDate,
+            now.addingTimeInterval(Hy2AutoSwitch.rememberFor).timeIntervalSinceReferenceDate,
+            accuracy: 0.001,
+            "a remembered success does not extend the window"
         )
         XCTAssertNil(
             relaunched.beginAttempt(
@@ -90,6 +95,7 @@ final class Hy2AutoSwitchTests: XCTestCase {
             ),
             "after expiry Reality is tried again"
         )
+        XCTAssertNotNil(relaunched.rememberedUntil(dial.tcp))
         relaunched.applyCatalogPermission(true, owner: owner, catalog: nodes.filter { $0.name != dial.hy2 })
         XCTAssertNil(relaunched.rememberedUntil(dial.tcp), "the hy2 block left the catalog")
     }

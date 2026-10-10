@@ -24,11 +24,14 @@ import Foundation
 ///   UDP is not known vendor-blocked. Otherwise nothing switches.
 /// - An automatic hy2 attempt that reaches Connected (the same readiness
 ///   checks as any attempt) is remembered for that node for `rememberFor`;
-///   later connects dial hy2 until it expires, then Reality is tried again.
-/// - An automatic hy2 attempt that fails forgets the node's memory and blocks
-///   another automatic hy2 attempt on that node for `retryAfterHy2Failure`.
-///   Together with the threshold this bounds automatic hy2 attempts to one per
-///   node per window; the existing reconnect loops supply the backoff.
+///   later connects dial hy2 until it expires (a remembered success does not
+///   extend it), then Reality is tried again.
+/// - Starting an automatic hy2 attempt consumes the node's strikes and memory
+///   and blocks another automatic hy2 attempt on that node for
+///   `retryAfterHy2Failure`; only reaching Connected gives the memory back.
+///   So a failed, stalled or cancelled hy2 attempt cannot repeat: at most one
+///   automatic hy2 attempt per node per window, after fresh strikes. The
+///   existing reconnect loops supply the backoff between attempts.
 /// - A manual pick (any block of the node) wipes that node's state. Manual hy2
 ///   is never rewritten: only a Reality selection is ever swapped.
 final class Hy2AutoSwitch {
@@ -44,7 +47,10 @@ final class Hy2AutoSwitch {
     struct Dial: Equatable {
         let tcp: String
         let hy2: String
-        let remembered: Bool
+        /// The memory this attempt consumed; nil when strikes chose hy2.
+        let rememberedUntil: Date?
+
+        var remembered: Bool { rememberedUntil != nil }
     }
 
     private struct Stored: Codable {
@@ -148,17 +154,31 @@ final class Hy2AutoSwitch {
               twin.type == .hysteria2, twin.password == uuid,
               ConfigPipeline.singBoxUnavailableReason(twin) == nil,
               !ProxyNode.hy2UdpIsVendorBlocked(twin.name) else { return nil }
-        let rememberedValid = remembered[base].map { $0 > now && $0.timeIntervalSince(now) <= Self.rememberFor } ?? false
+        let rememberedUntil = remembered[base].flatMap {
+            $0 > now && $0.timeIntervalSince(now) <= Self.rememberFor ? $0 : nil
+        }
         let failuresDue = (tcpFailures[base] ?? 0) >= Self.tcpFailureThreshold
             && (hy2NotBefore[base].map { $0 <= now } ?? true)
-        guard rememberedValid || failuresDue else { return nil }
-        let dial = Dial(tcp: base, hy2: twin.name, remembered: rememberedValid)
+        guard rememberedUntil != nil || failuresDue else { return nil }
+        // Consumed now, given back only by Connected: an attempt that never
+        // reports (watchdog, cancel) counts as a failed one.
+        tcpFailures[base] = 0
+        hy2NotBefore[base] = now.addingTimeInterval(Self.retryAfterHy2Failure)
+        remembered[base] = nil
+        save()
+        let dial = Dial(tcp: base, hy2: twin.name, rememberedUntil: rememberedUntil)
         activeDial = dial
         return dial
     }
 
     /// The swap could not be applied; the attempt dials the selected block.
+    /// The memory it consumed is given back; the strikes are not.
     func abandonAttempt() {
+        if let dial = activeDial {
+            remembered[dial.tcp] = dial.rememberedUntil
+            hy2NotBefore[dial.tcp] = nil
+            save()
+        }
         activeDial = nil
     }
 
@@ -184,7 +204,7 @@ final class Hy2AutoSwitch {
             tcpFailures[dial.tcp] = 0
             hy2NotBefore[dial.tcp] = nil
             if permitted {
-                remembered[dial.tcp] = now.addingTimeInterval(Self.rememberFor)
+                remembered[dial.tcp] = dial.rememberedUntil ?? now.addingTimeInterval(Self.rememberFor)
                 if remembered.count > Self.maximumRemembered {
                     remembered = Dictionary(uniqueKeysWithValues: remembered
                         .sorted { $0.value > $1.value }

@@ -11,8 +11,9 @@
   vendor-blocked (Tokyo). No other node is ever chosen. Other failure classes (DNS, helper, TUN) neither count nor
   reset. An automatic hy2 attempt that reaches Connected through the same readiness checks is remembered for that
   node for **24 h** (UserDefaults, owner-scoped by SHA-256, base names and dates only); connects in that window dial
-  hy2, after it Reality is tried again. An automatic hy2 attempt that fails forgets the node's memory and blocks
-  another automatic hy2 attempt on that node for **30 min**. The memory also clears when the twin leaves the
+  hy2 (a remembered success does not extend it), after it Reality is tried again. Starting an automatic hy2 attempt
+  consumes the node's strikes and memory and blocks another automatic hy2 attempt on that node for **30 min**; only
+  Connected gives the memory back, so a failed, stalled (watchdog) or cancelled hy2 attempt cannot repeat. The memory also clears when the twin leaves the
   catalog, the flag turns false, or the user picks either block of that node. The swap is in memory only: the saved
   selection stays the Reality block, and PF is armed for the dialed node exactly as for a manual hy2 pick.
   Rejected: caching the flag with the catalog for offline launches (more launches that move without a fresh grant);
