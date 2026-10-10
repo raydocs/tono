@@ -109,6 +109,11 @@ jobs:
           python3 tooling/scripts/tests/test_desktop_version.py
           python3 tooling/scripts/verify-desktop-version.py
 
+      - name: Verify standalone kode-bridge lockfile
+        # App/service path dependencies use their own workspace lockfiles; they
+        # cannot detect drift in the vendored crate's independent lockfile.
+        run: cargo fetch --locked --manifest-path apps/windows/vendor/kode-bridge/Cargo.toml
+
       - name: Test tono-core
         # Run from the workspace root: the lockfile lives there, so `--locked`
         # from the crate directory would look for one that does not exist.
