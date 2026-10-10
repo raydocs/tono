@@ -607,18 +607,7 @@ impl CoreManager {
         // stopped an unprotected child before the App's DNS bind proof.
         self.prepare_start(true).await?;
         set_core_lifecycle_state(ServiceLifecycleState::Starting);
-        if self.running_pid.load(Ordering::Relaxed) != 0 {
-            info!("Core is already running, stopping existing instance");
-            if let Err(error) = self.stop_core().await {
-                // The previous core could not be confirmed stopped, so it may still be alive
-                // and unsupervised; report that as Fatal rather than parking the state at
-                // Starting, which readers treat as an operation still settling.
-                set_core_lifecycle_state(ServiceLifecycleState::Fatal);
-                return Err(error);
-            }
-            // A successful stop reports Running; re-assert Starting for the spawn below.
-            set_core_lifecycle_state(ServiceLifecycleState::Starting);
-        }
+        self.stop_supervised_core_before_start().await?;
 
         info!("Starting core with config: {:?}", config);
 
@@ -725,6 +714,30 @@ impl CoreManager {
         self.start_watchdog(child_guard, config, owner).await;
         set_core_lifecycle_state(ServiceLifecycleState::Running);
 
+        Ok(())
+    }
+
+    /// Stop whatever the previous start left supervised: a running Core, or a watchdog that is
+    /// recovering one. A recovering watchdog has already published PID 0 (its Core exited) and
+    /// may be waiting out a restart backoff, but it still owns the Core lifecycle. Replacing its
+    /// shutdown sender in `start_watchdog` only detaches it: it wakes on the dropped sender and
+    /// its final cleanup then clears the identity, PID and runtime record of the Core started
+    /// here, or it respawns a second Core first. So it is joined here like a running Core.
+    async fn stop_supervised_core_before_start(&self) -> Result<()> {
+        let watchdog_registered = self.watchdog_handle.lock().await.is_some();
+        if self.running_pid.load(Ordering::Relaxed) == 0 && !watchdog_registered {
+            return Ok(());
+        }
+        info!("Core is already running or recovering, stopping existing instance");
+        if let Err(error) = self.stop_core().await {
+            // The previous core could not be confirmed stopped, so it may still be alive
+            // and unsupervised; report that as Fatal rather than parking the state at
+            // Starting, which readers treat as an operation still settling.
+            set_core_lifecycle_state(ServiceLifecycleState::Fatal);
+            return Err(error);
+        }
+        // A successful stop reports Running; re-assert Starting for the spawn below.
+        set_core_lifecycle_state(ServiceLifecycleState::Starting);
         Ok(())
     }
 
@@ -1751,6 +1764,134 @@ mod sing_box_ipc_tests {
                 .await
                 .is_err()
         );
+    }
+}
+
+#[cfg(all(test, feature = "test"))]
+mod restart_while_recovering_tests {
+    use super::*;
+    use serial_test::serial;
+
+    fn exiting_core() -> Command {
+        let mut command = if cfg!(windows) {
+            let mut command = Command::new("cmd");
+            command.args(["/C", "exit 1"]);
+            command
+        } else {
+            let mut command = Command::new("/bin/sh");
+            command.args(["-c", "exit 1"]);
+            command
+        };
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+        command
+    }
+
+    fn lasting_core() -> Command {
+        let mut command = if cfg!(windows) {
+            let mut command = Command::new("ping");
+            command.args(["-n", "60", "127.0.0.1"]);
+            command
+        } else {
+            let mut command = Command::new("/bin/sleep");
+            command.arg("60");
+            command
+        };
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+        command
+    }
+
+    fn owner() -> OwnerIdentity {
+        #[cfg(windows)]
+        {
+            OwnerIdentity::Windows {
+                sid: "S-1-5-21-1-2-3-1001".into(),
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            OwnerIdentity::Unix {
+                uid: unsafe { platform_lib::geteuid() },
+                gid: unsafe { platform_lib::getegid() },
+            }
+        }
+    }
+
+    /// The watchdog cannot restart this Core: its sing-box document does not exist, so every
+    /// restart attempt is refused before a spawn and the watchdog waits out its backoff.
+    fn unrestartable_config() -> ClashConfig {
+        let missing = std::env::temp_dir().join("tono-watchdog-recovering-test-missing");
+        ClashConfig {
+            core_config: crate::CoreConfig {
+                core_path: missing.join("sing-box").to_string_lossy().into_owned(),
+                core_ipc_path: "unused".into(),
+                config_path: missing.join("config.json").to_string_lossy().into_owned(),
+                config_dir: missing.to_string_lossy().into_owned(),
+            },
+            log_config: WriterConfig {
+                directory: missing.to_string_lossy().into_owned(),
+                max_log_size: 1,
+                max_log_files: 1,
+            },
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_start_while_the_watchdog_recovers_keeps_the_new_cores_identity() -> Result<()> {
+        set_core_watchdog_config_for_tests(Some(CoreWatchdogTestConfig {
+            max_restarts: 10,
+            restart_window: Duration::from_secs(60),
+            max_backoff: Duration::from_secs(1),
+        }));
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                set_core_watchdog_config_for_tests(None);
+            }
+        }
+        let _reset = Reset;
+        let manager = CoreManager::new();
+
+        // Core A exits at once; its watchdog clears the PID and starts recovering it.
+        let exited = exiting_core().spawn()?;
+        publish_core_identity(&manager.running_pid, exited.id().context("no pid")?);
+        manager
+            .start_watchdog(
+                ChildGuard { child: Some(exited), readers: Vec::new() },
+                unrestartable_config(),
+                owner(),
+            )
+            .await;
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while manager.running_pid.load(Ordering::Acquire) != 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .context("the watchdog never saw Core A exit")?;
+
+        // `start_core` while A's watchdog recovers: its stop gate, then the tail that publishes
+        // and supervises Core B.
+        manager.stop_supervised_core_before_start().await?;
+        let started = lasting_core().spawn()?;
+        let started_pid = started.id().context("no pid")?;
+        publish_core_identity(&manager.running_pid, started_pid);
+        manager
+            .start_watchdog(
+                ChildGuard { child: Some(started), readers: Vec::new() },
+                unrestartable_config(),
+                owner(),
+            )
+            .await;
+
+        // Longer than the old watchdog's restart backoff.
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        let identity = security_core_instance_snapshot().map(|instance| instance.pid);
+        let recorded = manager.running_pid.load(Ordering::Acquire);
+        manager.stop_core().await?;
+        assert_eq!(identity, Some(started_pid), "the recovering watchdog cleared Core B's identity");
+        assert_eq!(recorded, started_pid);
+        Ok(())
     }
 }
 
