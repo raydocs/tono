@@ -11,3 +11,5 @@
 - 验证：本机不跑 `src-tauri` 的 cargo；以托管 Windows CI `ci-gate` 为准。发布主机对 Range 的支持按 `services/control-plane/src/releases/host.ts` 阅读确认，未对生产发请求。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：故障为模拟；半截文件不清理、「取消」不中止下载另记 [WIN-UPDATE-PARTIAL-FILES](../findings.d/WIN-UPDATE-PARTIAL-FILES.md)（open）。
+- 2026-10-10 续记（评审 minor 一轮）：续传应答的 `Content-Range` 数字只接受 ASCII 数字（`digits`），`u64::from_str` 会接受的前导 `+`、空白、符号一律拒绝；
+  同一条测试扩展为再对 `bytes +5-+9/+10` 断言拒绝（报 `package resume was not answered from byte 5`，拒绝后不再写字节）。

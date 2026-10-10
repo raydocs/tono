@@ -312,9 +312,18 @@ fn resumed_at(response: &reqwest::Response, offset: u64, expected: u64) -> bool 
         return false;
     };
     response.status() == reqwest::StatusCode::PARTIAL_CONTENT
-        && start.parse::<u64>().ok() == Some(offset)
-        && end.parse::<u64>().ok() == expected.checked_sub(1)
-        && (total == "*" || total.parse::<u64>().ok() == Some(expected))
+        && digits(start) == Some(offset)
+        && digits(end) == expected.checked_sub(1)
+        && (total == "*" || digits(total) == Some(expected))
+}
+
+/// A `Content-Range` number: ASCII digits only. `u64::from_str` also takes a leading `+`, and a
+/// sign or whitespace is not the grammar of RFC 9110 `complete-length` / `first-pos`.
+fn digits(text: &str) -> Option<u64> {
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    text.parse().ok()
 }
 
 async fn bounded(client: &reqwest::Client, url: &str, limit: usize, preferred: &PathPreference) -> Result<String> {
@@ -864,80 +873,93 @@ mod update_relay_tests {
     /// A package transfer cut off mid-body (a reset, a stall, a network change; simulated here
     /// by a server that closes after half the bytes) picks up from the bytes already written
     /// with `Range`, and the file ends as the one contiguous copy. Before, the install failed and
-    /// the next try started again from byte 0.
+    /// the next try started again from byte 0. A resumed answer whose `Content-Range` numbers are
+    /// not plain ASCII digits (`bytes +5-+9/+10`) is refused.
     #[tokio::test]
     async fn a_package_download_cut_off_mid_body_resumes_from_the_bytes_written() {
         const PACKAGE: &[u8] = b"0123456789";
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let address = listener.local_addr().expect("addr");
-        // The Range header of every request the server received, empty when absent.
-        let (range_tx, range_rx) = std::sync::mpsc::channel::<String>();
-        std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                use std::io::{BufRead as _, BufReader, Write as _};
-                let Ok(mut stream) = stream else { continue };
-                let Ok(clone) = stream.try_clone() else { continue };
-                let mut reader = BufReader::new(clone);
-                let mut line = String::new();
-                let mut range = String::new();
-                while reader.read_line(&mut line).unwrap_or(0) > 0 && line != "\r\n" && line != "\n" {
-                    if let Some((name, value)) = line.split_once(':')
-                        && name.eq_ignore_ascii_case("range")
-                    {
-                        range = value.trim().to_owned();
+        // A server that cuts the first transfer off halfway and answers a `Range` request with a
+        // 206, its `Content-Range` numbers written with a leading `+` when `signed`. The Range
+        // header of every request goes to the receiver, empty when absent.
+        fn serve(signed: bool) -> (SocketAddr, std::sync::mpsc::Receiver<String>) {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            let address = listener.local_addr().expect("addr");
+            let (range_tx, range_rx) = std::sync::mpsc::channel::<String>();
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    use std::io::{BufRead as _, BufReader, Write as _};
+                    let Ok(mut stream) = stream else { continue };
+                    let Ok(clone) = stream.try_clone() else { continue };
+                    let mut reader = BufReader::new(clone);
+                    let mut line = String::new();
+                    let mut range = String::new();
+                    while reader.read_line(&mut line).unwrap_or(0) > 0 && line != "\r\n" && line != "\n" {
+                        if let Some((name, value)) = line.split_once(':')
+                            && name.eq_ignore_ascii_case("range")
+                        {
+                            range = value.trim().to_owned();
+                        }
+                        line.clear();
                     }
-                    line.clear();
+                    let _ = range_tx.send(range.clone());
+                    if let Some(from) = range.strip_prefix("bytes=").and_then(|v| v.strip_suffix('-')) {
+                        let from: usize = from.parse().expect("offset");
+                        let sign = if signed { "+" } else { "" };
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {sign}{from}-{sign}{}/{sign}{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            PACKAGE.len() - 1,
+                            PACKAGE.len(),
+                            PACKAGE.len() - from
+                        );
+                        let _ = stream.write_all(&PACKAGE[from..]);
+                    } else {
+                        // The whole length is announced; half of it arrives, then the link is gone.
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            PACKAGE.len()
+                        );
+                        let _ = stream.write_all(&PACKAGE[..PACKAGE.len() / 2]);
+                    }
+                    let _ = stream.flush();
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
                 }
-                let _ = range_tx.send(range.clone());
-                if let Some(from) = range.strip_prefix("bytes=").and_then(|v| v.strip_suffix('-')) {
-                    let from: usize = from.parse().expect("offset");
-                    let _ = write!(
-                        stream,
-                        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {from}-{}/{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                        PACKAGE.len() - 1,
-                        PACKAGE.len(),
-                        PACKAGE.len() - from
-                    );
-                    let _ = stream.write_all(&PACKAGE[from..]);
-                } else {
-                    // The whole length is announced; half of it arrives, then the link is gone.
-                    let _ = write!(
-                        stream,
-                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                        PACKAGE.len()
-                    );
-                    let _ = stream.write_all(&PACKAGE[..PACKAGE.len() / 2]);
-                }
-                let _ = stream.flush();
-                let _ = stream.shutdown(std::net::Shutdown::Both);
-            }
-        });
-        let direct = reqwest::Client::builder()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .resolve("releases.test", address)
-            .build()
-            .expect("direct client");
+            });
+            (address, range_rx)
+        }
+        async fn download(address: SocketAddr, written: &mut Vec<u8>) -> (Result<()>, usize, usize) {
+            let direct = reqwest::Client::builder()
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none())
+                .resolve("releases.test", address)
+                .build()
+                .expect("direct client");
+            let (mut started, mut reported) = (0, 0);
+            let result = download_resuming(
+                &direct,
+                &format!("http://releases.test:{}/desktop/v1/package.windows-x86_64.exe", address.port()),
+                &[],
+                || reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()),
+                &PathPreference::default(),
+                PACKAGE.len() as u64,
+                written,
+                |event| {
+                    match event {
+                        DownloadEvent::Started => started += 1,
+                        DownloadEvent::Chunk(length) => reported += length,
+                    }
+                    Ok(())
+                },
+            )
+            .await;
+            (result, started, reported)
+        }
+
+        let (address, range_rx) = serve(false);
         let mut written = Vec::new();
-        let (mut started, mut reported) = (0, 0);
-        download_resuming(
-            &direct,
-            &format!("http://releases.test:{}/desktop/v1/package.windows-x86_64.exe", address.port()),
-            &[],
-            || reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()),
-            &PathPreference::default(),
-            PACKAGE.len() as u64,
-            &mut written,
-            |event| {
-                match event {
-                    DownloadEvent::Started => started += 1,
-                    DownloadEvent::Chunk(length) => reported += length,
-                }
-                Ok(())
-            },
-        )
-        .await
-        .expect("the cut-off download must resume");
+        let (result, started, reported) = download(address, &mut written).await;
+        result.expect("the cut-off download must resume");
         assert_eq!(written, PACKAGE, "the bytes on disk must be one contiguous copy");
         assert_eq!((started, reported), (1, PACKAGE.len()));
         assert_eq!(range_rx.recv_timeout(Duration::from_secs(1)).expect("first request"), "");
@@ -945,6 +967,17 @@ mod update_relay_tests {
             range_rx.recv_timeout(Duration::from_secs(1)).expect("the resumed request"),
             format!("bytes={}-", PACKAGE.len() / 2)
         );
+
+        // `bytes +5-+9/+10`: `u64::from_str` would take each number; the resume must not.
+        let (signed, _ranges) = serve(true);
+        let mut written = Vec::new();
+        let (result, _, _) = download(signed, &mut written).await;
+        let error = result.expect_err("a signed Content-Range must not be accepted");
+        assert!(
+            error.to_string().contains("package resume was not answered from byte 5"),
+            "{error:#}"
+        );
+        assert_eq!(written, &PACKAGE[..PACKAGE.len() / 2], "nothing after the refused answer is written");
     }
 
     /// Backlog A1: once a sign-in went through a relay, the update GET starts at that relay
