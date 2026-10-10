@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { DataTable, type DataColumn } from '@/components/ops/DataTable';
 import { EmptyLine } from '@/components/ops/Empty';
 import { measured } from '@/components/ops/measured';
@@ -12,7 +12,13 @@ import { cn } from '@/lib/utils';
 
 const words = copy.ledger;
 
-export function LedgerSlo({
+/**
+ * Memoised because it is the heaviest thing on the ledger page — a row per
+ * node, day, platform and carrier — and takes nothing from the page around
+ * it: every ledger write re-renders the page, and none of them can change
+ * this table.
+ */
+export const LedgerSlo = memo(function LedgerSlo({
   node,
   carrier,
   platform,
@@ -184,7 +190,7 @@ export function LedgerSlo({
       />
     </div>
   );
-}
+});
 
 function SloSummaryCards({
   summary,

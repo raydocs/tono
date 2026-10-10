@@ -96,7 +96,18 @@ Node install is pending: the agent has not been installed on any node yet.
    file or in any environment variable. It does not touch `tono-xray`, `tono-hy2` or nginx; it
    only asks systemd whether they are active.
 
-3. Check `GET /api/v1/ops/node-agents`: the node's `lastHeartbeatAt` is recent,
+3. On the node, check the install (read-only; sends no heartbeat):
+
+   ```sh
+   python3 -I check-node-install.py node-agent     # tooling/ops/node-install/, copied to the node
+   ```
+
+   It checks the script, units, `/etc/tono/node-agent.conf` (root 0644, parsed by the agent's own
+   allow-list parser), `/etc/tono/node-agent.token` (root 0600, one well-formed `tna1` token), the
+   timer enabled and active and the last run not failed, and prints the roles a heartbeat would
+   report. Exit 1 on any `FAIL`; no line carries the token or a config value.
+
+4. Check `GET /api/v1/ops/node-agents`: the node's `lastHeartbeatAt` is recent,
    `observedIp` is the node's public address.
 
 ## Revoke

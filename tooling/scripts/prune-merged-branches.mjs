@@ -18,8 +18,8 @@
 //              untracked or ignored files, no skip-worktree/assume-unchanged
 //              entries). Kept: the main worktree, the current one,
 //              locked, missing, detached, a branch at main's tip, and any
-//              worktree touched in the last --min-idle-hours (default 24) so a
-//              just-created agent worktree is not pulled from under it. Removal
+//              worktree touched in the last --min-idle-hours (default 24; 0 turns
+//              the guard off) so a just-created agent worktree is not pulled from under it. Removal
 //              is `git worktree remove` without --force; git refuses anything
 //              dirty a second time.
 //
@@ -197,7 +197,9 @@ export function selectWorktrees({ cwd, remote = 'origin', main = 'main', minIdle
     if (isProtected(branch, main)) return decide(keep, 'protected branch')
     if (entry.HEAD === mainSha) return decide(keep, 'at main tip (no work yet)')
     if (!isAncestor(cwd, entry.HEAD, mainSha)) return decide(keep, 'branch not merged into main')
-    const idleHours = (now - lastTouchedMs(entry.worktree)) / 3_600_000
+    // Date.now() is whole milliseconds while mtimeMs can be finer (or ahead, under clock skew), so a
+    // worktree written this millisecond would read as negative idle and be kept even under 0h: floor at 0.
+    const idleHours = Math.max(0, now - lastTouchedMs(entry.worktree)) / 3_600_000
     if (idleHours < minIdleHours) return decide(keep, `touched in the last ${minIdleHours}h`)
     const status = git(entry.worktree, ['status', '--porcelain=v1', '--untracked-files=all'])
     if (status !== '') return decide(keep, 'modified or untracked files')
