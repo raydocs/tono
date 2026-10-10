@@ -128,7 +128,7 @@
 | R3-F2 | Windows 加密 DNS 旁路捕获文件非原子落盘，损坏后释放永久硬拒 | fixed(1d572f24) | [#305](https://github.com/raydocs/tono/pull/305)（叠在 #300 上） | 中·推导 | 需持久记录隔离证据；文件跨卸载存活。审查 a894f160 五条已在 PR 内修：恢复只读不消费丢失证据，提交后才退役；Disconnect 第二次恢复保留附注；enable 恢复路径证据留给下一次恢复；degraded 与捕获附注拼接；suppress 先写记录后隔离。附注保留在进程内，Service 重启会丢 |
 | R3-F3 | macOS `protected-dns.json` 损坏/权限异常时 restore、紧急解除、卸载、启动清理全被阻 | fixed(05c58d5d) | [#307](https://github.com/raydocs/tono/pull/307) | 中·推导 | 审查要求：DNS 恢复失败时紧急出口不得顺带拆 PF（M2） |
 | R3-F4 | macOS status() 把「快照有效但服务不可读」报成无快照，App 不再调用 restore | fixed(be1c75d2) | [#303](https://github.com/raydocs/tono/pull/303) | 低·已确认 | helper 契约版本级联（4.6.0 起） |
-| R3-O1 | Windows 恢复证明通过后删快照失败即拒绝拆 WFP，重试同样失败（ACL/AV 锁文件） | open | 待开 | 低·推导 | 观察项，未核实 |
+| R3-O1 | Windows 恢复证明通过后删快照失败即拒绝拆 WFP，重试同样失败（ACL/AV 锁文件） | fixed(cc45bf4f) | [#769](https://github.com/raydocs/tono/pull/769)（[#827](https://github.com/raydocs/tono/pull/827) 已关闭不合） | 低·推导 | 与 WIN-DNS-SNAPSHOT-DELETE-BLOCKS 同根因，由 #769（`fe91aa87`）修：恢复已证明后删快照失败按成功收尾并记 `TONO_DNS_RESTORE_DEGRADED` 告警，不再拒拆 WFP；剩余限制见该分片；待实机（2026-10-10 A15 核对） |
 | R3-O2 | Windows 外层超时丢弃 restore future 时自写窗口提前关闭，自写通知被当外部变化 | fixed(f80951fb) | [#841](https://github.com/raydocs/tono/pull/841) | 低·推导 | 注册表写入在阻塞线程上另持一把自写窗口，直到写入返回；60 秒年龄上限仍会重新发布。异步调用方自己的 guard 超时仍会放下 |
 | R3-O3 | 无快照时把静态 DNS 改为 DHCP 的孤儿修复 | accepted-design | — | 低 | 有意取舍 |
 | R3-O4 | macOS `--emergency-disarm` 不先 bootout daemon，与在线 daemon 双写 | open | 待开 | 低·推导 | 观察项；操作员手动路径 |
