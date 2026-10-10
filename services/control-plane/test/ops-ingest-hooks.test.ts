@@ -301,6 +301,7 @@ describe('ops ingest hooks', () => {
     }
   });
 
+  // Six seeded accounts over one exit IP: 0.6-0.7 s on Linux, among the slowest cases (A27).
   it('accounts that reach the Worker through one exit IP keep separate telemetry budgets', async () => {
     const accounts = [];
     for (let i = 0; i < 6; i++) accounts.push(await seedAccount(`shared-exit-${i}`));
@@ -319,7 +320,7 @@ describe('ops ingest hooks', () => {
         expect(response.status).toBe(201);
       }
     }
-  });
+  }, 15_000);
 
   it('a customer incident opened on a heartbeat reaches a user-subject alert rule', async () => {
     const account = await seedAccount('alert');
