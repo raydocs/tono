@@ -74,6 +74,13 @@ const AUTH_ERROR_CODES = new Set([
   'TONO_TLS_INTERCEPTED',
 ])
 
+// Decision 091's native marker is the signal, not the current protection state:
+// legacy Services and other request paths may still return the generic error.
+const relayOnlyFailure = (error: unknown) => {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  return raw.match(/(?:^|: )TONO_RELAYS_UNREACHABLE: ([\s\S]*)$/)?.[1] ?? null
+}
+
 // Copy-to-support gets only fixed labels and allowlisted tokens, never the
 // backend error chain (which may contain request URLs or other private data).
 const authSupportSummary = (
@@ -90,6 +97,17 @@ const authSupportSummary = (
   const code =
     foundCode && AUTH_ERROR_CODES.has(foundCode) ? foundCode : '(none)'
   const lines = [`Auth stage: ${stage}`, `Error code: ${code}`]
+  const relays = relayOnlyFailure(error)
+  if (relays !== null) {
+    lines.push('Routes: Tono relays')
+    for (const match of relays.matchAll(
+      /(?:^|; )relay ([1-3]) \([^()\r\n]{1,80}\) (dns|connect|tls|timeout|other): /g,
+    )) {
+      const [, relay, kind] = match
+      if (relay && kind) lines.push(`Relay ${relay}: ${kind}`)
+    }
+    return lines.join('\n')
+  }
   const transport = raw.match(
     /^TONO_(?:AUTH_[A-Z0-9_]+|CLOCK_SKEW|TLS_INTERCEPTED): could not reach Tono: (?:TONO_CAPTIVE_PORTAL: )?([\s\S]*)$/,
   )?.[1]
@@ -219,7 +237,11 @@ const LoginPage = () => {
       // not a resend cooldown — the resend cooldown stays a fixed 60s.
       setCountdown(RESEND_COUNTDOWN)
     } catch (error) {
-      setError(formatTonoActionError(error, t))
+      setError(
+        relayOnlyFailure(error) !== null
+          ? t('tono.login.errors.relaysUnreachable')
+          : formatTonoActionError(error, t),
+      )
       setAuthFailureSummary(authSupportSummary('send-code', error))
     } finally {
       authRequestPendingRef.current = false
@@ -258,7 +280,11 @@ const LoginPage = () => {
         autoSubmittedCodeRef.current = null
         setRejectedAttempt((attempt) => attempt + 1)
       }
-      setError(formatTonoActionError(error, t))
+      setError(
+        relayOnlyFailure(error) !== null
+          ? t('tono.login.errors.relaysUnreachable')
+          : formatTonoActionError(error, t),
+      )
       setAuthFailureSummary(authSupportSummary('verify-code', error))
     } finally {
       authRequestPendingRef.current = false
@@ -898,6 +924,26 @@ const LoginPage = () => {
           >
             {error}
           </p>
+        )}
+        {error && authFailureSummary?.includes('\nRoutes: Tono relays') && (
+          <details style={{ fontSize: 12, color: text.secondary }}>
+            <summary style={{ cursor: 'pointer' }}>
+              {t('tono.login.relayFailureDetails')}
+            </summary>
+            <p style={{ margin: '8px 0', lineHeight: 1.5 }}>
+              {t('tono.login.relayFailureKinds')}
+            </p>
+            <pre
+              style={{
+                margin: 0,
+                fontFamily: TONO_MONO_STACK,
+                whiteSpace: 'pre-wrap',
+                overflowWrap: 'anywhere',
+              }}
+            >
+              {authFailureSummary}
+            </pre>
+          </details>
         )}
         {errorOffersSupport && (
           <SupportContact

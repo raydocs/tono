@@ -274,8 +274,11 @@
       "stillRunningTitle": "上次的连接仍在运行",
       "stillRunningDescription": "上次会话的隧道仍在转发流量。登录其他账号可能停止这条连接。「恢复网络」会停止连接并关闭保护。"
     },
+    "relayFailureDetails": "中继失败详情",
+    "relayFailureKinds": "connect：连接失败；timeout：等待超时；tls：安全连接失败；dns：域名解析失败；other：请求失败。这些是返回的分类，不是对你当前网络的诊断。",
     "errors": {
       "unreachable": "这个网络暂时连不上 Tono 的登录服务器。请确认电脑能上网，等一分钟再试；一直失败请复制详情发给客服。",
+      "relaysUnreachable": "Tono 的备用线路目前都无法到达。请检查网络，或稍后再试。重试不需要关闭保护。",
       "rateLimited": "尝试过多，请稍后再试。",
       "deviceLimit": "这个账号的设备数已满。请在已登录的设备上打开「账号」，移除一台设备，然后重试。",
       "sessionExpired": "验证码已过期，请重新获取。",

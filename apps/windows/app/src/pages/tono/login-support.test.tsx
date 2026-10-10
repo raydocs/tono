@@ -5,9 +5,8 @@ import { initReactI18next } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { setNewAppearance } from '@/tono-ui/appearance-preferences'
-
 import enTono from '@/locales/en/tono.json'
+import { setNewAppearance } from '@/tono-ui/appearance-preferences'
 import { version } from '@root/package.json'
 
 const mocks = vi.hoisted(() => ({
@@ -84,6 +83,47 @@ async function waitForResend() {
 }
 
 describe('login support diagnostics', () => {
+  it('distinguishes relay-only failures and exposes only safe per-relay classifications', async () => {
+    mocks.invoke.mockRejectedValueOnce(
+      'TONO_AUTH_TCP: could not reach Tono: TONO_RELAYS_UNREACHABLE: relay 2 (192.0.2.2:2053) timeout: private-token; relay 3 (192.0.2.3:2053) tls: https://example.invalid/auth?secret=private-query; relay 1 (192.0.2.1:2053) connect: private-device',
+    )
+    renderLogin()
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Send code' })),
+    )
+    expect(screen.getByRole('alert').textContent).toBe(
+      "Tono's backup routes cannot be reached right now. Check your network or try again later. You do not need to turn protection off to retry.",
+    )
+    const details = screen.getByText('Relay failure details').closest('details')
+    expect(details?.open).toBe(false)
+    expect(details?.textContent).toContain('Relay 2: timeout')
+    expect(details?.textContent).toContain('Relay 3: tls')
+    expect(details?.textContent).toContain('Relay 1: connect')
+    expect(details?.textContent).not.toMatch(
+      /private-|192\.0\.2|pinned|system-dns/,
+    )
+    expect(await copyForSupport()).toBe(
+      `${supportHeader}\nAuth stage: send-code\nError code: TONO_AUTH_TCP\nRoutes: Tono relays\nRelay 2: timeout\nRelay 3: tls\nRelay 1: connect`,
+    )
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Send code' })),
+    )
+    expect(screen.queryByText('Relay failure details')).toBeNull()
+    await waitForResend()
+    mocks.invoke.mockRejectedValueOnce(
+      'TONO_AUTH_TCP: could not reach Tono: connect: private-token',
+    )
+    await act(async () =>
+      fireEvent.change(screen.getByLabelText('6-digit code'), {
+        target: { value: '654321' },
+      }),
+    )
+    expect(screen.getByRole('alert').textContent).toBe(
+      `${enTono.login.errors.unreachable} (TONO_AUTH_TCP)`,
+    )
+    expect(screen.queryByText('Relay failure details')).toBeNull()
+  })
+
   it('copies send and verify classifications through the real UI and clears them on retry and reset', async () => {
     mocks.invoke.mockRejectedValueOnce(
       'TONO_AUTH_UNREACHABLE: could not reach Tono: pinned[connect: error sending request for url (https://example.invalid/auth?token=private-token)]; system-dns[timeout: request timed out]; relay[179.253.233.220:2053: connect: error sending request for url (https://example.invalid:2053/auth?token=private-token)]',
