@@ -98,7 +98,7 @@
     "retryPreview": "查看新报告",
     "recoveryTitle": "正在恢复连接",
     "recoveryActive": "Tono 正通过现有恢复流程重试，不会悄悄更换已选出口。",
-    "recoveryWaiting": "已安排重试。你可以立即重试，也可以明确选择恢复普通网络。",
+    "recoveryWaiting": "已安排重试。你可以立即重试，也可以明确选择恢复正常网络。",
     "recoveryStopped": "当前没有安排自动重试。请选择重试或查看健康检查。",
     "repairTitle": "修复后台服务？",
     "repairDescription": "Windows 可能请求管理员权限，以重启 TonoService 及其依赖服务。这不是网络重置，也不会解除保护。",
@@ -124,7 +124,8 @@
     "retry": "重试",
     "connecting": "连接中",
     "disconnecting": "断开中",
-    "pickNode": "切换线路"
+    "pickNode": "切换线路",
+    "useRoute": "改用{{city}}"
   },
   "activity": {
     "title": "活动",
@@ -197,7 +198,6 @@
     "skip": "跳过",
     "next": "继续",
     "getStarted": "开始使用 →",
-    "progress": "第 {{step}} 步，共 4 步",
     "step1": {
       "headline": "连上，就受保护。",
       "body": "打开 Tono，点一下，所有流量都走受保护线路。"
@@ -214,7 +214,7 @@
   "login": {
     "restoringSession": "正在打开你的 Tono 工作区…",
     "stillWaiting": "还在等待？",
-    "restoreInternet": "恢复网络",
+    "restoreInternet": "恢复正常网络",
     "restartTono": "重启 Tono",
     "brandLabel": "连接，从容一点",
     "brandTitle": "距离近一点。\n世界，开阔一点。",
@@ -271,12 +271,12 @@
     },
     "networkBlocked": {
       "title": "网络已被保护拦住",
-      "description": "保护仍在拦住普通网络流量。你仍可登录，无需关闭保护。「恢复网络」是可选操作：它会关闭保护，在你重新连接之前，这台电脑的流量直接出网。",
-      "restore": "恢复网络",
+      "description": "保护仍在拦住普通网络流量。你仍可登录，无需关闭保护。「恢复正常网络」是可选操作：它会关闭保护，在你重新连接之前，这台电脑的流量直接出网。",
+      "restore": "恢复正常网络",
       "restoring": "正在恢复…",
-      "unverifiedDescription": "Tono 无法确认上次连接的保护是否还在。你仍可获取登录验证码。「恢复网络」会明确关闭保护，在你重新连接之前，这台电脑的流量直接出网；获取验证码不需要这一步。",
+      "unverifiedDescription": "Tono 无法确认上次连接的保护是否还在。你仍可获取登录验证码。「恢复正常网络」会明确关闭保护，在你重新连接之前，这台电脑的流量直接出网；获取验证码不需要这一步。",
       "stillRunningTitle": "上次的连接仍在运行",
-      "stillRunningDescription": "上次会话的隧道仍在转发流量。登录其他账号可能停止这条连接。「恢复网络」会停止连接并关闭保护。"
+      "stillRunningDescription": "上次会话的隧道仍在转发流量。登录其他账号可能停止这条连接。「恢复正常网络」会停止连接并关闭保护。"
     },
     "relayFailureDetails": "中继失败详情",
     "relayFailureKinds": "connect：连接失败；timeout：等待超时；tls：安全连接失败；dns：域名解析失败；other：请求失败。这些是返回的分类，不是对你当前网络的诊断。",
@@ -307,7 +307,7 @@
     "subtitle": {
       "tapToConnect": "点击连接",
       "tapToDisconnect": "点击断开",
-      "tapToRestore": "点击恢复网络",
+      "tapToRestore": "点击恢复正常网络（关闭保护）",
       "restoringAccess": "正在恢复网络访问",
       "starting": "正在启动…"
     },
@@ -386,7 +386,7 @@
       "coreUnpinned": "此安装缺少内核校验，请安装最新版。",
       "coreMismatch": "内核与安装不匹配，请安装最新版。",
       "dnsPortBusy": "检测到其他代理软件（如 Clash Verge、CFW 等）正在运行并占用了系统网络。请在系统托盘彻底退出其他代理后再连接。",
-      "protectionReleaseFailed": "保护还没解除。请再点一次「恢复网络」。",
+      "protectionReleaseFailed": "保护还没解除。请再点一次「恢复正常网络」。",
       "encryptedDns": "Windows 还开着「加密 DNS」。点下面打开设置，关掉后再连接。",
       "sendDiagnostics": "发给支持"
     },
@@ -457,7 +457,7 @@
     "retryNow": "立即重试",
     "restore": "恢复正常网络",
     "restoreConfirmTitle": "恢复正常网络",
-    "restoreConfirmMessage": "将解除网络保护并恢复正常 Internet 连接。",
+    "restoreConfirmMessage": "将解除网络保护并恢复正常网络连接。",
     "copyDetails": "复制诊断信息",
     "copied": "诊断信息已复制",
     "copyFailed": "复制诊断信息失败",

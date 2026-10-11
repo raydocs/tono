@@ -124,7 +124,8 @@
     "retry": "Retry",
     "connecting": "Connecting…",
     "disconnecting": "Disconnecting…",
-    "pickNode": "Switch server"
+    "pickNode": "Switch server",
+    "useRoute": "Use {{city}}"
   },
   "activity": {
     "title": "Activity",
@@ -197,7 +198,6 @@
     "skip": "Skip",
     "next": "Continue",
     "getStarted": "Get started →",
-    "progress": "Step {{step}} of 4",
     "step1": {
       "headline": "Connected means protected.",
       "body": "Open Tono, click once, and all your traffic takes the protected route."

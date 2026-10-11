@@ -410,7 +410,7 @@ it('new-look quick switch calls the existing native selection once without dupli
     fireEvent.click(
       await within(
         screen.getByRole('group', { name: 'Switch server' }),
-      ).findByRole('button', { name: 'Buffalo' }),
+      ).findByRole('button', { name: 'Use Buffalo' }),
     ),
   )
   expect(mocks.tonoSelectServer).toHaveBeenCalledExactlyOnceWith(next)
@@ -446,7 +446,7 @@ it('new-look connected tray trades one quick pick for the live-rate line, so the
   render(<TrayPanel />, { wrapper: freshSWR })
   const group = screen.getByRole('group', { name: 'Switch server' })
   expect(
-    await within(group).findByRole('button', { name: 'Buffalo' }),
+    await within(group).findByRole('button', { name: 'Use Buffalo' }),
   ).toBeTruthy()
   expect(screen.getByText(/↑ 4\.00 KB\/s/)).toBeTruthy()
   expect(within(group).getAllByRole('button')).toHaveLength(1)

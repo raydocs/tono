@@ -1254,7 +1254,6 @@ export interface TranslationResources {
         getStarted: string
         landmark: string
         next: string
-        progress: string
         skip: string
         step1: {
           body: string
@@ -1745,6 +1744,7 @@ export interface TranslationResources {
         pickNode: string
         quit: string
         retry: string
+        useRoute: string
       }
     }
   }

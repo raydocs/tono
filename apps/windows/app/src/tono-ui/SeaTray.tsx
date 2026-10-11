@@ -95,7 +95,9 @@ export const SeaTray = ({
               key={server.name}
               onClick={() => onSelect(server.name)}
             >
-              {nodeCityLabel(server.name, t)}
+              {t('tono.tray.useRoute', {
+                city: nodeCityLabel(server.name, t),
+              })}
               <span aria-hidden="true">→</span>
             </button>
           ))}
