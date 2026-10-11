@@ -1938,6 +1938,10 @@ extension KillSwitchManager {
     /// `/core/stop`, forever (R609-F2).
     static let helperCommandDeadline: TimeInterval = 15
 
+    /// The `/bin/sh` admission gate in front of every command. The release
+    /// worker recognises a gated child of a dead helper by this exact text.
+    static let commandGateScript = #"IFS= read -r gate || exit 125; [ "$gate" = go ] || exit 125; exec "$0" "$@""#
+
     /// Past `deadline` the command has failed, whatever it would have done:
     /// no caller may read a load, an enable or a release that never reported
     /// back as done. The deadline starts before the launch: `Process.run()`
@@ -1970,7 +1974,7 @@ extension KillSwitchManager {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [
-            "-c", #"IFS= read -r gate || exit 125; [ "$gate" = go ] || exit 125; exec "$0" "$@""#,
+            "-c", commandGateScript,
             executable,
         ] + arguments
         process.environment = environment

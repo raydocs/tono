@@ -296,6 +296,9 @@ pub struct TonoInner {
     /// are deliberately detached and reconcile after commit, but the user-facing transaction no
     /// longer waits for them after Disconnect, node replacement, Quit, or its absolute deadline.
     pub connect_cancellation: CancellationToken,
+    /// The release ticket of the latest admitted attempt: taken when it began, then the
+    /// generation the Service admitted it under. Teardowns of that session send its generation.
+    pub release_ticket: crate::core::service::ReleaseTicket,
     /// The intent of the latest generation bump (H-1): `true` when the
     /// bumper releases the barrier (disconnect / sign-out / quit), `false`
     /// when it re-arms or keeps blocking (node switch, catalog teardown).
@@ -809,6 +812,7 @@ impl TonoState {
                 controller_generation: 0,
                 connect_generation: 0,
                 connect_cancellation: CancellationToken::new(),
+                release_ticket: Default::default(),
                 release_on_stale: false,
                 retired_intents: VecDeque::new(),
                 last_core_pid: None,

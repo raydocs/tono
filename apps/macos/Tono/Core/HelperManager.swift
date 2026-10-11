@@ -1424,7 +1424,7 @@ nonisolated struct HelperManager {
             return 6
         case "/core/start", "/core/sync":
             return 20
-        case "/version", "/core/status", "/killswitch/status", "/release/status":
+        case "/version", "/core/status", "/killswitch/status", "/release/status", "/session/status":
             return 2
         case "/release":
             // The release service answers by 28 s even when its worker is
@@ -1615,36 +1615,110 @@ nonisolated struct HelperManager {
 
     /// The first protective request of a session admits it under the
     /// helper's machine lock; every session request then carries the
-    /// generation. Requests outside a session box send none, as before.
+    /// generation. The session box is the operation's epoch: the task
+    /// captured it before any async work, and it is read once here.
+    ///
+    /// Admission reads the helper's current generation first and admits
+    /// with it as a compare-and-swap (R-F3). A release-direction request
+    /// with no admitted generation, inside a box or outside any box, names
+    /// the generation current right now, so a Connect admitted in between
+    /// makes the helper refuse it instead of tearing that session down
+    /// (R-F4). Protective requests outside a box stay headerless; the
+    /// helper refuses them on a released machine.
     static func sessionGenerationHeader(method: String, path: String) throws -> String {
-        guard let session = HelperSessionGeneration.current,
-              let kind = sessionRequestKind(method: method, path: path) else { return "" }
+        guard let kind = sessionRequestKind(method: method, path: path) else { return "" }
+        guard let session = HelperSessionGeneration.current else {
+            guard kind == .releasing, let current = try readSessionStatus()?.generation else { return "" }
+            return generationHeader(current)
+        }
         if session.isRetired, session.value == nil {
             throw HelperIPCError.commandFailed("Earlier session.", code: "STALE_GENERATION")
         }
-        if kind == .protective, session.value == nil, !session.helperPredatesAdmission {
-            if let generation = try admitSession() {
-                session.adopt(generation)
-            } else {
-                session.markHelperPredatesAdmission()
+        if session.value == nil, !session.helperPredatesAdmission {
+            switch kind {
+            case .protective:
+                let admitted = try session.admitIfNeeded {
+                    guard let status = try HelperManager.readSessionStatus() else { return nil }
+                    if !mayAdmit(status, userInitiated: session.userInitiated) {
+                        throw HelperIPCError.commandFailed(
+                            "Restore internet released this Mac. Choose Connect to protect it again.",
+                            code: "STALE_GENERATION"
+                        )
+                    }
+                    return try HelperManager.admitSession(expectedGeneration: status.generation)
+                }
+                guard admitted else {
+                    throw HelperIPCError.commandFailed("Earlier session.", code: "STALE_GENERATION")
+                }
+            case .releasing:
+                guard let current = try readSessionStatus()?.generation else { return "" }
+                return generationHeader(current)
             }
         }
         guard let generation = session.value else { return "" }
-        return "X-Tono-Generation: \(generation)\r\n"
+        return generationHeader(generation)
     }
 
-    /// Connect admission. Nil from a helper that predates it (404). A
-    /// refusal names why Connect must wait (`RELEASE_IN_PROGRESS`,
-    /// `RELEASE_UNFINISHED`, `RELEASE_RECORD_CORRUPT`).
-    static func admitSession() throws -> UInt64? {
-        let result = try sendRequest(method: "POST", path: "/session/admit")
+    private static func generationHeader(_ generation: UInt64) -> String {
+        "X-Tono-Generation: \(generation)\r\n"
+    }
+
+    /// After Restore internet only the user's Connect admits (R-F3).
+    static func mayAdmit(_ status: SessionStatus, userInitiated: Bool) -> Bool {
+        !status.released || userInitiated
+    }
+
+    struct SessionStatus: Equatable {
+        let released: Bool
+        /// Nil when the helper's release record is unreadable.
+        let generation: UInt64?
+    }
+
+    /// The helper's release record as it is now. Nil from a helper that
+    /// predates admission (404).
+    static func readSessionStatus() throws -> SessionStatus? {
+        let result = try sendRequest(method: "GET", path: "/session/status")
         if result.status == 404 { return nil }
-        try requireSuccess(result, operation: "session admission")
+        _ = try requireSuccess(result, operation: "session status")
+        guard let object = try? JSONSerialization.jsonObject(with: result.body) as? [String: Any] else {
+            throw HelperIPCError.invalidResponse
+        }
+        return SessionStatus(
+            released: object["mode"] as? String == "released",
+            generation: (object["generation"] as? NSNumber)?.uint64Value
+        )
+    }
+
+    /// Connect admission, a compare-and-swap on `expectedGeneration`. Nil
+    /// from a helper that predates it (404). A refusal names why Connect
+    /// must wait (`RELEASE_IN_PROGRESS`, `RELEASE_UNFINISHED`,
+    /// `RELEASE_RECORD_CORRUPT`, `STALE_GENERATION`).
+    static func admitSession(expectedGeneration: UInt64?) throws -> UInt64? {
+        var body: Data?
+        if let expectedGeneration {
+            body = try JSONSerialization.data(withJSONObject: ["expectedGeneration": NSNumber(value: expectedGeneration)])
+        }
+        let result = try sendRequest(method: "POST", path: "/session/admit", body: body)
+        if result.status == 404 { return nil }
+        _ = try requireSuccess(result, operation: "session admission")
         guard let object = try? JSONSerialization.jsonObject(with: result.body) as? [String: Any],
               let number = object["generation"] as? NSNumber else {
             throw HelperIPCError.invalidResponse
         }
         return number.uint64Value
+    }
+
+    /// The generation in the release record, read through the release
+    /// service (not the daemon, which a Restore must not depend on). Nil
+    /// when the record is unreadable.
+    static func releaseStatusGeneration() throws -> UInt64? {
+        let result = try sendRequest(method: "GET", path: "/release/status", socket: releaseSocketPath)
+        if result.status == 403 { throw HelperIPCError.forbidden }
+        guard result.status == 200,
+              let object = try? JSONSerialization.jsonObject(with: result.body) as? [String: Any] else {
+            throw HelperIPCError.invalidResponse
+        }
+        return (object["generation"] as? NSNumber)?.uint64Value
     }
 
     static let releaseSocketPath = "/var/run/tono-release.sock"
@@ -1673,6 +1747,20 @@ nonisolated struct HelperManager {
         let stuck: [Int32]
         let finished: Bool
         let detail: String?
+
+        /// The app's own part of the result (R-M1): a system proxy Tono set
+        /// that is still in place makes a restored result partial, and one
+        /// that could not be read makes it unknown.
+        func includingSystemProxy(tonoProxyRemains: Bool?) -> ReleaseOutcome {
+            guard tonoProxyRemains != false else { return self }
+            let remains = tonoProxyRemains == true
+            var combined = outcome
+            if combined == "restored" { combined = remains ? "partial" : "unknown" }
+            let proxy = Component(name: "proxy", readback: remains ? "residual" : "unreadable", risk: "unknown",
+                                  detail: remains ? "Tono's system proxy is still set." : "System proxy settings could not be read.")
+            return ReleaseOutcome(outcome: combined, generation: generation, components: components + [proxy],
+                                  stuck: stuck, finished: finished, detail: detail)
+        }
     }
 
     /// Restore internet through the release service. Never goes through the

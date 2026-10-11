@@ -12,10 +12,17 @@ fn scratch() -> PathBuf {
     directory
 }
 
+fn stamp(marker: &str) -> BootStamp {
+    BootStamp {
+        marker: Some(marker.into()),
+        booted_at: None,
+    }
+}
+
 fn idle() -> Processes {
     Processes {
         alive: Box::new(|_| Some(false)),
-        boot_session: Box::new(|| Some("boot".into())),
+        boot: Box::new(|| stamp("boot")),
     }
 }
 
@@ -97,10 +104,30 @@ fn a_connect_for_an_older_secured_generation_is_stale() {
 }
 
 #[test]
+fn a_start_without_a_generation_after_an_admission_is_stale() {
+    let secured = Record {
+        generation: 20,
+        ..Record::default()
+    };
+    assert_eq!(start_verdict(&secured, None), StartVerdict::Stale);
+}
+
+#[test]
+fn an_old_teardown_cannot_reach_a_newer_session() {
+    let newer = Record {
+        generation: 22,
+        ..Record::default()
+    };
+    assert!(!release_generation_verdict(&newer, Some(20)));
+    assert!(!release_generation_verdict(&newer, None));
+    assert!(release_generation_verdict(&newer, Some(22)));
+}
+
+#[test]
 fn a_live_worker_blocks_admission() {
     let live = Processes {
         alive: Box::new(|incarnation| Some(incarnation.pid == 4242)),
-        boot_session: Box::new(|| Some("boot".into())),
+        boot: Box::new(|| stamp("boot")),
     };
     let mut record = released(3);
     record.worker = Some(Incarnation {
@@ -114,7 +141,7 @@ fn a_live_worker_blocks_admission() {
 fn an_unreadable_process_blocks_admission() {
     let unknown = Processes {
         alive: Box::new(|_| None),
-        boot_session: Box::new(|| Some("boot".into())),
+        boot: Box::new(|| stamp("boot")),
     };
     let mut record = released(3);
     record.stuck = vec![Incarnation {
@@ -128,7 +155,7 @@ fn an_unreadable_process_blocks_admission() {
 fn a_record_from_an_earlier_boot_does_not_block() {
     let alive = Processes {
         alive: Box::new(|_| Some(true)),
-        boot_session: Box::new(|| Some("this boot".into())),
+        boot: Box::new(|| stamp("this boot")),
     };
     let mut record = released(3);
     record.worker_boot_session = Some("earlier boot".into());
@@ -137,4 +164,51 @@ fn a_record_from_an_earlier_boot_does_not_block() {
         started_at: 3,
     }];
     assert!(alive.unretired_reason(&record).is_none());
+}
+
+#[test]
+fn a_reinstall_within_one_boot_is_not_a_reboot() {
+    let before = BootStamp {
+        marker: Some("before reinstall".into()),
+        booted_at: Some(1_000),
+    };
+    let after = BootStamp {
+        marker: Some("after reinstall".into()),
+        booted_at: Some(1_030),
+    };
+    assert!(before.same_boot_as(&after));
+}
+
+#[test]
+fn a_retry_keeps_the_survivors_of_the_previous_release() {
+    let processes = Processes {
+        alive: Box::new(|incarnation| Some(incarnation.pid == 7)),
+        boot: Box::new(|| stamp("boot")),
+    };
+    let mut record = released(3);
+    record.worker = Some(Incarnation { pid: 7, started_at: 1 });
+    record.stuck = vec![Incarnation { pid: 8, started_at: 2 }];
+    assert_eq!(
+        processes.unretired_incarnations(&record),
+        vec![Incarnation { pid: 7, started_at: 1 }]
+    );
+}
+
+#[test]
+fn an_unproven_worker_job_blocks_while_its_owner_runs() {
+    let processes = Processes {
+        alive: Box::new(|incarnation| Some(incarnation.pid == 50)),
+        boot: Box::new(|| stamp("boot")),
+    };
+    let mut record = released(3);
+    record.jobs_unproven = true;
+    record.job_owner = Some(Incarnation { pid: 50, started_at: 5 });
+    assert!(processes.unretired_reason(&record).is_some());
+}
+
+#[test]
+fn a_pending_wmi_dns_change_blocks_until_the_boot_ends() {
+    let mut record = released(3);
+    record.broker_unknown_boot = Some(stamp("boot"));
+    assert!(idle().unretired_reason(&record).is_some());
 }

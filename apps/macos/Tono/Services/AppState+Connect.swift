@@ -7,6 +7,13 @@ extension AppState {
         connect(preservingUnarmedBackoff: false)
     }
 
+    /// Connect from the user's own click: the only connect that may protect
+    /// a Mac again after Restore internet released it.
+    func userConnect() {
+        connectionCoordinator.beginUserConnect()
+        connect()
+    }
+
     func connect(preservingUnarmedBackoff: Bool) {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
         if !preservingUnarmedBackoff { unarmedReconnectAttempt = 0 }
@@ -820,20 +827,40 @@ extension AppState {
         let requestID = UUID().uuidString
         let generation = connectionCoordinator.protectionOperationGeneration
         LocalTrafficAudit.shared.recordEvent("preemptive_release_requested", details: [:])
+        let sessionPorts: Set<Int> = config.mixedPort > 0 ? [config.mixedPort] : []
         Task { [weak self] in
+            // R-F4: the Restore names the session it is for. With no admitted
+            // session it names the generation current now, read from the
+            // release service, so a Connect admitted in between supersedes it.
             let result = await Task.detached(priority: .userInitiated) {
-                Result { try HelperManager.requestRelease(requestID: requestID, expectedGeneration: expectedGeneration) }
+                Result {
+                    try HelperManager.requestRelease(
+                        requestID: requestID,
+                        expectedGeneration: expectedGeneration ?? HelperManager.releaseStatusGeneration()
+                    )
+                }
             }.value
             guard let self else { return }
             // A newer Connect or Restore owns the UI now.
             guard self.connectionCoordinator.protectionOperationGeneration == generation else { return }
-            self.finishPreemptiveRelease(result, updateWasPending: updateWasPending)
+            // R-M1: a system proxy Tono set points at a listener that is gone.
+            // It is cleared and read back before anything is reported; the
+            // release service cannot reach it. Not when a newer session won.
+            var tonoProxyRemains: Bool? = false
+            if case .success(let answer) = result, answer.outcome != "superseded", answer.outcome != "busy" {
+                tonoProxyRemains = await Task.detached(priority: .userInitiated) {
+                    SystemProxy.clearTonoOwnedProxy(sessionPorts: sessionPorts)
+                }.value
+                guard self.connectionCoordinator.protectionOperationGeneration == generation else { return }
+            }
+            self.finishPreemptiveRelease(result, updateWasPending: updateWasPending, tonoProxyRemains: tonoProxyRemains)
         }
     }
 
     private func finishPreemptiveRelease(
         _ result: Result<HelperManager.ReleaseOutcome, Error>,
-        updateWasPending: Bool
+        updateWasPending: Bool,
+        tonoProxyRemains: Bool?
     ) {
         isDisconnecting = false
         disconnectionStartedAt = nil
@@ -841,7 +868,7 @@ extension AppState {
         let outcome: HelperManager.ReleaseOutcome
         switch result {
         case .success(let answer):
-            outcome = answer
+            outcome = answer.includingSystemProxy(tonoProxyRemains: tonoProxyRemains)
         case .failure(let error):
             // The service did not answer. The queued release is the only
             // other path; it reports its own result.
@@ -865,12 +892,6 @@ extension AppState {
         if pfClean { KillSwitchService.isArmed = false }
         if coreClean { RuntimeCleanup.clearCoreStarted() }
         if updateWasPending { RuntimeCleanup.nativeUpdateBlocksConnect = true }
-        if !config.tunEnabled {
-            // App-owned and per user; the release service cannot reach it.
-            Task.detached(priority: .utility) {
-                if SystemProxy.didSetProxy { try? SystemProxy.disable() }
-            }
-        }
         switch outcome.outcome {
         case "restored":
             isProtectionBlocked = false
@@ -910,6 +931,7 @@ extension AppState {
             case "ai": String(localized: "AI service protection")
             case "dns": String(localized: "DNS settings")
             case "core": String(localized: "Tono's network core")
+            case "proxy": String(localized: "system proxy settings")
             default: component.name
             }
         })

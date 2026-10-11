@@ -300,6 +300,11 @@ async fn run_release_sequence(
         }
     }
 
+    // The session this release tears down, read while the release guard keeps any attempt from
+    // replacing it (Sol R-F4: same owner is not same session).
+    let release_generation =
+        service::teardown_release_generation(state.lock().await.release_ticket.generation).await;
+
     #[cfg(windows)]
     let status = {
         // User Disconnect and failed-Prepare recovery request this durable release.
@@ -310,9 +315,9 @@ async fn run_release_sequence(
         match update_release {
             Some(status) => status,
             None => match if apply_narrow {
-                service::tono_release_kill_switch_applying_narrow().await
+                service::tono_release_kill_switch_applying_narrow(release_generation).await
             } else {
-                service::tono_release_kill_switch().await
+                service::tono_release_kill_switch(release_generation).await
             } {
                 Ok(status) => status,
                 Err(error) => return Err(release_failed(state, &error).await),
@@ -322,14 +327,14 @@ async fn run_release_sequence(
 
     #[cfg(not(windows))]
     let status = {
-        service::tono_restore_protected_dns()
+        service::tono_restore_protected_dns(release_generation)
             .await
             .map_err(|error| format!("DNS restore failed; protection stays on: {error}"))?;
         let core_active = matches!(*CoreManager::global().get_running_mode(), RunningMode::Service);
         if stop_core_before_release(core_active, service::tono_session_live()) {
             let _ = service::tono_stop_core(false).await;
         }
-        match service::tono_release_kill_switch().await {
+        match service::tono_release_kill_switch(release_generation).await {
             Ok(status) => status,
             Err(error) => return Err(release_failed(state, &error).await),
         }

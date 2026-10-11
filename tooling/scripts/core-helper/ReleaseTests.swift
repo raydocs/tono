@@ -19,7 +19,7 @@ func runReleaseSelfTests() -> Bool {
             passed = false
         }
     }
-    let idle = ReleaseProcesses(incarnation: { _ in nil }, sessionMembers: { _ in [] }, bootSession: { "boot" }, kill: { _ in })
+    let idle = ReleaseProcesses(state: { _ in .gone }, groupMembers: { _, _ in [] }, bootSession: { "boot" }, kill: { _ in })
 
     // A machine that never ran a release is secured at generation 0.
     check((try? authority.load()) == ReleaseAuthority.Record(), "missing record reads as secured")
@@ -57,7 +57,7 @@ func runReleaseSelfTests() -> Bool {
     released.executorQuarantined = true
     try? authority.save(released)
     var executorRestores = 0
-    let admitted = try? authority.admit(processes: idle, restoreExecutor: { executorRestores += 1 })
+    let admitted = try? authority.admit(expectedGeneration: 7, processes: idle, restoreExecutor: { executorRestores += 1 })
     let afterAdmission = try? authority.load()
     check(admitted != nil && admitted! > 7 && afterAdmission?.mode == .secured
             && afterAdmission?.generation == admitted && afterAdmission?.executorQuarantined == false
@@ -84,7 +84,7 @@ func runReleaseSelfTests() -> Bool {
     var running = releasedRecord
     running.worker = worker
     running.workerBootSession = "boot"
-    let liveWorker = ReleaseProcesses(incarnation: { $0 == 4242 ? worker : nil }, sessionMembers: { _ in [] },
+    let liveWorker = ReleaseProcesses(state: { $0 == 4242 ? .alive(worker) : .gone }, groupMembers: { _, _ in [] },
                                       bootSession: { "boot" }, kill: { _ in })
     check(liveWorker.unretiredReason(running) != nil, "running worker blocks admission")
 
@@ -92,8 +92,8 @@ func runReleaseSelfTests() -> Bool {
     var stuckRecord = releasedRecord
     stuckRecord.workerBootSession = "boot"
     stuckRecord.stuck = [.init(pid: 99, startSeconds: 3, startMicroseconds: 4)]
-    let stuckAlive = ReleaseProcesses(incarnation: { $0 == 99 ? .init(pid: 99, startSeconds: 3, startMicroseconds: 4) : nil },
-                                      sessionMembers: { _ in [] }, bootSession: { "boot" }, kill: { _ in })
+    let stuckAlive = ReleaseProcesses(state: { $0 == 99 ? .alive(.init(pid: 99, startSeconds: 3, startMicroseconds: 4)) : .gone },
+                                      groupMembers: { _, _ in [] }, bootSession: { "boot" }, kill: { _ in })
     check(stuckAlive.unretiredReason(stuckRecord) != nil, "stuck writer blocks admission")
 
     // Only a record from this boot can block: an earlier boot ended its work.
@@ -118,7 +118,164 @@ func runReleaseSelfTests() -> Bool {
     // E-F5-v4-F1: a worker that cannot get C reports busy and touches nothing.
     check(workerWithoutLockReportsBusy(), "worker without C reports busy")
 
+    // R-F1: clean, agreeing reads are not terminal evidence. A Tono command
+    // child still alive (found by its arguments, here not killed) leaves its
+    // components unknown, and so does an unverified bootout.
+    let cleanReads = ReleaseCleanup.componentNames.map {
+        ReleaseReport.Component(name: $0, readback: "restored", risk: "unknown", detail: nil)
+    }
+    let proven = ReleaseWorker.TerminalEvidence(quarantineVerified: true, writersEnded: true, busy: [], storedDNSUsesTonoResolver: false)
+    check(ReleaseReport.outcome(components: ReleaseWorker.settle(first: cleanReads, second: cleanReads, evidence: proven),
+                                stuck: [], finished: true) == "restored",
+          "clean reads with terminal evidence are restored")
+    var unverified = proven
+    unverified.quarantineVerified = false
+    check(ReleaseReport.outcome(components: ReleaseWorker.settle(first: cleanReads, second: cleanReads, evidence: unverified),
+                                stuck: [], finished: true) == "unknown",
+          "clean reads with an unverified bootout are not restored")
+    check(liveTaggedChildKeepsComponentsUnsettled(cleanReads: cleanReads, proven: proven),
+          "clean reads with a live Tono command child are not restored")
+
+    // R-F2: a retry carries an unfinished worker forward instead of dropping
+    // it, and the new record still refuses Connect.
+    var crashed = releasedRecord
+    crashed.worker = worker
+    crashed.workerBootSession = "boot"
+    crashed.workerFinished = false
+    let carried = ReleaseWorker.carryForward(crashed, currentBoot: "boot", processes: liveWorker)
+    var retried = crashed
+    retried.worker = .init(pid: 5151, startSeconds: 9, startMicroseconds: 9)
+    retried.workerFinished = true
+    retried.earlier = carried.earlier
+    check(carried.earlier.map(\.worker) == [worker] && liveWorker.unretiredReason(retried) != nil,
+          "retry keeps an unretired worker")
+
+    // R-F2: an inspection error is unknown, never gone.
+    let unreadable = ReleaseProcesses(state: { _ in .unknown }, groupMembers: { _, _ in [] }, bootSession: { "boot" }, kill: { _ in })
+    check(unreadable.unretiredReason(running) != nil, "unreadable worker blocks admission")
+
+    // R-F2: a missing boot identity counts as the same boot.
+    check(stuckAlive.unretiredReason({ var r = stuckRecord; r.workerBootSession = nil; return r }()) != nil,
+          "missing boot identity does not skip the checks")
+
+    // R-F2: a worker that is gone still leaves its session and group to empty.
+    var goneWorker = releasedRecord
+    goneWorker.worker = worker
+    goneWorker.workerBootSession = "boot"
+    let heldGroup = ReleaseProcesses(state: { _ in .gone }, groupMembers: { _, _ in [777] }, bootSession: { "boot" }, kill: { _ in })
+    check(heldGroup.unretiredReason(goneWorker) != nil, "a live process in the release group blocks admission")
+
+    // R-F2: history lost to a corrupt record blocks the rest of that boot.
+    var lost = releasedRecord
+    lost.historyLostBoot = "boot"
+    check(idle.unretiredReason(lost) != nil, "lost history blocks admission in its boot")
+
+    // R-F1: an unsettled component recorded by the release blocks admission.
+    var unsettledRecord = releasedRecord
+    unsettledRecord.unsettled = ["dns"]
+    check(idle.unretiredReason(unsettledRecord) != nil, "unsettled component blocks admission")
+
+    // R-F3: a protective request without a generation on a released machine
+    // is refused, not admitted, and the record does not move.
+    try? authority.save(releasedRecord)
+    let implicit = (try? SocketServer.enforceSessionGeneration(nil, kind: .protective, authority: authority)) != nil
+    check(!implicit && (try? authority.load()) == releasedRecord, "headerless arm on a released machine is refused")
+
+    // R-F3: admission is a compare-and-swap on the generation read before.
+    let wrongExpected = (try? authority.admit(expectedGeneration: 20, processes: idle)) != nil
+    let noExpected = (try? authority.admit(processes: idle)) != nil
+    check(!wrongExpected && !noExpected && (try? authority.load()) == releasedRecord,
+          "admission with another generation changes nothing")
+
+    // R-F4: a release-direction request must name the current generation.
+    check(ReleaseAuthority.verdict(record: releasedRecord, generation: 20, kind: .releasing) == .stale
+            && ReleaseAuthority.verdict(record: secured, generation: nil, kind: .releasing) == .needsAdmission,
+          "teardown from before a release, or without a generation, is refused")
+
+    // R-F5: a step that did not prove itself is never restored.
+    check(ReleaseReport.outcome(components: [clean], stuck: [], finished: true, failures: ["save failed"]) == "unknown",
+          "failed step is unknown")
+    check(ReleaseLaunchd.state("com.raydocs.tono.self-test-absent") == .notLoaded, "launchd reads back an absent job")
+
+    // R-F6: a worker that died after the bootout leaves the daemon to the
+    // release job, which puts it back without re-arming anything.
+    var quarantined = releasedRecord
+    quarantined.worker = worker
+    quarantined.workerBootSession = "boot"
+    quarantined.daemonBootedOut = true
+    quarantined.executorQuarantined = true
+    try? authority.save(quarantined)
+    var restores = 0
+    let recovered = ReleaseQuarantine.recover(authority: authority, processes: idle, restore: { restores += 1; return true })
+    let afterRecovery = try? authority.load()
+    check(recovered == .clear && restores == 1 && afterRecovery?.daemonBootedOut == nil
+            && afterRecovery?.mode == .released && afterRecovery?.executorQuarantined == true,
+          "dead worker's quarantine is recovered without re-arming")
+    try? authority.save(quarantined)
+    let failedRecovery = ReleaseQuarantine.recover(authority: authority, processes: idle, restore: { false })
+    check(failedRecovery != .clear && (try? authority.load())?.daemonRecoveryFailure != nil
+            && (try? authority.load())?.daemonBootedOut == true,
+          "failed recovery stays visible")
+
+    // R-M2: an emergency command that gets C marks the machine released with
+    // a new generation; without C it runs and leaves the record alone.
+    try? authority.save(secured)
+    var ran = 0
+    _ = runEmergencyUnderReleaseAuthority(authority: authority) { ran += 1; return true }
+    let afterEmergency = try? authority.load()
+    check(ran == 1 && afterEmergency?.mode == .released && (afterEmergency?.generation ?? 0) > 20
+            && afterEmergency?.unsettled == ReleaseCleanup.componentNames,
+          "emergency under C releases with a new generation")
+    try? authority.save(secured)
+    _ = try? authority.withLock(timeout: 1) { (_: Int32) -> Bool in
+        runEmergencyUnderReleaseAuthority(authority: authority) { ran += 1; return true }
+    }
+    check(ran == 2 && (try? authority.load()) == secured, "emergency without C leaves the record alone")
+
     return passed
+}
+
+/// A real gated command child, as `KillSwitchManager.run` starts it, held at
+/// its gate. The release must find it by its arguments; with the kill
+/// withheld it stays alive, and its components must not settle.
+private func liveTaggedChildKeepsComponentsUnsettled(cleanReads: [ReleaseReport.Component],
+                                                     proven: ReleaseWorker.TerminalEvidence) -> Bool {
+    var gate: [Int32] = [-1, -1]
+    guard pipe(&gate) == 0 else { return false }
+    defer { close(gate[1]) }
+    var actions: posix_spawn_file_actions_t?
+    posix_spawn_file_actions_init(&actions)
+    defer { posix_spawn_file_actions_destroy(&actions) }
+    posix_spawn_file_actions_adddup2(&actions, gate[0], 0)
+    let argv: [UnsafeMutablePointer<CChar>?] = [
+        strdup("/bin/sh"), strdup("-c"), strdup(KillSwitchManager.commandGateScript),
+        strdup("/sbin/pfctl"), strdup("-s"), strdup("info"), nil,
+    ]
+    defer { argv.forEach { free($0) } }
+    var pid: pid_t = 0
+    let spawned = posix_spawn(&pid, "/bin/sh", &actions, nil, argv, nil)
+    close(gate[0])
+    guard spawned == 0 else { return false }
+    defer {
+        kill(pid, SIGKILL)
+        var status: Int32 = 0
+        waitpid(pid, &status, 0)
+    }
+    usleep(300_000)
+    let withheld = ReleaseProcesses(state: { ReleaseProcessTable.state(of: $0) },
+                                    groupMembers: { ReleaseProcessTable.members(session: $0, group: $1) },
+                                    bootSession: { "boot" }, kill: { _ in })
+    let outcome = ReleaseChildren.end(processes: withheld)
+    var evidence = proven
+    evidence.busy = outcome.busy
+    let settled = ReleaseWorker.settle(first: cleanReads, second: cleanReads, evidence: evidence)
+    guard outcome.stuck.contains(where: { $0.pid == pid }), outcome.busy.contains("pf"),
+          ReleaseReport.outcome(components: settled, stuck: outcome.stuck.map(\.pid), finished: true) == "unknown",
+          ReleaseReport.outcome(components: settled, stuck: [], finished: true) == "unknown" else {
+        fputs("release tagged child \(pid): \(ReleaseProcessTable.arguments(of: pid) ?? []), busy \(outcome.busy)\n", stderr)
+        return false
+    }
+    return true
 }
 
 /// Starts `/bin/sh` as a session leader with two children, kills only the
@@ -134,8 +291,8 @@ private func deadWorkerSessionIsEnded() -> Bool {
     guard posix_spawn(&pid, "/bin/sh", nil, &attributes, argv, nil) == 0 else { return false }
     usleep(300_000)
     guard let leader = ReleaseProcessTable.incarnation(of: pid),
-          ReleaseProcessTable.sessionMembers(pid).count >= 3 else {
-        fputs("release session members of \(pid): \(ReleaseProcessTable.sessionMembers(pid)), getsid \(getsid(pid))\n", stderr)
+          (ReleaseProcessTable.sessionMembers(pid) ?? []).count >= 3 else {
+        fputs("release session members of \(pid): \(ReleaseProcessTable.sessionMembers(pid) ?? []), getsid \(getsid(pid))\n", stderr)
         kill(-pid, SIGKILL)
         return false
     }
@@ -147,7 +304,7 @@ private func deadWorkerSessionIsEnded() -> Bool {
     record.worker = leader
     record.workerBootSession = try? TonoAuthenticatedPeer.bootSession()
     let reason = ReleaseProcesses.live.unretiredReason(record)
-    return reason == nil && ReleaseProcessTable.sessionMembers(pid).isEmpty
+    return reason == nil && ReleaseProcessTable.sessionMembers(pid) == []
 }
 
 private func workerWithoutLockReportsBusy() -> Bool {

@@ -25,7 +25,7 @@ pub async fn restore_internet(state: Arc<TonoState>, app: AppHandle) -> Result<(
         use crate::core::service::{PreemptiveRelease, tono_restore_internet_preemptively};
 
         // From here no connect or reconnect task starts the Core until the user clicks Connect.
-        crate::core::service::raise_release_fence();
+        let ticket = crate::core::service::raise_release_fence();
         {
             let mut inner = state.lock().await;
             inner.client.transport().set_auth_tunnel_port(0);
@@ -33,7 +33,7 @@ pub async fn restore_internet(state: Arc<TonoState>, app: AppHandle) -> Result<(
             inner.fsm.begin_disconnect();
             commands::emit_status(&app, &commands::status_of(&inner));
         }
-        match tono_restore_internet_preemptively().await {
+        match tono_restore_internet_preemptively(ticket).await {
             PreemptiveRelease::Answered(report) => return settle(&state, &app, report).await,
             PreemptiveRelease::Unavailable(reason) => {
                 logging!(

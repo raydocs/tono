@@ -83,6 +83,15 @@ final class ConnectionCoordinator {
         helperSession = HelperSessionGeneration()
     }
 
+    /// The user's own Connect: a session not yet admitted is replaced by one
+    /// that may admit a released machine. Automatic connects keep the box
+    /// they have, which cannot (R-F3).
+    func beginUserConnect() {
+        guard helperSession.value == nil, !helperSession.userInitiated else { return }
+        helperSession.retire()
+        helperSession = HelperSessionGeneration(userInitiated: true)
+    }
+
     /// A preemptive release that could not confirm the network is restored
     /// keeps the release intent, like the queued path, until the user connects.
     func notePreemptiveReleaseUnconfirmed() {

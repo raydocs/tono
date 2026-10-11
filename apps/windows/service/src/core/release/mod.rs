@@ -20,6 +20,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub(crate) struct WorkerInput {
     pub(crate) request: crate::release_wire::ReleaseRequest,
     pub(crate) owner_key: String,
+    /// The release service holding the worker's Job.
+    pub(crate) job_owner: Incarnation,
 }
 
 #[cfg(all(windows, not(feature = "test")))]
@@ -43,6 +45,34 @@ pub(crate) enum Mode {
     Released,
 }
 
+/// Which boot something happened in: the Service's volatile boot marker and the machine's
+/// boot time. The marker alone changes on a reinstall within one boot, so two stamps are the
+/// same boot unless both parts differ; an unknown part never proves a different boot.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub(crate) struct BootStamp {
+    #[serde(default)]
+    pub(crate) marker: Option<String>,
+    #[serde(default)]
+    pub(crate) booted_at: Option<u64>,
+}
+
+/// Boot times read from the uptime counter wander with clock changes; closer than this is
+/// one boot.
+const BOOT_TIME_TOLERANCE_SECONDS: u64 = 120;
+
+impl BootStamp {
+    /// A different boot needs both markers known and different, and boot times that do not
+    /// put the two in one boot (a reinstall changes the marker, not the boot time).
+    pub(crate) fn same_boot_as(&self, other: &BootStamp) -> bool {
+        let marker_differs = matches!((&self.marker, &other.marker), (Some(a), Some(b)) if a != b);
+        let time_matches = matches!(
+            (self.booted_at, other.booted_at),
+            (Some(a), Some(b)) if a.abs_diff(b) <= BOOT_TIME_TOLERANCE_SECONDS
+        );
+        !marker_differs || time_matches
+    }
+}
+
 /// One process instance: a PID plus its creation time, so a reused PID never matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Incarnation {
@@ -62,6 +92,8 @@ pub(crate) struct Record {
     #[serde(default)]
     pub(crate) worker_boot_session: Option<String>,
     #[serde(default)]
+    pub(crate) worker_booted_at: Option<u64>,
+    #[serde(default)]
     pub(crate) worker_finished: bool,
     #[serde(default)]
     pub(crate) stuck: Vec<Incarnation>,
@@ -72,6 +104,23 @@ pub(crate) struct Record {
     /// clears it puts the configuration back first.
     #[serde(default)]
     pub(crate) service_quarantined: bool,
+    /// The release service process that holds the workers' Job Objects.
+    #[serde(default)]
+    pub(crate) job_owner: Option<Incarnation>,
+    /// Set by each worker before any effect; cleared by the release service only once every
+    /// worker Job it holds has been terminated and reported no active process. While set, PID
+    /// death of the worker proves nothing about the children it started.
+    #[serde(default)]
+    pub(crate) jobs_unproven: bool,
+    /// The boot in which an earlier record could not be read, so whatever it named was lost.
+    /// Nothing can show that work retired before that boot ends.
+    #[serde(default)]
+    pub(crate) history_lost_boot: Option<BootStamp>,
+    /// The boot in which a DNS change handed to the WMI provider host may still be pending
+    /// (the process that submitted it was ended, or gave up waiting). Windows offers no way to
+    /// see it finish, so only the end of that boot retires it.
+    #[serde(default)]
+    pub(crate) broker_unknown_boot: Option<BootStamp>,
 }
 
 impl Default for Record {
@@ -83,10 +132,15 @@ impl Default for Record {
             request_id: None,
             worker: None,
             worker_boot_session: None,
+            worker_booted_at: None,
             worker_finished: false,
             stuck: Vec::new(),
             executor_quarantined: false,
             service_quarantined: false,
+            job_owner: None,
+            jobs_unproven: false,
+            history_lost_boot: None,
+            broker_unknown_boot: None,
         }
     }
 }
@@ -120,29 +174,82 @@ impl std::fmt::Display for AdmissionRefusal {
 pub(crate) struct Processes {
     /// `Some(true)` alive, `Some(false)` gone, `None` could not tell (treated as alive).
     pub(crate) alive: Box<dyn Fn(&Incarnation) -> Option<bool> + Send + Sync>,
-    pub(crate) boot_session: Box<dyn Fn() -> Option<String> + Send + Sync>,
+    pub(crate) boot: Box<dyn Fn() -> BootStamp + Send + Sync>,
+}
+
+impl Record {
+    pub(crate) fn worker_boot(&self) -> BootStamp {
+        BootStamp {
+            marker: self.worker_boot_session.clone(),
+            booted_at: self.worker_booted_at,
+        }
+    }
+}
+
+/// This boot, as the release records it.
+pub(crate) fn current_boot() -> BootStamp {
+    BootStamp {
+        marker: crate::core::boot_session::current(),
+        booted_at: booted_at(),
+    }
+}
+
+#[cfg(windows)]
+fn booted_at() -> Option<u64> {
+    // SAFETY: no arguments; reads the system uptime counter.
+    let uptime = Duration::from_millis(unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() });
+    SystemTime::now()
+        .checked_sub(uptime)?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|since| since.as_secs())
+}
+
+#[cfg(not(windows))]
+fn booted_at() -> Option<u64> {
+    None
 }
 
 impl Processes {
     pub(crate) fn live() -> Self {
         Self {
             alive: Box::new(|incarnation| live_incarnation_alive(incarnation)),
-            boot_session: Box::new(crate::core::boot_session::current),
+            boot: Box::new(current_boot),
         }
     }
 
-    /// `None` when nothing from the last release can still change the network.
-    pub(crate) fn unretired_reason(&self, record: &Record) -> Option<String> {
-        if record.mode != Mode::Released {
-            return None;
+    fn same_boot(&self, recorded: &BootStamp) -> bool {
+        recorded.same_boot_as(&(self.boot)())
+    }
+
+    /// The incarnations in `record` that are not proven gone, so a later release keeps them.
+    pub(crate) fn unretired_incarnations(&self, record: &Record) -> Vec<Incarnation> {
+        if record.mode != Mode::Released || !self.same_boot(&record.worker_boot()) {
+            return Vec::new();
         }
-        let this_boot = (self.boot_session)();
-        // A record from an earlier boot ended with that boot. An unknown boot is not proof.
-        let same_boot = match (&record.worker_boot_session, &this_boot) {
-            (Some(recorded), Some(current)) => recorded == current,
-            _ => true,
-        };
-        if !same_boot {
+        let mut kept: Vec<Incarnation> = Vec::new();
+        for incarnation in record.worker.iter().chain(record.stuck.iter()) {
+            if (self.alive)(incarnation) != Some(false) && !kept.contains(incarnation) {
+                kept.push(*incarnation);
+            }
+        }
+        kept
+    }
+
+    /// `None` when nothing from the last release can still change the network. Work is
+    /// retired by proof only: the worker and every survivor gone, the worker Jobs proven
+    /// empty or ended with the release service that held them (kill-on-close), and no
+    /// lost history or pending WMI DNS change from this boot.
+    pub(crate) fn unretired_reason(&self, record: &Record) -> Option<String> {
+        if record.history_lost_boot.as_ref().is_some_and(|lost| self.same_boot(lost)) {
+            return Some("an earlier restore record could not be read; restart Windows to clear it".into());
+        }
+        if record.broker_unknown_boot.as_ref().is_some_and(|pending| self.same_boot(pending)) {
+            return Some(
+                "a DNS change handed to Windows may still take effect; restart Windows to clear it".into(),
+            );
+        }
+        if record.mode != Mode::Released || !self.same_boot(&record.worker_boot()) {
             return None;
         }
         if let Some(worker) = record.worker
@@ -153,6 +260,14 @@ impl Processes {
         for stuck in &record.stuck {
             if (self.alive)(stuck) != Some(false) {
                 return Some(format!("process {} survived termination", stuck.pid));
+            }
+        }
+        if record.jobs_unproven {
+            let owner_gone = record
+                .job_owner
+                .is_some_and(|owner| (self.alive)(&owner) == Some(false));
+            if !owner_gone {
+                return Some("the restore's child processes are not yet proven ended".into());
             }
         }
         None
@@ -203,7 +318,10 @@ pub(crate) enum StartVerdict {
 
 pub(crate) fn start_verdict(record: &Record, supplied: Option<u64>) -> StartVerdict {
     match (record.mode, supplied) {
-        (Mode::Secured, None) => StartVerdict::Allowed(record.generation),
+        // Without a generation only a machine that never released or admitted is secured at a
+        // generation the caller cannot have missed. After that the App always has one (Sol
+        // R-F3): a start without it may be a retry from before a restore and a newer Connect.
+        (Mode::Secured, None) if record.generation == 0 => StartVerdict::Allowed(record.generation),
         (Mode::Secured, Some(generation)) if generation == record.generation => {
             StartVerdict::Allowed(record.generation)
         }
@@ -342,6 +460,11 @@ impl Authority {
         record.worker = None;
         record.worker_finished = false;
         record.stuck.clear();
+        record.jobs_unproven = false;
+        record.job_owner = None;
+        // Reached only when these name an earlier boot.
+        record.history_lost_boot = None;
+        record.broker_unknown_boot = None;
         record.executor_quarantined = false;
         // The main Service is answering this Connect, so its configuration is back.
         record.service_quarantined = false;
@@ -406,6 +529,42 @@ fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
 #[cfg(not(all(windows, not(feature = "test"))))]
 fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
     std::fs::rename(source, destination)
+}
+
+/// Whether a release-direction request (`ReleaseKillSwitch`, `RestoreProtectedDns`) for the
+/// session admitted at `supplied` may act (Sol R-F4 on PR #1569). Refused once a restore or a
+/// later admission has moved the generation on, so an old teardown cannot reach a newer session
+/// of the same owner. A released machine has no session to reach, so any teardown may run (a
+/// Disconnect after Restore internet). Otherwise `None` is accepted only on a machine that never
+/// released or admitted, where no session can be newer than the caller knows.
+pub(crate) fn release_generation_verdict(record: &Record, supplied: Option<u64>) -> bool {
+    record.mode == Mode::Released
+        || supplied.map_or(record.generation == 0, |generation| generation == record.generation)
+}
+
+/// [`release_generation_verdict`] under C. The caller holds the main Service's lifecycle lock
+/// across the check and its effect, and StartClash admits under that same lock, so nothing is
+/// admitted between the two.
+pub(crate) async fn check_release_generation(supplied: Option<u64>) -> std::result::Result<(), AdmissionRefusal> {
+    tokio::task::spawn_blocking(move || {
+        let authority = Authority::live();
+        let held = authority
+            .lock(ADMISSION_LOCK_TIMEOUT)
+            .map_err(|error| AdmissionRefusal::Corrupt(format!("{error:#}")))?;
+        let Some(_held) = held else {
+            return Err(AdmissionRefusal::InProgress);
+        };
+        let record = authority
+            .load()
+            .map_err(|error| AdmissionRefusal::Corrupt(format!("{error:#}")))?;
+        if release_generation_verdict(&record, supplied) {
+            Ok(())
+        } else {
+            Err(AdmissionRefusal::Stale)
+        }
+    })
+    .await
+    .unwrap_or_else(|error| Err(AdmissionRefusal::Corrupt(format!("generation check failed: {error}"))))
 }
 
 /// Admission for the main Service's StartClash: runs the blocking lock wait off the runtime.

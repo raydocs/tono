@@ -12,3 +12,13 @@
   - 未执行：任何真机测试。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：见 IMPLEMENTATION.md §4。所有机制都没有真机实验验证；SCM 注册、Job 关闭、计划任务停用、launchd bootout 的真实行为待测试用户检验。不能声称“恢复已可靠”。
+- Sol 审查第 1 轮修复（6 个主要问题、2 个次要问题全部接受）：
+  - 判断“已恢复”改用终结证据，不再看两次读回一致（决策 094）。Windows 新增 WMI DNS 账本。
+  - 未结束的任务在重试和崩溃之后保留。Windows 要证明 Job 已清空；Mac 要求 session 和进程组为空。
+  - 每次连接带自己的代数；拆除请求（`ReleaseKillSwitch`、`RestoreProtectedDns`、Mac 解除方向请求）在服务端核对代数。
+  - 失败一律不当成功：计划任务、扫描、bootout、最后落盘。
+  - Mac 的 helper 守护进程在 worker 崩溃后恢复。
+  - Mac 的 Tono 系统代理纳入结果。
+  - 紧急命令与 C 的边界写明。
+  - Mac helper 升到 4.52.51。
+  - 验证：Linux 上 `cargo test --lib release broker_ledger` 74 通过；整个 lib 有 476 通过，另有 3 个失败，这 3 个在改动前就只在 Linux 上失败。Swift 和 Windows 代码由托管 CI 编译，结果以 PR #1569 的 CI 为准。未执行：真机测试。

@@ -8,7 +8,7 @@
 //! reports a JSON line on stdout so the release service can answer at its deadline with
 //! whatever is known by then.
 
-use super::{Authority, Incarnation, Mode, Record, RECORD_SCHEMA, WorkerInput, next_generation};
+use super::{Authority, Incarnation, Mode, Processes, Record, RECORD_SCHEMA, WorkerInput, next_generation};
 use crate::release_wire::{ReleaseComponent, ReleaseReport, ReleaseRequest};
 use anyhow::{Context as _, Result, ensure};
 use std::ffi::{OsStr, OsString};
@@ -24,10 +24,10 @@ const WORKER_LOCK_TIMEOUT: Duration = Duration::from_secs(3);
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(45);
 const SETTLE_INTERVAL: Duration = Duration::from_secs(1);
 const TOOL_TIMEOUT: Duration = Duration::from_secs(10);
-/// How long the restarted main Service gets to report Running, and then to run its startup
-/// restore, before the second read-back looks for anything it re-armed.
+/// How long the restarted main Service gets to report Running, and then to finish its startup
+/// restore and open its pipe, before the second read-back looks for anything it re-armed.
 const SERVICE_START_TIMEOUT: Duration = Duration::from_secs(10);
-const SERVICE_STARTUP_SETTLE: Duration = Duration::from_secs(2);
+const SERVICE_ANSWER_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Images that can write the network state again. Matched by file name, then kept only when
 /// the canonical path is under the Service's own state directory.
@@ -71,7 +71,7 @@ pub fn run() -> i32 {
         }
     };
     let request = input.request;
-    let report = runtime.block_on(release(&request, &input.owner_key));
+    let report = runtime.block_on(release(&request, &input.owner_key, input.job_owner));
     emit(&report);
     // A timed-out DNS or WFP call can leave blocking work behind; never wait for it.
     runtime.shutdown_background();
@@ -106,7 +106,7 @@ pub(crate) async fn owner_refusal(caller_key: &str) -> Option<String> {
     }
 }
 
-async fn release(request: &ReleaseRequest, owner_key: &str) -> ReleaseReport {
+async fn release(request: &ReleaseRequest, owner_key: &str, job_owner: Incarnation) -> ReleaseReport {
     let request_id = request.request_id.clone();
     let held = match tokio::task::spawn_blocking(|| Authority::live().lock(WORKER_LOCK_TIMEOUT)).await {
         Ok(Ok(Some(held))) => held,
@@ -130,9 +130,11 @@ async fn release(request: &ReleaseRequest, owner_key: &str) -> ReleaseReport {
         return ReleaseReport::without_components(&request_id, "refused", Some(reason));
     }
     let authority = Authority::live();
+    let processes = Processes::live();
     // An unreadable record must not stop a restore: it is replaced by this release, whose
-    // generation is still larger than any earlier one (`next_generation` uses the clock). Only
-    // a readable secured record can show that a newer Connect superseded the request.
+    // generation is still larger than any earlier one (`next_generation` uses the clock). What
+    // it named is lost, so this boot keeps refusing Connect (`history_lost_boot`). Only a
+    // readable secured record can show that a newer Connect superseded the request.
     let loaded = authority.load();
     let previous = loaded.as_ref().cloned().unwrap_or_default();
     if let Some(expected) = request.expected_generation
@@ -154,20 +156,42 @@ async fn release(request: &ReleaseRequest, owner_key: &str) -> ReleaseReport {
             return ReleaseReport::without_components(&request_id, "unknown", Some(format!("{error:#}")));
         }
     };
+    let boot = super::current_boot();
+    // A retry inherits whatever the previous release left unretired; replacing the record
+    // must never forget a worker or a survivor that may still act.
+    let mut carried = processes.unretired_incarnations(&previous);
+    // Jobs another release service held and never proved empty end only with that service.
+    if previous.jobs_unproven
+        && let Some(owner) = previous.job_owner
+        && owner != job_owner
+        && (processes.alive)(&owner) != Some(false)
+        && !carried.contains(&owner)
+    {
+        carried.push(owner);
+    }
     let mut record = Record {
         schema: RECORD_SCHEMA,
         mode: Mode::Released,
         generation: next_generation(previous.generation),
         request_id: Some(request_id.clone()),
         worker: Some(worker),
-        worker_boot_session: crate::core::boot_session::current(),
+        worker_boot_session: boot.marker.clone(),
+        worker_booted_at: boot.booted_at,
         worker_finished: false,
-        stuck: Vec::new(),
+        stuck: carried.clone(),
         executor_quarantined: true,
         service_quarantined: true,
+        job_owner: Some(job_owner),
+        jobs_unproven: true,
+        history_lost_boot: if loaded.is_err() {
+            Some(boot.clone())
+        } else {
+            previous.history_lost_boot.clone()
+        },
+        broker_unknown_boot: previous.broker_unknown_boot.clone(),
     };
     // No effect happens before the record names this worker: a crash from here on is found
-    // by admission, which refuses Connect until this process is gone.
+    // by admission, which refuses Connect until this process and its Job are gone.
     if let Err(error) = authority.save(&record) {
         return ReleaseReport::without_components(
             &request_id,
@@ -186,18 +210,37 @@ async fn release(request: &ReleaseRequest, owner_key: &str) -> ReleaseReport {
     };
     emit(&report);
 
-    // Every note up to the read-back is an effect step that did not prove itself, so a clean
-    // read-back with any of them is not reported as restored.
+    // Every note is a step that did not prove itself. Any note at all keeps the outcome from
+    // `restored`, whatever the read-back shows.
     let mut notes = Vec::new();
-    if let Err(error) = quarantine_main_service() {
-        notes.push(format!("main Service quarantine: {error:#}"));
+    let service_quarantined = match quarantine_main_service().and_then(|()| main_service_disabled()) {
+        Ok(true) => true,
+        Ok(false) => {
+            notes.push("main Service quarantine did not take: it is not Disabled".into());
+            false
+        }
+        Err(error) => {
+            notes.push(format!("main Service quarantine: {error:#}"));
+            false
+        }
+    };
+    let task_quarantined = match set_recovery_task_enabled(false) {
+        Ok(()) => true,
+        Err(error) => {
+            notes.push(format!("update recovery task: {error:#}"));
+            false
+        }
+    };
+    let (ended, scan_complete) = terminate_writers().await;
+    if !scan_complete {
+        notes.push("the writer scan was incomplete".into());
     }
-    if let Err(error) = set_recovery_task_enabled(false) {
-        notes.push(format!("update recovery task: {error:#}"));
+    let mut stuck = carried;
+    for incarnation in ended {
+        if !stuck.contains(&incarnation) {
+            stuck.push(incarnation);
+        }
     }
-    // Without the quarantine SCM or the task can start a writer again after it was ended.
-    let quarantined = notes.is_empty();
-    let stuck = terminate_writers().await;
     record.stuck = stuck.clone();
     if let Err(error) = authority.save(&record) {
         notes.push(format!("stuck writers not recorded: {error:#}"));
@@ -216,44 +259,103 @@ async fn release(request: &ReleaseRequest, owner_key: &str) -> ReleaseReport {
         }
         first = read_components().await;
     }
-    report.components = components(&first, None, false);
+    report.components = components(&first, None, &Settlement::default());
     report.detail = joined(&notes);
     emit(&report);
-    let effects_proven = notes.is_empty();
 
-    // The main Service comes back before the second read, so anything its startup re-arms is
-    // seen there rather than after "restored". Its startup finds the tombstone and the stopped
-    // desired state, and replays no Core while the record is released; the update executor
-    // stays quarantined until a Connect is admitted.
-    let mut after = Vec::new();
-    match restore_main_service(true).and_then(|()| wait_main_service_running()) {
+    // The main Service comes back before the second read and the read waits for its pipe,
+    // which it opens only after its startup restore: anything that startup re-arms is seen
+    // here rather than after "restored". It replays no Core while the record is released, and
+    // the update executor stays quarantined until a Connect is admitted.
+    let restarted = tokio::task::spawn_blocking(|| {
+        restore_main_service(true)
+            .and_then(|()| wait_main_service_running())
+            .and_then(|()| wait_main_service_answering())
+    })
+    .await
+    .unwrap_or_else(|error| Err(anyhow::anyhow!("the restart task failed: {error}")));
+    match restarted {
         Ok(()) => {
             record.service_quarantined = false;
             if let Err(error) = authority.save(&record) {
-                after.push(format!("service restore not recorded: {error:#}"));
+                notes.push(format!("service restore not recorded: {error:#}"));
             }
-            tokio::time::sleep(SERVICE_STARTUP_SETTLE).await;
+        }
+        Err(error) => notes.push(format!("main Service not restored: {error:#}")),
+    }
+    tokio::time::sleep(SETTLE_INTERVAL).await;
+    let second = read_components().await;
+
+    // Terminal evidence, not quiet samples (Sol R-F1). WFP changes die with their session:
+    // BFE aborts the transaction of an ended client (FwpmEngineClose0). The NRPT rule, DoH
+    // values and the Core are written in-process. So once every writer is proven ended and
+    // could not be restarted, only the adapter DNS can still change: the IPv4 half of a
+    // compatibility batch runs in WmiPrvSE, beyond any Job. It is final only when no batch
+    // of this boot is left unaccounted for in the broker ledger.
+    let survivors: Vec<Incarnation> = stuck
+        .iter()
+        .filter(|incarnation| (processes.alive)(incarnation) != Some(false))
+        .copied()
+        .collect();
+    let broker_clear = match crate::core::dns::broker_ledger::outstanding() {
+        Ok(pending) if pending.is_empty() => true,
+        Ok(pending) => {
+            notes.push(format!("a DNS change handed to Windows may still land: {}", pending.join(", ")));
+            false
         }
         Err(error) => {
-            after.push(format!("main Service not restored: {error:#}"));
-            tokio::time::sleep(SETTLE_INTERVAL).await;
+            notes.push(format!("the WMI DNS ledger could not be read: {error:#}"));
+            false
         }
+    };
+    if !broker_clear {
+        record.broker_unknown_boot = Some(boot.clone());
     }
-    let second = read_components().await;
-    report.components = components(&second, Some(&first), stuck.is_empty() && quarantined);
+    let settlement = Settlement {
+        writers_ended: survivors.is_empty() && scan_complete && service_quarantined && task_quarantined,
+        broker_clear,
+    };
+    report.components = components(&second, Some(&first), &settlement);
+    record.stuck = survivors.clone();
+    report.stuck = survivors.iter().map(|incarnation| incarnation.pid).collect();
 
     record.worker_finished = true;
     if let Err(error) = authority.save(&record) {
-        after.push(format!("finish not recorded: {error:#}"));
+        notes.push(format!("finish not recorded: {error:#}"));
     }
     drop(held);
 
     report.finished = true;
     let outcome = ReleaseReport::outcome_of(&report.components, &report.stuck, true);
-    report.outcome = (if outcome == "restored" && !effects_proven { "unknown" } else { outcome }).into();
-    notes.extend(after);
+    report.outcome = (if outcome == "restored" && !notes.is_empty() { "unknown" } else { outcome }).into();
     report.detail = joined(&notes);
     report
+}
+
+/// The pipe the main Service opens once its startup restore has finished.
+fn wait_main_service_answering() -> Result<()> {
+    use std::os::windows::ffi::OsStrExt as _;
+    use windows_sys::Win32::System::Pipes::WaitNamedPipeW;
+
+    let name: Vec<u16> = crate::core::paths::service_paths()
+        .ipc_path()
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let deadline = Instant::now() + SERVICE_ANSWER_TIMEOUT;
+    loop {
+        // SAFETY: `name` is a NUL-terminated wide string that outlives the call.
+        if unsafe { WaitNamedPipeW(name.as_ptr(), 200) } != 0 {
+            return Ok(());
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "the main Service did not open its pipe within {}s",
+            SERVICE_ANSWER_TIMEOUT.as_secs()
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn wait_main_service_running() -> Result<()> {
@@ -343,9 +445,19 @@ async fn read_components() -> Vec<Reading> {
     ]
 }
 
-/// The second read decides the read-back; the risk is settled only when both reads saw the
-/// same thing and no writer survived termination.
-fn components(latest: &[Reading], earlier: Option<&[Reading]>, writers_gone: bool) -> Vec<ReleaseComponent> {
+/// What the worker proved about everything that could still change a component.
+#[derive(Default)]
+struct Settlement {
+    /// Every writer process is proven ended and none can be restarted by SCM or the task.
+    writers_ended: bool,
+    /// No WMI DNS batch of this boot is left unaccounted for.
+    broker_clear: bool,
+}
+
+/// The second read decides the read-back. The risk is settled only on terminal evidence that
+/// nothing can still change the component (see [`Settlement`]); agreement of the two reads is
+/// required too, but it is never enough on its own.
+fn components(latest: &[Reading], earlier: Option<&[Reading]>, settlement: &Settlement) -> Vec<ReleaseComponent> {
     latest
         .iter()
         .map(|(name, readback, detail)| {
@@ -354,7 +466,10 @@ fn components(latest: &[Reading], earlier: Option<&[Reading]>, writers_gone: boo
                     .iter()
                     .any(|(other, value, _)| other == name && value == readback)
             });
-            let settled = agreed && writers_gone && readback != "unreadable";
+            let settled = agreed
+                && settlement.writers_ended
+                && (*name != "dns" || settlement.broker_clear)
+                && readback != "unreadable";
             ReleaseComponent {
                 name: (*name).to_owned(),
                 readback: readback.clone(),
@@ -374,15 +489,18 @@ fn tono_core_running() -> Result<bool> {
 }
 
 /// Terminate every process that could write the network state again and return the ones that
-/// survived. Each is matched by its inspected identity, so a reused PID is left alone.
-async fn terminate_writers() -> Vec<Incarnation> {
+/// survived, and whether the scan saw every candidate. Each is matched by its inspected
+/// identity, so a reused PID is left alone. A failed scan is never read as "none left".
+async fn terminate_writers() -> (Vec<Incarnation>, bool) {
     let mut stuck = Vec::new();
+    let mut complete = true;
     let own = std::process::id();
     let roots = writer_roots();
     let candidates = match crate::core::process::image_candidates(WRITER_IMAGE_NAMES) {
         Ok(candidates) => candidates,
         Err(error) => {
             tracing::warn!("release: writer scan failed: {error:#}");
+            complete = false;
             Vec::new()
         }
     };
@@ -404,20 +522,25 @@ async fn terminate_writers() -> Vec<Incarnation> {
     }
     if let Err(error) = crate::core::process::sweep_orphan_core_processes(&[], false).await {
         tracing::warn!("release: core sweep failed: {error:#}");
+        complete = false;
     }
-    if let Ok(cores) =
-        crate::core::process::image_candidates(&["tono-core.exe", "verge-mihomo.exe", "sing-box.exe"])
-    {
-        for (pid, identity) in cores {
-            if crate::core::runtime_generation::is_installed_core_image_path(Path::new(&identity.executable)) {
-                stuck.push(Incarnation {
-                    pid,
-                    started_at: identity.started_at,
-                });
+    match crate::core::process::image_candidates(&["tono-core.exe", "verge-mihomo.exe", "sing-box.exe"]) {
+        Ok(cores) => {
+            for (pid, identity) in cores {
+                if crate::core::runtime_generation::is_installed_core_image_path(Path::new(&identity.executable)) {
+                    stuck.push(Incarnation {
+                        pid,
+                        started_at: identity.started_at,
+                    });
+                }
             }
         }
+        Err(error) => {
+            tracing::warn!("release: core scan failed: {error:#}");
+            complete = false;
+        }
     }
-    stuck
+    (stuck, complete)
 }
 
 fn writer_roots() -> Vec<String> {
@@ -538,44 +661,93 @@ pub(crate) fn restore_main_service(start: bool) -> Result<()> {
     Ok(())
 }
 
-/// Enable or disable the update recovery task. A task that is not registered is already as
-/// it should be.
+/// Enable or disable the update recovery task, then read its state back (Sol R-F5). A task that
+/// is not registered is already as it should be, but only a missing task file proves that: a
+/// failed query proves nothing.
 pub(crate) fn set_recovery_task_enabled(enabled: bool) -> Result<()> {
-    let schtasks = crate::core::update::security::system_directory()?.join("schtasks.exe");
+    let system = crate::core::update::security::system_directory()?;
     let name = crate::core::update::RECOVERY_TASK_NAME;
-    let present = run_bounded(Command::new(&schtasks).args(["/Query", "/TN", name]))?;
-    if !present {
-        return Ok(());
+    let task_file = system.join("Tasks").join(name);
+    match std::fs::metadata(&task_file) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("the update recovery task could not be inspected at {task_file:?}"));
+        }
     }
+    let schtasks = system.join("schtasks.exe");
     let switch = if enabled { "/ENABLE" } else { "/DISABLE" };
     ensure!(
         run_bounded(Command::new(&schtasks).args(["/Change", "/TN", name, switch]))?,
         "schtasks {switch} failed for the update recovery task"
     );
+    let (queried, xml) = run_bounded_output(
+        Command::new(&schtasks)
+            .args(["/Query", "/TN", name, "/XML"])
+            .stdout(Stdio::piped()),
+    )?;
+    ensure!(queried, "the update recovery task could not be read back");
+    let disabled = decode_tool_output(&xml).contains("<Enabled>false</Enabled>");
+    ensure!(
+        disabled != enabled,
+        "the update recovery task reads back {} after schtasks {switch}",
+        if disabled { "disabled" } else { "enabled" }
+    );
     Ok(())
+}
+
+/// schtasks writes its XML as UTF-16 when its output is a pipe on some Windows builds.
+fn decode_tool_output(bytes: &[u8]) -> String {
+    if bytes.contains(&0) {
+        let units: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        String::from_utf16_lossy(&units)
+    } else {
+        String::from_utf8_lossy(bytes).into_owned()
+    }
 }
 
 /// Run a system tool with a hard deadline; `Ok(success)`.
 fn run_bounded(command: &mut Command) -> Result<bool> {
+    Ok(run_bounded_output(command.stdout(Stdio::null()))?.0)
+}
+
+/// [`run_bounded`] that keeps stdout; `Ok((success, stdout))`. Stdout is drained on its own
+/// thread so a full pipe cannot stall the tool past its deadline.
+fn run_bounded_output(command: &mut Command) -> Result<(bool, Vec<u8>)> {
+    use std::io::Read as _;
     use std::os::windows::process::CommandExt as _;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+    let program = command.get_program().to_owned();
     let mut child = command
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
         .stderr(Stdio::null())
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()?;
+    let reader = child.stdout.take().map(|mut stdout| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stdout.read_to_end(&mut bytes);
+            bytes
+        })
+    });
     let deadline = Instant::now() + TOOL_TIMEOUT;
-    loop {
+    let status = loop {
         if let Some(status) = child.try_wait()? {
-            return Ok(status.success());
+            break status;
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            anyhow::bail!("{:?} did not finish within {}s", command.get_program(), TOOL_TIMEOUT.as_secs());
+            anyhow::bail!("{program:?} did not finish within {}s", TOOL_TIMEOUT.as_secs());
         }
         std::thread::sleep(Duration::from_millis(50));
-    }
+    };
+    let output = reader
+        .map(|reader| reader.join().unwrap_or_default())
+        .unwrap_or_default();
+    Ok((status.success(), output))
 }

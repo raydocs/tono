@@ -3,10 +3,15 @@
 //! A request starts a worker, or joins the one already running, and is answered when the
 //! worker finishes or at [`RELEASE_ANSWER_SECONDS`], whichever comes first. The worker runs in
 //! a kill-on-close Job Object this service holds; at [`RELEASE_HARD_CAP_SECONDS`] the Job is
-//! closed and everything in it ends. After every run, and when the service starts, a main
+//! terminated and everything in it ends. After every run, and when the service starts, a main
 //! Service left quarantined by a worker that died is put back.
+//!
+//! A worker's exit proves nothing about the children it started (Sol R-F2 on PR #1569). Each
+//! worker records `jobs_unproven` before its first effect; this service clears it, under C,
+//! only once every Job it holds has been terminated and reports no active process. A Job that
+//! still has a process is kept and checked again, never dropped and forgotten.
 
-use super::{Authority, Processes, WorkerInput};
+use super::{Authority, Incarnation, Processes, WorkerInput};
 use crate::release_wire::{
     RELEASE_ANSWER_SECONDS, RELEASE_HARD_CAP_SECONDS, ReleaseReport, ReleaseRequest, ReleaseStatus,
 };
@@ -43,8 +48,45 @@ impl Run {
         self.changed.notify_all();
     }
 
-    fn close_job(&self) {
-        drop(self.job.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take());
+    /// End everything in the Job. The handle is kept so that emptiness can be proven.
+    fn end_job(&self) {
+        if let Some(job) = self
+            .job
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            && let Err(error) = terminate_job(job)
+        {
+            tracing::warn!("release: {error:#}");
+        }
+    }
+
+    /// The Job once the worker is gone: dropped when proven empty, otherwise kept pending.
+    fn retire_job(&self) {
+        let Some(job) = self
+            .job
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        else {
+            return;
+        };
+        if let Err(error) = terminate_job(&job) {
+            tracing::warn!("release: {error:#}");
+        }
+        let deadline = Instant::now() + JOB_EMPTY_WAIT;
+        loop {
+            match active_processes(&job) {
+                Ok(0) => return,
+                Ok(_) | Err(_) if Instant::now() >= deadline => break,
+                _ => std::thread::sleep(Duration::from_millis(100)),
+            }
+        }
+        tracing::warn!("release: a worker Job still has processes; keeping it until it is empty");
+        PENDING_JOBS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(job);
     }
 
     fn is_done(&self) -> bool {
@@ -91,6 +133,102 @@ impl Run {
 }
 
 static CURRENT: Mutex<Option<Arc<Run>>> = Mutex::new(None);
+/// Terminated worker Jobs that still reported a process. Held, so kill-on-close still covers
+/// them, until they are proven empty.
+static PENDING_JOBS: Mutex<Vec<std::os::windows::io::OwnedHandle>> = Mutex::new(Vec::new());
+/// How long a terminated Job gets to empty before it is kept pending.
+const JOB_EMPTY_WAIT: Duration = Duration::from_secs(10);
+const PENDING_JOB_RECHECK: Duration = Duration::from_secs(5);
+
+fn terminate_job(job: &std::os::windows::io::OwnedHandle) -> anyhow::Result<()> {
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+
+    // SAFETY: the handle is owned by `job` and stays open across the call.
+    if unsafe { TerminateJobObject(job.as_raw_handle() as HANDLE, 1) } == 0 {
+        return Err(anyhow::Error::from(std::io::Error::last_os_error())
+            .context("failed to terminate a release worker Job Object"));
+    }
+    Ok(())
+}
+
+/// How many processes are still in the Job.
+fn active_processes(job: &std::os::windows::io::OwnedHandle) -> anyhow::Result<u32> {
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::System::JobObjects::{
+        JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JobObjectBasicAccountingInformation,
+        QueryInformationJobObject,
+    };
+
+    let mut info = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+    // SAFETY: `info` is a writable buffer of the size passed, and the handle stays open.
+    if unsafe {
+        QueryInformationJobObject(
+            job.as_raw_handle() as HANDLE,
+            JobObjectBasicAccountingInformation,
+            (&mut info as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+            std::mem::size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+            std::ptr::null_mut(),
+        )
+    } == 0
+    {
+        return Err(anyhow::Error::from(std::io::Error::last_os_error())
+            .context("failed to query a release worker Job Object"));
+    }
+    Ok(info.ActiveProcesses)
+}
+
+/// Drop the pending Jobs that have emptied; `true` when none is left.
+fn prune_pending_jobs() -> bool {
+    let mut pending = PENDING_JOBS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    pending.retain(|job| {
+        let _ = terminate_job(job);
+        !matches!(active_processes(job), Ok(0))
+    });
+    pending.is_empty()
+}
+
+fn own_incarnation() -> anyhow::Result<Incarnation> {
+    let pid = std::process::id();
+    let started_at = crate::core::process::process_started_at(pid)?
+        .ok_or_else(|| anyhow::anyhow!("the release service cannot read its own start time"))?;
+    Ok(Incarnation { pid, started_at })
+}
+
+/// Clear `jobs_unproven` once every Job this service holds is proven empty and no run is in
+/// progress. Under C, so a worker starting now cannot have its own mark cleared.
+fn settle_jobs() {
+    if !prune_pending_jobs() {
+        return;
+    }
+    let Ok(own) = own_incarnation() else {
+        return;
+    };
+    let authority = Authority::live();
+    let Ok(Some(_held)) = authority.lock(Duration::from_secs(5)) else {
+        return;
+    };
+    let running = CURRENT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(|run| !run.is_done());
+    if running || !prune_pending_jobs() {
+        return;
+    }
+    let Ok(mut record) = authority.load() else {
+        return;
+    };
+    if !record.jobs_unproven || record.job_owner != Some(own) {
+        return;
+    }
+    record.jobs_unproven = false;
+    if let Err(error) = authority.save(&record) {
+        tracing::warn!("release: proven worker Jobs not recorded: {error:#}");
+    }
+}
 
 /// Start a release, or join the one running, and answer by the deadline. `owner_key` is the
 /// authenticated caller; the worker checks it against the protection owner under C.
@@ -99,9 +237,12 @@ pub(crate) async fn start_or_join(request: ReleaseRequest, owner_key: String) ->
         let mut current = CURRENT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         match current.as_ref() {
             Some(run) if !run.is_done() => Arc::clone(run),
-            _ => match spawn_run(WorkerInput {
-                request: request.clone(),
-                owner_key,
+            _ => match own_incarnation().and_then(|job_owner| {
+                spawn_run(WorkerInput {
+                    request: request.clone(),
+                    owner_key,
+                    job_owner,
+                })
             }) {
                 Ok(run) => {
                     *current = Some(Arc::clone(&run));
@@ -189,8 +330,8 @@ fn spawn_run(input: WorkerInput) -> anyhow::Result<Arc<Run>> {
                     }
                     std::thread::sleep(Duration::from_millis(250));
                 }
-                tracing::warn!("release worker reached the hard cap; closing its Job Object");
-                run.close_job();
+                tracing::warn!("release worker reached the hard cap; terminating its Job Object");
+                run.end_job();
             })?;
     }
 
@@ -206,10 +347,15 @@ fn spawn_run(input: WorkerInput) -> anyhow::Result<Arc<Run>> {
                     }
                 }
                 let _ = child.wait();
-                // Anything the worker left in the Job ends with it.
-                run.close_job();
+                // Anything the worker left in the Job ends with it, and is proven gone or kept.
+                run.retire_job();
                 run.finish();
                 recover_quarantine();
+                settle_jobs();
+                while !prune_pending_jobs() {
+                    std::thread::sleep(PENDING_JOB_RECHECK);
+                }
+                settle_jobs();
             })?;
     }
     Ok(run)
@@ -226,7 +372,7 @@ pub fn shutdown() {
         && !run.is_done()
     {
         tracing::warn!("release service stopping; ending the running release worker");
-        run.close_job();
+        run.end_job();
         let deadline = Instant::now() + Duration::from_secs(10);
         while !run.is_done() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(100));

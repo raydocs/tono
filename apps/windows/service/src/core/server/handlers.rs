@@ -522,6 +522,14 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     ControlFlow::Continue(guard) => guard,
                     ControlFlow::Break(response) => return response,
                 };
+            // Same owner is not same session (Sol R-F4): a teardown for a session a restore or a
+            // newer Connect has replaced is refused before it touches DNS, the Core or WFP.
+            // Checked under the lifecycle lock, which StartClash admission also holds.
+            if let Err(refusal) =
+                crate::core::release::check_release_generation(request.payload.release_generation()).await
+            {
+                return service_error(release_admission_error(&refusal));
+            }
             let _operation_guard = OperationGuard::begin(
                 ServiceOperationKind::ReleaseKillSwitch,
                 IPC_HANDLER_TIMEOUT,
@@ -607,8 +615,8 @@ pub(super) fn create_ipc_router() -> Result<Router> {
         })
         .post(IpcCommand::RestoreProtectedDns.as_ref(), |ctx| async move {
             trace!("Received RestoreProtectedDns command");
-            let (_request, owner) =
-                match authenticate_request::<AuthenticatedRequest<()>>(&ctx).await {
+            let (request, owner) =
+                match authenticate_request::<AuthenticatedRequest<crate::core::structure::ReleaseKillSwitchBody>>(&ctx).await {
                     ControlFlow::Continue(authenticated) => authenticated,
                     ControlFlow::Break(response) => return response,
                 };
@@ -620,6 +628,11 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     ControlFlow::Continue(guard) => guard,
                     ControlFlow::Break(response) => return response,
                 };
+            if let Err(refusal) =
+                crate::core::release::check_release_generation(request.payload.release_generation()).await
+            {
+                return service_error(release_admission_error(&refusal));
+            }
             let _operation_guard =
                 OperationGuard::begin(ServiceOperationKind::RestoreDns, IPC_HANDLER_TIMEOUT);
             match dns::restore_protected().await {

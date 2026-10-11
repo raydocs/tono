@@ -75,20 +75,33 @@ pub(super) async fn start_core_cancellation_safe(
     generation: u64,
 ) -> Result<(), StageFailure> {
     let mutation_guard = state.begin_connect_mutation().await;
-    if state.lock().await.connect_generation != generation {
-        drop(mutation_guard);
-        return Err(StageFailure::Stale);
-    }
+    let ticket = {
+        let inner = state.lock().await;
+        if inner.connect_generation != generation {
+            drop(mutation_guard);
+            return Err(StageFailure::Stale);
+        }
+        inner.release_ticket
+    };
     let task_state = Arc::clone(state);
     let task = tokio::spawn(async move {
         let mutation_guard = mutation_guard;
-        service::tono_start_core_with_kill_switch(bundle, kill_switch)
+        let admitted = service::tono_start_core_with_kill_switch(bundle, kill_switch, ticket)
             .await
             .map_err(StageFailure::error)?;
-        if task_state.lock().await.connect_generation != generation {
-            return Err(stale_after_arm(&task_state, generation, &mutation_guard).await);
+        {
+            let mut inner = task_state.lock().await;
+            if inner.connect_generation == generation {
+                // A second StartClash in this attempt, and its teardown, use the admitted one.
+                if admitted.is_some() {
+                    inner.release_ticket.generation = admitted;
+                }
+                return Ok(());
+            }
         }
-        Ok(())
+        // The late commit is torn down under exactly the generation it was admitted with, so
+        // a newer session admitted since is refused rather than released.
+        Err(stale_after_arm(&task_state, generation, &mutation_guard, admitted).await)
     });
     task.await
         .map_err(|error| StageFailure::error(format!("StartClash reconciliation task failed: {error}")))?
@@ -102,10 +115,15 @@ pub(super) async fn enable_dns_cancellation_safe(
     service_session: OwnerSessionProof,
 ) -> Result<(), StageFailure> {
     let mutation_guard = state.begin_connect_mutation().await;
-    if state.lock().await.connect_generation != generation {
-        drop(mutation_guard);
-        return Err(StageFailure::Stale);
-    }
+    // This attempt's session, admitted by its StartClash; a later attempt replaces the field.
+    let admitted = {
+        let inner = state.lock().await;
+        if inner.connect_generation != generation {
+            drop(mutation_guard);
+            return Err(StageFailure::Stale);
+        }
+        inner.release_ticket.generation
+    };
     let task_state = Arc::clone(state);
     let task = tokio::spawn(async move {
         let mutation_guard = mutation_guard;
@@ -113,7 +131,7 @@ pub(super) async fn enable_dns_cancellation_safe(
             .await
             .map_err(StageFailure::error)?;
         if task_state.lock().await.connect_generation != generation {
-            return Err(stale_after_dns(&task_state, generation, &mutation_guard).await);
+            return Err(stale_after_dns(&task_state, generation, &mutation_guard, admitted).await);
         }
         Ok(())
     });
@@ -123,12 +141,22 @@ pub(super) async fn enable_dns_cancellation_safe(
 
 /// Only the detached mutation may compensate its commit. The held reader proves that the
 /// retiring writer has not released/replaced its Core; an outer read-only waiter lacks it.
+///
+/// `admitted` is the release generation the late StartClash was admitted under. The release is
+/// sent with it, so a session admitted since (a Restore, the user's newer Connect) is refused
+/// rather than torn down. Unknown, it is read now: the held reader keeps this App from admitting
+/// anything else first.
 async fn stale_after_arm(
     state: &Arc<TonoState>, generation: u64,
     _guard: &tokio::sync::OwnedRwLockReadGuard<()>,
+    admitted: Option<u64>,
 ) -> StageFailure {
     let release = stale_arm_release(&*state.lock().await, generation);
     if let Some(apply_narrow) = release {
+        let admitted = match admitted {
+            Some(generation) => Some(generation),
+            None => service::fresh_release_generation().await,
+        };
         logging!(
             warn,
             Type::Service,
@@ -140,9 +168,9 @@ async fn stale_after_arm(
         // idempotent even if the session was already cleared.
         let _ = service::tono_stop_core(false).await;
         let _ = if apply_narrow {
-            service::tono_release_kill_switch_applying_narrow().await
+            service::tono_release_kill_switch_applying_narrow(admitted).await
         } else {
-            service::tono_release_kill_switch().await
+            service::tono_release_kill_switch(admitted).await
         };
     }
     StageFailure::Stale
@@ -166,10 +194,15 @@ fn stale_arm_release(inner: &crate::tono::state::TonoInner, generation: u64) -> 
 async fn stale_after_dns(
     state: &Arc<TonoState>, generation: u64,
     guard: &tokio::sync::OwnedRwLockReadGuard<()>,
+    admitted: Option<u64>,
 ) -> StageFailure {
     let release_intent = { state.lock().await.release_intent_for(generation) };
     if release_intent {
-        if let Err(error) = service::tono_restore_protected_dns().await {
+        let admitted = match admitted {
+            Some(generation) => Some(generation),
+            None => service::fresh_release_generation().await,
+        };
+        if let Err(error) = service::tono_restore_protected_dns(admitted).await {
             logging!(
                 error,
                 Type::Service,
@@ -177,7 +210,7 @@ async fn stale_after_dns(
             );
             return StageFailure::Stale;
         }
-        return stale_after_arm(state, generation, guard).await;
+        return stale_after_arm(state, generation, guard, admitted).await;
     }
     StageFailure::Stale
 }

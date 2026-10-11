@@ -2157,11 +2157,14 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
 if CommandLine.arguments.dropFirst() == ["--network-self-test"] {
     exit(KillSwitchManager.runNetworkSelfTest() ? 0 : 1)
 }
+// Both go through the release lock C when it is free within 3 s, and are
+// manual break-glass that leaves the release record alone when it is not
+// (runEmergencyUnderReleaseAuthority, R-M2).
 if CommandLine.arguments.dropFirst() == ["--emergency-disarm"] {
-    exit(runEmergencyDisarm() ? 0 : 1)
+    exit(runEmergencyUnderReleaseAuthority({ runEmergencyDisarm() }) ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--emergency-reset"] {
-    exit(runEmergencyReset() ? 0 : 1)
+    exit(runEmergencyUnderReleaseAuthority({ runEmergencyReset() }) ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--release-daemon"] {
     exit(ReleaseDaemon.runMain())

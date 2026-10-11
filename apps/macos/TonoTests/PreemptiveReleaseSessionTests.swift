@@ -21,4 +21,37 @@ final class PreemptiveReleaseSessionTests: XCTestCase {
             }
         }
     }
+
+    /// R-F3: an admission that finishes after Restore retired its box is
+    /// not adopted, so the old session cannot carry the new generation.
+    func testAdmissionFinishingAfterRetirementIsNotAdopted() {
+        let box = HelperSessionGeneration()
+        let admitted = box.admitIfNeeded {
+            box.retire()
+            return 42
+        }
+        XCTAssertFalse(admitted)
+        XCTAssertNil(box.value)
+    }
+
+    /// R-F3: a wake or reconnect connect cannot admit a Mac that Restore
+    /// released; only the user's own Connect can.
+    func testOnlyTheUsersConnectAdmitsAReleasedMac() {
+        let released = HelperManager.SessionStatus(released: true, generation: 7)
+        XCTAssertFalse(HelperManager.mayAdmit(released, userInitiated: false))
+        XCTAssertTrue(HelperManager.mayAdmit(released, userInitiated: true))
+    }
+
+    /// R-M1: a Tono system proxy still in place keeps Restore from reporting
+    /// the internet as restored.
+    func testRemainingTonoProxyMakesRestoredPartial() {
+        let restored = HelperManager.ReleaseOutcome(
+            outcome: "restored", generation: 9,
+            components: [.init(name: "pf", readback: "restored", risk: "settled", detail: nil)],
+            stuck: [], finished: true, detail: nil
+        )
+        let combined = restored.includingSystemProxy(tonoProxyRemains: true)
+        XCTAssertEqual(combined.outcome, "partial")
+        XCTAssertTrue(combined.components.contains { $0.name == "proxy" && $0.readback == "residual" })
+    }
 }

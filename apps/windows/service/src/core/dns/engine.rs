@@ -986,7 +986,8 @@ fn run_with_timeout(
         match waited {
             Some(status) => break status,
             None if std::time::Instant::now() >= deadline => {
-                bail!("{program} timed out after {timeout:?} and was killed");
+                return Err(anyhow::Error::new(KilledAtDeadline))
+                    .with_context(|| format!("{program} timed out after {timeout:?} and was killed"));
             }
             None => std::thread::sleep(std::time::Duration::from_millis(25)),
         }
@@ -1006,6 +1007,19 @@ fn run_with_timeout(
     }
     Ok(String::from_utf8_lossy(&stdout).into_owned())
 }
+
+/// A child ended at its deadline while it was running; anything it handed to a broker may
+/// still run.
+#[derive(Debug)]
+struct KilledAtDeadline;
+
+impl std::fmt::Display for KilledAtDeadline {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("killed at its deadline")
+    }
+}
+
+impl std::error::Error for KilledAtDeadline {}
 
 /// Only these characters ever reach the generated script. GUIDs come from registry subkey
 /// names and server strings from our own snapshot writes; anything else fails closed.
@@ -1152,11 +1166,24 @@ fn live_apply_batch(entries: &[LiveApplyEntry], mode: ApplyMode) -> Vec<(String,
     script.push_str(
         "[Console]::Out.Write(($global:fails -join ',') + '|' + ($global:skips -join ','))",
     );
+    // The IPv4 half runs in WmiPrvSE, beyond this process's Job; record it so a release can
+    // tell whether a late DNS write is still possible (`broker_ledger`).
+    let in_flight = match super::broker_ledger::begin() {
+        Ok(in_flight) => in_flight,
+        Err(error) => {
+            tracing::warn!("dns: batch not run, its WMI call could not be recorded: {error:#}");
+            return entries.iter().map(|entry| (entry.guid.clone(), false)).collect();
+        }
+    };
     let run = run_with_timeout(
         "powershell.exe",
         &["-NoProfile", "-NonInteractive", "-Command", &script],
         POWERSHELL_TIMEOUT,
     );
+    match &run {
+        Err(error) if error.chain().any(|cause| cause.is::<KilledAtDeadline>()) => in_flight.abandoned(),
+        _ => in_flight.returned(),
+    }
     let reported = match run {
         Ok(stdout) => stdout
             .lines()

@@ -681,18 +681,40 @@ pub async fn enable_protected_dns(
 
 /// `POST /dns/restore`: restore the snapshotted adapter DNS. Owner-gated so the disconnect
 /// path can call it after the session is gone.
+///
+/// `release_generation` is the release generation of the session being torn down; the Service
+/// refuses it once a restore or a newer Connect has moved on. `None` sends the older `null` body.
 pub async fn restore_protected_dns(
     credentials: &OwnerCredentials,
+    release_generation: Option<u64>,
 ) -> Result<Response<DnsProtectionStatus>> {
-    protected_call(
-        Verb::Post,
-        IpcCommand::RestoreProtectedDns,
-        credentials,
-        None,
-        (),
-        Some(LIFECYCLE_TIMEOUT),
-    )
-    .await
+    match release_generation {
+        None => {
+            protected_call(
+                Verb::Post,
+                IpcCommand::RestoreProtectedDns,
+                credentials,
+                None,
+                (),
+                Some(LIFECYCLE_TIMEOUT),
+            )
+            .await
+        }
+        Some(_) => {
+            protected_call(
+                Verb::Post,
+                IpcCommand::RestoreProtectedDns,
+                credentials,
+                None,
+                crate::core::structure::ReleaseKillSwitchPayload {
+                    apply_narrow_layer: false,
+                    release_generation,
+                },
+                Some(LIFECYCLE_TIMEOUT),
+            )
+            .await
+        }
+    }
 }
 
 /// `POST /kill-switch/release`: the explicit user-requested disarm (protocol rev 6).
@@ -702,25 +724,49 @@ pub async fn restore_protected_dns(
 /// breaks). The service refuses, staying armed, when DNS restore cannot be proven; a
 /// successful response carries the post-release status. Idempotent. Gate on
 /// [`ProtocolInfo::supports_kill_switch_release`] for older services.
+///
+/// `release_generation` is the release generation of the session being torn down (revision 21);
+/// the Service refuses the release once a restore or a newer Connect has moved on.
 pub async fn release_kill_switch(
     credentials: &OwnerCredentials,
+    release_generation: Option<u64>,
 ) -> Result<Response<KillSwitchStatus>> {
-    // `null` is the pre-narrow body. Restore and disconnect keep sending it so
-    // a service that has not learned the optional object still opens the network.
-    protected_call(
-        Verb::Post,
-        IpcCommand::ReleaseKillSwitch,
-        credentials,
-        None,
-        (),
-        Some(LIFECYCLE_TIMEOUT),
-    )
-    .await
+    match release_generation {
+        // `null` is the pre-narrow body. Without a generation, restore and disconnect keep
+        // sending it so a service that has not learned the optional object still opens the
+        // network. A generation comes only from a revision-21 Service, which parses the object.
+        None => {
+            protected_call(
+                Verb::Post,
+                IpcCommand::ReleaseKillSwitch,
+                credentials,
+                None,
+                (),
+                Some(LIFECYCLE_TIMEOUT),
+            )
+            .await
+        }
+        Some(_) => {
+            protected_call(
+                Verb::Post,
+                IpcCommand::ReleaseKillSwitch,
+                credentials,
+                None,
+                crate::core::structure::ReleaseKillSwitchPayload {
+                    apply_narrow_layer: false,
+                    release_generation,
+                },
+                Some(LIFECYCLE_TIMEOUT),
+            )
+            .await
+        }
+    }
 }
 
 /// Full release, then the secondary AI hold. Restore and disconnect do not use this.
 pub async fn release_kill_switch_applying_narrow(
     credentials: &OwnerCredentials,
+    release_generation: Option<u64>,
 ) -> Result<Response<KillSwitchStatus>> {
     protected_call(
         Verb::Post,
@@ -729,6 +775,7 @@ pub async fn release_kill_switch_applying_narrow(
         None,
         crate::core::structure::ReleaseKillSwitchPayload {
             apply_narrow_layer: true,
+            release_generation,
         },
         Some(LIFECYCLE_TIMEOUT),
     )

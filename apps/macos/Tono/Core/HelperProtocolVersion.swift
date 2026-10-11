@@ -455,7 +455,18 @@ nonisolated enum HelperProtocolVersion {
     ///   refused (`STALE_GENERATION`), and a protective request on a
     ///   released machine is admitted under the lock first
     ///   (`RELEASE_IN_PROGRESS`, `RELEASE_UNFINISHED`).
-    static let current = "4.52.50"
+    /// - 4.52.50 → 4.52.51: release review fixes. A component is settled
+    ///   only with terminal evidence (writers and Tono command children
+    ///   ended and confirmed gone, quarantine read back from launchd, stored
+    ///   DNS clean); unretired workers are carried forward, and admission
+    ///   needs every release session empty. `POST /session/admit` takes
+    ///   `{"expectedGeneration": G}` from the new `GET /session/status` and
+    ///   swaps it under the lock; nothing is admitted implicitly
+    ///   (`SESSION_NOT_ADMITTED`), and release-direction requests must name
+    ///   the current generation. The release job puts a booted-out daemon
+    ///   back after a worker crash, and the emergency commands take the
+    ///   release lock when it is free.
+    static let current = "4.52.51"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

@@ -12,11 +12,20 @@ nonisolated final class HelperSessionGeneration: @unchecked Sendable {
     @TaskLocal static var current: HelperSessionGeneration?
 
     private let lock = NSLock()
+    /// Serialises admission, so two first requests of one session cannot
+    /// both swap the helper's generation.
+    private let admission = NSLock()
     private var stored: UInt64?
     private var predatesAdmission = false
     private var retired = false
+    /// Created by the user's own Connect. Only such a session may admit a
+    /// machine that Restore internet released; an automatic connect (wake,
+    /// protected reconnect, launch) never reopens it (R-F3).
+    let userInitiated: Bool
 
-    init() {}
+    init(userInitiated: Bool = false) {
+        self.userInitiated = userInitiated
+    }
 
     /// The generation the helper admitted this session with, if any.
     var value: UInt64? {
@@ -33,10 +42,31 @@ nonisolated final class HelperSessionGeneration: @unchecked Sendable {
         return predatesAdmission
     }
 
-    func adopt(_ generation: UInt64) {
+    /// Atomic with `retire`: a box retired before this call keeps no
+    /// generation, so an admission that finished after a Restore belongs to
+    /// no live session (R-F3).
+    @discardableResult
+    func adopt(_ generation: UInt64) -> Bool {
         lock.lock()
         defer { lock.unlock() }
+        guard !retired else { return false }
         stored = generation
+        return true
+    }
+
+    /// Runs `admit` at most once at a time for this box and adopts what it
+    /// returns; nil from `admit` means the helper predates admission. False
+    /// when the box is retired, before or during the admission.
+    func admitIfNeeded(_ admit: () throws -> UInt64?) rethrows -> Bool {
+        admission.lock()
+        defer { admission.unlock() }
+        if value != nil || helperPredatesAdmission { return true }
+        if isRetired { return false }
+        guard let generation = try admit() else {
+            markHelperPredatesAdmission()
+            return true
+        }
+        return adopt(generation)
     }
 
     /// Set when a preemptive Restore replaced this session. A retired

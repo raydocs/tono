@@ -62,6 +62,9 @@ pub(crate) async fn begin_attempt(
     }
     // Abort-free: the registered reconnect/switch task may itself be admitting this attempt.
     inner.retire_connection_generation(false);
+    // Fixed now, under the lock that admits the attempt: a Restore or a newer Connect after
+    // this point leaves this attempt with an out-of-date ticket.
+    inner.release_ticket = crate::core::service::release_ticket();
     Some((inner.connect_generation, inner.connect_cancellation.clone(), account_owner))
 }
 
@@ -70,6 +73,9 @@ pub(super) fn selection_still_current(captured: Option<&str>, current: Option<&s
 }
 
 async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generation: Option<u64>) -> Attempt {
+    // Before any lock: an App with no generation yet reads one, so the ticket taken at
+    // admission has it.
+    crate::core::service::prime_release_epoch().await;
     // Admission is a lifecycle mutation too: failure may have made the FSM idle while its
     // detached cleanup still owns the Core. Do not reuse that idle window or its generation.
     let admission = state.begin_connect_mutation().await;

@@ -220,6 +220,11 @@ pub struct OwnerCredentials {
 pub struct ReleaseKillSwitchPayload {
     #[serde(default)]
     pub apply_narrow_layer: bool,
+    /// The release generation of the session this teardown is for (revision 21). The Service
+    /// refuses it once a restore or a newer Connect has moved the generation on, so an old
+    /// teardown cannot reach a newer session. Also the body of `POST /dns/restore`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_generation: Option<u64>,
 }
 
 /// `null` (older clients) or the payload object.
@@ -235,6 +240,13 @@ impl ReleaseKillSwitchBody {
         match self {
             Self::Options(options) => options.apply_narrow_layer,
             Self::Absent(()) => false,
+        }
+    }
+
+    pub fn release_generation(&self) -> Option<u64> {
+        match self {
+            Self::Options(options) => options.release_generation,
+            Self::Absent(()) => None,
         }
     }
 }
@@ -936,6 +948,11 @@ pub struct ServiceStatusSnapshot {
     /// absence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_attempt_pending: Option<bool>,
+    /// The release generation on disk (revision 21), read fresh for this snapshot. A teardown
+    /// with no captured generation sends this one, so a Connect admitted after the read still
+    /// refuses it. `None` when unreadable or from an older Service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_generation: Option<u64>,
 }
 
 /// Whether an already-running Windows Core is safe to preserve until `StartClash` replaces it.
