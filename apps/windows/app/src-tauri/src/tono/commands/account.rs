@@ -243,8 +243,9 @@ pub async fn tono_sign_in_start(
     // The installation id hydrates from the vault off-thread at startup;
     // wait for it so sign-in registers the stable device id.
     load_credentials(state.inner()).await;
-    let (client, installation_id, generation) = begin_sign_in(state.inner()).await?;
-    let operation = begin_sign_in_request(state.inner(), &app, SignInStep::SendCode).await;
+    let (client, installation_id, generation, operation) =
+        begin_sign_in_request(state.inner(), SignInStep::SendCode, |inner| emit_status(&app, &status_of(inner)))
+            .await?;
     // Empty device name → the platform default ("Windows PC", §2).
     let challenge = match client.start_email_sign_in(&email, "", &installation_id).await {
         Ok(challenge) => challenge,
@@ -253,7 +254,8 @@ pub async fn tono_sign_in_start(
                 stage: "requestCode",
                 error: err.to_string(),
             });
-            finish_sign_in_request(state.inner(), &app, operation, sign_in_recovery::cause_of(&err)).await;
+            finish_sign_in_request(state.inner(), generation, operation, sign_in_recovery::cause_of(&err),
+                |inner| emit_status(&app, &status_of(inner))).await;
             return Err(auth_error(&err));
         }
     };
@@ -308,12 +310,14 @@ pub async fn tono_sign_in_verify(
                 stage: "verifyCode",
                 error: err.to_string(),
             });
-            finish_sign_in_request(state.inner(), &app, operation, sign_in_recovery::cause_of(&err)).await;
+            finish_sign_in_request(state.inner(), generation, operation, sign_in_recovery::cause_of(&err),
+                |inner| emit_status(&app, &status_of(inner))).await;
             return Err(auth_error(&err));
         }
     };
     // Tono answered; what follows is local adoption, which the user acts on directly.
-    finish_sign_in_request(state.inner(), &app, operation, None).await;
+    finish_sign_in_request(state.inner(), generation, operation, None, |inner| emit_status(&app, &status_of(inner)))
+        .await;
 
     let release_app = app.clone();
     let info = adopt_replacing_with(state.inner(), &client, generation, &challenge_id, &auth,
@@ -349,22 +353,32 @@ pub async fn tono_sign_in_verify(
     Ok(info)
 }
 
-/// Decision 093: a sign-in request starts, and the screen hears that Tono is still trying.
-async fn begin_sign_in_request(state: &Arc<TonoState>, app: &AppHandle, step: SignInStep) -> u64 {
+/// Decision 093: admits a code request ([`begin_sign_in`]) and starts its recovery outcome in
+/// the same critical section, so a later admission always holds the later recovery token and a
+/// sign-out (which bumps the generation and dismisses under its own lock) is ordered against
+/// both. `emit` publishes that Tono is still trying.
+pub(crate) async fn begin_sign_in_request(
+    state: &Arc<TonoState>, step: SignInStep, emit: impl FnOnce(&TonoInner),
+) -> Result<(Arc<crate::tono::state::TonoApiClient>, String, u64, u64), String> {
     let mut inner = state.lock().await;
+    admit_sign_in(state, &mut inner)?;
     let operation = inner.sign_in_recovery.begin(step);
-    emit_status(app, &status_of(&inner));
-    operation
+    emit(&inner);
+    Ok((inner.client.clone(), inner.installation_id.clone(), inner.sign_in_generation, operation))
 }
 
-/// Decision 093: the request `operation` ended; lands only while it is still the current one.
-async fn finish_sign_in_request(
-    state: &Arc<TonoState>, app: &AppHandle, operation: u64, cause: Option<SignInFailureCause>,
-) {
+/// Decision 093: the request `operation`, admitted under auth `generation`, ended. Lands only
+/// while both are still current; returns whether it did (and then `emit` published it).
+pub(crate) async fn finish_sign_in_request(
+    state: &Arc<TonoState>, generation: u64, operation: u64, cause: Option<SignInFailureCause>,
+    emit: impl FnOnce(&TonoInner),
+) -> bool {
     let mut inner = state.lock().await;
-    if inner.sign_in_recovery.finish(operation, cause) {
-        emit_status(app, &status_of(&inner));
+    if inner.sign_in_generation != generation || !inner.sign_in_recovery.finish(operation, cause) {
+        return false;
     }
+    emit(&inner);
+    true
 }
 
 /// Decision 093: the user left this sign-in (another email). Clears its outcome and retires any
@@ -384,6 +398,11 @@ pub(crate) async fn begin_sign_in(
     state: &Arc<TonoState>,
 ) -> Result<(Arc<crate::tono::state::TonoApiClient>, String, u64), String> {
     let mut inner = state.lock().await;
+    admit_sign_in(state, &mut inner)?;
+    Ok((inner.client.clone(), inner.installation_id.clone(), inner.sign_in_generation))
+}
+
+fn admit_sign_in(state: &Arc<TonoState>, inner: &mut TonoInner) -> Result<(), String> {
     if inner.account_close.is_some() {
         return Err("account sign-out is still reconciling".to_string());
     }
@@ -397,7 +416,7 @@ pub(crate) async fn begin_sign_in(
     inner.credential_error = None;
     inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
     state.audit().abandon_log_upload_owner();
-    Ok((inner.client.clone(), inner.installation_id.clone(), inner.sign_in_generation))
+    Ok(())
 }
 
 /// The caller has already written this sign-in's session marker pending; it commits once the
@@ -721,6 +740,31 @@ async fn wait_account_close(operation: &crate::tono::state::LifecycleOperation) 
 mod lifecycle_tests {
     use super::*;
     use tokio::sync::oneshot;
+
+    /// Decision 093 (Sol #1564 M1): admission and the recovery token are taken together, so an
+    /// older code request ending late cannot land over a newer one or leave it automatic, and a
+    /// request a sign-out retired cannot publish its failure afterwards.
+    #[tokio::test]
+    async fn a_superseded_or_signed_out_code_request_leaves_no_stale_recovery_outcome() {
+        use crate::tono::sign_in_recovery::{SignInFailureCause, SignInRecoveryPhase};
+        let state = Arc::new(TonoState::for_test());
+        let (_, _, older_generation, older) =
+            begin_sign_in_request(&state, SignInStep::SendCode, |_| {}).await.unwrap();
+        let (_, _, newer_generation, newer) =
+            begin_sign_in_request(&state, SignInStep::SendCode, |_| {}).await.unwrap();
+        assert!(newer_generation > older_generation && newer > older);
+        assert!(!finish_sign_in_request(&state, older_generation, older, Some(SignInFailureCause::Network), |_| {}).await);
+        assert_eq!(state.lock().await.sign_in_recovery.current().unwrap().phase, SignInRecoveryPhase::Automatic);
+        assert!(finish_sign_in_request(&state, newer_generation, newer, None, |_| {}).await);
+        assert_eq!(state.lock().await.sign_in_recovery.current(), None);
+
+        let (_, _, generation, operation) =
+            begin_sign_in_request(&state, SignInStep::SendCode, |_| {}).await.unwrap();
+        close_account_with(Arc::clone(&state), AccountCloseReason::User,
+            |_| async { Ok(()) }, |_| async { Ok(()) }, |_, _| async {}, |_| {}).await.unwrap();
+        assert!(!finish_sign_in_request(&state, generation, operation, Some(SignInFailureCause::RelaysUnreachable), |_| {}).await);
+        assert_eq!(state.lock().await.sign_in_recovery.current(), None);
+    }
 
     #[tokio::test]
     async fn installation_id_read_failure_blocks_sign_in_until_the_stable_id_is_loaded() {

@@ -109,6 +109,7 @@ final class SignInRecoveryTests: XCTestCase {
         defer { cleanUp() }
         await account.requestEmailCode(email: "runtime@example.test", deviceName: "Test Mac")
         let ended = account.signInRecovery
+        XCTAssertEqual(ended?.phase, .userAction)
 
         await account.fail(TonoAPIClient.APIError.transport("runtime"))
 
