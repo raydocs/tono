@@ -962,6 +962,13 @@ final class MacUsabilityRenderTests: XCTestCase {
             label.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) }
         }
         request.recognitionLanguages = hasChineseLabels ? ["zh-Hans", "en-US"] : ["en-US"]
+        if hasChineseLabels {
+            // Vision defaults to image height / 32, filtering 14px Chinese
+            // controls in a 720px window before recognition. Include the 8px
+            // glyphs our existing geometry contract can validate. Exact tokens,
+            // confidence, original-image contrast and completeness stay unchanged.
+            request.minimumTextHeight = 8 / Float(image.height)
+        }
         request.usesLanguageCorrection = true
         do {
             try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
@@ -976,7 +983,7 @@ final class MacUsabilityRenderTests: XCTestCase {
             if abs(left.2.midY - right.2.midY) > 0.015 { return left.2.midY > right.2.midY }
             return left.2.minX < right.2.minX
         }
-        receipt.append("Vision lines=\(lines.count) recognition=accurate languages=\(request.recognitionLanguages) correction=true")
+        receipt.append("Vision lines=\(lines.count) recognition=accurate languages=\(request.recognitionLanguages) minimumTextHeight=\(request.minimumTextHeight) correction=true")
         for (index, line) in lines.prefix(80).enumerated() {
             receipt.append("OCR[\(index)] text=\(line.0.debugDescription) confidence=\(line.1) box=\(line.2)")
         }
