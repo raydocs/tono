@@ -69,6 +69,10 @@ final class ConnectionCoordinator {
     /// newest queued request settles. While set, the teardown is still in
     /// flight even though the UI no longer shows "Disconnecting…".
     private(set) var releaseStillFinishing = false
+    /// The same interim state for a pending native-update release
+    /// (`/update/disconnect`), which runs outside the teardown queue. AppState
+    /// sets it at that release's deadline and clears it when the task ends.
+    var updateReleaseStillFinishing = false
 
     /// Whether the pending or in-flight teardown queue's newest request is an
     /// explicit release, or was one that could not release PF. Newest-wins,

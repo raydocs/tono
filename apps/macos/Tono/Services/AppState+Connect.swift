@@ -818,6 +818,7 @@ extension AppState {
     /// background. Automatic work and Connect wait for it in both cases.
     var teardownInFlight: Bool {
         isDisconnecting || connectionCoordinator.releaseStillFinishing
+            || connectionCoordinator.updateReleaseStillFinishing
     }
 
     static let releaseStillFinishingMessage = String(

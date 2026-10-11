@@ -64,6 +64,59 @@ final class NativeUpdateWakeRetirementTests: XCTestCase {
         XCTAssertFalse(app.isConnecting, "the retired wake cannot start another connection")
     }
 
+    /// Decision 092 case: an update failed and the user chose Restore
+    /// internet, but a cancelled connect mutation never returns. At the
+    /// overall deadline the UI publishes unknown with the recovery text,
+    /// nothing is released early and the armed intent stays; once the drain
+    /// ends, exactly one `/update/disconnect` runs and replaces the result.
+    func testOverdueUpdateReleaseDrainPublishesUnknownThenOneDisconnect() async throws {
+        let armed = KillSwitchService.isArmed
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        let didStartCore = AppProfile.defaults.object(forKey: SettingsKey.didStartCore)
+        let lastTunEnabled = AppProfile.defaults.object(forKey: SettingsKey.lastTunEnabled)
+        let drain = Gate()
+        defer {
+            drain.open()
+            KillSwitchService.isArmed = armed
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+            AppProfile.defaults.set(didStartCore, forKey: SettingsKey.didStartCore)
+            AppProfile.defaults.set(lastTunEnabled, forKey: SettingsKey.lastTunEnabled)
+        }
+        KillSwitchService.isArmed = true
+        let app = AppState()
+        app.connectionCoordinator.explicitReleaseDeadline = .milliseconds(50)
+        var disconnects = 0
+        app.nativeUpdateDisconnect = {
+            disconnects += 1
+            return .init(pending: true, receipt: nil, execution: "staged",
+                         disconnectVerified: true, diagnostic: nil)
+        }
+        app.connectionCoordinator.connectTask = Task { await drain.wait() }
+
+        app.disconnectPendingNativeUpdate()
+        let release = try XCTUnwrap(app.nativeUpdateDisconnectTask)
+        for _ in 0..<500 where app.errorMessage == nil {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertEqual(app.errorMessage, AppState.releaseStillFinishingMessage)
+        XCTAssertTrue(app.isProtectionUnconfirmed, "the interim result is unknown")
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertEqual(disconnects, 0, "nothing is released while the drain is pending")
+        XCTAssertTrue(KillSwitchService.isArmed)
+        XCTAssertTrue(app.teardownInFlight, "automatic work still waits")
+
+        drain.open()
+        await release.value
+
+        XCTAssertEqual(disconnects, 1, "the same release runs once after the drain")
+        XCTAssertFalse(app.isProtectionUnconfirmed)
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertFalse(KillSwitchService.isArmed)
+        XCTAssertNil(app.errorMessage)
+        XCTAssertFalse(app.teardownInFlight)
+    }
+
     private final class Gate {
         private var isOpen = false
         private var waiter: CheckedContinuation<Void, Never>?

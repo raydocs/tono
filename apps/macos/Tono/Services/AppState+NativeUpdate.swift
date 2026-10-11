@@ -89,7 +89,10 @@ extension AppState {
         // An explicit Restore that joins a running automatic release keeps its
         // remove-AI intent; the running task issues it once it settles.
         if !preserveAIHold { nativeUpdateExplicitReleaseRequested = true }
-        guard nativeUpdateDisconnectTask == nil else { return }
+        guard nativeUpdateDisconnectTask == nil else {
+            if !preserveAIHold { scheduleUpdateReleaseDeadline() }
+            return
+        }
         nativeUpdatePending = true
         RuntimeCleanup.nativeUpdateBlocksConnect = true
         nativeUpdateDisconnectTask = Task {
@@ -99,6 +102,11 @@ extension AppState {
                 let explicitJoined = dispatchedAutomatic && settled && nativeUpdateExplicitReleaseRequested
                 nativeUpdateExplicitReleaseRequested = false
                 nativeUpdateDisconnectTask = nil
+                // The final result (or a newer owner) replaces the interim one.
+                if connectionCoordinator.updateReleaseStillFinishing {
+                    connectionCoordinator.updateReleaseStillFinishing = false
+                    if errorMessage == Self.releaseStillFinishingMessage { errorMessage = nil }
+                }
                 // Routed again: still pending runs the plain update Disconnect,
                 // a committed update runs the ordinary explicit release.
                 if explicitJoined { disconnect(releaseKillSwitch: true) }
@@ -155,6 +163,27 @@ extension AppState {
                       connectionCoordinator.protectionOperationGeneration == generation else { return }
                 errorMessage = error.localizedDescription
             }
+        }
+        if !preserveAIHold { scheduleUpdateReleaseDeadline() }
+    }
+
+    /// The user's Restore during a pending update shares the explicit
+    /// release's overall deadline (decision 092). The drain before
+    /// `/update/disconnect` has no bound of its own; past the deadline the UI
+    /// publishes "unknown, still finishing", nothing is released early, the
+    /// armed intent stays, and the running task still publishes its result.
+    private func scheduleUpdateReleaseDeadline() {
+        guard let release = nativeUpdateDisconnectTask else { return }
+        let deadline = connectionCoordinator.explicitReleaseDeadline
+        Task { [weak self] in
+            try? await Task.sleep(for: deadline)
+            guard let self, self.nativeUpdateDisconnectTask == release,
+                  !self.connectionCoordinator.updateReleaseStillFinishing else { return }
+            self.connectionCoordinator.updateReleaseStillFinishing = true
+            self.isProtectionBlocked = false
+            self.isProtectionUnconfirmed = true
+            self.errorMessage = Self.releaseStillFinishingMessage
+            LocalTrafficAudit.shared.recordEvent("update_release_overdue", details: [:])
         }
     }
 
