@@ -52,95 +52,106 @@
   Known limit of (a): a fence the disk refused binds only the running daemon (in memory). The update executor and a
   restarted or swapped daemon read the record on disk, so they are not fenced; the release still runs and reads back,
   but nothing reports the fence as not durable to the app. (c) makes a durable fence a condition of "released".
-- (c) Design, not implemented (revised after Sol's design review FAIL at b2124fb7, D-F1 to D-F5): a release that does
-  not queue behind the helper's request loop or a long privileged call. Implementation waits for Sol's design PASS and
-  then ships as helper 4.52.51.
-  - Blockers today, file:line:
-    - The helper serves one connection at a time on its accept loop
-      (`tooling/scripts/core-helper/SocketServer.swift:401-407`: `accept`, then `handle(client)` inline).
-    - Every request except `/helper/upgrade` runs inside the update lock (`SocketServer.swift:931`,
-      `updates.storage.locked`), and `/update/stage` holds it for the whole copy (`HelperManager.swift:1403`).
-    - In the app, every helper call goes through `actor PrivilegedRuntimeCoordinator`
-      (`apps/macos/Tono/Core/PrivilegedRuntimeCoordinator.swift:6`) as a blocking call, including the repair prompt
-      (`HelperManager.swift:323`, 180 s, then the 45 s start-up poll) and the system proxy cleanup.
-    - `KillSwitchManager`, `ProtectedDNSManager` and `CoreManager` each guard their state with a plain `NSLock`
-      (`KillSwitchManager.swift:147`, `ProtectedDNSManager.swift:86`, `CoreManager.swift:8`) taken without a deadline;
-      `PowerTransitionGate.whileAwake` (`HelperPower.swift:18`) and `CoreManager`'s diagnostic lock are taken inside
-      them.
-    - A launch that claimed `go` waits for its commit without a bound (`HelperCommandLaunch.wait`,
-      `KillSwitchManager.swift:228-231`: `.going` → `committed.wait()`), while the caller holds its manager's lock.
-  - One release epoch (D-F5). The app's Restore mints `epoch = (sessionGeneration G it last began, request UUID)` and
-    every part of that one release carries it: the fast request, the old mutators' undo, and the trailing queued
-    release (today's sequence). The helper's fence is a compare-and-swap on G under the target lock: it writes
-    `released <G+1>` only while the record is `secured <G>` (or already `released`, which it leaves as is). A record at a
-    newer `secured` generation means a newer Connect began: the fast path answers `superseded` and touches nothing.
-    The same check guards everything later in the epoch: an undo, the trailing release's cleanup and its deferred
-    bookkeeping run only while the record is still this epoch's `released <G+1>`, so no stale effect or cleanup can
-    reach a newer Connect. A fence write that is abandoned past its budget and lands late takes the same lock and the
-    same compare, so it cannot revoke a Connect that began meanwhile.
-  - Durable fence (D-F1). "Released" requires the fence on disk: the record written, fsynced and its directory
-    synced, then read back as this epoch's generation. Without that (disk refused, budget passed), the in-memory fence
-    still binds this daemon (now under a lock, as in round 10's code), but the result is `partial` with the fence named
-    unknown and the Support page's `--emergency-disarm` as the exit, because the update executor (a copied helper run
-    by launchd) and a restarted or swapped daemon read only the disk. Compatibility: helpers from 4.52.50 read the
-    same `released <n>` record (decision 084); a rollback to a helper older than 4.52.50 ignores it, so the app never
-    treats such a helper as fence-aware. The executor already treats `released` as release authority (decision 092).
-  - Ownership of a stalled launch (D-F2). A `.going` launch is never given up on a timeout alone. Past `commitBudget`
-    the caller sends SIGKILL to the child it started and waits for its exit status (`waitpid` through the process's
-    termination handler), bounded by the release deadline. Only a reaped child turns into a terminal failure that
-    releases the manager's lock. A child that is not reaped in time stays registered as abandoned work of that
-    manager (below), and its component reads unknown until it is reaped. TERM / KILL alone is not taken as proof.
-  - One deadline, owned work (D-F3).
-    - A single monotonic deadline (`DispatchTime`) is fixed when the request is accepted, 50 s after it; every step
-      gets `min(its own budget, time left)`, nested children and their TERM / KILL grace included, every pfctl /
-      route / networksetup query, every SystemConfiguration call (run on a worker thread and abandoned at the
-      deadline) and the target write with its fsyncs.
-    - Abandoned work is owned: each manager keeps a table of the threads and child pids it gave up waiting for; the
-      readback reports that component unknown while the table is not empty, whatever a transient clean read says.
-    - Each manager gains one timed, non-recursive lock API (`withLock(until:)`) that refuses (instead of deadlocking)
-      when the calling thread already holds it; the fast path never holds two manager locks at once.
-    - Lock graph (outer → inner, the only edges): target lock → nothing; `CoreManager.lock` → diagnostic lock;
-      `KillSwitchManager.lock` → `PowerTransitionGate` lock (the disarm runs under `whileAwake`); `ProtectedDNSManager.lock`
-      → nothing; the update lock is never taken. The fast path takes them one at a time in the order target → Core →
-      DNS → PF → AI → proxy.
-    - Socket I/O and authentication are bounded: 1 s receive and send timeouts, a 4 KiB request cap, the peer's audit
-      token read from the socket (`LOCAL_PEERTOKEN`), and the code-signature check run under the deadline.
-    - Coalescing: one fast release runs at a time. A second request with the same epoch joins it and gets the same
-      result; a newer epoch waits for it, then runs its own compare-and-swap.
-  - Proxy (D-F4). The fast path also restores the system proxy settings Tono owns (services whose HTTP / HTTPS /
-    SOCKS proxy points at Tono's local listener) through SystemConfiguration and reads them back. The app's proxy
-    writer, which today runs inside `PrivilegedRuntimeCoordinator`, takes the same epoch check before and after its
-    write (the `guardedEffect` shape): a write that lands after the fence is undone. Without this a Core stop could
-    leave ordinary browsing pointed at a dead proxy.
-  - Route and authentication. A second socket `/var/run/tono-core-helper.release.sock`, created by the daemon at start
-    in a root-owned directory, mode 0600, owned by the same bound uid as the main socket, unlinked and recreated
-    atomically on each start. One route, `POST /release/user`, body exactly `{"epoch":{"sessionGeneration":G,"request":
-    "<uuid>"}}`. The peer must be the bound uid, and its kernel audit token must carry Tono's signature with
-    `get-task-allow` absent. No new cross-user authority.
-  - Answer: `{"result":"released"|"partial"|"unknown"|"superseded","components":{"fence","core","dns","pf","ai",
-    "proxy":"released"|"present"|"unknown"}}`. A component is `released` only when its lock was taken, its step
-    succeeded, no abandoned work remains for it and the readback is clean; a missed lock or a failed undo stays
-    unknown for the whole epoch.
-  - No ledger on the fast path. It never reads or writes the update ledger, never retires and never sets
-    `disconnectVerified`. The update executor learns of the release from the durable target. Deferred bookkeeping
-    (`disconnectRequested` / `disconnectVerified`) stays in the trailing `/update/disconnect`, under the update lock and
-    only for a matching epoch.
-  - App and legacy fallback. The app sends the request at once on its own thread, outside
-    `PrivilegedRuntimeCoordinator`, then the trailing release queues as today. The capability is known from the daemon's
-    earlier `/version` answer in this session (4.52.51 or later), never from a version probe queued behind the call
-    the fast path is meant to bypass. A missing socket is not proof of an old helper: against a fence-capable helper it
-    is `unknown` plus `--emergency-disarm`. Against a helper without the capability the app sends no blind release,
-    applies no drain cap, and runs today's queued path.
-  - Bound: one 50 s deadline from accepting the request (target 4, authentication 2, Core 6, DNS 10, PF 10, AI 8,
-    proxy 5, readback 5); the app's receive timeout is 55 s. Anything not finished is `unknown`, never `released`.
-  - Failure modes: daemon dead or stopped (`SIGSTOP`): no answer, so unknown plus `--emergency-disarm`. Disk refuses
-    the fence: `partial`, fence unknown. A pfctl / networksetup / SC call that hangs: abandoned at the deadline, so
-    that component is unknown. An arm that lands after the fence: undone by its after-read
-    (`runLateReblockAfterUserReleaseSelfTest`). A newer Connect before the fence: `superseded`, nothing touched.
-  - Cost: a protocol change (new socket, route and answer), helper 4.52.51, timed locking and abandoned-work tables in
-    the three managers, the proxy writer's epoch check, and the `.going` ownership change.
-  - Minimal alternative if (c) is rejected: keep (a) + (b) and state the queue as not bounded (contributors in the
-    budget table), with `--emergency-disarm` as the escape, which does not use the daemon's socket.
+- (c) Design, not implemented (third revision, after Sol's design review FAIL at 5b23b163: D10-F1 to D10-F3; the
+  earlier D-F1 to D-F5 answers that Sol accepted are kept below).
+  - **Conclusion first.** (c) can be made safe, but only with a helper-wide concurrency rewrite: every protection
+    mutation in every helper process must move under one cross-process mutation lock, held across its check and its
+    effect, one effect at a time. Epoch reads before and after an effect (today's `guardedEffect`) cannot be made
+    linear against `/session/connect`, and the current lock graph has cycles. Honest size: about 1,500 to 2,500
+    changed lines across ten helper files (about 13,000 lines today) and five app files, a new socket listener, and a
+    regression per behaviour. That is 4 to 6 working days plus at least two review rounds, during the freeze. The
+    owner decides between that and the minimal alternative at the end of this section.
+  - Blocking code, file:line (at 5b23b163):
+    - `HelperTarget.guardedEffect` (`tooling/scripts/core-helper/OperatorRelease.swift:283-296`) compares only the
+      mode before and after an effect, so allowed G → released G+1 → allowed G+2 looks like "allowed" both times, and
+      the effect is not excluded from a Connect in between. Its users: `KillSwitchPF.swift`, `ProtectedDNSManager.swift`,
+      `SelectiveFailOpen.swift` and nine sites in `OperatorRelease.swift`.
+    - Lock cycles: power → Core / KillSwitch (`SocketServer.swift:1099-1103`, `1121-1122`: the sleep and wake callbacks
+      stop the Core and arm inside `PowerTransitionGate.whileAwake`), and Core → power / KillSwitch (`CoreManager.swift:
+      102-105` holds `CoreManager.lock` while the start gate at `SocketServer.swift:1018-1020`, `1036-1042` reads
+      `transitionGate.isAwake()` and `killSwitch.status()`).
+    - The helper session generation lives only in the app's memory (`apps/macos/Tono/Core/HelperManager.swift:957-980`),
+      so a relaunched app has no G.
+    - DNS writes are in-process System Configuration calls (`ProtectedDNSManager.swift:1192-1201`), which no deadline
+      can abandon safely while they hold a lock.
+    - The helper serves one connection at a time (`SocketServer.swift:401-407`) inside the update lock
+      (`SocketServer.swift:931`), and the app calls it through `actor PrivilegedRuntimeCoordinator`
+      (`PrivilegedRuntimeCoordinator.swift:6`).
+  - **Mechanism: one mutation lock, M.** M is the existing cross-process target lock (`HelperTarget.Store.withLock`, a
+    file lock beside `target-state`), promoted to the outermost lock of every protection mutation:
+    - Who takes M: every helper route that changes PF, DNS, the AI layer, the Core or the target; `/session/connect`;
+      the watchdog; PF supervision; the sleep and wake callbacks; the update executor (a copied helper, same code); the
+      emergency CLI; and the new release listener. Read-only status takes no M.
+    - What M covers: one effect at a time. Under M the holder reads the target (mode and generation), checks that the
+      effect belongs to the current epoch, runs the effect, and only then releases M. A fence or a Connect can no
+      longer land between the check and the effect, so stale effects need no undo and no undo can reach a newer
+      session. `guardedEffect` and `stepsUnlessReleased` become this check-under-M (their after-reads go).
+    - How long M is held: one effect. Each effect is one child process with its deadline (pfctl, route, networksetup
+      15 s, plus 2 s TERM / KILL grace) or a DNS write moved into a bounded child (`tono-core-helper --dns-apply`, so a
+      hung configd is killed, not abandoned in-process). A route with several effects takes M once per effect.
+    - Abandoned holder: a holder past its effect deadline whose child cannot be reaped keeps M. M is never released
+      while its effect may still land. Every other M taker, the fast release included, then fails at its own deadline
+      with `unknown`, and only `--emergency-disarm` (which boots the daemon out and so ends the holder) recovers it.
+      Late effects are therefore impossible, at the price of a bounded `unknown`.
+    - Compatibility: only helpers that take M can write once the fence holds. A helper or executor older than 4.52.51
+      does not take M. So the fast path answers `released` only when its bounded process scan (`proc_listpids`, no
+      child) finds no Tono helper process other than this daemon; otherwise those components are `unknown`. A rollback
+      helper older than 4.52.50 that starts later ignores the target, but finds no saved intent to heal (the release
+      removed it), and the app arms it only after a user Connect.
+  - **Lock graph (complete, acyclic).** M is outermost. Under M the component locks are taken in one total order, each
+    at most once: target record I/O → `CoreManager.lock` → `ProtectedDNSManager.lock` → `KillSwitchManager.lock` →
+    `PowerTransitionGate` lock → `CoreManager` diagnostic lock. The rewrite removes the two reverse edges:
+    - The sleep and wake callbacks take M first, then call the components in this order. They no longer call Core or
+      KillSwitch from inside the power lock; the power lock only records sleeping or awake.
+    - The Core start gate reads `isAwake` and the PF status before taking `CoreManager.lock`, under M, which already
+      excludes any change to them.
+    - Paths without M (status, diagnostics, the update store, the proxy readback) take one lock at a time and never
+      nest. The update lock may be held outside M (today every request runs inside it, `SocketServer.swift:931`), but
+      no M holder ever waits for the update lock, so update lock → M is the only order between them. The fast path
+      never takes the update lock.
+    - The app's proxy writer is in the app process, so it has its own lock P in the app (below); no helper lock is
+      held across an app call.
+  - **Release request and epoch (D10-F1).** The fast request is `POST /release/user` with
+    `{"request":"<uuid>","expectedGeneration":G|null}` on the second socket. The helper takes M (bounded) and reads
+    the record:
+    - `secured G'` with G' equal to `expectedGeneration`, or `expectedGeneration` null → write `released G'+1`.
+    - `secured` with a different generation → `superseded`, nothing touched.
+    - `released` → keep it (already fenced).
+    - Missing → `released 1`. Unreadable → the existing atomic repair to `released <now in ms>`.
+    - The answer carries the generation it fenced.
+    The app sends null only when this app process has begun no helper session (a relaunched app). That is safe
+    because only this app sends `/session/connect`, and while one of its release requests is unsettled (in flight, or
+    timed out without an answer) it sends no Connect; Connect waits for the release's deadline. A retry reuses the
+    same request ID, and the helper keeps the IDs it applied (in memory, bounded table) and answers them again without
+    a second fence. After the app admits a Connect it never retries an older request. A daemon restarted in between
+    has lost the table, but by the rule above no newer Connect exists, so the fence applies to the session the user
+    released.
+    Disk failure: the fence stays in memory for this daemon; the answer is `partial` with `fence: unknown`, and every
+    cleanup step still runs.
+  - **Deadline, coalescing, abandonment (D10-F3).** The deadline is fixed when the request's bytes are read: 50 s.
+    Every wait uses what is left of it: authentication (the audit-token signature check on a worker thread), M,
+    each component lock, each child, the target fsyncs and the coalescing wait. Before starting each effect the
+    holder checks the deadline under M; an expired request starts no mutation and answers what it has read back.
+    A second request with the same ID joins the running one and keeps its own original deadline. A request with a
+    new ID waits for the running one within its own deadline.
+  - **Proxy (D-F4, kept).** The app moves `SystemProxy.enable` / `disable` behind one app-side owner with lock P and
+    the release request ID: the fast release takes P, records the release and disables the proxy Tono set; an enable
+    that takes P after it sees the release and does nothing. Readback runs under P. networksetup is bounded (15 s), so
+    P is held for at most one call.
+  - Kept from the previous round (accepted by Sol): the second socket and its peer policy (same bound uid, kernel audit
+    token, signed Tono without `get-task-allow`, 0600, recreated atomically); per-component answers where only a taken
+    lock, a finished step, no abandoned work and a clean readback give `released`; no update-ledger access on the
+    fast path; capability-gated fallback (known-version evidence only, missing socket = `unknown`, no blind call, no
+    drain cap against a fence-unaware helper); a `.going` launch released only after its child is reaped.
+  - Bound: 50 s from reading the request (authentication 2, M wait up to one effect 17, Core 6, DNS child 10, PF 8,
+    AI 4, proxy under P 15 in the app in parallel, readback 5, inside the 50). Anything unfinished is `unknown`.
+  - Regressions it would need (one per behaviour): fast path while `/update/stage` holds the update lock and another
+    thread holds a component lock; a late re-seal refused across the executor and a daemon restart; proxy restore;
+    the epoch against a newer Connect (and a retried request after it); the old-helper capability gate; the 50 s bound
+    with a stalled child holding M.
+  - **Minimal alternative** (what this PR ships today, and Sol's stated safe interim): (a) + (b) + (d), the drain
+    uncapped against fence-unaware helpers, the queue stated as not bounded, and the administrator's
+    `--emergency-disarm` as the exit. It does not meet the owner's one-click hard gate.
 - (d) The Support page shows `--emergency-disarm` as a last-resort local administrator command that is not a substitute
   for Restore normal internet. It latches the release, stops the daemon, releases PF, DNS and the AI layer, reads each
   back, prints one line per step, exits 0 only when everything read back released, and keeps Tono installed.
