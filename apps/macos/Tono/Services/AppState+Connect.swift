@@ -22,12 +22,12 @@ extension AppState {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
         if !preservingUnarmedBackoff { unarmedReconnectAttempt = 0 }
         connectionCoordinator.executeConnect(
-            isDisconnecting: isDisconnecting,
+            isDisconnecting: teardownInFlight,
             deferredFallback: { [weak self] in
                 guard let self,
                       !self.isConnected,
                       !self.isConnecting,
-                      !self.isDisconnecting else { return }
+                      !self.teardownInFlight else { return }
                 self.connect(preservingUnarmedBackoff: preservingUnarmedBackoff, userIntent: userIntent)
             },
             prepare: { [weak self] in
@@ -813,6 +813,31 @@ extension AppState {
         }
     }
 
+    /// Teardown still owns the host: either the UI shows "Disconnecting…", or
+    /// an explicit release passed its UI deadline and keeps finishing in the
+    /// background. Automatic work and Connect wait for it in both cases.
+    var teardownInFlight: Bool {
+        isDisconnecting || connectionCoordinator.releaseStillFinishing
+    }
+
+    static let releaseStillFinishingMessage = String(
+        localized: "Restoring internet is taking longer than expected. Tono keeps finishing it in the background and will show the result; until then, direct internet may still be blocked. If it stays stuck, the Support page has a local recovery command."
+    )
+
+    /// The explicit release's overall deadline passed (decision 092): stop
+    /// showing "Disconnecting…" and publish the truthful interim result. The
+    /// armed intent stays, nothing is released here, and the queued release
+    /// publishes its final result when it lands.
+    func publishReleaseStillFinishing() {
+        guard isDisconnecting else { return }
+        isDisconnecting = false
+        disconnectionStartedAt = nil
+        isProtectionBlocked = false
+        isProtectionUnconfirmed = true
+        errorMessage = Self.releaseStillFinishingMessage
+        LocalTrafficAudit.shared.recordEvent("explicit_release_overdue", details: [:])
+    }
+
     /// Restore internet, including Cancel while a connect already holds the
     /// network. A disconnect of a working tunnel is not this path.
     func restoreInternet() {
@@ -893,6 +918,10 @@ extension AppState {
             : ordinaryQuit ? .ordinaryQuit
             : (automaticFailureRelease || afterUnarmedConnectFailure) ? .automatic : .explicit
 
+        var onOverdue: (@MainActor () -> Void)?
+        if releaseDisposition == .explicit {
+            onOverdue = { [weak self] in self?.publishReleaseStillFinishing() }
+        }
         connectionCoordinator.executeDisconnect(
             releaseKillSwitch: releaseKillSwitch,
             releaseDisposition: releaseDisposition,
@@ -1001,6 +1030,7 @@ extension AppState {
                 self.isLoadingProviderRules = false
                 self.activeDirectPolicy = nil
             },
+            onOverdue: onOverdue,
             operation: { [weak self, coreRuntime] requestID in
             var transitionError: String?
             var helperReadyForRelease = true
@@ -1217,7 +1247,13 @@ extension AppState {
                     requestID,
                     releaseUnconfirmed: releaseKillSwitch && transitionLeavesProtectionBlocked
                 ) {
-                    self.isProtectionBlocked = transitionLeavesProtectionBlocked
+                    // An unknown result is not Protected Offline (092).
+                    self.isProtectionBlocked = transitionLeavesProtectionBlocked && !releaseOutcomeUnknown
+                    if self.connectionCoordinator.releaseStillFinishing {
+                        // Replace the deadline's interim "still finishing".
+                        self.isProtectionUnconfirmed = false
+                        if self.errorMessage == Self.releaseStillFinishingMessage { self.errorMessage = nil }
+                    }
                     if releaseOutcomeUnknown { self.isProtectionUnconfirmed = true }
                     if let selectiveRecoveryPending {
                         self.selectiveAIRecoveryPending = selectiveRecoveryPending
@@ -2128,7 +2164,7 @@ extension AppState {
                 self.errorMessage = String(localized: "Recovering protected connection…")
                 return .continueMonitoring
             }
-            guard self.isConnected, !self.isDisconnecting else { return .stopMonitoring }
+            guard self.isConnected, !self.teardownInFlight else { return .stopMonitoring }
             await self.applyExhaustedArmedFailure(
                 message: failure.userMessage,
                 resumeWhenReachable: true
@@ -2143,7 +2179,7 @@ extension AppState {
     /// when a cloud node was already selected and only the dialer moves.
     private func attemptAutomaticCloudFailover() async -> Bool {
         guard isConnected,
-              !isDisconnecting,
+              !teardownInFlight,
               switchingNodeId == nil,
               self.connectionCoordinator.configReloadTask == nil else {
             return false
@@ -2176,7 +2212,7 @@ extension AppState {
         _ = await switchTask.value
         guard !Task.isCancelled,
               isConnected,
-              !isDisconnecting,
+              !teardownInFlight,
               switchingNodeId == nil,
               let active = selectedExitNode(),
               active.id == candidate.id else {
@@ -2194,7 +2230,7 @@ extension AppState {
     /// to tell that the original DNS servers were not put back (X3-1). Show
     /// that notice on activation once no other message is on screen.
     func showPendingProtectedDNSRestoreNotice() {
-        guard errorMessage == nil, !isDisconnecting,
+        guard errorMessage == nil, !teardownInFlight,
               let notice = HelperManager.takeProtectedDNSRestoreNotice() else { return }
         errorMessage = notice
     }
@@ -2211,7 +2247,7 @@ extension AppState {
             return
         }
         guard isProtectionBlocked, !isConnected, !isConnecting,
-              !isDisconnecting else { return }
+              !teardownInFlight else { return }
         Task { [weak self] in
             // Never-armed teardown also leaves Protected Offline set; only an
             // armed intent can be released externally (as the reconnect loop does).
@@ -2240,14 +2276,14 @@ extension AppState {
         repairRequested: Bool = false
     ) async -> Bool {
         guard protectionWasArmed, isProtectionBlocked || isProtectionUnconfirmed,
-              !isConnected, !isConnecting, !isDisconnecting else { return false }
+              !isConnected, !isConnecting, !teardownInFlight else { return false }
         let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
         let networkProtection = self.networkProtection
         let observation = await networkProtection.refreshKillSwitchStatus()
         guard !Task.isCancelled,
               self.connectionCoordinator.protectionOperationGeneration == observedGeneration,
               isProtectionBlocked || isProtectionUnconfirmed, !isConnected, !isConnecting,
-              !isDisconnecting else { return false }
+              !teardownInFlight else { return false }
 
         switch observation {
         case .unavailable:
@@ -2301,11 +2337,11 @@ extension AppState {
     /// retires with it instead of re-arming PF (INT610-F2).
     func acceptConfirmedProtectionReleaseBeforeSignIn() async
         -> KillSwitchService.StatusObservation {
-        guard !isConnected, !isConnecting, !isDisconnecting else { return .unavailable }
+        guard !isConnected, !isConnecting, !teardownInFlight else { return .unavailable }
         let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
         let networkProtection = self.networkProtection
         let observation = await networkProtection.refreshKillSwitchStatus()
-        guard !Task.isCancelled, !isConnected, !isConnecting, !isDisconnecting
+        guard !Task.isCancelled, !isConnected, !isConnecting, !teardownInFlight
         else { return .unavailable }
         let generation = self.connectionCoordinator.protectionOperationGeneration
         guard generation == observedGeneration else {
@@ -2560,7 +2596,7 @@ extension AppState {
                 guard let self, !Task.isCancelled,
                       self.connectionCoordinator.protectionOperationGeneration == generation,
                       !self.nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
-                if self.isConnected || self.isConnecting || self.isDisconnecting { return }
+                if self.isConnected || self.isConnecting || self.teardownInFlight { return }
                 if self.protectedReconnectPausedForUserAction { return }
                 // After an unexpected restart only the user reconnects.
                 if self.automaticResumeHeldAfterRestart { return }
@@ -2589,7 +2625,7 @@ extension AppState {
                 // cancellation or a newer lifecycle owner has taken over.
                 guard !Task.isCancelled,
                       self.connectionCoordinator.protectionOperationGeneration == generation,
-                      !self.isConnected, !self.isConnecting, !self.isDisconnecting,
+                      !self.isConnected, !self.isConnecting, !self.teardownInFlight,
                       !self.protectedReconnectPausedForUserAction,
                       !self.automaticResumeHeldAfterRestart,
                       !self.nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
@@ -2732,7 +2768,7 @@ extension AppState {
                 if self.isConnecting {
                     let pending = self.connectionCoordinator.connectTask
                     _ = await pending?.value
-                } else if !self.isDisconnecting {
+                } else if !self.teardownInFlight {
                     LocalTrafficAudit.shared.recordEvent(
                         "protected_reconnect_attempt",
                         details: [
@@ -2818,7 +2854,7 @@ extension AppState {
             guard let self, !Task.isCancelled,
                   self.connectionCoordinator.protectionOperationGeneration == generation,
                   !self.isProtectionBlocked, !self.isProtectionUnconfirmed,
-                  !self.isConnected, !self.isConnecting, !self.isDisconnecting,
+                  !self.isConnected, !self.isConnecting, !self.teardownInFlight,
                   self.errorMessage == pending else { return }
             self.errorMessage = released
         }

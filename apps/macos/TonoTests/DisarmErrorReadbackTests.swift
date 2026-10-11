@@ -70,6 +70,45 @@ final class DisarmErrorReadbackTests: XCTestCase {
         return runtime
     }
 
+    /// One-click release whose drain never finishes: a cancelled connect
+    /// mutation has not returned. At the overall deadline the UI stops
+    /// showing "Disconnecting…" and publishes unknown with the recovery text,
+    /// with nothing released and the armed intent kept. The release still runs
+    /// once the drain ends, and its result replaces the interim one.
+    func testOverdueReleaseDrainPublishesUnknownThenTheLateResult() async {
+        let app = AppState()
+        KillSwitchService.isArmed = true
+        defer { KillSwitchService.isArmed = false }
+        app.isConnected = true
+        let log = ReleaseLog()
+        app.networkProtection = releaseRuntime(log)
+        app.connectionCoordinator.explicitReleaseDeadline = .milliseconds(50)
+        let drain = ReleaseDrainGate()
+        app.connectionCoordinator.connectTask = Task { await drain.wait() }
+
+        app.disconnect(releaseKillSwitch: true)
+        for _ in 0..<500 where app.isDisconnecting {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertFalse(app.isDisconnecting, "the UI stops waiting at the deadline")
+        XCTAssertTrue(app.isProtectionUnconfirmed, "the interim result is unknown")
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertEqual(app.errorMessage, AppState.releaseStillFinishingMessage)
+        XCTAssertEqual(log.disarms, 0, "nothing is released while the drain is pending")
+        XCTAssertTrue(KillSwitchService.isArmed)
+        XCTAssertTrue(app.teardownInFlight, "Connect and automatic work still wait")
+
+        drain.open()
+        await app.finishPendingDisconnect()
+
+        XCTAssertEqual(log.disarms, 1, "the same release finishes after the drain")
+        XCTAssertFalse(app.isProtectionUnconfirmed)
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertNil(app.errorMessage)
+        XCTAssertFalse(app.teardownInFlight)
+    }
+
     /// One-click release, status unreadable: the disarm reply is lost and the
     /// readback cannot be made. That is neither released nor known to hold:
     /// the result is published as unknown, never as Protected Offline and
@@ -88,6 +127,7 @@ final class DisarmErrorReadbackTests: XCTestCase {
         await app.disconnectAndWait(releaseKillSwitch: true)
 
         XCTAssertTrue(app.isProtectionUnconfirmed, "an unreadable release result is unknown")
+        XCTAssertFalse(app.isProtectionBlocked, "unknown is not Protected Offline")
         XCTAssertTrue(KillSwitchService.isArmed, "an unknown result never clears the armed intent")
         XCTAssertNotNil(app.errorMessage)
     }
@@ -135,5 +175,22 @@ final class DisarmErrorReadbackTests: XCTestCase {
         XCTAssertTrue(KillSwitchService.isArmed)
         XCTAssertTrue(app.errorMessage?.contains("Support page") == true,
                       "the failure must name the local recovery path: \(app.errorMessage ?? "nil")")
+    }
+}
+
+/// Holds a drained mutation open until the test releases it.
+private final class ReleaseDrainGate {
+    private var isOpen = false
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { waiter = $0 }
+    }
+
+    func open() {
+        isOpen = true
+        waiter?.resume()
+        waiter = nil
     }
 }

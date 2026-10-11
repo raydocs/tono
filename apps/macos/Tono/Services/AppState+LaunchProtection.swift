@@ -2,12 +2,12 @@ import Foundation
 
 extension AppState {
     func refreshSelectiveAIRecovery() async {
-        guard !isConnected, !isConnecting, !isDisconnecting,
+        guard !isConnected, !isConnecting, !teardownInFlight,
               !nativeUpdatePending, !RuntimeCleanup.nativeUpdatePending,
               !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
         let generation = connectionCoordinator.protectionOperationGeneration
         guard let pending = try? await networkProtection.selectiveAIRecoveryPending(),
-              !Task.isCancelled, !isConnected, !isConnecting, !isDisconnecting,
+              !Task.isCancelled, !isConnected, !isConnecting, !teardownInFlight,
               connectionCoordinator.protectionOperationGeneration == generation else { return }
         selectiveAIRecoveryPending = pending
     }
@@ -19,7 +19,7 @@ extension AppState {
     /// or tearing down publishes its own verdict.
     func adoptLaunchProtection(_ protection: RuntimeCleanup.LaunchProtection) {
         launchProtectionSequence &+= 1
-        guard !isConnected, !isConnecting, !isDisconnecting else { return }
+        guard !isConnected, !isConnecting, !teardownInFlight else { return }
         switch protection {
         case .held:
             isProtectionBlocked = true
@@ -45,7 +45,8 @@ extension AppState {
     /// the protection generation but not the launch sequence; its recovery
     /// reasserts the stored intent, so the older answer must not retire it.
     func resolveUnconfirmedProtection() async {
-        guard isProtectionUnconfirmed else { return }
+        // A release past its UI deadline publishes its own result (092).
+        guard isProtectionUnconfirmed, !teardownInFlight else { return }
         if nativeUpdatePending || RuntimeCleanup.nativeUpdatePending
             || RuntimeCleanup.nativeUpdateBlocksConnect {
             await refreshNativeUpdateProtectionStatus()
@@ -54,7 +55,7 @@ extension AppState {
         let sequence = launchProtectionSequence
         let generation = connectionCoordinator.protectionOperationGeneration
         let observation = await networkProtection.refreshKillSwitchStatus()
-        guard !Task.isCancelled, isProtectionUnconfirmed,
+        guard !Task.isCancelled, isProtectionUnconfirmed, !teardownInFlight,
               launchProtectionSequence == sequence,
               connectionCoordinator.protectionOperationGeneration == generation else { return }
         guard case .confirmed(let requiresProtectionRecovery) = observation else { return }

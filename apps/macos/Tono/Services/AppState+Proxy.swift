@@ -6,7 +6,7 @@ extension AppState {
     /// Select a node/group by name or id.
     func selectNode(_ nameOrId: String, releaseNetworkIfSwitchFails: Bool = false,
                     forceRuntimeReplacement: Bool = false) {
-        guard !isDisconnecting, switchingNodeId == nil else { return }
+        guard !teardownInFlight, switchingNodeId == nil else { return }
         guard connectionCoordinator.configReloadTask == nil else {
             errorMessage = String(
                 localized: "Secure routing is updating. Try switching the cloud server again in a moment."
@@ -227,7 +227,7 @@ extension AppState {
                 // URLSession reports cancellation as URLError.cancelled rather
                 // than CancellationError. An intentional disconnect must not
                 // be converted into an automatic protected reconnect.
-                guard !Task.isCancelled, !isDisconnecting,
+                guard !Task.isCancelled, !teardownInFlight,
                       self.connectionCoordinator.protectionOperationGeneration == switchGeneration else { return }
                 self.retireFailedRouteSuccess(nodeName, owner: routeOwner, generation: switchGeneration)
                 LocalTrafficAudit.shared.recordEvent(
@@ -725,7 +725,7 @@ extension AppState {
                 }
                 finishConfigReloadRequest(requestID)
             } catch is CancellationError {
-                guard pinsRuntimeCommitted, !isDisconnecting,
+                guard pinsRuntimeCommitted, !teardownInFlight,
                       connectionCoordinator.configReloadRequestID == requestID else { return }
                 LocalTrafficAudit.shared.recordEvent(
                     "managed_direct_pf_convergence_cancelled"
@@ -738,7 +738,7 @@ extension AppState {
                     resumeWhenReachable: true
                 )
             } catch {
-                if pendingRemovedCatalogExit, !Task.isCancelled, !isDisconnecting,
+                if pendingRemovedCatalogExit, !Task.isCancelled, !teardownInFlight,
                    connectionCoordinator.configReloadRequestID == requestID {
                     // A failed old owner cannot retry its retired exit or keep
                     // bootstrap PF while the catalog replacement is pending.
@@ -751,7 +751,7 @@ extension AppState {
                 // temporary PF union even when cancelled. A newer disconnect
                 // or update owner already owns that cleanup.
                 if pinsOnlyRefresh, pinsRuntimeCommitted {
-                    guard !isDisconnecting,
+                    guard !teardownInFlight,
                           connectionCoordinator.configReloadRequestID == requestID else { return }
                     // The core is already using the new exact pins but PF could
                     // not converge from old ∪ new to the new set. Retire this
@@ -771,7 +771,7 @@ extension AppState {
                     )
                     return
                 }
-                guard !Task.isCancelled, !isDisconnecting else { return }
+                guard !Task.isCancelled, !teardownInFlight else { return }
                 guard connectionCoordinator.configReloadRequestID == requestID else { return }
                 if pinsOnlyRefresh {
                     // A background pin refresh must never take the session
@@ -819,7 +819,7 @@ extension AppState {
     ) {
         guard connectionCoordinator.configReloadRequestID == requestID else { return }
         connectionCoordinator.configReloadTask = nil
-        guard startPending, isConnected, !isDisconnecting else {
+        guard startPending, isConnected, !teardownInFlight else {
             if !startPending {
                 pendingOptionalPolicyReload = false
                 pendingRemovedCatalogExit = false
@@ -833,7 +833,7 @@ extension AppState {
 
     private func startPendingConfigReloadIfPossible() {
         guard connectionCoordinator.configReloadTask == nil, switchingNodeId == nil,
-              isConnected, !isDisconnecting else { return }
+              isConnected, !teardownInFlight else { return }
         if pendingRemovedCatalogExit {
             pendingRemovedCatalogExit = false
             // The catalog switch writes the complete latest configuration,

@@ -56,6 +56,20 @@ final class ConnectionCoordinator {
 
     private var deferredConnect: (id: UUID, task: Task<Void, Never>)?
 
+    /// One overall UI deadline for an explicit release (decision 092,
+    /// one-click hard gate). Each helper call is bounded, but the queue also
+    /// drains cancelled connect/switch/reload work, and that drain has no
+    /// bound of its own. Past this deadline the UI publishes "unknown, still
+    /// finishing" while the release keeps running; it never releases early,
+    /// because a late mutation could still block the network again.
+    var explicitReleaseDeadline: Duration = .seconds(60)
+    private var explicitReleaseDeadlineTask: Task<Void, Never>?
+    private var settledDisconnectRequestID = 0
+    /// Set once a deadline published "still finishing"; cleared when the
+    /// newest queued request settles. While set, the teardown is still in
+    /// flight even though the UI no longer shows "Disconnecting…".
+    private(set) var releaseStillFinishing = false
+
     /// Whether the pending or in-flight teardown queue's newest request is an
     /// explicit release, or was one that could not release PF. Newest-wins,
     /// matching `disconnectRequestID`: a later teardown request replaces the
@@ -85,6 +99,29 @@ final class ConnectionCoordinator {
             await previousDisconnect?.value
             for task in pendingTasks { await task.value }
             await operation(requestID)
+            self.settledDisconnectRequestID = requestID
+            if requestID == self.disconnectRequestID {
+                self.explicitReleaseDeadlineTask?.cancel()
+                self.explicitReleaseDeadlineTask = nil
+                self.releaseStillFinishing = false
+            }
+        }
+    }
+
+    /// Starts the explicit release's overall UI deadline for the request just
+    /// queued. When it passes before that request settles, `onOverdue`
+    /// publishes the interim result; the queued operation still runs and
+    /// publishes the final one through `completeDisconnect`.
+    private func scheduleExplicitReleaseDeadline(_ onOverdue: @escaping @MainActor () -> Void) {
+        explicitReleaseDeadlineTask?.cancel()
+        let requestID = disconnectRequestID
+        let deadline = explicitReleaseDeadline
+        explicitReleaseDeadlineTask = Task { [weak self] in
+            try? await Task.sleep(for: deadline)
+            guard let self, !Task.isCancelled,
+                  self.settledDisconnectRequestID < requestID else { return }
+            self.releaseStillFinishing = true
+            onOverdue()
         }
     }
 
@@ -261,6 +298,7 @@ final class ConnectionCoordinator {
         releaseDisposition: ReleaseDisposition? = nil,
         pendingTasks: [Task<Void, Never>],
         prepare: () -> Void,
+        onOverdue: (@MainActor () -> Void)? = nil,
         operation: @escaping @MainActor (Int) async -> Void
     ) {
         bumpGeneration()
@@ -275,6 +313,7 @@ final class ConnectionCoordinator {
             releaseDisposition: releaseDisposition,
             operation: operation
         )
+        if let onOverdue { scheduleExplicitReleaseDeadline(onOverdue) }
     }
 
     /// Coordinates scheduling a protected reconnect attempt with exponential backoff and debouncing.
