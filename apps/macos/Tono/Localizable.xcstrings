@@ -1121,12 +1121,12 @@
         }
       }
     },
-    "Your email is only used to sign in. Traffic logs are never uploaded unless you turn that on in Settings.": {
+    "Your email is only used to sign in. Traffic log upload is on by default: the hostnames you connect to, the apps that open each connection, and the matched rules and routes, used to diagnose problems. Turn it off in Settings.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "邮箱只用于登录。流量日志不会上传，除非你在设置里打开。"
+            "value": "邮箱只用于登录。流量日志默认上传：你连接的主机名、发起每条连接的应用、命中的规则与路由，用于排查问题。可在设置里关闭。"
           }
         }
       }

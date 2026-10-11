@@ -97,8 +97,8 @@ keep the existing brand mark, eyebrow and two-line headline.
 
 Form side, above the primary button, one trust line with a lock glyph:
 
-- zh: 邮箱只用于登录。流量日志不会上传，除非你在设置里打开。
-- en: Your email is only used to sign in. Traffic logs are never uploaded unless you turn that on in Settings.
+- zh: 邮箱只用于登录。流量日志默认上传：你连接的主机名、发起每条连接的应用、命中的规则与路由，用于排查问题。可在设置里关闭。
+- en: Your email is only used to sign in. Traffic log upload is on by default: the hostnames you connect to, the apps that open each connection, and the matched rules and routes, used to diagnose problems. Turn it off in Settings.
 
 Verify against the real defaults before shipping the line: network log upload
 must default to off on that platform, or the sentence must change to stay

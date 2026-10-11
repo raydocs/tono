@@ -97,7 +97,7 @@ describe('login welcome v2', () => {
     )
     expect(
       screen.getByText(
-        'Your email is only used to sign in. Traffic logs are never uploaded unless you turn that on in Settings.',
+        'Your email is only used to sign in. Traffic log upload is on by default: the hostnames you connect to, the apps that open each connection, and the matched rules and routes, used to diagnose problems. Turn it off in Settings.',
       ),
     ).toBeDefined()
     expect(screen.getByRole('button', { name: 'Send code' })).toBeDefined()
@@ -168,7 +168,8 @@ describe('login while protection blocks the network', () => {
     const explanation = screen.getByText(
       enTono.login.networkBlocked.description,
     )
-    expect(explanation.textContent).toMatch(/relay routes/)
+    // Route-neutral: an armed legacy Service keeps the full walk, not relay-only.
+    expect(explanation.textContent).not.toMatch(/relay/i)
     expect(explanation.textContent).toMatch(/turns protection off/)
     expect(explanation.textContent).toMatch(/without turning it off/)
     expect(mocks.start).toHaveBeenCalledTimes(1)

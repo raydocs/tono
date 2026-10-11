@@ -234,7 +234,7 @@
     "sendNewCode": "Send again",
     "sending": "Sending…",
     "sent": "Sent to your inbox",
-    "trust": "Your email is only used to sign in. Traffic logs are never uploaded unless you turn that on in Settings.",
+    "trust": "Your email is only used to sign in. Traffic log upload is on by default: the hostnames you connect to, the apps that open each connection, and the matched rules and routes, used to diagnose problems. Turn it off in Settings.",
     "resendIn": "Resend in {{seconds}}s",
     "codeSent": "Code sent.",
     "codeSentTo": "Sent to the address above. Check the full address, and spam.",
@@ -267,10 +267,10 @@
     },
     "networkBlocked": {
       "title": "Internet is blocked",
-      "description": "Protection keeps regular internet traffic blocked. You can sign in through Tono's relay routes without turning it off. Restore network is optional: it turns protection off and lets this PC's traffic go out directly until you connect again.",
+      "description": "Protection keeps regular internet traffic blocked. You can still sign in without turning it off. Restore network is optional: it turns protection off and lets this PC's traffic go out directly until you connect again.",
       "restore": "Restore network",
       "restoring": "Restoring…",
-      "unverifiedDescription": "Tono cannot confirm whether protection from the last session is still on. You can request a sign-in code through Tono's relay routes. Restore network explicitly turns protection off and lets this PC's traffic go out directly until you connect again; it is not required to request a code.",
+      "unverifiedDescription": "Tono cannot confirm whether protection from the last session is still on. You can still request a sign-in code. Restore network explicitly turns protection off and lets this PC's traffic go out directly until you connect again; it is not required to request a code.",
       "stillRunningTitle": "Previous connection still running",
       "stillRunningDescription": "The last session's tunnel is still carrying traffic. Signing in with another account may stop that connection. Restore network stops it and turns protection off."
     },
