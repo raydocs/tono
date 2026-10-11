@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-SEA-TRAY-PICKER-CLIPPED | 固定232px托盘中展开全部线路把列表和底栏推到窗口外，键盘用户缺少Escape收起/焦点返回 | in-PR | [#1495](https://github.com/raydocs/tono/pull/1495) | 中·已复现（Linux Chromium synthetic IO） | 原生WebView2、DPI/多屏摆放、Narrator待设备验收；无连接/保护语义变动 |
+| WIN-SEA-TRAY-PICKER-CLIPPED | 固定232px托盘中展开全部线路把列表和底栏推到窗口外，键盘用户缺少Escape收起/焦点返回 | fixed(bd6c005d2) | [#1495](https://github.com/raydocs/tono/pull/1495) | 中·已复现（Linux Chromium synthetic IO） | 原生WebView2、DPI/多屏摆放、Narrator待设备验收；无连接/保护语义变动；待实机（2026-10-11 汇总：无签名设备 / 国内家宽证据） |
 
 本轮真实生产TrayPanel/SeaTray的Linux Chromium渲染复现，原始展开截图见
 [before-picker-keyboard-en.png](../screenshots/windows-tray-2026-10-10/before-picker-keyboard-en.png)。
