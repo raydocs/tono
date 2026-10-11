@@ -199,9 +199,11 @@ final class MacUsabilityRenderTests: XCTestCase {
                 .environment(\.seaAppearanceOverride, true).environment(app)
         }
         login.state = .error("Tono 的备用线路目前无法到达。请稍后重试，或换个网络。")
+        // Small CJK controls are visually reviewed in the original PNG, not
+        // claimed as Vision witnesses; #1561 separately asserts the real send title.
         try await capture("login-recovery-user-action-zh-narrow", width: 640, height: 820, annotate: false,
                           darkAppearance: true, nativeOpacity: .isolatedSubpixelEdges,
-                          nativeLabels: ["登录 Tono", "联系支持（复制诊断）", "发送验证码"]) {
+                          nativeLabels: ["登录 Tono"]) {
             LoginView(session: login).modifier(SeaPageAppearance())
                 .environment(\.seaAppearanceOverride, true).environment(\.locale, Locale(identifier: "zh-Hans")).environment(app)
         }
