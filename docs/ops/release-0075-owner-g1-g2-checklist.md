@@ -34,6 +34,8 @@
      restored（任何 unknown 都不算成功）→ 读回已释放 → 2 分钟后仍已释放（helper 重启后拒绝自动重连）。
    - e. **helper 重启**：断开后 `sudo launchctl kickstart -k system/com.raydocs.tono.core-helper` → 读回仍为已释放，
      2 分钟后仍已释放，App 不自动重连。
+   - f. **App 侧 helper 替换被放弃（#1071）**：连接中触发 helper 升级并在管理员提示处点取消（或安装失败）→ 读回 PF 仍有
+     block、App 仍显示受保护 / 离线（不自动放行）→ 点 Restore internet → 读回已释放 → 2 分钟后仍已释放。
    证据：每个分支的命令输出截图。任一分支读回不符，092 不能视为关闭。
 
 ## G2（连不上时有下一手）

@@ -272,9 +272,10 @@ nonisolated struct HelperManager {
         if replacement.upgraded { return }
         var upgradeSucceeded = false
         defer {
-            // A cancelled or failed replacement has no Core to carry traffic.
-            // Release through Disconnect's path, without hiding the install
-            // error, unless a protected fault holds (A29).
+            // A cancelled or failed replacement has no Core to carry traffic,
+            // and it never releases on its own (decision 092, #1071): PF and
+            // the armed intent stay, the install error surfaces, and only the
+            // user's Disconnect or Restore internet releases.
             cleanUpAbandonedUpgrade(
                 coreStopped: replacement.coreStopped,
                 succeeded: upgradeSucceeded
@@ -415,7 +416,7 @@ nonisolated struct HelperManager {
         var checkResources: () throws -> Void
         /// The prompt-free upgrade; true when it replaced the daemon.
         var silentUpgrade: () -> Bool
-        var release = AbandonedUpgradeRelease()
+        var abandoned = AbandonedUpgradeObservation()
 
         static func live(preparationStartedAt: Date) -> ReplacementOperations {
             ReplacementOperations(
@@ -443,22 +444,13 @@ nonisolated struct HelperManager {
         }
     }
 
-    /// How an abandoned upgrade releases, injectable for the same test. It
-    /// is an automatic release of its own, not the user's Disconnect path.
-    struct AbandonedUpgradeRelease {
-        /// The helper's own word on the A29 protected fault, read right before
-        /// any release: true held, false not held (or a helper older than the
-        /// fault), nil when the status cannot be read, which counts as
-        /// possibly held.
+    /// What an abandoned upgrade reads, injectable for the same test. It
+    /// releases nothing (decision 092, #1071); it only learns an A29 fault
+    /// the helper reports, so the app shows it.
+    struct AbandonedUpgradeObservation {
+        /// The helper's own word on the A29 protected fault: true held (and
+        /// recorded for the app), false not held, nil unreadable.
         var helperReportsFault: () -> Bool? = { HelperManager.protectedFaultReport() }
-        /// DNS back and PF disarmed, issued only after the helper said no
-        /// fault is held.
-        var release: () throws -> Void = { try HelperManager.releaseAfterAbandonedUpgrade() }
-        var refreshStatus: () -> KillSwitchService.StatusObservation = {
-            KillSwitchService.refreshStatus()
-        }
-        /// The fault the app already knows.
-        var protectedFaultHeld: () -> Bool = { LocalNetworkDevicesSync.holdsProtectedFault }
     }
 
     /// Reads `/killswitch/status` for the A29 protected fault. nil when the
@@ -477,15 +469,6 @@ nonisolated struct HelperManager {
             return true
         }
         return false
-    }
-
-    /// The abandoned upgrade's own release: DNS back and PF disarmed, with
-    /// the app's armed intent cleared. Only `cleanUpAbandonedUpgrade` calls
-    /// it, and only after the helper reported no protected fault.
-    static func releaseAfterAbandonedUpgrade() throws {
-        _ = try restoreProtectedDNSIfConfigured()
-        try disarmKillSwitch()
-        KillSwitchService.isArmed = false
     }
 
     /// Recover DNS and stop the Core before launchd replaces an
@@ -510,21 +493,21 @@ nonisolated struct HelperManager {
                 cleanUpAbandonedUpgrade(
                     coreStopped: coreStopped,
                     succeeded: false,
-                    operations: operations.release
+                    operations: operations.abandoned
                 )
             }
         }
         if installedVersion != nil {
-            // A29: a prompt-free preparation keeps protected DNS and its
-            // snapshot while a protected fault is held or cannot be ruled
-            // out; PF blocks everything anyway, and the user's Disconnect
-            // restores DNS. Otherwise DNS is recovered as before.
-            let keepsDNS = !administratorPrompt
-                && (operations.release.protectedFaultHeld()
-                    || operations.release.helperReportsFault() != false)
+            // Decision 092 (#1071): a prompt-free preparation keeps protected
+            // DNS and its snapshot, fault or no fault. Nobody asked for a
+            // release, and it may be abandoned (withheld prompt, failed
+            // upgrade): PF blocks everything anyway and the user's Disconnect
+            // or Restore internet restores DNS. With the administrator prompt
+            // (Connect or Restore internet asked for it) DNS is recovered
+            // before the replacement as before.
             var restoreDNS = operations.restoreDNS
-            if keepsDNS {
-                LocalTrafficAudit.shared.recordEvent("helper_upgrade_dns_kept_for_protected_fault")
+            if !administratorPrompt {
+                LocalTrafficAudit.shared.recordEvent("helper_upgrade_dns_kept_prompt_free")
                 restoreDNS = {}
             }
             do {
@@ -574,62 +557,24 @@ nonisolated struct HelperManager {
     }
 
     /// Settles an upgrade that stopped the Core and did not replace the
-    /// daemon: an automatic release (DNS back, PF disarmed), as before. Not
-    /// while an A29 protected fault is held or possibly held: the app knows
-    /// it, the helper reports it on a fresh read, or that read fails. Then
-    /// the block and the saved intent stay, the caller's error still
-    /// surfaces, and only the user's Disconnect or Restore internet releases.
+    /// daemon (administrator prompt cancelled, install failed, prompt
+    /// withheld). Decision 092 (#1071): it never releases on its own,
+    /// whatever the A29 fault state. PF, the app's armed intent and, where
+    /// the pre-prompt rule kept it, protected DNS and its snapshot stay; the
+    /// caller's install error still surfaces; only the user's Disconnect or
+    /// Restore internet releases, which the old helper, still running,
+    /// serves. A fault the helper reports is recorded so the app shows it.
     static func cleanUpAbandonedUpgrade(
         coreStopped: Bool,
         succeeded: Bool,
-        operations: AbandonedUpgradeRelease = AbandonedUpgradeRelease()
+        operations: AbandonedUpgradeObservation = AbandonedUpgradeObservation()
     ) {
-        guard shouldReleaseAfterAbandonedUpgrade(coreStopped: coreStopped, succeeded: succeeded) else {
-            return
-        }
-        guard !operations.protectedFaultHeld() else {
-            LocalTrafficAudit.shared.recordEvent("helper_upgrade_abandoned_fault_held")
-            return
-        }
-        switch operations.helperReportsFault() {
-        case true?:
-            LocalTrafficAudit.shared.recordEvent("helper_upgrade_abandoned_fault_held")
-            return
-        case nil:
-            LocalTrafficAudit.shared.recordEvent("helper_upgrade_abandoned_fault_unknown")
-            return
-        case false?:
-            break
-        }
-        do {
-            try operations.release()
-            LocalTrafficAudit.shared.recordEvent(
-                "helper_upgrade_abandoned_released"
-            )
-        } catch {
-            // A disarm reply can be lost after PF was released, just
-            // as on Disconnect; only a confirmed release clears intent.
-            if operations.refreshStatus()
-                == .confirmed(requiresProtectionRecovery: false) {
-                KillSwitchService.isArmed = false
-                LocalTrafficAudit.shared.recordEvent(
-                    "helper_upgrade_abandoned_released",
-                    details: ["disarm_error": error.localizedDescription]
-                )
-            } else {
-                LocalTrafficAudit.shared.recordEvent(
-                    "helper_upgrade_abandoned_release_failed",
-                    details: ["error": error.localizedDescription]
-                )
-            }
-        }
-    }
-
-    static func shouldReleaseAfterAbandonedUpgrade(
-        coreStopped: Bool,
-        succeeded: Bool
-    ) -> Bool {
-        coreStopped && !succeeded
+        guard coreStopped, !succeeded else { return }
+        let fault = operations.helperReportsFault()
+        LocalTrafficAudit.shared.recordEvent(
+            "helper_upgrade_abandoned_protection_kept",
+            details: ["protected_fault": fault.map { String($0) } ?? "unknown"]
+        )
     }
 
     private static func durationMilliseconds(since start: Date) -> String {

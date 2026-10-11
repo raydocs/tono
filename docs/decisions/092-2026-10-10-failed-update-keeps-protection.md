@@ -18,6 +18,16 @@
   server construction) follows the same authority for both its PF release and its DNS restore (round 8, R7-F2):
   `secureFailedStartupRestoringDNS` releases only on an operator `released` or no saved protection, and the
   saved-block release itself refuses an unreadable target.
+- Same rule for an abandoned app-side helper replacement (round 8, #1071): a prompt-free preparation keeps
+  protected DNS and its snapshot with or without an A29 fault, and an upgrade that stopped the Core and then did
+  not replace the daemon (administrator prompt cancelled, install failed, prompt withheld) releases nothing: PF,
+  the armed intent and protected DNS stay, the install error surfaces, and the user's Disconnect or Restore
+  internet (served by the old helper, still running) is the only release. With the administrator prompt (Connect
+  or Restore internet asked for it) DNS is still restored before the replacement, as before; PF stays. #1071:
+  fixed-code / pending-hardware; device gate: cancel the administrator prompt during an upgrade, protection stays
+  on, Restore internet recovers.
+- In short: an automatic failure keeps the whole protection (PF, intent, protected DNS, an A29 fault); only an
+  explicit Restore / Disconnect or an operator release releases.
 - Release authority, the same everywhere (decision 084 round 7): an operator `released` on record, the user's own
   Disconnect (here: the attempt's), the user's Restore Internet, or no saved protection. An unreadable target is
   unknown and is never authority.

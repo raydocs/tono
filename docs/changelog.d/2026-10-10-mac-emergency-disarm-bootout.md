@@ -69,3 +69,4 @@
   - M1：如实标注哪些 092 回归在旧代码上会失败（见 PR 正文），其余为新增覆盖；未在本机运行 Swift。
   - M2：`--update-self-test` 汇总行按实际运行数报告，不再写死 16。
   - 决定 092：在新回归于托管 CI 通过且 Sol 复审通过之前仍为代码未关闭；真机待 G1 第 5 步。
+  - 范围追加（#1071，App 侧，按决定 092）：放弃的 helper 替换（管理员提示被取消、安装失败、提示被拦下）不再自行放行。`cleanUpAbandonedUpgrade` 只记录事件并读取 helper 报告的 A29 故障以便显示，PF、armed 意图与受保护 DNS 原样保留，调用方的安装错误照常抛出；免提示的准备阶段无论有无故障都不再恢复 DNS（带管理员提示时照旧恢复，PF 保持）。删掉 `releaseAfterAbandonedUpgrade`、`release` / `refreshStatus` 接缝与 `shouldReleaseAfterAbandonedUpgrade`（及其旧测试）。XCTest `LocalNetworkDevicesArmFieldTests.testNoFaultAbandonedUpgradeKeepsProtectionUntilExplicitDisconnect` 替换原 `testAbandonedUpgradeReleasesWithoutAFaultAndUserDisconnectReleasesAHeldOne`：无故障的放弃升级 DNS 恢复 0 次、armed 仍为 true、未伪造故障；随后用户 Disconnect 恰好一次显式 disarm，界面发布已释放（helper I/O 为假，真实 PF / DNS 读回属真机门 G1 第 5f 步）。未在本机先跑红（Linux 无 Swift）；旧代码上同一测试断言的是 DNS 恢复 1 次、释放 1 次。#1071：fixed-code / pending-hardware。只改 App 代码，helper 源码与 CONTRACT 不变。

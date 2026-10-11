@@ -267,17 +267,18 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
         XCTAssertEqual(releases, 1, "the user's Disconnect releases")
         XCTAssertFalse(app.isConnected)
     }
-    /// Records what a prompt-free replacement did.
+    /// Records what a prompt-free replacement did. An abandoned upgrade has
+    /// no release operation any more (decision 092, #1071), so a release
+    /// would have to show up as a DNS restore or a cleared armed intent.
     private final class ReplacementLog {
         var dnsRestores = 0
         var coreStops = 0
-        var releases = 0
     }
 
     /// Prompt-free replacement effects whose silent upgrade fails. `faultReads`
-    /// answers the helper's fault reads in order (the DNS decision first,
-    /// then the cleanup's read); the last answer repeats. `preflightStatusFails`
-    /// makes the status read after the Core stop throw.
+    /// answers the helper's fault reads in order (the cleanup's read); the
+    /// last answer repeats. `preflightStatusFails` makes the status read after
+    /// the Core stop throw.
     private func abandonedReplacement(
         log: ReplacementLog,
         faultReads: [Bool?],
@@ -293,7 +294,7 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
             },
             checkResources: {},
             silentUpgrade: { false },
-            release: HelperManager.AbandonedUpgradeRelease(
+            abandoned: HelperManager.AbandonedUpgradeObservation(
                 helperReportsFault: {
                     let answer = reads.first ?? nil
                     if reads.count > 1 { reads.removeFirst() }
@@ -301,9 +302,7 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
                         LocalNetworkDevicesSync.recordFault(.helper("reported by the helper"))
                     }
                     return answer
-                },
-                release: { log.releases += 1 },
-                refreshStatus: { .confirmed(requiresProtectionRecovery: false) }
+                }
             )
         )
     }
@@ -336,7 +335,6 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
         }
         XCTAssertEqual(log.coreStops, 1, "the previous Core was stopped for the replacement")
         XCTAssertEqual(log.dnsRestores, 0, "protected DNS and its snapshot stay while the fault is held")
-        XCTAssertEqual(log.releases, 0, "an abandoned automatic upgrade must not release a held fault")
         XCTAssertTrue(LocalNetworkDevicesSync.holdsProtectedFault)
     }
 
@@ -345,13 +343,13 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
     /// the helper again: a fault only discoverable on that later read, or a
     /// status that stays unreadable, must not be released.
     func testFailedPreflightStatusNeverReleasesAFaultFoundLaterOrUnknown() {
-        // Not visible on the first read, reported on the cleanup's read.
+        // Reported on the cleanup's read: recorded, nothing released.
         let later = ReplacementLog()
         XCTAssertNotNil(preparePromptFree(abandonedReplacement(
-            log: later, faultReads: [false, true], preflightStatusFails: true
+            log: later, faultReads: [true], preflightStatusFails: true
         )))
         XCTAssertEqual(later.coreStops, 1)
-        XCTAssertEqual(later.releases, 0, "a fault found on the later read is not released")
+        XCTAssertEqual(later.dnsRestores, 0, "a fault found on the later read keeps protected DNS")
         XCTAssertTrue(LocalNetworkDevicesSync.holdsProtectedFault)
 
         // The status never becomes readable: possibly held, so no release,
@@ -362,28 +360,40 @@ final class LocalNetworkDevicesArmFieldTests: XCTestCase {
             log: unknown, faultReads: [nil], preflightStatusFails: true
         )))
         XCTAssertEqual(unknown.coreStops, 1)
-        XCTAssertEqual(unknown.releases, 0, "an unreadable status is not a release")
-        XCTAssertEqual(unknown.dnsRestores, 0)
+        XCTAssertEqual(unknown.dnsRestores, 0, "an unreadable status is not a release")
     }
 
-    /// Controls: with no fault anywhere the same abandoned upgrade recovers
-    /// DNS and releases as before, and with the fault held the user's
-    /// explicit Disconnect still releases.
-    func testAbandonedUpgradeReleasesWithoutAFaultAndUserDisconnectReleasesAHeldOne() async {
-        let log = ReplacementLog()
-        XCTAssertNotNil(preparePromptFree(abandonedReplacement(log: log, faultReads: [false])))
-        XCTAssertEqual(log.dnsRestores, 1, "no fault: DNS is recovered as before")
-        XCTAssertEqual(log.releases, 1, "no fault: the abandoned upgrade releases as before")
-
-        var releases = 0
-        let app = makeApp { releases += 1 }
-        app.isConnected = true
+    /// Decision 092 / #1071: an abandoned prompt-free helper replacement
+    /// with no A29 fault anywhere (old code: it restored DNS before the
+    /// prompt and then released PF and cleared the armed intent on its own).
+    /// Now nothing is released: PF intent and protected DNS stay and the
+    /// install error surfaces. Then the user's explicit Disconnect still
+    /// releases, through the app's ordinary release path (helper I/O faked:
+    /// it proves the app issues exactly one explicit disarm and publishes the
+    /// release, not live PF / DNS state, which is a device gate).
+    func testNoFaultAbandonedUpgradeKeepsProtectionUntilExplicitDisconnect() async {
         KillSwitchService.isArmed = true
-        LocalNetworkDevicesSync.recordFault(.helper("reported by the helper"))
-        app.showLocalNetworkDevicesFault()
+        LocalNetworkDevicesSync.resetForTesting()
+        let log = ReplacementLog()
+        let error = preparePromptFree(abandonedReplacement(log: log, faultReads: [false]))
+        guard let error, case HelperInstallError.installFailed = error else {
+            return XCTFail("the abandoned upgrade must surface its install error: \(String(describing: error))")
+        }
+        XCTAssertEqual(log.coreStops, 1, "the previous Core was stopped for the replacement")
+        XCTAssertEqual(log.dnsRestores, 0, "no fault: protected DNS and its snapshot still stay")
+        XCTAssertTrue(KillSwitchService.isArmed, "the armed intent stays after an abandoned upgrade")
+        XCTAssertFalse(LocalNetworkDevicesSync.holdsProtectedFault, "the hold is not a fabricated A29 fault")
+
+        var disarms = 0
+        let app = makeApp { disarms += 1 }
+        app.isConnected = false
+        app.isProtectionBlocked = true
+        app.protectedDNSService = "Wi-Fi"
         app.disconnect(releaseKillSwitch: true)
         await app.connectionCoordinator.disconnectSequence?.value
-        XCTAssertEqual(releases, 1, "the user's Disconnect releases a held fault")
-        XCTAssertFalse(LocalNetworkDevicesSync.holdsProtectedFault)
+        XCTAssertEqual(disarms, 1, "the user's Disconnect issues exactly one explicit disarm")
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertNil(app.protectedDNSService)
+        XCTAssertFalse(app.connectionCoordinator.disconnectQueueRequestsRelease, "no pending teardown")
     }
 }
