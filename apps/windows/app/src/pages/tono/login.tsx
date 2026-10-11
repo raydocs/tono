@@ -449,10 +449,13 @@ const LoginPage = () => {
         className="tono-link"
         style={{
           alignSelf: 'flex-start',
-          padding: '9px 12px',
+          padding: '8px 16px',
           fontSize: 13,
-          fontWeight: 500,
-          color: text.secondary,
+          fontWeight: 600,
+          color: text.primary,
+          background: 'transparent',
+          border: `1px solid ${TONO_COLORS.protectedOffline}B3`,
+          borderRadius: 999,
         }}
         onClick={handleRestoreInternet}
         disabled={restoringInternet}
