@@ -15,6 +15,7 @@ mod connection_plan;
 mod connection_routes;
 mod route_ledger;
 pub mod route_preferences;
+pub mod sign_in_recovery;
 pub mod credentials;
 pub mod diagnostics;
 pub(crate) mod local_evidence;

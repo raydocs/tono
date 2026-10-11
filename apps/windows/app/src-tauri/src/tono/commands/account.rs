@@ -15,6 +15,7 @@ use crate::{
         audit::AuditEvent,
         catalog_sync, connection,
         credentials::{TonoCredentialStore, VaultSessionOwnership},
+        sign_in_recovery::{self, SignInFailureCause, SignInStep},
         state::{AccountState, TonoInner, TonoState},
     },
 };
@@ -243,22 +244,26 @@ pub async fn tono_sign_in_start(
     // wait for it so sign-in registers the stable device id.
     load_credentials(state.inner()).await;
     let (client, installation_id, generation) = begin_sign_in(state.inner()).await?;
+    let operation = begin_sign_in_request(state.inner(), &app, SignInStep::SendCode).await;
     // Empty device name → the platform default ("Windows PC", §2).
-    let challenge = client
-        .start_email_sign_in(&email, "", &installation_id)
-        .await
-        .map_err(|err| {
+    let challenge = match client.start_email_sign_in(&email, "", &installation_id).await {
+        Ok(challenge) => challenge,
+        Err(err) => {
             state.audit().log(crate::tono::audit::AuditEvent::SignInFail {
                 stage: "requestCode",
                 error: err.to_string(),
             });
-            auth_error(&err)
-        })?;
+            finish_sign_in_request(state.inner(), &app, operation, sign_in_recovery::cause_of(&err)).await;
+            return Err(auth_error(&err));
+        }
+    };
 
     let mut inner = state.lock().await;
     if inner.sign_in_generation != generation {
         return Err("sign-in request was superseded by a newer attempt".to_string());
     }
+    // The code is on its way: waiting for the email is not a failure.
+    inner.sign_in_recovery.finish(operation, None);
     inner.account_state = AccountState::Authenticating;
     inner.challenge_id = Some(challenge.challenge_id.clone());
     emit_status(&app, &status_of(&inner));
@@ -283,8 +288,8 @@ pub async fn tono_sign_in_verify(
     code: String,
 ) -> Result<TonoAccountInfo, String> {
     let _ = email; // the challenge, not the address, identifies the attempt
-    let (client, challenge_id, generation) = {
-        let inner = state.lock().await;
+    let (client, challenge_id, generation, operation) = {
+        let mut inner = state.lock().await;
         if inner.account_close.is_some() {
             return Err("account sign-out is still reconciling".to_string());
         }
@@ -292,18 +297,23 @@ pub async fn tono_sign_in_verify(
             .challenge_id
             .clone()
             .ok_or_else(|| "no sign-in is in progress".to_string())?;
-        (inner.client.clone(), challenge_id, inner.sign_in_generation)
+        let operation = inner.sign_in_recovery.begin(SignInStep::VerifyCode);
+        emit_status(&app, &status_of(&inner));
+        (inner.client.clone(), challenge_id, inner.sign_in_generation, operation)
     };
-    let auth = client
-        .verify_email_sign_in(&challenge_id, &code)
-        .await
-        .map_err(|err| {
+    let auth = match client.verify_email_sign_in(&challenge_id, &code).await {
+        Ok(auth) => auth,
+        Err(err) => {
             state.audit().log(crate::tono::audit::AuditEvent::SignInFail {
                 stage: "verifyCode",
                 error: err.to_string(),
             });
-            auth_error(&err)
-        })?;
+            finish_sign_in_request(state.inner(), &app, operation, sign_in_recovery::cause_of(&err)).await;
+            return Err(auth_error(&err));
+        }
+    };
+    // Tono answered; what follows is local adoption, which the user acts on directly.
+    finish_sign_in_request(state.inner(), &app, operation, None).await;
 
     let release_app = app.clone();
     let info = adopt_replacing_with(state.inner(), &client, generation, &challenge_id, &auth,
@@ -337,6 +347,34 @@ pub async fn tono_sign_in_verify(
             .await;
     }
     Ok(info)
+}
+
+/// Decision 093: a sign-in request starts, and the screen hears that Tono is still trying.
+async fn begin_sign_in_request(state: &Arc<TonoState>, app: &AppHandle, step: SignInStep) -> u64 {
+    let mut inner = state.lock().await;
+    let operation = inner.sign_in_recovery.begin(step);
+    emit_status(app, &status_of(&inner));
+    operation
+}
+
+/// Decision 093: the request `operation` ended; lands only while it is still the current one.
+async fn finish_sign_in_request(
+    state: &Arc<TonoState>, app: &AppHandle, operation: u64, cause: Option<SignInFailureCause>,
+) {
+    let mut inner = state.lock().await;
+    if inner.sign_in_recovery.finish(operation, cause) {
+        emit_status(app, &status_of(&inner));
+    }
+}
+
+/// Decision 093: the user left this sign-in (another email). Clears its outcome and retires any
+/// request still in flight; the challenge and protection are untouched.
+#[tauri::command]
+pub async fn tono_sign_in_dismiss(state: tauri::State<'_, Arc<TonoState>>, app: AppHandle) -> Result<(), String> {
+    let mut inner = state.lock().await;
+    inner.sign_in_recovery.dismiss();
+    emit_status(&app, &status_of(&inner));
+    Ok(())
 }
 
 /// Account admission and adoption remain shared with the command path; only server/UI I/O
@@ -594,6 +632,7 @@ where
         }
         inner.invalidate_connection(true);
         inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
+        inner.sign_in_recovery.dismiss();
         state.audit().abandon_log_upload_owner();
         inner.tasks.abort_catalog_sync();
         inner.cancel_server_tests();
