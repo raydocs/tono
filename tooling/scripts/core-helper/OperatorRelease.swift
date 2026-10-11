@@ -66,7 +66,16 @@ struct HelperTarget: Equatable {
     /// `released` record could not be written (a full or failing disk). It
     /// holds until the next user Connect begins a session, or the daemon
     /// exits. nil whenever the record on disk carries the fence.
-    nonisolated(unsafe) static var userReleaseFallback: HelperTarget?
+    /// Read by every gate on the request, watchdog and launch threads, so
+    /// it is only touched under `userReleaseFallbackLock`. It binds this
+    /// daemon process alone: the update executor and a restarted or swapped
+    /// daemon read only the record on disk.
+    static var userReleaseFallback: HelperTarget? {
+        get { userReleaseFallbackLock.withLock { storedUserReleaseFallback } }
+        set { userReleaseFallbackLock.withLock { storedUserReleaseFallback = newValue } }
+    }
+    private static let userReleaseFallbackLock = NSLock()
+    nonisolated(unsafe) private static var storedUserReleaseFallback: HelperTarget?
 
     /// The target as this process must obey it: the in-memory release first.
     static func read() -> Reading {

@@ -87,7 +87,7 @@
 - 续记 2026-10-11（第十轮：所有者经 Puck 批准「有界放行最小方案」，决定 094；helper 仍为 4.52.50，未改协议与文件格式）：
   - (a) 用户放行栅栏：helper 的 `/killswitch/disarm` 与用户的 `/update/disconnect` 先在 target 锁下写 `released <n+1>`（与 `--emergency-disarm` 同一函数；磁盘写失败则同一栅栏保存在内存，放行不等磁盘），再尽力停 Core、恢复 DNS，然后 disarm。此后旧会话的 arm、Core 启动 / 同步、DNS 启用、PF 自愈、电源屏障与 App 重启请求都被拒绝，进行中的效果由事后复读撤销；只有用户 Connect 的 `/session/connect` 重新开始会话。拒绝文案：「Protection is off. Click Connect in Tono to reconnect.」。更新 Disconnect 的用户放行不再先保留 bootstrap 阻断。App 记录 `connectAwaitsUser`：用户放行后启动自动连接与其他自动连接静默放弃（显示未连接、无错误、不循环），用户 Connect 开始 helper 会话后清除。`/killswitch/disarm` 接收超时 6 s → 20 s（锁 2 + 停 Core 4.1 + DNS 6 + disarm 6）。
   - (b) 排空上限：显式放行最多等 10 s（`explicitReleaseDrainCap`）旧的连接 / 切换 / 重载任务和上一个拆除，然后执行；之后旧任务发出的请求被 (a) 拒绝，界面结果按代数作废；旧任务结束后在同一代数下关系统代理并回读 PF 一次，只有确认仍在阻断才发布阻断，读不出不覆盖放行结果。任何超时发布为未知，不发布为已放行。
-  - 预算（上限，未实测，真机门槛）：排空 10；启动检查 4.7（需修复 180 + 45）；放行 61；读回 8；开始后合计 83.7 s（需修复 308.7 s）；更新路径 57 s。开始前仍要等 helper 正在处理的那一个请求：普通 ≤30 s，`/update/stage` ≤600 s，之前的修复提示 ≤225 s。60 s 界面时限不是放行上限。
+  - 预算（上限，未实测，真机门槛）：排空 10；启动检查 4.7（需修复 180 + 45）；放行 61；读回 8；开始后合计 83.7 s（需修复 308.7 s）；更新路径 57 s。开始前要等已在进行的特权工作，这一段**没有上限**（已知来源：进行中请求自身的接收时限，`/update/stage` 的复制 / 哈希 / fsync 与更新锁等待，之前的修复提示 180 + 45，以及 actor 里排在前面的多个串行调用）。60 s 界面时限不是放行上限。
   - (c) 只做设计（决定 094）：helper 独立放行 socket 与线程（先栅栏，再按组件限时取锁，逐项读回，不取更新锁，约 56 s，与队列无关），App 绕过特权 actor 发送。需要协议改动与 helper 升版，待 Sol 设计审查通过后再实现；阻塞点含文件行号。
   - (d) Support 页改为显示 `--emergency-disarm`，写明是最后手段、由管理员在本机终端运行、不能替代一键「恢复正常网络」；`--emergency-reset` 保留并如实标为移除 helper（放行不逐项读回，有挂起更新时只放行）。连接报告里的恢复命令同步改为 `--emergency-disarm`。
   - 回归：helper `--self-test` `runUserReleaseFencesOlderWorkSelfTest`（顺序为栅栏 → 停 Core → 恢复 DNS → disarm；之后会话 5 的 arm 与无会话的 Core 启动 / 同步 / DNS 启用都被拒；磁盘写失败时内存栅栏仍拒绝）、`runUserConnectAfterUserReleaseRearmsSelfTest`、`runLateReblockAfterUserReleaseSelfTest`；XCTest `DisarmErrorReadbackTests.testDrainCapReleasesAtTheCapAndPublishesTheReadback`、`testLateResultFromRetiredWorkDoesNotOverwriteTheRelease`、`UserConnectSessionTests.testLaunchAfterAUserReleaseDoesNotAutoConnect`。PF / DNS / AI 的真实读回仍属真机门槛（G1 第 6 步）；helper 自测验证的是目标与准入，不碰真实 PF。Linux 无法运行 Swift，新测试未先跑红。
@@ -95,3 +95,9 @@
     - R9-F1：PF 回读改为三态（不存在 / 存在 / 未知，`KillSwitchManager.pfBlockReading`）。pfctl 失败、超时或输出无法识别都是未知，只有「PF 已停用」或 Tono 锚点内没有规则（只允许 ALTQ 提示）才算不存在；更新 Disconnect 只在不存在时把 PF 记为已释放。回归 `--update-self-test` `update-disconnect-unknown-pf-query-is-not-verified`（超时、失败、无法解析、锚点仍有 block 都返回 `UPDATE_DISCONNECT_UNVERIFIED` 且不记已验证；PF 停用与空锚点为对照）。
     - R9-F2：每次更新 Disconnect 在执行前先持久地撤销旧的 `disconnectVerified`，只有本次读回全部通过才重新记为已验证；退役另外要求实时证明 AI 层已移除（`observe` 不含 AI）。回归 `automatic-proof-does-not-verify-a-failed-explicit-release`（自动放行已验证 → 用户放行 AI 清理失败 → 账本与状态都是未验证、不能退役；AI 移除并实时读回后才退役）。副作用：用户放行失败后，已消耗的更新若无阻断原因，Support 的「重试」按钮不再因旧的自动证明而可用；恢复联网本身照常可再点。
     - (c) 设计补充：`HelperCommandLaunch.wait` 在 `.going` 时无上限等待提交（`KillSwitchManager.swift:228-231`），设计中给它 5 s 上限，超时终止子进程并报告失败。
+  - 第十轮补充（Sol 对 (c) 设计 FAIL，5 个 major；CI 修正）：
+    - 排空上限加能力门：只有本次 App 会话里 daemon 上一次回答的正是本构建的 helper 版本（会做栅栏）时才封顶 10 s；其他 helper 或尚无回答时照旧无上限等待，且不为此额外探测版本。回归 XCTest `DisarmErrorReadbackTests.testDrainCapWaitsForStaleWorkWithoutAFencingHelper`。
+    - 内存栅栏改为加锁读写（请求、看门狗与启动线程都会读）；并在决定 094 记下限制：磁盘拒写时内存栅栏只约束当前 daemon，更新执行器与重启 / 替换后的 daemon 只读磁盘。
+    - 修 CI：`automatic-proof-does-not-verify-a-failed-explicit-release` 原先以 unprotected 预留、准备却报 protectedOffline，在场景前就失败；改为先 protectedOffline 预留。
+    - (c) 设计按 D-F1–D-F5 重写（决定 094 §(c)，仍未实现）：一次放行一个 epoch（栅栏对会话代数做 CAS，迟到写入与旧撤销不能影响更新的 Connect）；「已放行」要求持久栅栏；`.going` 超时须先证明子进程已回收才放手；单一单调时限、被放弃工作归属到各管理器、定时非递归锁与锁图、有界 socket 读写与认证、请求合并；代理恢复与读回并给旧代理写入加 epoch 检查；快路径不碰更新账本；遗留 helper 走能力门。目标 helper 4.52.51，待 Sol 设计通过。
+    - 排队段不再写成上限（≤600 / ≤225 不是已证明的上限），改为「没有上限」并列出已知来源。
