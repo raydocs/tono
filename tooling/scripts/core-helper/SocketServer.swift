@@ -819,7 +819,14 @@ final class SocketServer {
     }
 
     private func handleRuntime(_ request: HTTPRequest, client: Int32, owner: SessionOwner?) throws {
+            if let kind = Self.releaseRequestKind(method: request.method, path: request.path) {
+                try Self.enforceSessionGeneration(request.generation, kind: kind)
+            }
             switch (request.method, request.path) {
+            case ("POST", "/session/admit"):
+                guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
+                let generation = try Self.admitSession()
+                sendResponse(client, status: 200, object: ["ok": true, "generation": NSNumber(value: generation)])
             case ("GET", "/version"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
                 sendResponse(client, status: 200, object: ["ok": true, "version": helperVersion])
@@ -953,6 +960,65 @@ final class SocketServer {
             default:
                 sendResponse(client, status: 404, object: ["ok": false, "error": "Not found."])
             }
+    }
+
+    /// Which requests change the network for a session. Reads, updates and
+    /// the upgrade path are not session effects.
+    static func releaseRequestKind(method: String, path: String) -> ReleaseAuthority.RequestKind? {
+        switch (method, path) {
+        case ("POST", "/core/start"), ("POST", "/core/sync"), ("POST", "/killswitch/arm"), ("POST", "/dns/enable"):
+            return .protective
+        case ("DELETE", "/core/stop"), ("POST", "/killswitch/quit"), ("POST", "/killswitch/disarm"),
+             ("POST", "/killswitch/release"), ("POST", "/dns/restore"):
+            return .releasing
+        default:
+            return nil
+        }
+    }
+
+    /// An effect from an earlier session (a teardown or arm queued before a
+    /// Restore and a newer Connect) is refused instead of touching the new
+    /// session. A protective request with no generation on a released
+    /// machine is admitted first, under C.
+    static func enforceSessionGeneration(
+        _ generation: UInt64?,
+        kind: ReleaseAuthority.RequestKind,
+        authority: ReleaseAuthority = ReleaseAuthority(),
+        admit: () throws -> UInt64 = { try SocketServer.admitSession() }
+    ) throws {
+        let record: ReleaseAuthority.Record
+        do {
+            record = try authority.load()
+        } catch {
+            // A release-direction effect never needs a trusted record.
+            if kind == .releasing { return }
+            throw HelperFailure.coded(
+                code: ReleaseAuthority.AdmissionRefusal.recordCorrupt.code,
+                message: ReleaseAuthority.AdmissionRefusal.recordCorrupt.message
+            )
+        }
+        switch ReleaseAuthority.verdict(record: record, generation: generation, kind: kind) {
+        case .allowed:
+            return
+        case .needsAdmission:
+            _ = try admit()
+        case .stale:
+            throw HelperFailure.coded(
+                code: "STALE_GENERATION",
+                message: "This request belongs to an earlier Tono session and was not applied."
+            )
+        }
+    }
+
+    static func admitSession() throws -> UInt64 {
+        do {
+            return try ReleaseAuthority().admit(restoreExecutor: {
+                guard FileManager.default.fileExists(atPath: UpdateExecutor.plist) else { return }
+                _ = try? KillSwitchManager.run("/bin/launchctl", ["bootstrap", "system", UpdateExecutor.plist], deadline: 5)
+            })
+        } catch let refusal as ReleaseAuthority.AdmissionRefusal {
+            throw HelperFailure.coded(code: refusal.code, message: refusal.message)
+        }
     }
 
     private func handleUpdate(_ request: HTTPRequest, peer: TonoAuthenticatedPeer, client: Int32) throws {

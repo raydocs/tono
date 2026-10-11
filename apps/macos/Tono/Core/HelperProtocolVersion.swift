@@ -443,7 +443,19 @@ nonisolated enum HelperProtocolVersion {
     ///   `KILLSWITCH_LOCAL_NETWORK_FAULT[_STOP_CORE]`). While that fault is
     ///   held, no failed arm releases, whatever its tunnel, and an
     ///   abandoned prompt-free helper upgrade does not disarm it.
-    static let current = "4.52.49"
+    /// - 4.52.49 → 4.52.50: preemptive Restore internet. The daemon installs
+    ///   a separate release job (`com.raydocs.tono.release`, socket
+    ///   `/var/run/tono-release.sock`) from its own executable. A release runs
+    ///   in a new session-leader worker under the machine lock
+    ///   `/Library/Application Support/Tono/release.lock`, records itself in
+    ///   `release-state.json` before any effect, boots out and kills the old
+    ///   writers, cleans up, and answers restored/partial/unknown per
+    ///   component. The daemon gained `POST /session/admit` and the optional
+    ///   `X-Tono-Generation` header: an effect from an earlier session is
+    ///   refused (`STALE_GENERATION`), and a protective request on a
+    ///   released machine is admitted under the lock first
+    ///   (`RELEASE_IN_PROGRESS`, `RELEASE_UNFINISHED`).
+    static let current = "4.52.50"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

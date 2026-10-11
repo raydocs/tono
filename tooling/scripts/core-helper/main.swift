@@ -1494,6 +1494,8 @@ private func removeHelperInstallation() {
     } catch {
         fputs("Tono emergency reset left its /etc/pf.conf hook in place: \(error)\n", stderr)
     }
+    // The release job is installed by this helper and leaves with it.
+    ReleaseInstaller.remove()
     // The socket goes too: it is still owned by the account this helper
     // served, and another account's app reads that owner as "bound to them".
     for path in [
@@ -1760,6 +1762,16 @@ func bootoutRemovedHelper() {
     bootout.standardError = FileHandle.nullDevice
     try? bootout.run()
     bootout.waitUntilExit()
+}
+
+/// Bounded: a release that outlives its own hard deadline is not waited for.
+func waitForActiveRelease(authority: ReleaseAuthority = ReleaseAuthority(), limit: TimeInterval = 120) {
+    guard geteuid() == 0 else { return }
+    let end = Date().addingTimeInterval(limit)
+    while authority.lockHeldElsewhere(), Date() < end {
+        if helperShutdownRequested != 0 { exit(0) }
+        usleep(200_000)
+    }
 }
 
 func fileType(_ value: stat) -> mode_t {
@@ -2151,6 +2163,21 @@ if CommandLine.arguments.dropFirst() == ["--emergency-disarm"] {
 if CommandLine.arguments.dropFirst() == ["--emergency-reset"] {
     exit(runEmergencyReset() ? 0 : 1)
 }
+if CommandLine.arguments.dropFirst() == ["--release-daemon"] {
+    exit(ReleaseDaemon.runMain())
+}
+if CommandLine.arguments.dropFirst() == ["--release-worker"] {
+    exit(ReleaseWorker.run())
+}
+if CommandLine.arguments.dropFirst() == ["--release"] {
+    exit(runReleaseCommand())
+}
+if CommandLine.arguments.dropFirst() == ["--release-self-test"] {
+    exit(runReleaseSelfTests() ? 0 : 1)
+}
+// A running release owns cleanup and has booted this daemon out; a KeepAlive
+// restart that slipped in first waits here instead of racing it.
+waitForActiveRelease()
 do {
     // Executor recovery must precede CoreManager's stale-child cleanup.
     // startup() does not install a PF block, including when the ledger is
@@ -2172,6 +2199,7 @@ if let server = startHelperDaemon(
         )
     }
 ) {
+    DispatchQueue.global(qos: .utility).async { ReleaseInstaller.ensureInstalled() }
     server.run()
 } else {
     exit(1)
