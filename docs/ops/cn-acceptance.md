@@ -49,7 +49,7 @@ by the local network, step not run); it is never a pass.
 | 2.1, 2.2 | System DNS for `api.afk.ccwu.cc`, `releases.afk.ccwu.cc`; every answer must be in Cloudflare's published ranges | `not-cloudflare`: the resolver is poisoned or hijacked. Clients still have the pinned addresses (3b) and the relays (3c), so it only hurts if those fail too; browsers on the download page do hit it |
 | 3a | TLS (SNI `api.afk.ccwu.cc`, normal verification) + `GET /api/v1/health` to the system-DNS address | the client's `system_dns` path is dead |
 | 3b.1, 3b.2 | Same to the pinned Cloudflare addresses 104.20.26.170, 172.66.162.98 | the client's `pinned` path is dead |
-| 3c.1, 3c.2 | Same through the Tono relays 179.253.233.220:2053, 179.255.154.17:2053 ([api-relay.md](api-relay.md)) | the relay fallback is dead on this network |
+| 3c.1–3c.3 | Same through the Tono relays 179.253.233.220:2053, 179.255.154.17:2053, 154.84.56.196:2053 ([api-relay.md](api-relay.md)) | the relay fallback is dead on this network |
 | 4.1x | `GET https://releases.afk.ccwu.cc/desktop/v1/latest/manifest.json` (Windows updater and macOS native updater discovery) direct and via each relay | the updater cannot see a new version on that path. A `404 Not found` from the release host is `PASS no-manifest`: the path works, nothing is published there yet (true on 2026-10-10) |
 | 4.2x | `GET https://api.afk.ccwu.cc/appcast.xml` (Sparkle feed of the published macOS line) direct and via each relay | macOS builds on Sparkle cannot see an update on that path |
 | 5.0 | TCP control to 192.0.2.1:443 (RFC 5737, never routed) | `UNKNOWN tcp-intercepted` when it connects: the local network answers every TCP connect itself, so 5.1+ are `UNKNOWN` too |
