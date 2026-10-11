@@ -200,13 +200,14 @@ final class SignInDiagnosticCopy {
     }
 }
 
+@MainActor
 struct SignInDiagnosticCopyButton: View {
     @State private var copy: SignInDiagnosticCopy
     let cause: SignInRecovery.Cause?
     let contact: Bool
 
-    init(copy: SignInDiagnosticCopy = SignInDiagnosticCopy(), cause: SignInRecovery.Cause? = nil, contact: Bool = false) {
-        _copy = State(initialValue: copy)
+    init(copy: SignInDiagnosticCopy? = nil, cause: SignInRecovery.Cause? = nil, contact: Bool = false) {
+        _copy = State(initialValue: copy ?? SignInDiagnosticCopy())
         self.cause = cause
         self.contact = contact
     }

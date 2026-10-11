@@ -8,3 +8,5 @@
 - 恢复契约：先前缺口由主线程 #1564 解决。UI 只消费真实 signInRecovery：automatic 时进度/禁重复写，userAction 时低强调联系支持，absent 不显示支持；不从保护/错误文案/计时器推导耗尽。Windows 换邮箱调用既有新增 dismiss；Mac reset 流程不变。operation 不显示、不复制，cause 仅使用封闭枚举。开发预览的状态明确为合成 IO，不代替 native 契约测试。
 - 候选/发布：仅源码，无新包、无发布线操作。按最新顺序，本项、默认中文、一次走查及 A13 完成后才最终冻结；不擅自挪到下一包。
 - 设备缺口：签名 Win/Mac 包真实剪贴板拒绝/成功、语言冷启动、键盘/VoiceOver、权限安装/取消、保护释放与更新恢复必须在最终包验证；合成状态和 hosted render 不等于实机验收。
+- 首次 hosted CI 38109385945/head f30d328cf：Windows 407 passed/4 failed，源于登录改文案误用了全局 fallback；收回全局变化、只给登录专用 fallback，既有四个失败文件加登录回归 104/104 passed。Mac 编译报 MainActor 模型在默认参数中构造；改为 optional 参数，在 MainActor View initializer 内构造，native 复验待 CI。不改断言或保护逻辑。
+- Linux Chromium 渲染中复现隐私 disclosure 占用邮箱右侧的网格槽位，已定点移到摘要下方；Tab 从邮箱到发送到详情，Enter 可开关。实际 browser clipboard 写入成功后“已复制”，合成拒绝时只报失败/手动复制；没有读取原剪贴板。截图/生产 UI 操作与原生设备证据分开记录。

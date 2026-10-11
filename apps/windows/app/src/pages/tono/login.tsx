@@ -204,6 +204,14 @@ const LoginPage = () => {
     autoSubmittedCodeRef.current = null
   }
 
+  // Keep the shared fallback unchanged for other product screens.
+  const signInErrorText = (error: unknown) => {
+    const message = formatTonoActionError(error, t)
+    return message === t('tono.errors.unknownAction')
+      ? t('tono.login.errors.unknown')
+      : message
+  }
+
   const handleChangeEmail = useLockFn(async () => {
     if (authRequestPendingRef.current) return
     authRequestPendingRef.current = true
@@ -213,7 +221,7 @@ const LoginPage = () => {
       await mutateTonoStatus()
       resetToStart()
     } catch (error) {
-      setError(formatTonoActionError(error, t))
+      setError(signInErrorText(error))
     } finally {
       authRequestPendingRef.current = false
       setChangingEmail(false)
@@ -245,7 +253,7 @@ const LoginPage = () => {
       setError(
         relayOnlyFailure(error) !== null
           ? t('tono.login.errors.relaysUnreachable')
-          : formatTonoActionError(error, t),
+          : signInErrorText(error),
       )
       setAuthFailureSummary(authSupportSummary('send-code', error))
     } finally {
@@ -288,7 +296,7 @@ const LoginPage = () => {
       setError(
         relayOnlyFailure(error) !== null
           ? t('tono.login.errors.relaysUnreachable')
-          : formatTonoActionError(error, t),
+          : signInErrorText(error),
       )
       setAuthFailureSummary(authSupportSummary('verify-code', error))
     } finally {

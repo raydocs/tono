@@ -201,7 +201,7 @@ describe('login support diagnostics', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Send code' })),
     )
     expect(screen.getByRole('alert').textContent).toBe(
-      enTono.errors.unknownAction,
+      enTono.login.errors.unknown,
     )
     expect(await copyForSupport()).toBe(
       `${supportHeader}\nAuth stage: send-code\nError code: (none)`,

@@ -1294,6 +1294,7 @@ export interface TranslationResources {
           sessionExpired: string
           signInNotSaved: string
           tlsIntercepted: string
+          unknown: string
           unreachable: string
         }
         inboxInstructions: string

@@ -291,7 +291,8 @@
       "clockSkew": "This PC's date and time look wrong, so Tono cannot verify its server. Set the correct date and time in Settings > Time & language > Date & time, then retry.",
       "captivePortal": "This network needs a web sign-in (captive portal) before Tono can reach its server. Open a browser, finish the network's sign-in page, then retry.",
       "tlsIntercepted": "This network is intercepting encrypted connections: something between this PC and Tono replaced Tono's certificate, and Tono will not accept it. If this network has a sign-in page, finish it in a browser; otherwise turn off any proxy or security software that inspects HTTPS, then retry.",
-      "serverError": "Tono's sign-in service is unavailable right now. Retry in a few minutes."
+      "serverError": "Tono's sign-in service is unavailable right now. Retry in a few minutes.",
+      "unknown": "This action did not finish. Please try again."
     }
   },
   "pill": {
@@ -428,7 +429,7 @@
     }
   },
   "errors": {
-    "unknownAction": "This action did not finish. Please try again."
+    "unknownAction": "Something went wrong. Details are below; copy them for support."
   },
   "node": {
     "activeServer": "Active server",
