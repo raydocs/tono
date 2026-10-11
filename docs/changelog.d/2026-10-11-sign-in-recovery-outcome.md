@@ -11,3 +11,7 @@
   与 `a_sign_in_outcome_and_protection_recovery_do_not_touch_each_other`；Mac `SignInRecoveryTests`（全 relay 失败且不解除保护、成功重试清除、
   运行期失败不改结果、旧请求迟到不落地、取消清除）。
 - 验证：见 PR 回执（Linux 本机 `cargo test --lib sign_in`；Mac XCTest 仅托管 CI）。仅源码，无新候选。
+- 续记（2026-10-11，Sol #1564 回执 @372f5de79：PASS，M1 minor 一轮修复）：Windows 发码的登录准入（`sign_in_generation` 递增）与恢复令牌原在两次加锁中取得，
+  旧请求可在两锁之间排到新请求之后，留下永远 `automatic` 的结果，或在退出登录后登记新令牌并发布失败。改为同一临界区内准入并开始（`begin_sign_in_request`），
+  结束时同时核对认证代际与令牌（`finish_sign_in_request`）。回归 `a_superseded_or_signed_out_code_request_leaves_no_stale_recovery_outcome`（经真实
+  `close_account_with` 退出）；Mac 运行期隔离测试补非空前置断言。本机 Linux `cargo test --lib tono::commands` 78 通过、`sign_in` 16 通过、cleanup 5 通过。
