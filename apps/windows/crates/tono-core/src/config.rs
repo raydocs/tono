@@ -2232,6 +2232,8 @@ reality-opts:
             let cloud = format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{host})),Tono-Exit");
             let index = rules.iter().position(|rule| *rule == cloud).expect(host);
             assert!(index < home, "{host} must override Home domain/process rules");
+            assert!(rules.contains(&format!("AND,((NETWORK,UDP),(DOMAIN-SUFFIX,{host})),REJECT").as_str()),
+                "{host} UDP must be rejected, not sent to a potentially unsupported exit");
             assert!(crate::direct_domains::is_protected_from_direct(host));
         }
         for domain in [
@@ -2357,9 +2359,9 @@ reality-opts:
     /// Rule shadowing is not hypothetical in this codebase; it has already happened in this
     /// very function.
     ///
-    /// So: every UDP rule that precedes the REJECT must narrow the flow to something
-    /// reviewed — a process identity or a pinned address. An unconditional one is refused
-    /// here rather than in production.
+    /// So: every rule that admits UDP before the REJECT must narrow the flow to
+    /// something reviewed — a process identity or a pinned address. Earlier REJECT
+    /// rules deny traffic and cannot open a ruleless dial.
     #[test]
     fn no_unconditional_udp_rule_may_precede_the_reject() {
         let mut plan = direct_plan();
@@ -2386,6 +2388,12 @@ reality-opts:
                 // through `AND,((DST-PORT,443)),Tono-China-Direct`, which is unconditional for
                 // UDP in everything but name. Only a rule that names TCP is out of scope.
                 if rule.contains("(NETWORK,TCP)") {
+                    continue;
+                }
+                // Cloud-video UDP denials terminate the flow; only forwarding
+                // rules can bypass the final rejection. Their targets remain
+                // checked by the exact graph and Home/video regressions.
+                if rule.ends_with(",REJECT") {
                     continue;
                 }
                 // Bare rules (`IP-CIDR,127.0.0.0/8,DIRECT,no-resolve`) carry no parenthesis,
