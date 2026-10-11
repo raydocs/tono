@@ -1,0 +1,64 @@
+# 一键“恢复正常网络”测试清单（测试版，2026-10-11）
+
+给知情测试用户用。被测的是 [IMPLEMENTATION.md](IMPLEMENTATION.md) 里的抢占式恢复：恢复由独立的解除组件执行，不等旧任务；只有逐项读回干净且稳定时才显示“已恢复”。
+
+**所有项目都还没有在真机上跑过。** 每一项的结果都按真实情况记录：通过、失败，或现象不清（例如没复现出卡住）。没有复现出问题不等于证明没有问题，不能写成“全部通过”。
+
+## 0. 测试前
+
+- 安装同一版本号的测试包：Mac 一个，Windows 一个。包的版本、来源提交和 SHA-256 以发包消息为准。测试包不走自动更新通道。
+- 先记一次基线：
+  - Mac：`scutil --dns | head -20`、`sudo pfctl -a tono.killswitch -sr`（应为空）。
+  - Windows：`Get-DnsClientServerAddress`、`Get-DnsClientNrptRule`。
+- 测试时手边留着第 4 节的手动恢复方法。它只是测试员的安全网，不是产品的恢复方式。
+
+## 1. 每次点“恢复正常网络”都要记
+
+| 记录项 | 判定 |
+|---|---|
+| 从点击到界面给出结果用了多少秒 | 应在约 30 秒内给出结果。结果只会是“已恢复”“部分恢复”“状态未知”“正在恢复中”或“保护属于另一用户”之一。一直转圈不给结果算失败。 |
+| 界面结果 | 记下原文或截图。截图请裁掉账号和邮箱。 |
+| 实际网络 | 打开两个普通网站，并 `ping 223.5.5.5`。 |
+| 显示“已恢复”时 | 网络必须真的通了，并且 2 分钟后依然通。**显示“已恢复”但网络不通，或之后又断，是最严重的失败。** |
+| 显示其他结果时 | 重试入口必须还在，再点一次要有响应。 |
+| 解除记录 | Mac：`sudo cat "/Library/Application Support/Tono/release-state.json"`；Windows：`type C:\ProgramData\Tono\release-state.json`（管理员）。只含代数和进程号，不含个人信息。 |
+| App 日志 | Windows 日志里搜索 `恢复网络结果` 那一行；Mac 附上诊断导出。发出前去掉账号信息。 |
+
+## 2. Mac
+
+| # | 操作 | 期望 |
+|---|---|---|
+| M1 | 正常连接后点“恢复正常网络”。 | 显示“已恢复”，网络通。PF 锚点为空，DNS 与基线一致，`pgrep -fl sing-box` 为空。之后点 Connect 能正常连上。 |
+| M2 | 连接过程中（在路由器上屏蔽出口 IP，让它卡在连接中）点恢复。 | 约 30 秒内给出结果，不等连接超时。2 分钟后 PF 锚点仍为空，没有自己重新连接。 |
+| M3 | 先装上一个正式版并连接，再用测试包覆盖安装（App 更新或 helper 修复之后），然后点恢复。 | 同 M1。旧版本留下的任务不会在之后重新挡网。 |
+| M4 | 恢复进行中执行 `sudo launchctl kickstart -k system/com.raydocs.tono.release`。 | 不能显示“已恢复”，只能是“部分恢复”或“状态未知”。再点一次能完成恢复。 |
+| M5 | 连续快速点两次恢复。 | 第二次显示“正在恢复中”，或者等到同一次的结果。最终网络通。 |
+| M6 | 恢复后等 3 分钟，什么都不点。 | 不会自动重连，网络一直通。 |
+| M7 | 恢复后重启电脑，打开 App。 | 网络通，不会自动连上。点 Connect 能连上。 |
+| M8 | 恢复刚开始时立刻点 Connect。 | Connect 被拒绝，并说明原因（恢复进行中，或恢复未收尾），不能悄悄连上。 |
+
+## 3. Windows
+
+| # | 操作 | 期望 |
+|---|---|---|
+| W1 | 正常连接后点“恢复正常网络”。 | 显示“已恢复”，网络通。管理员执行 `netsh wfp show filters` 后，生成的 `filters.xml` 里搜不到 `Tono`；`Get-DnsClientNrptRule` 里没有 Tono 规则，DNS 与基线一致，没有 `tono-core`/`sing-box` 进程。之后 Connect 正常。 |
+| W2 | 安装后执行 `sc query TonoRelease`。 | 服务存在，状态为 RUNNING。 |
+| W3 | 连接过程中（屏蔽出口 IP）点恢复。 | 同 M2。 |
+| W4 | 从上一个正式版覆盖安装测试包后连接，再点恢复。 | 同 M3。 |
+| W5 | 恢复进行中用管理员执行 `taskkill /F /IM tono-service.exe`。 | 不能显示“已恢复”。之后 `sc qc TonoService` 的启动类型应恢复为 AUTO_START，不能停在 DISABLED。 |
+| W6 | 恢复进行中执行 `sc stop TonoRelease`。 | 同 W5：主服务回到 AUTO_START。再次启动 TonoRelease 后，恢复可以用。 |
+| W7 | 两个 Windows 用户：A 连接后切换到 B，B 打开 Tono 点恢复。 | B 看到“保护属于另一用户”，A 的连接不受影响。 |
+| W8 | 同 M5、M6、M7、M8。 | 同上。 |
+| W9 | 从“设置 → 应用”卸载。 | 卸载后 `sc query TonoRelease` 报 1060（服务不存在），网络通。 |
+
+## 4. 测试员安全网（手动恢复，不是产品功能）
+
+只在一键恢复给不出结果、或网络一直不通时使用，并把当时的现象记下来。
+
+- Mac：`sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-disarm`。还不行就运行 `--emergency-reset`。
+- Windows：开始菜单里右键「Tono — 恢复网络 (Restore Network)」，选“以管理员身份运行”。如果被拒绝，先退出 Tono 再运行。
+
+## 5. 不能据此声称的事
+
+- 测试中没有复现出迟到写入（configd、WmiPrvSE），不等于这类写入不存在。
+- Windows 的紧急 CLI 还没有经过机器锁，见 IMPLEMENTATION.md §4。
