@@ -4,6 +4,6 @@
 
 - [PROPOSAL.md](PROPOSAL.md)：根因判断与方案。§9 是 v2 修订；所有者给出的“可靠恢复”定义见 §9.0。
 - [SPIKE.md](SPIKE.md)：真机可行性实验设计 v2（已按 Sol 对 `a81ae09` 的 FAIL 评审修订，待复审）。正式实现要等实验结果出来后，由所有者批准。
-- PROPOSAL.md §10 v4：门控效果槽位、机器级协调者、重启边界（回应 E-F5）。SPIKE 为 v4。
+- PROPOSAL.md §10 v5：门控效果槽位、机器级协调者、重启边界（回应 E-F5 及 Sol v4 回执）。SPIKE 为 v5。
 
 背景：[HANDOFF](../bounded-release-handoff-2026-10-11/HANDOFF.md)，PR #1504（head `2d757c1`，decision 094）。
