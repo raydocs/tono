@@ -37,6 +37,20 @@
    - f. **App 侧 helper 替换被放弃（#1071）**：连接中触发 helper 升级并在管理员提示处点取消（或安装失败）→ 读回 PF 仍有
      block、App 仍显示受保护 / 离线（不自动放行）→ 点 Restore internet → 读回已释放 → 2 分钟后仍已释放。
    证据：每个分支的命令输出截图。任一分支读回不符，092 不能视为关闭。
+6. **macOS 一键放行（发布硬门槛，所有者 2026-10-11 裁定；对签名候选逐条做，未做不得勾 G1）**：一次用户操作（Restore internet，
+   至多一次风险确认）→ 本地有界恢复，不依赖账号、API、隧道或中继。每步读回：`sudo pfctl -a tono.killswitch -s rules`（空）、
+   `scutil --dns | grep nameserver`（不是 127.0.0.1）、`ls /etc/resolver`（无 Tono 的 AI sinkhole 文件）、
+   `netstat -rn | grep -i blackhole`（无 Tono 的 AI 黑洞路由）；随后打开一个普通网站**和**一个 AI 服务（如 chatgpt.com），
+   两者都能用才算放行——普通网站能用而 AI 仍被拦 = 失败。界面结果只能是「已放行 / 部分失败 / 未知」之一，不得假成功。
+   - a. 正常连接中点 Restore internet。
+   - b. 拔网线 / 关 Wi-Fi 后登录失效状态下点 Restore internet（不依赖账号、API、隧道）。
+   - c. 安装旧版候选（上一版 helper）后直接升级到本候选、在升级完成前点 Restore internet（旧 helper 路径）。
+   - d. `sudo launchctl kill SIGSTOP system/com.raydocs.tono.core-helper` 后点 Restore internet：界面在有限时间内给出失败 / 未知
+     （不转圈不止），并指向 Support 页的本地恢复命令；照做后读回已释放。
+   - e. 放行中 / 放行后合上盖子睡眠 1 分钟再唤醒：仍已释放，不自动重连。
+   - f. 放行后 `sudo launchctl kickstart -k system/com.raydocs.tono.core-helper`：仍已释放，2 分钟内不复锁。
+   - g. 连续快速点三次 Restore internet：最终一次结果、已释放，不复锁。
+   证据：每步命令输出 + 普通网站与 AI 服务都能打开的截图。
 
 ## G2（连不上时有下一手）
 1. **B0 日志默认口径写进发布说明**：已写（apps/windows/release-notes/0.0.75.md、apps/macos/release-notes/build75.md）。

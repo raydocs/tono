@@ -45,4 +45,95 @@ final class DisarmErrorReadbackTests: XCTestCase {
         )
         XCTAssertFalse(KillSwitchService.isArmed)
     }
+
+    /// Helper effects for the one-click release, each counted.
+    private final class ReleaseLog {
+        var disarms = 0
+        var automaticReleases = 0
+    }
+
+    private func releaseRuntime(_ log: ReleaseLog) -> NetworkProtectionOperations {
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { core in
+            core.isRunning = false
+            return true
+        }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = { log.disarms += 1 }
+        runtime.releaseAfterFailure = { log.automaticReleases += 1 }
+        runtime.restrictToBootstrap = {}
+        runtime.refreshKillSwitchStatus = { .confirmed(requiresProtectionRecovery: false) }
+        runtime.selectiveAIRecoveryPending = { false }
+        return runtime
+    }
+
+    /// One-click release, status unreadable: the disarm reply is lost and the
+    /// readback cannot be made. That is neither released nor known to hold:
+    /// the result is published as unknown, never as Protected Offline and
+    /// never as released.
+    func testUnreadableReadbackAfterDisarmErrorPublishesUnknown() async {
+        let app = AppState()
+        KillSwitchService.isArmed = true
+        defer { KillSwitchService.isArmed = false }
+        app.isConnected = true
+        let log = ReleaseLog()
+        var runtime = releaseRuntime(log)
+        runtime.disarm = { throw KillSwitchService.Error.commandFailed("reply lost") }
+        runtime.refreshKillSwitchStatus = { .unavailable }
+        app.networkProtection = runtime
+
+        await app.disconnectAndWait(releaseKillSwitch: true)
+
+        XCTAssertTrue(app.isProtectionUnconfirmed, "an unreadable release result is unknown")
+        XCTAssertTrue(KillSwitchService.isArmed, "an unknown result never clears the armed intent")
+        XCTAssertNotNil(app.errorMessage)
+    }
+
+    /// One-click release restores AI too: a confirmed release reads the AI
+    /// layer back, and a removal the helper still has pending shows instead
+    /// of a plain "released" while AI services stay blocked.
+    func testConfirmedReleaseShowsAIRemovalStillPending() async {
+        let app = AppState()
+        KillSwitchService.isArmed = true
+        defer { KillSwitchService.isArmed = false }
+        app.isConnected = true
+        let log = ReleaseLog()
+        var runtime = releaseRuntime(log)
+        runtime.selectiveAIRecoveryPending = { true }
+        app.networkProtection = runtime
+
+        await app.disconnectAndWait(releaseKillSwitch: true)
+
+        XCTAssertEqual(log.disarms, 1)
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertTrue(app.selectiveAIRecoveryPending, "AI still blocked must show after the release")
+    }
+
+    /// One-click release against a helper that must be repaired first (an
+    /// older protocol, or one that rejects this app): the repair runs before
+    /// any release call; when it fails nothing is disarmed or released
+    /// (no blind call to an endpoint the old helper may not have), protection
+    /// stays, and the message points to the local recovery command.
+    func testUnrepairableHelperKeepsProtectionAndPointsToTheRecoveryCommand() async {
+        let app = AppState()
+        KillSwitchService.isArmed = true
+        defer { KillSwitchService.isArmed = false }
+        app.isConnected = true
+        let log = ReleaseLog()
+        var runtime = releaseRuntime(log)
+        runtime.repairForRelease = { throw HelperIPCError.forbidden }
+        app.networkProtection = runtime
+
+        await app.disconnectAndWait(releaseKillSwitch: true)
+
+        XCTAssertEqual(log.disarms, 0)
+        XCTAssertEqual(log.automaticReleases, 0)
+        XCTAssertTrue(app.isProtectionBlocked)
+        XCTAssertTrue(KillSwitchService.isArmed)
+        XCTAssertTrue(app.errorMessage?.contains("Support page") == true,
+                      "the failure must name the local recovery path: \(app.errorMessage ?? "nil")")
+    }
 }

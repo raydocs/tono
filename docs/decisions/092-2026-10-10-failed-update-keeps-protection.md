@@ -26,6 +26,14 @@
   or Restore internet asked for it) DNS is still restored before the replacement, as before; PF stays. #1071:
   fixed-code / pending-hardware; device gate: cancel the administrator prompt during an upgrade, protection stays
   on, Restore internet recovers.
+- Owner ruling 2026-10-11 (Puck): 092 covers helper replacement / upgrade failure too (#1071), and one-click release
+  is a release **hard gate**: one explicit user action, with at most one risk confirmation, runs a bounded local
+  recovery that needs no account, API, tunnel or relay; works with the current and the previous helper (repair
+  first, never a blind call to an endpoint the old helper may lack); cancels the matching reconnect and update work
+  and retires their generation; never leaves the UI waiting forever; reports released / partially failed / unknown
+  and never fakes success; restores PF, DNS **and** the AI sinkholes and blackhole routes (sites working while AI
+  stays blocked is a failure); and on failure points to the local emergency exit. Test matrix: #1504 PR body;
+  device steps: owner checklist G1 step 6.
 - In short: an automatic failure keeps the whole protection (PF, intent, protected DNS, an A29 fault); only an
   explicit Restore / Disconnect or an operator release releases.
 - Release authority, the same everywhere (decision 084 round 7): an operator `released` on record, the user's own

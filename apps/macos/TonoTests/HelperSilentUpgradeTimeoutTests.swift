@@ -32,6 +32,18 @@ final class HelperSilentUpgradeTimeoutTests: XCTestCase {
         )
     }
 
+    /// One-click release, IPC disconnect or timeout: every request the
+    /// explicit release sends has a finite receive timeout, so a helper that
+    /// stops answering ends the step (and the release reads as failed or
+    /// unknown) instead of leaving the UI waiting.
+    func testExplicitReleaseRequestsHaveBoundedReceiveTimeouts() {
+        XCTAssertEqual(HelperManager.receiveTimeout(for: "/killswitch/disarm"), 6)
+        XCTAssertEqual(HelperManager.receiveTimeout(for: "/dns/restore"), 6)
+        XCTAssertEqual(HelperManager.receiveTimeout(for: "/core/stop"), 6)
+        XCTAssertEqual(HelperManager.receiveTimeout(for: "/killswitch/ai-recovery"), 6)
+        XCTAssertEqual(HelperManager.receiveTimeout(for: "/update/disconnect"), 45)
+    }
+
     func testCoreLifecycleRoutesRetainEstablishedTimeouts() {
         XCTAssertEqual(
             HelperManager.receiveTimeout(for: "/core/stop"),

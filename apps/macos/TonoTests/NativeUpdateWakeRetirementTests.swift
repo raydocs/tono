@@ -80,4 +80,18 @@ final class NativeUpdateWakeRetirementTests: XCTestCase {
             waiter = nil
         }
     }
+
+    /// One-click release during a pending native update: suspension retires
+    /// the unarmed reconnect too, so a late retry cannot reconnect (and
+    /// re-block) after the update's explicit Disconnect.
+    func testUpdateSuspensionCancelsTheUnarmedReconnect() async {
+        let app = AppState()
+        let retry = Task<Void, Never> { try? await Task.sleep(nanoseconds: 60_000_000_000) }
+        app.connectionCoordinator.unarmedReconnectTask = retry
+        defer { retry.cancel() }
+
+        await app.suspendForNativeUpdate()
+
+        XCTAssertTrue(retry.isCancelled, "the unarmed reconnect survived the update suspension")
+    }
 }

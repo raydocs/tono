@@ -1121,6 +1121,7 @@ extension AppState {
                 }
             }
             let disarming = releaseKillSwitch && coreStopped && protectedDNSRestored
+            var releaseOutcomeUnknown = false
             if helperReadyForRelease {
                 do {
                     if disarming {
@@ -1154,9 +1155,9 @@ extension AppState {
                     // A disarm error alone does not prove the Kill Switch still
                     // holds this host, so read the helper back before claiming
                     // it does. Only a confirmed release publishes an open host.
-                    if disarming,
-                       await networkProtection.refreshKillSwitchStatus()
-                        == .confirmed(requiresProtectionRecovery: false) {
+                    let readback: KillSwitchService.StatusObservation? = disarming
+                        ? await networkProtection.refreshKillSwitchStatus() : nil
+                    if readback == .confirmed(requiresProtectionRecovery: false) {
                         KillSwitchService.isArmed = false
                         transitionLeavesProtectionBlocked = false
                         LocalTrafficAudit.shared.recordEvent(
@@ -1165,6 +1166,12 @@ extension AppState {
                         )
                     } else {
                         transitionLeavesProtectionBlocked = true
+                        // A failed disarm whose readback is unavailable or
+                        // rejected is neither released nor known to be held:
+                        // publish "unknown", never Protected Offline (092).
+                        if readback == .unavailable || readback == .rejected {
+                            releaseOutcomeUnknown = true
+                        }
                         transitionError = String(localized: "Kill switch transition failed: \(error.localizedDescription)")
                     }
                 }
@@ -1197,8 +1204,11 @@ extension AppState {
             }
 
             var selectiveRecoveryPending: Bool?
-            if disarming, !transitionLeavesProtectionBlocked,
-               ordinaryQuit || self?.selectiveAIRecoveryPending == true {
+            // Every confirmed release reads the AI layer back (decision 092):
+            // the explicit release removes the sinkholes and blackhole routes,
+            // and a removal the helper still has pending must show, never a
+            // plain "released" while AI services stay blocked.
+            if disarming, !transitionLeavesProtectionBlocked {
                 selectiveRecoveryPending = try? await networkProtection.selectiveAIRecoveryPending()
             }
             await MainActor.run {
@@ -1208,6 +1218,7 @@ extension AppState {
                     releaseUnconfirmed: releaseKillSwitch && transitionLeavesProtectionBlocked
                 ) {
                     self.isProtectionBlocked = transitionLeavesProtectionBlocked
+                    if releaseOutcomeUnknown { self.isProtectionUnconfirmed = true }
                     if let selectiveRecoveryPending {
                         self.selectiveAIRecoveryPending = selectiveRecoveryPending
                     }

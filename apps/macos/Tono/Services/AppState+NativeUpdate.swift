@@ -43,7 +43,8 @@ extension AppState {
         let tasks = [connectionCoordinator.coreMonitorTask, connectionCoordinator.nodeSwitchTask,
                      connectionCoordinator.protectedReconnectTask, connectionCoordinator.connectTask,
                      connectionCoordinator.configReloadTask, connectionCoordinator.networkEnvironmentTask,
-                     connectionCoordinator.wakeRecoveryTask, connectionCoordinator.sleepRestrictTask]
+                     connectionCoordinator.wakeRecoveryTask, connectionCoordinator.sleepRestrictTask,
+                     connectionCoordinator.unarmedReconnectTask]
             .compactMap { $0 }
         for task in tasks { task.cancel() }
         resumeProtectionAfterWake = false
