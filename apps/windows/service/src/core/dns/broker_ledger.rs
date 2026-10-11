@@ -263,16 +263,18 @@ mod tests {
             legacy: false,
         };
         std::fs::create_dir_all(&directory).unwrap();
-        create_unique(&directory, &earlier).unwrap();
+        let path = create_unique(&directory, &earlier).unwrap();
         let now = BootStamp {
             marker: Some("this boot".into()),
             booted_at: Some(9_000),
             uptime_ms: Some(10_000),
         };
         let pending = outstanding_in(&directory).unwrap();
-        let from_earlier: Vec<_> = pending.iter().filter(|entry| entry.from_earlier_boot(&now)).cloned().collect();
-        assert_eq!(from_earlier.len(), 1);
-        retire(&from_earlier).unwrap();
-        assert!(outstanding_in(&directory).unwrap().iter().all(|entry| !entry.from_earlier_boot(&now)));
+        let entry: Vec<_> = pending.iter().filter(|entry| entry.path == path).cloned().collect();
+        assert!(entry.len() == 1 && entry[0].from_earlier_boot(&now));
+        // Still outstanding: only a release that read DNS back settled retires it.
+        assert!(outstanding_in(&directory).unwrap().iter().any(|entry| entry.path == path));
+        retire(&entry).unwrap();
+        assert!(outstanding_in(&directory).unwrap().iter().all(|entry| entry.path != path));
     }
 }
