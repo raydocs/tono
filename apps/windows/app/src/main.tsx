@@ -14,7 +14,11 @@ import { MihomoWebSocket } from 'tono-plugin-core-api'
 import { BaseErrorBoundary } from './components/base/base-error-boundary'
 import { router } from './pages/_routers'
 import { WindowProvider } from './providers/window'
-import { FALLBACK_LANGUAGE, initializeLanguage } from './services/i18n'
+import {
+  FALLBACK_LANGUAGE,
+  getCachedLanguage,
+  initializeLanguage,
+} from './services/i18n'
 import {
   preloadAppData,
   resolveThemeMode,
@@ -115,16 +119,18 @@ bootstrap().catch((error) => {
     '[main.tsx] App bootstrap failed, falling back to default language:',
     error,
   )
-  // Render immediately after the deadline. Language modules and the original IPC preload keep
-  // resolving in the background; i18next will notify mounted consumers when resources arrive.
-  initializeApp(resolveThemeMode(getPreloadConfig()))
-  const fallbackLanguage = initializeLanguage(FALLBACK_LANGUAGE).catch(
-    (fallbackError) => {
-      console.error(
-        '[main.tsx] Fallback language initialization failed:',
-        fallbackError,
-      )
-    },
+  // Stop waiting for native IPC, but load the saved/default language before the first UI commit.
+  // A cached English choice must not be replaced by the fallback on a slow startup.
+  const fallbackLanguage = initializeLanguage(
+    getCachedLanguage() ?? FALLBACK_LANGUAGE,
+  ).catch((fallbackError) => {
+    console.error(
+      '[main.tsx] Fallback language initialization failed:',
+      fallbackError,
+    )
+  })
+  void fallbackLanguage.then(() =>
+    initializeApp(resolveThemeMode(getPreloadConfig())),
   )
   // When only the deadline fired, preserve the user's eventual language. Re-apply it after the
   // fallback load so completion order cannot leave a slow English/etc. preload overwritten by zh.

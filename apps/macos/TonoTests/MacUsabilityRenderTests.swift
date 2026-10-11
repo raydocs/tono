@@ -86,6 +86,68 @@ func nativeWindowRequest<Value>(
 /// Synthetic state only: no sign-in, helper calls, browser scans or uploads.
 @MainActor
 final class MacUsabilityRenderTests: XCTestCase {
+    func testDefaultChineseFirstRenderPreservesStoredEnglishAndAuto() async throws {
+        let suite = "tono-default-language-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(InterfaceLanguagePreference.storedLanguage(defaults: defaults), "简体中文")
+        XCTAssertNil(defaults.object(forKey: SettingsKey.interfaceLanguage))
+        defaults.set("unknown-locale", forKey: SettingsKey.interfaceLanguage)
+        XCTAssertEqual(InterfaceLanguagePreference.storedLanguage(defaults: defaults), "简体中文")
+        XCTAssertEqual(defaults.string(forKey: SettingsKey.interfaceLanguage), "unknown-locale")
+        defaults.removeObject(forKey: SettingsKey.interfaceLanguage)
+
+        let app = AppState()
+        let login = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        login.state = .signedOut
+        login.authMethods = .init(email: .init(enabled: true, clientId: nil),
+            apple: .init(enabled: false, clientId: nil), google: .init(enabled: false, clientId: nil))
+        // Production views, selected from the production stored-language resolver.
+        // Process/bundle English is explicit in the test scheme; it is not a user default.
+        func renderFirstRun(_ suffix: String, introLabels: [String], loginLabels: [String]) async throws {
+            let language = InterfaceLanguagePreference.storedLanguage(defaults: defaults)
+            let locale = Locale(identifier: language == InterfaceLanguagePreference.english ? "en" : "zh-Hans")
+            // Use the actual button's source key and the app's compiled catalog,
+            // selected by the same production default that drives this window.
+            // A wrong default, missing translation or wrong button key fails here.
+            let localization = try XCTUnwrap(Bundle.preferredLocalizations(
+                from: Bundle.main.localizations, forPreferences: [locale.identifier]).first)
+            let resourceURL = try XCTUnwrap(Bundle.main.url(forResource: localization, withExtension: "lproj"))
+            let catalog = try XCTUnwrap(Bundle(url: resourceURL))
+            let title = catalog.localizedString(forKey: LoginView.sendCodeTitleKey, value: nil, table: nil)
+            XCTAssertEqual(title, language == InterfaceLanguagePreference.english ? "Send a sign-in code" : "发送验证码")
+            let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("test-results/renders", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let evidence = "source=LoginView.sendCodeTitleKey catalog=app-bundle locale=\(locale.identifier) localization=\(localization) resolvedTitle=\(title) buttonOCR=not-claimed device=unverified\n"
+            try Data(evidence.utf8).write(to: folder.appendingPathComponent("default-language-login-" + suffix + "-resolved-title.txt"), options: .atomic)
+            try await capture("default-language-intro-" + suffix, width: 760, height: 680,
+                              annotate: false, darkAppearance: true,
+                              nativeOpacity: .isolatedSubpixelEdges, nativeLabels: introLabels) {
+                WelcomeIntroView().modifier(SeaPageAppearance())
+                    .environment(\.seaAppearanceOverride, true).environment(\.locale, locale)
+            }
+            try await capture("default-language-login-" + suffix, width: 760, height: 720,
+                              annotate: false, darkAppearance: true,
+                              nativeOpacity: .isolatedSubpixelEdges, nativeLabels: loginLabels) {
+                LoginView(session: login).modifier(SeaPageAppearance())
+                    .environment(\.seaAppearanceOverride, true).environment(\.locale, locale).environment(app)
+            }
+        }
+        try await renderFirstRun("fresh-zh", introLabels: ["连上，就受保护。", "下一步"],
+                                 loginLabels: ["登录 Tono"])
+        defaults.set("English", forKey: SettingsKey.interfaceLanguage)
+        XCTAssertEqual(InterfaceLanguagePreference.storedLanguage(defaults: defaults), "English")
+        XCTAssertEqual(defaults.string(forKey: SettingsKey.interfaceLanguage), "English")
+        try await renderFirstRun("saved-en", introLabels: ["Connected means protected.", "Next"],
+                                 loginLabels: ["Sign in to Tono", "Send a sign-in code"])
+        defaults.set("Auto", forKey: SettingsKey.interfaceLanguage)
+        XCTAssertEqual(InterfaceLanguagePreference.storedLanguage(defaults: defaults), "Auto")
+        XCTAssertEqual(defaults.string(forKey: SettingsKey.interfaceLanguage), "Auto")
+        XCTAssertNil(login.emailChallenge)
+        XCTAssertNil(app.connectionCoordinator.connectTask)
+    }
+
     func testLoginItemsWaitForConfirmationAndRecoverUnknownChanges() async throws {
         let suite = "tono-login-items-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -914,6 +976,13 @@ final class MacUsabilityRenderTests: XCTestCase {
             label.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) }
         }
         request.recognitionLanguages = hasChineseLabels ? ["zh-Hans", "en-US"] : ["en-US"]
+        if hasChineseLabels {
+            // Do not pre-filter Chinese glyphs before recognition. The 8px
+            // input filter still omitted visible control text on the hosted
+            // 1x image. Acceptance below independently requires >=8px original
+            // bounds, exact tokens, confidence, contrast and completeness.
+            request.minimumTextHeight = 0
+        }
         request.usesLanguageCorrection = true
         do {
             try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
@@ -928,7 +997,7 @@ final class MacUsabilityRenderTests: XCTestCase {
             if abs(left.2.midY - right.2.midY) > 0.015 { return left.2.midY > right.2.midY }
             return left.2.minX < right.2.minX
         }
-        receipt.append("Vision lines=\(lines.count) recognition=accurate languages=\(request.recognitionLanguages) correction=true")
+        receipt.append("Vision lines=\(lines.count) recognition=accurate languages=\(request.recognitionLanguages) minimumTextHeight=\(request.minimumTextHeight) correction=true")
         for (index, line) in lines.prefix(80).enumerated() {
             receipt.append("OCR[\(index)] text=\(line.0.debugDescription) confidence=\(line.1) box=\(line.2)")
         }

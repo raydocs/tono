@@ -35,7 +35,7 @@ export {
   type GeneralSave,
 } from '../../hooks/use-tono-preferences'
 let generalPreferences: TonoPreferences = {
-  language: params.get('lang') === 'zh' ? 'zh' : 'en',
+  language: params.get('lang') ?? undefined,
   theme_mode: 'dark',
   enable_auto_launch: false,
   auto_check_update: false,

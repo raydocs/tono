@@ -181,6 +181,9 @@ export const changeLanguage = async (language: string) => {
   )
 
   await i18n.changeLanguage(targetLanguage)
+  if (typeof document !== 'undefined') {
+    document.documentElement.lang = targetLanguage === 'zh' ? 'zh-CN' : 'en'
+  }
   cacheLanguage(targetLanguage)
 }
 
