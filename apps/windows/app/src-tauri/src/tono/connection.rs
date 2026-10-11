@@ -28,6 +28,7 @@ mod monitor;
 mod probes;
 mod status;
 mod disconnect;
+mod preemptive;
 mod reconnect;
 pub(crate) use reconnect::crash_recovery_reconnect_allowed;
 mod switch;
@@ -141,6 +142,7 @@ use probes::{fake_ip_race_state, tun_dns_proves_fake_ip};
 pub use probes::{is_fake_ip, test_current_server, verify_lock_retry_window};
 
 pub use disconnect::{disconnect, release_explicit};
+pub use preemptive::restore_internet;
 pub(crate) use disconnect::disconnect_for_generation;
 pub(crate) use disconnect::release_for_account;
 #[cfg(test)]

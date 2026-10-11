@@ -7,10 +7,10 @@ final class PreemptiveReleaseSessionTests: XCTestCase {
 
     /// A session retired by Restore that was never admitted cannot admit
     /// itself late: its arm and its teardown are both refused before any IPC.
-    func testRetiredUnadmittedSessionIsRefusedBeforeTheHelper() {
+    func testRetiredUnadmittedSessionIsRefusedBeforeTheHelper() throws {
         let retired = HelperSessionGeneration()
         retired.retire()
-        HelperSessionGeneration.$current.withValue(retired) {
+        try HelperSessionGeneration.$current.withValue(retired) {
             for (method, path) in [("POST", "/killswitch/arm"), ("POST", "/killswitch/disarm")] {
                 XCTAssertThrowsError(try HelperManager.sessionGenerationHeader(method: method, path: path)) { error in
                     guard case HelperIPCError.commandFailed(_, let code) = error else {

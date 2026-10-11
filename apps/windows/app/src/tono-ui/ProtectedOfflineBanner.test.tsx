@@ -40,6 +40,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/tono')>()),
   tonoRetryNow: mocks.tonoRetryNow,
   tonoDisconnect: mocks.tonoDisconnect,
+  tonoRestoreInternet: mocks.tonoDisconnect,
   tonoServers: mocks.tonoServers,
   tonoConnectProgress: mocks.tonoConnectProgress,
   tonoSelectServer: mocks.tonoSelectServer,

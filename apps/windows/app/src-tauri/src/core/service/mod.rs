@@ -394,6 +394,23 @@ pub(crate) async fn tono_prepare_core_start() -> Result<u32> {
 /// (TW-anthropic-1) — get their stable markers; every other refusal keeps the Service's message
 /// untouched.
 fn tono_start_refusal(code: u16, message: String) -> String {
+    use tono_service_protocol::ServiceErrorCode;
+    // PROPOSAL §10 v5: a Connect the release authority did not admit says why.
+    let release_prefix = [
+        (ServiceErrorCode::ReleaseInProgress, "TONO_RELEASE_IN_PROGRESS"),
+        (ServiceErrorCode::ReleaseUnfinished, "TONO_RELEASE_UNFINISHED"),
+        (ServiceErrorCode::ReleaseRecordCorrupt, "TONO_RELEASE_RECORD_CORRUPT"),
+        (ServiceErrorCode::StaleGeneration, "TONO_STALE_GENERATION"),
+    ]
+    .into_iter()
+    .find(|(candidate, _)| code == *candidate as u16);
+    if let Some((refusal, prefix)) = release_prefix {
+        if refusal == ServiceErrorCode::StaleGeneration {
+            // The next Connect asks without a generation and is admitted afresh.
+            set_known_release_generation(None);
+        }
+        return format!("{prefix}: {message}");
+    }
     if code == tono_service_protocol::ServiceErrorCode::ProtectionHeldByAnotherUser as u16 {
         return format!(
             "{}: {message}",
@@ -718,6 +735,85 @@ pub(crate) async fn tono_probe_kill_switch_release_support() -> Result<Option<St
     Ok(Some(detail))
 }
 
+/// The release generation this App last saw (PROPOSAL §10 v5): from the last admitted
+/// StartClash or the last Restore internet report. StartClash sends it, so a start prepared
+/// before a restore is refused as stale instead of re-arming the restored machine.
+static KNOWN_RELEASE_GENERATION: std::sync::Mutex<Option<u64>> = std::sync::Mutex::new(None);
+
+pub(crate) fn known_release_generation() -> Option<u64> {
+    *KNOWN_RELEASE_GENERATION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+pub(crate) fn set_known_release_generation(generation: Option<u64>) {
+    *KNOWN_RELEASE_GENERATION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = generation;
+}
+
+/// What the release service answered for one Restore internet.
+#[cfg(windows)]
+pub(crate) enum PreemptiveRelease {
+    /// No release service to ask: the caller takes the ordinary release path.
+    Unavailable(String),
+    Answered(tono_service_protocol::release_wire::ReleaseReport),
+}
+
+/// Restore internet through the separate release service. It does not wait for the main
+/// Service, its lifecycle lock or any task this App still has in flight.
+#[cfg(windows)]
+pub(crate) async fn tono_restore_internet_preemptively() -> PreemptiveRelease {
+    use tono_service_protocol::release_wire::ReleaseRequest;
+
+    if !tono_service_protocol::release_service_available() {
+        return PreemptiveRelease::Unavailable("the release service is not running".into());
+    }
+    let credentials = match current_owner_credentials() {
+        Ok(credentials) => credentials,
+        Err(error) => return PreemptiveRelease::Unavailable(format!("{error:#}")),
+    };
+    // The release ends the main Service's session; a monitor still ticking would read that as
+    // an owner loss and run its own recovery in the middle of the restore.
+    cancel_owner_monitors();
+    clear_active_service_session();
+    let request = ReleaseRequest {
+        request_id: generate_service_session_token().unwrap_or_else(|_| "restore".into()),
+        // The click is the newest intent; nothing it could supersede is older than it.
+        expected_generation: None,
+    };
+    match tono_service_protocol::request_release(&credentials, &request).await {
+        Ok(response) => match response.data {
+            Some(report) => {
+                if let Some(generation) = report.generation {
+                    set_known_release_generation(Some(generation));
+                }
+                PreemptiveRelease::Answered(report)
+            }
+            // The service answered but did not run a release (refused credentials, an older
+            // protocol): the ordinary path still can.
+            None => PreemptiveRelease::Unavailable(format!(
+                "the release service refused the request ({}): {}",
+                response.code, response.message
+            )),
+        },
+        // The request may have reached the service; its status says whether a release ran.
+        Err(error) => match tono_service_protocol::release_status(&credentials).await {
+            Ok(status) if status.data.as_ref().is_some_and(|status| status.running || status.mode == "released") => {
+                let mut report = tono_service_protocol::release_wire::ReleaseReport::without_components(
+                    &request.request_id,
+                    "unknown",
+                    Some(format!("the restore answer was lost: {error:#}")),
+                );
+                report.finished = false;
+                report.generation = status.data.map(|status| status.generation);
+                PreemptiveRelease::Answered(report)
+            }
+            _ => PreemptiveRelease::Unavailable(format!("{error:#}")),
+        },
+    }
+}
+
 /// Start the core with the Tono owned runtime and the WFP bootstrap kill switch.
 ///
 /// The Service persists intent, arms the bootstrap policy (block all + Mihomo endpoint permit +
@@ -751,7 +847,7 @@ pub(crate) async fn tono_start_core_with_kill_switch(
         macos_proxy: None,
         kill_switch: None,
         windows_kill_switch: Some(kill_switch),
-        release_generation: None,
+        release_generation: known_release_generation(),
     };
 
     let response = match tono_service_protocol::start_clash(&credentials, &request).await {
@@ -791,6 +887,9 @@ pub(crate) async fn tono_start_core_with_kill_switch(
         start_owner_monitor();
         bail!("Tono Service 未返回会话信息");
     };
+    if result.release_generation.is_some() {
+        set_known_release_generation(result.release_generation);
+    }
     adopt_tono_service_session(result.session.generation, proposed_session_token).await;
     logging!(info, Type::Service, "Tono: 服务成功启动核心");
     Ok(())
