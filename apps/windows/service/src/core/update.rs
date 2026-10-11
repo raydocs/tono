@@ -1719,6 +1719,11 @@ pub fn finish_manual() -> Result<()> {
 /// evidence exists. ONSTART recovery can repair binaries even if Service will
 /// not load. A live Service also wakes that same independent executor.
 pub fn reconcile_before_desired() -> Result<bool> {
+    // After a Restore internet only an admitted Connect brings a Core back (PROPOSAL §10 v5).
+    if super::release::replay_held() {
+        tracing::warn!("the network was restored and no Connect admitted since; no Core replay");
+        return Ok(true);
+    }
     let mut store = open_store()?;
     if store.state.manual_installer.is_some() {
         return Ok(true);

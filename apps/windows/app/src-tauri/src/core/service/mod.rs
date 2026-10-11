@@ -406,8 +406,8 @@ fn tono_start_refusal(code: u16, message: String) -> String {
     .find(|(candidate, _)| code == *candidate as u16);
     if let Some((refusal, prefix)) = release_prefix {
         if refusal == ServiceErrorCode::StaleGeneration {
-            // The next Connect asks without a generation and is admitted afresh.
-            set_known_release_generation(None);
+            // Only the user's next Connect, which asks for the current generation, starts again.
+            raise_release_fence();
         }
         return format!("{prefix}: {message}");
     }
@@ -752,6 +752,38 @@ pub(crate) fn set_known_release_generation(generation: Option<u64>) {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = generation;
 }
 
+/// Raised by Restore internet and by a stale refusal: from then on no StartClash leaves this App
+/// until the user clicks Connect. A connect or reconnect task that outlived the restore would
+/// otherwise send the restore's own generation and be admitted.
+static RELEASE_FENCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn raise_release_fence() {
+    RELEASE_FENCE.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// An explicit Connect from the user: lift the fence and learn the generation the release
+/// service holds now, so this Connect is admitted and anything prepared before it is not.
+pub(crate) async fn begin_user_connect() {
+    RELEASE_FENCE.store(false, std::sync::atomic::Ordering::SeqCst);
+    #[cfg(windows)]
+    if tono_service_protocol::release_service_available()
+        && let Ok(credentials) = current_owner_credentials()
+    {
+        match tono_service_protocol::release_status(&credentials).await {
+            Ok(response) => {
+                if let Some(status) = response.data {
+                    set_known_release_generation(Some(status.generation));
+                }
+            }
+            Err(error) => logging!(
+                warn,
+                Type::Service,
+                "Tono: 读取解除代数失败，沿用已知代数: {error:#}"
+            ),
+        }
+    }
+}
+
 /// What the release service answered for one Restore internet.
 #[cfg(windows)]
 pub(crate) enum PreemptiveRelease {
@@ -790,6 +822,18 @@ pub(crate) async fn tono_restore_internet_preemptively() -> PreemptiveRelease {
                 }
                 PreemptiveRelease::Answered(report)
             }
+            // Another Windows user owns the protection; the ordinary path refuses the same.
+            None if response.code
+                == tono_service_protocol::ServiceErrorCode::ProtectionHeldByAnotherUser as u16 =>
+            {
+                PreemptiveRelease::Answered(
+                    tono_service_protocol::release_wire::ReleaseReport::without_components(
+                        &request.request_id,
+                        "refused",
+                        Some(response.message),
+                    ),
+                )
+            }
             // The service answered but did not run a release (refused credentials, an older
             // protocol): the ordinary path still can.
             None => PreemptiveRelease::Unavailable(format!(
@@ -799,7 +843,7 @@ pub(crate) async fn tono_restore_internet_preemptively() -> PreemptiveRelease {
         },
         // The request may have reached the service; its status says whether a release ran.
         Err(error) => match tono_service_protocol::release_status(&credentials).await {
-            Ok(status) if status.data.as_ref().is_some_and(|status| status.running || status.mode == "released") => {
+            Ok(status) if status.data.as_ref().is_some_and(|status| status.running || status.mode != "secured") => {
                 let mut report = tono_service_protocol::release_wire::ReleaseReport::without_components(
                     &request.request_id,
                     "unknown",
@@ -826,6 +870,12 @@ pub(crate) async fn tono_start_core_with_kill_switch(
     kill_switch: KillSwitchConfig,
 ) -> Result<()> {
     logging!(info, Type::Service, "Tono: 通过服务启动核心并 arm Kill Switch");
+    // Refused here, before anything is torn down: the restore that raised the fence already did.
+    if RELEASE_FENCE.load(std::sync::atomic::Ordering::SeqCst) {
+        bail!(
+            "TONO_STALE_GENERATION: Restore internet ran after this connect was prepared; press Connect to start again"
+        );
+    }
     // Cancel the previous start's owner monitor before the session is cleared, exactly as
     // `tono_stop_core` does. Between this line and `adopt_tono_service_session` the Service
     // truthfully answers "not your session", and a monitor still ticking in that window reads

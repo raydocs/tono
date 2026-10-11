@@ -31,22 +31,24 @@
 - 管道 `\\.\pipe\tono-release` 与主管道的 SDDL 相同，鉴权也相同（主人身份校验）。路由有三条：`GET /magic`、`POST /release`（发起，或加入正在进行的那次）、`GET /release/status`。
 - 每次解除只起一个 worker（`--release-worker`），放在服务持有的 kill-on-close Job 里运行。服务在 25 s 时答复；到 90 s 关闭 Job。每次结束后以及服务启动时，都会执行 `recover_quarantine`：如果 worker 死前把主服务留在 Disabled，就把它恢复回来。
 - worker 的顺序：
-  1. 取 C（3 s，拿不到就答复 busy）。
+  1. 取 C（3 s，拿不到就答复 busy）。在 C 下核对主人：保护（kill-switch 意图）或正在运行的连接属于另一个 Windows 用户，就答复 refused，什么都不改；读不到主人也拒绝。管道入口先做同样的检查。规则与主服务的 `ReleaseKillSwitch` 相同。
   2. 检查代数，过期则答复 superseded。
   3. 先把 worker 身份落盘。
-  4. 隔离主服务：改为 Disabled，去掉失败重启动作。
+  4. 隔离主服务：改为 Disabled，去掉失败重启动作。隔离或停用计划任务失败时，所有分项都不算 settled。
   5. 停用恢复计划任务。
   6. 按映像身份终止主服务、更新执行器和 Tono 内核；回收不了的记入 stuck。
   7. 执行紧急解除：写入 owner 已停、WFP 解除、严格 DNS 还原。
-  8. 读回 WFP、适配器 DNS、NRPT 规则和内核进程。有残留就再清理一次，然后隔 1 s 再读一次；两次一致才算 settled。
-  9. 恢复主服务。更新执行器保持隔离，直到下一次 Connect 准入。
-- Connect 准入：`StartClash` 带上 App 已知的代数（协议修订 21）。服务只在 C 下判定（1.5 s）。结果有四种：解除进行中 1017、未收尾 1018、记录损坏 1019、代数过期 1020，都返回 409，App 显示原因，并保留重试和紧急入口。
-- App：新命令 `tono_restore_internet` 先作废当前连接，再请求解除服务，不等任何旧守卫。只有 `restored` 才退出登录或退出程序；其余情况都保持“保护中”状态，显示部分、未知或忙的提示。解除服务不可用时（旧版本服务），回退到原来的断开流程。
+  8. 读回 WFP、适配器 DNS、NRPT 规则和内核进程。有残留就再清理一次。
+  9. 先恢复主服务，等它报告 Running 后再等 2 s，然后第二次读回。这样主服务启动时如果重新加上了什么，第二次读回就能看到，不会在“已恢复”之后才出现。两次一致才算 settled。主服务启动时，只要记录是 released，就不重放内核。更新执行器保持隔离，直到下一次 Connect 准入。
+  10. 隔离、计划任务或清理步骤中，只要有一步没证明自己成功，即使读回干净，总体也报 unknown。
+- Connect 准入：`StartClash` 带上 App 已知的代数（协议修订 21）。解除之后，不带代数的 Connect 一律算过期。服务只在 C 下判定（1.5 s）。结果有四种：解除进行中 1017、未收尾 1018、记录损坏 1019、代数过期 1020，都返回 409，App 显示原因，并保留重试和紧急入口。
+- App：新命令 `tono_restore_internet` 先作废当前连接，再请求解除服务，不等任何旧守卫。同时竖起“围栏”：在用户亲手点 Connect 之前，App 不会发出任何 StartClash。用户点 Connect 时，App 会向解除服务读取当前代数，再落下围栏。只有 `restored` 才退出登录或退出程序；其余情况都保持“保护中”状态，显示部分、未知或忙的提示。解除服务不可用时（旧版本服务），回退到原来的断开流程。
 
 ## 4. 已知限制（如实保留）
 
 - Windows 紧急 CLI 尚未经过 C，与解除服务并发时可能交错（两者都是解除方向）。
-- Windows 的 `ReleaseKillSwitch` 路由不校验代数；作废旧任务靠 App 的 `invalidate_connection` 中止任务，代数是全局的，不按任务区分。
+- Windows 的 `ReleaseKillSwitch` 路由不校验代数。代数是全局的，不按任务区分；在解除之后、用户再次点 Connect 之前，旧任务由 App 的围栏挡住。用户点了 Connect 以后，仍在运行的旧任务也会被准入，但这时用户本来就要连接。
+- 恢复网络后重启 App，开机自动连接会以“代数过期”被拒，直到用户手动点一次 Connect。
 - Windows 经 WMI 的迟到 DNS 写入只能靠两次读回发现。
 - Windows 服务代码只能在托管 Windows CI 编译和运行单元测试；SCM 注册、Job 关闭、计划任务停用均未在真机执行过。
 - configd、WmiPrvSE 等 broker 的迟到效果无法从外部取消，只能靠读回加间隔复读发现。

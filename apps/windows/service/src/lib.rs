@@ -71,7 +71,8 @@ pub use core::{
 pub use core::{note_power_event, start_network_monitor};
 #[cfg(all(feature = "standalone", windows, not(feature = "test")))]
 pub use core::{
-    release_service_recover_quarantine, release_service_remove, release_service_spawn_install,
+    release_service_recover_quarantine, release_service_remove, release_service_shutdown,
+    release_service_spawn_install,
     release_worker_run, run_release_server_until,
 };
 

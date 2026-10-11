@@ -32,7 +32,14 @@ pub async fn run_release_server_until(shutdown: impl std::future::Future<Output 
                 "Restore internet requested by owner {} (request {})",
                 owner.key, request.payload.request_id
             );
-            ok_json(daemon::start_or_join(request.payload).await)
+            // The same owner rule as `ReleaseKillSwitch`; the worker checks it again under C.
+            if let Some(reason) = crate::core::release::worker::owner_refusal(&owner.key).await {
+                return service_error(ServiceError::new(
+                    crate::core::structure::ServiceErrorCode::ProtectionHeldByAnotherUser,
+                    format!("Restore internet refused: {reason}"),
+                ));
+            }
+            ok_json(daemon::start_or_join(request.payload, owner.key.clone()).await)
         })
         .get(RELEASE_STATUS_ROUTE, |ctx| async move {
             let (_request, _owner) =

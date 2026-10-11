@@ -65,7 +65,9 @@ mod reconcile;
 #[cfg(feature = "standalone")]
 pub(crate) mod release;
 #[cfg(all(feature = "standalone", windows, not(feature = "test")))]
-pub use release::daemon::recover_quarantine as release_service_recover_quarantine;
+pub use release::daemon::{
+    recover_quarantine as release_service_recover_quarantine, shutdown as release_service_shutdown,
+};
 #[cfg(all(feature = "standalone", windows, not(feature = "test")))]
 pub use release::install::{
     remove as release_service_remove, spawn_ensure_installed as release_service_spawn_install,

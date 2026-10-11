@@ -8,7 +8,7 @@
 //! reports a JSON line on stdout so the release service can answer at its deadline with
 //! whatever is known by then.
 
-use super::{Authority, Incarnation, Mode, Record, RECORD_SCHEMA, next_generation};
+use super::{Authority, Incarnation, Mode, Record, RECORD_SCHEMA, WorkerInput, next_generation};
 use crate::release_wire::{ReleaseComponent, ReleaseReport, ReleaseRequest};
 use anyhow::{Context as _, Result, ensure};
 use std::ffi::{OsStr, OsString};
@@ -24,6 +24,10 @@ const WORKER_LOCK_TIMEOUT: Duration = Duration::from_secs(3);
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(45);
 const SETTLE_INTERVAL: Duration = Duration::from_secs(1);
 const TOOL_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long the restarted main Service gets to report Running, and then to run its startup
+/// restore, before the second read-back looks for anything it re-armed.
+const SERVICE_START_TIMEOUT: Duration = Duration::from_secs(10);
+const SERVICE_STARTUP_SETTLE: Duration = Duration::from_secs(2);
 
 /// Images that can write the network state again. Matched by file name, then kept only when
 /// the canonical path is under the Service's own state directory.
@@ -39,8 +43,8 @@ pub fn run() -> i32 {
         ));
         return 2;
     }
-    let request: ReleaseRequest = match serde_json::from_str(input.trim()) {
-        Ok(request) => request,
+    let input: WorkerInput = match serde_json::from_str(input.trim()) {
+        Ok(input) => input,
         Err(error) => {
             emit(&ReleaseReport::without_components(
                 "",
@@ -59,14 +63,15 @@ pub fn run() -> i32 {
         Ok(runtime) => runtime,
         Err(error) => {
             emit(&ReleaseReport::without_components(
-                &request.request_id,
+                &input.request.request_id,
                 "unknown",
                 Some(format!("the release worker could not start: {error}")),
             ));
             return 2;
         }
     };
-    let report = runtime.block_on(release(&request));
+    let request = input.request;
+    let report = runtime.block_on(release(&request, &input.owner_key));
     emit(&report);
     // A timed-out DNS or WFP call can leave blocking work behind; never wait for it.
     runtime.shutdown_background();
@@ -81,7 +86,27 @@ fn emit(report: &ReleaseReport) {
     }
 }
 
-async fn release(request: &ReleaseRequest) -> ReleaseReport {
+/// Why `caller_key` may not release: the armed protection or the running Core belongs to another
+/// Windows user. The same owner rule `ReleaseKillSwitch` applies in the main Service, read from
+/// disk because this process has none of its in-memory state. Unreadable state refuses.
+pub(crate) async fn owner_refusal(caller_key: &str) -> Option<String> {
+    match crate::core::windows_kill_switch::persisted_intent_owner() {
+        Ok(Some(owner)) if owner != caller_key => {
+            return Some("the protection belongs to another Windows user".into());
+        }
+        Ok(_) => {}
+        Err(error) => return Some(format!("the protection owner could not be read: {error}")),
+    }
+    match crate::core::desired::load_active_owner().await {
+        Ok(Some(active)) if active.owner_key != caller_key => {
+            Some("the running connection belongs to another Windows user".into())
+        }
+        Ok(_) => None,
+        Err(error) => Some(format!("the connection owner could not be read: {error:#}")),
+    }
+}
+
+async fn release(request: &ReleaseRequest, owner_key: &str) -> ReleaseReport {
     let request_id = request.request_id.clone();
     let held = match tokio::task::spawn_blocking(|| Authority::live().lock(WORKER_LOCK_TIMEOUT)).await {
         Ok(Ok(Some(held))) => held,
@@ -99,11 +124,19 @@ async fn release(request: &ReleaseRequest) -> ReleaseReport {
             return ReleaseReport::without_components(&request_id, "unknown", Some(error.to_string()));
         }
     };
+    // Checked again under C: a Connect admitted since the pipe checked may have made another
+    // user the owner.
+    if let Some(reason) = owner_refusal(owner_key).await {
+        return ReleaseReport::without_components(&request_id, "refused", Some(reason));
+    }
     let authority = Authority::live();
     // An unreadable record must not stop a restore: it is replaced by this release, whose
-    // generation is still larger than any earlier one (`next_generation` uses the clock).
-    let previous = authority.load().unwrap_or_default();
+    // generation is still larger than any earlier one (`next_generation` uses the clock). Only
+    // a readable secured record can show that a newer Connect superseded the request.
+    let loaded = authority.load();
+    let previous = loaded.as_ref().cloned().unwrap_or_default();
     if let Some(expected) = request.expected_generation
+        && loaded.is_ok()
         && previous.mode == Mode::Secured
         && previous.generation != expected
     {
@@ -153,6 +186,8 @@ async fn release(request: &ReleaseRequest) -> ReleaseReport {
     };
     emit(&report);
 
+    // Every note up to the read-back is an effect step that did not prove itself, so a clean
+    // read-back with any of them is not reported as restored.
     let mut notes = Vec::new();
     if let Err(error) = quarantine_main_service() {
         notes.push(format!("main Service quarantine: {error:#}"));
@@ -160,6 +195,8 @@ async fn release(request: &ReleaseRequest) -> ReleaseReport {
     if let Err(error) = set_recovery_task_enabled(false) {
         notes.push(format!("update recovery task: {error:#}"));
     }
+    // Without the quarantine SCM or the task can start a writer again after it was ended.
+    let quarantined = notes.is_empty();
     let stuck = terminate_writers().await;
     record.stuck = stuck.clone();
     if let Err(error) = authority.save(&record) {
@@ -182,33 +219,59 @@ async fn release(request: &ReleaseRequest) -> ReleaseReport {
     report.components = components(&first, None, false);
     report.detail = joined(&notes);
     emit(&report);
+    let effects_proven = notes.is_empty();
 
-    tokio::time::sleep(SETTLE_INTERVAL).await;
-    let second = read_components().await;
-    report.components = components(&second, Some(&first), stuck.is_empty());
-
-    record.worker_finished = true;
-    if let Err(error) = authority.save(&record) {
-        notes.push(format!("finish not recorded: {error:#}"));
-    }
-    // The main Service comes back for the next Connect. Its startup finds the tombstone and
-    // the stopped desired state, so it re-arms nothing; the update executor stays quarantined
-    // until a Connect is admitted.
-    match restore_main_service(true) {
+    // The main Service comes back before the second read, so anything its startup re-arms is
+    // seen there rather than after "restored". Its startup finds the tombstone and the stopped
+    // desired state, and replays no Core while the record is released; the update executor
+    // stays quarantined until a Connect is admitted.
+    let mut after = Vec::new();
+    match restore_main_service(true).and_then(|()| wait_main_service_running()) {
         Ok(()) => {
             record.service_quarantined = false;
             if let Err(error) = authority.save(&record) {
-                notes.push(format!("service restore not recorded: {error:#}"));
+                after.push(format!("service restore not recorded: {error:#}"));
             }
+            tokio::time::sleep(SERVICE_STARTUP_SETTLE).await;
         }
-        Err(error) => notes.push(format!("main Service not restored: {error:#}")),
+        Err(error) => {
+            after.push(format!("main Service not restored: {error:#}"));
+            tokio::time::sleep(SETTLE_INTERVAL).await;
+        }
+    }
+    let second = read_components().await;
+    report.components = components(&second, Some(&first), stuck.is_empty() && quarantined);
+
+    record.worker_finished = true;
+    if let Err(error) = authority.save(&record) {
+        after.push(format!("finish not recorded: {error:#}"));
     }
     drop(held);
 
     report.finished = true;
-    report.outcome = ReleaseReport::outcome_of(&report.components, &report.stuck, true).into();
+    let outcome = ReleaseReport::outcome_of(&report.components, &report.stuck, true);
+    report.outcome = (if outcome == "restored" && !effects_proven { "unknown" } else { outcome }).into();
+    notes.extend(after);
     report.detail = joined(&notes);
     report
+}
+
+fn wait_main_service_running() -> Result<()> {
+    use platform_lib::service::ServiceState;
+
+    let service = open_main_service()?;
+    let deadline = Instant::now() + SERVICE_START_TIMEOUT;
+    loop {
+        if service.query_status()?.current_state == ServiceState::Running {
+            return Ok(());
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "the main Service did not report Running within {}s",
+            SERVICE_START_TIMEOUT.as_secs()
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
 }
 
 fn joined(notes: &[String]) -> Option<String> {
@@ -434,6 +497,10 @@ pub(crate) fn quarantine_main_service() -> Result<()> {
     service.set_failure_actions_on_non_crash_failures(false)?;
     service.change_config(&main_service_info(ServiceStartType::Disabled))?;
     Ok(())
+}
+
+pub(crate) fn main_service_disabled() -> Result<bool> {
+    Ok(open_main_service()?.query_config()?.start_type == platform_lib::service::ServiceStartType::Disabled)
 }
 
 /// Put back the installer's configuration and failure actions, then start the Service.

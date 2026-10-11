@@ -24,6 +24,8 @@ pub async fn restore_internet(state: Arc<TonoState>, app: AppHandle) -> Result<(
     {
         use crate::core::service::{PreemptiveRelease, tono_restore_internet_preemptively};
 
+        // From here no connect or reconnect task starts the Core until the user clicks Connect.
+        crate::core::service::raise_release_fence();
         {
             let mut inner = state.lock().await;
             inner.client.transport().set_auth_tunnel_port(0);
@@ -108,6 +110,7 @@ fn restore_failure(report: &tono_service_protocol::release_wire::ReleaseReport) 
     let prefix = match report.outcome.as_str() {
         "partial" => RESTORE_PARTIAL_PREFIX,
         "busy" => RESTORE_BUSY_PREFIX,
+        "refused" => super::PROTECTION_HELD_BY_ANOTHER_USER_PREFIX,
         _ => RESTORE_UNKNOWN_PREFIX,
     };
     format!(

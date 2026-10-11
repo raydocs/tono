@@ -67,7 +67,8 @@ pub struct ReleaseComponent {
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseReport {
     pub request_id: String,
-    /// `restored`, `partial`, `unknown`, `busy` or `superseded`.
+    /// `restored`, `partial`, `unknown`, `busy`, `superseded`, or `refused` (the protection or
+    /// the running connection belongs to another Windows user; nothing was changed).
     pub outcome: String,
     #[serde(default)]
     pub generation: Option<u64>,

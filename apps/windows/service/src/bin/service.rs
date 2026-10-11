@@ -417,6 +417,17 @@ fn run_release_service() -> platform_lib::Result<()> {
         }
     });
     rt.shutdown_background();
+    // A restore still running ends with this service; put the main Service back first.
+    let _ = status.set_service_status(ServiceStatus {
+        service_type: ServiceType::OWN_PROCESS,
+        current_state: ServiceState::StopPending,
+        controls_accepted: ServiceControlAccept::empty(),
+        exit_code: ServiceExitCode::Win32(0),
+        checkpoint: 1,
+        wait_hint: Duration::from_secs(30),
+        process_id: None,
+    });
+    tono_service_protocol::release_service_shutdown();
     status.set_service_status(ServiceStatus {
         service_type: ServiceType::OWN_PROCESS,
         current_state: ServiceState::Stopped,

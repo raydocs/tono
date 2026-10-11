@@ -11,6 +11,8 @@ pub(super) fn seed_autostart_after_connect() {
 /// `tono_connect`: guard, then the full §6 transaction; any failure after
 /// arm keeps blocking and schedules the protected reconnect.
 pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
+    // The user's own Connect is the one thing that may start again after Restore internet.
+    crate::core::service::begin_user_connect().await;
     connect_for_generation(state, app, None).await
 }
 

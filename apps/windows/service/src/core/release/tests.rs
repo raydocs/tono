@@ -83,6 +83,11 @@ fn a_connect_prepared_before_the_release_is_stale() {
 }
 
 #[test]
+fn a_connect_without_a_generation_after_a_release_is_stale() {
+    assert_eq!(start_verdict(&released(21), None), StartVerdict::Stale);
+}
+
+#[test]
 fn a_connect_for_an_older_secured_generation_is_stale() {
     let secured = Record {
         generation: 20,

@@ -13,6 +13,15 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+/// What the release service hands its worker on stdin: the App's request and the owner the
+/// release pipe authenticated, which the worker checks again under C.
+#[cfg(all(windows, not(feature = "test")))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct WorkerInput {
+    pub(crate) request: crate::release_wire::ReleaseRequest,
+    pub(crate) owner_key: String,
+}
+
 #[cfg(all(windows, not(feature = "test")))]
 pub(crate) mod daemon;
 #[cfg(all(windows, not(feature = "test")))]
@@ -179,7 +188,10 @@ pub(crate) fn next_generation(previous: u64) -> u64 {
 }
 
 /// The admission decision for a Connect that carries `supplied`, the generation its App last
-/// saw (`None` from an App that predates generations or has seen none yet).
+/// saw (`None` from an App that predates generations or has seen none yet). After a release only
+/// the released generation is admitted: a Connect without one was prepared without having seen
+/// the release, so it may be a retry from before it (the App asks the release service for the
+/// generation when the user clicks Connect).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StartVerdict {
     /// The machine is secured at this generation; nothing to write.
@@ -195,7 +207,6 @@ pub(crate) fn start_verdict(record: &Record, supplied: Option<u64>) -> StartVerd
         (Mode::Secured, Some(generation)) if generation == record.generation => {
             StartVerdict::Allowed(record.generation)
         }
-        (Mode::Released, None) => StartVerdict::NeedsAdmission,
         (Mode::Released, Some(generation)) if generation == record.generation => {
             StartVerdict::NeedsAdmission
         }
@@ -421,6 +432,15 @@ pub(crate) fn restore_update_recovery_task() -> Result<()> {
 #[cfg(not(all(windows, not(feature = "test"))))]
 pub(crate) fn restore_update_recovery_task() -> Result<()> {
     Ok(())
+}
+
+/// Whether the main Service's startup must not replay a Core: the machine was released and no
+/// Connect has been admitted since. Unreadable state holds the replay too.
+pub(crate) fn replay_held() -> bool {
+    Authority::live()
+        .load()
+        .map(|record| record.mode == Mode::Released)
+        .unwrap_or(true)
 }
 
 /// Whether the update executor must stay down: the release quarantined it and no Connect has

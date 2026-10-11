@@ -18,6 +18,20 @@ pub fn strict_kill_switch_intent_on_disk() -> bool {
         .is_some_and(|intent| intent.wanted && intent.strict_kill_switch)
 }
 
+/// The owner recorded in the persisted intent, for the release service, which has no in-memory
+/// armed state. A missing or unparseable record owns no one, exactly as `authorize_write_for`
+/// treats a missing or ownerless intent; a record that exists but cannot be read is an error.
+#[cfg(windows)]
+pub(crate) fn persisted_intent_owner() -> std::io::Result<Option<String>> {
+    match std::fs::read(intent_path()) {
+        Ok(bytes) => Ok(serde_json::from_slice::<IntentRecord>(&bytes)
+            .ok()
+            .and_then(|intent| intent.owner_key)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 /// Per-write sequence for intent temporaries (BRICK-W11). A shared
 /// `kill-switch.tmp` let a later writer delete or overwrite an earlier
 /// writer's in-flight bytes, and a `replace` that reported a timeout can
