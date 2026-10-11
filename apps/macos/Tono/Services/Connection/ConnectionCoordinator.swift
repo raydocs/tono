@@ -83,24 +83,41 @@ final class ConnectionCoordinator {
     /// release; any other helper keeps the uncapped wait, because nothing
     /// there refuses the stale work's later arms (decision 094 (b)).
     var releaseFenceAvailable: () -> Bool = { HelperManager.daemonKnownFenceAware }
-    /// R10-F1: the work a capped explicit release stopped waiting for (an
-    /// older teardown, cancelled connect / switch / reload), followed by the
-    /// release's late readback. It still runs its own network effects, so no
-    /// Connect is admitted, and no later teardown runs, until it has settled.
-    /// The release itself does not wait for it.
-    private(set) var cappedStaleWork: Task<Void, Never>?
-    /// The teardown request whose release capped `cappedStaleWork`.
-    private var cappedStaleWorkRequestID = 0
+    /// R10-F1: the work each capped explicit release stopped waiting for (an
+    /// older teardown, cancelled connect / switch / reload), followed by that
+    /// release's late readback, keyed by the release's request ID. It still
+    /// runs its own network effects, so no Connect is admitted, and no later
+    /// teardown runs, until it has settled. The release itself does not wait.
+    /// R11-F1: an entry only ever waits for strictly older requests and
+    /// entries (snapshots taken when it is built), and each entry is removed
+    /// only by its own end, so the waits form no cycle and none is lost.
+    private var cappedStaleWork: [Int: Task<Void, Never>] = [:]
 
-    var cappedStaleWorkSettling: Bool { cappedStaleWork != nil }
+    var cappedStaleWorkSettling: Bool { !cappedStaleWork.isEmpty }
+
+    /// Test seam: how a fenced explicit release waits for older work
+    /// (`waitAtMost` with the cap). Returns false when it stopped at the cap.
+    var waitForStaleWork: @MainActor (_ tasks: [Task<Void, Never>], _ cap: Duration, _ requestID: Int) async -> Bool = {
+        tasks, cap, _ in await ConnectionCoordinator.waitAtMost(tasks, cap: cap)
+    }
+
+    /// A snapshot of the capped work registered by releases older than
+    /// `request` (all of it when nil), oldest first.
+    private func cappedStaleWorkSnapshot(olderThan request: Int?) -> [Task<Void, Never>] {
+        cappedStaleWork
+            .filter { entry in request.map { entry.key < $0 } ?? true }
+            .sorted { $0.key < $1.key }
+            .map(\.value)
+    }
 
     /// Waits until no capped stale work is left that a release older than
     /// `request` capped (all of it when nil, as for a Connect). Newer capped
-    /// work may itself be waiting for the caller, so it is not awaited.
+    /// work may itself be waiting for the caller, so it is never awaited.
     func settleCappedStaleWork(olderThan request: Int? = nil) async {
-        while let work = cappedStaleWork, request.map({ cappedStaleWorkRequestID < $0 }) ?? true {
-            await work.value
-            if cappedStaleWork == work { cappedStaleWork = nil }
+        while true {
+            let pending = cappedStaleWorkSnapshot(olderThan: request)
+            guard !pending.isEmpty else { return }
+            for work in pending { await work.value }
         }
     }
 
@@ -131,7 +148,10 @@ final class ConnectionCoordinator {
         disconnectQueueReleaseIntent = releaseIntent
         let previousDisconnect = disconnectSequence
         disconnectSequence = Task {
-            let stale = [previousDisconnect, self.cappedStaleWork].compactMap { $0 } + pendingTasks
+            // Strictly older only: the previous request and capped work that
+            // releases older than this one registered.
+            let stale = [previousDisconnect].compactMap { $0 }
+                + self.cappedStaleWorkSnapshot(olderThan: requestID) + pendingTasks
             var cappedRelease: CappedRelease?
             if disposition == .explicit, self.releaseFenceAvailable() {
                 // Decision 094: the user's release waits for older work at
@@ -139,7 +159,7 @@ final class ConnectionCoordinator {
                 // work sends later is refused by the helper's user-release
                 // fence, and the release itself stops the Core and restores
                 // DNS after the fence.
-                if !(await Self.waitAtMost(stale, cap: self.explicitReleaseDrainCap)) {
+                if !(await self.waitForStaleWork(stale, self.explicitReleaseDrainCap, requestID)) {
                     LocalTrafficAudit.shared.recordEvent("explicit_release_drain_capped")
                     // From here until it ends, the stale work excludes every
                     // newer Connect and teardown (R10-F1). If it outlives
@@ -147,10 +167,13 @@ final class ConnectionCoordinator {
                     // under the generation this release settled with.
                     let release = CappedRelease()
                     cappedRelease = release
-                    // Includes stale work an earlier release capped after
-                    // this one started waiting.
-                    let lingering = stale + [self.cappedStaleWork].compactMap { $0 }
+                    // Includes stale work an older release capped after this
+                    // one started waiting; never a newer release's.
+                    let lingering = stale + self.cappedStaleWorkSnapshot(olderThan: requestID)
                     let work = Task { @MainActor in
+                        // Registered below before this body can run; only
+                        // its own end removes it.
+                        defer { self.cappedStaleWork[requestID] = nil }
                         for task in lingering { await task.value }
                         // A stale end before this release settled is
                         // covered by the release's own readback.
@@ -160,12 +183,7 @@ final class ConnectionCoordinator {
                               self.protectionOperationGeneration == generation else { return }
                         await afterLateDrain(generation)
                     }
-                    self.cappedStaleWork = work
-                    self.cappedStaleWorkRequestID = requestID
-                    Task { @MainActor in
-                        await work.value
-                        if self.cappedStaleWork == work { self.cappedStaleWork = nil }
-                    }
+                    self.cappedStaleWork[requestID] = work
                 }
             } else {
                 for task in stale { await task.value }

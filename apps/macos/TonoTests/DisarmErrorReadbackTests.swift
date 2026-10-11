@@ -272,6 +272,118 @@ final class DisarmErrorReadbackTests: XCTestCase {
         XCTAssertEqual(log.disarms, 1)
     }
 
+    /// R11-F1: repeated Restore with a preserve teardown between them, and
+    /// the newer release's cap firing first. T1 (an old preserve teardown) is
+    /// held in its Core stop; R2 Restore and R4 Restore both cap, R4 before
+    /// R2, with the preserve teardown R3 queued between them. The capped work
+    /// must form no cycle: once T1's effects really end, every wait ends, the
+    /// user's Connect is admitted after every old effect and readback, and a
+    /// later teardown (here Quit's) settles too.
+    func testRepeatedCappedReleasesWithTheNewerCapFirstFormNoCycle() async {
+        let app = AppState()
+        KillSwitchService.isArmed = true
+        defer {
+            KillSwitchService.isArmed = false
+            RuntimeCleanup.clearConnectAwaitsUser()
+        }
+        app.isConnected = true
+        app.proxyRegions = []
+        XCTAssertFalse(app.isTonoReady, "prepare refuses, so no real session starts")
+        let log = ReleaseLog()
+        var runtime = releaseRuntime(log)
+        let oldStop = ReleaseDrainGate()
+        defer { oldStop.open() }
+        var stopCalls = 0
+        var effects: [String] = []
+        let admissionMarks = [
+            String(localized: "No protected Tono cloud exit is ready."),
+            String(localized: "Choose an available cloud server before reconnecting."),
+        ]
+        let connectAdmitted = { admissionMarks.contains(app.errorMessage ?? "") }
+        let note = { (effect: String) in
+            effects.append(connectAdmitted() ? "\(effect) after connect" : effect)
+        }
+        runtime.stopCore = { core in
+            stopCalls += 1
+            if stopCalls == 1 { await oldStop.wait() }
+            note("stop core")
+            core.isRunning = false
+            return true
+        }
+        runtime.coreStatus = { note("core status"); return (false, true) }
+        runtime.restoreDNS = { note("restore dns"); return true }
+        runtime.disableSystemProxy = { note("proxy off") }
+        runtime.restrictToBootstrap = { note("restrict") }
+        runtime.disarm = { log.disarms += 1; note("disarm") }
+        runtime.releaseForQuit = { note("quit release") }
+        runtime.refreshKillSwitchStatus = {
+            log.statusReads += 1
+            note("status")
+            return .confirmed(requiresProtectionRecovery: false)
+        }
+        app.networkProtection = runtime
+        let coordinator = app.connectionCoordinator
+        coordinator.releaseFenceAvailable = { true }
+        // Each release's cap fires only when the test says so.
+        var capWaiters: [Int] = []
+        var caps: [Int: ReleaseDrainGate] = [:]
+        coordinator.waitForStaleWork = { _, _, requestID in
+            let cap = ReleaseDrainGate()
+            caps[requestID] = cap
+            capWaiters.append(requestID)
+            await cap.wait()
+            return false
+        }
+        func eventually(_ condition: () -> Bool) async {
+            for _ in 0..<500 where !condition() {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+        }
+
+        app.disconnect()                          // T1, held in its Core stop
+        await eventually { stopCalls == 1 }
+        XCTAssertEqual(stopCalls, 1)
+        app.disconnect(releaseKillSwitch: true)   // R2
+        app.disconnect()                          // R3, preserve
+        app.disconnect(releaseKillSwitch: true)   // R4
+        await eventually { capWaiters.count == 2 }
+        XCTAssertEqual(capWaiters.count, 2, "both releases wait at their caps")
+        guard capWaiters.count == 2, let r2 = capWaiters.min(), let r4 = capWaiters.max() else { return }
+
+        // The newer release caps and registers first, then the older one.
+        caps[r4]?.open()
+        await eventually { log.disarms == 1 }
+        caps[r2]?.open()
+        await eventually { log.disarms == 2 }
+        XCTAssertEqual(log.disarms, 2, "both releases ran at their caps, with T1 still held")
+        XCTAssertTrue(coordinator.cappedStaleWorkSettling)
+
+        app.connectFromUser()
+        try? await Task.sleep(for: .milliseconds(200))
+        XCTAssertFalse(connectAdmitted(), "no Connect while T1 still owns effects")
+
+        // T1's real effects end; nothing else is holding anything.
+        oldStop.open()
+        await eventually { connectAdmitted() }
+        XCTAssertTrue(connectAdmitted(), "every wait ended: no cycle")
+        XCTAssertFalse(coordinator.cappedStaleWorkSettling, "every capped entry ended and was removed")
+        try? await Task.sleep(for: .milliseconds(200))
+        XCTAssertTrue(effects.contains("restrict"), "the old preserve teardowns ran: \(effects)")
+        XCTAssertFalse(
+            effects.contains { $0.hasSuffix("after connect") },
+            "no old Core/PF/DNS/proxy effect or readback after the Connect: \(effects)"
+        )
+
+        // A later teardown (Quit's) settles as well.
+        let effectsBeforeQuit = effects.count
+        app.disconnect(releaseKillSwitch: true, ordinaryQuit: true)
+        XCTAssertTrue(app.isDisconnecting)
+        await eventually { !app.isDisconnecting }
+        XCTAssertFalse(app.isDisconnecting, "Quit's teardown is not stuck behind capped work")
+        XCTAssertGreaterThan(effects.count, effectsBeforeQuit, "Quit's teardown ran: \(effects)")
+        XCTAssertFalse(coordinator.cappedStaleWorkSettling)
+    }
+
     /// One-click release whose drain never finishes: a cancelled connect
     /// mutation has not returned. At the UI deadline the UI stops
     /// showing "Disconnecting…" and publishes unknown with the recovery text,
