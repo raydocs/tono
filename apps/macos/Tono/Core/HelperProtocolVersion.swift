@@ -470,7 +470,11 @@ nonisolated enum HelperProtocolVersion {
     ///   script's stdin is relayed after `go`). A failed update executor run
     ///   keeps the block and protected DNS unless an operator release, the
     ///   attempt's Disconnect or no saved protection asks otherwise, and
-    ///   counts a daemon stopped only on launchd's "no such service".
+    ///   counts a daemon stopped only on launchd's "no such service"; a
+    ///   failed helper start follows the same rule. An unreadable target
+    ///   refuses re-arms but releases nothing (block, intent, A29 fault, AI
+    ///   and DNS held). A launch accepted inside its deadline is asked again
+    ///   (`admit`) before `go`, and a Core once more after it starts.
     static let current = "4.52.50"
 }
 

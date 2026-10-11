@@ -931,9 +931,15 @@ final class KillSwitchManager {
     /// or threw (#1504 review F1): what it saved or loaded is released, the
     /// AI hold included, and the release's refusal is returned for the
     /// caller to throw. nil while no release holds. Caller holds `lock`.
+    /// A target that became unreadable refuses the same way but releases
+    /// nothing (R6-F2): the block, its intent and an A29 protected fault
+    /// stay until a readable `released`, a Disconnect or a Restore.
     private func releaseIfOvertakenLocked() -> HelperFailure? {
-        guard let failure = HelperTarget.releaseRefusal() else { return nil }
-        _ = try? disarmLocked(preserveAIHold: false)
+        let reading = HelperTarget.read()
+        guard let failure = HelperTarget.releaseRefusal(reading: { reading }) else { return nil }
+        if HelperTarget.mayRelease(.operatorRelease, gate: HelperTarget.gate(reading)) {
+            _ = try? disarmLocked(preserveAIHold: false)
+        }
         return failure
     }
 
@@ -1105,7 +1111,13 @@ final class KillSwitchManager {
     func reconcileSelectiveRecoveryIfReleased() {
         lock.lock()
         defer { lock.unlock() }
-        guard HelperTarget.automaticRearmAllowed(HelperTarget.read()) else {
+        let gate = HelperTarget.gate(HelperTarget.read())
+        // An unreadable target changes no AI state either way (R6-F2).
+        if gate == .unknown {
+            selectiveRecoveryReconciled = false
+            return
+        }
+        guard gate == .allowed else {
             selectiveRecoveryReconciled = false
             Self.reconcileSelectiveRecoveryUnderTarget(
                 rearmAllowed: false,
@@ -1159,9 +1171,10 @@ final class KillSwitchManager {
     }
 
     /// An operator release is a full release: no automatic release keeps the
-    /// AI hold while it holds (decision 084).
+    /// AI hold while it holds (decision 084). An unreadable target is no
+    /// release (R6-F2): the saved disposition stands.
     static func automaticReleasePreservesAIHold() -> Bool {
-        guard HelperTarget.automaticRearmAllowed(HelperTarget.read()) else { return false }
+        guard HelperTarget.gate(HelperTarget.read()) != .released else { return false }
         return (try? selectiveRecoveryDisposition()) ?? true
     }
 
@@ -1221,8 +1234,11 @@ final class KillSwitchManager {
     /// has already been removed. It never installs a general block.
     static func releasePersistedBlock() {
         guard stateFileExists() else {
+            let gate = HelperTarget.gate(HelperTarget.read())
+            // An unreadable target neither installs nor removes AI (R6-F2).
+            guard gate != .unknown else { return }
             reconcileSelectiveRecoveryUnderTarget(
-                rearmAllowed: HelperTarget.automaticRearmAllowed(HelperTarget.read()),
+                rearmAllowed: gate == .allowed,
                 generalIntentPresent: false,
                 disposition: try? selectiveRecoveryDisposition(),
                 removalPending: selectiveRemovalPending()
@@ -1571,8 +1587,10 @@ final class KillSwitchManager {
             var outcome = KernelLoadOutcome.notIssued
             try ensureAnchorLoaded(flushStates: false, loadOutcome: &outcome)
         } catch {
-            if let failure = HelperTarget.releaseRefusal() {
-                undo()
+            let reading = HelperTarget.read()
+            if let failure = HelperTarget.releaseRefusal(reading: { reading }) {
+                // Unreadable refuses but is no release authority (R6-F2).
+                if HelperTarget.mayRelease(.operatorRelease, gate: HelperTarget.gate(reading)) { undo() }
                 throw failure
             }
             throw error

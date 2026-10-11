@@ -177,12 +177,12 @@ final class ProtectedDNSManager {
     private static func guardedProtectedDNSWrite(
         on service: NetworkService,
         original: [String],
-        allowed: () -> Bool = { HelperTarget.automaticRearmAllowed(HelperTarget.read()) },
+        gate: () -> HelperTarget.Gate = { HelperTarget.gate(HelperTarget.read()) },
         write: ([String], NetworkService) throws -> Void,
         read: (NetworkService) throws -> [String],
         keepRecovery: (Snapshot) -> Void
     ) throws {
-        try HelperTarget.guardedEffect(allowed: allowed, {
+        try HelperTarget.guardedEffect(gate: gate, {
             try write([protectedDNSServer], service)
         }, undo: {
             if (try? write(original, service)) != nil, (try? read(service)) == original { return }

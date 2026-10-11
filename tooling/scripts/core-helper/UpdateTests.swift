@@ -379,7 +379,7 @@ func runUpdateSelfTests() -> Bool {
             helperShutdownRequested = 1
             defer { helperShutdownRequested = 0 }
             let clean = try UpdateExecutor.startup(storage: daemon, protectionWanted: { true },
-                                                   emergencyBlock: { armed += 1 })
+                                                   onFailure: { _ in armed += 1 })
             try check(clean, "A bootout while waiting behind the executor's lock is a clean stop")
         }
         try check(armed == 0, "Executor bootout during startup armed the emergency block")
@@ -390,7 +390,7 @@ func runUpdateSelfTests() -> Bool {
         var corrupted = 0
         try refuses {
             _ = try UpdateExecutor.startup(storage: corrupt, protectionWanted: { true },
-                                           emergencyBlock: { corrupted += 1 })
+                                           onFailure: { _ in corrupted += 1 })
         }
         try check(corrupted == 1, "Corrupt-ledger startup did not release a saved kill switch")
     }
@@ -408,7 +408,7 @@ func runUpdateSelfTests() -> Bool {
                 defer { if probe >= 0 { close(probe) } }
                 decidedUnderLock = probe >= 0 && flock(probe, LOCK_EX | LOCK_NB) != 0 && errno == EWOULDBLOCK
                 return false
-            }, emergencyBlock: { barriers += 1 })
+            }, onFailure: { _ in barriers += 1 })
         }
         try check(barriers == 0, "A startup failure without saved intent installed the emergency block")
         try check(decidedUnderLock == true, "The startup barrier was decided outside the update lock")
@@ -824,6 +824,45 @@ func runUpdateSelfTests() -> Bool {
         try check(UpdateExecutor.failureMayRelease(target: .recorded(HelperTarget(mode: .released, generation: 4)),
                                                    disconnectRequested: false, protectionSaved: true),
                   "An operator release did not release a failed update")
+    }
+    // #1504 review R6-F3: a protected helper start finds a consumed update and
+    // launches its executor; `launchctl bootstrap` and then `launchctl print`
+    // both run out of time (real bounded runner, children that ignore
+    // SIGTERM). The start fails, and with no operator release, no Disconnect
+    // and protection saved it keeps the block and DNS (the old
+    // `armEmergencyBlock` released both). Control: a `released` target does
+    // release.
+    test("protected-startup-launch-timeout-keeps-block-and-dns") { directory in
+        let store = try UpdateStorage(root: directory + "/store")
+        let engine = UpdateTransaction(storage: store, effects: effects())
+        try reserved(store, engine)
+        try engine.execute(peer: owner)
+        try check(store.load().attempt?.execution == .consumed, "No consumed attempt to launch")
+        let hung = ["-c", "trap '' TERM; exec /bin/sleep 30"]
+        func start(target: HelperTarget.Reading) throws -> (released: Int, calls: [String]) {
+            var released = 0
+            var calls: [String] = []
+            var recovery = UpdateExecutor.FailureRecovery()
+            recovery.target = { target }
+            recovery.disconnectRequested = { nil } // startup passes the attempt's own answer
+            recovery.protectionSaved = { true }
+            recovery.release = { released += 1 }
+            try refuses {
+                _ = try UpdateExecutor.startup(storage: store, protectionWanted: { true }, launchExecutor: { _, _ in
+                    // `launch`'s tail: bootstrap, then print, each bounded.
+                    do { calls.append("bootstrap"); try UpdatePackage.run("/bin/sh", hung, deadline: 0.3) }
+                    catch { calls.append("print"); try UpdatePackage.run("/bin/sh", hung, deadline: 0.3) }
+                }, onFailure: { UpdateExecutor.settleStartupFailure(disconnectRequested: $0, recovery: recovery) })
+            }
+            return (released, calls)
+        }
+        let secured = try start(target: .recorded(HelperTarget(mode: .secured, generation: 3)))
+        try check(secured.calls == ["bootstrap", "print"], "The launch did not time out twice: \(secured.calls)")
+        try check(secured.released == 0, "A timed-out startup launch released a protected block or DNS")
+        let unknown = try start(target: .unreadable("test"))
+        try check(unknown.released == 0, "A timed-out startup launch released under an unreadable target")
+        let released = try start(target: .recorded(HelperTarget(mode: .released, generation: 4)))
+        try check(released.released == 1, "An operator release did not release after a failed startup")
     }
     // #1504 review R5-F4: stopping the daemon before replacement counted any
     // failed `launchctl print`, a timeout included, as "already absent". Both

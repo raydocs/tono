@@ -2029,6 +2029,7 @@ extension KillSwitchManager {
     /// the pfctl shape. `standardInput` is never handed to the child: it is
     /// relayed onto the same admission pipe after `go` (#1504 review R5-F1),
     /// so a command abandoned at the deadline never reads a byte of it.
+    /// `admit` is the caller's last word before `go` (see `launchAdmitted`).
     static func run(
         _ executable: String,
         _ arguments: [String],
@@ -2039,6 +2040,7 @@ extension KillSwitchManager {
         output outputMode: HelperCommandOutputMode = .captured,
         started: (pid_t) -> Void = { _ in },
         ended: @escaping @Sendable () -> Void = {},
+        admit: (@Sendable () -> (any Error)?)? = nil,
         launch: @escaping @Sendable (Process) throws -> Void = { try $0.run() }
     ) throws -> HelperCommandResult {
         let end = DispatchTime.now() + deadline
@@ -2067,6 +2069,7 @@ extension KillSwitchManager {
             process, executable: executable, arguments: arguments,
             until: end, deadline: deadline,
             relayingInputFrom: standardInput?.fileDescriptor,
+            admit: admit,
             launch: launch,
             abandon: { process in
                 process.terminate()
@@ -2125,6 +2128,11 @@ extension KillSwitchManager {
     /// to `abandon` (#1542 review F1/F2). The caller sets environment,
     /// directory, output and termination handler; standard input is the
     /// gate's. Not a second runner: `run` itself launches through here.
+    /// `admit`, when given, is asked after the launch returns and before the
+    /// launch is accepted (#1504 review R6-F1): a launch that stalled while
+    /// an operator release landed is accepted inside its deadline yet must
+    /// not run. An error from it fails the call with that error and the
+    /// shell gets end-of-file, exactly like an abandoned launch.
     static func launchAdmitted(
         _ process: Process,
         executable: String,
@@ -2132,6 +2140,7 @@ extension KillSwitchManager {
         until end: DispatchTime,
         deadline: TimeInterval,
         relayingInputFrom inputFD: Int32? = nil,
+        admit: (@Sendable () -> (any Error)?)? = nil,
         launch: @escaping @Sendable (Process) throws -> Void = { try $0.run() },
         abandon: @escaping @Sendable (Process) -> Void = { process in
             process.terminate()
@@ -2149,6 +2158,13 @@ extension KillSwitchManager {
                 try launch(process)
             } catch {
                 _ = launched.report(.failed(error))
+                return
+            }
+            if let refusal = admit?() {
+                // Refused after the launch: no `go`, so it never executes.
+                _ = launched.report(.failed(refusal))
+                try? admission.fileHandleForWriting.close()
+                abandon(process)
                 return
             }
             guard launched.report(.launched) else {

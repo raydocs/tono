@@ -356,7 +356,16 @@ final class SocketServer {
         // keeps the block it already has. DNS restore uses the same
         // SCPreferences path as disconnect and has no extra deadline.
         releaseLeftoverBlockIfCoreStopped()
-        recoverDNSAfterStoppedCore(operatorReleased: !HelperTarget.automaticRearmAllowed(HelperTarget.read()))
+        // An unreadable target is no release authority (R6-F2): protected DNS
+        // stays until a readable `released`, a Disconnect or a Restore.
+        switch HelperTarget.gate(HelperTarget.read()) {
+        case .unknown:
+            FileHandle.standardError.write(Data("tono: target unreadable at start; DNS kept\n".utf8))
+        case .released:
+            recoverDNSAfterStoppedCore(operatorReleased: true)
+        case .allowed:
+            recoverDNSAfterStoppedCore(operatorReleased: false)
+        }
         var protectionChecks = ProtectionCheckSchedule(now: ProtectionCheckSchedule.monotonicNow())
         while helperShutdownRequested == 0 {
             // Low-frequency check between requests. Under the update lock
@@ -407,8 +416,17 @@ final class SocketServer {
     /// Immediate release at start. Idempotent: no state file means no pfctl.
     /// A running Core is not disarmed and is not reinstalled from the file.
     private func releaseLeftoverBlockIfCoreStopped() {
-        // Under an operator release no Core keeps a block (decision 084).
-        let operatorReleased = !HelperTarget.automaticRearmAllowed(HelperTarget.read())
+        // Under an operator release no Core keeps a block (decision 084). An
+        // unreadable target is no release: the block, its intent, an A29
+        // protected fault and the AI layer all stay as they are (R6-F2).
+        let gate = HelperTarget.gate(HelperTarget.read())
+        guard gate != .unknown else {
+            FileHandle.standardError.write(Data(
+                "tono: target unreadable at start; leftover block and fault kept\n".utf8
+            ))
+            return
+        }
+        let operatorReleased = gate == .released
         guard !core.status().running || operatorReleased else { return }
         guard KillSwitchManager.stateFileExists() else {
             killSwitch.reconcileSelectiveRecoveryIfReleased()
@@ -448,10 +466,12 @@ final class SocketServer {
             openNetworkEpoch = epoch
             consecutiveCoreDownChecks = 0
         }
-        // An operator release (or an unreadable target) keeps the cleanup
-        // going but never loads PF, re-arms or relaunches the app; each effect
-        // re-reads the target where it acts (decision 084).
-        let rearmAllowed = HelperTarget.automaticRearmAllowed(HelperTarget.read())
+        // An operator release keeps the cleanup going but never loads PF,
+        // re-arms or relaunches the app; each effect re-reads the target
+        // where it acts (decision 084). An unreadable target refuses all of
+        // that too and releases nothing (R6-F2).
+        let gate = HelperTarget.gate(HelperTarget.read())
+        let rearmAllowed = gate == .allowed
         let coreRunning = core.status().running
         let stateFilePresent = KillSwitchManager.stateFileExists()
         if rearmAllowed, !coreRunning, stateFilePresent {
@@ -469,9 +489,10 @@ final class SocketServer {
             // Under a release a block can be in the kernel with no saved
             // intent (a load that landed after the CLI deleted it, #1504
             // review F1); read the anchor itself, and unread counts as there.
-            blockPresent: !rearmAllowed && (stateFilePresent || Self.tonoAnchorMayHoldBlock()),
+            blockPresent: gate == .released && (stateFilePresent || Self.tonoAnchorMayHoldBlock()),
             coreDownChecks: consecutiveCoreDownChecks,
-            localNetworkFault: killSwitch.localNetworkFault
+            localNetworkFault: killSwitch.localNetworkFault,
+            targetUnknown: gate == .unknown
         ) {
             switch step {
             case .relaunchOwner:
@@ -530,15 +551,21 @@ final class SocketServer {
     /// saved intent or Tono's anchor holding a block: either is released.
     /// The A29 protected fault (`localNetworkFault`) keeps a saved block past
     /// the threshold, and its DNS, until the user acts; an operator release
-    /// still wins over it.
+    /// still wins over it. An unreadable target (`targetUnknown`) refuses
+    /// every re-arm and is no release authority either: the pass does
+    /// nothing, so a held block, its intent, the fault, the AI layer and
+    /// protected DNS stay until a readable `released`, a Disconnect or a
+    /// Restore (#1504 review R6-F2).
     static func watchdogSteps(
         rearmAllowed: Bool,
         coreRunning: Bool,
         stateFilePresent: Bool,
         blockPresent: Bool = false,
         coreDownChecks: Int,
-        localNetworkFault: Bool = false
+        localNetworkFault: Bool = false,
+        targetUnknown: Bool = false
     ) -> [WatchdogStep] {
+        if !rearmAllowed, targetUnknown { return [] }
         guard rearmAllowed else {
             return (stateFilePresent || blockPresent ? [.releaseBlock] : []) + [.reconcileAI, .recoverDNS]
         }
@@ -640,6 +667,11 @@ final class SocketServer {
                         ))
                     },
                     ended: ended,
+                    // Asked once more before `go` (#1504 review R6-F1): a
+                    // release that landed while the launch stalled stops
+                    // the request before `open` executes; `started` covers
+                    // the instant between this answer and `go`.
+                    admit: { allowed() ? nil : HelperTarget.releasedFailure },
                     launch: { process in
                         guard allowed() else { throw HelperTarget.releasedFailure }
                         try launch(process)
@@ -962,7 +994,7 @@ final class SocketServer {
                     configDirectory: directory,
                     configSHA256: digest,
                     startAllowed: {
-                        transitionGate.isAwake() && killSwitch.status()["live"] as? Bool == true
+                        self.transitionGate.isAwake() && self.killSwitch.status()["live"] as? Bool == true
                             && HelperTarget.automaticRearmAllowed(HelperTarget.read())
                     }
                 )
@@ -980,7 +1012,7 @@ final class SocketServer {
                     configDirectory: directory,
                     configSHA256: digest,
                     startAllowed: {
-                        transitionGate.isAwake() && killSwitch.status()["live"] as? Bool == true
+                        self.transitionGate.isAwake() && self.killSwitch.status()["live"] as? Bool == true
                             && HelperTarget.automaticRearmAllowed(HelperTarget.read())
                     },
                     // The old Core's utun goes away with it (#608). A failure

@@ -2125,6 +2125,8 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && runFailedTargetRepairKeepsRefusalSelfTest()
             && runTargetRepairNeverMissingSelfTest()
             && runOwnerRelaunchReleasedDuringSpawnSelfTest()
+            && runReleaseDuringAcceptedCoreLaunchSelfTest()
+            && runUnknownTargetKeepsFaultSelfTest()
             && runUpdateChildBoundedSelfTest()
             && KillSwitchManager.runFailedCommitReleaseSelfTest()
             && KillSwitchManager.runLiveSessionReArmKeepsBlockSelfTest()

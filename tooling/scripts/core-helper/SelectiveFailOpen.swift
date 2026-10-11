@@ -368,7 +368,7 @@ enum SelectiveFailOpenInstaller {
         for args in SelectiveFailOpen.routeAddArguments() {
             steps.append { _ = runRoute(args, logFailure: true) }
         }
-        HelperTarget.stepsUnlessReleased(steps, allowed: allowed, undo: { removeBestEffort() })
+        HelperTarget.stepsUnlessReleased(steps, undo: { removeBestEffort() })
     }
 
     /// False when a route delete did not finish or a resolver could not be

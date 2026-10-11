@@ -97,7 +97,7 @@ final class CoreManager {
     func start(
         configDirectory: String,
         configSHA256: String,
-        startAllowed: () -> Bool = { true }
+        startAllowed: @escaping () -> Bool = { true }
     ) throws {
         lock.lock()
         defer { lock.unlock() }
@@ -108,7 +108,7 @@ final class CoreManager {
     private func startLocked(
         configDirectory: String,
         configSHA256: String,
-        startAllowed: () -> Bool
+        startAllowed: @escaping () -> Bool
     ) throws {
         if process?.isRunning == true {
             // Coded, because the app's recovery for it — stop the orphaned core,
@@ -128,7 +128,42 @@ final class CoreManager {
         try launchValidatedSnapshotLocked(configPath: configPath, startAllowed: startAllowed)
     }
 
-    private func launchValidatedSnapshotLocked(configPath: String, startAllowed: () -> Bool) throws {
+    /// The refusal a start the gate stopped returns: the operator release's
+    /// (or the unreadable target's) when that is the reason, else sleep.
+    static func startRefusal() -> HelperFailure {
+        HelperTarget.releaseRefusal()
+            ?? HelperFailure.invalid("The system is entering sleep; network protection remains fail-closed.")
+    }
+
+    /// Carries the caller's start gate into the launch thread's `admit`.
+    private final class StartGate: @unchecked Sendable {
+        let allowed: () -> Bool
+        init(_ allowed: @escaping () -> Bool) { self.allowed = allowed }
+    }
+
+    /// The Core's launch through the admission gate, with the start gate as
+    /// its `admit`. Static so the self-test drives the very same launch.
+    static func launchCoreAdmitted(
+        _ child: Process,
+        executable: String,
+        arguments: [String],
+        deadline: TimeInterval = HelperChildDeadline.coreLaunch,
+        startAllowed: @escaping () -> Bool,
+        launch: @escaping @Sendable (Process) throws -> Void = { try $0.run() }
+    ) throws {
+        let gate = StartGate(startAllowed)
+        try KillSwitchManager.launchAdmitted(
+            child,
+            executable: executable,
+            arguments: arguments,
+            until: .now() + deadline,
+            deadline: deadline,
+            admit: { gate.allowed() ? nil : CoreManager.startRefusal() },
+            launch: launch
+        )
+    }
+
+    private func launchValidatedSnapshotLocked(configPath: String, startAllowed: @escaping () -> Bool) throws {
         // Recheck the root-owned binary at launch, including after a sync stop.
         _ = try secureMetadata(mihomoPath, type: mode_t(S_IFREG), owner: 0)
         let child = Process()
@@ -144,20 +179,20 @@ final class CoreManager {
         do {
             guard startAllowed() else {
                 stopDiagnosticCapture()
-                throw HelperFailure.invalid(
-                    "The system is entering sleep; network protection remains fail-closed."
-                )
+                throw Self.startRefusal()
             }
             // Bounded and admitted like every helper child (#1504 review
             // R5-F1): a launch still pending at the deadline fails the start,
             // and its late child gets end-of-file at the admission gate, so
-            // an abandoned Core never starts; it is terminated as well.
-            try KillSwitchManager.launchAdmitted(
+            // an abandoned Core never starts; it is terminated as well. The
+            // gate is asked again once the launch returns, before `go`
+            // (R6-F1): an operator release that landed while `Process.run()`
+            // stalled refuses a launch accepted inside the deadline too.
+            try Self.launchCoreAdmitted(
                 child,
                 executable: mihomoPath,
                 arguments: ["run", "-D", runtimeDirectory, "-c", configPath],
-                until: .now() + HelperChildDeadline.coreLaunch,
-                deadline: HelperChildDeadline.coreLaunch
+                startAllowed: startAllowed
             )
         } catch {
             stopDiagnosticCapture()
@@ -186,12 +221,18 @@ final class CoreManager {
             stopDiagnosticCapture()
             throw HelperFailure.system(failure)
         }
+        // A release between `admit` and `go` overtook this start: the Core
+        // is stopped and the start refused, never reported running (R6-F1).
+        guard startAllowed() else {
+            try? stopLocked()
+            throw Self.startRefusal()
+        }
     }
 
     /// Serialized protected replacement. The caller keeps PF and system DNS
     /// armed throughout; failure never restarts an older configuration.
     func sync(configDirectory: String, configSHA256: String,
-              startAllowed: () -> Bool = { true },
+              startAllowed: @escaping () -> Bool = { true },
               beforeStop: () throws -> Void = {}) throws -> String {
         lock.lock()
         defer { lock.unlock() }

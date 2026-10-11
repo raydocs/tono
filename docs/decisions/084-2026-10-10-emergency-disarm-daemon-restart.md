@@ -10,8 +10,12 @@
     `/Library/Application Support/Tono/target-state`: `secured <n>` or `released <n>`. No file = no release or session
     was ever recorded, behavior as before. Mapping to Mullvad (`target_state.rs`, read for comparison only): `secured`
     = Secured, `released` = the explicit Disconnected target an administrator set; Mullvad's "unreadable = Secured"
-    (fail closed) maps here, for the operator-release case, to **unreadable = refuse every automatic re-arm (stay
-    released) with an explicit `TARGET_STATE_UNREADABLE` error while cleanup goes on**. Proton clears its persisted
+    (fail closed) maps here, for the operator-release case, to **unreadable = refuse every automatic re-arm with an
+    explicit `TARGET_STATE_UNREADABLE` error, and release nothing**: refusing a re-arm and having the authority to
+    release are separate answers (`HelperTarget.Gate`: allowed / released / unknown). Unknown holds: the block, its
+    saved intent, an A29 protected fault, the AI layer and protected DNS stay exactly as they are, and no cleanup
+    runs, until a readable `released`, the user's Disconnect or the user's Restore Internet (the only release
+    authorities, `HelperTarget.mayRelease`; round 7, R6-F2). Proton clears its persisted
     target before stopping the tunnel; Tono likewise latches before the bootout.
   - **`--emergency-disarm` order, every phase bounded:** `released` in memory first (`HelperTarget.processOverride`),
     its write started beside everything else (under the target lock, generation = old + 1; an unreadable old record
@@ -33,7 +37,8 @@
     loads (arm commit, supervision repair, permit withholding, LAN widening, power barrier, emergency block: all
     through one gate inside `ensureAnchorLoaded`), each 127.0.0.1 DNS write, each AI resolver file and route, and the
     owner app relaunch (right before `Process.run()` and right after it returns) read the target right before and
-    right after; a release in between undoes the effect and stops. The read after also runs when the effect threw,
+    right after; a release in between undoes the effect and stops (a target that turned unreadable in between stops
+    it too, without the undo: unknown is no release). The read after also runs when the effect threw,
     since it may have committed first. The undo uses what was captured before the effect (the DNS originals), never
     a re-read that the release's own cleanup may have removed. A released daemon also releases a block it reads in
     Tono's anchor without saved intent. No lock is held across PF, System Configuration or disk I/O.
@@ -54,7 +59,9 @@
   - **While `released` or unreadable** the helper refuses `/killswitch/arm` (all callers, the update path's included),
     `/core/start`, `/core/sync`, `/dns/enable`, PF supervision re-arm, the reviewed-bundle permit reload, the power
     barrier and the dead-owner app relaunch, each checked again where it acts (arm commit, Core launch, the DNS
-    write, inside supervision and the permit reload), not only at the request. The AI hold is a full release too:
+    write, inside supervision and the permit reload), not only at the request; a Core launch accepted inside its
+    deadline is asked again before `go` and once more after it starts (round 7, R6-F1). **Only while `released`**
+    (never while unreadable, which holds everything as above) the cleanup runs: the AI hold is a full release too:
     automatic releases do not keep it, `applyBestEffort` never reinstalls it, and the startup and watchdog
     reconciliation remove sinkholes and blackhole routes every pass until the system reads them gone. A saved block
     is released at once (no Core-start threshold), DNS is restored even beside a Core that survived. Releases,

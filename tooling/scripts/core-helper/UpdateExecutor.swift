@@ -69,24 +69,33 @@ enum UpdateExecutor {
         catch { try UpdatePackage.run("/bin/launchctl", ["print", "system/" + label], deadline: HelperChildDeadline.launchctl) }
     }
 
-    /// Startup failure used to install an emergency block, and skipped that
-    /// block entirely when the allowed uid could not be read (BRICK-M13).
-    /// There is no strict kill switch, and no uid is required to release.
-    private static func armEmergencyBlock() {
-        // Same class as a crash/hang release: open the general block, then
-        // best-effort restore a saved dead-loopback DNS snapshot and apply
-        // the secondary AI sinkhole. releaseInstalledBlock alone omitted
-        // both (M4-UPDATE-SELECTIVE-OMISSION / M4-UPDATE-LEDGER-DNS).
-        KillSwitchManager.releaseInstalledBlock()
-        if let dns = try? ProtectedDNSManager() {
-            try? dns.restore(deferringLossNotice: true)
+    /// What a startup failure does to saved protection (#1504 review R6-F3).
+    /// It was `armEmergencyBlock`, which (despite the name) released PF and
+    /// protected DNS and applied the AI layer on every startup failure, a
+    /// bounded `launchctl bootstrap` and `print` that merely ran out of time
+    /// included. Now it is the executor's own failure policy: the release
+    /// (`releaseAfterFailure`: PF, then DNS, then AI) runs only under an
+    /// explicit release intent (`failureMayRelease`: an operator `released`
+    /// on record, the attempt's own Disconnect, or no saved protection);
+    /// otherwise the block, its intent, protected DNS and an A29 fault stay
+    /// as they are, and the failure is thrown, so launchd's restart retries.
+    /// `disconnectRequested` is the attempt's, as read under the update lock
+    /// this runs in (nil when it could not be read); this never takes that
+    /// lock again.
+    static func settleStartupFailure(disconnectRequested: Bool?,
+                                     recovery: FailureRecovery = FailureRecovery()) {
+        guard failureMayRelease(target: recovery.target(), disconnectRequested: disconnectRequested,
+                                protectionSaved: recovery.protectionSaved()) else {
+            FileHandle.standardError.write(Data("tono: startup failed; saved protection kept\n".utf8))
+            return
         }
-        SelectiveFailOpenInstaller.applyBestEffort()
+        recovery.release()
     }
 
     /// Called before constructing CoreManager or restoring normal desired
     /// state. A corrupt ledger stops launch. The default failure action
-    /// releases a saved kill switch; it does not install one (BRICK-M13).
+    /// (`settleStartupFailure`) releases a saved kill switch only under an
+    /// explicit release intent, and never installs one (BRICK-M13, R6-F3).
     /// Intent is read only under the update lock, including when normal store
     /// opening failed but the existing root directory and lock are secure.
     /// A Mac that was never connected is not blocked by a store it cannot read.
@@ -98,7 +107,12 @@ enum UpdateExecutor {
     /// action, exit success.
     static func startup(storage: UpdateStorage? = nil,
                         protectionWanted: () -> Bool = KillSwitchManager.stateFileExists,
-                        emergencyBlock: () throws -> Void = armEmergencyBlock) throws -> Bool {
+                        launchExecutor: (UpdateStorage, UpdateStorage.Attempt) throws -> Void = {
+                            try UpdateExecutor.launch(storage: $0, attempt: $1)
+                        },
+                        onFailure: (_ disconnectRequested: Bool?) -> Void = {
+                            UpdateExecutor.settleStartupFailure(disconnectRequested: $0)
+                        }) throws -> Bool {
         do {
             let openedStorage: UpdateStorage
             do { openedStorage = try storage ?? UpdateStorage() }
@@ -108,25 +122,27 @@ enum UpdateExecutor {
                 // lockless read. Preserve the original startup failure.
                 do {
                     try UpdateStorage.withRootLockForStartup {
-                        if protectionWanted() { try? emergencyBlock() }
+                        if protectionWanted() { onFailure(nil) }
                     }
                 } catch HelperFailure.stopping { return true }
                 catch { }
                 throw openingError
             }
             return try openedStorage.locked {
+                var disconnectRequested: Bool?
                 do {
                     guard let attempt = try openedStorage.load().attempt, attempt.receipt.phase != .committed else { return false }
+                    disconnectRequested = attempt.disconnectRequested
                     if attempt.execution == .consumed && (attempt.receipt.blockedReason != nil || attempt.disconnectRequested) { return false }
                     if [.consumed, .replacing, .rollingBack].contains(attempt.execution) {
-                        try launch(storage: openedStorage, attempt: attempt)
+                        try launchExecutor(openedStorage, attempt)
                         return true
                     }
                     return false
                 } catch HelperFailure.stopping(let message) {
                     throw HelperFailure.stopping(message)
                 } catch {
-                    if protectionWanted() { try? emergencyBlock() }
+                    if protectionWanted() { onFailure(disconnectRequested) }
                     throw error
                 }
             }

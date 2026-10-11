@@ -57,8 +57,14 @@ struct HelperTarget: Equatable {
         return HelperTarget(mode: mode, generation: generation)
     }
 
+    /// Self-test seam: a reading every target read in this process returns
+    /// (a record turning unreadable mid-effect, #1504 review R6-F2). nil
+    /// always, outside `--self-test`.
+    nonisolated(unsafe) static var selfTestReading: Reading?
+
     /// The target as this process must obey it: the in-memory release first.
     static func read() -> Reading {
+        if let selfTestReading { return selfTestReading }
         if let processOverride { return .recorded(processOverride) }
         return readFile()
     }
@@ -177,6 +183,50 @@ struct HelperTarget: Equatable {
         if let failure = releaseRefusal() { throw failure }
     }
 
+    /// What the target says about automatic protection changes (#1504
+    /// review R6-F2). Refusing an automatic re-arm and having the authority
+    /// to release are different answers: `.unknown` (an unreadable record)
+    /// refuses every automatic re-arm, and releases nothing either: the
+    /// block, its saved intent, an A29 protected fault and protected DNS stay
+    /// exactly as they are. Only `.released`, an administrator's release
+    /// recorded on disk (or latched in the `--emergency-disarm` process),
+    /// is release authority; the user's own Disconnect and Restore are the
+    /// other two, and they do not go through the target.
+    enum Gate: Equatable {
+        case allowed
+        case released
+        case unknown
+    }
+
+    static func gate(_ reading: Reading) -> Gate {
+        switch reading {
+        case .unreadable: return .unknown
+        case .recorded(let target) where target.mode == .released: return .released
+        case .recorded, .missing: return .allowed
+        }
+    }
+
+    /// Who is asking to release protection. Only these may (R6-F2).
+    enum ReleaseCause {
+        /// `released` on record: `--emergency-disarm`.
+        case operatorRelease
+        /// The user's Disconnect (`/killswitch/disarm`, `/killswitch/release`).
+        case userDisconnect
+        /// The user's Restore Internet (`/dns/restore` and the disarm).
+        case userRestore
+    }
+
+    /// Whether `cause` may release now. The user's own requests always may;
+    /// the operator release only while it is what the target records. An
+    /// unreadable target is never authority, whatever an A29 protected
+    /// fault or anything else holds.
+    static func mayRelease(_ cause: ReleaseCause, gate: Gate) -> Bool {
+        switch cause {
+        case .userDisconnect, .userRestore: return true
+        case .operatorRelease: return gate == .released
+        }
+    }
+
     /// The one shape every irreversible protection effect takes (PF load,
     /// 127.0.0.1 DNS write, AI sinkhole or route install, app relaunch): the
     /// target is read right before it and again right after. A release that
@@ -185,17 +235,21 @@ struct HelperTarget: Equatable {
     /// after runs whether the effect returned or threw (#1504 review F1/F2):
     /// an effect can throw after it committed (PF loaded, then the
     /// verification failed; System Configuration committed, then Apply
-    /// failed), and a thrown effect under a release is undone too.
+    /// failed), and a thrown effect under a release is undone too. A target
+    /// that became unreadable meanwhile refuses too, but is no authority to
+    /// release: the effect stays (R6-F2) and the caller stops with
+    /// `TARGET_STATE_UNREADABLE`.
     static func guardedEffect<T>(
-        allowed: () -> Bool = { HelperTarget.automaticRearmAllowed(HelperTarget.read()) },
+        gate: () -> Gate = { HelperTarget.gate(HelperTarget.read()) },
         refusal: () -> HelperFailure? = { HelperTarget.releaseRefusal() },
         _ effect: () throws -> T,
         undo: () -> Void
     ) throws -> T {
-        guard allowed() else { throw refusal() ?? releasedFailure }
+        guard gate() == .allowed else { throw refusal() ?? releasedFailure }
         let result = Result<T, any Error> { try effect() }
-        guard allowed() else {
-            undo()
+        let after = gate()
+        guard after == .allowed else {
+            if mayRelease(.operatorRelease, gate: after) { undo() }
             throw refusal() ?? releasedFailure
         }
         return try result.get()
@@ -203,22 +257,25 @@ struct HelperTarget: Equatable {
 
     /// `guardedEffect` over a sequence of install steps: each runs only while
     /// the target allows it, and a release seen before or after any step
-    /// undoes the whole install and stops. False when stopped.
+    /// undoes the whole install and stops. An unreadable target stops the
+    /// install without undoing it (R6-F2). False when stopped.
     @discardableResult
     static func stepsUnlessReleased(
         _ steps: [() -> Void],
-        allowed: () -> Bool = { HelperTarget.automaticRearmAllowed(HelperTarget.read()) },
+        gate: () -> Gate = { HelperTarget.gate(HelperTarget.read()) },
         undo: () -> Void
     ) -> Bool {
         for step in steps {
-            guard allowed() else {
-                undo()
+            let now = gate()
+            guard now == .allowed else {
+                if mayRelease(.operatorRelease, gate: now) { undo() }
                 return false
             }
             step()
         }
-        guard allowed() else {
-            undo()
+        let after = gate()
+        guard after == .allowed else {
+            if mayRelease(.operatorRelease, gate: after) { undo() }
             return false
         }
         return true
@@ -1133,13 +1190,14 @@ func runOperatorReleaseSelfTests() -> Bool {
     var undone = 0
     var interleavedCode: String?
     do {
-        try HelperTarget.guardedEffect(allowed: { allowedNow }, refusal: { nil }, {
+        try HelperTarget.guardedEffect(gate: { allowedNow ? .allowed : .released }, refusal: { nil }, {
             effects += 1
             allowedNow = false // the CLI released while this PF load / DNS write stalled
         }, undo: { undone += 1 })
     } catch let failure as HelperFailure { interleavedCode = failure.code } catch {}
     do {
-        try HelperTarget.guardedEffect(allowed: { allowedNow }, refusal: { nil }, { effects += 1 }, undo: { undone += 1 })
+        try HelperTarget.guardedEffect(gate: { allowedNow ? .allowed : .released }, refusal: { nil },
+                                       { effects += 1 }, undo: { undone += 1 })
     } catch {}
     guard interleavedCode == "OPERATOR_RELEASED", effects == 1, undone == 1 else {
         return fail("interleaved effect", "\(interleavedCode ?? "none") \(effects) \(undone)")
@@ -1151,7 +1209,7 @@ func runOperatorReleaseSelfTests() -> Bool {
     var removedAll = 0
     let installCompleted = HelperTarget.stepsUnlessReleased(
         [{ installed += 1; allowedNow = false }, { installed += 1 }],
-        allowed: { allowedNow },
+        gate: { allowedNow ? .allowed : .released },
         undo: { removedAll += 1 }
     )
     guard !installCompleted, installed == 1, removedAll == 1 else {
@@ -1591,6 +1649,144 @@ func runOwnerRelaunchReleasedDuringSpawnSelfTest() -> Bool {
     usleep(1_500_000)
     guard !FileManager.default.fileExists(atPath: marker) else {
         return selfTestFail("relaunch during release: the request ran")
+    }
+    return true
+}
+
+/// R6-F1: a Core launch stalls in `Process.run()` while an operator release
+/// lands, then returns well inside its deadline, so the launch is accepted.
+/// The start gate is asked again before `go`: the start is refused with the
+/// release and the Core never executes (here: never writes its marker).
+/// Control: the same launch with no release runs.
+func runReleaseDuringAcceptedCoreLaunchSelfTest() -> Bool {
+    func launchCore(releaseDuringLaunch: Bool, marker: String, exited: DispatchSemaphore) -> (Process, String?) {
+        let child = Process()
+        child.standardOutput = FileHandle.nullDevice
+        child.standardError = FileHandle.nullDevice
+        child.terminationHandler = { _ in exited.signal() }
+        var code: String? = "none"
+        withInjectedTarget(selfTestSecured) {
+            do {
+                try CoreManager.launchCoreAdmitted(
+                    child,
+                    executable: "/bin/sh",
+                    arguments: ["-c", "printf started > \"$1\"; exec /bin/sleep 30", "sh", marker],
+                    deadline: 5,
+                    startAllowed: { HelperTarget.automaticRearmAllowed(HelperTarget.read()) },
+                    launch: { process in
+                        try process.run()
+                        usleep(300_000) // stalled, still well inside the deadline
+                        if releaseDuringLaunch { HelperTarget.processOverride = selfTestReleased }
+                    }
+                )
+                code = nil
+            } catch let failure as HelperFailure {
+                code = failure.code
+            } catch {}
+        }
+        return (child, code)
+    }
+    let marker = NSTemporaryDirectory() + "tono-admitted-core-\(UUID().uuidString)"
+    defer { unlink(marker) }
+    let exited = DispatchSemaphore(value: 0)
+    let (refused, code) = launchCore(releaseDuringLaunch: true, marker: marker, exited: exited)
+    guard code == "OPERATOR_RELEASED" else { return selfTestFail("accepted Core launch under release", code ?? "started") }
+    guard exited.wait(timeout: .now() + 5) == .success else {
+        if refused.isRunning { kill(refused.processIdentifier, SIGKILL) }
+        return selfTestFail("accepted Core launch under release: never ended")
+    }
+    usleep(500_000)
+    guard !FileManager.default.fileExists(atPath: marker) else {
+        return selfTestFail("accepted Core launch under release: the Core executed")
+    }
+    let controlExited = DispatchSemaphore(value: 0)
+    let (control, controlCode) = launchCore(releaseDuringLaunch: false, marker: marker, exited: controlExited)
+    defer {
+        if control.isRunning { kill(control.processIdentifier, SIGKILL) }
+        _ = controlExited.wait(timeout: .now() + 2)
+    }
+    var ran = false
+    for _ in 0..<40 where !ran {
+        ran = FileManager.default.fileExists(atPath: marker)
+        if !ran { usleep(50_000) }
+    }
+    guard controlCode == nil, ran else {
+        return selfTestFail("Core launch without release", "\(controlCode ?? "nil") \(ran)")
+    }
+    return true
+}
+
+/// R6-F2: an A29 protected fault holds its block and protected DNS when the
+/// target record turns corrupt. Unknown refuses every automatic re-arm but
+/// is no release authority: the watchdog pass does nothing however long the
+/// Core stays down, and a PF load or AI install the corrupt read overtook
+/// is refused, never undone. Controls: a readable `released` still releases
+/// (watchdog plan and undo), and the user's Disconnect and Restore are
+/// release authority whatever the target reads.
+func runUnknownTargetKeepsFaultSelfTest() -> Bool {
+    let directory = NSTemporaryDirectory() + "tono-target-\(UUID().uuidString)"
+    guard mkdir(directory, 0o700) == 0 else { return selfTestFail("unknown target: setup") }
+    defer { try? FileManager.default.removeItem(atPath: directory) }
+    var store = HelperTarget.Store()
+    store.path = directory + "/target-state"
+    store.requireRootOwnership = false
+    guard FileManager.default.createFile(
+        atPath: store.path, contents: Data("secured five\n".utf8), attributes: [.posixPermissions: 0o600]
+    ) else { return selfTestFail("unknown target: corrupt record") }
+    let corrupt = store.read()
+    guard corrupt.isUnreadable, HelperTarget.gate(corrupt) == .unknown,
+          !HelperTarget.automaticRearmAllowed(corrupt),
+          !HelperTarget.mayRelease(.operatorRelease, gate: .unknown),
+          HelperTarget.mayRelease(.operatorRelease, gate: .released),
+          HelperTarget.mayRelease(.userDisconnect, gate: .unknown),
+          HelperTarget.mayRelease(.userRestore, gate: .unknown) else {
+        return selfTestFail("unknown target: gate", corrupt)
+    }
+    guard SocketServer.watchdogSteps(
+        rearmAllowed: false, coreRunning: false, stateFilePresent: true, blockPresent: true,
+        coreDownChecks: 1_000, localNetworkFault: true, targetUnknown: true
+    ) == [] else {
+        return selfTestFail("unknown target: watchdog released the held fault")
+    }
+    guard SocketServer.watchdogSteps(
+        rearmAllowed: false, coreRunning: false, stateFilePresent: true, coreDownChecks: 0, localNetworkFault: true
+    ) == [.releaseBlock, .reconcileAI, .recoverDNS] else {
+        return selfTestFail("released target: watchdog kept the fault")
+    }
+    func overtakenLoad(by reading: HelperTarget.Reading) -> (String?, Int) {
+        var undone = 0
+        var code: String?
+        let seam = KillSwitchManager.BlockLoadSeam(
+            load: { HelperTarget.selfTestReading = reading },
+            undo: { undone += 1 }
+        )
+        withInjectedTarget(selfTestSecured, seam: seam) {
+            defer { HelperTarget.selfTestReading = nil }
+            do { try KillSwitchManager.ensureAnchorLoaded(flushStates: true) }
+            catch let failure as HelperFailure { code = failure.code }
+            catch {}
+        }
+        return (code, undone)
+    }
+    let unknownLoad = overtakenLoad(by: corrupt)
+    guard unknownLoad.0 == "TARGET_STATE_UNREADABLE", unknownLoad.1 == 0 else {
+        return selfTestFail("unknown target: PF load undone", "\(unknownLoad)")
+    }
+    let releasedLoad = overtakenLoad(by: .recorded(selfTestReleased))
+    guard releasedLoad.0 == "OPERATOR_RELEASED", releasedLoad.1 >= 1 else {
+        return selfTestFail("released target: PF load kept", "\(releasedLoad)")
+    }
+    var installed = 0
+    var removed = 0
+    let completed = withInjectedTarget(selfTestSecured) { () -> Bool in
+        defer { HelperTarget.selfTestReading = nil }
+        return HelperTarget.stepsUnlessReleased(
+            [{ installed += 1; HelperTarget.selfTestReading = corrupt }, { installed += 1 }],
+            undo: { removed += 1 }
+        )
+    }
+    guard !completed, installed == 1, removed == 0 else {
+        return selfTestFail("unknown target: AI install undone", "\(installed) \(removed)")
     }
     return true
 }
