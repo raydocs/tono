@@ -1313,6 +1313,9 @@ export interface TranslationResources {
           description: string
           title: string
         }
+        privacyDetails: string
+        privacySummary: string
+        recoveryEnded: string
         relayFailureDetails: string
         relayFailureKinds: string
         resendIn: string
@@ -1341,6 +1344,7 @@ export interface TranslationResources {
           description: string
           title: string
         }
+        technicalDetails: string
         title: string
         trust: string
         validity: string
@@ -1670,8 +1674,11 @@ export interface TranslationResources {
         auditPathCopied: string
         contact: {
           copied: string
+          copyFailed: string
           copyMessage: string
           description: string
+          finalAction: string
+          manualCopy: string
         }
         copyFailed: string
         detailsCopied: string

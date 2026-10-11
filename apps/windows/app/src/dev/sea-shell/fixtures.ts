@@ -4,6 +4,7 @@ import { createTheme } from '@mui/material'
 import type {
   TonoDiagnosticsReport,
   TonoLocalDiagnosticsReport,
+  TonoSignInRecovery,
 } from '../../services/tono'
 import { tonoStatus as simulatedStatus } from '../sea-home/fixtures'
 
@@ -214,13 +215,39 @@ export const tonoUpdateRoutePreferences = async (
   return tonoRoutePreferences()
 }
 
-// Sign-in fixture uses no credentials or network; only synthetic status events.
-const signInFixtureIO = async () => {
+// Decision093 snapshots from synthetic IO, not a replacement recovery engine.
+// No credentials or network; the operation token is never rendered or copied.
+const signInFixtureIO = async (step: TonoSignInRecovery['step']) => {
+  const signInRecovery: TonoSignInRecovery = {
+    operation: 1,
+    step,
+    phase: 'automatic',
+  }
+  window.dispatchEvent(
+    new CustomEvent('preview-home-state', { detail: { signInRecovery } }),
+  )
   await privacyDelay('authDelay')
-  if (params.has('relaysDown'))
+  if (params.has('relaysDown')) {
+    window.dispatchEvent(
+      new CustomEvent('preview-home-state', {
+        detail: {
+          signInRecovery: {
+            ...signInRecovery,
+            phase: 'userAction',
+            cause: 'relaysUnreachable',
+          },
+        },
+      }),
+    )
     throw new Error(
       'TONO_AUTH_TCP: could not reach Tono: TONO_RELAYS_UNREACHABLE: relay 2 (192.0.2.2:2053) timeout: synthetic timeout; relay 3 (192.0.2.3:2053) tls: synthetic TLS failure; relay 1 (192.0.2.1:2053) connect: synthetic connection failure',
     )
+  }
+  window.dispatchEvent(
+    new CustomEvent('preview-home-state', {
+      detail: { signInRecovery: undefined },
+    }),
+  )
 }
 export const tonoSignInStart = async () => {
   window.dispatchEvent(
@@ -228,11 +255,11 @@ export const tonoSignInStart = async () => {
       detail: { accountState: 'authenticating' },
     }),
   )
-  await signInFixtureIO()
+  await signInFixtureIO('sendCode')
   return { challengeId: 'synthetic', expiresIn: 600, message: '' }
 }
 export const tonoSignInVerify = async () => {
-  await signInFixtureIO()
+  await signInFixtureIO('verifyCode')
   if (params.has('badCode'))
     throw new Error('TONO_AUTH_INVALID_CODE: Synthetic rejected code')
   const suspended = params.has('paused')
@@ -242,6 +269,13 @@ export const tonoSignInVerify = async () => {
     }),
   )
   return { email: 'preview@example.test', suspended, deviceLimit: 3 }
+}
+export const tonoSignInDismiss = async () => {
+  window.dispatchEvent(
+    new CustomEvent('preview-home-state', {
+      detail: { signInRecovery: undefined },
+    }),
+  )
 }
 
 // Populated, privacy-safe activity/account fixtures; no native feed or account IO.

@@ -1,0 +1,10 @@
+## 2026-10-11 · 两端登录精简与点击复制诊断
+- 归属：SHIP_PLAN G2；有限 UIUX 收口第 2 项，随后只走查一次首次启动/登录/设置/托盘/更新/权限。
+- 来源：叠在默认中文 #1561 与 native 恢复信号 #1564（decision 093）上，分支 `amp/login-cleanup`；待 native CI、Sol 与主线程视觉审查，未合 main。
+- 新增/优化：默认保留简短登录操作与原因；隐私摘要仍披露日志默认上传，原详细说明折叠；技术分类与诊断操作后置。60 秒未收到邮件只提供核对地址/垃圾箱/重发，不冒充最终恢复失败，也不提前推客服。
+- 缺陷修复：点击复制只使用封闭 allowlist，不含完整邮箱、IP、密码、token、验证码、节点/原始错误。Windows 等待真实 clipboard Promise，Mac 检查 NSPasteboard 的 Bool；失败不显示“已复制”，提供折叠的安全手动文本。发送接口接受请求不证明送达，两端反馈改为“请求已提交/查收邮件”。
+- 保留：请求互斥、发送/验证/重试次数、超时、后台恢复、错误分类、relayOnly/提示选择、保护显示与显式恢复网络处理均不变；没有调用剪贴板读取/自动复制/上传。
+- 验证：Linux 定点 login/support vitest 首轮 16 passed/2 failed（新 fixture 错误格式与旧“Code sent”断言）；修正后 18/18 passed，接入 093 后 19/19 passed。typecheck unchecked indexed access errors 69 (baseline 79)，未升预算；scoped ESLint exit 0。Swift/真实 OS 剪贴板未在 Linux 运行。
+- 恢复契约：先前缺口由主线程 #1564 解决。UI 只消费真实 signInRecovery：automatic 时进度/禁重复写，userAction 时低强调联系支持，absent 不显示支持；不从保护/错误文案/计时器推导耗尽。Windows 换邮箱调用既有新增 dismiss；Mac reset 流程不变。operation 不显示、不复制，cause 仅使用封闭枚举。开发预览的状态明确为合成 IO，不代替 native 契约测试。
+- 候选/发布：仅源码，无新包、无发布线操作。按最新顺序，本项、默认中文、一次走查及 A13 完成后才最终冻结；不擅自挪到下一包。
+- 设备缺口：签名 Win/Mac 包真实剪贴板拒绝/成功、语言冷启动、键盘/VoiceOver、权限安装/取消、保护释放与更新恢复必须在最终包验证；合成状态和 hosted render 不等于实机验收。

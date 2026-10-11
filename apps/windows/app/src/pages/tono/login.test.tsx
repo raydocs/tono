@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   disconnect: vi.fn(),
   start: vi.fn(),
   verify: vi.fn(),
+  dismiss: vi.fn(),
   mutate: vi.fn(),
   status: {} as Record<string, unknown>,
 }))
@@ -35,6 +36,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/tono')>()),
   tonoSignInStart: mocks.start,
   tonoSignInVerify: mocks.verify,
+  tonoSignInDismiss: mocks.dismiss,
   tonoSignOut: mocks.signOut,
   tonoDisconnect: mocks.disconnect,
   tonoRetryRestore: vi.fn(),
@@ -60,6 +62,7 @@ beforeEach(() => {
   mocks.disconnect.mockReset().mockResolvedValue(undefined)
   mocks.start.mockReset().mockResolvedValue({ expiresIn: 600 })
   mocks.verify.mockReset()
+  mocks.dismiss.mockReset().mockResolvedValue(undefined)
   mocks.mutate.mockReset().mockResolvedValue(undefined)
   mocks.status = {}
 })
@@ -89,23 +92,23 @@ async function enterCodeStep() {
 }
 
 describe('login welcome v2', () => {
-  it('shows the trust line above the send-code button', () => {
+  it('keeps the default-upload disclosure visible and folds its detailed privacy explanation', () => {
     render(
       <MemoryRouter>
         <LoginPage />
       </MemoryRouter>,
     )
-    expect(
-      screen.getByText(
-        'Your email is only used to sign in. Traffic log upload is on by default: the hostnames you connect to, the apps that open each connection, and the matched rules and routes, used to diagnose problems. Turn it off in Settings.',
-      ),
-    ).toBeDefined()
+    expect(screen.getByText(enTono.login.privacySummary)).toBeDefined()
+    const details = screen.getByText(enTono.login.trust).closest('details')
+    expect(details?.open).toBe(false)
+    fireEvent.click(screen.getByText('Privacy details'))
+    expect(details?.open).toBe(true)
     expect(screen.getByRole('button', { name: 'Send code' })).toBeDefined()
   })
 })
 
 describe('login code not received', () => {
-  it('offers support once the code has had a minute to arrive', async () => {
+  it('offers self-service after a minute without pretending recovery is exhausted', async () => {
     render(
       <MemoryRouter>
         <LoginPage />
@@ -123,9 +126,8 @@ describe('login code not received', () => {
     expect(screen.queryByText('No email yet?')).toBeNull()
     await act(async () => vi.advanceTimersByTime(1000))
     expect(screen.queryByText('No email yet?')).not.toBeNull()
-    expect(
-      screen.getByTestId('support-contact').getAttribute('data-extra'),
-    ).toBe('No email yet?')
+    expect(screen.queryByTestId('support-contact')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Send again' })).toBeDefined()
   })
 })
 
@@ -217,11 +219,15 @@ describe('login request exclusion', () => {
     ).toBeDefined()
     const code = screen.getByLabelText('6-digit code')
     expect(document.activeElement).toBe(code)
-    expect(screen.getByRole('status').textContent).toBe('Code sent.')
+    expect(screen.getByRole('status').textContent).toBe('Check your inbox.')
     expect(
       document.getElementById(code.getAttribute('aria-describedby')!),
     ).not.toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Use another email' }))
+    await act(async () =>
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Use another email' }),
+      ),
+    )
     expect(document.activeElement).toBe(screen.getByLabelText('Email'))
     expect(screen.getByDisplayValue('person@example.com')).toBeDefined()
     expect(screen.queryByLabelText('6-digit code')).toBeNull()
@@ -356,7 +362,11 @@ describe('login request exclusion', () => {
       }),
     )
     expect(screen.getByText('Account paused')).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: 'Use another email' }))
+    await act(async () =>
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Use another email' }),
+      ),
+    )
     expect(screen.queryByText('Account paused')).toBeNull()
     fireEvent.change(screen.getByLabelText('Email'), {
       target: { value: 'other@example.com' },

@@ -233,11 +233,15 @@
     "sendCode": "发送验证码",
     "sendNewCode": "重新发送",
     "sending": "发送中…",
-    "sent": "已发送到邮箱",
+    "sent": "请求已提交",
+    "privacySummary": "邮箱用于登录。流量日志默认上传，可在设置中关闭。",
+    "privacyDetails": "隐私说明",
+    "technicalDetails": "详情",
+    "recoveryEnded": "这次登录未完成。请重试，或换个网络。",
     "trust": "邮箱只用于登录。流量日志默认上传：你连接的主机名、发起每条连接的应用、命中的规则与路由，用于排查问题。可在设置里关闭。",
     "resendIn": "{{seconds}} 秒后可重发",
-    "codeSent": "验证码已发送。",
-    "codeSentTo": "已发到上面这封邮箱。核对完整地址，也可看垃圾箱。",
+    "codeSent": "请查收邮件。",
+    "codeSentTo": "请查看这个邮箱（也可查看垃圾箱）。",
     "codeFrom": "发件人：Tono <login@lecvia.com>",
     "codeLabel": "6 位验证码",
     "codePlaceholder": "123456",
@@ -249,11 +253,11 @@
     "invalidCode": "请输入 6 位验证码",
     "noEmail": {
       "title": "还没收到邮件？",
-      "description": "请查看垃圾箱并核对上面的邮箱地址，或重新发送。仍然收不到的话，复制下面的信息发给客服。"
+      "description": "请查看垃圾箱并核对上面的邮箱地址，或重新发送。"
     },
     "suspended": {
       "title": "账号已暂停",
-      "description": "请联系客服。"
+      "description": "这个账号暂时无法连接。请重新登录，确认账号状态。"
     },
     "sessionEnded": {
       "title": "登录已失效",
@@ -277,7 +281,7 @@
     "relayFailureDetails": "中继失败详情",
     "relayFailureKinds": "connect：连接失败；timeout：等待超时；tls：安全连接失败；dns：域名解析失败；other：请求失败。这些是返回的分类，不是对你当前网络的诊断。",
     "errors": {
-      "unreachable": "这个网络暂时连不上 Tono 的登录服务器。请确认电脑能上网，等一分钟再试；一直失败请复制详情发给客服。",
+      "unreachable": "暂时连不上 Tono 的登录服务器。请检查网络后重试。",
       "relaysUnreachable": "Tono 的备用线路目前都无法到达。请检查网络，或稍后再试。重试不需要关闭保护。",
       "rateLimited": "尝试过多，请稍后再试。",
       "deviceLimit": "这个账号的设备数已满。请在已登录的设备上打开「账号」，移除一台设备，然后重试。",
@@ -287,7 +291,7 @@
       "clockSkew": "这台电脑的日期和时间不对，Tono 无法验证服务器。请在「设置 > 时间和语言 > 日期和时间」里改正，然后重试。",
       "captivePortal": "网络需要网页登录（强制门户）：这个网络要先在浏览器里完成登录，Tono 才能连到服务器。请打开浏览器完成这个网络的登录页面，然后重试。",
       "tlsIntercepted": "网络在拦截加密连接：这台电脑与 Tono 之间有设备或软件替换了 Tono 的证书，Tono 不会接受。如果这个网络有网页登录，请先在浏览器里完成；否则请关闭检查 HTTPS 的代理或安全软件，然后重试。",
-      "serverError": "登录服务暂时繁忙或不可用，请稍后重试或联系客服。"
+      "serverError": "登录服务暂时不可用，请稍后重试。"
     }
   },
   "pill": {
@@ -424,7 +428,7 @@
     }
   },
   "errors": {
-    "unknownAction": "出了点问题。详情见下方，可复制给客服。"
+    "unknownAction": "这次操作未完成，请重试。"
   },
   "node": {
     "activeServer": "当前线路",
@@ -575,9 +579,12 @@
     "title": "支持",
     "subtitle": "本地状态摘要。可复制一段给客服。",
     "contact": {
-      "description": "复制这段发给客服。含版本、状态和线路，不含密码。",
-      "copyMessage": "复制给客服",
-      "copied": "已复制"
+      "description": "复制版本、状态和已知失败分类，不含账号信息或地址。",
+      "copyMessage": "复制诊断",
+      "finalAction": "联系支持（复制诊断）",
+      "copied": "已复制",
+      "copyFailed": "未能复制，可手动复制安全文本。",
+      "manualCopy": "手动复制"
     },
     "refresh": "刷新",
     "loadFailed": "无法加载诊断摘要，请刷新重试。",

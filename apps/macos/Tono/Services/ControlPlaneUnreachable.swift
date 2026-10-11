@@ -76,19 +76,19 @@ nonisolated struct ControlPlaneUnreachable: Equatable, Sendable {
     }
 
     static var unconfirmedProtectedHint: String {
-        String(localized: "Protection may still be on from an earlier session, and Tono's relays did not answer from this network. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.")
+        String(localized: "Protection may still be on from an earlier session, and Tono's relays did not answer from this network. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot.")
     }
 
     static var protectedNoRelayHint: String {
-        String(localized: "Protection is on. Tono keeps it on. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.")
+        String(localized: "Protection is on. Tono keeps it on. Try again in a moment or on another network, for example a phone hotspot.")
     }
 
     static var unconfirmedNoRelayHint: String {
-        String(localized: "Protection may still be on from an earlier session. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.")
+        String(localized: "Protection may still be on from an earlier session. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot.")
     }
 
     static var protectedHint: String {
-        String(localized: "Protection is on, and Tono's relays did not answer from this network. Tono keeps protection on. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.")
+        String(localized: "Protection is on, and Tono's relays did not answer from this network. Tono keeps protection on. Try again in a moment or on another network, for example a phone hotspot.")
     }
 
     var headline: String {
@@ -125,12 +125,12 @@ nonisolated struct ControlPlaneUnreachable: Equatable, Sendable {
             return String(localized: "Retry in a moment. If it keeps failing, try another network, for example a phone hotspot.")
         }
         if relayOnly {
-            return String(localized: "Tono's relays could not be reached from this network. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.")
+            return String(localized: "Tono's relays could not be reached from this network. Try again in a moment or on another network, for example a phone hotspot.")
         }
         if attempts.first(where: { $0.path == "system_dns" })?.failure == "dns" {
-            return String(localized: "This network's DNS did not return Tono's address. Try another network, for example a phone hotspot, then retry. For help, select this text and send it to Tono support.")
+            return String(localized: "This network's DNS did not return Tono's address. Try another network, for example a phone hotspot, then retry.")
         }
-        return String(localized: "Try another network, for example a phone hotspot, then retry. For help, select this text and send it to Tono support.")
+        return String(localized: "Try another network, for example a phone hotspot, then retry.")
     }
 
     /// Every route tried was a relay: the walk without a tunnel (decision 091).

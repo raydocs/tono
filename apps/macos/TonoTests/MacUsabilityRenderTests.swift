@@ -134,6 +134,66 @@ final class MacUsabilityRenderTests: XCTestCase {
         XCTAssertNil(app.connectionCoordinator.connectTask)
     }
 
+    func testLoginDiagnosticsCopyReportsFailureWithoutLeakingIdentity() async throws {
+        let copy = SignInDiagnosticCopy()
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        XCTAssertNil(copy.copied)
+        XCTAssertTrue(copy.manualText.isEmpty)
+        XCTAssertNil(pasteboard.string(forType: .string))
+        copy.copy { text in
+            pasteboard.clearContents()
+            return pasteboard.setString(text, forType: .string)
+        }
+        XCTAssertEqual(copy.copied, true)
+        let text = try XCTUnwrap(pasteboard.string(forType: .string))
+        XCTAssertEqual(text.components(separatedBy: "\n").count, 3)
+        XCTAssertTrue(text.hasPrefix("Tono sign-in diagnostics\nVersion: "))
+        XCTAssertTrue(text.hasSuffix("\nAuth stage: sign-in"))
+        XCTAssertFalse(text.contains("@"))
+        XCTAssertFalse(text.contains("Email:"))
+        copy.copy(cause: .relaysUnreachable) { _ in false }
+        XCTAssertEqual(copy.copied, false)
+        XCTAssertEqual(copy.manualText, text + "\nRecovery cause: relaysUnreachable")
+        try await capture("login-copy-failed", width: 420, height: 180, annotate: false,
+                          darkAppearance: true, nativeOpacity: .isolatedSubpixelEdges,
+                          nativeLabels: ["Copy diagnostics", "Could not copy. You can copy the safe text manually."]) {
+            SignInDiagnosticCopyButton(copy: copy).padding(24)
+        }
+        copy.copy { _ in true }
+        XCTAssertEqual(copy.copied, true)
+        XCTAssertTrue(copy.manualText.isEmpty)
+
+        let app = AppState()
+        let login = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        login.authMethods = .init(email: .init(enabled: true, clientId: nil),
+            apple: .init(enabled: false, clientId: nil), google: .init(enabled: false, clientId: nil))
+        login.state = .signedOut
+        let operation = login.signInRecoveryLedger.begin(.sendCode)
+        try await capture("login-recovery-automatic", width: 760, height: 720, annotate: false,
+                          darkAppearance: true, nativeOpacity: .isolatedSubpixelEdges,
+                          nativeLabels: ["Sign in to Tono", "Sending…"]) {
+            LoginView(session: login).modifier(SeaPageAppearance())
+                .environment(\.seaAppearanceOverride, true).environment(app)
+        }
+        login.signInRecoveryLedger.finish(operation, cause: .relaysUnreachable)
+        login.state = .error("Tono could not reach any of its relays. Try again in a moment or on another network.")
+        try await capture("login-recovery-user-action", width: 760, height: 820, annotate: false,
+                          darkAppearance: true, nativeOpacity: .isolatedSubpixelEdges,
+                          nativeLabels: ["Sign in to Tono", "Contact support (copy diagnostics)", "Send a sign-in code"]) {
+            LoginView(session: login).modifier(SeaPageAppearance())
+                .environment(\.seaAppearanceOverride, true).environment(app)
+        }
+        login.state = .error("Tono 的备用线路目前无法到达。请稍后重试，或换个网络。")
+        try await capture("login-recovery-user-action-zh-narrow", width: 640, height: 820, annotate: false,
+                          darkAppearance: true, nativeOpacity: .isolatedSubpixelEdges,
+                          nativeLabels: ["登录 Tono", "联系支持（复制诊断）", "发送验证码"]) {
+            LoginView(session: login).modifier(SeaPageAppearance())
+                .environment(\.seaAppearanceOverride, true).environment(\.locale, Locale(identifier: "zh-Hans")).environment(app)
+        }
+        XCTAssertNil(app.connectionCoordinator.connectTask)
+    }
+
     func testLoginItemsWaitForConfirmationAndRecoverUnknownChanges() async throws {
         let suite = "tono-login-items-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

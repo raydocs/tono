@@ -22,6 +22,7 @@ struct LoginView: View {
     @State private var resendCountdown = 0
     @State private var resendTimer: Task<Void, Never>?
     @State private var showErrorDetails = false
+    @State private var showPrivacyDetails = false
     @State private var showEmailForm = false
     /// After a successful send, hold the "sent" pill for 1.5 s before the code step.
     @State private var revealCodeStep = false
@@ -63,11 +64,12 @@ struct LoginView: View {
             )
     }
 
-    private var busy: Bool { session.state == .authenticating }
+    private var busy: Bool { session.state == .authenticating || session.signInRecovery?.phase == .automatic }
     /// Sign-out or Restore internet cleanup drops any sign-in submitted
     /// before it finishes, so the controls stay disabled until then (#1256).
     private var locked: Bool { busy || session.accountLifecycle.isCleaningUp }
     private var error: String? {
+        if session.signInRecovery?.phase == .automatic { return nil }
         if session.state == .signedOut, let signInError = session.signInError { return signInError }
         if case let .error(message) = session.state { return message }
         return nil
@@ -236,7 +238,8 @@ struct LoginView: View {
                     LoginErrorBlock(
                         message: error,
                         isExpanded: $showErrorDetails,
-                        reduceMotion: reduceMotion
+                        reduceMotion: reduceMotion,
+                        recovery: session.signInRecovery
                     )
 
                     // methods != nil is the signed-in-form branch: the only Retry
@@ -350,13 +353,19 @@ struct LoginView: View {
                                 .modifier(SeaDisclosureTreatment())
                                 .disabled(locked)
                                 Label {
-                                    Text("Your email is only used to sign in. Traffic log upload is on by default: the hostnames you connect to, the apps that open each connection, and the matched rules and routes, used to diagnose problems. Turn it off in Settings.")
+                                    Text("Email is for sign-in. Traffic logs upload by default; turn this off in Settings.")
                                 } icon: {
                                     Image(systemName: "lock.fill")
                                 }
                                 .font(.system(size: 12))
                                 .foregroundStyle(seaAppearance ? AnyShapeStyle(SeaTheme.tertiary) : AnyShapeStyle(.secondary))
                                 .fixedSize(horizontal: false, vertical: true)
+                                DisclosureGroup("Privacy details", isExpanded: $showPrivacyDetails) {
+                                    Text("Your email is only used to sign in. Traffic log upload is on by default: the hostnames you connect to, the apps that open each connection, and the matched rules and routes, used to diagnose problems. Turn it off in Settings.")
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .font(.caption)
+                                .modifier(SeaDisclosureTreatment())
                             }
                             if showsCodeStep {
                                 gateField("Six-digit email code", text: $emailCode, focused: focusedField == .code)
@@ -376,7 +385,7 @@ struct LoginView: View {
                             }
                             sendCodeButton
                             if showsCodeStep {
-                                Text("Code sent to \(email). Sender is Tono <login@lecvia.com>. If this address is eligible, the code is valid for 10 minutes.")
+                                Text("Check \(email) for an email from Tono <login@lecvia.com>, including spam. A sign-in code is valid for 10 minutes.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .multilineTextAlignment(.center)
@@ -392,8 +401,8 @@ struct LoginView: View {
                                             showNoEmailHint = true
                                         }
                                     }
-                                if showNoEmailHint {
-                                    SignInCodeNotReceivedHint(email: email)
+                                if showNoEmailHint && error == nil && !busy {
+                                    SignInCodeNotReceivedHint()
                                 }
                                 Button("Use another email") {
                                     showNoEmailHint = false
@@ -484,7 +493,7 @@ struct LoginView: View {
                     Button("Retry") { Task { await session.retryRestore() } }
                         .modifier(SeaActionStyle(variant: .quiet, legacy: .automatic))
                         .disabled(locked || error == nil)
-                    if error != nil {
+                    if error != nil && showErrorDetails {
                         // A launch failure at the gate is exactly when runtime
                         // logs don't exist yet; the local audit log is the only
                         // record of what went wrong and needs no network or
@@ -587,7 +596,9 @@ struct LoginView: View {
             } label: {
                 Group {
                     if sendPillPhase == .sent {
-                        Text("Sent to your email")
+                        Text("Request sent")
+                    } else if sendPillPhase == .sending {
+                        Text(LocalizedStringKey(session.signInRecovery?.step == .verifyCode ? "Verifying…" : "Sending…"))
                     } else {
                         Text("Send a sign-in code")
                     }
