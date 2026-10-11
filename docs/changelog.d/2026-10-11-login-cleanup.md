@@ -10,3 +10,5 @@
 - 设备缺口：签名 Win/Mac 包真实剪贴板拒绝/成功、语言冷启动、键盘/VoiceOver、权限安装/取消、保护释放与更新恢复必须在最终包验证；合成状态和 hosted render 不等于实机验收。
 - 首次 hosted CI 38109385945/head f30d328cf：Windows 407 passed/4 failed，源于登录改文案误用了全局 fallback；收回全局变化、只给登录专用 fallback，既有四个失败文件加登录回归 104/104 passed。Mac 编译报 MainActor 模型在默认参数中构造；改为 optional 参数，在 MainActor View initializer 内构造，native 复验待 CI。不改断言或保护逻辑。
 - Linux Chromium 渲染中复现隐私 disclosure 占用邮箱右侧的网格槽位，已定点移到摘要下方；Tab 从邮箱到发送到详情，Enter 可开关。实际 browser clipboard 写入成功后“已复制”，合成拒绝时只报失败/手动复制；没有读取原剪贴板。截图/生产 UI 操作与原生设备证据分开记录。
+- [1b71b7367](https://github.com/raydocs/tono/commit/1b71b7367eead2b3ac712ede9616b70dee1e23d9) 的 [38110583500](https://github.com/raydocs/tono/actions/runs/38110583500) 全绿，Windows 411/411、69≤79，Mac 714 tests / 1 skipped / 0 failures。新增真实临时 NSPasteboard/注入拒绝与 native recovery ledger 渲染测试执行通过，六张 hosted 原始窗口图已查看、原字节归档；不是设备验收。
+- 合入 #1561 唯一 M1/M2 minor 修复 head [7811766f5](https://github.com/raydocs/tono/commit/7811766f5d5056fc1b9c0fc8df44a8f8c3350728)，不改登录生产 UI 或保护/transport。原图仍明确来源 1b71；后续准确 head 的 CI 另核，不沿用旧绿，不再追加美化。

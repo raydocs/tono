@@ -69,3 +69,24 @@ it('renders Chinese on first launch even on an English OS, preserving saved Engl
     screen.getByRole('heading', { name: '连上，就受保护。' }),
   ).toBeDefined()
 })
+
+it('restores saved native English after an unavailable boot cached the Chinese fallback', async () => {
+  const preferences = vi.mocked(getTonoPreferences)
+  preferences.mockRejectedValueOnce(new Error('Synthetic unavailable IPC'))
+  expect((await preloadAppData()).initialLanguage).toBe('zh')
+  expect(localStorage.getItem('tono-language')).toBe('zh')
+
+  preferences.mockResolvedValueOnce({ language: 'en' })
+  expect((await preloadAppData()).initialLanguage).toBe('en')
+  expect(localStorage.getItem('tono-language')).toBe('en')
+  render(
+    <MemoryRouter>
+      <IntroPage />
+    </MemoryRouter>,
+  )
+  expect(
+    screen.getByRole('heading', { name: 'Connected means protected.' }),
+  ).toBeDefined()
+  expect(screen.queryByText('连上，就受保护。')).toBeNull()
+  expect(document.documentElement.lang).toBe('en')
+})

@@ -39,7 +39,18 @@
 
 本次只复现新 privacy disclosure 抢邮箱右侧网格槽位，已在同 PR 修复并重捕。其他未复现的美化不追加；总计语言/登录两个 PR，不开新机器、不再整体改主页。
 
-Mac cleanup 原生截图必须来自新准确 head 的 hosted CI（当前待验），不可用旧 language/settings 图冒充 after。新中文 narrow 的 Vision 只见证精确标题；小 CJK 控件不声称 OCR 通过，生产发送 title 的确定性断言由 #1561 覆盖，原始图片待协调者视觉核实。原窗口/PID/尺寸/对比度/完整性断言不变。
+## Mac：准确 cleanup head 的 hosted 原生窗口
+
+六张原图来自 source [1b71b7367](https://github.com/raydocs/tono/commit/1b71b7367eead2b3ac712ede9616b70dee1e23d9)、[CI 38110583500](https://github.com/raydocs/tono/actions/runs/38110583500)、PR merge-ref checkout [709790b54](https://github.com/raydocs/tono/commit/709790b54384404e249f60d39013e8bd9a21474d)。[原 PNG/txt 与 XCTest artifact](https://github.com/raydocs/tono/actions/runs/38110583500/artifacts/11692060595) 保留。ScreenCaptureKit 指定窗口/PID 原图，1×；是真实 SwiftUI 窗口、合成账号/recovery ledger，不是实机网络、安装或权限验收。
+
+| 状态 | 原图 |
+|---|---|
+| 正常，摘要与折叠隐私，无客服 | [默认中文](macos-normal-zh.png) · [保存 English](macos-normal-en.png)，760×720 |
+| automatic 仅发送进度，无客服/错误 payload | [English](macos-progress-en.png)，760×720 |
+| userAction，简短失败、重试与低强调支持 | [English](macos-final-en.png)，760×820 · [中文窄窗](macos-final-zh-narrow.png)，640×820 |
+| 注入复制拒绝，明确失败与折叠手动方案 | [English](macos-copy-failed.png)，420×180 |
+
+六张均已查看并与 native-window 原始字节比较，无裁剪、换图或像素编辑，六份 receipt 均为 acceptance=passed。中文 narrow 的 Vision 只见证精确标题；小 CJK 控件人工查看，不声称 OCR 通过，发送 title 的确定性断言由 #1561 覆盖。原窗口/PID/尺寸/对比度/完整性断言不变。CI 为 714 tests / 1 skipped / 0 failures；新增复制/恢复渲染 XCTest 实际执行，包括真实临时 NSPasteboard 写成功与注入拒绝。该 head 的 CI 不覆盖后续合入的 #1561 M1/M2，后续 head 必须另过 gate，不能沿用旧绿。
 
 ## 最终设备清单
 

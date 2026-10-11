@@ -15,3 +15,10 @@
 - 原图确认“发送验证码”实际可见。按 Apple minimumTextHeight 文档修正中文 OCR 输入尺寸过滤器（默认 height/32 会过滤此处 14 px 控件），仍要求精确原文字、首候选、confidence ≥0.35、原图亮度/完整性与指定窗口/PID/尺寸。不是产品改动、删断言或真实设备通过；准确新 head 原生复验尚待 CI。
 - 复验 [38107273790](https://github.com/raydocs/tono/actions/runs/38107273790)，head [430a4da00](https://github.com/raydocs/tono/commit/430a4da00cdf50974340fc1bac8c136a140b861b)，实际 checkout [5533dbce7](https://github.com/raydocs/tono/commit/5533dbce7bc250fd98b432c803899a90333860a3)：708 tests / 1 skipped / 1 failure，仍为同一中文按钮 witness；8 px 输入过滤只识别两行标题，原图按钮仍可见。最终一次定点修正关闭中文识别的输入尺寸预过滤，验收端既有 ≥8 px 原图几何/文字/置信度/亮度/完整性断言全部保留；不扩大至其他 fixture，不把旧截图称为复验通过。
 - [38108105926](https://github.com/raydocs/tono/actions/runs/38108105926) 的最终输入过滤复验仍为 708/1 skipped/1 failure，Vision 仅两行，标题通过而按钮缺失。协调者自行查看准确原图（artifact `tono-macos-tests-457ae60aac1a4e8d0e615c4af77e555ba50dad2d`）确认标题、副标题、邮箱、设备名、说明、按钮中文完整可见，明确授权最后一轮证据机制替换：fresh 窗口保留精确中文标题 OCR 和全部几何/对比度/完整性检查；按钮使用生产 LoginView 同一 source key、生产默认解析的 locale 与 app 编译目录做精确标题断言，PNG/txt 继续保存。按钮原文字/运行逻辑不变，不声称按钮 OCR 或真实设备通过；不同失败则停止报告。
+
+### 2026-10-11 · Sol 两个 minor 的唯一修复轮
+- [bde3cda74](https://github.com/raydocs/tono/commit/bde3cda7442a351c3c7847cd56184fc5e11b2c5d) 的 [38109609491](https://github.com/raydocs/tono/actions/runs/38109609491) 全绿，Mac 708 tests / 1 skipped / 0 failures；协调者视觉 13 图 PASS，Sol PASS 并要求本轮修复 M1/M2。这些旧 head 结论不冒充修复后的新 head 通过。
+- M1：成功返回的 native 语言优先于 web 缓存；无 native 答复才沿用缓存，deadline 的旧 fallback/reapply 不变。新回归精确复现 IPC 不可用缓存 zh → 下一启动 native en；修复前 expected en / received zh，修复后恢复英文首个 heading 并把缓存写回 en。
+- M2：偏好读取失败的来源随 draft/clone 保留，公共磁盘保存入口拒绝自动写回 fallback，保护恢复可读的旧文件。仅已有白名单通过后的用户设置命令标记显式编辑；标记不能从 IPC/YAML 注入或写入文档。退出、重启、自动 patch 无此授权；既有白名单、事务、保护和 transport 不变。
+- 验证：Linux preload/main/i18n 14/14 passed、定点 ESLint 0、unchecked indexed access errors 69 (baseline 79)。一条 Rust 回归使用真实临时文件与同一 load/save/draft 路径，覆盖读失败→文件恢复可读→自动保存不覆盖 English、成功重读、显式用户编辑；Linux 未编译/执行 Rust，待准确新 head hosted CI。截图布局、语言 restart 和所有 native-window assertions 未改，既有原图仅沿用视觉证据。
+- 仍为同一 #1561、同一候选；本次无新包、无发布操作，不开启第二个 minor 修复轮。

@@ -7,12 +7,19 @@ use anyhow::Result;
 use log::LevelFilter;
 use serde::{Deserialize, Serialize};
 use smartstring::alias::String;
+use std::path::PathBuf;
 use tono_logging::{Type, logging};
 
 /// Application preferences. Written as `tono.yaml`; `verge.yaml` is still read
 /// once on upgrade and adopted into the new name.
 #[derive(Default, Debug, Clone, Deserialize, Serialize)]
 pub struct TonoPreferences {
+    /// Runtime provenance, never accepted from IPC or written to the document.
+    #[serde(skip)]
+    pub(crate) failed_read: bool,
+    #[serde(skip)]
+    pub(crate) user_edit: bool,
+
     /// app log level
     /// silent | error | warn | info | debug | trace
     pub app_log_level: Option<String>,
@@ -386,25 +393,35 @@ impl TonoPreferences {
 
     pub async fn new() -> Self {
         match dirs::verge_path() {
-            Ok(path) => match help::read_yaml::<Self>(&path).await {
-                Ok(mut config) => {
-                    config.language = Some(config.resolve_language());
-                    // compatibility
-                    if let Some(start_page) = config.start_page.clone()
-                        && start_page == "/home"
-                    {
-                        config.start_page = Some(String::from("/"));
-                    }
-                    config
-                }
-                Err(err) => {
-                    logging!(error, Type::Config, "{err}");
-                    Self::template()
-                }
-            },
+            Ok(path) => Self::load_from(&path).await,
             Err(err) => {
                 logging!(error, Type::Config, "{err}");
-                Self::template()
+                Self {
+                    failed_read: true,
+                    ..Self::template()
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn load_from(path: &PathBuf) -> Self {
+        match help::read_yaml::<Self>(path).await {
+            Ok(mut config) => {
+                config.language = Some(config.resolve_language());
+                // compatibility
+                if let Some(start_page) = config.start_page.clone()
+                    && start_page == "/home"
+                {
+                    config.start_page = Some(String::from("/"));
+                }
+                config
+            }
+            Err(err) => {
+                logging!(error, Type::Config, "{err}");
+                Self {
+                    failed_read: true,
+                    ..Self::template()
+                }
             }
         }
     }
@@ -497,13 +514,30 @@ impl TonoPreferences {
 
     /// Persist Tono preferences.
     pub async fn save_file(&self) -> Result<()> {
-        help::save_yaml(&dirs::verge_path()?, &self, Some("# Tono Config")).await
+        self.save_to(&dirs::verge_path()?).await
+    }
+
+    pub(crate) async fn save_to(&self, path: &PathBuf) -> Result<()> {
+        if self.failed_read {
+            logging!(
+                warn,
+                Type::Config,
+                "Not saving fallback preferences after a failed read"
+            );
+            return Ok(());
+        }
+        help::save_yaml(path, &self, Some("# Tono Config")).await
     }
 
     /// patch verge config
     /// only save to file
     #[allow(clippy::cognitive_complexity)]
     pub fn patch_config(&mut self, patch: &Self) {
+        // Only the whitelisted user command sets this marker. Automatic patches
+        // retain the failed-read lock, including through draft commit/rollback.
+        if patch.user_edit {
+            self.failed_read = false;
+        }
         macro_rules! patch {
             ($key: tt) => {
                 if patch.$key.is_some() {
@@ -641,6 +675,56 @@ mod auto_launch_seed {
         let saved: TonoPreferences = serde_yaml_ng::from_str(&serde_yaml_ng::to_string(&prefs).unwrap()).unwrap();
         assert_eq!(saved.language.as_deref(), Some("en"));
         assert_eq!(saved.resolve_language().as_str(), "en");
+    }
+
+    #[tokio::test]
+    async fn failed_read_does_not_overwrite_recovered_english_until_user_edit() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("tono-preferences-{}-{nonce}", std::process::id()));
+        let path = root.join("tono.yaml");
+        std::fs::create_dir_all(&path).unwrap();
+        // A directory at the document path deterministically refuses reads on Windows too.
+        let prefs = tono_draft::Draft::new(TonoPreferences::load_from(&path).await);
+        assert_eq!(prefs.data_arc().language.as_deref(), Some("zh"));
+        std::fs::remove_dir(&path).unwrap();
+        let original = "language: en\ntheme_mode: light\n";
+        std::fs::write(&path, original).unwrap();
+        prefs.data_arc().save_to(&path).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+
+        // Automatic edits/draft commits, and even untrusted serialized marker keys,
+        // must not turn an unreadable boot's fallback into durable user intent.
+        let mut patch: TonoPreferences =
+            serde_yaml_ng::from_str("theme_mode: dark\nuser_edit: true\nfailed_read: false\n").unwrap();
+        prefs.edit_draft(|d| d.patch_config(&patch));
+        prefs.apply();
+        prefs.data_arc().save_to(&path).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+
+        // A successful reload preserves English and may persist ordinary changes.
+        let mut reloaded = TonoPreferences::load_from(&path).await;
+        reloaded.patch_config(&patch);
+        reloaded.save_to(&path).await.unwrap();
+        let saved: TonoPreferences = crate::utils::help::read_yaml(&path).await.unwrap();
+        assert_eq!(saved.language.as_deref(), Some("en"));
+        assert_eq!(saved.theme_mode.as_deref(), Some("dark"));
+
+        // The whitelisted command marks a genuine user edit before patching.
+        patch.user_edit = true;
+        patch.language = Some("zh".into());
+        prefs.edit_draft(|d| d.patch_config(&patch));
+        prefs.apply();
+        prefs.data_arc().save_to(&path).await.unwrap();
+        let saved: TonoPreferences = crate::utils::help::read_yaml(&path).await.unwrap();
+        assert_eq!(saved.language.as_deref(), Some("zh"));
+        assert_eq!(saved.theme_mode.as_deref(), Some("dark"));
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("failed_read:"));
+        assert!(!text.contains("user_edit:"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

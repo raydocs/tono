@@ -78,10 +78,12 @@ fn forbidden_field_present(patch: &TonoPreferences) -> Option<&'static str> {
 }
 
 #[tauri::command]
-pub async fn patch_tono_preferences(payload: TonoPreferences) -> CmdResult {
+pub async fn patch_tono_preferences(mut payload: TonoPreferences) -> CmdResult {
     if let Some(field) = forbidden_field_present(&payload) {
         return Err(format!("disabled by Tono: {field}").into());
     }
+    // The existing whitelist is checked before authorizing a user-requested save.
+    payload.user_edit = true;
     feat::patch_preferences(&payload, false).await.stringify_err()
 }
 
