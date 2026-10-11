@@ -150,6 +150,7 @@ mod app_init {
             cmd::patch_tono_preferences,
             tono::commands::account::tono_sign_in_start,
             tono::commands::account::tono_sign_in_verify,
+            tono::commands::account::tono_sign_in_dismiss,
             tono::commands::account::tono_sign_out,
             tono::commands::account::tono_account,
             tono::commands::account::tono_devices,
