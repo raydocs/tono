@@ -79,7 +79,7 @@ pub const DEDICATED_MODEL_API_SUFFIXES: [&str; 4] = [
 /// the desktop apps. `google.com`, `googleapis.com`, and `gstatic.com`
 /// stay out: they are shared by Search, YouTube, Gmail, and Tono's own
 /// exit probe. Gemini is pinned by its product hostnames instead.
-pub const CLAUDE_HOME_DOMAINS: [&str; 84] = [
+pub const CLAUDE_HOME_DOMAINS: [&str; 118] = [
     DEDICATED_MODEL_API_SUFFIXES[0],
     DEDICATED_MODEL_API_SUFFIXES[1],
     DEDICATED_MODEL_API_SUFFIXES[2],
@@ -111,6 +111,7 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 84] = [
     "statsigapi.net",
     "featuregates.org",
     "growthbook.io",
+    "cdn.usefathom.com",
     "stripe.com",
     "stripecdn.com",
     "link.com",
@@ -130,6 +131,7 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 84] = [
     "ai.com",
     "oaistatic.com",
     "oaiusercontent.com",
+    "sora.com",
     "grok.com",
     "grok.x.com",
     "grokipedia.com",
@@ -142,6 +144,41 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 84] = [
     "aistudio.google.com",
     "generativelanguage.googleapis.com",
     "notebooklm.google.com",
+    "ai.google.dev",
+    "gemini.google",
+    "deepmind.com",
+    "deepmind.google",
+    "notebooklm.google",
+    "antigravity.google",
+    "generativeai.google",
+    "makersuite.google.com",
+    "jules.google.com",
+    "antigravity-unleash.goog",
+    "aida.googleapis.com",
+    "geller-pa.googleapis.com",
+    "aisandbox-pa.googleapis.com",
+    "cloudcode-pa.googleapis.com",
+    "robinfrontend-pa.googleapis.com",
+    "alkalicore-pa.clients6.google.com",
+    "daily-cloudcode-pa.googleapis.com",
+    "proactivebackend-pa.googleapis.com",
+    "alkalimakersuite-pa.clients6.google.com",
+    // Owner-selected AI services and dependency hosts. This is a routing
+    // choice, not an assertion of provider affiliation. Specific host
+    // suffixes include their children, not the shared parent namespace.
+    "g.ai",
+    "dify.ai",
+    "poe.com",
+    "groq.com",
+    "cursor.sh",
+    "jasper.ai",
+    "openart.ai",
+    "clipdrop.co",
+    "chatgpt.site",
+    "openrouter.ai",
+    "api.github.com",
+    "api.jetbrains.ai",
+    "gateway.ai.cloudflare.com",
     // Meta Muse
     "muse.ai",
     "meta.ai",

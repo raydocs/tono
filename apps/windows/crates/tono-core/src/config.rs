@@ -2089,6 +2089,9 @@ reality-opts:
 
     #[test]
     fn home_domains_cover_reviewed_assistants_without_google_at_large() {
+        let socks5 = home_socks5();
+        let runtime = build_with_home_socks5(Some(&socks5));
+        let yaml = runtime.yaml();
         for required in [
             "stripe.com", "stripecdn.com", "link.com", "hcaptcha.com", "statsig.com",
             "openai.com",
@@ -2126,10 +2129,33 @@ reality-opts:
             "instagram.com",
             "gmail.com",
             "accounts.google.com",
+            "cdn.usefathom.com", "g.ai", "dify.ai", "poe.com", "groq.com",
+            "sora.com", "cursor.sh", "jasper.ai", "openart.ai", "clipdrop.co",
+            "chatgpt.site", "deepmind.com", "ai.google.dev", "gemini.google",
+            "openrouter.ai", "api.github.com", "deepmind.google", "api.jetbrains.ai",
+            "jules.google.com", "notebooklm.google", "antigravity.google",
+            "aida.googleapis.com", "generativeai.google", "makersuite.google.com",
+            "antigravity-unleash.goog", "geller-pa.googleapis.com", "gateway.ai.cloudflare.com",
+            "aisandbox-pa.googleapis.com", "cloudcode-pa.googleapis.com",
+            "robinfrontend-pa.googleapis.com", "alkalicore-pa.clients6.google.com",
+            "daily-cloudcode-pa.googleapis.com", "proactivebackend-pa.googleapis.com",
+            "alkalimakersuite-pa.clients6.google.com",
         ] {
             assert!(
                 CLAUDE_HOME_DOMAINS.contains(&required),
                 "{required} must leave through the home hop"
+            );
+            assert!(
+                yaml.contains(&format!(
+                    "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{required})),Tono-Claude-Home"
+                )),
+                "{required} must route to the residential hop in the public runtime"
+            );
+            assert!(
+                yaml.contains(&format!(
+                    "AND,((NETWORK,UDP),(DOMAIN-SUFFIX,{required})),REJECT"
+                )),
+                "{required} must not escape over cloud UDP"
             );
         }
         for forbidden in [
@@ -2139,11 +2165,18 @@ reality-opts:
             "youtube.com",
             "googlevideo.com",
             "drive.google.com",
+            "google.dev",
+            "clients6.google.com",
+            "github.com",
+            "cloudflare.com",
         ] {
             assert!(
                 !CLAUDE_HOME_DOMAINS.contains(&forbidden),
                 "{forbidden} would pull unrelated traffic onto the home hop"
             );
+            assert!(!yaml.contains(&format!(
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{forbidden})),Tono-Claude-Home"
+            )));
         }
         assert!(
             CLAUDE_HOME_IPV4_CIDRS.contains(&"160.79.104.0/21"),
@@ -2155,9 +2188,6 @@ reality-opts:
                 "{forbidden} is Tono's own probe or a wildcard, not Claude"
             );
         }
-        let socks5 = home_socks5();
-        let runtime = build_with_home_socks5(Some(&socks5));
-        let yaml = runtime.yaml();
         assert!(
             yaml.contains("AND,((NETWORK,TCP),(IP-CIDR,160.79.104.0/21,no-resolve)),Tono-Claude-Home"),
             "Anthropic IPv4 must ride the home hop by IP"

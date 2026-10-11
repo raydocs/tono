@@ -349,6 +349,7 @@ nonisolated struct ConfigPipeline {
         "statsig.com", "statsigapi.net",
         "featuregates.org",
         "growthbook.io",
+        "cdn.usefathom.com",
         // Payments, Link, CDN and challenge dependencies intentionally share
         // the residential identity across every browser (not just Radar).
         "stripe.com", "stripecdn.com", "link.com", "hcaptcha.com", "stripe.network",
@@ -368,6 +369,7 @@ nonisolated struct ConfigPipeline {
         "ai.com",
         "oaistatic.com",
         "oaiusercontent.com",
+        "sora.com",
         // xAI. `grok.x.com` is listed on its own so Grok-on-X is covered
         // without routing the whole of x.com through the residential hop.
         "grok.com",
@@ -384,6 +386,41 @@ nonisolated struct ConfigPipeline {
         "aistudio.google.com",
         "generativelanguage.googleapis.com",
         "notebooklm.google.com",
+        "ai.google.dev",
+        "gemini.google",
+        "deepmind.com",
+        "deepmind.google",
+        "notebooklm.google",
+        "antigravity.google",
+        "generativeai.google",
+        "makersuite.google.com",
+        "jules.google.com",
+        "antigravity-unleash.goog",
+        "aida.googleapis.com",
+        "geller-pa.googleapis.com",
+        "aisandbox-pa.googleapis.com",
+        "cloudcode-pa.googleapis.com",
+        "robinfrontend-pa.googleapis.com",
+        "alkalicore-pa.clients6.google.com",
+        "daily-cloudcode-pa.googleapis.com",
+        "proactivebackend-pa.googleapis.com",
+        "alkalimakersuite-pa.clients6.google.com",
+        // Owner-selected AI services and dependency hosts. This is a routing
+        // choice, not an assertion of provider affiliation. Specific host
+        // suffixes include their children, not the shared parent namespace.
+        "g.ai",
+        "dify.ai",
+        "poe.com",
+        "groq.com",
+        "cursor.sh",
+        "jasper.ai",
+        "openart.ai",
+        "clipdrop.co",
+        "chatgpt.site",
+        "openrouter.ai",
+        "api.github.com",
+        "api.jetbrains.ai",
+        "gateway.ai.cloudflare.com",
         // Meta Muse
         "muse.ai",
         "meta.ai",

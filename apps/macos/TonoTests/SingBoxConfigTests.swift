@@ -282,6 +282,36 @@ final class SingBoxConfigTests: XCTestCase {
         let homeRule = try XCTUnwrap(rules.firstIndex { $0["outbound"] as? String == "Tono-Claude-Home" })
         let directRule = try XCTUnwrap(rules.firstIndex { $0["outbound"] as? String == "Tono-China-App" })
         XCTAssertLessThan(homeRule, directRule)
+        let homeSuffixes = try XCTUnwrap(rules[homeRule]["domain_suffix"] as? [String])
+        let udpRule = try XCTUnwrap(rules.firstIndex {
+            $0["network"] as? String == "udp" && $0["action"] as? String == "reject"
+                && $0["domain_suffix"] != nil
+        })
+        let rejectedSuffixes = try XCTUnwrap(rules[udpRule]["domain_suffix"] as? [String])
+        XCTAssertLessThan(udpRule, directRule)
+        // Independent owner-requested hosts: a missing list entry must fail
+        // even if both compilers faithfully emit the same incomplete list.
+        for host in [
+            "clau.de", "cdn.usefathom.com", "g.ai", "dify.ai", "poe.com",
+            "groq.com", "sora.com", "cursor.sh", "jasper.ai", "openart.ai",
+            "clipdrop.co", "chatgpt.site", "deepmind.com", "ai.google.dev",
+            "gemini.google", "openrouter.ai", "api.github.com", "deepmind.google",
+            "api.jetbrains.ai", "jules.google.com", "notebooklm.google",
+            "antigravity.google", "aida.googleapis.com", "generativeai.google",
+            "makersuite.google.com", "antigravity-unleash.goog", "geller-pa.googleapis.com",
+            "gateway.ai.cloudflare.com", "aisandbox-pa.googleapis.com", "cloudcode-pa.googleapis.com",
+            "robinfrontend-pa.googleapis.com", "alkalicore-pa.clients6.google.com",
+            "daily-cloudcode-pa.googleapis.com", "proactivebackend-pa.googleapis.com",
+            "alkalimakersuite-pa.clients6.google.com",
+        ] {
+            XCTAssertTrue(homeSuffixes.contains(host), host)
+            XCTAssertTrue(rejectedSuffixes.contains(host), host)
+            XCTAssertThrowsError(try ConfigPipeline.validatedWebDirectDomain(host, trusted: true), host)
+        }
+        for shared in ["google.com", "googleapis.com", "google.dev", "clients6.google.com",
+                       "github.com", "cloudflare.com", "gstatic.com", "youtube.com"] {
+            XCTAssertFalse(homeSuffixes.contains(shared), shared)
+        }
         XCTAssertTrue(rules.contains { $0["mode"] as? String == "and" })
         XCTAssertTrue(result.directEndpoints.contains(.init(address: "223.5.5.5", port: 443, transport: "tcp")))
         overlay.selectedNodeName = hy2.name
