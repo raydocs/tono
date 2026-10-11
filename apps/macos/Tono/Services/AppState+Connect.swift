@@ -1153,6 +1153,7 @@ extension AppState {
             }
             let disarming = releaseKillSwitch && coreStopped && protectedDNSRestored
             var releaseOutcomeUnknown = false
+            var releasedDisposition = releaseDisposition
             if helperReadyForRelease {
                 do {
                     if disarming {
@@ -1160,6 +1161,7 @@ extension AppState {
                         // Restore may have arrived while either IPC awaited.
                         let disposition = self?.connectionCoordinator
                             .resolvedReleaseDisposition(releaseDisposition) ?? releaseDisposition
+                        releasedDisposition = disposition
                         switch disposition {
                         case .ordinaryQuit: try await networkProtection.releaseForQuit()
                         case .automatic: try await networkProtection.releaseAfterFailure()
@@ -1245,8 +1247,10 @@ extension AppState {
                 } catch {
                     // An unreadable AI layer is not a verified removal (R8-F2):
                     // the result stays partial until a readback proves it.
+                    // Automatic releases keep the AI hold by design, so only
+                    // the user's release, which asked for its removal, says so.
                     selectiveRecoveryPending = true
-                    if transitionError == nil {
+                    if transitionError == nil, releasedDisposition == .explicit {
                         transitionError = String(localized: "Internet is restored, but Tono could not confirm that its AI blocking rules were removed. If AI services stay blocked, choose Restore normal internet again. The Support page has a local recovery command.")
                     }
                     LocalTrafficAudit.shared.recordEvent(

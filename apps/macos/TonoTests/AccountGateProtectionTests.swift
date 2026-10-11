@@ -25,6 +25,7 @@ final class AccountGateProtectionTests: XCTestCase {
         runtime.disableSystemProxy = {}
         runtime.disarm = { KillSwitchService.isArmed = false }
         runtime.restrictToBootstrap = {}
+        runtime.selectiveAIRecoveryPending = { false }
         app.networkProtection = runtime
         let session = AccountSession(
             sidecar: TonoSidecarService(),
