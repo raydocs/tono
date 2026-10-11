@@ -2132,7 +2132,10 @@ extension KillSwitchManager {
     /// launch is accepted (#1504 review R6-F1): a launch that stalled while
     /// an operator release landed is accepted inside its deadline yet must
     /// not run. An error from it fails the call with that error and the
-    /// shell gets end-of-file, exactly like an abandoned launch.
+    /// shell gets end-of-file, exactly like an abandoned launch. This call
+    /// returns only after `go` was written (R7-F1), so a caller's post-start
+    /// check always sees what landed before `go`. `afterAccept` is the
+    /// self-test seam between acceptance and `go`.
     static func launchAdmitted(
         _ process: Process,
         executable: String,
@@ -2141,6 +2144,7 @@ extension KillSwitchManager {
         deadline: TimeInterval,
         relayingInputFrom inputFD: Int32? = nil,
         admit: (@Sendable () -> (any Error)?)? = nil,
+        afterAccept: (@Sendable () -> Void)? = nil,
         launch: @escaping @Sendable (Process) throws -> Void = { try $0.run() },
         abandon: @escaping @Sendable (Process) -> Void = { process in
             process.terminate()
@@ -2167,15 +2171,30 @@ extension KillSwitchManager {
                 abandon(process)
                 return
             }
-            guard launched.report(.launched) else {
+            guard launched.accept() else {
                 // Abandoned: the caller has already failed this command. No
                 // `go`: end-of-file, so the command is never executed.
                 try? admission.fileHandleForWriting.close()
                 abandon(process)
                 return
             }
-            // Accepted: the caller owns this command now, inside its deadline.
-            try? admission.fileHandleForWriting.write(contentsOf: Data("go\n".utf8))
+            // Accepted: the caller owns this command now, inside its deadline,
+            // and waits until `go` is written (R7-F1).
+            afterAccept?()
+            do {
+                try admission.fileHandleForWriting.write(contentsOf: Data("go\n".utf8))
+            } catch {
+                _ = launched.commit(.failed(error))
+                try? admission.fileHandleForWriting.close()
+                abandon(process)
+                return
+            }
+            guard launched.commit(.launched) else {
+                // The caller stopped waiting (commit budget): stop it here.
+                try? admission.fileHandleForWriting.close()
+                abandon(process)
+                return
+            }
             if let inputFD {
                 KillSwitchManager.relayAdmittedInput(from: inputFD, to: admission.fileHandleForWriting.fileDescriptor)
             }

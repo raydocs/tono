@@ -8,6 +8,7 @@ import Security
 func runUpdateSelfTests() -> Bool {
     guard geteuid() == 0 else { fputs("Update self-test requires root.\n", stderr); return false }
     var failures = [String]()
+    var ran = 0
     func check(_ condition: @autoclosure () throws -> Bool, _ message: String) throws {
         guard try condition() else { throw HelperFailure.invalid(message) }
     }
@@ -17,6 +18,7 @@ func runUpdateSelfTests() -> Bool {
         try check(refused, "Expected refusal did not occur")
     }
     func test(_ name: String, _ body: (String) throws -> Void) {
+        ran += 1
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("tono-update-test-" + UUID().uuidString)
         do {
             try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
@@ -975,6 +977,6 @@ func runUpdateSelfTests() -> Bool {
             $0[0] == "bootout" ? 3 : OperatorDaemonStop.launchctlNoSuchService
         }
     }
-    print("Update production-bound tests: \(16 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
+    print("Update production-bound tests: \(ran - failures.count) of \(ran) passed, \(failures.count) failed; native-device acceptance NOT performed")
     return failures.isEmpty
 }

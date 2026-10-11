@@ -142,13 +142,19 @@ final class CoreManager {
     }
 
     /// The Core's launch through the admission gate, with the start gate as
-    /// its `admit`. Static so the self-test drives the very same launch.
+    /// its `admit`, and the same gate asked again once `launchAdmitted` has
+    /// returned, which is strictly after `go` was written (R7-F1): a release
+    /// that landed between `admit` and `go` stops the Core here (TERM, then
+    /// KILL) and the start is refused. Static so the self-test drives the
+    /// very same launch; `afterAccept` is its seam between acceptance and
+    /// `go`.
     static func launchCoreAdmitted(
         _ child: Process,
         executable: String,
         arguments: [String],
         deadline: TimeInterval = HelperChildDeadline.coreLaunch,
         startAllowed: @escaping () -> Bool,
+        afterAccept: (@Sendable () -> Void)? = nil,
         launch: @escaping @Sendable (Process) throws -> Void = { try $0.run() }
     ) throws {
         let gate = StartGate(startAllowed)
@@ -159,8 +165,15 @@ final class CoreManager {
             until: .now() + deadline,
             deadline: deadline,
             admit: { gate.allowed() ? nil : CoreManager.startRefusal() },
+            afterAccept: afterAccept,
             launch: launch
         )
+        guard startAllowed() else {
+            child.terminate()
+            for _ in 0..<20 where child.isRunning { usleep(50_000) }
+            if child.isRunning { kill(child.processIdentifier, SIGKILL) }
+            throw startRefusal()
+        }
     }
 
     private func launchValidatedSnapshotLocked(configPath: String, startAllowed: @escaping () -> Bool) throws {

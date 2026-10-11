@@ -14,7 +14,10 @@
   `settleStartupFailure` (formerly `armEmergencyBlock`, which released PF and DNS and applied the AI layer
   unconditionally) releases only under the same release authority; the attempt's Disconnect is the one read under
   the lock startup already holds, unknown when it could not be read. Otherwise the block, its intent, protected DNS
-  and an A29 protected fault stay and the start fails, so launchd retries it.
+  and an A29 protected fault stay and the start fails, so launchd retries it. The later daemon start (bound uid,
+  server construction) follows the same authority for both its PF release and its DNS restore (round 8, R7-F2):
+  `secureFailedStartupRestoringDNS` releases only on an operator `released` or no saved protection, and the
+  saved-block release itself refuses an unreadable target.
 - Release authority, the same everywhere (decision 084 round 7): an operator `released` on record, the user's own
   Disconnect (here: the attempt's), the user's Restore Internet, or no saved protection. An unreadable target is
   unknown and is never authority.
@@ -37,6 +40,6 @@
      restart), each showing the explicit release succeeds and is not undone; what cannot run in CI is a device gate.
      Mapping and device steps: #1504 PR body and
      [owner checklist G1 step 5](../ops/release-0075-owner-g1-g2-checklist.md).
-  Status of the criteria: code-closed only once those regressions pass in hosted CI; device-pending until G1
-  step 5 is done on a real Mac.
+  Status of the criteria: code-pending until the #1504 regressions pass in hosted CI **and** the independent review
+  (Sol) passes the head that carries them; device-pending until G1 step 5 is done on a real Mac.
 - Applied in: [#1504](https://github.com/raydocs/tono/pull/1504) (backlog A13, helper 4.52.50).

@@ -1141,11 +1141,20 @@ func requestHelperShutdown(_ signal: Int32) {
 /// deleted and `allowedGroup` refuses — and launchd's KeepAlive restarts
 /// would repeat that failure forever with the system resolver still on
 /// 127.0.0.1 and no listener left (MAC-STARTUP-FAIL-DNS). Never throws and
-/// never installs a block: this already is a failure path.
+/// never installs a block: this already is a failure path. Both the PF
+/// release and the DNS restore run only with release authority (#1504 review
+/// R7-F2, decision 092): an operator `released` on record, or no saved
+/// protection. A saved block beside a secured or unreadable target (an A29
+/// protected fault included) keeps its block and protected DNS.
 func secureFailedStartupRestoringDNS(
     releaseBlock: () -> Void,
-    restoreDNS: () throws -> Void
+    restoreDNS: () throws -> Void,
+    mayRelease: () -> Bool = { UpdateExecutor.startupFailureMayRelease() }
 ) {
+    guard mayRelease() else {
+        fputs("Tono helper startup failed; saved protection kept (no release authority)\n", stderr)
+        return
+    }
     releaseBlock()
     do {
         try restoreDNS()
@@ -1162,7 +1171,8 @@ func runStartupDNSRecoverySelfTest() -> Bool {
     func secure(_ restoreDNS: () throws -> Void) {
         secureFailedStartupRestoringDNS(
             releaseBlock: { events.append("pf") },
-            restoreDNS: restoreDNS
+            restoreDNS: restoreDNS,
+            mayRelease: { true }
         )
     }
     secure { events.append("dns") }
@@ -1178,6 +1188,47 @@ func runStartupDNSRecoverySelfTest() -> Bool {
     }
     guard events == ["pf", "dns"] else {
         FileHandle.standardError.write(Data("startup DNS recovery failure: \(events)\n".utf8))
+        return false
+    }
+    return true
+}
+
+/// #1504 review R7-F2: the daemon start fails after the update startup (the
+/// bound uid cannot be read, the server cannot be built) while protection is
+/// saved. A secured target (here beside an A29 protected fault) and an
+/// unreadable one keep the block and protected DNS; a recorded `released`
+/// still releases both, PF first; no saved protection releases as before.
+func runStartupFailureReleaseAuthoritySelfTest() -> Bool {
+    func settle(target: HelperTarget.Reading, protectionSaved: Bool?) -> [String] {
+        var events: [String] = []
+        var recovery = UpdateExecutor.FailureRecovery()
+        recovery.target = { target }
+        recovery.protectionSaved = { protectionSaved }
+        _ = startHelperDaemon(
+            readUID: { throw HelperFailure.invalid("injected: bound user unreadable") },
+            restoreProtection: { _ in () },
+            startServer: { _, _ in () },
+            secureFailedStartup: {
+                secureFailedStartupRestoringDNS(
+                    releaseBlock: { events.append("pf") },
+                    restoreDNS: { events.append("dns") },
+                    mayRelease: { UpdateExecutor.startupFailureMayRelease(recovery: recovery) }
+                )
+            },
+            stopRequested: { false }
+        )
+        return events
+    }
+    let secured = settle(target: .recorded(HelperTarget(mode: .secured, generation: 3)), protectionSaved: true)
+    let unknown = settle(target: .unreadable("injected"), protectionSaved: true)
+    let unanswered = settle(target: .recorded(HelperTarget(mode: .secured, generation: 3)), protectionSaved: nil)
+    let released = settle(target: .recorded(HelperTarget(mode: .released, generation: 4)), protectionSaved: true)
+    let disconnected = settle(target: .recorded(HelperTarget(mode: .secured, generation: 3)), protectionSaved: false)
+    guard secured.isEmpty, unknown.isEmpty, unanswered.isEmpty,
+          released == ["pf", "dns"], disconnected == ["pf", "dns"] else {
+        FileHandle.standardError.write(Data(
+            "startup failure release authority: \(secured) \(unknown) \(unanswered) \(released) \(disconnected)\n".utf8
+        ))
         return false
     }
     return true
@@ -2117,6 +2168,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && PowerTransitionGate.runSelfTests()
             && runStartupOrderSelfTest()
             && runStartupDNSRecoverySelfTest()
+            && runStartupFailureReleaseAuthoritySelfTest()
             && runOperatorReleaseSelfTests()
             && runLateLANWideningAfterReleaseSelfTest()
             && runReleaseDuringPartialPFCommitSelfTest()
@@ -2126,6 +2178,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && runTargetRepairNeverMissingSelfTest()
             && runOwnerRelaunchReleasedDuringSpawnSelfTest()
             && runReleaseDuringAcceptedCoreLaunchSelfTest()
+            && runReleaseBetweenAcceptAndGoSelfTest()
             && runUnknownTargetKeepsFaultSelfTest()
             && runUpdateChildBoundedSelfTest()
             && KillSwitchManager.runFailedCommitReleaseSelfTest()

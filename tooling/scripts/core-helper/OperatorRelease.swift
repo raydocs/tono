@@ -1716,6 +1716,57 @@ func runReleaseDuringAcceptedCoreLaunchSelfTest() -> Bool {
     return true
 }
 
+/// R7-F1: `admit` passes, the launch is accepted, and the launch thread
+/// pauses before writing `go` while an operator release lands. The caller
+/// must not return before `go` (its post-start check would run too early and
+/// pass); once it returns, that check sees the release, stops the Core and
+/// refuses the start. Either the Core never ran or it was stopped: it is not
+/// running afterwards, and the caller returned only after the pause ended.
+func runReleaseBetweenAcceptAndGoSelfTest() -> Bool {
+    final class Events: @unchecked Sendable {
+        let lock = NSLock()
+        var list: [String] = []
+        func add(_ event: String) { lock.lock(); list.append(event); lock.unlock() }
+        var all: [String] { lock.lock(); defer { lock.unlock() }; return list }
+    }
+    let events = Events()
+    let exited = DispatchSemaphore(value: 0)
+    let child = Process()
+    child.standardOutput = FileHandle.nullDevice
+    child.standardError = FileHandle.nullDevice
+    child.terminationHandler = { _ in exited.signal() }
+    var code: String?
+    withInjectedTarget(selfTestSecured) {
+        do {
+            try CoreManager.launchCoreAdmitted(
+                child,
+                executable: "/bin/sh",
+                arguments: ["-c", "exec /bin/sleep 30"],
+                deadline: 5,
+                startAllowed: { HelperTarget.automaticRearmAllowed(HelperTarget.read()) },
+                afterAccept: {
+                    events.add("accepted")
+                    usleep(300_000) // paused after accept, before `go`
+                    HelperTarget.processOverride = selfTestReleased
+                    events.add("released")
+                }
+            )
+            events.add("returned")
+        } catch let failure as HelperFailure {
+            code = failure.code
+            events.add("refused")
+        } catch {
+            events.add("other error")
+        }
+    }
+    let ended = exited.wait(timeout: .now() + 5) == .success
+    if !ended, child.isRunning { kill(child.processIdentifier, SIGKILL) }
+    guard events.all == ["accepted", "released", "refused"], code == "OPERATOR_RELEASED", ended, !child.isRunning else {
+        return selfTestFail("release between accept and go", "\(events.all) \(code ?? "none") \(ended)")
+    }
+    return true
+}
+
 /// R6-F2: an A29 protected fault holds its block and protected DNS when the
 /// target record turns corrupt. Unknown refuses every automatic re-arm but
 /// is no release authority: the watchdog pass does nothing however long the

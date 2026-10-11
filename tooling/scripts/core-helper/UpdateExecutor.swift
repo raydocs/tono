@@ -92,6 +92,15 @@ enum UpdateExecutor {
         recovery.release()
     }
 
+    /// Release authority for a daemon start that fails after `startup`
+    /// (#1504 review R7-F2): the same rule as a failed executor run. The
+    /// attempt's Disconnect is not read here (that read waits on the update
+    /// lock); a Disconnect already released when it was made.
+    static func startupFailureMayRelease(recovery: FailureRecovery = FailureRecovery()) -> Bool {
+        failureMayRelease(target: recovery.target(), disconnectRequested: nil,
+                          protectionSaved: recovery.protectionSaved())
+    }
+
     /// Called before constructing CoreManager or restoring normal desired
     /// state. A corrupt ledger stops launch. The default failure action
     /// (`settleStartupFailure`) releases a saved kill switch only under an

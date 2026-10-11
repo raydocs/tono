@@ -126,29 +126,79 @@ enum HelperCommandOutputMode {
 /// returned. A launch that returns after it was abandoned terminates its own
 /// child (#1542 review F1): nobody is waiting for it, and its exit status must
 /// never be read as the command's outcome.
+///
+/// Two phases (#1504 review R7-F1): the launch thread first `accept`s (from
+/// then on the caller can no longer abandon it), writes `go`, and only then
+/// `commit`s. The caller's `wait` returns `.launched` only after the commit,
+/// so everything the caller does once the launch returns (the Core's
+/// post-start check, the relaunch request's `started` kill) runs strictly
+/// after `go` was written, and a release that landed between `admit` and
+/// `go` is seen by it. Abandonment is possible only before `accept`, so an
+/// abandoned launch still gets end-of-file and never executes.
 final class HelperCommandLaunch: @unchecked Sendable {
     enum Outcome { case launched, failed(any Error), abandoned }
+    private enum Phase { case pending, accepted, settled(Outcome) }
     private let lock = NSLock()
     private let settled = DispatchSemaphore(value: 0)
-    private var outcome: Outcome?
+    private let committed = DispatchSemaphore(value: 0)
+    private var phase = Phase.pending
+    /// How long the caller waits for `go` once accepted. Writing three bytes
+    /// to the gate's empty pipe never blocks; this only bounds a stuck thread.
+    static let commitBudget: TimeInterval = 5
 
-    /// The launch thread reports. False when the caller had already given up.
+    /// A failure before acceptance. False when the caller had already given up.
     func report(_ result: Outcome) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        if case .abandoned = outcome { return false }
-        outcome = result
+        guard case .pending = phase else { return false }
+        phase = .settled(result)
         settled.signal()
         return true
     }
 
-    /// The caller waits until `end`; past it, the launch is abandoned unless it
-    /// settled in the meantime.
+    /// The launch is the caller's now: it can no longer be abandoned. False
+    /// when the caller had already given up (then: no `go`, end-of-file).
+    func accept() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard case .pending = phase else { return false }
+        phase = .accepted
+        settled.signal()
+        return true
+    }
+
+    /// After `go` was written (`.launched`) or could not be (`.failed`). False
+    /// when the caller stopped waiting for it; the launch thread then stops
+    /// the child itself.
+    func commit(_ result: Outcome) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard case .accepted = phase else { return false }
+        phase = .settled(result)
+        committed.signal()
+        return true
+    }
+
+    /// The caller waits until `end`; past it, a launch not yet accepted is
+    /// abandoned. An accepted one is waited on until its `go` was written
+    /// (bounded by `commitBudget`).
     func wait(until end: DispatchTime) -> Outcome {
         _ = settled.wait(timeout: end)
+        lock.lock()
+        switch phase {
+        case .settled(let outcome):
+            lock.unlock()
+            return outcome
+        case .pending:
+            phase = .settled(.abandoned)
+            lock.unlock()
+            return .abandoned
+        case .accepted:
+            lock.unlock()
+        }
+        _ = committed.wait(timeout: .now() + Self.commitBudget)
         lock.lock(); defer { lock.unlock() }
-        if let outcome { return outcome }
-        outcome = .abandoned
-        return .abandoned
+        if case .settled(let outcome) = phase { return outcome }
+        let failure = HelperFailure.system("The admitted command did not receive its start signal in time.")
+        phase = .settled(.failed(failure))
+        return .failed(failure)
     }
 }
 
@@ -1243,6 +1293,13 @@ final class KillSwitchManager {
                 disposition: try? selectiveRecoveryDisposition(),
                 removalPending: selectiveRemovalPending()
             )
+            return
+        }
+        // A saved block is released only under an operator release (R7-F2);
+        // the caller also requires release authority, and an unreadable
+        // target is none.
+        guard HelperTarget.gate(HelperTarget.read()) != .unknown else {
+            FileHandle.standardError.write(Data("tono: target unreadable; saved kill switch kept\n".utf8))
             return
         }
         do {
