@@ -135,6 +135,7 @@ private func deadWorkerSessionIsEnded() -> Bool {
     usleep(300_000)
     guard let leader = ReleaseProcessTable.incarnation(of: pid),
           ReleaseProcessTable.sessionMembers(pid).count >= 3 else {
+        fputs("release session members of \(pid): \(ReleaseProcessTable.sessionMembers(pid)), getsid \(getsid(pid))\n", stderr)
         kill(-pid, SIGKILL)
         return false
     }

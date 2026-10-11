@@ -373,23 +373,10 @@ enum ReleaseProcessTable {
         return Array(pids.prefix(Int(count))).filter { $0 > 0 }
     }
 
-    /// Live (non-zombie) members of session `sid`.
+    /// Live (non-zombie) members of session `sid`, by asking the kernel for
+    /// each process's session. Runs as root, so no process is hidden.
     static func sessionMembers(_ sid: pid_t) -> [pid_t] {
         guard sid > 0 else { return [] }
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_SESSION, sid]
-        var size = 0
-        guard sysctl(&mib, 4, nil, &size, nil, 0) == 0 else { return [] }
-        let stride = MemoryLayout<kinfo_proc>.stride
-        let capacity = size / stride + 16
-        var table = [kinfo_proc](repeating: kinfo_proc(), count: capacity)
-        size = capacity * stride
-        let status = table.withUnsafeMutableBufferPointer { buffer in
-            sysctl(&mib, 4, buffer.baseAddress, &size, nil, 0)
-        }
-        guard status == 0 else { return [] }
-        return table.prefix(size / stride)
-            .filter { $0.kp_proc.p_stat != CChar(SZOMB) }
-            .map { $0.kp_proc.p_pid }
-            .filter { $0 > 0 }
+        return allPIDs().filter { getsid($0) == sid && incarnation(of: $0) != nil }
     }
 }

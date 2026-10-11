@@ -1424,8 +1424,12 @@ nonisolated struct HelperManager {
             return 6
         case "/core/start", "/core/sync":
             return 20
-        case "/version", "/core/status", "/killswitch/status":
+        case "/version", "/core/status", "/killswitch/status", "/release/status":
             return 2
+        case "/release":
+            // The release service answers by 28 s even when its worker is
+            // still running; this only guards against a wedged socket.
+            return 32
         default:
             return 6
         }
@@ -1591,13 +1595,115 @@ nonisolated struct HelperManager {
         return name.isEmpty ? nil : String(name)
     }
 
+    // MARK: - Session generation and preemptive release
+
+    enum SessionRequestKind: Equatable { case protective, releasing }
+
+    /// The requests that change the network for a session, mirroring the
+    /// helper's own table (SocketServer.releaseRequestKind).
+    static func sessionRequestKind(method: String, path: String) -> SessionRequestKind? {
+        switch (method, path) {
+        case ("POST", "/core/start"), ("POST", "/core/sync"), ("POST", "/killswitch/arm"), ("POST", "/dns/enable"):
+            return .protective
+        case ("DELETE", "/core/stop"), ("POST", "/killswitch/quit"), ("POST", "/killswitch/disarm"),
+             ("POST", "/killswitch/release"), ("POST", "/dns/restore"):
+            return .releasing
+        default:
+            return nil
+        }
+    }
+
+    /// The first protective request of a session admits it under the
+    /// helper's machine lock; every session request then carries the
+    /// generation. Requests outside a session box send none, as before.
+    static func sessionGenerationHeader(method: String, path: String) throws -> String {
+        guard let session = HelperSessionGeneration.current,
+              let kind = sessionRequestKind(method: method, path: path) else { return "" }
+        if session.isRetired, session.value == nil {
+            throw HelperIPCError.commandFailed("Earlier session.", code: "STALE_GENERATION")
+        }
+        if kind == .protective, session.value == nil, !session.helperPredatesAdmission {
+            if let generation = try admitSession() {
+                session.adopt(generation)
+            } else {
+                session.markHelperPredatesAdmission()
+            }
+        }
+        guard let generation = session.value else { return "" }
+        return "X-Tono-Generation: \(generation)\r\n"
+    }
+
+    /// Connect admission. Nil from a helper that predates it (404). A
+    /// refusal names why Connect must wait (`RELEASE_IN_PROGRESS`,
+    /// `RELEASE_UNFINISHED`, `RELEASE_RECORD_CORRUPT`).
+    static func admitSession() throws -> UInt64? {
+        let result = try sendRequest(method: "POST", path: "/session/admit")
+        if result.status == 404 { return nil }
+        try requireSuccess(result, operation: "session admission")
+        guard let object = try? JSONSerialization.jsonObject(with: result.body) as? [String: Any],
+              let number = object["generation"] as? NSNumber else {
+            throw HelperIPCError.invalidResponse
+        }
+        return number.uint64Value
+    }
+
+    static let releaseSocketPath = "/var/run/tono-release.sock"
+
+    /// Whether this Mac has the separate release service (helper 4.52.50+).
+    static var releaseServiceInstalled: Bool {
+        var metadata = stat()
+        return lstat(releaseSocketPath, &metadata) == 0
+            && metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFSOCK)
+    }
+
+    /// The release service's answer. `outcome` is restored, partial,
+    /// unknown, busy or superseded; only `restored` means every component
+    /// read back clean and nothing that could change the network is left.
+    struct ReleaseOutcome: Decodable, Equatable {
+        struct Component: Decodable, Equatable {
+            let name: String
+            let readback: String
+            let risk: String
+            let detail: String?
+        }
+
+        let outcome: String
+        let generation: UInt64?
+        let components: [Component]
+        let stuck: [Int32]
+        let finished: Bool
+        let detail: String?
+    }
+
+    /// Restore internet through the release service. Never goes through the
+    /// daemon, its update lock, or the runtime actor.
+    static func requestRelease(requestID: String, expectedGeneration: UInt64?) throws -> ReleaseOutcome {
+        var object: [String: Any] = ["requestID": requestID]
+        if let expectedGeneration { object["expectedGeneration"] = NSNumber(value: expectedGeneration) }
+        let data = try JSONSerialization.data(withJSONObject: object)
+        let result = try sendRequest(method: "POST", path: "/release", body: data, socket: releaseSocketPath)
+        if result.status == 403 { throw HelperIPCError.forbidden }
+        guard result.status == 200 else {
+            let envelope = try? JSONDecoder().decode(Envelope.self, from: result.body)
+            throw HelperIPCError.commandFailed(envelope?.error ?? "Restore service failed.", code: envelope?.code)
+        }
+        guard let outcome = try? JSONDecoder().decode(ReleaseOutcome.self, from: result.body) else {
+            throw HelperIPCError.invalidResponse
+        }
+        return outcome
+    }
+
     // MARK: - Bounded Unix-socket HTTP client
 
     private static func sendRequest(
         method: String,
         path: String,
-        body: Data? = nil
+        body: Data? = nil,
+        socket socketPath: String = HelperManager.socketPath
     ) throws -> (status: Int, body: Data) {
+        let generationLine = socketPath == HelperManager.socketPath
+            ? try sessionGenerationHeader(method: method, path: path)
+            : ""
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw HelperIPCError.socketFailed }
         defer { close(fd) }
@@ -1631,11 +1737,13 @@ nonisolated struct HelperManager {
                 Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        guard connected == 0 else { throw connectFailure() }
+        guard connected == 0 else {
+            throw socketPath == HelperManager.socketPath ? connectFailure() : HelperIPCError.connectFailed
+        }
 
         let payload = body ?? Data()
         var request = Data(
-            "\(method) \(path) HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: \(payload.count)\r\n\r\n".utf8
+            "\(method) \(path) HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\(generationLine)Content-Type: application/json\r\nContent-Length: \(payload.count)\r\n\r\n".utf8
         )
         request.append(payload)
         try writeAll(fd: fd, data: request)
@@ -1720,8 +1828,21 @@ enum HelperIPCError: LocalizedError {
             String(localized: "The installed network helper rejected this copy of Tono.")
         case .boundToAnotherUser(let account):
             String(localized: "Tono's network helper on this Mac is set up for the macOS account “\(account)” and keeps that account's network protection. Use Tono from that account. To move Tono to this account, an administrator can run sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-reset in Terminal, then reopen Tono.")
-        // commandFailed carries helper-produced text verbatim; not a catalog key.
-        case .commandFailed(let message, _): message
+        // Session refusals are the app's to explain; any other commandFailed
+        // carries helper-produced text verbatim and is not a catalog key.
+        case .commandFailed(let message, let code):
+            switch code {
+            case "RELEASE_IN_PROGRESS":
+                String(localized: "Restore internet is still finishing. Connect again when it completes.")
+            case "RELEASE_UNFINISHED":
+                String(localized: "An earlier Restore internet has not finished, so Tono is not connecting yet. Choose Restore internet again, then connect.")
+            case "RELEASE_RECORD_CORRUPT":
+                String(localized: "Tono's restore record could not be read. Choose Restore internet once, then connect.")
+            case "STALE_GENERATION":
+                String(localized: "This step belonged to an earlier connection and was not applied.")
+            default:
+                message
+            }
         }
     }
 }
