@@ -233,11 +233,15 @@
     "sendCode": "Send code",
     "sendNewCode": "Send again",
     "sending": "Sending…",
-    "sent": "Sent to your inbox",
+    "sent": "Request sent",
+    "privacySummary": "Email is for sign-in. Traffic logs upload by default; turn this off in Settings.",
+    "privacyDetails": "Privacy details",
+    "technicalDetails": "Details",
+    "recoveryEnded": "This sign-in did not finish. Retry, or try another network.",
     "trust": "Your email is only used to sign in. Traffic log upload is on by default: the hostnames you connect to, the apps that open each connection, and the matched rules and routes, used to diagnose problems. Turn it off in Settings.",
     "resendIn": "Resend in {{seconds}}s",
-    "codeSent": "Code sent.",
-    "codeSentTo": "Sent to the address above. Check the full address, and spam.",
+    "codeSent": "Check your inbox.",
+    "codeSentTo": "Check this inbox and spam for a Tono code.",
     "codeFrom": "From Tono <login@lecvia.com>",
     "codeLabel": "6-digit code",
     "codePlaceholder": "123456",
@@ -249,11 +253,11 @@
     "invalidCode": "Enter the 6-digit code",
     "noEmail": {
       "title": "No email yet?",
-      "description": "Check spam and the address above, or send again. If it still doesn't arrive, copy the details below for support."
+      "description": "Check spam and the address above, or send again."
     },
     "suspended": {
       "title": "Account paused",
-      "description": "Contact support."
+      "description": "This account cannot connect right now. Sign in again to check its status."
     },
     "sessionEnded": {
       "title": "Session ended",
@@ -277,7 +281,7 @@
     "relayFailureDetails": "Relay failure details",
     "relayFailureKinds": "connect: connection failed; timeout: took too long; tls: secure connection failed; dns: name lookup failed; other: request failed. These are the reported categories, not a diagnosis of your network.",
     "errors": {
-      "unreachable": "Tono couldn't reach its sign-in server from this network. Check that this PC is online, wait a minute, then retry. If it keeps failing, copy the details for support.",
+      "unreachable": "Tono couldn't reach its sign-in server. Check your network, then retry.",
       "relaysUnreachable": "Tono's backup routes cannot be reached right now. Check your network or try again later. You do not need to turn protection off to retry.",
       "rateLimited": "Too many tries. Wait a few minutes.",
       "deviceLimit": "This account already has its maximum number of devices. On a device that is signed in, open Account and remove one, then retry.",
@@ -287,7 +291,8 @@
       "clockSkew": "This PC's date and time look wrong, so Tono cannot verify its server. Set the correct date and time in Settings > Time & language > Date & time, then retry.",
       "captivePortal": "This network needs a web sign-in (captive portal) before Tono can reach its server. Open a browser, finish the network's sign-in page, then retry.",
       "tlsIntercepted": "This network is intercepting encrypted connections: something between this PC and Tono replaced Tono's certificate, and Tono will not accept it. If this network has a sign-in page, finish it in a browser; otherwise turn off any proxy or security software that inspects HTTPS, then retry.",
-      "serverError": "Tono's sign-in service is busy or unavailable right now. Retry in a few minutes, or contact support."
+      "serverError": "Tono's sign-in service is unavailable right now. Retry in a few minutes.",
+      "unknown": "This action did not finish. Please try again."
     }
   },
   "pill": {
@@ -575,9 +580,12 @@
     "title": "Support & Diagnostics",
     "subtitle": "Local status. Copy a note for support.",
     "contact": {
-      "description": "Copy this note for support. It includes version, status, and node — not passwords.",
-      "copyMessage": "Copy for support",
-      "copied": "Copied"
+      "description": "Copy version, status and known failure categories. No account details or addresses are included.",
+      "copyMessage": "Copy diagnostics",
+      "finalAction": "Contact support (copy diagnostics)",
+      "copied": "Copied",
+      "copyFailed": "Could not copy. You can copy the safe text manually.",
+      "manualCopy": "Copy manually"
     },
     "refresh": "Refresh",
     "loadFailed": "Couldn't load the diagnostics summary. Refresh to try again.",

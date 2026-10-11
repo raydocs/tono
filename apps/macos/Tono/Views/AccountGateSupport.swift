@@ -156,46 +156,81 @@ struct GateSecondaryButtonStyle: ButtonStyle {
     }
 }
 
-/// The code step's way out when no email arrives (#596). `auth/email/start`
-/// answers 202 for every address and a failed delivery is silent by design,
-/// so the gate offers one support action: copy the details for Tono support.
+/// A minute without email offers self-service, not an assertion that automatic
+/// recovery has been exhausted. Only decision093's request outcome permits support.
 struct SignInCodeNotReceivedHint: View {
     static let delay: Duration = .seconds(60)
-
-    let email: String
 
     var body: some View {
         VStack(spacing: 6) {
             Text("No email yet?")
                 .font(.caption.weight(.semibold))
-            Text("Check spam and the address above, or send a new code. If it still does not arrive, copy the details for Tono support.")
+            Text("Check spam and the address above, or send a new code.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            Button {
-                copyDetails()
-            } label: {
-                Label("Copy details", systemImage: "doc.on.doc")
-            }
-            .buttonStyle(.link)
-            .font(.caption)
         }
         .frame(maxWidth: .infinity)
     }
+}
 
-    private func copyDetails() {
+/// Login's clipboard payload has a closed allowlist. In particular, the error
+/// String is never copied: it can contain addresses, account data or secrets.
+@MainActor @Observable
+final class SignInDiagnosticCopy {
+    var copied: Bool?
+    var manualText = ""
+
+    func copy(cause: SignInRecovery.Cause? = nil, write: (String) -> Bool = { text in
+        NSPasteboard.general.clearContents()
+        return NSPasteboard.general.setString(text, forType: .string)
+    }) {
         let info = Bundle.main.infoDictionary
         let version = info?["CFBundleShortVersionString"] as? String ?? "unknown"
         let build = info?["CFBundleVersion"] as? String ?? "unknown"
-        let summary = """
-        Tono sign-in code not received
+        var text = """
+        Tono sign-in diagnostics
         Version: \(version) (\(build))
-        Email: \(email)
+        Auth stage: sign-in
         """
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(summary, forType: .string)
-        ToastCenter.shared.show(String(localized: "Copied"), systemImage: "doc.on.doc.fill")
+        if let cause { text += "\nRecovery cause: \(cause.rawValue)" }
+        copied = write(text)
+        manualText = copied == true ? "" : text
+    }
+}
+
+@MainActor
+struct SignInDiagnosticCopyButton: View {
+    @State private var copy: SignInDiagnosticCopy
+    let cause: SignInRecovery.Cause?
+    let contact: Bool
+
+    init(copy: SignInDiagnosticCopy? = nil, cause: SignInRecovery.Cause? = nil, contact: Bool = false) {
+        _copy = State(initialValue: copy ?? SignInDiagnosticCopy())
+        self.cause = cause
+        self.contact = contact
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                copy.copy(cause: cause)
+            } label: {
+                Label(LocalizedStringKey(contact ? "Contact support (copy diagnostics)" : "Copy diagnostics"), systemImage: "doc.on.doc")
+            }
+            .buttonStyle(.link)
+            if copy.copied == true {
+                Text("Copied").accessibilityAddTraits(.updatesFrequently)
+            } else if copy.copied == false {
+                Text("Could not copy. You can copy the safe text manually.")
+                DisclosureGroup("Copy manually") {
+                    Text(copy.manualText).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .font(.caption)
     }
 }
 
@@ -336,6 +371,7 @@ struct LoginErrorBlock: View {
     let message: String
     @Binding var isExpanded: Bool
     var reduceMotion: Bool
+    var recovery: SignInRecovery? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -358,7 +394,7 @@ struct LoginErrorBlock: View {
                 }
             } label: {
                 HStack(spacing: 4) {
-                    Text(isExpanded ? "Hide details" : "Show details")
+                    Text(LocalizedStringKey(isExpanded ? "Hide details" : "Show details"))
                     if seaAppearance { SeaChevron(expanded: isExpanded) }
                     else {
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
@@ -387,6 +423,12 @@ struct LoginErrorBlock: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                if recovery?.phase != .userAction {
+                    SignInDiagnosticCopyButton().id(message)
+                }
+            }
+            if recovery?.phase == .userAction {
+                SignInDiagnosticCopyButton(cause: recovery?.cause, contact: true).id(message)
             }
         }
         .padding(.horizontal, 12)
