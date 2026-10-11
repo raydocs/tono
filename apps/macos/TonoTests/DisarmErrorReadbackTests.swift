@@ -92,6 +92,7 @@ final class DisarmErrorReadbackTests: XCTestCase {
         runtime.selectiveAIRecoveryPending = { true }
         app.networkProtection = runtime
         app.connectionCoordinator.explicitReleaseDrainCap = .milliseconds(50)
+        app.connectionCoordinator.releaseFenceAvailable = { true }
         let drain = ReleaseDrainGate()
         defer { drain.open() }
         app.connectionCoordinator.connectTask = Task { await drain.wait() }
@@ -105,6 +106,35 @@ final class DisarmErrorReadbackTests: XCTestCase {
         XCTAssertTrue(app.selectiveAIRecoveryPending, "the published result is the readback's")
         XCTAssertFalse(app.isDisconnecting)
         XCTAssertNotEqual(app.errorMessage, AppState.releaseStillFinishingMessage)
+    }
+
+    /// Decision 094 capability gate: against a helper that does not fence
+    /// on the user's release (unknown, older or newer than this build's), the
+    /// cap does not apply: the release keeps waiting for the stale connect,
+    /// whose later arms nothing there would refuse.
+    func testDrainCapWaitsForStaleWorkWithoutAFencingHelper() async {
+        let app = AppState()
+        KillSwitchService.isArmed = true
+        defer {
+            KillSwitchService.isArmed = false
+            RuntimeCleanup.clearConnectAwaitsUser()
+        }
+        app.isConnected = true
+        let log = ReleaseLog()
+        app.networkProtection = releaseRuntime(log)
+        app.connectionCoordinator.explicitReleaseDrainCap = .milliseconds(50)
+        app.connectionCoordinator.releaseFenceAvailable = { false }
+        let drain = ReleaseDrainGate()
+        app.connectionCoordinator.connectTask = Task { await drain.wait() }
+
+        app.disconnect(releaseKillSwitch: true)
+        try? await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(log.disarms, 0, "no cap without the helper's fence")
+
+        drain.open()
+        await app.finishPendingDisconnect()
+        XCTAssertEqual(log.disarms, 1)
+        XCTAssertFalse(app.isProtectionBlocked)
     }
 
     /// Decision 094: the work the capped release stopped waiting for ends
@@ -122,6 +152,7 @@ final class DisarmErrorReadbackTests: XCTestCase {
         let log = ReleaseLog()
         app.networkProtection = releaseRuntime(log)
         app.connectionCoordinator.explicitReleaseDrainCap = .milliseconds(50)
+        app.connectionCoordinator.releaseFenceAvailable = { true }
         let drain = ReleaseDrainGate()
         let staleGeneration = app.connectionCoordinator.protectionOperationGeneration
         app.connectionCoordinator.nodeSwitchTask = Task {

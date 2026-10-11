@@ -79,6 +79,10 @@ final class ConnectionCoordinator {
     /// anyway. The helper's user-release fence refuses whatever that stale
     /// work sends later, so it cannot block the network again.
     var explicitReleaseDrainCap: Duration = .seconds(10)
+    /// The cap holds only against a helper that fences on the user's
+    /// release; any other helper keeps the uncapped wait, because nothing
+    /// there refuses the stale work's later arms (decision 094 (b)).
+    var releaseFenceAvailable: () -> Bool = { HelperManager.daemonKnownFenceAware }
 
     /// Whether the pending or in-flight teardown queue's newest request is an
     /// explicit release, or was one that could not release PF. Newest-wins,
@@ -109,7 +113,7 @@ final class ConnectionCoordinator {
         disconnectSequence = Task {
             let stale = [previousDisconnect].compactMap { $0 } + pendingTasks
             var capped = false
-            if disposition == .explicit {
+            if disposition == .explicit, self.releaseFenceAvailable() {
                 // Decision 094: the user's release waits for older work at
                 // most `explicitReleaseDrainCap`, then runs. Whatever that
                 // work sends later is refused by the helper's user-release

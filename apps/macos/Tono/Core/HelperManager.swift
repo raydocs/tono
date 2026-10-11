@@ -763,15 +763,38 @@ nonisolated struct HelperManager {
         guard let result = try? sendRequest(method: "GET", path: "/version") else {
             return .unreachable
         }
-        if result.status == 403 { return .rejected }
+        if result.status == 403 {
+            noteDaemonFenceAware(false)
+            return .rejected
+        }
         guard result.status == 200,
               let envelope = try? JSONDecoder().decode(Envelope.self, from: result.body),
               envelope.ok == true,
               let version = envelope.version else {
             return .unreachable
         }
+        noteDaemonFenceAware(version == helperVersion)
         return .version(version)
     }
+
+    /// Decision 094 (b) capability gate: whether the daemon last heard from
+    /// in this app session answered exactly this build's helper version, the
+    /// one that fences older work on the user's release. Only then may the
+    /// explicit release stop waiting for stale work at its drain cap. Nothing
+    /// is probed for it: a probe would queue behind the very call the cap is
+    /// for. A slow or unanswered probe leaves the last answer (the binary did
+    /// not change by being busy); a rejection or another version clears it,
+    /// and so does a fresh app launch, which waits for the first answer.
+    static var daemonKnownFenceAware: Bool {
+        fenceAwareLock.withLock { fenceAwareDaemon }
+    }
+
+    private static func noteDaemonFenceAware(_ aware: Bool) {
+        fenceAwareLock.withLock { fenceAwareDaemon = aware }
+    }
+
+    private static let fenceAwareLock = NSLock()
+    nonisolated(unsafe) private static var fenceAwareDaemon = false
 
     /// Whether a live daemon is refusing this app's identity outright. No IPC
     /// command can ever succeed against such a daemon; only the authenticated

@@ -364,13 +364,15 @@ func runUpdateSelfTests() -> Bool {
             wanted: { true }, prepare: { _ in }, stopCore: {}, restoreDNS: {}, disarm: { _ in },
             readback: { readback })
         var aiAbsent = false
+        var observed: UpdateContractV1.Protection = .protectedOffline
         var io = effects()
-        io.observe = { .unprotected }
+        io.observe = { observed }
         io.aiLayerAbsent = { aiAbsent }
         io.disconnectPreservingAIHold = { try UpdateRuntime.runDisconnect(preserveAIHold: true, steps: steps) }
         io.disconnect = { try UpdateRuntime.runDisconnect(preserveAIHold: false, steps: steps) }
         let engine = UpdateTransaction(storage: store, effects: io)
         try reserved(store, engine)
+        observed = .unprotected
         try engine.disconnect(peer: owner, preserveAIHold: true)
         try check(store.load().attempt?.disconnectVerified == true, "Automatic release was not verified")
         var code: String?
