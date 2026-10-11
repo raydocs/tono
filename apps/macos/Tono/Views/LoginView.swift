@@ -5,6 +5,8 @@ import SwiftUI
 import AppKit
 
 struct LoginView: View {
+    /// The real idle button and deterministic localization evidence share one source key.
+    static let sendCodeTitleKey = "Send a sign-in code"
     @Bindable var session: AccountSession
     @Environment(AppState.self) private var appState
     @SeaAppearancePreference private var seaAppearance
@@ -589,7 +591,7 @@ struct LoginView: View {
                     if sendPillPhase == .sent {
                         Text("Sent to your email")
                     } else {
-                        Text("Send a sign-in code")
+                        Text(LocalizedStringKey(Self.sendCodeTitleKey))
                     }
                 }
                 .frame(maxWidth: .infinity)

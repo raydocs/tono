@@ -30,7 +30,7 @@ ScreenCaptureKit 只捕获测试进程的指定窗口，原始 PNG 字节逐张�
 | intro | [fresh zh](macos-intro-fresh-zh.png) | [saved en](macos-intro-saved-en.png) |
 | 登录 | [fresh zh](macos-login-fresh-zh.png) | [saved en](macos-login-saved-en.png) |
 
-四张均已人工查看：文字、邮箱、发送动作可见，无截断。该次 CI 为 708 tests / 1 skipped / 1 failure：中文登录的 Vision 只识别标题，没识别实际可见的“发送验证码”；不能称这次 XCTest 全过。其余三图的原始 receipt `acceptance=passed`。Apple [minimumTextHeight](https://developer.apple.com/documentation/vision/vnrecognizetextrequest/minimumtextheight) 默认 image/32，此处 22.5 px，会过滤 14 px 的中文控件。后续仅修正中文 OCR 输入尺寸过滤器，使它涵盖既有 8 px 几何契约；精确文字、首候选、confidence ≥0.35、原图亮度/完整性和窗口/PID/尺寸要求不变。修正的原生复验看 PR 的准确 head CI，不把这些旧原图冒充新 CI 产物。
+四张均已人工查看：文字、邮箱、发送动作可见，无截断。该次 CI 为 708 tests / 1 skipped / 1 failure：中文登录的 Vision 只识别标题，没识别实际可见的“发送验证码”；不能称这次 XCTest 全过。其余三图的原始 receipt `acceptance=passed`。Apple [minimumTextHeight](https://developer.apple.com/documentation/vision/vnrecognizetextrequest/minimumtextheight) 默认 image/32，曾怀疑输入过滤；8 px 和 0 两次修正都未解决，不能再将过滤当作充分原因。协调者已查看准确 CI 38108105926 原图，确认小字号 CJK 未识别而实际内容完整，授权仅把中文按钮 OCR 换成同一 fresh fixture 的生产 button key/app 编译目录精确解析断言；标题 zh-Hans OCR、精确文字/首候选/confidence ≥0.35/原图几何/亮度/完整性/窗口/PID/尺寸断言不变，English button OCR 保留，PNG/txt 保留。按钮 OCR 不声称通过；准确新 head CI 另核，不把这些旧原图冒充复验产物或设备验收。
 
 ## 回归与设备缺口
 
