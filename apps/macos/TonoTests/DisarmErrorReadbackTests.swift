@@ -152,6 +152,27 @@ final class DisarmErrorReadbackTests: XCTestCase {
         XCTAssertTrue(app.selectiveAIRecoveryPending, "AI still blocked must show after the release")
     }
 
+    /// R8-F2: the disarm succeeded but the AI readback throws. Removal is not
+    /// verified, so the result stays partial: the AI notice shows and an
+    /// error names it, never a plain "released".
+    func testThrowingAIReadbackKeepsTheReleasePartial() async {
+        let app = AppState()
+        KillSwitchService.isArmed = true
+        defer { KillSwitchService.isArmed = false }
+        app.isConnected = true
+        let log = ReleaseLog()
+        var runtime = releaseRuntime(log)
+        runtime.selectiveAIRecoveryPending = { throw HelperIPCError.invalidResponse }
+        app.networkProtection = runtime
+
+        await app.disconnectAndWait(releaseKillSwitch: true)
+
+        XCTAssertEqual(log.disarms, 1)
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertTrue(app.selectiveAIRecoveryPending, "unverified AI removal must stay visible")
+        XCTAssertNotNil(app.errorMessage)
+    }
+
     /// One-click release against a helper that must be repaired first (an
     /// older protocol, or one that rejects this app): the repair runs before
     /// any release call; when it fails nothing is disarmed or released

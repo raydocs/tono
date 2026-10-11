@@ -1240,7 +1240,20 @@ extension AppState {
             // and a removal the helper still has pending must show, never a
             // plain "released" while AI services stay blocked.
             if disarming, !transitionLeavesProtectionBlocked {
-                selectiveRecoveryPending = try? await networkProtection.selectiveAIRecoveryPending()
+                do {
+                    selectiveRecoveryPending = try await networkProtection.selectiveAIRecoveryPending()
+                } catch {
+                    // An unreadable AI layer is not a verified removal (R8-F2):
+                    // the result stays partial until a readback proves it.
+                    selectiveRecoveryPending = true
+                    if transitionError == nil {
+                        transitionError = String(localized: "Internet is restored, but Tono could not confirm that its AI blocking rules were removed. If AI services stay blocked, choose Restore normal internet again. The Support page has a local recovery command.")
+                    }
+                    LocalTrafficAudit.shared.recordEvent(
+                        "release_ai_readback_failed",
+                        details: ["error": error.localizedDescription]
+                    )
+                }
             }
             await MainActor.run {
                 guard let self else { return }

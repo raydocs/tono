@@ -262,6 +262,43 @@ func runUpdateSelfTests() -> Bool {
         try refuses { try engine.gate(method: "POST", path: "/core/start", peer: successor) }
     }
 
+    // R8-F3: an update Disconnect whose cleanup really fails (preparation
+    // and the DNS restore throw, DNS and the AI layer read back unrestored)
+    // still releases PF, but is not recorded verified: the caller gets a
+    // coded partial result and retirement stays refused. Control: the same
+    // run with every component read back released is verified.
+    test("update-disconnect-unverified-cleanup-is-not-recorded-verified") { directory in
+        let store = try UpdateStorage(root: directory)
+        var disarms = 0
+        var readback = UpdateRuntime.DisconnectReadback(
+            pfReleased: true, coreStopped: true, tunnelAbsent: true,
+            dnsRestored: false, proxyRestored: true, aiRemoved: false)
+        let steps = UpdateRuntime.DisconnectSteps(
+            wanted: { true },
+            prepare: { _ in throw HelperFailure.invalid("DNS readback failed during preparation") },
+            stopCore: {},
+            restoreDNS: { throw HelperFailure.invalid("DNS restore failed") },
+            disarm: { _ in disarms += 1 },
+            readback: { readback })
+        var io = effects()
+        io.disconnect = { try UpdateRuntime.runDisconnect(preserveAIHold: false, steps: steps) }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        var code: String?
+        do { try engine.disconnect(peer: owner) } catch let failure as HelperFailure { code = failure.code }
+        let partial = try store.load().attempt
+        try check(disarms == 1, "A failed preparation kept PF up")
+        try check(code == "UPDATE_DISCONNECT_UNVERIFIED", "Unverified cleanup was not reported partial")
+        try check(partial?.disconnectRequested == true && partial?.disconnectVerified == false,
+                  "Unverified cleanup was recorded as a verified Disconnect")
+        try refuses { try engine.retireUnconsumed(peer: owner) }
+        readback.dnsRestored = true
+        readback.aiRemoved = true
+        try engine.disconnect(peer: owner)
+        try check(disarms == 2 && store.load().attempt?.disconnectVerified == true,
+                  "A fully read-back Disconnect was not verified")
+    }
+
     test("automatic-update-release-preserves-ai-and-consumed-obligation") { directory in
         let store = try UpdateStorage(root: directory)
         var observed: UpdateContractV1.Protection = .connected

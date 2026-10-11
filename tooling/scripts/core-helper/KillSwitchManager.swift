@@ -135,9 +135,15 @@ enum HelperCommandOutputMode {
 /// after `go` was written, and a release that landed between `admit` and
 /// `go` is seen by it. Abandonment is possible only before `accept`, so an
 /// abandoned launch still gets end-of-file and never executes.
+///
+/// Writing `go` and the caller's commit timeout are one atomic decision
+/// (#1504 review R8-F1): the launch thread must `claimGo` before writing,
+/// and the caller's timeout revokes an accepted launch that has not claimed
+/// it. Exactly one side wins, so a launch the caller already failed can never
+/// receive `go` later and run after a newer owner released or armed.
 final class HelperCommandLaunch: @unchecked Sendable {
     enum Outcome { case launched, failed(any Error), abandoned }
-    private enum Phase { case pending, accepted, settled(Outcome) }
+    private enum Phase { case pending, accepted, going, settled(Outcome) }
     private let lock = NSLock()
     private let settled = DispatchSemaphore(value: 0)
     private let committed = DispatchSemaphore(value: 0)
@@ -145,6 +151,11 @@ final class HelperCommandLaunch: @unchecked Sendable {
     /// How long the caller waits for `go` once accepted. Writing three bytes
     /// to the gate's empty pipe never blocks; this only bounds a stuck thread.
     static let commitBudget: TimeInterval = 5
+    private let budget: TimeInterval
+
+    init(commitBudget: TimeInterval = HelperCommandLaunch.commitBudget) {
+        budget = commitBudget
+    }
 
     /// A failure before acceptance. False when the caller had already given up.
     func report(_ result: Outcome) -> Bool {
@@ -165,12 +176,20 @@ final class HelperCommandLaunch: @unchecked Sendable {
         return true
     }
 
-    /// After `go` was written (`.launched`) or could not be (`.failed`). False
-    /// when the caller stopped waiting for it; the launch thread then stops
-    /// the child itself.
-    func commit(_ result: Outcome) -> Bool {
+    /// The right to write `go`. False when the caller's commit timeout
+    /// already revoked the launch: then no `go`, end-of-file, never executed.
+    func claimGo() -> Bool {
         lock.lock(); defer { lock.unlock() }
         guard case .accepted = phase else { return false }
+        phase = .going
+        return true
+    }
+
+    /// After `go` was written (`.launched`) or could not be (`.failed`).
+    /// Only a claimed launch commits; the caller cannot revoke it any more.
+    func commit(_ result: Outcome) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard case .going = phase else { return false }
         phase = .settled(result)
         committed.signal()
         return true
@@ -178,7 +197,9 @@ final class HelperCommandLaunch: @unchecked Sendable {
 
     /// The caller waits until `end`; past it, a launch not yet accepted is
     /// abandoned. An accepted one is waited on until its `go` was written
-    /// (bounded by `commitBudget`).
+    /// (bounded by `commitBudget`); past that budget an unclaimed launch is
+    /// revoked and never gets `go`. A claimed one is only writing three bytes
+    /// to an empty pipe, so its commit follows at once.
     func wait(until end: DispatchTime) -> Outcome {
         _ = settled.wait(timeout: end)
         lock.lock()
@@ -190,15 +211,27 @@ final class HelperCommandLaunch: @unchecked Sendable {
             phase = .settled(.abandoned)
             lock.unlock()
             return .abandoned
-        case .accepted:
+        case .accepted, .going:
             lock.unlock()
         }
-        _ = committed.wait(timeout: .now() + Self.commitBudget)
+        _ = committed.wait(timeout: .now() + budget)
+        lock.lock()
+        switch phase {
+        case .settled(let outcome):
+            lock.unlock()
+            return outcome
+        case .accepted, .pending:
+            let failure = HelperFailure.system("The admitted command did not receive its start signal in time.")
+            phase = .settled(.failed(failure))
+            lock.unlock()
+            return .failed(failure)
+        case .going:
+            lock.unlock()
+        }
+        committed.wait()
         lock.lock(); defer { lock.unlock() }
         if case .settled(let outcome) = phase { return outcome }
-        let failure = HelperFailure.system("The admitted command did not receive its start signal in time.")
-        phase = .settled(.failed(failure))
-        return .failed(failure)
+        return .failed(HelperFailure.system("The admitted command's start was not recorded."))
     }
 }
 

@@ -2145,6 +2145,7 @@ extension KillSwitchManager {
         relayingInputFrom inputFD: Int32? = nil,
         admit: (@Sendable () -> (any Error)?)? = nil,
         afterAccept: (@Sendable () -> Void)? = nil,
+        commitBudget: TimeInterval = HelperCommandLaunch.commitBudget,
         launch: @escaping @Sendable (Process) throws -> Void = { try $0.run() },
         abandon: @escaping @Sendable (Process) -> Void = { process in
             process.terminate()
@@ -2156,7 +2157,7 @@ extension KillSwitchManager {
         process.arguments = ["-c", admissionGateScript, executable] + arguments
         let admission = Pipe()
         process.standardInput = admission
-        let launched = HelperCommandLaunch()
+        let launched = HelperCommandLaunch(commitBudget: commitBudget)
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 try launch(process)
@@ -2181,6 +2182,13 @@ extension KillSwitchManager {
             // Accepted: the caller owns this command now, inside its deadline,
             // and waits until `go` is written (R7-F1).
             afterAccept?()
+            guard launched.claimGo() else {
+                // The caller's commit budget ran out first and revoked this
+                // launch (R8-F1): no `go`, end-of-file, never executed.
+                try? admission.fileHandleForWriting.close()
+                abandon(process)
+                return
+            }
             do {
                 try admission.fileHandleForWriting.write(contentsOf: Data("go\n".utf8))
             } catch {
@@ -2190,7 +2198,7 @@ extension KillSwitchManager {
                 return
             }
             guard launched.commit(.launched) else {
-                // The caller stopped waiting (commit budget): stop it here.
+                // Unreachable once claimed; kept so a future phase change fails closed.
                 try? admission.fileHandleForWriting.close()
                 abandon(process)
                 return

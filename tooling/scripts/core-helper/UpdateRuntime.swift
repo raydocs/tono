@@ -86,26 +86,109 @@ final class UpdateRuntime {
     }
 
     private func disconnect(preserveAIHold: Bool) throws {
-        let wanted = (firewall.status()["wantArmed"] as? Bool) == true
+        try Self.runDisconnect(preserveAIHold: preserveAIHold, steps: liveDisconnectSteps())
+    }
+
+    /// What one update Disconnect read back after its release, component by
+    /// component (#1504 review R8-F3). Only a positive reading counts; an
+    /// unreadable one is not verified.
+    struct DisconnectReadback: Equatable {
+        var pfReleased: Bool
+        var coreStopped: Bool
+        var tunnelAbsent: Bool
+        var dnsRestored: Bool
+        var proxyRestored: Bool
+        var aiRemoved: Bool
+
+        /// Components the release could not verify. AI counts only for the
+        /// user's explicit release; the automatic one keeps the AI hold.
+        func unverified(preserveAIHold: Bool) -> [String] {
+            var missing: [String] = []
+            if !pfReleased { missing.append("PF") }
+            if !coreStopped { missing.append("Core") }
+            if !tunnelAbsent { missing.append("TUN") }
+            if !dnsRestored { missing.append("DNS") }
+            if !proxyRestored { missing.append("system proxy") }
+            if !preserveAIHold, !aiRemoved { missing.append("AI blocking rules") }
+            return missing
+        }
+    }
+
+    struct DisconnectSteps {
+        var wanted: () -> Bool
+        var prepare: (UpdateContractV1.Protection) throws -> Void
+        var stopCore: () throws -> Void
+        var restoreDNS: () throws -> Void
+        var disarm: (Bool) throws -> Void
+        var readback: () -> DisconnectReadback
+    }
+
+    /// The release always proceeds (a failed preparation must not keep PF up,
+    /// BRICK-M4), but it is reported verified only when every component reads
+    /// back released. Otherwise it throws `UPDATE_DISCONNECT_UNVERIFIED`, so
+    /// the transaction does not record `disconnectVerified` and the app shows
+    /// a partial or unknown result instead of an assumed success.
+    static func runDisconnect(preserveAIHold: Bool, steps: DisconnectSteps) throws {
         do {
-            _ = try prepare(wanted ? .protectedOffline : .unprotected)
+            try steps.prepare(steps.wanted() ? .protectedOffline : .unprotected)
         } catch {
-            guard Self.disconnectReleasesWhenPrepareFails(strictKillSwitchEnabled: false) else {
-                throw error
-            }
+            guard disconnectReleasesWhenPrepareFails(strictKillSwitchEnabled: false) else { throw error }
             let detail = (error as? HelperFailure)?.message ?? String(describing: error)
             FileHandle.standardError.write(Data(
                 "tono: update disconnect continued after prepare failed: \(detail)\n".utf8
             ))
-            try? core.stop()
-            try? dns.restore(deferringLossNotice: true)
+            try? steps.stopCore()
+            try? steps.restoreDNS()
         }
-        _ = try power.whileAwake { try firewall.disarm(preserveAIHold: preserveAIHold) }
-        if (try? observe()) != .unprotected {
-            FileHandle.standardError.write(Data(
-                "tono: update disconnect released PF; observe is not unprotected\n".utf8
-            ))
+        try steps.disarm(preserveAIHold)
+        let missing = steps.readback().unverified(preserveAIHold: preserveAIHold)
+        guard missing.isEmpty else {
+            throw HelperFailure.coded(
+                code: "UPDATE_DISCONNECT_UNVERIFIED",
+                message: "Tono's update Disconnect ran, but could not verify: \(missing.joined(separator: ", ")). "
+                    + "Choose Restore internet again; the Support page has a local recovery command."
+            )
         }
+    }
+
+    private func liveDisconnectSteps() -> DisconnectSteps {
+        DisconnectSteps(
+            wanted: { (self.firewall.status()["wantArmed"] as? Bool) == true },
+            prepare: { _ = try self.prepare($0) },
+            stopCore: { try self.core.stop() },
+            restoreDNS: { _ = try self.dns.restore(deferringLossNotice: true) },
+            disarm: { preserve in
+                _ = try self.power.whileAwake { try self.firewall.disarm(preserveAIHold: preserve) }
+            },
+            readback: { self.readBackDisconnect() }
+        )
+    }
+
+    /// Strict reads: an error anywhere answers "not verified".
+    func readBackDisconnect() -> DisconnectReadback {
+        let pf = firewall.status()
+        let pfReleased = pf["ok"] as? Bool == true && pf["wantArmed"] as? Bool == false
+            && pf["armed"] as? Bool == false && (try? KillSwitchManager.effectiveStatus()) == false
+        var dnsRestored = false
+        // configd's active store converges asynchronously after a restore.
+        for attempt in 0..<30 {
+            let resolver = dns.status()
+            if resolver["ok"] as? Bool == true, resolver["snapshotPresent"] as? Bool == false,
+               (try? dns.verifyRestored()) != nil {
+                dnsRestored = true
+                break
+            }
+            if attempt < 29 { usleep(100_000) }
+        }
+        let aiRecord = (try? firewall.selectiveAIRecoveryStatus())?["aiRecoveryPending"] as? Bool
+        return DisconnectReadback(
+            pfReleased: pfReleased,
+            coreStopped: !core.status().running,
+            tunnelAbsent: if_nametoindex("utun199") == 0,
+            dnsRestored: dnsRestored,
+            proxyRestored: (try? verifyProxyRestored()) != nil,
+            aiRemoved: aiRecord == false && SelectiveFailOpenInstaller.layerProvenAbsent()
+        )
     }
 
     func verifyRecovery(requiresTUN: Bool) throws -> UpdateContractV1.Protection {

@@ -474,7 +474,12 @@ nonisolated enum HelperProtocolVersion {
     ///   failed helper start follows the same rule. An unreadable target
     ///   refuses re-arms but releases nothing (block, intent, A29 fault, AI
     ///   and DNS held). A launch accepted inside its deadline is asked again
-    ///   (`admit`) before `go`, and a Core once more after it starts.
+    ///   (`admit`) before `go`, and a Core once more after it starts. Writing
+    ///   `go` and the caller's commit timeout are one atomic decision, so a
+    ///   launch the caller already failed never runs. An update Disconnect
+    ///   is recorded verified only when PF, Core, TUN, DNS, the system proxy
+    ///   and (for the user's release) the AI layer all read back released;
+    ///   otherwise it answers `UPDATE_DISCONNECT_UNVERIFIED`.
     static let current = "4.52.50"
 }
 

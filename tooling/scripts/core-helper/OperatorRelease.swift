@@ -1767,6 +1767,41 @@ func runReleaseBetweenAcceptAndGoSelfTest() -> Bool {
     return true
 }
 
+/// R8-F1: an accepted launch that stalls past its commit budget is failed
+/// by the caller, so it must never execute later. The launch thread is held
+/// after accept, beyond the budget; when it resumes, the caller's timeout has
+/// already revoked `go`. The command would create a marker file; it must not.
+func runStalledAcceptedLaunchNeverExecsSelfTest() -> Bool {
+    let marker = NSTemporaryDirectory() + "tono-stalled-go-\(UUID().uuidString)"
+    defer { unlink(marker) }
+    let resumed = DispatchSemaphore(value: 0)
+    let child = Process()
+    child.standardOutput = FileHandle.nullDevice
+    child.standardError = FileHandle.nullDevice
+    var failed = false
+    do {
+        try KillSwitchManager.launchAdmitted(
+            child, executable: "/usr/bin/touch", arguments: [marker],
+            until: .now() + 5, deadline: 5,
+            afterAccept: {
+                usleep(600_000) // stalled after accept, past the commit budget
+                resumed.signal()
+            },
+            commitBudget: 0.1
+        )
+    } catch {
+        failed = true
+    }
+    let threadResumed = resumed.wait(timeout: .now() + 5) == .success
+    usleep(500_000) // time a late `go` would need to reach `touch`
+    let executed = access(marker, F_OK) == 0
+    if child.isRunning { kill(child.processIdentifier, SIGKILL) }
+    guard failed, threadResumed, !executed else {
+        return selfTestFail("stalled accepted launch", "failed \(failed) resumed \(threadResumed) executed \(executed)")
+    }
+    return true
+}
+
 /// R6-F2: an A29 protected fault holds its block and protected DNS when the
 /// target record turns corrupt. Unknown refuses every automatic re-arm but
 /// is no release authority: the watchdog pass does nothing however long the

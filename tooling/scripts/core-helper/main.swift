@@ -2179,6 +2179,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && runOwnerRelaunchReleasedDuringSpawnSelfTest()
             && runReleaseDuringAcceptedCoreLaunchSelfTest()
             && runReleaseBetweenAcceptAndGoSelfTest()
+            && runStalledAcceptedLaunchNeverExecsSelfTest()
             && runUnknownTargetKeepsFaultSelfTest()
             && runUpdateChildBoundedSelfTest()
             && KillSwitchManager.runFailedCommitReleaseSelfTest()

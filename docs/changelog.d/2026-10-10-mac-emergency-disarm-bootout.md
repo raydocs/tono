@@ -74,3 +74,12 @@
   - 一键放行界面等待时限：用户的显式放行（恢复联网 / 断开）设 60 秒界面时限（只停止界面等待，不是完成时限），包括等待进行中的连接 / 切换 / 重载任务排空。超时后界面不再停在「正在断开…」，而是显示「未知、仍在完成」并给出支持页面的本地恢复命令；不提前放行，保留 armed 意图，连接和自动任务继续等待（`teardownInFlight`）。同一次放行在排空后继续执行，最终结果覆盖临时结果。读回不可用的未知结果也不再同时标为 Protected Offline。新增 XCTest `DisarmErrorReadbackTests.testOverdueReleaseDrainPublishesUnknownThenTheLateResult`（Linux 无法运行 Swift，未先跑红）。仍未覆盖：时限不中止工作，排空或助手调用一直不返回时结果保持未知，退出路径是恢复命令；原生更新挂起的放行（`/update/disconnect`）不在此时限内。
   - 原生更新挂起时的恢复联网（决定 092 的情形：更新失败后用户点恢复联网，走 `/update/disconnect`）也纳入同一 60 秒总时限，语义相同：超时显示「未知、仍在完成」和恢复命令，不提前放行，保留 armed 意图，自动任务继续等待；排空后同一任务只执行一次 `/update/disconnect` 并覆盖临时结果。未改 helper 协议。新增 XCTest `NativeUpdateWakeRetirementTests.testOverdueUpdateReleaseDrainPublishesUnknownThenOneDisconnect`（Linux 无法运行 Swift，未先跑红）。上一条「原生更新挂起的放行不在此时限内」的限制已解除。
   - 措辞与迟到结果（所有者经 Puck 追加）：60 秒只表示界面停止等待并显示「未知、仍在完成」，**不是**一键恢复在 60 秒内完成；放行前的排空没有上限，排空后的预算（普通路径约 36 秒，需修复时约 261 秒；更新路径 ≤53 秒）写在 PR 正文。迟到结果只发布真实读回（已放行 / 部分失败 / 未知），不假定成功；旧代数的迟到结果不覆盖新状态，新增 XCTest `NativeUpdateWakeRetirementTests.testLateUpdateReleaseFromRetiredGenerationDoesNotOverwriteNewerState`（按代数令牌断言；未先跑红）。真实放行与 PF / DNS / AI 读回仍是真机门槛（G1 第 6 步，新增 6h：更新失败后的恢复联网）。紧急入口仍是本地 `--emergency-reset` / `--emergency-disarm` 命令：Support 页可见，App 卡死时在终端运行；macOS 没有 App 外的快捷入口。
+  - 第九轮（Sol R8 @49e24b10：3 个 major + 1 个 minor）：
+    - R8-F1：写入 `go` 与调用方的提交超时改为一次原子决定（`claimGo`），超时撤销后启动线程不再写 `go`，被判失败的启动永不执行；回归 `--self-test` `runStalledAcceptedLaunchNeverExecsSelfTest`。
+    - R8-F2：放行后的 AI 回读抛错时结果保持「部分」：AI 提示保留并给出错误说明；回归 XCTest `DisarmErrorReadbackTests.testThrowingAIReadbackKeepsTheReleasePartial`。
+    - R8-F3：更新 Disconnect 照常放行 PF，但逐项回读 PF、Core、TUN、DNS、系统代理，用户放行时还回读 AI；任何一项未验证都返回 `UPDATE_DISCONNECT_UNVERIFIED`，不记录 `disconnectVerified`，App 走已有的未知路径；回归 `--update-self-test` `update-disconnect-unverified-cleanup-is-not-recorded-verified`。
+    - R8-M1：预算计入嵌套调用。排空后约 60 秒（需修复时约 285 秒），更新路径 ≤57 秒。
+    - helper 仍为 4.52.50，CONTRACT 已重算。
+    - 所有者硬门槛「放行本身有界」本轮未达成，只报告不硬做。阻塞点：helper 没有用户放行的代数栅栏，显式 disarm 不改 target；helper 逐个处理请求，App 的特权 actor 也串行。最小方案写在 PR 正文，待所有者决定。
+    - 紧急入口已按源码核实：Support 页显示的是 `--emergency-reset`（移除 helper；有挂起更新时退回旧放行，不逐项回读）；有界并逐项回读的是 `--emergency-disarm`。两者都可在 App 外以 root 在终端运行；macOS 在 App 外没有可发现的入口。
+    - Linux 无法运行 Swift，新测试未先跑红。
