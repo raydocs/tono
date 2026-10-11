@@ -61,3 +61,5 @@
   - 契约：`CONTRACT.sha256` 按 `build-core-helper.sh` 清单重算。
   - 验证（Linux）：契约守卫 PASS；`test_build_source.py` OK。Swift 编译、helper 自测与 XCTest 只在托管 macOS CI 上跑；未实机。
   - 剩余限制：更新执行器或 helper 启动持续失败且没有放行意图时，阻断会一直保持到重试成功或管理员运行 `--emergency-disarm`（决定 092）；目标记录读不出时，也要等用户 Connect（修复记录）、Disconnect 或 Restore。`admit` 与写 `go` 之间仍有极短窗口，由启动后的复查（Core）与 `started` 的 SIGKILL（App 重启请求）兜底。
+- 续记 2026-10-11（决定 092 所有者有条件批准）：所有者 2026-10-11 经 Puck 批准 092（更新失败保持保护），条件是证明显式恢复上网始终可用、自动路径不静默放行、显式释放不被任何迟到写入撤销。决定 092 状态改为 owner，并写入验收条件；`docs/ops/release-0075-owner-g1-g2-checklist.md` G1 第 5 步加入 macOS 各分支的真机步骤和读回预期。新增 `--update-self-test` 回归：`prepare-failure-explicit-release-is-not-undone`、`execute-failure-explicit-release-is-not-undone`、`helper-restart-after-explicit-release-does-not-relock`；启动超时分支用 `protected-startup-launch-timeout-keeps-block-and-dns` 与 `runOperatorReleaseSelfTests`，正常分支用已有 App XCTest（见 PR 正文对照表）。092 只有在这些回归于托管 CI 通过后才算代码关闭，真机部分待 G1 第 5 步。
+  - 修 CI：上一提交的 `CONTRACT.sha256` 是在最后一处源码改动之前算的，构建守卫报版本未变；全部改动后重算。

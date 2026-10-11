@@ -18,6 +18,23 @@
    之后断开再连正常，不残留 “unreadable run”（#117）。证据：前后截图或诊断导出。
 4. **macOS 连接/断开回归**：Mac 上连接 → 断开 → 再连接 → 睡眠 1 分钟唤醒 → 仍 Connected 或自动恢复；
    断开后网络正常。证据：截图 + 一份诊断导出。
+5. **macOS 决定 092 的手动恢复（仅当冻结候选包含 #1504，helper 4.52.50）**：更新失败会保持保护，但用户的显式断开 /
+   恢复上网必须始终可用、且之后不被任何自动路径重新锁上。每个分支的读回命令相同：
+   `sudo pfctl -a tono.killswitch -s rules`（释放后应为空；保持时应有 `block` 规则）、
+   `scutil --dns | grep nameserver`（释放后不是 `127.0.0.1`）、`networksetup -getdnsservers Wi-Fi`（释放后是原值）；
+   「不复锁」= 释放后等 2 分钟（看门狗 10 s 一轮）再读一次，仍为释放结果，App 也不自动重连。每步保存命令输出截图。
+   - a. **正常**：连接 → 断开 → 读回为已释放 → 2 分钟后仍已释放。
+   - b. **更新 Prepare 失败**：连接中开始原生更新，让准备失败（如准备前断开物理网络）→ 读回 PF 仍有 block、DNS 仍为
+     127.0.0.1（保护保持）→ 在 App 里断开 → 读回已释放 → 2 分钟后仍已释放，更新不再继续。
+   - c. **更新 Execute 失败**：连接中开始原生更新，在执行阶段让它失败（如执行器拉起时断网，或安装中断）→ 读回保护保持 →
+     断开 → 读回已释放 → 2 分钟后仍已释放，执行器重试也不重新锁上。
+   - d. **启动 / IPC 超时（helper 无响应）**：连接后 `sudo launchctl kill SIGSTOP system/com.raydocs.tono.core-helper` →
+     在 App 里断开：App 不得显示「已释放」（应为未知 / 失败并提示）→ 运行
+     `sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-disarm`，在 181.5 s 内结束、退出码 0，输出逐项
+     restored（任何 unknown 都不算成功）→ 读回已释放 → 2 分钟后仍已释放（helper 重启后拒绝自动重连）。
+   - e. **helper 重启**：断开后 `sudo launchctl kickstart -k system/com.raydocs.tono.core-helper` → 读回仍为已释放，
+     2 分钟后仍已释放，App 不自动重连。
+   证据：每个分支的命令输出截图。任一分支读回不符，092 不能视为关闭。
 
 ## G2（连不上时有下一手）
 1. **B0 日志默认口径写进发布说明**：已写（apps/windows/release-notes/0.0.75.md、apps/macos/release-notes/build75.md）。

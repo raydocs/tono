@@ -864,6 +864,99 @@ func runUpdateSelfTests() -> Bool {
         let released = try start(target: .recorded(HelperTarget(mode: .released, generation: 4)))
         try check(released.released == 1, "An operator release did not release after a failed startup")
     }
+    // Decision 092 acceptance (owner condition, 2026-10-11): a failed update
+    // keeps protection, but the user's explicit release always works and no
+    // late update or re-arm write undoes it. One test per branch the helper
+    // can drive here; the normal and startup branches are named in the PR.
+    //
+    // Prepare failure: the attempt is blocked (`preparationFailed`); the
+    // owner's explicit Disconnect still releases (it needs no unblocked or
+    // unexpired attempt, no sign-in, no tunnel), and afterwards neither the
+    // update (prepare, execute) nor a reconnect (arm, Core start, DNS enable,
+    // session) is admitted.
+    test("prepare-failure-explicit-release-is-not-undone") { directory in
+        let store = try UpdateStorage(root: directory)
+        var releases = 0
+        var io = effects()
+        io.prepare = { _ in throw HelperFailure.system("injected preparation failure") }
+        io.disconnect = { releases += 1 }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try engine.reserve(peer: owner, manifest: manifest, manifestBytes: UpdateContractV1.canonical(manifest), signature: Data())
+        var ledger = try store.load()
+        ledger.attempt?.execution = .staged
+        try store.save(ledger)
+        try refuses { try engine.prepare(peer: owner) }
+        try check(store.load().attempt?.receipt.blockedReason == .preparationFailed, "Prepare failure did not block")
+        try check(releases == 0, "Prepare failure released by itself")
+        try engine.disconnect(peer: owner)
+        try check(releases == 1 && store.load().attempt?.disconnectVerified == true,
+                  "The explicit release after a prepare failure did not run")
+        try refuses { try engine.prepare(peer: owner) }
+        try refuses { try engine.execute(peer: owner) }
+        for path in ["/killswitch/arm", "/core/start", "/core/sync", "/dns/enable", "/session/connect"] {
+            try refuses { try engine.gate(method: "POST", path: path, peer: owner) }
+        }
+        try check(releases == 1, "A late update write touched the released network")
+    }
+    // Execute failure: the consumed attempt's executor fails with protection
+    // saved and no release intent, so it keeps the block (092); the owner's
+    // explicit Disconnect then releases. A later executor rerun that fails
+    // again releases (never re-installs), a resumed execute is refused and so
+    // is every reconnect for either app incarnation.
+    test("execute-failure-explicit-release-is-not-undone") { directory in
+        let store = try UpdateStorage(root: directory)
+        var releases = 0
+        var io = effects()
+        io.disconnect = { releases += 1 }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        try engine.execute(peer: owner)
+        var recovery = UpdateExecutor.FailureRecovery()
+        recovery.target = { .recorded(HelperTarget(mode: .secured, generation: 3)) }
+        recovery.disconnectRequested = { try? store.load().attempt?.disconnectRequested }
+        recovery.protectionSaved = { true }
+        recovery.release = { releases += 1 }
+        recovery.markBlocked = { false }
+        recovery.startDaemon = {}
+        let failedRun = UpdateExecutor.settle(recovery) { throw HelperFailure.system("injected executor failure") }
+        try check(!failedRun && releases == 0, "An execute failure released without a release intent")
+        try engine.disconnect(peer: owner)
+        try check(releases == 1 && store.load().attempt?.disconnectVerified == true,
+                  "The explicit release after an execute failure did not run")
+        _ = UpdateExecutor.settle(recovery) { throw HelperFailure.system("injected late executor failure") }
+        try check(releases == 2, "A late executor failure after the release did not keep it released")
+        try refuses { try engine.execute(peer: owner) }
+        for peer in [owner, successor] {
+            for path in ["/killswitch/arm", "/core/start", "/dns/enable", "/session/connect"] {
+                try refuses { try engine.gate(method: "POST", path: path, peer: peer) }
+            }
+        }
+    }
+    // Helper restart after the explicit release of a consumed update: the
+    // restarted daemon's startup neither relaunches the executor nor runs a
+    // failure settlement, and with the intent gone its watchdog never
+    // supervises (re-arms) a block; it restores DNS.
+    test("helper-restart-after-explicit-release-does-not-relock") { directory in
+        let store = try UpdateStorage(root: directory)
+        var io = effects()
+        io.disconnect = {}
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        try engine.execute(peer: owner)
+        try engine.disconnect(peer: owner)
+        var launches = 0
+        var settlements = 0
+        let stopped = try UpdateExecutor.startup(storage: store, protectionWanted: { true },
+                                                 launchExecutor: { _, _ in launches += 1 },
+                                                 onFailure: { _ in settlements += 1 })
+        try check(!stopped && launches == 0 && settlements == 0,
+                  "A restarted helper relaunched update work after the explicit release")
+        let steps = SocketServer.watchdogSteps(rearmAllowed: true, coreRunning: false, stateFilePresent: false,
+                                               coreDownChecks: 1_000)
+        try check(!steps.contains(.supervise) && !steps.contains(.releaseBlock) && steps.contains(.recoverDNS),
+                  "A restarted helper's watchdog re-armed after the explicit release: \(steps)")
+        try refuses { try engine.gate(method: "POST", path: "/killswitch/arm", peer: owner) }
+    }
     // #1504 review R5-F4: stopping the daemon before replacement counted any
     // failed `launchctl print`, a timeout included, as "already absent". Both
     // calls run out of time here: no answer, so the stop (and with it the

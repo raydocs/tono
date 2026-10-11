@@ -1,5 +1,6 @@
 ## 2026-10-10 · macOS: does a failed native-update executor run (or helper start) release PF and DNS?
-- Status: provisional
+- Status: owner (owner approved 2026-10-11 via Puck, on condition that the acceptance criteria below are proven;
+  092 is not closed until they are)
 - Chosen: the failed run keeps the installed block and protected DNS unless there is an explicit release intent: an
   operator release on record (`target-state` = `released`), the update attempt's own Disconnect, or no saved
   protection at all (`killswitch.state` definitely absent). A failure, a timeout, a launch with no answer, or a
@@ -22,4 +23,20 @@
   reach a helper to Disconnect then), keeps the Mac offline until a retry succeeds or an
   administrator runs `sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-disarm`, whose `released`
   target this path obeys.
+- Acceptance criteria (the owner's condition):
+  1. **Explicit Restore always works.** Turning protection off / restoring normal internet does not depend on sign-in,
+     the API or a healthy tunnel, and still works after an update Prepare or Execute failure, a startup or IPC
+     timeout, an abnormal helper state or a helper restart, through a bounded local path: the app's explicit
+     disarm (`/killswitch/disarm`, or `/update/disconnect` while an update is pending), or
+     `--emergency-disarm` when the helper is unresponsive. The user is shown and confirms the risk; success means
+     a real PF / DNS readback; an unknown result never claims protection was released.
+  2. **Automatic paths never silently release**, and an explicit release is never undone: an older generation does
+     not re-lock after the user releases; the release stops the matching reconnect and update work; no late write
+     re-installs the block.
+  3. **Regressions**, one per branch (normal, update Prepare failure, Execute failure, startup / IPC timeout, helper
+     restart), each showing the explicit release succeeds and is not undone; what cannot run in CI is a device gate.
+     Mapping and device steps: #1504 PR body and
+     [owner checklist G1 step 5](../ops/release-0075-owner-g1-g2-checklist.md).
+  Status of the criteria: code-closed only once those regressions pass in hosted CI; device-pending until G1
+  step 5 is done on a real Mac.
 - Applied in: [#1504](https://github.com/raydocs/tono/pull/1504) (backlog A13, helper 4.52.50).
