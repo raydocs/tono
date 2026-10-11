@@ -963,11 +963,11 @@ final class MacUsabilityRenderTests: XCTestCase {
         }
         request.recognitionLanguages = hasChineseLabels ? ["zh-Hans", "en-US"] : ["en-US"]
         if hasChineseLabels {
-            // Vision defaults to image height / 32, filtering 14px Chinese
-            // controls in a 720px window before recognition. Include the 8px
-            // glyphs our existing geometry contract can validate. Exact tokens,
-            // confidence, original-image contrast and completeness stay unchanged.
-            request.minimumTextHeight = 8 / Float(image.height)
+            // Do not pre-filter Chinese glyphs before recognition. The 8px
+            // input filter still omitted visible control text on the hosted
+            // 1x image. Acceptance below independently requires >=8px original
+            // bounds, exact tokens, confidence, contrast and completeness.
+            request.minimumTextHeight = 0
         }
         request.usesLanguageCorrection = true
         do {
