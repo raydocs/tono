@@ -230,3 +230,58 @@ Each folder's README states its exact source commit and limits. GitHub Actions a
 | Puck | T-01a12527-6258-75e2-a022-8b47669fc1b4 | relays the owner |
 
 An independent designer working from [HANDOFF.md](HANDOFF.md) should not edit the A13 branch. Its output is a design to review.
+
+---
+
+## 9. Continuation: 2026-10-11 ~11:10 UTC (A13 paused by the owner)
+
+### Owner decision (via Puck)
+
+- **A13 is paused.**
+  - Speculative new-architecture work on (c) stops, and so do new edits to recovery-related product source.
+  - The existing worker stopped at a safe checkpoint. Nothing was discarded or reset, and no new implementation worker was started.
+- **What continues:** read-only review of exact heads that already exist, evidence collection, and other explicitly scoped work.
+- **#1504 as a whole has NOT passed.** The pause does not merge it and does not build packages.
+- **Owner decision 2 still stands:** packages wait for a reliable release design. This is not open for re-choosing unless the owner changes it.
+- **Hard-gate boundary.** Sol's boundary below (a bounded attempt with an honest result; restoration is not unconditional) needs the owner's explicit approval. It is **not** assumed.
+- **Next design path:**
+  1. A separate AI (Claude Projects) writes a pre-emptive recovery experiment design on its own branch.
+  2. The original reviewer (Sol) reviews that design.
+  3. The prerequisites are then verified on dedicated, known-recoverable Mac/Windows machines: late DNS commit, launch isolation, crash recovery.
+  4. The owner approves the results and the architecture.
+  5. Only then is a single implementation owner and file ownership set, with phased implementation and exit conditions. No two parties write the helper in parallel.
+- **Not yet provided:** the document links and test machines. They are not assumed, and no destructive experiment is started.
+
+### Pause checkpoint (confirmed by the worker)
+
+- PR branch `amp/a13-emergency-disarm-bootout` head is
+  [`84a88ed4db421a2b6e0a1c805997bfdb5433a4d0`](https://github.com/raydocs/tono/commit/84a88ed4db421a2b6e0a1c805997bfdb5433a4d0).
+  It holds the R11-F1 fix, pushed before the stop arrived.
+- No unpushed commits and no uncommitted changes, so there is no WIP branch and no patch file.
+- The worker is idle and waiting. Design round 5 was cancelled before it started.
+- CI on 84a88ed4: ci-gate [38124552364](https://github.com/raydocs/tono/actions/runs/38124552364) was still running at the pause. The new regression is **not yet proven**.
+
+### #1504 itemized after the pause (exact SHA / CI / Sol)
+
+| Item | Fixed at | CI | Sol |
+|---|---|---|---|
+| R8-F1 late `go` after commit timeout | `20da92dd` (claimGo) | green at `7f73bd52` ([38119047390](https://github.com/raydocs/tono/actions/runs/38119047390)) | closed in R9 |
+| R8-F2 swallowed AI readback | `20da92dd` + `81213742`/`7f73bd52` | green at `7f73bd52` | closed in R9 |
+| R8-M1 budget nested calls | `20da92dd` | green at `7f73bd52` | closed in R9 |
+| R9-F1 failed pfctl query read as released (tri-state) | `b1d31856` | green at `5b23b163` ([38121267157](https://github.com/raydocs/tono/actions/runs/38121267157)) | closed in R10 |
+| R9-F2 stale `disconnectVerified` | `b1d31856` (test order fixed in `5b23b163`) | green at `5b23b163` | closed in R10 |
+| (a) fence, (b) drain cap with capability gate, (d) Support `--emergency-disarm` | `b1d31856`/`b2124fb7`/`5b23b163` | green at `5b23b163` | reviewed in R10. Fence accepted except for R10-F1. Dashboard copy and retry restriction accepted |
+| R10-F1 capped teardown stops a new Connect | `f7c8164f` | green ([38123029736](https://github.com/raydocs/tono/actions/runs/38123029736), 728/0/1) | **R11 FAIL** at `f7c8164f`: R11-F1 permanent wait cycle ([receipt](https://github.com/raydocs/tono/pull/1504#issuecomment-6107059593)) |
+| R10-M1 proxy budget | `f7c8164f` (no fixed bound; contributors listed) | green | closed in R11 |
+| R11-F1 capped-work cycle | `84a88ed4` (per-request registry, strictly older deps; regression `testRepeatedCappedReleasesWithTheNewerCapFirstFormNoCycle`) | **running** at pause | **not reviewed** |
+| (c) queue-independent bounded release | design only | — | **FAIL x4**. Round 4 at `2d757c1c` ([receipt](https://github.com/raydocs/tono/pull/1504#issuecomment-6107144656)): D4-F1 outside-lock PF flush; D4-F2 spawn identity / effect lifetime; D4-F3 rollback below floor after Connect; D4-F4 clock can't interrupt fsync/readback/reap; D4-M1 repair incarnation |
+
+### Sol's boundary on the hard gate (round 4; owner approval pending)
+
+- Feasible: a bounded local release attempt that always returns an honest released / partial / unknown.
+- Not feasible: unconditional restoration despite unreapable kernel work, or despite a non-cooperating root downgrade (an older Tono app reinstalling its older helper with an administrator password). A 50 s answer is not restoration evidence.
+- The worker's estimate of about 3,400–5,400 lines over about 3–4 weeks is "plausible but uncertified" and **not freeze-safe**.
+- Directionally sound: the epoch compare-and-swap with replay, and the helper-owned proxy.
+- DNS proof: accepted only as a conditional real-Mac gate.
+
+Unchanged from above: no freeze, no signed packages, all device gates pending, Windows failed-Prepare A/B pending the owner.
