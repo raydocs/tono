@@ -757,12 +757,6 @@ const LoginPage = () => {
                 <TonoIcon name="lock" size={14} />
                 <span>{t('tono.login.privacySummary')}</span>
               </p>
-              <details style={{ fontSize: 12, color: text.secondary }}>
-                <summary>{t('tono.login.privacyDetails')}</summary>
-                <p style={{ margin: '8px 0', lineHeight: 1.5 }}>
-                  {t('tono.login.trust')}
-                </p>
-              </details>
               <button
                 type="submit"
                 className={
@@ -787,6 +781,19 @@ const LoginPage = () => {
                         : t('tono.login.sendCode')}
                 </span>
               </button>
+              <details
+                style={{
+                  gridColumn: '1 / -1',
+                  gridRow: 3,
+                  fontSize: 12,
+                  color: text.secondary,
+                }}
+              >
+                <summary>{t('tono.login.privacyDetails')}</summary>
+                <p style={{ margin: '8px 0', lineHeight: 1.5 }}>
+                  {t('tono.login.trust')}
+                </p>
+              </details>
             </>
           ) : (
             <>
