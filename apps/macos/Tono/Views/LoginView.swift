@@ -350,7 +350,7 @@ struct LoginView: View {
                                 .modifier(SeaDisclosureTreatment())
                                 .disabled(locked)
                                 Label {
-                                    Text("Your email is only used to sign in. Traffic logs are never uploaded unless you turn that on in Settings.")
+                                    Text("Your email is only used to sign in. Traffic log upload is on by default: the hostnames you connect to, the apps that open each connection, and the matched rules and routes, used to diagnose problems. Turn it off in Settings.")
                                 } icon: {
                                     Image(systemName: "lock.fill")
                                 }
