@@ -255,6 +255,20 @@ outage, 300 s, is the shortest one that opens an incident: it resolves one 5-min
 
 ## Client behaviour
 
+**Windows, decision 091** (supersedes the Windows half of the order below): without a healthy
+tunnel (signed out, unarmed, armed without a tunnel, Protected Offline, drop recovery), a
+request to the API host goes to the relays only (`transport.rs` `send_over_relays`): the relay
+that last answered first, then the rest in `API_RELAYS` order, 4 s connect each
+(`RELAY_CONNECT_TIMEOUT`), 45 s total. No pinned, system-resolver, DoH, alternate-port or
+loopback-tunnel attempt, and no direct fallback: when every relay fails, the error is
+`TONO_RELAYS_UNREACHABLE: relay 1 (<ip:port>) <phase>: <cause>; relay 2 (…) …`, one entry per
+relay numbered by its place in `API_RELAYS` (a stable prefix the UI maps). Three dead relays cost at most
+12 s of connecting; a live third relay is reached by about 8 s. Connected (or a connect past
+`LockingTraffic`) the order is unchanged and the tunnel carries the direct path. Exceptions:
+armed without a tunnel on a Service below protocol revision 20 (no reported relay permit) and
+any host other than the API host keep the full walk below; the updater is unchanged.
+
+Otherwise (Windows with a tunnel or under an exception; macOS per decision 086 and below),
 Windows (`transport.rs`) and macOS (`TonoAPIClient.exchangeOverPaths`) try a relay only after
 the pinned Cloudflare addresses and the system resolver have both failed before any request
 byte was sent, so a sign-in code is never sent twice. A relay that answered is tried first
@@ -270,7 +284,8 @@ While protection is armed without a tunnel (bootstrap, Protected Offline):
   refresh can go through a relay in that state too (owner decision W-A,
   [decision 090](../decisions/090-2026-10-10-windows-armed-control-plane-via-relays.md),
   amending 077). No other process matches; connected (`Locked`) the whole channel is
-  retracted.
+  retracted. A Service at protocol revision 20 or later reports the permit, and the app then
+  goes relay-only in this state ([decision 091](../decisions/091-2026-10-10-control-plane-relay-only-without-tunnel.md)).
 - **macOS**: the helper's PF permits only the relays, TCP 2053, for the interactive user
   (decision 086, #1507); no Cloudflare address is permitted in that state.
 

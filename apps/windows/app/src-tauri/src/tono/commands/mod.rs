@@ -253,7 +253,15 @@ pub fn ui_state_key(ui_state: UiState) -> &'static str {
 }
 
 /// Snapshot the product state for the status command and the status event.
+///
+/// Also hands the API transport what carries the control plane now (decision 091): every
+/// connection and kill-switch change is published through here, before its network call
+/// (H16-O-F7), and the transport reads it before each path it tries.
 pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
+    inner.client.transport().set_control_plane_reach(crate::tono::transport::control_plane_reach_of(
+        &inner.fsm,
+        inner.kill_switch.as_ref(),
+    ));
     let status = inner.fsm.status();
     let stage = status.stage;
     let revision = inner.catalog_tracker.current_revision();
