@@ -3225,6 +3225,70 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
             assert_eq!(relay_connections.load(SeqCst), 2);
         }
 
+        /// A DoH query already on the wire when the user cancels (Disconnect publishes Unarmed and
+        /// the request's owner drops it): the query goes with its walk, well before its own 2 s
+        /// timeout, so no late answer can feed a direct request; the next sign-in goes to the
+        /// relays alone and dials nothing direct.
+        #[tokio::test]
+        async fn a_doh_query_in_flight_goes_with_a_cancelled_walk_and_the_next_request_uses_the_relays() {
+            use tokio::io::AsyncReadExt as _;
+            let relay_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let alternate = fixture("direct", false).await;
+            let unused_queries = Arc::new(AtomicUsize::new(0));
+            let mut transport = tunnel_walk(
+                relay_listener.local_addr().unwrap(),
+                &unused_queries,
+                vec![alternate.address.port()],
+            );
+            // A resolver that never answers: it reports each query, holds it open, and reports
+            // when the client goes away.
+            let resolver = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let resolver_address = resolver.local_addr().unwrap();
+            let (accepted_tx, mut accepted) = tokio::sync::mpsc::unbounded_channel();
+            let (closed_tx, mut closed) = tokio::sync::mpsc::unbounded_channel();
+            tokio::spawn(async move {
+                while let Ok((mut stream, _)) = resolver.accept().await {
+                    let _ = accepted_tx.send(());
+                    let closed_tx = closed_tx.clone();
+                    tokio::spawn(async move {
+                        let mut buffer = [0u8; 1024];
+                        while matches!(stream.read(&mut buffer).await, Ok(read) if read > 0) {}
+                        let _ = closed_tx.send(());
+                    });
+                }
+            });
+            transport.stand_ins.doh.as_mut().unwrap().resolvers =
+                vec![("localhost".to_owned(), vec![resolver_address])];
+            let transport = Arc::new(transport);
+            // The relay fails while the tunnel is up, and answers once it is the only path.
+            let relay_connections = scripted(relay_listener, |index| index > 0).await;
+
+            let walk = tokio::spawn({
+                let transport = Arc::clone(&transport);
+                async move { transport.send(request(HttpMethod::Get, closed_port())).await }
+            });
+            tokio::time::timeout(Duration::from_secs(20), accepted.recv())
+                .await
+                .expect("the walk reached its DoH query")
+                .unwrap();
+            transport.set_control_plane_reach(ControlPlaneReach::Unarmed);
+            walk.abort();
+            assert!(walk.await.unwrap_err().is_cancelled());
+            tokio::time::timeout(Duration::from_millis(1000), closed.recv())
+                .await
+                .expect("the DoH query outlived its cancelled walk")
+                .unwrap();
+
+            let response = transport
+                .send(request(HttpMethod::Get, closed_port()))
+                .await
+                .expect("the relays carry the next request");
+            assert_eq!(response.body, b"relay");
+            assert_eq!(alternate.connections(), 0, "a direct request ran after the cancel");
+            assert_eq!(relay_connections.load(SeqCst), 2);
+            assert!(accepted.try_recv().is_err(), "the next request sent a DoH query");
+        }
+
         /// The tunnel is lost during the last direct step, the loopback proxy request, and no
         /// relay answers: the request still ends with the relay-unreachable error.
         #[tokio::test]
