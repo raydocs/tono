@@ -107,6 +107,20 @@ final class MacUsabilityRenderTests: XCTestCase {
         func renderFirstRun(_ suffix: String, introLabels: [String], loginLabels: [String]) async throws {
             let language = InterfaceLanguagePreference.storedLanguage(defaults: defaults)
             let locale = Locale(identifier: language == InterfaceLanguagePreference.english ? "en" : "zh-Hans")
+            // Use the actual button's source key and the app's compiled catalog,
+            // selected by the same production default that drives this window.
+            // A wrong default, missing translation or wrong button key fails here.
+            let localization = try XCTUnwrap(Bundle.preferredLocalizations(
+                from: Bundle.main.localizations, forPreferences: [locale.identifier]).first)
+            let resourceURL = try XCTUnwrap(Bundle.main.url(forResource: localization, withExtension: "lproj"))
+            let catalog = try XCTUnwrap(Bundle(url: resourceURL))
+            let title = catalog.localizedString(forKey: LoginView.sendCodeTitleKey, value: nil, table: nil)
+            XCTAssertEqual(title, language == InterfaceLanguagePreference.english ? "Send a sign-in code" : "发送验证码")
+            let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("test-results/renders", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let evidence = "source=LoginView.sendCodeTitleKey catalog=app-bundle locale=\(locale.identifier) localization=\(localization) resolvedTitle=\(title) buttonOCR=not-claimed device=unverified\n"
+            try Data(evidence.utf8).write(to: folder.appendingPathComponent("default-language-login-" + suffix + "-resolved-title.txt"), options: .atomic)
             try await capture("default-language-intro-" + suffix, width: 760, height: 680,
                               annotate: false, darkAppearance: true,
                               nativeOpacity: .isolatedSubpixelEdges, nativeLabels: introLabels) {
@@ -121,7 +135,7 @@ final class MacUsabilityRenderTests: XCTestCase {
             }
         }
         try await renderFirstRun("fresh-zh", introLabels: ["连上，就受保护。", "下一步"],
-                                 loginLabels: ["登录 Tono", "发送验证码"])
+                                 loginLabels: ["登录 Tono"])
         defaults.set("English", forKey: SettingsKey.interfaceLanguage)
         XCTAssertEqual(InterfaceLanguagePreference.storedLanguage(defaults: defaults), "English")
         XCTAssertEqual(defaults.string(forKey: SettingsKey.interfaceLanguage), "English")
