@@ -6,6 +6,7 @@
   - 登录受保护态的恢复入口原为无边框纯文字，改为低强调轮廓按钮（非主色填充）。点击逻辑、`tonoDisconnect`、说明文案的“会关闭保护”语义不变；登录页此处原本就没有二次确认，未新增。
   - 托盘候选线路原只显示城市名加 →，点击会选择该线路（空闲时还会连接）。现显示“改用布法罗 / Use Buffalo”，accessible name 同。
   - 删除未被任何 tsx 引用、且写着“共 4 步”（实际 3 步）的 `tono.intro.progress`（en/zh；其它语言文件里的同名遗留键未动）。
+- 续记（2026-10-11，review M1）：Mac `Restore normal internet` 的 zh 值与 Win `tono.login.recoveryWaiting` 中的「恢复普通网络」同改为「恢复正常网络」，仅文案；安装器/uninstaller 里的同名叙述属特权路径，仍未动。
 - 新增/优化：无。
 - 工程与测试：新增 `src/locales/restore-action-name.test.ts`（一个 `it`）；`TrayPanel.test.tsx` 两处按钮名改为 “Use Buffalo”；重新生成 i18n 类型。
 - 验证：见 PR 正文。截图为合成 IO 的 Chromium，不是真机。

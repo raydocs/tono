@@ -98,7 +98,7 @@
     "retryPreview": "查看新报告",
     "recoveryTitle": "正在恢复连接",
     "recoveryActive": "Tono 正通过现有恢复流程重试，不会悄悄更换已选出口。",
-    "recoveryWaiting": "已安排重试。你可以立即重试，也可以明确选择恢复普通网络。",
+    "recoveryWaiting": "已安排重试。你可以立即重试，也可以明确选择恢复正常网络。",
     "recoveryStopped": "当前没有安排自动重试。请选择重试或查看健康检查。",
     "repairTitle": "修复后台服务？",
     "repairDescription": "Windows 可能请求管理员权限，以重启 TonoService 及其依赖服务。这不是网络重置，也不会解除保护。",
