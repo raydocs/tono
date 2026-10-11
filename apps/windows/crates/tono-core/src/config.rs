@@ -33,7 +33,7 @@ pub const DNS_LISTEN: &str = "127.0.0.1:53";
 pub const DIRECT_GROUP_NAME: &str = "Tono-China-Direct";
 pub const WEB_DIRECT_GROUP_NAME: &str = "Tono-China-Web-Direct";
 pub use crate::direct_domains::{
-    ADDRESS_FREE_WEB_SUFFIXES, CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS,
+    ADDRESS_FREE_WEB_SUFFIXES, CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS, CLOUD_VIDEO_DOMAINS,
     DEDICATED_MODEL_API_SUFFIXES, is_address_free_web_suffix,
 };
 /// Always attached to a native-app DIRECT plan, even if the published policy
@@ -922,6 +922,17 @@ fn runtime_value(
         .iter()
         .map(|rule| rule.to_string())
         .collect();
+    if home.is_some() || home_socks5.is_some() || direct.is_some_and(|plan| {
+        !plan.tcp_wechat_rules.is_empty() || !plan.tcp_web_rules.is_empty()
+            || !plan.web_suffix_rules.is_empty() || !plan.udp_wechat_rules.is_empty()
+    }) {
+        // Specific video/API exceptions precede Google parents and every
+        // Home/DIRECT process rule. Do not attempt a Reality UDP fallback.
+        for domain in CLOUD_VIDEO_DOMAINS {
+            rules.push(format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{EXIT_GROUP_NAME}"));
+            rules.push(format!("AND,((NETWORK,UDP),(DOMAIN-SUFFIX,{domain})),REJECT"));
+        }
+    }
     if home.is_some() || home_socks5.is_some() {
         // TCP-scoped on purpose: these pins sit ahead of the UDP REJECT rows,
         // and a network-agnostic Claude pin would swallow UDP into a group
@@ -1565,6 +1576,13 @@ reality-opts:
         rules
     }
 
+    fn expected_cloud_video_rules() -> Vec<String> {
+        CLOUD_VIDEO_DOMAINS.iter().flat_map(|domain| [
+            format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),Tono-Exit"),
+            format!("AND,((NETWORK,UDP),(DOMAIN-SUFFIX,{domain})),REJECT"),
+        ]).collect()
+    }
+
     /// Mirrors the emission order in `runtime_value`: the resolved TCP pins in plan order,
     /// then the UDP media rules. TCP is pinned rather than process-scoped because only a
     /// pinned endpoint has a matching WFP permit.
@@ -1602,6 +1620,8 @@ reality-opts:
             "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve".to_string(),
             "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
         ];
+        rules.extend(expected_cloud_video_rules());
+        let home_start = rules.len();
         for domain in CLAUDE_HOME_DOMAINS {
             rules.push(format!(
                 "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{CLAUDE_HOME_GROUP_NAME}"
@@ -1613,7 +1633,7 @@ reality-opts:
             ));
         }
         rules.extend(expected_home_process_rules(CLAUDE_HOME_GROUP_NAME));
-        let udp_rules: Vec<String> = rules[2..]
+        let udp_rules: Vec<String> = rules[home_start..]
             .iter()
             .map(|rule| {
                 rule.replace("(NETWORK,TCP)", "(NETWORK,UDP)")
@@ -1631,6 +1651,8 @@ reality-opts:
             "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve".to_string(),
             "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
         ];
+        rules.extend(expected_cloud_video_rules());
+        let home_start = rules.len();
         for domain in CLAUDE_HOME_DOMAINS {
             rules.push(format!(
                 "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{CLAUDE_HOME_GROUP_NAME}"
@@ -1642,7 +1664,7 @@ reality-opts:
             ));
         }
         rules.extend(expected_home_process_rules(CLAUDE_HOME_GROUP_NAME));
-        let udp_rules: Vec<String> = rules[2..]
+        let udp_rules: Vec<String> = rules[home_start..]
             .iter()
             .map(|rule| {
                 rule.replace("(NETWORK,TCP)", "(NETWORK,UDP)")
@@ -1778,6 +1800,7 @@ reality-opts:
             "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve".to_string(),
             "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
         ];
+        expected.extend(expected_cloud_video_rules());
         expected.extend(expected_home_process_rules("Tono-Exit"));
         // The shared helper, not a second hand-written copy: this test and
         // `expected_direct_rules` drifted apart exactly once already.
@@ -1790,8 +1813,9 @@ reality-opts:
             expected.iter().map(String::as_str).collect::<Vec<_>>()
         );
         let home_rules = expected_home_process_rules("Tono-Exit");
+        let home_start = 2 + 2 * CLOUD_VIDEO_DOMAINS.len();
         assert_eq!(
-            &rules[2..2 + home_rules.len()],
+            &rules[home_start..home_start + home_rules.len()],
             home_rules
                 .iter()
                 .map(String::as_str)
@@ -2088,7 +2112,7 @@ reality-opts:
     }
 
     #[test]
-    fn home_domains_cover_reviewed_assistants_without_google_at_large() {
+    fn home_domains_cover_owner_destinations_with_cloud_video_exceptions() {
         let socks5 = home_socks5();
         let runtime = build_with_home_socks5(Some(&socks5));
         let yaml = runtime.yaml();
@@ -2140,6 +2164,9 @@ reality-opts:
             "robinfrontend-pa.googleapis.com", "alkalicore-pa.clients6.google.com",
             "daily-cloudcode-pa.googleapis.com", "proactivebackend-pa.googleapis.com",
             "alkalimakersuite-pa.clients6.google.com",
+            "google.com", "googleapis.com", "github.com", "githubusercontent.com", "githubassets.com",
+            "reddit.com", "redd.it", "redditmedia.com", "redditstatic.com", "reddit.map.fastly.net",
+            "tiktok.com", "tiktokv.com", "tiktokcdn.com", "tiktokcdn-us.com", "ttlivecdn.com",
         ] {
             assert!(
                 CLAUDE_HOME_DOMAINS.contains(&required),
@@ -2159,16 +2186,12 @@ reality-opts:
             );
         }
         for forbidden in [
-            "google.com",
-            "googleapis.com",
             "gstatic.com",
             "youtube.com",
             "googlevideo.com",
-            "drive.google.com",
             "google.dev",
-            "clients6.google.com",
-            "github.com",
             "cloudflare.com",
+            "bytedance.com", "ibyteimg.com", "fastly.net", "akamaized.net", "edgesuite.net",
         ] {
             assert!(
                 !CLAUDE_HOME_DOMAINS.contains(&forbidden),
@@ -2204,6 +2227,13 @@ reality-opts:
             .iter()
             .map(|rule| rule.as_str().unwrap())
             .collect();
+        let home = rules.iter().position(|rule| rule.ends_with(",Tono-Claude-Home")).unwrap();
+        for host in ["youtube.com", "googlevideo.com", "youtubei.googleapis.com", "youtube-ui.l.google.com", "pornhub.com", "phncdn.com"] {
+            let cloud = format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{host})),Tono-Exit");
+            let index = rules.iter().position(|rule| *rule == cloud).expect(host);
+            assert!(index < home, "{host} must override Home domain/process rules");
+            assert!(crate::direct_domains::is_protected_from_direct(host));
+        }
         for domain in [
             "storage.googleapis.com",
             "registry.npmjs.org",
@@ -2842,7 +2872,7 @@ fingerprint: "1e5374a79bdb83b04c3d3c84722c03211d1c941c2de9f92431d2198ba7212cad"
         let home_rows = CLAUDE_HOME_DOMAINS.len() + CLAUDE_HOME_IPV4_CIDRS.len()
             + HOME_PROCESS_NAMES.len() + home_process_path_regexes().len();
         assert_eq!(tcp_home_rules.len(), home_rows);
-        let first_udp = 2 + home_rows;
+        let first_udp = 2 + 2 * CLOUD_VIDEO_DOMAINS.len() + home_rows;
         for (offset, tcp_rule) in tcp_home_rules.iter().enumerate() {
             let udp_rule = tcp_rule.replace("(NETWORK,TCP)", "(NETWORK,UDP)")
                 .replace(CLAUDE_HOME_GROUP_NAME, "REJECT");

@@ -316,6 +316,12 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
     } else {
         home.map(|n| n.name.as_str())
     };
+    if home_target.is_some() || input.direct_plan.is_some() {
+        // YouTube API children override Google Home; video overrides process
+        // fallbacks too. UDP rejection keeps retries on the protected TCP path.
+        rules.push(json!({"network":"tcp","domain_suffix":config::CLOUD_VIDEO_DOMAINS.to_vec(),"action":"route","outbound":"Tono-Exit"}));
+        rules.push(json!({"network":"udp","domain_suffix":config::CLOUD_VIDEO_DOMAINS.to_vec(),"action":"reject"}));
+    }
     if let Some(target) = home_target {
         rules.push(json!({"network":"tcp","domain_suffix":config::CLAUDE_HOME_DOMAINS.to_vec(),"action":"route","outbound":target}));
         rules.push(json!({"network":"tcp","ip_cidr":config::CLAUDE_HOME_IPV4_CIDRS.to_vec(),"action":"route","outbound":target}));
@@ -734,10 +740,17 @@ mod tests {
         let runtime = build_runtime(input(&nodes, &routing)).unwrap();
         let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
         assert_eq!(value["outbounds"][3]["detour"], "Tono-Exit");
-        assert_eq!(
-            value["route"]["rules"][4]["outbound"],
-            "Tono-Home-Residential"
-        );
+        let rules = value["route"]["rules"].as_array().unwrap();
+        let home = rules.iter().position(|rule| rule["outbound"] == "Tono-Home-Residential").unwrap();
+        for host in ["google.com", "github.com", "reddit.com", "redd.it", "tiktok.com", "tiktokv.com", "tiktokcdn.com"] {
+            assert!(rules[home]["domain_suffix"].as_array().unwrap().contains(&json!(host)), "{host}");
+        }
+        for host in ["youtubei.googleapis.com", "youtube-ui.l.google.com", "googlevideo.com", "pornhub.com", "phncdn.com"] {
+            let cloud = rules.iter().position(|rule| rule["network"] == "tcp"
+                && rule["outbound"] == "Tono-Exit"
+                && rule["domain_suffix"].as_array().is_some_and(|domains| domains.contains(&json!(host)))).unwrap();
+            assert!(cloud < home, "{host} must override broad Google and process Home rules");
+        }
         assert_eq!(runtime.dial_endpoints().len(), 1);
         assert!(!runtime.redacted_json().contains("sensitive-home-secret"));
         let routing = CatalogRouting {

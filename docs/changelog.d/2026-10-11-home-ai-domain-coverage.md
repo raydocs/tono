@@ -1,9 +1,10 @@
-## 2026-10-11 · 补齐 owner 指定的 Home AI 域名
+## 2026-10-11 · 补齐并扩大 owner 指定的 Home 域名，视频保留云出口例外
 - 归属：SHIP_PLAN G1/G2 下一版路由覆盖；不进入 0.0.75 G4 冻结候选，不恢复 A13 / #1504，不实现 #1571 默认 DIRECT 实验模式。
 - 来源：基线 [main a8b0be2d5701dbabdb644699547398bdefb99a26](https://github.com/raydocs/tono/commit/a8b0be2d5701dbabdb644699547398bdefb99a26)；分支 `fix/home-ai-domain-coverage`，准确提交/PR 与验证回执见交付 PR；未合 main。
-- 缺陷修复：owner 清单和截图对应的 51 个具体目标中，17 个已有覆盖，34 个缺失。两端 Home 后缀表同步由 84 项增至 118 项；保留既有条目与优先级，不将未匹中流量改为 DIRECT。
-- 新增/优化：补 g.ai、Dify、Poe、Groq、Sora、Cursor、Jasper、OpenArt、Clipdrop、chatgpt.site、OpenRouter，以及指定 Google AI、GitHub/JetBrains API、Cloudflare AI Gateway、Fathom 主机。具体主机沿用 DOMAIN-SUFFIX，涵盖该主机及子域，不扩成 google.com/googleapis.com/github.com 等共享父域；api.github.com 的非 AI API 请求同样走 Home，这是名单选择的影响，不是应用识别。
-- 工程与测试：扩展既有 Mac sing-box 产品配置 XCTest 和 Windows Home 配置回归，检查独立列出的缺项确实生成 TCP Home/UDP 拒绝规则、位于 DIRECT 前，且不加入共享父域。现有 Home 表继续参与两端 DIRECT 禁止集及 Windows Service 准入；无新接口、协议版本、进程匹配或 PF/WFP 改动。
+- 缺陷修复：owner 原清单和截图对应的 51 个具体目标中，17 个已有覆盖，34 个缺失；先补至 118 项。随后 owner 明确扩大 Google/GitHub、Reddit/TikTok（视频也算 Home），两端再补 48 项至 166 项；保留全部原条目，不将未匹中流量改为 DIRECT。
+- 新增/优化：除原来的具体 AI 主机，加入 google.com/googleapis.com/github.com、GitHub 内容/静态资源以及 Reddit/TikTok 的专属网站、媒体/CDN。相关父域的普通搜索、API、下载也走 Home，是明确的产品选择而非 AI 应用识别。21 个 YouTube/Pornhub 站点、媒体/API 后缀固定云出口，先于 Google 父域、Home 进程及 DIRECT；UDP 拒绝而非新增可能直连回退的 UDP 路由。
+- 来源与界限：专属媒体域名取自 [v2fly/domain-list-community c6adacf29](https://github.com/v2fly/domain-list-community/tree/c6adacf29cc4fb05e04651fcf03e00989ef9f797/data) 的 reddit/tiktok/youtube/pornhub 表，手工选择有界条目并沿用本项目后缀合同；不整体加入 fastly.net/akamaized.net/edgesuite.net/ibyteimg.com/bytedance.com，也不导入整个 Google 或 ByteDance 分类。不是所有未来 CDN、未知域名、裸 IP 或第三方加密解析都已全覆盖的证明。
+- 工程与测试：四个 Mac/Windows sing-box 与兼容 YAML 编译路径同步；两端 DIRECT 禁止集包含 Home 和云视频，Windows 精确控制器图证明加入视频前缀且保留完整顺序/数量检查。扩展既有公开运行时回归，检查 Home 媒体及 YouTube Google 子域的云优先级。Windows 云出口/TUN/DNS 探针改为不进 Home 的 gstatic generate_204，仍验证 DNS、TLS 和确切 HTTP 204，不改预算/恢复语义；无新接口、协议版本、进程匹配或 PF/WFP 改动。
 - 验证：Linux orb 的源码覆盖/两端一致性、签名策略合同与 diff 检查见准确 head PR 回执；原生测试由正常 PR CI 在指定宿主运行，具体通过/失败/pending 以回执为准。未执行设备、抓包、DNS 泄露或第三方账户实验，不将配置测试当作端到端安全证明。
 - 候选/发布：仅源码，无新候选、nightly、合并、部署或客户发布；保持 #1571 设计 PR 独立与 A13 暂停。
-- 剩余限制：已有 Claude/ChatGPT/Codex/Cursor/VS Code/Grok 等进程名和安装路径匹配，但不等于不可伪造身份或任意客户端全覆盖；共享 node/python 不整体捕获。截图目录应使用路径匹配而非 PROCESS-NAME；clau.de 已有，IPv4 /23 已被 /21 覆盖，IPv6 仍禁用。未添加泛化 openai 关键词或 HTTPS URL-REGEX；其明确的 alkali 主机按后缀覆盖，Gemini 主机已覆盖，不能按加密 URL 的查询参数识别 google.com 请求。路由名单不背书第三方域名归属，也不新增 Home 第二跳 DNS 或持续无泄露保证。
+- 剩余限制：已有 Claude/ChatGPT/Codex/Cursor/VS Code/Grok 等进程名和安装路径匹配，但不等于不可伪造身份或任意客户端全覆盖；共享 node/python 不整体捕获。截图目录应使用路径匹配而非 PROCESS-NAME；clau.de 已有，IPv4 /23 已被 /21 覆盖，IPv6 仍禁用。未添加泛化 openai 关键词或 HTTPS URL-REGEX，不能按加密 URL 的查询参数识别流量。gstatic/cloudflare 等共享父域不进 Home；不承诺网站免风控。路由名单不背书第三方域名归属，也不新增 Home 第二跳 DNS 或持续无泄露保证。独立路由审核、设备/DNS/节点切换及一周试用仍待安排；本轮不产出 nightly。

@@ -30,8 +30,9 @@ pub struct ProbeOrigin {
 pub const PROBE_ORIGINS: [ProbeOrigin; 1] = [
     ProbeOrigin {
         label: "Google",
-        url: "https://www.google.com",
-        expected_status: 200,
+        // google.com now routes Home; keep the cloud-path proof independent.
+        url: "https://www.gstatic.com/generate_204",
+        expected_status: 204,
     },
 ];
 
@@ -477,8 +478,8 @@ mod tests {
     #[test]
     fn https_origins_parse() {
         let (host, path) = parse_https_origin(PROBE_ORIGINS[0].url).unwrap();
-        assert_eq!(host, "www.google.com");
-        assert_eq!(path, "/");
+        assert_eq!(host, "www.gstatic.com");
+        assert_eq!(path, "/generate_204");
     }
 
     #[test]

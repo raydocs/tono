@@ -695,6 +695,11 @@ nonisolated extension ConfigPipeline {
         // PF session allowlist.
         let hasResidentialHop = claudeHome != nil || claudeHomeSocks5 != nil
         let assistantTarget = hasResidentialHop ? claudeHomeGroupName : exitGroupName
+        // Video/API exceptions precede Google parents and all process rules.
+        for suffix in Self.cloudVideoDomainSuffixes {
+            yaml += "  - AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(suffix))),\(exitGroupName)\n"
+            yaml += "  - AND,((NETWORK,UDP),(DOMAIN-SUFFIX,\(suffix))),REJECT\n"
+        }
         // These rows stay on without a residential hop. MATCH is not enough:
         // reviewed-bundle process rules and suffix routes are first-match and
         // would otherwise carry assistant names and 160.79.104.0/21 out the
