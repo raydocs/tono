@@ -99,17 +99,21 @@ enum RuntimeCleanup {
     /// helper against every older arm. Nothing automatic connects again,
     /// launch auto-connect included: Tono shows not connected and waits for
     /// the user's Connect, whose new helper session clears this.
-    static var connectAwaitsUser: Bool {
-        AppProfile.defaults.bool(forKey: SettingsKey.connectAwaitsUser)
+    /// Written from the privileged runtime's executor (the release and the
+    /// session begin run there), read on the main actor.
+    nonisolated static var connectAwaitsUser: Bool {
+        AppProfile.defaults.bool(forKey: connectAwaitsUserKey)
     }
 
-    static func noteUserRelease() {
-        AppProfile.defaults.set(true, forKey: SettingsKey.connectAwaitsUser)
+    nonisolated static func noteUserRelease() {
+        AppProfile.defaults.set(true, forKey: connectAwaitsUserKey)
     }
 
-    static func clearConnectAwaitsUser() {
-        AppProfile.defaults.removeObject(forKey: SettingsKey.connectAwaitsUser)
+    nonisolated static func clearConnectAwaitsUser() {
+        AppProfile.defaults.removeObject(forKey: connectAwaitsUserKey)
     }
+
+    nonisolated private static let connectAwaitsUserKey = "connectAwaitsUserAfterRelease"
 
     static func clearConnectBootSession() {
         AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)

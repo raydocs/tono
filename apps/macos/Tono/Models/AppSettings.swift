@@ -105,9 +105,6 @@ enum SettingsKey {
     /// `kern.bootsessionuuid` when the last connect started; removed by a
     /// completed release. See `RuntimeCleanup.holdsAutomaticResume`.
     static let connectBootSession = "connectBootSession"
-    /// Decision 094: set by the user's release, removed by the next helper
-    /// session a user Connect begins. See `RuntimeCleanup.connectAwaitsUser`.
-    static let connectAwaitsUser = "connectAwaitsUserAfterRelease"
 }
 
 enum InterfaceLanguagePreference {
