@@ -34,6 +34,18 @@ Home 名单的受支持业务 ──→ 云节点 ──→ Home 家宽 ──�
 
 名单内共享依赖用于普通工作时也走 Home：例如 Gmail、Stripe、npm、GitHub raw。Home 故障时这些请求同样会失败；“普通网络隔离”只指不属于 Home 的业务，不承诺所有页面/工作流毫无影响。不能为它们阻断整个 Cloudflare、Google、Azure 或 ASN。
 
+### 2.1 云第一跳可替换，assigned Home 与其 DNS 路径保持
+
+Owner 的补充目标：云节点故障、节点供应商流量耗尽或不稳定时，可以更换云第一跳；**不重新分配 Home，不把 Home 流量改为云端最终出口或 DIRECT**。本提案约束已有手动切节点及将来的切换行为，不实现自动选节点、健康调度或额度驱动切换。
+
+- 切换前后保持同一授权 Home 绑定与最终家宽出口，Home DNS仍经新云第一跳 → 同一 Home → 批准解析器；解析类别、主备解析器策略和禁止链外fallback的合同不变。DNS答案随TTL/CDN变化不等于泄露，不要求每次答案相同。
+- Cloud选择、Home绑定和会话代次是不同概念。Cloud变更必须重证新链；旧会话/旧Core的迟到effect不能因Home没变而获准写新状态。缓存复用需要同一已证明Home解析上下文及有效来源，不能把复用缓存报成新链已验证；Home身份/策略改变仍重新准入。
+- **同一个Home绑定、SOCKS地址或凭据，不保证同一个公网IP。** 供应商可能逐连接轮换，ISP也可能改地址。要承诺出口连续性，需明确固定/粘性家宽分配机制与其有效期，并用受控接收端对比切换前后实际出口。单次出口探测只证明当时；若供应商可在后续连接轮换，不能凭一次探测授予持续固定身份资格。最终IP改变或无法确认时停止Home新业务准入，不能把新身份静默称作原Home；具体检测/约束机制仍需设计审查。
+- Home本身故障与云第一跳故障分开处理：前者不能靠换云终点或随机换家宽“修好”；绑定迁移另走明确授权和重新准入流程，不藏在故障切换里。节点供应商额度与用户套餐/账户授权也不同，切节点不得绕过后者；运维额度估算不是供应商实际执行/当前可用性的证明。
+- 保持最终IP有助于减少因频繁更换出口引起的身份变化，**不保证平台风控通过或不封号**。第一跳切换仍可能中断TCP/AI流式会话，不能承诺无缝续传，也不能自动重放AI请求、付款或工具执行等有副作用的操作。
+
+“DNS保持一致”在这里指同一受保护解析合同和Home末端路径，不只是resolver名字一样；网站主要看到的是业务连接的最终出口。当前数据面绑定分离已有基础，但Home完整链DNS及出口连续性资格仍是待实现/验证项。
+
 ## 3. 当前已有的能力，以及不能沿用的证明
 
 以下是基线源码事实，不是设备抓包或线上配置证据。
@@ -42,6 +54,8 @@ Home 名单的受支持业务 ──→ 云节点 ──→ Home 家宽 ──�
 |---|---|---|
 | 默认路由 | Mac `ConfigPipeline+Runtime.swift:856–862` 的 MATCH，以及 `ConfigPipeline+SingBoxProduct.swift:355–367` 的 final；Windows `runtime-template.json:25–34` 都指向 Tono-Exit | 当前是默认代理，改一个 final/MATCH 不够；PF/WFP、DNS 和特权准入也依赖旧合同 |
 | Home 链 | Mac `ConfigPipeline+SingBoxProduct.swift:196–203`、Windows `sing_box/runtime.rs:312–348` 中 SOCKS5 的 detour 为 Tono-Exit，Home 不做最终云出口兜底 | 保留两跳；其他 home_proxy 表示必须证明同一拓扑后才能准入，不能只凭名字叫 Home |
+| Home绑定与Cloud选择 | `services/control-plane/src/catalog.ts:175–231` 按用户读取Home绑定，停用/缺失Home返回503；Mac `AppState+Proxy.swift:135–164` 改selectedNodeName、`AppState.swift:2879–2896` 单独取Home；Windows `connection/core_select.rs:219–237` 分别传selected和Home | 切Cloud不需要重新分配Home，这是配置构造事实，不是切换中无泄露/无迟到effect的设备证明 |
+| 家宽IP及节点额度 | `services/control-plane/src/home.ts:130–146,245–270` 的egressIpv4是绑定元数据，未进入上述catalog路由构造；`ops/quota.ts:354–372` 给运维周期额度/估算 | 未找到由此强制固定实际公网IP或自动安全切节点的证明；绑定/预期IP/实际出口/供应商额度不可混算 |
 | 上游 DNS | Mac `ConfigPipeline+SingBoxProduct.swift:214–235,335–346`、Windows `runtime-template.json:3–18` 默认为云出口 DoH；Mac 的部分 DIRECT DNS另走国内 DoH | 加密且经云出口，不等于上游 DNS 经家宽末端，也不等于任意客户端无法绕行 |
 | 客户 DNS 身份 | fake-IP；Mac `ConfigPipeline+SingBoxProduct.swift:236–244` 拒绝旧 slot；controller 查询需要真实答案 | 必须保留客户端/控制查询分离及过期身份拒绝；fake-IP 答案本身不证明上游出口 |
 | Mac 实际 resolver | `SystemProxy.swift:538–697` 读取有效 DNS、动态 split DNS 和 `/etc/resolver`；`AppState+Connect.swift:440–480` 要求系统查询及浏览器配置通过 | 读取失败不是安全；单次读回不证明未来不会被别的 writer 改写 |
@@ -93,7 +107,7 @@ Home 名单的受支持业务 ──→ 云节点 ──→ Home 家宽 ──�
 必须分开以下场景：
 
 1. **Home 故障、Core仍健康：** 阻断 Home 业务；允许名单外普通 DIRECT；云类按其路径可用性处理，不自动改最终 Home 身份。
-2. **云第一跳故障：** Home链和云类都可能不可用。若现有安全恢复允许换云第一跳，末端 Home身份与 DNS类别不能改变；不在本提案新增自动换城/传输机制。
+2. **云第一跳故障：** Home链和云类都可能不可用。若现有安全恢复允许换云第一跳，按§2.1保持assigned Home、末端身份与DNS合同并重证新链；切换窗口也不得链外解析/拨号。不在本提案新增自动选节点/换城/传输机制。
 3. **Core/Helper/Service死、卡住、重启：** 本地 DNS和按名分流可能一起消失。必须证明独立 Home防线先成立，再允许普通网络/DNS恢复；只写“守护进程会很快重启”不能关闭这项。
 4. **DNS writer/broker迟到、旧重连排队：** 单次读回/超时不证明未来不会修改。未结束旧 effect仍有 owner；不能仅凭 generation/CAS宣布其已失效。新 Connect准入必须等待真实终结或有已证明的拒绝机制。
 
@@ -157,7 +171,8 @@ Home 名单的受支持业务 ──→ 云节点 ──→ Home 家宽 ──�
 | Chrome/Edge配置中途变化、便携/参数DoH、ECH | 扫描间隔或漏扫描窗口内直连 | 强制机制阻止绕行，或该配置不准入；不能仅事后报警 |
 | system查询失败但TUN成功；foreign NRPT/GPO、Mac supplemental DNS | 把监听器成功/写注册表当系统通过 | 分项证据不被掩盖，不强制抹除外部策略，不声称严格通过 |
 | Home第二跳断，云第一跳仍通 | 偷退云IP | Home数据和DNS均失败；名单外普通业务继续 |
-| 云第一跳断/重建 | Home DNS另走直连，旧连接继续 | 无错误最终身份/链外解析；恢复后重证当前合同 |
+| 云A故障/节点供应商额度耗尽，手动改云B，再改云C；含切换失败及旧Core迟到 | 重绑Home、只验证云出口、DNS临时另走或旧代覆盖新链 | 同一assigned Home；受控数据及DNS接收端看到批准Home出口，切换全窗口无链外业务；新链重新准入，普通业务作对照，不靠跨云绕过账户限制 |
+| SOCKS端点/绑定不变，但供应商逐连接轮换或实际家宽IP改变 | 单次探测通过就声称所有后续请求身份固定 | 观察能检出身份变化；未经证明的固定/粘性机制不获持续资格，Home新业务不准入；同绑定不冒充同公网IP |
 | Core/daemon死亡与重启、已缓存数据直连 | 沉洞无效，普通恢复先放开Home | 独立Home阻断已成立后才放普通；做不到就不准入 |
 | 卡住/迟到DNS effect、取消等待后新Connect、重复操作 | CAS更新UI但旧OS操作覆写新会话 | unfinished owner挡准入或有已证明的拒绝；当前readback与未来资格分开 |
 | LAN开关、手机/NAS/打印机、IPv4/IPv6、Home解析私网地址 | 为本地设备打开路由器DNS或绕行 | 合法LAN可用，Home不直连私网/路由器DNS；不宣称全手机功能已覆盖 |
@@ -190,5 +205,6 @@ Home 名单的受支持业务 ──→ 云节点 ──→ Home 家宽 ──�
 5. Helper/Service是否真正验证同一合同及Home底线？是否有任意DIRECT注入、旧组件混配、假回执、系统writer迟到或retired owner复活路径？
 6. Home名单与普通业务、LAN/手机/GPO的误伤边界是否如实；是否遗漏CNAME、IPv6、SVCB、现有流和动态网卡？
 7. G0、正负对照、跨组件时间证据、停止/回退及一周试用是否可执行？候选签名入口、更新floor和稳定模式回归是否留有绕过？
+8. 云第一跳切换是否真正保留assigned Home及完整链DNS？固定/粘性家宽机制能保证什么、何时失效；能否区分同绑定与实际出口变化、节点供应商额度与用户账户限制，并拒绝有副作用请求的自动重放？
 
-可继续而不授权实验的下一步：锁定稳定包身份、补具体逐平台机制设计/支持矩阵，交Claude审阅；owner确定测试设备与带外恢复后，另批准实现和实验阶段。**当前阻塞：§5独立严格防线未定、运行时绕行约束未证、有效DNS准入需增强、稳定包/DUT/云名单/回退候选未确认。本PR完整交付的是这些要求与审查计划，不是“nightly已完成”。**
+可继续而不授权实验的下一步：锁定稳定包身份、补具体逐平台机制设计/支持矩阵，交Claude审阅；owner确定测试设备与带外恢复后，另批准实现和实验阶段。**当前阻塞：§5独立严格防线未定、运行时绕行约束未证、有效DNS准入需增强、家宽固定/粘性身份机制与切换证据未确认、稳定包/DUT/云名单/回退候选未确认。本PR完整交付的是这些要求与审查计划，不是“nightly已完成”。**
