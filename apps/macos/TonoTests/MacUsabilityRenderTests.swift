@@ -86,6 +86,54 @@ func nativeWindowRequest<Value>(
 /// Synthetic state only: no sign-in, helper calls, browser scans or uploads.
 @MainActor
 final class MacUsabilityRenderTests: XCTestCase {
+    func testDefaultChineseFirstRenderPreservesStoredEnglishAndAuto() async throws {
+        let suite = "tono-default-language-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(InterfaceLanguagePreference.storedLanguage(defaults: defaults), "简体中文")
+        XCTAssertNil(defaults.object(forKey: SettingsKey.interfaceLanguage))
+        defaults.set("unknown-locale", forKey: SettingsKey.interfaceLanguage)
+        XCTAssertEqual(InterfaceLanguagePreference.storedLanguage(defaults: defaults), "简体中文")
+        XCTAssertEqual(defaults.string(forKey: SettingsKey.interfaceLanguage), "unknown-locale")
+        defaults.removeObject(forKey: SettingsKey.interfaceLanguage)
+
+        let app = AppState()
+        let login = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        login.state = .signedOut
+        login.authMethods = .init(email: .init(enabled: true, clientId: nil),
+            apple: .init(enabled: false, clientId: nil), google: .init(enabled: false, clientId: nil))
+        // Production views, selected from the production stored-language resolver.
+        // Process/bundle English is explicit in the test scheme; it is not a user default.
+        func renderFirstRun(_ suffix: String, introLabels: [String], loginLabels: [String]) async throws {
+            let language = InterfaceLanguagePreference.storedLanguage(defaults: defaults)
+            let locale = Locale(identifier: language == InterfaceLanguagePreference.english ? "en" : "zh-Hans")
+            try await capture("default-language-intro-" + suffix, width: 760, height: 680,
+                              annotate: false, darkAppearance: true,
+                              nativeOpacity: .isolatedSubpixelEdges, nativeLabels: introLabels) {
+                WelcomeIntroView().modifier(SeaPageAppearance())
+                    .environment(\.seaAppearanceOverride, true).environment(\.locale, locale)
+            }
+            try await capture("default-language-login-" + suffix, width: 760, height: 720,
+                              annotate: false, darkAppearance: true,
+                              nativeOpacity: .isolatedSubpixelEdges, nativeLabels: loginLabels) {
+                LoginView(session: login).modifier(SeaPageAppearance())
+                    .environment(\.seaAppearanceOverride, true).environment(\.locale, locale).environment(app)
+            }
+        }
+        try await renderFirstRun("fresh-zh", introLabels: ["连上，就受保护。", "下一步"],
+                                 loginLabels: ["登录 Tono", "发送验证码"])
+        defaults.set("English", forKey: SettingsKey.interfaceLanguage)
+        XCTAssertEqual(InterfaceLanguagePreference.storedLanguage(defaults: defaults), "English")
+        XCTAssertEqual(defaults.string(forKey: SettingsKey.interfaceLanguage), "English")
+        try await renderFirstRun("saved-en", introLabels: ["Connected means protected.", "Next"],
+                                 loginLabels: ["Sign in to Tono", "Send a sign-in code"])
+        defaults.set("Auto", forKey: SettingsKey.interfaceLanguage)
+        XCTAssertEqual(InterfaceLanguagePreference.storedLanguage(defaults: defaults), "Auto")
+        XCTAssertEqual(defaults.string(forKey: SettingsKey.interfaceLanguage), "Auto")
+        XCTAssertNil(login.emailChallenge)
+        XCTAssertNil(app.connectionCoordinator.connectTask)
+    }
+
     func testLoginItemsWaitForConfirmationAndRecoverUnknownChanges() async throws {
         let suite = "tono-login-items-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

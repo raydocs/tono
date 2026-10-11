@@ -1,5 +1,7 @@
-import { getTonoPreferences } from './cmds'
+import { getTonoPreferences } from '@/services/cmds'
+
 import {
+  FALLBACK_LANGUAGE,
   cacheLanguage,
   getCachedLanguage,
   initializeLanguage,
@@ -96,11 +98,8 @@ const preloadLanguage = async (
     return resolved
   }
 
-  const browserLanguage = resolveLanguage(
-    typeof navigator !== 'undefined' ? navigator.language : undefined,
-  )
-  cacheLanguage(browserLanguage)
-  return browserLanguage
+  cacheLanguage(FALLBACK_LANGUAGE)
+  return FALLBACK_LANGUAGE
 }
 
 export const preloadAppData = async () => {

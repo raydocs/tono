@@ -79,7 +79,7 @@ struct SettingsView: View {
     @State private var loginItems: LoginItemPreference
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(SettingsKey.interfaceLanguage, store: AppProfile.defaults)
-    private var selectedLanguage = InterfaceLanguagePreference.auto
+    private var selectedLanguage = InterfaceLanguagePreference.simplifiedChinese
     @AppStorage(SettingsKey.logsEnabled) private var logsEnabled = true
     @AppStorage(SettingsKey.localTrafficAuditEnabled)
     private var localTrafficAuditEnabled = true
@@ -208,7 +208,7 @@ struct SettingsView: View {
                 settingsPicker(
                     label: "Interface Language",
                     selection: Binding(
-                        get: { selectedLanguage },
+                        get: { InterfaceLanguagePreference.resolve(selectedLanguage) },
                         set: changeLanguage
                     ),
                     options: languages

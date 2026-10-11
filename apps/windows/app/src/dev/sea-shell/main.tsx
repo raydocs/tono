@@ -1,15 +1,7 @@
-import i18n from 'i18next'
 import { createRoot } from 'react-dom/client'
-import { initReactI18next } from 'react-i18next'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { SWRConfig } from 'swr'
 
-import enSettings from '@/locales/en/settings.json'
-import enShared from '@/locales/en/shared.json'
-import en from '@/locales/en/tono.json'
-import zhSettings from '@/locales/zh/settings.json'
-import zhShared from '@/locales/zh/shared.json'
-import zh from '@/locales/zh/tono.json'
 import { writeTonoIntroSeen } from '@/pages/_layout/tono-guard'
 import SettingsPage from '@/pages/settings'
 import AccountPage from '@/pages/tono/account'
@@ -20,6 +12,7 @@ import LoginPage from '@/pages/tono/login'
 import ServersPage from '@/pages/tono/servers'
 import SupportPage from '@/pages/tono/support'
 import TrayPage from '@/pages/tono/tray'
+import { preloadAppData } from '@/services/preload'
 import { swrConfig } from '@/services/query-client'
 import {
   setNewAppearance,
@@ -33,15 +26,13 @@ setNewAppearance(params.get('appearance') !== 'old')
 setMotionPreference('static')
 if (params.get('route') === '/intro') localStorage.removeItem('tono.introSeen')
 else writeTonoIntroSeen()
-void i18n.use(initReactI18next).init({
-  resources: {
-    en: { translation: { tono: en, shared: enShared, settings: enSettings } },
-    zh: { translation: { tono: zh, shared: zhShared, settings: zhSettings } },
-  },
-  lng: params.get('lang') === 'zh' ? 'zh' : 'en',
-  fallbackLng: 'en',
-  interpolation: { escapeValue: false },
-})
+// An explicit fixture locale simulates a saved native choice without a stale web cache.
+// With no override, use the same no-choice startup as the packaged application.
+if (params.has('lang')) {
+  localStorage.removeItem('tono-language')
+  localStorage.removeItem('verge-language')
+}
+await preloadAppData()
 const router = createMemoryRouter(
   [
     {

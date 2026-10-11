@@ -4,7 +4,7 @@ import AppKit
 @main
 struct TonoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @AppStorage(SettingsKey.interfaceLanguage, store: AppProfile.defaults) private var interfaceLanguage = "Auto"
+    @AppStorage(SettingsKey.interfaceLanguage, store: AppProfile.defaults) private var interfaceLanguage = InterfaceLanguagePreference.simplifiedChinese
     @AppStorage(SettingsKey.introSeen, store: AppProfile.defaults) private var introSeen = false
     @StateObject private var updater: AppUpdater
     @State private var appState: AppState
@@ -138,7 +138,7 @@ struct TonoApp: App {
     static let preferredScheme: ColorScheme = .dark
 
     private var appLocale: Locale {
-        switch interfaceLanguage {
+        switch InterfaceLanguagePreference.resolve(interfaceLanguage) {
         case "简体中文": return Locale(identifier: "zh-Hans")
         case "English": return Locale(identifier: "en")
         default: return Locale.current  // "Auto" — follow system

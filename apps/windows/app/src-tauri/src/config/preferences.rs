@@ -4,10 +4,10 @@ use crate::{
     utils::{dirs, help},
 };
 use anyhow::Result;
-use tono_logging::{Type, logging};
 use log::LevelFilter;
 use serde::{Deserialize, Serialize};
 use smartstring::alias::String;
+use tono_logging::{Type, logging};
 
 /// Application preferences. Written as `tono.yaml`; `verge.yaml` is still read
 /// once on upgrade and adopted into the new name.
@@ -313,6 +313,7 @@ impl TonoPreferences {
             Ok(config) => config,
             Err(_) => Self::template(),
         };
+        config.language = Some(config.resolve_language());
 
         let mut needs_fix = false;
 
@@ -387,6 +388,7 @@ impl TonoPreferences {
         match dirs::verge_path() {
             Ok(path) => match help::read_yaml::<Self>(&path).await {
                 Ok(mut config) => {
+                    config.language = Some(config.resolve_language());
                     // compatibility
                     if let Some(start_page) = config.start_page.clone()
                         && start_page == "/home"
@@ -407,12 +409,22 @@ impl TonoPreferences {
         }
     }
 
+    /// Product UI languages; absent/retired locales never inherit the OS language.
+    /// Keep partial preference patches sparse so unrelated saves cannot replace English.
+    pub fn resolve_language(&self) -> String {
+        let normalized = self.language.as_deref().unwrap_or("").to_lowercase().replace('_', "-");
+        match normalized.split('-').next() {
+            Some("en") => "en".into(),
+            _ => "zh".into(),
+        }
+    }
+
     pub fn template() -> Self {
         Self {
             app_log_max_size: Some(128),
             app_log_max_count: Some(8),
             clash_core: Some("tono-core".into()),
-            language: Some(tono_i18n::system_language().into()),
+            language: Some("zh".into()),
             theme_mode: Some("system".into()),
             #[cfg(not(target_os = "windows"))]
             env_type: Some("bash".into()),
@@ -612,6 +624,24 @@ impl TonoPreferences {
 #[cfg(test)]
 mod auto_launch_seed {
     use super::TonoPreferences;
+
+    #[test]
+    fn startup_defaults_to_chinese_without_overwriting_saved_english() {
+        assert_eq!(TonoPreferences::template().language.as_deref(), Some("zh"));
+        let mut prefs: TonoPreferences = serde_yaml_ng::from_str("{}").unwrap();
+        assert_eq!(prefs.resolve_language().as_str(), "zh");
+        prefs.language = Some("unknown-locale".into());
+        assert_eq!(prefs.resolve_language().as_str(), "zh");
+        prefs.language = Some("en-US".into());
+        assert_eq!(prefs.resolve_language().as_str(), "en");
+        prefs.language = Some("en".into());
+        let patch: TonoPreferences = serde_yaml_ng::from_str("theme_mode: dark").unwrap();
+        assert_eq!(patch.language, None);
+        prefs.patch_config(&patch);
+        let saved: TonoPreferences = serde_yaml_ng::from_str(&serde_yaml_ng::to_string(&prefs).unwrap()).unwrap();
+        assert_eq!(saved.language.as_deref(), Some("en"));
+        assert_eq!(saved.resolve_language().as_str(), "en");
+    }
 
     #[test]
     fn toggling_auto_launch_marks_it_decided() {
