@@ -1159,6 +1159,13 @@ final class AppState {
     }
 
     func attemptAutomaticConnect() {
+        // Decision 094: after the user's release only their Connect arms.
+        // Consume the automatic intent quietly: not connected, no error.
+        if RuntimeCleanup.connectAwaitsUser, autoConnectRequested {
+            autoConnectRequested = false
+            LocalTrafficAudit.shared.recordEvent("automatic_connect_awaits_user")
+            return
+        }
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect,
               !automaticResumeHeldAfterRestart,
               autoConnectRequested, initialDataLoaded, isTonoReady,

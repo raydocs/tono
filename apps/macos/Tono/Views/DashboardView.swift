@@ -1136,8 +1136,8 @@ private struct ConnectionProgressCard: View {
         Classified: \(classifiedDetail)
         Retry attempt: \(appState.protectedReconnectAttempt)
         Kill Switch: \(KillSwitchService.isArmed ? "active" : "inactive")
-        Recovery command (last resort, restores normal internet):
-        sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-reset
+        Recovery command (last resort, administrator, restores normal internet):
+        sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-disarm
         """
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(summary, forType: .string)

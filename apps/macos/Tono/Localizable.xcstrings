@@ -39,6 +39,9 @@
     "Advanced": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Advanced"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "高级"}}}},
     "Read-only checks; nothing is changed or sent. Upload diagnostics shows a preview first and sends only after you confirm.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Read-only checks; nothing is changed or sent. Upload diagnostics shows a preview first and sends only after you confirm."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "只读检查，不会改动或发送任何内容。上传诊断会先显示预览，你确认后才发送。"}}}},
     "Restoring internet is taking longer than expected. Tono keeps finishing it in the background and will show the result; until then, direct internet may still be blocked. If it stays stuck, the Support page has a local recovery command.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Restoring internet is taking longer than expected. Tono keeps finishing it in the background and will show the result; until then, direct internet may still be blocked. If it stays stuck, the Support page has a local recovery command."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "恢复联网所需的时间比预期长。Tono 会在后台继续完成并显示结果；在此之前，直接联网可能仍被拦截。若一直没有完成，支持页面提供了一条本地恢复命令。"}}}},
+    "Restore normal internet in Tono is the one-click way to turn protection off. Use this command only as a last resort, when Tono cannot release protection: an administrator runs it in Terminal on this Mac. It turns off Tono's network rules, protected DNS and AI blocking rules, checks each one and prints the result. It does not remove Tono.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Restore normal internet in Tono is the one-click way to turn protection off. Use this command only as a last resort, when Tono cannot release protection: an administrator runs it in Terminal on this Mac. It turns off Tono's network rules, protected DNS and AI blocking rules, checks each one and prints the result. It does not remove Tono."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "在 Tono 中选择「恢复正常网络」是一键关闭保护的方式。只有在 Tono 无法解除保护时，才把这条命令作为最后手段：由管理员在这台 Mac 的“终端”中运行。它会关闭 Tono 的网络规则、受保护 DNS 和 AI 拦截规则，逐项核对并输出结果。它不会移除 Tono。"}}}},
+    "To remove Tono's network helper instead (for example, to use Tono from another macOS account), run the command below. It releases the network without checking each part, then removes the helper; Tono installs it again when you reopen it. While an update is pending, it only releases the network.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "To remove Tono's network helper instead (for example, to use Tono from another macOS account), run the command below. It releases the network without checking each part, then removes the helper; Tono installs it again when you reopen it. While an update is pending, it only releases the network."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "如需改为移除 Tono 的网络助手（例如要在另一个 macOS 账户中使用 Tono），请运行下面的命令。它会解除网络限制但不逐项核对，然后移除助手；重新打开 Tono 时会再次安装。有更新待完成时，它只解除网络限制。"}}}},
+    "Copy helper removal command": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Copy helper removal command"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "复制移除助手命令"}}}},
     "Internet is restored, but Tono could not confirm that its AI blocking rules were removed. If AI services stay blocked, choose Restore normal internet again. The Support page has a local recovery command.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Internet is restored, but Tono could not confirm that its AI blocking rules were removed. If AI services stay blocked, choose Restore normal internet again. The Support page has a local recovery command."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "已恢复联网，但 Tono 无法确认其 AI 拦截规则已移除。如果 AI 服务仍被拦截，请再次选择「恢复正常网络」。支持页面提供了一条本地恢复命令。"}}}},
     "Restoring internet turns protection off.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Restoring internet turns protection off."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "恢复正常网络会关闭保护。"}}}},
     "Switch server": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Switch server"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "切换线路"}}}},
@@ -7466,16 +7469,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "用量"
-          }
-        }
-      }
-    },
-    "Use this only when Tono cannot repair its network helper and the internet stays blocked after you quit Tono: it clears the helper's leftover network rules so the Mac connects normally again.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "仅在 Tono 无法修复其网络助手、且退出 Tono 后网络仍被阻断时使用：它会清除助手残留的网络规则，让这台 Mac 恢复正常联网。"
           }
         }
       }

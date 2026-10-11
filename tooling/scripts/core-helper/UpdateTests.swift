@@ -40,9 +40,11 @@ func runUpdateSelfTests() -> Bool {
     let owner = TonoAuthenticatedPeer(uid: 501, auditToken: Data("old-incarnation".utf8), bundleURL: URL(fileURLWithPath: UpdatePackage.appPath))
     let successor = TonoAuthenticatedPeer(uid: 501, auditToken: Data("new-incarnation".utf8), bundleURL: owner.bundleURL)
     func effects() -> UpdateTransaction.Effects {
-        .init(authenticate: { _ in }, installedFloor: { 5 }, installedComponents: { components },
+        var io = UpdateTransaction.Effects(authenticate: { _ in }, installedFloor: { 5 }, installedComponents: { components },
               stage: { _, _, _, _ in components }, observe: { .protectedOffline }, prepare: { _ in .protectedOffline },
               recovery: { _ in .protectedOffline }, disconnect: {}, launchExecutor: { _ in })
+        io.aiLayerAbsent = { true }
+        return io
     }
     func reserved(_ store: UpdateStorage, _ engine: UpdateTransaction) throws {
         try engine.reserve(peer: owner, manifest: manifest, manifestBytes: UpdateContractV1.canonical(manifest), signature: Data())
@@ -297,6 +299,94 @@ func runUpdateSelfTests() -> Bool {
         try engine.disconnect(peer: owner)
         try check(disarms == 2 && store.load().attempt?.disconnectVerified == true,
                   "A fully read-back Disconnect was not verified")
+    }
+
+    // R9-F1: a PF query that failed, gave no answer or printed something
+    // unrecognised is no proof of a release: the Disconnect is reported
+    // UPDATE_DISCONNECT_UNVERIFIED and never recorded verified. Controls: PF
+    // disabled, or an anchor with no rule (ALTQ notices only), verifies; a
+    // rule left in the anchor does not.
+    test("update-disconnect-unknown-pf-query-is-not-verified") { directory in
+        struct NoAnswer: Error {}
+        let enabled = "Status: Enabled for 0 days 00:01:02           Debug: Urgent\n"
+        let notices = "No ALTQ support in kernel\nALTQ related functions disabled\n"
+        func answering(info: String?, rules: String?, throwing: Bool = false) -> ([String]) throws -> String? {
+            { arguments in
+                if throwing { throw NoAnswer() }
+                return arguments == ["-s", "info"] ? info : rules
+            }
+        }
+        let cases: [(String, ([String]) throws -> String?, Bool)] = [
+            ("query timed out", answering(info: enabled, rules: "", throwing: true), false),
+            ("pfctl failed", answering(info: nil, rules: ""), false),
+            ("info unparseable", answering(info: "pfctl: garbage", rules: ""), false),
+            ("anchor query failed", answering(info: enabled, rules: nil), false),
+            ("anchor unparseable", answering(info: enabled, rules: "something else\n"), false),
+            ("block left", answering(info: enabled, rules: notices + "block drop out quick all\n"), false),
+            ("pf disabled", answering(info: "Status: Disabled\n", rules: nil), true),
+            ("anchor empty", answering(info: enabled, rules: notices), true),
+        ]
+        for (index, (name, query, releases)) in cases.enumerated() {
+            let store = try UpdateStorage(root: directory + "/case-\(index)")
+            let block = KillSwitchManager.pfBlockReading(query: query)
+            let intentGone: [String: Any] = ["ok": true, "wantArmed": false, "armed": false, "live": false]
+            let steps = UpdateRuntime.DisconnectSteps(
+                wanted: { false }, prepare: { _ in }, stopCore: {}, restoreDNS: {}, disarm: { _ in },
+                readback: {
+                    UpdateRuntime.DisconnectReadback(
+                        pfReleased: UpdateRuntime.pfReadsReleased(status: intentGone, block: block),
+                        coreStopped: true, tunnelAbsent: true, dnsRestored: true, proxyRestored: true, aiRemoved: true)
+                })
+            var io = effects()
+            io.disconnect = { try UpdateRuntime.runDisconnect(preserveAIHold: false, steps: steps) }
+            let engine = UpdateTransaction(storage: store, effects: io)
+            try reserved(store, engine)
+            var code: String?
+            do { try engine.disconnect(peer: owner) } catch let failure as HelperFailure { code = failure.code }
+            let verified = try store.load().attempt?.disconnectVerified == true
+            try check(verified == releases && (code == nil) == releases
+                      && (releases || code == "UPDATE_DISCONNECT_UNVERIFIED"),
+                      "\(name): PF read \(block), verified \(verified), code \(code ?? "none")")
+        }
+    }
+
+    // R9-F2: an automatic release verified with the AI hold kept; the user's
+    // later release fails its AI cleanup. The older, weaker proof must not
+    // stand for it: the ledger and status say not verified, and retirement
+    // refuses, also on its own live AI proof. Control: the user's release
+    // verified with AI removed retires.
+    test("automatic-proof-does-not-verify-a-failed-explicit-release") { directory in
+        let store = try UpdateStorage(root: directory)
+        var readback = UpdateRuntime.DisconnectReadback(
+            pfReleased: true, coreStopped: true, tunnelAbsent: true,
+            dnsRestored: true, proxyRestored: true, aiRemoved: false)
+        let steps = UpdateRuntime.DisconnectSteps(
+            wanted: { true }, prepare: { _ in }, stopCore: {}, restoreDNS: {}, disarm: { _ in },
+            readback: { readback })
+        var aiAbsent = false
+        var io = effects()
+        io.observe = { .unprotected }
+        io.aiLayerAbsent = { aiAbsent }
+        io.disconnectPreservingAIHold = { try UpdateRuntime.runDisconnect(preserveAIHold: true, steps: steps) }
+        io.disconnect = { try UpdateRuntime.runDisconnect(preserveAIHold: false, steps: steps) }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        try engine.disconnect(peer: owner, preserveAIHold: true)
+        try check(store.load().attempt?.disconnectVerified == true, "Automatic release was not verified")
+        var code: String?
+        do { try engine.disconnect(peer: owner) } catch let failure as HelperFailure { code = failure.code }
+        try check(code == "UPDATE_DISCONNECT_UNVERIFIED", "Failed AI cleanup was not reported partial")
+        try check(store.load().attempt?.disconnectVerified == false
+                  && (try engine.status())["disconnectVerified"] as? Bool == false,
+                  "The automatic proof stood for the failed explicit release")
+        try refuses { try engine.retireUnconsumed(peer: owner) }
+        readback.aiRemoved = true
+        try engine.disconnect(peer: owner)
+        try check(store.load().attempt?.disconnectVerified == true, "Explicit release with AI removed was not verified")
+        try refuses { try engine.retireUnconsumed(peer: owner) } // AI not proven absent now
+        aiAbsent = true
+        try engine.retireUnconsumed(peer: owner)
+        try check(store.load().attempt == nil, "Verified explicit release did not retire")
     }
 
     test("automatic-update-release-preserves-ai-and-consumed-obligation") { directory in

@@ -62,11 +62,43 @@ struct HelperTarget: Equatable {
     /// always, outside `--self-test`.
     nonisolated(unsafe) static var selfTestReading: Reading?
 
+    /// Decision 094: the daemon's in-memory fence for a user release whose
+    /// `released` record could not be written (a full or failing disk). It
+    /// holds until the next user Connect begins a session, or the daemon
+    /// exits. nil whenever the record on disk carries the fence.
+    nonisolated(unsafe) static var userReleaseFallback: HelperTarget?
+
     /// The target as this process must obey it: the in-memory release first.
     static func read() -> Reading {
         if let selfTestReading { return selfTestReading }
         if let processOverride { return .recorded(processOverride) }
+        if let userReleaseFallback { return .recorded(userReleaseFallback) }
         return readFile()
+    }
+
+    /// Decision 094: the user's explicit release (`/killswitch/disarm`, the
+    /// pending update's `/update/disconnect`) fences every older piece of
+    /// work before it releases anything: `released <n+1>` under the target
+    /// lock, as `--emergency-disarm` writes it. From then on an arm of an
+    /// older session, a Core start or sync, a DNS enable, PF supervision, the
+    /// power barrier and owner relaunch are refused, and an effect already in
+    /// flight is undone by its after-read; only the next `/session/connect`
+    /// (an explicit user Connect) re-arms. The release never waits on this:
+    /// a failed write keeps the same fence in memory instead. False then.
+    @discardableResult
+    static func fenceUserRelease(store: Store = Store(), now: Date = Date()) -> Bool {
+        do {
+            _ = try persistOperatorRelease(store: store, now: now)
+            userReleaseFallback = nil
+            return true
+        } catch {
+            userReleaseFallback = HelperTarget(mode: .released, generation: 0)
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: user release fence kept in memory; the target record was not written: \(detail)\n".utf8
+            ))
+            return false
+        }
     }
 
     static func readFile(path: String = HelperTarget.path, requireRootOwnership: Bool = true) -> Reading {
@@ -140,7 +172,7 @@ struct HelperTarget: Equatable {
         case .recorded(let target) where target.mode == .released:
             return .refused(
                 code: "OPERATOR_RELEASED",
-                message: "An administrator released Tono's network protection. Click Connect in Tono to reconnect."
+                message: releasedMessage
             )
         case .recorded(let target):
             if let sessionGeneration, sessionGeneration != target.generation {
@@ -190,7 +222,7 @@ struct HelperTarget: Equatable {
     /// block, its saved intent, an A29 protected fault and protected DNS stay
     /// exactly as they are. Only `.released`, an administrator's release
     /// recorded on disk (or latched in the `--emergency-disarm` process),
-    /// is release authority; the user's own Disconnect and Restore are the
+    /// or the user's own release fence (decision 094), is release authority; the user's own Disconnect and Restore are the
     /// other two, and they do not go through the target.
     enum Gate: Equatable {
         case allowed
@@ -281,9 +313,13 @@ struct HelperTarget: Equatable {
         return true
     }
 
+    /// Neutral: the record does not say whether the user or an administrator
+    /// released (decision 094).
+    static let releasedMessage = "Protection is off. Click Connect in Tono to reconnect."
+
     static let releasedFailure = HelperFailure.coded(
         code: "OPERATOR_RELEASED",
-        message: "An administrator released Tono's network protection. Click Connect in Tono to reconnect."
+        message: releasedMessage
     )
 
     /// Where the target lives, behind a seam for the self-tests. Every
@@ -398,8 +434,8 @@ struct HelperTarget: Equatable {
         }
     }
 
-    static let supersededConnectMessage = "Tono's connection target changed while connecting (an administrator "
-        + "released protection, or another Connect began). Click Connect again."
+    static let supersededConnectMessage = "Tono's connection target changed while connecting (protection was "
+        + "released, or another Connect began). Click Connect again."
 
     /// `/session/connect`: an explicit user Connect, the only way out of an
     /// operator release. Compare-and-swap under the target lock: `expected`
@@ -419,6 +455,8 @@ struct HelperTarget: Equatable {
                     HelperTarget(mode: .secured, generation: generation),
                     replacingUnreadable: reading.isUnreadable, now: now
                 )
+                // The user's Connect ends an in-memory release fence too.
+                userReleaseFallback = nil
                 return generation
             }
         } catch let failure as HelperFailure where failure.code == "SESSION_SUPERSEDED" || failure.code == "TARGET_STATE_BUSY" {
@@ -1763,6 +1801,147 @@ func runReleaseBetweenAcceptAndGoSelfTest() -> Bool {
     if !ended, child.isRunning { kill(child.processIdentifier, SIGKILL) }
     guard events.all == ["accepted", "released", "refused"], code == "OPERATOR_RELEASED", ended, !child.isRunning else {
         return selfTestFail("release between accept and go", "\(events.all) \(code ?? "none") \(ended)")
+    }
+    return true
+}
+
+// MARK: - Decision 094: the user's release fences older work
+
+private func userReleaseStore(_ directory: String) -> HelperTarget.Store {
+    var store = HelperTarget.Store()
+    store.path = directory + "/target"
+    store.requireRootOwnership = false
+    store.lockBudget = 0.3
+    store.write = { target, path in
+        try HelperTarget.encode(target).write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+    return store
+}
+
+private func refusalCode(_ store: HelperTarget.Store, sessionGeneration: UInt64?) -> String? {
+    do {
+        try HelperTarget.requireAdmission(sessionGeneration: sessionGeneration, reading: { store.read() })
+        return nil
+    } catch let failure as HelperFailure {
+        return failure.code
+    } catch {
+        return "other"
+    }
+}
+
+/// Decision 094: the user's explicit release runs fence, Core stop, DNS
+/// restore, disarm in that order, and afterwards the admission every older request passes
+/// through refuses it: an arm of the older session, and a Core start, Core
+/// sync or DNS enable (which carry no session). A fence the disk refuses is
+/// kept in memory instead, and the release still runs.
+func runUserReleaseFencesOlderWorkSelfTest() -> Bool {
+    let directory = NSTemporaryDirectory() + "tono-user-fence-\(UUID().uuidString)"
+    guard mkdir(directory, 0o700) == 0 else { return selfTestFail("user fence: setup") }
+    defer { try? FileManager.default.removeItem(atPath: directory) }
+    let store = userReleaseStore(directory)
+    let now = Date(timeIntervalSince1970: 1_000)
+    guard FileManager.default.createFile(atPath: store.path, contents: Data("secured 5\n".utf8)) else {
+        return selfTestFail("user fence: session 5")
+    }
+    var events: [String] = []
+    SocketServer.fenceThenStopForUserRelease(
+        fence: {
+            events.append("fence")
+            return HelperTarget.fenceUserRelease(store: store, now: now)
+        },
+        stopCore: { events.append("stop core") },
+        restoreDNS: { events.append("restore dns") }
+    )
+    events.append("disarm")
+    let disk = store.read()
+    guard events == ["fence", "stop core", "restore dns", "disarm"],
+          disk == .recorded(HelperTarget(mode: .released, generation: 6)),
+          HelperTarget.userReleaseFallback == nil,
+          refusalCode(store, sessionGeneration: 5) == "OPERATOR_RELEASED",   // stale arm of session 5
+          refusalCode(store, sessionGeneration: nil) == "OPERATOR_RELEASED", // Core start / sync, DNS enable
+          !HelperTarget.automaticRearmAllowed(disk),
+          HelperTarget.releasedFailure.message == "Protection is off. Click Connect in Tono to reconnect." else {
+        return selfTestFail("user release fence", "\(events) \(disk)")
+    }
+    var full = store
+    full.write = { _, _ in throw HelperFailure.system("injected: disk full") }
+    guard FileManager.default.createFile(atPath: store.path, contents: Data("secured 8\n".utf8)) else {
+        return selfTestFail("user fence: session 8")
+    }
+    defer { HelperTarget.userReleaseFallback = nil }
+    let written = HelperTarget.fenceUserRelease(store: full, now: now)
+    guard !written, HelperTarget.userReleaseFallback?.mode == .released,
+          HelperTarget.gate(HelperTarget.read()) == .released,
+          store.read() == .recorded(HelperTarget(mode: .secured, generation: 8)) else {
+        return selfTestFail("user release fence kept in memory", "\(written)")
+    }
+    return true
+}
+
+/// Decision 094: after the user's release only an explicit user Connect
+/// (`/session/connect`) re-arms. It begins a newer session that is admitted,
+/// the older one stays refused, and it ends an in-memory fence too.
+func runUserConnectAfterUserReleaseRearmsSelfTest() -> Bool {
+    let directory = NSTemporaryDirectory() + "tono-user-connect-\(UUID().uuidString)"
+    guard mkdir(directory, 0o700) == 0 else { return selfTestFail("user connect: setup") }
+    defer { try? FileManager.default.removeItem(atPath: directory) }
+    let store = userReleaseStore(directory)
+    let now = Date(timeIntervalSince1970: 1_000)
+    guard FileManager.default.createFile(atPath: store.path, contents: Data("secured 5\n".utf8)),
+          HelperTarget.fenceUserRelease(store: store, now: now) else {
+        return selfTestFail("user connect: fence")
+    }
+    HelperTarget.userReleaseFallback = HelperTarget(mode: .released, generation: 0)
+    defer { HelperTarget.userReleaseFallback = nil }
+    let session = try? HelperTarget.beginSession(expected: 6, store: store, now: now)
+    guard session == 7, HelperTarget.userReleaseFallback == nil,
+          refusalCode(store, sessionGeneration: 7) == nil,
+          refusalCode(store, sessionGeneration: nil) == nil,
+          refusalCode(store, sessionGeneration: 5) == "SESSION_SUPERSEDED" else {
+        return selfTestFail("user connect after user release", "\(session.map(String.init) ?? "none") \(store.read())")
+    }
+    return true
+}
+
+/// Decision 094, the late re-seal race: a PF load that passed its check
+/// before the user's release and lands after it is undone by its after-read
+/// and refused, and every later attempt is refused before it starts.
+func runLateReblockAfterUserReleaseSelfTest() -> Bool {
+    let directory = NSTemporaryDirectory() + "tono-user-reseal-\(UUID().uuidString)"
+    guard mkdir(directory, 0o700) == 0 else { return selfTestFail("late re-seal: setup") }
+    defer { try? FileManager.default.removeItem(atPath: directory) }
+    let store = userReleaseStore(directory)
+    let now = Date(timeIntervalSince1970: 1_000)
+    guard FileManager.default.createFile(atPath: store.path, contents: Data("secured 5\n".utf8)) else {
+        return selfTestFail("late re-seal: session 5")
+    }
+    var blocked = false
+    var undone = false
+    var code: String?
+    do {
+        try HelperTarget.guardedEffect(
+            gate: { HelperTarget.gate(store.read()) },
+            refusal: { HelperTarget.releaseRefusal(reading: { store.read() }) },
+            {
+                blocked = true // the stale PF load commits ...
+                _ = HelperTarget.fenceUserRelease(store: store, now: now) // ... as the user releases
+            },
+            undo: { undone = true; blocked = false }
+        )
+    } catch let failure as HelperFailure {
+        code = failure.code
+    } catch {}
+    var laterRan = false
+    do {
+        try HelperTarget.guardedEffect(
+            gate: { HelperTarget.gate(store.read()) },
+            refusal: { HelperTarget.releaseRefusal(reading: { store.read() }) },
+            { laterRan = true },
+            undo: {}
+        )
+    } catch {}
+    guard code == "OPERATOR_RELEASED", undone, !blocked, !laterRan else {
+        return selfTestFail("late re-seal after user release", "\(code ?? "none") \(undone) \(blocked) \(laterRan)")
     }
     return true
 }

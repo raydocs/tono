@@ -27,7 +27,16 @@ struct SupportView: View {
     @State private var healthCheck: LocalHealthCheck?
     @State private var technicalDetailsExpanded = false
 
+    /// Decision 094 (owner, via Puck): the last-resort local release. It
+    /// latches the release, stops the daemon, releases PF, DNS and the AI
+    /// rules, reads each one back and prints the result; it keeps Tono
+    /// installed. Not a substitute for Restore normal internet.
     private static let recoveryCommand =
+        "sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-disarm"
+    /// Helper removal (also how Tono moves to another macOS account). Its
+    /// release reads nothing back, and with an update pending it only
+    /// releases, so it is labelled as removal, not recovery.
+    private static let helperRemovalCommand =
         "sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-reset"
 
     private enum CopyTarget: Hashable {
@@ -35,6 +44,7 @@ struct SupportView: View {
         case logsFolderPath
         case report
         case recoveryCommand
+        case helperRemovalCommand
         case timing
         case appVersion
     }
@@ -659,29 +669,46 @@ struct SupportView: View {
 
     private var recoveryCard: some View {
         SupportCard(icon: "wrench.and.screwdriver", title: String(localized: "Recovery")) {
-            Text(String(localized: "Use this only when Tono cannot repair its network helper and the internet stays blocked after you quit Tono: it clears the helper's leftover network rules so the Mac connects normally again."))
+            Text(String(localized: "Restore normal internet in Tono is the one-click way to turn protection off. Use this command only as a last resort, when Tono cannot release protection: an administrator runs it in Terminal on this Mac. It turns off Tono's network rules, protected DNS and AI blocking rules, checks each one and prints the result. It does not remove Tono."))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text(Self.recoveryCommand)
-                .font(.system(size: 11, design: seaEnabled ? .default : .monospaced))
-                .foregroundStyle(.primary)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    .white.opacity(colorScheme == .dark ? 0.06 : 0.35),
-                    in: RoundedRectangle(cornerRadius: 10)
-                )
+            commandText(Self.recoveryCommand)
 
             copyButton(
                 title: String(localized: "Copy recovery command"),
                 target: .recoveryCommand,
                 value: Self.recoveryCommand
             )
+
+            Text(String(localized: "To remove Tono's network helper instead (for example, to use Tono from another macOS account), run the command below. It releases the network without checking each part, then removes the helper; Tono installs it again when you reopen it. While an update is pending, it only releases the network."))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            commandText(Self.helperRemovalCommand)
+
+            copyButton(
+                title: String(localized: "Copy helper removal command"),
+                target: .helperRemovalCommand,
+                value: Self.helperRemovalCommand
+            )
         }
+    }
+
+    private func commandText(_ command: String) -> some View {
+        Text(command)
+            .font(.system(size: 11, design: seaEnabled ? .default : .monospaced))
+            .foregroundStyle(.primary)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                .white.opacity(colorScheme == .dark ? 0.06 : 0.35),
+                in: RoundedRectangle(cornerRadius: 10)
+            )
     }
 
     // MARK: - Rows & Buttons

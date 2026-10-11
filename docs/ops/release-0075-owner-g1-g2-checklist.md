@@ -54,6 +54,12 @@
    - e. 放行中 / 放行后合上盖子睡眠 1 分钟再唤醒：仍已释放，不自动重连。
    - f. 放行后 `sudo launchctl kickstart -k system/com.raydocs.tono.core-helper`：仍已释放，2 分钟内不复锁。
    - g. 连续快速点三次 Restore internet：最终一次结果、已释放，不复锁。
+   - i. **放行后不自动重连（决定 094）**：Restore internet 读回已释放后退出并重开 Tono（也试一次重启 Mac）：显示未连接、
+     无错误、不循环重试；`sudo pfctl -a tono.killswitch -s rules` 仍为空；点 Connect 才重新连接并受保护。
+   - j. **排空上限（决定 094）**：连接进行中（还在「正在连接…」）点 Restore internet：最迟约 10 s 后开始放行，
+     不等那次连接；读回已释放，之后 2 分钟内旧连接不复锁、DNS 不变回 127.0.0.1；界面结果按真实读回。
+   - k. **Support 页**：显示 `--emergency-disarm`，写明是最后手段、由管理员在终端运行；照做一次（helper `SIGSTOP` 时）
+     输出逐项 restored、退出码 0、Tono 仍已安装。
    证据：每步命令输出 + 普通网站与 AI 服务都能打开的截图。
 
 ## G2（连不上时有下一手）

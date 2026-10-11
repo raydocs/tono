@@ -57,11 +57,12 @@ final class ConnectionCoordinator {
     private var deferredConnect: (id: UUID, task: Task<Void, Never>)?
 
     /// One overall UI deadline for an explicit release (decision 092,
-    /// one-click hard gate). Each helper call is bounded, but the queue also
-    /// drains cancelled connect/switch/reload work, and that drain has no
-    /// bound of its own. Past this deadline the UI publishes "unknown, still
-    /// finishing" while the release keeps running; it never releases early,
-    /// because a late mutation could still block the network again.
+    /// one-click hard gate). The drain of older work is capped
+    /// (`explicitReleaseDrainCap`, decision 094), and each helper call is
+    /// bounded, but their sum can pass this (the repair prompt alone is 180 s),
+    /// and the helper may still be serving an earlier long call. Past this
+    /// deadline the UI publishes "unknown, still finishing" while the release
+    /// keeps running. It is a UI deadline, not a bound on the release.
     var explicitReleaseDeadline: Duration = .seconds(60)
     private var explicitReleaseDeadlineTask: Task<Void, Never>?
     private var settledDisconnectRequestID = 0
@@ -73,6 +74,11 @@ final class ConnectionCoordinator {
     /// (`/update/disconnect`), which runs outside the teardown queue. AppState
     /// sets it at that release's deadline and clears it when the task ends.
     var updateReleaseStillFinishing = false
+    /// Decision 094: how long an explicit release waits for cancelled
+    /// connect/switch/reload work and an earlier teardown before it runs
+    /// anyway. The helper's user-release fence refuses whatever that stale
+    /// work sends later, so it cannot block the network again.
+    var explicitReleaseDrainCap: Duration = .seconds(10)
 
     /// Whether the pending or in-flight teardown queue's newest request is an
     /// explicit release, or was one that could not release PF. Newest-wins,
@@ -90,6 +96,7 @@ final class ConnectionCoordinator {
         waitingFor pendingTasks: [Task<Void, Never>] = [],
         releaseIntent: Bool = false,
         releaseDisposition: ReleaseDisposition? = nil,
+        afterLateDrain: (@MainActor (UInt64) async -> Void)? = nil,
         operation: @escaping @MainActor (Int) async -> Void
     ) {
         cancelDeferredConnect()
@@ -100,15 +107,73 @@ final class ConnectionCoordinator {
         disconnectQueueReleaseIntent = releaseIntent
         let previousDisconnect = disconnectSequence
         disconnectSequence = Task {
-            await previousDisconnect?.value
-            for task in pendingTasks { await task.value }
+            let stale = [previousDisconnect].compactMap { $0 } + pendingTasks
+            var capped = false
+            if disposition == .explicit {
+                // Decision 094: the user's release waits for older work at
+                // most `explicitReleaseDrainCap`, then runs. Whatever that
+                // work sends later is refused by the helper's user-release
+                // fence, and the release itself stops the Core and restores
+                // DNS after the fence.
+                capped = !(await Self.waitAtMost(stale, cap: self.explicitReleaseDrainCap))
+                if capped {
+                    LocalTrafficAudit.shared.recordEvent("explicit_release_drain_capped")
+                }
+            } else {
+                for task in stale { await task.value }
+            }
             await operation(requestID)
-            self.settledDisconnectRequestID = requestID
+            // An earlier request the cap stopped waiting for can settle later.
+            self.settledDisconnectRequestID = max(self.settledDisconnectRequestID, requestID)
             if requestID == self.disconnectRequestID {
                 self.explicitReleaseDeadlineTask?.cancel()
                 self.explicitReleaseDeadlineTask = nil
                 self.releaseStillFinishing = false
             }
+            guard capped, let afterLateDrain else { return }
+            // The work the release stopped waiting for ends later. Its own
+            // results are retired by the generation, but what it did to the
+            // Mac is read back once, still under this release's generation;
+            // a newer request or Connect owns the state instead.
+            let generation = self.protectionOperationGeneration
+            Task { @MainActor in
+                for task in stale { await task.value }
+                guard requestID == self.disconnectRequestID,
+                      self.protectionOperationGeneration == generation else { return }
+                await afterLateDrain(generation)
+            }
+        }
+    }
+
+    /// True when every task ended within `cap`; false at the cap, leaving
+    /// the tasks running (awaiting a Task's value cannot be cancelled).
+    static func waitAtMost(_ tasks: [Task<Void, Never>], cap: Duration) async -> Bool {
+        guard !tasks.isEmpty else { return true }
+        return await withCheckedContinuation { continuation in
+            let once = ResumeOnce(continuation)
+            let timer = Task { @MainActor in
+                try? await Task.sleep(for: cap)
+                once.resume(false)
+            }
+            Task { @MainActor in
+                for task in tasks { await task.value }
+                timer.cancel()
+                once.resume(true)
+            }
+        }
+    }
+
+    /// Resumes the capped wait exactly once: the drain or the cap, first wins.
+    nonisolated private final class ResumeOnce: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Bool, Never>?
+        init(_ continuation: CheckedContinuation<Bool, Never>) { self.continuation = continuation }
+        func resume(_ value: Bool) {
+            let pending = lock.withLock { () -> CheckedContinuation<Bool, Never>? in
+                defer { continuation = nil }
+                return continuation
+            }
+            pending?.resume(returning: value)
         }
     }
 
@@ -303,6 +368,7 @@ final class ConnectionCoordinator {
         pendingTasks: [Task<Void, Never>],
         prepare: () -> Void,
         onOverdue: (@MainActor () -> Void)? = nil,
+        afterLateDrain: (@MainActor (UInt64) async -> Void)? = nil,
         operation: @escaping @MainActor (Int) async -> Void
     ) {
         bumpGeneration()
@@ -315,6 +381,7 @@ final class ConnectionCoordinator {
             waitingFor: pendingTasks,
             releaseIntent: releaseKillSwitch,
             releaseDisposition: releaseDisposition,
+            afterLateDrain: afterLateDrain,
             operation: operation
         )
         if let onOverdue { scheduleExplicitReleaseDeadline(onOverdue) }

@@ -50,6 +50,8 @@ final class DisarmErrorReadbackTests: XCTestCase {
     private final class ReleaseLog {
         var disarms = 0
         var automaticReleases = 0
+        var statusReads = 0
+        var staleCommits = 0
     }
 
     private func releaseRuntime(_ log: ReleaseLog) -> NetworkProtectionOperations {
@@ -65,9 +67,93 @@ final class DisarmErrorReadbackTests: XCTestCase {
         runtime.disarm = { log.disarms += 1 }
         runtime.releaseAfterFailure = { log.automaticReleases += 1 }
         runtime.restrictToBootstrap = {}
-        runtime.refreshKillSwitchStatus = { .confirmed(requiresProtectionRecovery: false) }
+        runtime.refreshKillSwitchStatus = {
+            log.statusReads += 1
+            return .confirmed(requiresProtectionRecovery: false)
+        }
         runtime.selectiveAIRecoveryPending = { false }
         return runtime
+    }
+
+    /// Decision 094 drain cap: a cancelled connect never returns. The
+    /// release stops waiting for it at the cap, runs, and publishes its real
+    /// readback (here released with the AI removal still pending), not an
+    /// assumed success and not an interim "still finishing".
+    func testDrainCapReleasesAtTheCapAndPublishesTheReadback() async {
+        let app = AppState()
+        KillSwitchService.isArmed = true
+        defer {
+            KillSwitchService.isArmed = false
+            RuntimeCleanup.clearConnectAwaitsUser()
+        }
+        app.isConnected = true
+        let log = ReleaseLog()
+        var runtime = releaseRuntime(log)
+        runtime.selectiveAIRecoveryPending = { true }
+        app.networkProtection = runtime
+        app.connectionCoordinator.explicitReleaseDrainCap = .milliseconds(50)
+        let drain = ReleaseDrainGate()
+        defer { drain.open() }
+        app.connectionCoordinator.connectTask = Task { await drain.wait() }
+
+        app.disconnect(releaseKillSwitch: true)
+        await app.finishPendingDisconnect()
+
+        XCTAssertEqual(log.disarms, 1, "the release ran at the cap, with the stale connect still pending")
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertFalse(app.isProtectionUnconfirmed)
+        XCTAssertTrue(app.selectiveAIRecoveryPending, "the published result is the readback's")
+        XCTAssertFalse(app.isDisconnecting)
+        XCTAssertNotEqual(app.errorMessage, AppState.releaseStillFinishingMessage)
+    }
+
+    /// Decision 094: the work the capped release stopped waiting for ends
+    /// after the release. Its result belongs to a retired generation and
+    /// cannot overwrite the release; the late readback publishes what the
+    /// helper reports (released), never the stale work's claim.
+    func testLateResultFromRetiredWorkDoesNotOverwriteTheRelease() async {
+        let app = AppState()
+        KillSwitchService.isArmed = true
+        defer {
+            KillSwitchService.isArmed = false
+            RuntimeCleanup.clearConnectAwaitsUser()
+        }
+        app.isConnected = true
+        let log = ReleaseLog()
+        app.networkProtection = releaseRuntime(log)
+        app.connectionCoordinator.explicitReleaseDrainCap = .milliseconds(50)
+        let drain = ReleaseDrainGate()
+        let staleGeneration = app.connectionCoordinator.protectionOperationGeneration
+        app.connectionCoordinator.nodeSwitchTask = Task {
+            await drain.wait()
+            // The stale switch finishes and tries to publish its runtime.
+            _ = await app.connectionCoordinator.finishNodeSwitch(
+                generation: staleGeneration,
+                converge: {},
+                commit: { log.staleCommits += 1; app.isConnected = true },
+                recover: { _ in log.staleCommits += 1; app.isProtectionBlocked = true }
+            )
+        }
+
+        app.disconnect(releaseKillSwitch: true)
+        await app.finishPendingDisconnect()
+        XCTAssertEqual(log.disarms, 1)
+        XCTAssertEqual(log.statusReads, 0)
+        let releaseGeneration = app.connectionCoordinator.protectionOperationGeneration
+        XCTAssertNotEqual(releaseGeneration, staleGeneration, "the release retired the switch's generation")
+
+        drain.open()
+        for _ in 0..<500 where log.statusReads == 0 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertEqual(log.statusReads, 1, "the late drain is read back once")
+        XCTAssertEqual(log.staleCommits, 0, "the retired switch publishes nothing")
+        XCTAssertEqual(app.connectionCoordinator.protectionOperationGeneration, releaseGeneration)
+        XCTAssertFalse(app.isConnected)
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertFalse(app.isProtectionUnconfirmed)
+        XCTAssertEqual(log.disarms, 1)
     }
 
     /// One-click release whose drain never finishes: a cancelled connect

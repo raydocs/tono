@@ -130,7 +130,10 @@ final class UpdateRuntime {
     /// a partial or unknown result instead of an assumed success.
     static func runDisconnect(preserveAIHold: Bool, steps: DisconnectSteps) throws {
         do {
-            try steps.prepare(steps.wanted() ? .protectedOffline : .unprotected)
+            // The user's release fenced every arm first (decision 094) and
+            // keeps no bootstrap block, so it prepares as unprotected: only
+            // the automatic release retains the bootstrap until its disarm.
+            try steps.prepare(preserveAIHold && steps.wanted() ? .protectedOffline : .unprotected)
         } catch {
             guard disconnectReleasesWhenPrepareFails(strictKillSwitchEnabled: false) else { throw error }
             let detail = (error as? HelperFailure)?.message ?? String(describing: error)
@@ -164,11 +167,24 @@ final class UpdateRuntime {
         )
     }
 
+    /// R9-F1: PF reads released only when the helper's intent is gone and
+    /// pfctl itself proved the block absent; a failed or unparseable query
+    /// is unknown, never released.
+    static func pfReadsReleased(status pf: [String: Any], block: KillSwitchManager.PFBlockReading) -> Bool {
+        pf["ok"] as? Bool == true && pf["wantArmed"] as? Bool == false
+            && pf["armed"] as? Bool == false && block == .absent
+    }
+
+    /// The AI layer read back removed: no recovery pending and the installer
+    /// proves its resolvers and routes absent. An error answers false.
+    func aiLayerAbsent() -> Bool {
+        let aiRecord = (try? firewall.selectiveAIRecoveryStatus())?["aiRecoveryPending"] as? Bool
+        return aiRecord == false && SelectiveFailOpenInstaller.layerProvenAbsent()
+    }
+
     /// Strict reads: an error anywhere answers "not verified".
     func readBackDisconnect() -> DisconnectReadback {
-        let pf = firewall.status()
-        let pfReleased = pf["ok"] as? Bool == true && pf["wantArmed"] as? Bool == false
-            && pf["armed"] as? Bool == false && (try? KillSwitchManager.effectiveStatus()) == false
+        let pfReleased = Self.pfReadsReleased(status: firewall.status(), block: KillSwitchManager.pfBlockReading())
         var dnsRestored = false
         // configd's active store converges asynchronously after a restore.
         for attempt in 0..<30 {
@@ -180,14 +196,13 @@ final class UpdateRuntime {
             }
             if attempt < 29 { usleep(100_000) }
         }
-        let aiRecord = (try? firewall.selectiveAIRecoveryStatus())?["aiRecoveryPending"] as? Bool
         return DisconnectReadback(
             pfReleased: pfReleased,
             coreStopped: !core.status().running,
             tunnelAbsent: if_nametoindex("utun199") == 0,
             dnsRestored: dnsRestored,
             proxyRestored: (try? verifyProxyRestored()) != nil,
-            aiRemoved: aiRecord == false && SelectiveFailOpenInstaller.layerProvenAbsent()
+            aiRemoved: aiLayerAbsent()
         )
     }
 

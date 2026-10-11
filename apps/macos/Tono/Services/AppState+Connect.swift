@@ -920,7 +920,15 @@ extension AppState {
             : (automaticFailureRelease || afterUnarmedConnectFailure) ? .automatic : .explicit
 
         var onOverdue: (@MainActor () -> Void)?
+        var afterLateDrain: (@MainActor (UInt64) async -> Void)?
         if releaseDisposition == .explicit {
+            afterLateDrain = { [weak self] generation in
+                await self?.readBackAfterLateDrain(generation)
+            }
+            // Decision 094: from the user's release on, only their Connect
+            // arms; launch and every automatic path wait for it.
+            RuntimeCleanup.noteUserRelease()
+            autoConnectRequested = false
             onOverdue = { [weak self] in self?.publishReleaseStillFinishing() }
         }
         connectionCoordinator.executeDisconnect(
@@ -1032,6 +1040,7 @@ extension AppState {
                 self.activeDirectPolicy = nil
             },
             onOverdue: onOverdue,
+            afterLateDrain: afterLateDrain,
             operation: { [weak self, coreRuntime] requestID in
             var transitionError: String?
             var helperReadyForRelease = true
@@ -1302,6 +1311,28 @@ extension AppState {
         }
     )
 }
+
+    /// Decision 094: the explicit release stopped waiting for older work at
+    /// its drain cap, and that work has now ended. The helper's fence refused
+    /// whatever it sent after the release, and its results were retired by
+    /// the generation, so this only clears what the app itself can still
+    /// write (the system proxy) and reads PF back once. A verified live block
+    /// is published as it is; an unreadable status does not replace the
+    /// release's own readback.
+    func readBackAfterLateDrain(_ generation: UInt64) async {
+        guard !isConnected, !isConnecting else { return }
+        try? await networkProtection.disableSystemProxy()
+        let readback = await networkProtection.refreshKillSwitchStatus()
+        guard connectionCoordinator.protectionOperationGeneration == generation,
+              !isConnected, !isConnecting else { return }
+        LocalTrafficAudit.shared.recordEvent(
+            "explicit_release_late_drain_readback",
+            details: ["readback": String(describing: readback)]
+        )
+        if readback == .confirmed(requiresProtectionRecovery: true) {
+            isProtectionBlocked = true
+        }
+    }
 
     /// Local update gates can outlive a retired transaction. Only a fresh
     /// authenticated no-pending verdict permits ordinary Quit to retire them;

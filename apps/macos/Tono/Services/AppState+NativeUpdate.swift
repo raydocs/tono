@@ -88,7 +88,13 @@ extension AppState {
     func disconnectPendingNativeUpdate(preserveAIHold: Bool = false) {
         // An explicit Restore that joins a running automatic release keeps its
         // remove-AI intent; the running task issues it once it settles.
-        if !preserveAIHold { nativeUpdateExplicitReleaseRequested = true }
+        if !preserveAIHold {
+            nativeUpdateExplicitReleaseRequested = true
+            // Decision 094: the helper's update Disconnect fences older work;
+            // only the user's Connect arms again.
+            RuntimeCleanup.noteUserRelease()
+            autoConnectRequested = false
+        }
         guard nativeUpdateDisconnectTask == nil else {
             if !preserveAIHold { scheduleUpdateReleaseDeadline() }
             return

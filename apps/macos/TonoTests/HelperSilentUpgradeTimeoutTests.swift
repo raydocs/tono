@@ -37,7 +37,7 @@ final class HelperSilentUpgradeTimeoutTests: XCTestCase {
     /// stops answering ends the step (and the release reads as failed or
     /// unknown) instead of leaving the UI waiting.
     func testExplicitReleaseRequestsHaveBoundedReceiveTimeouts() {
-        XCTAssertEqual(HelperManager.receiveTimeout(for: "/killswitch/disarm"), 6)
+        XCTAssertEqual(HelperManager.receiveTimeout(for: "/killswitch/disarm"), 20)
         XCTAssertEqual(HelperManager.receiveTimeout(for: "/dns/restore"), 6)
         XCTAssertEqual(HelperManager.receiveTimeout(for: "/core/stop"), 6)
         XCTAssertEqual(HelperManager.receiveTimeout(for: "/killswitch/ai-recovery"), 6)

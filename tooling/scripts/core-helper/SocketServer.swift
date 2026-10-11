@@ -952,6 +952,29 @@ final class SocketServer {
         }
     }
 
+    /// Decision 094, the order every user release takes: the fence first, so
+    /// nothing older can arm, start or point DNS anywhere after it, then a
+    /// best-effort Core stop and DNS restore that undo whatever older work
+    /// committed before the fence. None of them can keep the release from
+    /// running; the app reads every component back afterwards.
+    static func fenceThenStopForUserRelease(
+        fence: () -> Bool,
+        stopCore: () throws -> Void,
+        restoreDNS: () throws -> Void
+    ) {
+        _ = fence()
+        func bestEffort(_ step: String, _ run: () throws -> Void) {
+            do {
+                try run()
+            } catch {
+                let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+                FileHandle.standardError.write(Data("tono: user release could not \(step): \(detail)\n".utf8))
+            }
+        }
+        bestEffort("stop the Core", stopCore)
+        bestEffort("restore DNS", restoreDNS)
+    }
+
     private func handleRuntime(_ request: HTTPRequest, client: Int32, owner: SessionOwner?) throws {
             switch (request.method, request.path) {
             case ("GET", "/version"):
@@ -1083,6 +1106,18 @@ final class SocketServer {
                 sendResponse(client, status: 200, object: response)
             case ("POST", "/killswitch/disarm"), ("POST", "/killswitch/release"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
+                if request.path == "/killswitch/disarm" {
+                    // Decision 094: the user's explicit release fences all older
+                    // work first, then stops a Core a stale start may have left.
+                    Self.fenceThenStopForUserRelease(
+                        fence: { HelperTarget.fenceUserRelease() },
+                        stopCore: {
+                            try? self.killSwitch.withholdReviewedBundlePermit()
+                            try self.core.stop()
+                        },
+                        restoreDNS: { _ = try self.protectedDNS.restore() }
+                    )
+                }
                 let response = try transitionGate.whileAwake {
                     try killSwitch.disarm(preserveAIHold: request.path == "/killswitch/release")
                 }

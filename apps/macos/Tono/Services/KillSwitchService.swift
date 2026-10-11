@@ -311,6 +311,7 @@ nonisolated enum KillSwitchService {
     static func beginSession() throws {
         do {
             _ = try sessionIPC.begin()
+            RuntimeCleanup.clearConnectAwaitsUser()
         } catch HelperIPCError.commandFailed(let message, let code?) where HelperManager.operatorReleaseCodes.contains(code) {
             LocalTrafficAudit.shared.recordEvent("helper_session_begin_refused", details: ["code": code])
             throw Error.operatorReleased(message)
@@ -460,6 +461,9 @@ nonisolated enum KillSwitchService {
             if isArmed { throw Error.notInstalled }
             return
         }
+        // Decision 094: the full release fences the helper; from here only the
+        // user's Connect may arm again, so nothing automatic tries to.
+        if !preserveAIHold { RuntimeCleanup.noteUserRelease() }
         do {
             _ = try HelperManager.restoreProtectedDNSIfConfigured()
             try HelperManager.disarmKillSwitch(preserveAIHold: preserveAIHold)

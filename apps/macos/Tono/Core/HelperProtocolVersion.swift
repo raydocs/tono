@@ -480,6 +480,16 @@ nonisolated enum HelperProtocolVersion {
     ///   is recorded verified only when PF, Core, TUN, DNS, the system proxy
     ///   and (for the user's release) the AI layer all read back released;
     ///   otherwise it answers `UPDATE_DISCONNECT_UNVERIFIED`.
+    ///   The user's own release fences the helper the same way (decision
+    ///   094): `/killswitch/disarm` and the user's `/update/disconnect`
+    ///   persist `released <n+1>` (kept in memory if the disk refuses) before
+    ///   anything else, then stop the Core and restore DNS, so older arms,
+    ///   starts, syncs and DNS enables are refused with "Protection is off.
+    ///   Click Connect in Tono to reconnect." until the next user Connect.
+    ///   No route, field or file format changed. PF reads released only when
+    ///   pfctl answered and showed Tono's block absent (a failed or
+    ///   unparseable query is unknown), and each update Disconnect withdraws
+    ///   an earlier proof before it runs; retirement also reads AI back.
     static let current = "4.52.50"
 }
 

@@ -9,6 +9,49 @@ import XCTest
 /// helper's refusal stops the automatic loops instead.
 final class UserConnectSessionTests: XCTestCase {
 
+    /// Decision 094: the user's own release fences the helper, so a later
+    /// launch does not auto-connect into a refusal: the automatic intent is
+    /// consumed quietly (not connected, no error), and only the user's
+    /// Connect, once its helper session begins, ends that wait.
+    func testLaunchAfterAUserReleaseDoesNotAutoConnect() async throws {
+        let savedSession = KillSwitchService.sessionIPC
+        defer {
+            KillSwitchService.sessionIPC = savedSession
+            KillSwitchService.isArmed = false
+            RuntimeCleanup.clearConnectAwaitsUser()
+        }
+        RuntimeCleanup.clearConnectAwaitsUser()
+        let releasing = AppState()
+        KillSwitchService.isArmed = true
+        releasing.isConnected = true
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { core in
+            core.isRunning = false
+            return true
+        }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = { KillSwitchService.isArmed = false }
+        runtime.restrictToBootstrap = {}
+        runtime.selectiveAIRecoveryPending = { false }
+        releasing.networkProtection = runtime
+        await releasing.disconnectAndWait(releaseKillSwitch: true)
+        XCTAssertTrue(RuntimeCleanup.connectAwaitsUser, "the user's release is recorded")
+
+        let launched = AppState()
+        launched.autoConnectRequested = true
+        launched.attemptAutomaticConnect()
+        XCTAssertFalse(launched.autoConnectRequested, "the automatic intent is consumed, not deferred")
+        XCTAssertFalse(launched.isConnecting)
+        XCTAssertNil(launched.errorMessage, "waiting for Connect is not an error")
+
+        KillSwitchService.sessionIPC.begin = { 7 }
+        try KillSwitchService.beginSession()
+        XCTAssertFalse(RuntimeCleanup.connectAwaitsUser, "the user's Connect ends the wait")
+    }
+
     func testOnlyTheUserConnectAttemptBeginsAHelperSession() throws {
         let savedSession = KillSwitchService.sessionIPC
         let savedArm = KillSwitchService.armIPC

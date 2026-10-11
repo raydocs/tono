@@ -94,6 +94,23 @@ enum RuntimeCleanup {
         }
     }
 
+    /// Decision 094: the user released protection (Restore internet, the
+    /// pending update's Disconnect, a signed-out release), which fences the
+    /// helper against every older arm. Nothing automatic connects again,
+    /// launch auto-connect included: Tono shows not connected and waits for
+    /// the user's Connect, whose new helper session clears this.
+    static var connectAwaitsUser: Bool {
+        AppProfile.defaults.bool(forKey: SettingsKey.connectAwaitsUser)
+    }
+
+    static func noteUserRelease() {
+        AppProfile.defaults.set(true, forKey: SettingsKey.connectAwaitsUser)
+    }
+
+    static func clearConnectAwaitsUser() {
+        AppProfile.defaults.removeObject(forKey: SettingsKey.connectAwaitsUser)
+    }
+
     static func clearConnectBootSession() {
         AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)
         try? FileManager.default.removeItem(at: connectBootSessionFile)

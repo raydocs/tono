@@ -1189,6 +1189,40 @@ extension KillSwitchManager {
         return try childAnchorActive()
     }
 
+    /// What a release readback may conclude about Tono's PF block (#1504
+    /// review R9-F1). `effectiveStatus` answers false for a query that failed
+    /// or could not be parsed, which is right for "may we re-arm" and wrong
+    /// for "is it released": only `.absent` is proof of a release.
+    enum PFBlockReading: Equatable {
+        case absent
+        case present
+        case unknown
+    }
+
+    /// `.absent` only when pfctl answered and said so: PF is disabled, or
+    /// Tono's anchor holds no rule. A query that failed, ran out of time or
+    /// printed anything it does not recognise is `.unknown`.
+    static func pfBlockReading(
+        query: ([String]) throws -> String? = { try KillSwitchManager.pfctlQuery($0) }
+    ) -> PFBlockReading {
+        guard let info = try? query(["-s", "info"]) else { return .unknown }
+        let status = info.lowercased()
+        if status.contains("status: disabled") { return .absent }
+        guard status.contains("status: enabled") else { return .unknown }
+        guard let rules = try? query(["-a", killSwitchAnchor, "-sr"]) else { return .unknown }
+        // pfctl prints these notices on every query of a kernel without ALTQ.
+        let notices = ["no altq support in kernel", "altq related functions disabled"]
+        let ruleStarts = ["block", "pass", "match", "anchor", "scrub", "nat", "rdr", "binat", "antispoof", "table"]
+        var present = false
+        for raw in rules.split(whereSeparator: \.isNewline) {
+            let line = raw.trimmingCharacters(in: .whitespaces).lowercased()
+            if line.isEmpty || notices.contains(where: { line.hasPrefix($0) }) { continue }
+            guard ruleStarts.contains(where: { line.hasPrefix($0) }) else { return .unknown }
+            present = true
+        }
+        return present ? .present : .absent
+    }
+
     // MARK: - PF enable reference
 
     /// A token this helper acquired but could not record. Held in memory only,

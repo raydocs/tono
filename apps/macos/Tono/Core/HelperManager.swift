@@ -1407,6 +1407,13 @@ nonisolated struct HelperManager {
             return 30
         case "/core/stop":
             return 6
+        case "/killswitch/disarm":
+            // Decision 094: the user's release fences first, then stops a
+            // Core and restores DNS a stale start may have left, then
+            // disarms: target lock 2 + Core stop 4.1 + DNS restore 6 + PF
+            // disarm 6, about 18 s at worst. A shorter wait would read an
+            // unfinished release as failed.
+            return 20
         case "/core/start", "/core/sync":
             return 20
         case "/version", "/core/status", "/killswitch/status":
