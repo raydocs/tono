@@ -75,6 +75,14 @@ export const SupportContact = ({
         minHeight: 32,
         padding: '6px 12px',
         fontSize: 12,
+        ...(contact
+          ? {
+              color: text.secondary,
+              fontWeight: 400,
+              background: 'transparent',
+              borderColor: 'transparent',
+            }
+          : {}),
       }}
     >
       {t(
