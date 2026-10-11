@@ -686,6 +686,10 @@ pub struct StartClashRequest {
     /// contract is byte-identical to what existing clients send; absent from older clients.
     #[serde(default)]
     pub windows_kill_switch: Option<KillSwitchConfig>,
+    /// The release generation this App last saw (revision 21). A start prepared before a
+    /// Restore internet carries the old one and is refused as stale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_generation: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -697,6 +701,9 @@ pub struct OwnerSessionHandle {
 pub struct StartClashResult {
     pub session: OwnerSessionHandle,
     pub proxy_outcome: ProxyApplyOutcome,
+    /// The release generation this session was admitted under (revision 21).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_generation: Option<u64>,
 }
 
 /// What staging a bundle into the running core's generation achieved.
@@ -775,6 +782,18 @@ pub enum ServiceErrorCode {
     /// are taken on main by `StaleReleaseEpoch`, `ProtectionHeldByAnotherUser` and
     /// `RemoteSessionConnectRefused`.)
     AppIdentityUnproven = 1016,
+    /// `StartClash` refused: a Restore internet run holds the release lock right now. Retry
+    /// once it has answered. Mapped to 409 Conflict.
+    ReleaseInProgress = 1017,
+    /// `StartClash` refused: the last Restore internet left a worker or a writer that may still
+    /// change the network. Mapped to 409 Conflict.
+    ReleaseUnfinished = 1018,
+    /// `StartClash` refused: `release-state.json` cannot be read, and it is never retired
+    /// automatically. Mapped to 409 Conflict.
+    ReleaseRecordCorrupt = 1019,
+    /// `StartClash` refused: it was prepared for a session a Restore internet already ended.
+    /// Mapped to 409 Conflict.
+    StaleGeneration = 1020,
 }
 
 pub fn owner_key(identity: &OwnerIdentity) -> String {
@@ -1025,6 +1044,7 @@ mod tests {
             }),
             kill_switch: None,
             windows_kill_switch: None,
+            release_generation: None,
         };
         let encoded = serde_json::to_vec(&request).expect("request should serialize");
         let decoded: StartClashRequest =

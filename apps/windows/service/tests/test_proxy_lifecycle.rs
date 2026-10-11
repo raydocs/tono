@@ -76,6 +76,7 @@ async fn client_uses_versioned_session_aware_proxy_lifecycle() -> Result<()> {
             macos_proxy: Some(MacosProxyConfig::Disabled),
             kill_switch: None,
             windows_kill_switch: None,
+            release_generation: None,
         },
     )
     .await?;
@@ -113,6 +114,7 @@ async fn client_uses_versioned_session_aware_proxy_lifecycle() -> Result<()> {
             macos_proxy: None,
             kill_switch: None,
             windows_kill_switch: None,
+            release_generation: None,
         },
     })?;
     let response = client
@@ -164,6 +166,7 @@ async fn owner_b_cannot_overtake_owner_a_proxy_operation() -> Result<()> {
             macos_proxy: None,
             kill_switch: None,
             windows_kill_switch: None,
+            release_generation: None,
         },
     )
     .await?;
@@ -210,6 +213,7 @@ async fn owner_b_cannot_overtake_owner_a_proxy_operation() -> Result<()> {
                 macos_proxy: None,
                 kill_switch: None,
                 windows_kill_switch: None,
+                release_generation: None,
             },
         )
         .await

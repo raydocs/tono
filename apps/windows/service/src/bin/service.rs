@@ -74,6 +74,19 @@ fn main() -> Result<()> {
     if std::env::args().any(|arg| arg == "--emergency-disarm") {
         return run_emergency_disarm();
     }
+    // PROPOSAL §10 v5: the same image runs the release service and its worker.
+    #[cfg(not(feature = "test"))]
+    if std::env::args().any(|arg| arg == "--release-worker") {
+        std::process::exit(tono_service_protocol::release_worker_run());
+    }
+    #[cfg(not(feature = "test"))]
+    if std::env::args().any(|arg| arg == "--release-service") {
+        service_dispatcher::start(
+            tono_service_protocol::release_wire::RELEASE_SERVICE_NAME,
+            ffi_release_service_main,
+        )?;
+        return Ok(());
+    }
     if service_dispatcher::start(
         tono_service_protocol::WINDOWS_SERVICE_NAME,
         ffi_service_main,
@@ -344,6 +357,78 @@ mod startup_reconcile_tests {
 #[cfg(windows)]
 define_windows_service!(ffi_service_main, my_service_main);
 
+#[cfg(all(windows, not(feature = "test")))]
+define_windows_service!(ffi_release_service_main, release_service_main);
+
+#[cfg(all(windows, not(feature = "test")))]
+fn release_service_main(_args: Vec<OsString>) {
+    if let Err(error) = run_release_service() {
+        info!("Release service failed to run: {}", error);
+    }
+}
+
+/// `TonoRelease`: serves only the release pipe. It shares nothing with the main Service, so a
+/// main Service parked in a WFP or DNS call cannot hold a Restore internet up.
+#[cfg(all(windows, not(feature = "test")))]
+fn run_release_service() -> platform_lib::Result<()> {
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
+    let event_handler = move |control_event| -> ServiceControlHandlerResult {
+        match control_event {
+            ServiceControl::Stop | ServiceControl::Preshutdown => {
+                let _ = shutdown_tx.try_send(());
+                ServiceControlHandlerResult::NoError
+            }
+            ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+            _ => ServiceControlHandlerResult::NotImplemented,
+        }
+    };
+    let status = service_control_handler::register(
+        tono_service_protocol::release_wire::RELEASE_SERVICE_NAME,
+        event_handler,
+    )?;
+    status.set_service_status(ServiceStatus {
+        service_type: ServiceType::OWN_PROCESS,
+        current_state: ServiceState::Running,
+        controls_accepted: ServiceControlAccept::STOP | ServiceControlAccept::PRESHUTDOWN,
+        exit_code: ServiceExitCode::Win32(0),
+        checkpoint: 0,
+        wait_hint: Duration::default(),
+        process_id: None,
+    })?;
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_name("tono-release")
+        .enable_all()
+        .build()
+        .unwrap();
+    let failed = rt.block_on(async {
+        // A worker that died may have left the main Service Disabled.
+        let _ = tokio::task::spawn_blocking(tono_service_protocol::release_service_recover_quarantine).await;
+        match tono_service_protocol::run_release_server_until(async {
+            let _ = shutdown_rx.recv().await;
+        })
+        .await
+        {
+            Ok(()) => false,
+            Err(error) => {
+                tracing::warn!("Release pipe failed: {error:#}");
+                true
+            }
+        }
+    });
+    rt.shutdown_background();
+    status.set_service_status(ServiceStatus {
+        service_type: ServiceType::OWN_PROCESS,
+        current_state: ServiceState::Stopped,
+        controls_accepted: ServiceControlAccept::empty(),
+        exit_code: ServiceExitCode::Win32(u32::from(failed)),
+        checkpoint: 0,
+        wait_hint: Duration::default(),
+        process_id: None,
+    })?;
+    Ok(())
+}
+
 /// The entry point for the Windows service.
 #[cfg(windows)]
 fn my_service_main(_args: Vec<OsString>) {
@@ -479,6 +564,10 @@ fn run_service() -> platform_lib::Result<()> {
                 return true;
             }
         };
+
+        // Register or refresh the release service from this image, off the startup path.
+        #[cfg(not(feature = "test"))]
+        tono_service_protocol::release_service_spawn_install();
 
         // WFP intent is restored before IPC exists, so no client can race a fail-open
         // startup; the watchdog keeps the expected rule set verified by key.

@@ -16,6 +16,9 @@ use tokio::sync::RwLock;
 #[cfg(all(windows, any(not(feature = "test"), test)))]
 mod windows_identity;
 
+mod release;
+pub use release::{release_service_available, release_status, request_release};
+
 use crate::{
     AuthenticatedRequest, AuthenticatedSessionRequest, BootstrapPins, DirectRuntimeReloadResult,
     DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, IPC_AUTH_EXPECT, IPC_PATH, IpcCommand,

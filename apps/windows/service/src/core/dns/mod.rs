@@ -577,6 +577,10 @@ async fn observe_for_update_with(barrier_wanted: bool) -> Result<DnsProtectionSt
 
 #[cfg(all(windows, not(feature = "test")))]
 mod engine;
+#[cfg(all(windows, not(feature = "test")))]
+mod release_readback;
+#[cfg(all(windows, not(feature = "test")))]
+pub(crate) use release_readback::{ReleaseDnsReadback, release_readback};
 
 
 

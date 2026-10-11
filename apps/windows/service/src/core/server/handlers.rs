@@ -45,6 +45,18 @@ fn update_operation(request: &crate::update_wire::UpdateRequest) -> Option<Opera
     .then(|| OperationGuard::begin(ServiceOperationKind::ReleaseKillSwitch, IPC_HANDLER_TIMEOUT))
 }
 
+/// The refusal a StartClash gets when the release authority does not admit it.
+fn release_admission_error(refusal: &crate::core::release::AdmissionRefusal) -> ServiceError {
+    use crate::core::release::AdmissionRefusal;
+    let code = match refusal {
+        AdmissionRefusal::InProgress => crate::ServiceErrorCode::ReleaseInProgress,
+        AdmissionRefusal::Unfinished(_) => crate::ServiceErrorCode::ReleaseUnfinished,
+        AdmissionRefusal::Corrupt(_) => crate::ServiceErrorCode::ReleaseRecordCorrupt,
+        AdmissionRefusal::Stale => crate::ServiceErrorCode::StaleGeneration,
+    };
+    ServiceError::new(code, refusal.to_string())
+}
+
 /// How a StartClash whose owner-proxy transition failed reports the error after this request
 /// armed the Windows kill switch: the transition's refusal stays the verdict, and a failed arm
 /// rollback is appended to it — the machine may still be blocked, so the message must say so.
@@ -799,6 +811,14 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             };
             let _operation_guard =
                 OperationGuard::begin(ServiceOperationKind::StartCore, IPC_HANDLER_TIMEOUT);
+            // PROPOSAL §10 v5: a Connect runs only under a generation the release authority
+            // admitted. A release that is running, unfinished or newer than this request
+            // refuses it before anything is armed.
+            let release_generation =
+                match crate::core::release::admit_start(start_request.release_generation).await {
+                    Ok(generation) => generation,
+                    Err(refusal) => return service_error(release_admission_error(&refusal)),
+                };
             let previous_owner = match load_active_owner().await {
                 Ok(owner) => owner,
                 Err(error) => {
@@ -921,6 +941,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     generation: active.generation,
                 },
                 proxy_outcome,
+                release_generation: Some(release_generation),
             })
         })
         .get(IpcCommand::GetClashLogs.as_ref(), |ctx| async move {

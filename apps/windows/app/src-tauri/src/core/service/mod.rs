@@ -751,6 +751,7 @@ pub(crate) async fn tono_start_core_with_kill_switch(
         macos_proxy: None,
         kill_switch: None,
         windows_kill_switch: Some(kill_switch),
+        release_generation: None,
     };
 
     let response = match tono_service_protocol::start_clash(&credentials, &request).await {

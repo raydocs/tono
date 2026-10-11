@@ -690,6 +690,14 @@ fn windows_cleanup() -> CleanupOutcome {
         {
             cosmetic_error = Some(error);
         }
+        // The release service is registered by the main Service from its own image; it goes
+        // with it (PROPOSAL §10 v5).
+        #[cfg(not(feature = "test"))]
+        if let Err(error) = tono_service_protocol::release_service_remove()
+            && cosmetic_error.is_none()
+        {
+            cosmetic_error = Some(error);
+        }
         cosmetic_error
     })
 }
