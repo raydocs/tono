@@ -22,7 +22,9 @@ extension AppState {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
         if !preservingUnarmedBackoff { unarmedReconnectAttempt = 0 }
         connectionCoordinator.executeConnect(
-            isDisconnecting: teardownInFlight,
+            // R10-F1: a Connect also waits for stale work a capped release
+            // left running; it would otherwise stop or restrict this session.
+            isDisconnecting: teardownInFlight || connectionCoordinator.cappedStaleWorkSettling,
             deferredFallback: { [weak self] in
                 guard let self,
                       !self.isConnected,

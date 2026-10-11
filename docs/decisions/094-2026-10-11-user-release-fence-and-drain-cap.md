@@ -27,25 +27,30 @@
     refused by (a); its UI results are retired by the protection generation. When it ends, the app clears the system
     proxy and reads PF back once under the release's generation; a verified live block is published as it is, an
     unreadable status does not replace the release's own readback. A timeout anywhere is published as unknown,
-    never as released.
+    never as released. The capped work still runs its own effects (an older teardown still turns the proxy off and
+    restricts PF), so until it and that readback have ended no newer Connect is admitted and no later teardown runs
+    (R10-F1, `ConnectionCoordinator.cappedStaleWork`): the user's Connect waits, the release does not.
   - Rejected: an uncapped drain (no bound); cancelling or killing the stale helper call (the app cannot interrupt a
     blocking IPC call, and the helper's request loop is serial); fencing in the app only (a restarted app or a
     second process would not see it).
-- Budget (explicit release, seconds, upper bounds; device-gated, not measured):
+- Budget (explicit release, seconds; device-gated, not measured). The rows are per-call limits, and the totals are
+  **not proven ceilings**: they leave out the queue and the system proxy, neither of which has a fixed bound.
 
   | Stage | Bound |
   |---|---|
   | Queue: whatever privileged work is already in flight when the user clicks (the app actor and the helper's loop each run one call at a time) | **not bounded.** Known contributors: the in-flight call's own receive limit (ordinary arm / upgrade 30; `/update/stage` 600 for the request, but its copy, hash and fsync are not otherwise bounded and it holds the update lock, whose waiters allow 660); an earlier repair prompt 180 plus the 45 start-up poll; several serial actor calls queued ahead, each with its own limit |
   | Drain of cancelled work (new) | 10 |
   | Start-up: helper repair check without a prompt | 4.7 (with the administrator prompt 180 + 45) |
-  | Release: Core stop 8, Core status 2, DNS restore 6, system proxy 6, `KillSwitchService.disarm` 39 (status probes 13, DNS restore 6, disarm 20) | 61 |
+  | Release: Core stop 8, Core status 2, DNS restore 6, `KillSwitchService.disarm` 39 (status probes 13, DNS restore 6, disarm 20) | 55, plus the system proxy |
+  | System proxy (only when Tono set one, `SystemProxy.didSetProxy`: a session without TUN; the managed TUN session never sets it) | **no fixed bound.** Contributors: `networksetup -listallnetworkservices` for the saved service, waited with `waitUntilExit` (no limit); then up to 6 `networksetup` children (3 without a snapshot) at 15 each plus 0.3 kill grace; on any failure one `osascript` administrator fallback of 180. Without the lookup that is up to about 272 |
   | Readback: status after a disarm error 2, AI layer 6 | 8 |
-  | Total after the queue | 83.7 (with repair 308.7) |
+  | Total after the queue, without the system proxy | 77.7 (with repair 302.7); not a ceiling |
   | Pending-update release (`/update/disconnect` 45, AI 6, status 6) | 57 |
 
   The 60 s UI deadline (decision 092) only stops the UI waiting and shows "unknown, still finishing"; it is not a
-  bound on the release. With (a) and (b) the release is bounded after it starts, but its start still waits for the
-  privileged work in flight (the queue row, not bounded). (c) addresses that.
+  bound on the release. With (a) and (b) the release's helper calls are bounded after it starts (the system proxy,
+  when Tono set one, is not), but its start still waits for the privileged work in flight (the queue row, not
+  bounded). (c) addresses that.
   The drain cap applies only against a helper known to fence (the daemon last heard from in this app session answered
   this build's helper version; nothing is probed for it). Against any other helper, or before the first answer, the
   release keeps the uncapped wait.

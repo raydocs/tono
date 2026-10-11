@@ -101,3 +101,6 @@
     - 修 CI：`automatic-proof-does-not-verify-a-failed-explicit-release` 原先以 unprotected 预留、准备却报 protectedOffline，在场景前就失败；改为先 protectedOffline 预留。
     - (c) 设计按 D-F1–D-F5 重写（决定 094 §(c)，仍未实现）：一次放行一个 epoch（栅栏对会话代数做 CAS，迟到写入与旧撤销不能影响更新的 Connect）；「已放行」要求持久栅栏；`.going` 超时须先证明子进程已回收才放手；单一单调时限、被放弃工作归属到各管理器、定时非递归锁与锁图、有界 socket 读写与认证、请求合并；代理恢复与读回并给旧代理写入加 epoch 检查；快路径不碰更新账本；遗留 helper 走能力门。目标 helper 4.52.51，待 Sol 设计通过。
     - 排队段不再写成上限（≤600 / ≤225 不是已证明的上限），改为「没有上限」并列出已知来源。
+  - Sol R10 代码审查 @5b23b163（1 个 major + 1 个 minor，未开始 (c)）：
+    - R10-F1：显式放行封顶后不再等待的旧工作（上一个拆除、被取消的连接 / 切换 / 重载）仍会执行自己的网络效果（如旧的保留拆除继续关代理、收紧 PF）。现在由 `ConnectionCoordinator.cappedStaleWork` 跟踪它和随后的迟到回读：在它结束前，新的 Connect 等待（`connect` 走延后路径，`connectAfterDisconnect` 也等它），后续拆除排在它之后；恢复联网本身仍不等待。迟到回读改为用放行结束时的代数判断。回归 XCTest `DisarmErrorReadbackTests.testConnectAfterACappedReleaseWaitsForTheOldTeardownToEnd`（旧保留拆除卡在停 Core → 封顶的恢复联网完成 → 用户 Connect 不被接纳 → 旧拆除结束 → 其关代理、收紧 PF 与回读都发生在 Connect 接纳之前，之后没有任何旧效果）。Linux 无法运行 Swift，未先跑红。
+    - R10-M1：预算更正。系统代理没有固定上限，只在 Tono 设过系统代理（非 TUN 会话）时运行：先用 `waitUntilExit` 无限等 `networksetup -listallnetworkservices`，再最多 6 个 `networksetup` 子进程各 15 s，失败时 `osascript` 管理员回退 180 s，不计查询约 272 s。决定 094 与 PR 正文的合计改为不含系统代理（放行 55，开始后 77.7 s，需修复 302.7 s），并注明这些合计不是已证明的上限。

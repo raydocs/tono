@@ -187,6 +187,91 @@ final class DisarmErrorReadbackTests: XCTestCase {
         XCTAssertEqual(log.disarms, 1)
     }
 
+    /// R10-F1: an older preserve teardown is still inside its Core stop when
+    /// Restore internet caps its wait for it and completes. That teardown
+    /// then goes on to turn the proxy off and restrict PF. The user's next
+    /// Connect is admitted only after it (and the release's late readback)
+    /// ended, so none of those effects can stop or restrict the new session.
+    /// The admission point is `prepare`, where a session would begin; here
+    /// it refuses for lack of a catalog, which marks the moment.
+    func testConnectAfterACappedReleaseWaitsForTheOldTeardownToEnd() async {
+        let app = AppState()
+        KillSwitchService.isArmed = true
+        defer {
+            KillSwitchService.isArmed = false
+            RuntimeCleanup.clearConnectAwaitsUser()
+        }
+        app.isConnected = true
+        app.proxyRegions = []
+        XCTAssertFalse(app.isTonoReady, "prepare refuses, so no real session starts")
+        let log = ReleaseLog()
+        var runtime = releaseRuntime(log)
+        let oldStop = ReleaseDrainGate()
+        defer { oldStop.open() }
+        var stopCalls = 0
+        var effects: [String] = []
+        let admissionMarks = [
+            String(localized: "No protected Tono cloud exit is ready."),
+            String(localized: "Choose an available cloud server before reconnecting."),
+        ]
+        let connectAdmitted = { admissionMarks.contains(app.errorMessage ?? "") }
+        let note = { (effect: String) in
+            effects.append(connectAdmitted() ? "\(effect) after connect" : effect)
+        }
+        runtime.stopCore = { core in
+            stopCalls += 1
+            if stopCalls == 1 { await oldStop.wait() }
+            note("stop core")
+            core.isRunning = false
+            return true
+        }
+        runtime.coreStatus = { note("core status"); return (false, true) }
+        runtime.restoreDNS = { note("restore dns"); return true }
+        runtime.disableSystemProxy = { note("proxy off") }
+        runtime.restrictToBootstrap = { note("restrict") }
+        runtime.disarm = { log.disarms += 1; note("disarm") }
+        runtime.refreshKillSwitchStatus = {
+            log.statusReads += 1
+            note("status")
+            return .confirmed(requiresProtectionRecovery: false)
+        }
+        app.networkProtection = runtime
+        app.connectionCoordinator.explicitReleaseDrainCap = .milliseconds(50)
+        app.connectionCoordinator.releaseFenceAvailable = { true }
+
+        app.disconnect()
+        for _ in 0..<500 where stopCalls == 0 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(stopCalls, 1, "the old preserve teardown is inside its Core stop")
+
+        app.disconnect(releaseKillSwitch: true)
+        await app.finishPendingDisconnect()
+        XCTAssertEqual(log.disarms, 1, "Restore did not wait for the old teardown")
+        XCTAssertFalse(app.isDisconnecting)
+        XCTAssertTrue(app.connectionCoordinator.cappedStaleWorkSettling)
+
+        app.connectFromUser()
+        try? await Task.sleep(for: .milliseconds(200))
+        XCTAssertFalse(connectAdmitted(), "no Connect while the old teardown still owns effects")
+
+        oldStop.open()
+        for _ in 0..<500 where !connectAdmitted() {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(connectAdmitted(), "the Connect runs once the old teardown ended")
+        try? await Task.sleep(for: .milliseconds(200))
+
+        XCTAssertTrue(effects.contains("restrict"), "the old teardown went on after the release: \(effects)")
+        XCTAssertTrue(effects.contains("proxy off"), "\(effects)")
+        XCTAssertFalse(
+            effects.contains { $0.hasSuffix("after connect") },
+            "no old Core/PF/DNS/proxy effect after the new Connect: \(effects)"
+        )
+        XCTAssertFalse(app.connectionCoordinator.cappedStaleWorkSettling)
+        XCTAssertEqual(log.disarms, 1)
+    }
+
     /// One-click release whose drain never finishes: a cancelled connect
     /// mutation has not returned. At the UI deadline the UI stops
     /// showing "Disconnecting…" and publishes unknown with the recovery text,

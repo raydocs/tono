@@ -83,6 +83,26 @@ final class ConnectionCoordinator {
     /// release; any other helper keeps the uncapped wait, because nothing
     /// there refuses the stale work's later arms (decision 094 (b)).
     var releaseFenceAvailable: () -> Bool = { HelperManager.daemonKnownFenceAware }
+    /// R10-F1: the work a capped explicit release stopped waiting for (an
+    /// older teardown, cancelled connect / switch / reload), followed by the
+    /// release's late readback. It still runs its own network effects, so no
+    /// Connect is admitted, and no later teardown runs, until it has settled.
+    /// The release itself does not wait for it.
+    private(set) var cappedStaleWork: Task<Void, Never>?
+    /// The teardown request whose release capped `cappedStaleWork`.
+    private var cappedStaleWorkRequestID = 0
+
+    var cappedStaleWorkSettling: Bool { cappedStaleWork != nil }
+
+    /// Waits until no capped stale work is left that a release older than
+    /// `request` capped (all of it when nil, as for a Connect). Newer capped
+    /// work may itself be waiting for the caller, so it is not awaited.
+    func settleCappedStaleWork(olderThan request: Int? = nil) async {
+        while let work = cappedStaleWork, request.map({ cappedStaleWorkRequestID < $0 }) ?? true {
+            await work.value
+            if cappedStaleWork == work { cappedStaleWork = nil }
+        }
+    }
 
     /// Whether the pending or in-flight teardown queue's newest request is an
     /// explicit release, or was one that could not release PF. Newest-wins,
@@ -111,40 +131,56 @@ final class ConnectionCoordinator {
         disconnectQueueReleaseIntent = releaseIntent
         let previousDisconnect = disconnectSequence
         disconnectSequence = Task {
-            let stale = [previousDisconnect].compactMap { $0 } + pendingTasks
-            var capped = false
+            let stale = [previousDisconnect, self.cappedStaleWork].compactMap { $0 } + pendingTasks
+            var cappedRelease: CappedRelease?
             if disposition == .explicit, self.releaseFenceAvailable() {
                 // Decision 094: the user's release waits for older work at
                 // most `explicitReleaseDrainCap`, then runs. Whatever that
                 // work sends later is refused by the helper's user-release
                 // fence, and the release itself stops the Core and restores
                 // DNS after the fence.
-                capped = !(await Self.waitAtMost(stale, cap: self.explicitReleaseDrainCap))
-                if capped {
+                if !(await Self.waitAtMost(stale, cap: self.explicitReleaseDrainCap)) {
                     LocalTrafficAudit.shared.recordEvent("explicit_release_drain_capped")
+                    // From here until it ends, the stale work excludes every
+                    // newer Connect and teardown (R10-F1). If it outlives
+                    // this release, what it did is read back once, still
+                    // under the generation this release settled with.
+                    let release = CappedRelease()
+                    cappedRelease = release
+                    // Includes stale work an earlier release capped after
+                    // this one started waiting.
+                    let lingering = stale + [self.cappedStaleWork].compactMap { $0 }
+                    let work = Task { @MainActor in
+                        for task in lingering { await task.value }
+                        // A stale end before this release settled is
+                        // covered by the release's own readback.
+                        guard let afterLateDrain,
+                              let generation = release.settledGeneration,
+                              requestID == self.disconnectRequestID,
+                              self.protectionOperationGeneration == generation else { return }
+                        await afterLateDrain(generation)
+                    }
+                    self.cappedStaleWork = work
+                    self.cappedStaleWorkRequestID = requestID
+                    Task { @MainActor in
+                        await work.value
+                        if self.cappedStaleWork == work { self.cappedStaleWork = nil }
+                    }
                 }
             } else {
                 for task in stale { await task.value }
+                // Stale work an older release capped after this request was
+                // queued still owns effects; a teardown runs after it.
+                await self.settleCappedStaleWork(olderThan: requestID)
             }
             await operation(requestID)
+            cappedRelease?.settledGeneration = self.protectionOperationGeneration
             // An earlier request the cap stopped waiting for can settle later.
             self.settledDisconnectRequestID = max(self.settledDisconnectRequestID, requestID)
             if requestID == self.disconnectRequestID {
                 self.explicitReleaseDeadlineTask?.cancel()
                 self.explicitReleaseDeadlineTask = nil
                 self.releaseStillFinishing = false
-            }
-            guard capped, let afterLateDrain else { return }
-            // The work the release stopped waiting for ends later. Its own
-            // results are retired by the generation, but what it did to the
-            // Mac is read back once, still under this release's generation;
-            // a newer request or Connect owns the state instead.
-            let generation = self.protectionOperationGeneration
-            Task { @MainActor in
-                for task in stale { await task.value }
-                guard requestID == self.disconnectRequestID,
-                      self.protectionOperationGeneration == generation else { return }
-                await afterLateDrain(generation)
             }
         }
     }
@@ -165,6 +201,11 @@ final class ConnectionCoordinator {
                 once.resume(true)
             }
         }
+    }
+
+    /// The generation a capped release settled with; nil until it has.
+    private final class CappedRelease {
+        var settledGeneration: UInt64?
     }
 
     /// Resumes the capped wait exactly once: the drain or the cap, first wins.
@@ -236,6 +277,8 @@ final class ConnectionCoordinator {
         let pendingDisconnect = disconnectSequence
         let task = Task { [weak self] in
             await pendingDisconnect?.value
+            // R10-F1: nor before the stale work a capped release left running.
+            await self?.settleCappedStaleWork()
             guard let self, !Task.isCancelled,
                   self.protectionOperationGeneration == generation,
                   self.deferredConnect?.id == requestID else { return }
