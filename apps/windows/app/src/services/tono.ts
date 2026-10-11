@@ -124,6 +124,30 @@ export interface TonoStatus {
   updateIncomplete?: boolean
   /** The selected route dropped repeatedly while connected; set until this time. */
   routeUnstableUntilMs?: number | null
+  /** Decision 093: the current sign-in request's outcome; absent with none or after success. */
+  signInRecovery?: TonoSignInRecovery
+}
+
+/**
+ * Decision 093. `automatic`: the request is in flight and Tono may still retry it on its own.
+ * `userAction`: it ended in `cause` and nothing of it is scheduled; only the user can act
+ * (retry, another network, support). Not a promise about later network changes. Protection
+ * is a separate state and is never released by this.
+ */
+export interface TonoSignInRecovery {
+  /** Process-local request count; a newer request, a dismissal or a success replaces it. */
+  operation: number
+  step: 'sendCode' | 'verifyCode'
+  phase: 'automatic' | 'userAction'
+  cause?:
+    | 'relaysUnreachable'
+    | 'network'
+    | 'clock'
+    | 'interception'
+    | 'captive'
+    | 'localConflict'
+    | 'service'
+    | 'localStore'
 }
 
 export const TONO_STATUS_EVENT = 'tono://status'
@@ -498,6 +522,9 @@ export const tonoSignInVerify = (email: string, code: string) =>
   call<TonoAccount>('tono_sign_in_verify', { email, code })
 
 export const tonoSignOut = () => call<void>('tono_sign_out')
+
+/** Decision 093: leave this sign-in (another email); clears its recovery outcome. */
+export const tonoSignInDismiss = () => call<void>('tono_sign_in_dismiss')
 
 export const tonoAccount = () => call<TonoAccount | null>('tono_account')
 

@@ -81,6 +81,11 @@ final class AccountSession {
     /// A credential write can fail after verification succeeds. Keep its
     /// localized explanation while the account returns to signedOut.
     var signInError: String?
+    /// Decision 093: the current sign-in request's recovery outcome, for the
+    /// sign-in screen (`SignInRecovery`). Only the sign-in requests below
+    /// write it.
+    var signInRecoveryLedger = SignInRecoveryLedger()
+    var signInRecovery: SignInRecovery? { signInRecoveryLedger.current }
     /// Device management reports here instead of through `fail`: a failed
     /// revoke is not an authentication or runtime failure, and must not take
     /// the tunnel, the background tasks and the whole window with it.

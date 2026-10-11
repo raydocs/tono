@@ -325,6 +325,7 @@ extension AccountSession {
         default: return
         }
         emailChallenge = nil
+        signInRecoveryLedger.dismiss()
         state = .signedOut
     }
 
@@ -341,14 +342,18 @@ extension AccountSession {
             return
         }
         state = .authenticating
+        let operation = signInRecoveryLedger.begin(.sendCode)
         do {
             emailChallenge = try await api.startEmailSignIn(TonoEmailStartRequest(
                 email: TonoAccountRules.normalizedEmail(email),
                 deviceName: TonoAccountRules.normalizedDeviceName(deviceName),
                 installationId: try keychain.installationId()
             ))
+            // The code is on its way: waiting for the email is not a failure.
+            signInRecoveryLedger.finish(operation, cause: nil)
             state = .signedOut
         } catch {
+            signInRecoveryLedger.finish(operation, cause: SignInRecovery.cause(of: error))
             await fail(error)
         }
     }
@@ -885,9 +890,20 @@ extension AccountSession {
         // A failed revoke from the device-limit list belongs to the attempt
         // that raised it, not to the one starting here.
         deviceActionError = nil
+        let recoveryOperation = signInRecoveryLedger.begin(.verifyCode)
+        // Only a failure of the request itself ends it as recovery-relevant;
+        // once Tono answered, what follows is the account's own runtime.
+        defer { signInRecoveryLedger.finish(recoveryOperation, cause: nil) }
         do {
             try await api.prepareForAuthentication()
-            let response = try await operation()
+            let response: TonoAuthResponse
+            do {
+                response = try await operation()
+            } catch {
+                signInRecoveryLedger.finish(recoveryOperation, cause: SignInRecovery.cause(of: error))
+                throw error
+            }
+            signInRecoveryLedger.finish(recoveryOperation, cause: nil)
             try Task.checkCancellation()
             try await api.adopt(response)
             try Task.checkCancellation()

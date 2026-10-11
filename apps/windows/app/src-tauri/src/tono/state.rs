@@ -240,6 +240,8 @@ pub struct TonoInner {
     /// Generation of the current email-auth transaction. Starting/resending, signing out, or
     /// replacing a challenge invalidates network responses from every older transaction.
     pub sign_in_generation: u64,
+    /// Decision 093: the outcome of the current sign-in request, for the sign-in screen.
+    pub sign_in_recovery: crate::tono::sign_in_recovery::SignInRecoveryLedger,
     /// Who in this process answers for a pending session marker: the sign-in in flight, or the
     /// adopted sign-in whose commit task waits for its session to be durable.
     pub session_marker: crate::tono::credentials::SessionMarker,
@@ -784,6 +786,7 @@ impl TonoState {
                 account: None,
                 challenge_id: None,
                 sign_in_generation: 0,
+                sign_in_recovery: Default::default(),
                 session_marker: Default::default(),
                 installation_id,
                 sing_box_core: false,
