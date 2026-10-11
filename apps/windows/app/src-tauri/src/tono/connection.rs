@@ -144,6 +144,8 @@ pub use probes::{is_fake_ip, test_current_server, verify_lock_retry_window};
 pub use disconnect::{disconnect, release_explicit};
 pub use preemptive::restore_internet;
 pub(crate) use disconnect::disconnect_for_generation;
+#[cfg(windows)]
+use disconnect::disconnect_for_restore;
 pub(crate) use disconnect::release_for_account;
 #[cfg(test)]
 pub(crate) use disconnect::{complete_account_release, coordinate_release};

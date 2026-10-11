@@ -34,23 +34,37 @@ pub async fn restore_internet(state: Arc<TonoState>, app: AppHandle) -> Result<(
             commands::emit_status(&app, &commands::status_of(&inner));
         }
         match tono_restore_internet_preemptively(ticket).await {
-            PreemptiveRelease::Answered(report) => return settle(&state, &app, report).await,
+            PreemptiveRelease::Answered(report) => settle(&state, &app, ticket, report).await,
+            PreemptiveRelease::Superseded => {
+                logging!(info, Type::Service, "Tono: 恢复网络已被更新的操作取代，不再改动状态");
+                Ok(())
+            }
             PreemptiveRelease::Unavailable(reason) => {
                 logging!(
                     warn,
                     Type::Service,
                     "Tono: 解除服务不可用，改走普通释放: {reason}"
                 );
+                // Still this Restore's: refused once a newer Connect or Restore has begun.
+                super::disconnect_for_restore(state, app, ticket).await
             }
         }
     }
-    super::disconnect(state, app).await
+    #[cfg(not(windows))]
+    {
+        super::disconnect(state, app).await
+    }
 }
 
+/// Publish the answer, but only for the Restore that still owns the release epoch, checked
+/// under the state lock that admits attempts (Sol R2-F4). An older Restore's answer arriving
+/// after the user clicked Connect or Restore again leaves the newer operation's runtime,
+/// protection and UI untouched.
 #[cfg(windows)]
 async fn settle(
     state: &Arc<TonoState>,
     app: &AppHandle,
+    ticket: crate::core::service::ReleaseTicket,
     report: tono_service_protocol::release_wire::ReleaseReport,
 ) -> Result<(), String> {
     logging!(
@@ -68,6 +82,10 @@ async fn settle(
         report.detail
     );
     let mut inner = state.lock().await;
+    if !crate::core::service::release_ticket_current(&ticket) {
+        logging!(info, Type::Service, "Tono: 旧的恢复网络结果已被更新的操作取代，不再改动状态");
+        return Ok(());
+    }
     let result = if report.outcome == "restored" {
         inner.fsm.sign_out_or_quit();
         inner.kill_switch = None;
@@ -88,11 +106,13 @@ async fn settle(
         inner.fsm.initial_release_failed();
         Err(restore_failure(&report))
     };
-    commands::emit_status(app, &commands::status_of(&inner));
-    drop(inner);
+    // Still under the state lock: a Connect begun after the check above cannot set its own proxy
+    // before this clears the old one.
     if result.is_ok() {
         let _ = crate::core::sysopt::Sysopt::global().clear_owned_sysproxy().await;
     }
+    commands::emit_status(app, &commands::status_of(&inner));
+    drop(inner);
     result
 }
 

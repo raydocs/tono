@@ -787,6 +787,12 @@ pub(crate) fn raise_release_fence() -> ReleaseTicket {
     }
 }
 
+/// Whether the operation holding `ticket` still owns the release epoch: no Restore internet and
+/// no user Connect has begun since it took the ticket.
+pub(crate) fn release_ticket_current(ticket: &ReleaseTicket) -> bool {
+    release_epoch().serial == ticket.serial
+}
+
 /// Record a generation the release authority reported to the operation holding `ticket`, unless
 /// a Restore or a Connect has moved the epoch on since that operation began.
 pub(crate) fn learn_release_generation(ticket: &ReleaseTicket, generation: u64) {
@@ -885,6 +891,8 @@ pub(crate) async fn begin_user_connect() {
 pub(crate) enum PreemptiveRelease {
     /// No release service to ask: the caller takes the ordinary release path.
     Unavailable(String),
+    /// A newer Restore internet or the user's Connect began first; this one sent nothing.
+    Superseded,
     Answered(tono_service_protocol::release_wire::ReleaseReport),
 }
 
@@ -895,6 +903,11 @@ pub(crate) enum PreemptiveRelease {
 /// generation the machine holds now, read after the fence went up: a Connect the user clicks
 /// after this restore is admitted under a newer one, and the restore then reports superseded
 /// rather than undo it (Sol R-F4).
+///
+/// The generation must be one this Restore saw while it still owned the epoch (Sol R2-F4). A
+/// newer Connect moves the epoch on before it can be admitted, so a read that completes while
+/// the ticket is still current cannot name that Connect's session; one that completes after is
+/// dropped, and nothing is sent.
 #[cfg(windows)]
 pub(crate) async fn tono_restore_internet_preemptively(ticket: ReleaseTicket) -> PreemptiveRelease {
     use tono_service_protocol::release_wire::ReleaseRequest;
@@ -907,12 +920,23 @@ pub(crate) async fn tono_restore_internet_preemptively(ticket: ReleaseTicket) ->
         Err(error) => return PreemptiveRelease::Unavailable(format!("{error:#}")),
     };
     // The release ends the main Service's session; a monitor still ticking would read that as
-    // an owner loss and run its own recovery in the middle of the restore.
-    cancel_owner_monitors();
-    clear_active_service_session();
+    // an owner loss and run its own recovery in the middle of the restore. Under the epoch lock,
+    // so a Connect begun since keeps its own monitors and session.
+    {
+        let epoch = release_epoch();
+        if epoch.serial != ticket.serial {
+            return PreemptiveRelease::Superseded;
+        }
+        cancel_owner_monitors();
+        clear_active_service_session();
+    }
+    let expected_generation = fresh_release_generation().await.or(ticket.generation);
+    if !release_ticket_current(&ticket) {
+        return PreemptiveRelease::Superseded;
+    }
     let request = ReleaseRequest {
         request_id: generate_service_session_token().unwrap_or_else(|_| "restore".into()),
-        expected_generation: fresh_release_generation().await.or(ticket.generation),
+        expected_generation,
     };
     match tono_service_protocol::request_release(&credentials, &request).await {
         Ok(response) => match response.data {

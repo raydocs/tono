@@ -22,3 +22,10 @@
   - 紧急命令与 C 的边界写明。
   - Mac helper 升到 4.52.51。
   - 验证：Linux 上 `cargo test --lib release broker_ledger` 74 通过；整个 lib 有 476 通过，另有 3 个失败，这 3 个在改动前就只在 Linux 上失败。Swift 和 Windows 代码由托管 CI 编译，结果以 PR #1569 的 CI 为准。未执行：真机测试。
+- Sol 审查第 2 轮修复（4 个主要问题全部接受，详见 IMPLEMENTATION.md §3c）：
+  - Windows WMI 账本：条目在进程创建前独占创建并落盘；只有脚本走到最后、每个 CIM 调用都有答复才删除；Connect 准入在 C 下直接读账本；首次使用时为旧版本记一个条目。
+  - Windows “已恢复”要等 Job 证明清空，并由解除服务再读一次全部分项；记录写成 `completed` 后才准入。解除服务死后不再当作 Job 已证明清空。
+  - 重启不再自动清除未完成的状态（Mac + Windows），要在新的开机里再恢复一次。Windows 开机身份改用独立的易失注册表键，加开机时间和计数器判断。
+  - Windows 旧的“恢复正常网络”结果被新操作取代时不改任何状态；更新事务的 Disconnect 带代数并在服务端核对。
+  - Mac 清除系统代理最多等 10 s，超时报 unknown。
+  - 决策 094 更新：去掉“重启即可清除”的说法。

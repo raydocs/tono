@@ -260,6 +260,13 @@ enum ReleaseWorker {
         let settled = settle(first: components, second: second, evidence: evidence)
         record.stuck = stuckNow
         record.unsettled = settled.filter { $0.risk != "settled" }.map(\.name)
+        // History lost in an earlier boot named only processes that ended with
+        // it; this release read everything back settled, so it is checked.
+        // History lost in this boot stays until a restart (Sol R2-F3).
+        if record.unsettled?.isEmpty == true, let lost = record.historyLostBoot,
+           !lost.isEmpty, let currentBoot, !ReleaseAuthority.sameBoot(lost, currentBoot) {
+            record.historyLostBoot = nil
+        }
         record.workerFinished = true
         let finalStuck = stuckNow.map(\.pid)
         reporter.update {

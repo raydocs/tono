@@ -159,25 +159,23 @@ async fn release(request: &ReleaseRequest, owner_key: &str, job_owner: Incarnati
     let boot = super::current_boot();
     // A retry inherits whatever the previous release left unretired; replacing the record
     // must never forget a worker or a survivor that may still act.
-    let mut carried = processes.unretired_incarnations(&previous);
-    // Jobs another release service held and never proved empty end only with that service.
-    if previous.jobs_unproven
-        && let Some(owner) = previous.job_owner
-        && owner != job_owner
-        && (processes.alive)(&owner) != Some(false)
-        && !carried.contains(&owner)
-    {
-        carried.push(owner);
-    }
+    let carried = processes.unretired_incarnations(&previous);
+    // Jobs another release service held and never proved empty: kill-on-close ended them with
+    // that service, but nothing observed it (Sol R2-F2). That boot keeps refusing Connect, and a
+    // later one needs a completed release. Jobs this service still holds it proves itself.
+    let orphaned_jobs_boot = previous.orphaned_jobs_boot.clone().or_else(|| {
+        (previous.jobs_unproven && previous.job_owner != Some(job_owner))
+            .then(|| previous.worker_boot.clone().unwrap_or_else(|| boot.clone()))
+    });
     let mut record = Record {
         schema: RECORD_SCHEMA,
         mode: Mode::Released,
         generation: next_generation(previous.generation),
         request_id: Some(request_id.clone()),
         worker: Some(worker),
-        worker_boot_session: boot.marker.clone(),
-        worker_booted_at: boot.booted_at,
+        worker_boot: Some(boot.clone()),
         worker_finished: false,
+        completed: false,
         stuck: carried.clone(),
         executor_quarantined: true,
         service_quarantined: true,
@@ -188,7 +186,7 @@ async fn release(request: &ReleaseRequest, owner_key: &str, job_owner: Incarnati
         } else {
             previous.history_lost_boot.clone()
         },
-        broker_unknown_boot: previous.broker_unknown_boot.clone(),
+        orphaned_jobs_boot,
     };
     // No effect happens before the record names this worker: a crash from here on is found
     // by admission, which refuses Connect until this process and its Job are gone.
@@ -297,27 +295,55 @@ async fn release(request: &ReleaseRequest, owner_key: &str, job_owner: Incarnati
         .filter(|incarnation| (processes.alive)(incarnation) != Some(false))
         .copied()
         .collect();
-    let broker_clear = match crate::core::dns::broker_ledger::outstanding() {
-        Ok(pending) if pending.is_empty() => true,
+    // A WMI batch from this boot (or one that cannot be told apart) may still land. One from an
+    // earlier boot ended with it; what it wrote is in this read, and it is retired below once
+    // DNS reads back settled (Sol R2-F3).
+    let (broker_clear, earlier_batches) = match crate::core::dns::broker_ledger::outstanding() {
         Ok(pending) => {
-            notes.push(format!("a DNS change handed to Windows may still land: {}", pending.join(", ")));
-            false
+            let (earlier, current): (Vec<_>, Vec<_>) =
+                pending.into_iter().partition(|entry| entry.from_earlier_boot(&boot));
+            if !current.is_empty() {
+                notes.push(format!(
+                    "a DNS change handed to Windows may still land: {}",
+                    current.iter().map(|entry| entry.description.as_str()).collect::<Vec<_>>().join(", ")
+                ));
+            }
+            (current.is_empty(), earlier)
         }
         Err(error) => {
             notes.push(format!("the WMI DNS ledger could not be read: {error:#}"));
-            false
+            (false, Vec::new())
         }
     };
-    if !broker_clear {
-        record.broker_unknown_boot = Some(boot.clone());
+    // Lost history or orphaned Jobs from this boot may name work that can still act.
+    let boot_clear = [&record.history_lost_boot, &record.orphaned_jobs_boot]
+        .into_iter()
+        .flatten()
+        .all(|recorded| recorded.relation_to(&boot) == super::BootRelation::Earlier);
+    if !boot_clear {
+        notes.push("work from an earlier restore in this Windows session cannot be ruled out".into());
     }
     let settlement = Settlement {
-        writers_ended: survivors.is_empty() && scan_complete && service_quarantined && task_quarantined,
+        writers_ended: survivors.is_empty()
+            && scan_complete
+            && service_quarantined
+            && task_quarantined
+            && boot_clear,
         broker_clear,
     };
     report.components = components(&second, Some(&first), &settlement);
     record.stuck = survivors.clone();
     report.stuck = survivors.iter().map(|incarnation| incarnation.pid).collect();
+    let all_settled = report.components.iter().all(|component| component.risk == "settled");
+    if all_settled {
+        // DNS read back settled in this boot, so batches an earlier boot ended are checked.
+        if let Err(error) = crate::core::dns::broker_ledger::retire(&earlier_batches) {
+            notes.push(format!("checked DNS changes from before the restart not recorded: {error:#}"));
+        }
+        // Reached only when these name an earlier boot (`boot_clear`).
+        record.history_lost_boot = None;
+        record.orphaned_jobs_boot = None;
+    }
 
     record.worker_finished = true;
     if let Err(error) = authority.save(&record) {
@@ -418,7 +444,7 @@ async fn clean_up() -> Option<String> {
     joined(&notes)
 }
 
-type Reading = (&'static str, String, Option<String>);
+pub(crate) type Reading = (&'static str, String, Option<String>);
 
 fn reading(name: &'static str, result: std::result::Result<bool, String>) -> Reading {
     match result {
@@ -428,7 +454,7 @@ fn reading(name: &'static str, result: std::result::Result<bool, String>) -> Rea
     }
 }
 
-async fn read_components() -> Vec<Reading> {
+pub(crate) async fn read_components() -> Vec<Reading> {
     let wfp = crate::core::windows_kill_switch::residual_filters_present()
         .await
         .map_err(|error| format!("{error:#}"));

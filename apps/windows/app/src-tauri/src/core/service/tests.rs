@@ -993,3 +993,14 @@ fn protection_held_by_another_user_refusal_carries_its_marker() {
         crate::tono::connection::PROTECTION_HELD_BY_ANOTHER_USER_PREFIX
     )));
 }
+
+/// Sol R2-F4 on PR #1569: a Restore whose answer arrives after the user clicked Restore again (or
+/// Connect, which moves the same epoch) no longer owns the epoch, so its result changes nothing.
+#[test]
+fn an_older_restore_loses_ownership_once_a_newer_operation_begins() {
+    let older = super::raise_release_fence();
+    assert!(super::release_ticket_current(&older));
+    let newer = super::raise_release_fence();
+    assert!(!super::release_ticket_current(&older));
+    assert!(super::release_ticket_current(&newer));
+}

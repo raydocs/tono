@@ -373,6 +373,24 @@ nonisolated struct SystemProxy {
         }
     }
 
+    /// The clear above with a deadline on the wait (Sol R2 carry-over of
+    /// R-M1). Clearing can wait on configd and on the privilege path for far
+    /// longer than Restore internet may: past `seconds` the result is nil
+    /// (unknown), and a clear still running finishes on its own. It only
+    /// ever removes a proxy that points at Tono's own listener.
+    static func clearTonoOwnedProxy(sessionPorts: Set<Int>, within seconds: TimeInterval) async -> Bool? {
+        let once = ProxyClearOnce()
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool?, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let remains = SystemProxy.clearTonoOwnedProxy(sessionPorts: sessionPorts)
+                if once.claim() { continuation.resume(returning: remains) }
+            }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + seconds) {
+                if once.claim() { continuation.resume(returning: nil) }
+            }
+        }
+    }
+
     // MARK: - Proxy Guard
 
     /// Check if system proxy still points to our ports. Returns false if tampered.
@@ -740,5 +758,19 @@ nonisolated struct SystemNetworkObservation: Equatable {
                 resolverFiles: fileResolvers
             )
         )
+    }
+}
+
+/// Lets exactly one of the clear and its deadline answer.
+nonisolated private final class ProxyClearOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var answered = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if answered { return false }
+        answered = true
+        return true
     }
 }

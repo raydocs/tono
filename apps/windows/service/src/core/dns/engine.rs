@@ -1035,6 +1035,7 @@ fn script_safe(value: &str, extra: &str) -> bool {
 const PROTECTED_DNS_V4_TOKEN: &str = "__TONO_PROTECTED_DNS_V4__";
 const SCRIPT_PRELUDE: &str = r#"$global:fails = @()
 $global:skips = @()
+$global:unanswered = @()
 function Test-Family($index, $family, $want, $restoring) {
   if ($index -eq 0) { return $true }
   $entry = Get-DnsClientServerAddress -InterfaceIndex $index -AddressFamily $family -ErrorAction SilentlyContinue
@@ -1058,6 +1059,7 @@ function Set-AdapterDns($g, $i4, $i6, $v4, $v6, $restoring) {
 $c = Get-CimInstance Win32_NetworkAdapterConfiguration -Filter "SettingID='$g'" -ErrorAction SilentlyContinue
 if ($null -eq $c) { $global:fails += $g; return }
 $r = Invoke-CimMethod -InputObject $c -MethodName SetDNSServerSearchOrder -Arguments @{ DNSServerSearchOrder = $v4 } -ErrorAction SilentlyContinue
+if (-not $r) { $global:unanswered += $g }
 if ($r -and $r.ReturnValue -eq 84) { $v4 = $null }
 elseif (-not $r -or $r.ReturnValue -ne 0) { $global:fails += $g; return }
 else { $touched = $true }
@@ -1103,6 +1105,21 @@ fn ipv4_not_enabled_does_not_skip_the_ipv6_block() {
         .expect("84");
     let at_v6 = SCRIPT_PRELUDE.find("if ($i6 -ne 0)").expect("ipv6 block");
     assert!(at_84 < at_v6);
+}
+
+/// Whether a batch run proves every WMI call it handed off finished.
+fn batch_settled(run: &Result<String>) -> bool {
+    run.as_ref()
+        .is_ok_and(|stdout| stdout.lines().any(|line| line.trim() == super::broker_ledger::SETTLED_MARKER))
+}
+
+#[cfg(test)]
+#[test]
+fn only_a_batch_that_saw_every_cim_answer_retires_its_ledger_entry() {
+    let settled = format!("{}\r\n|", super::broker_ledger::SETTLED_MARKER);
+    assert!(batch_settled(&Ok(settled)));
+    assert!(!batch_settled(&Ok("{guid}|".to_owned())));
+    assert!(!batch_settled(&Err(anyhow::anyhow!("powershell.exe could not be started within the deadline"))));
 }
 
 /// The result marker the batch must print. Its presence is what distinguishes "the script
@@ -1163,6 +1180,12 @@ fn live_apply_batch(entries: &[LiveApplyEntry], mode: ApplyMode) -> Vec<(String,
             powershell_list(&entry.ipv6_servers),
         ));
     }
+    // A CIM call without an answer may still be running in WmiPrvSE; only a batch whose every
+    // call answered prints the settled line, and only that line retires its ledger entry.
+    script.push_str(&format!(
+        "if ($global:unanswered.Count -eq 0) {{ [Console]::Out.WriteLine('{}') }}\n",
+        super::broker_ledger::SETTLED_MARKER
+    ));
     script.push_str(
         "[Console]::Out.Write(($global:fails -join ',') + '|' + ($global:skips -join ','))",
     );
@@ -1180,9 +1203,13 @@ fn live_apply_batch(entries: &[LiveApplyEntry], mode: ApplyMode) -> Vec<(String,
         &["-NoProfile", "-NonInteractive", "-Command", &script],
         POWERSHELL_TIMEOUT,
     );
-    match &run {
-        Err(error) if error.chain().any(|cause| cause.is::<KilledAtDeadline>()) => in_flight.abandoned(),
-        _ => in_flight.returned(),
+    // Sol R2-F1: only a script that reached its end with every CIM call answered proves nothing
+    // is left in WmiPrvSE. A timeout, a spawn that missed its deadline (its thread may still
+    // create the process), a wait error or a script that died part way keeps the entry.
+    if batch_settled(&run) {
+        in_flight.returned();
+    } else {
+        in_flight.abandoned();
     }
     let reported = match run {
         Ok(stdout) => stdout

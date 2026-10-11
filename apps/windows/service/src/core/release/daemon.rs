@@ -9,7 +9,12 @@
 //! A worker's exit proves nothing about the children it started (Sol R-F2 on PR #1569). Each
 //! worker records `jobs_unproven` before its first effect; this service clears it, under C,
 //! only once every Job it holds has been terminated and reports no active process. A Job that
-//! still has a process is kept and checked again, never dropped and forgotten.
+//! still has a process is kept and checked again, never dropped and forgotten. If this service
+//! ends first, nothing clears it: admission keeps refusing (Sol R2-F2).
+//!
+//! The worker's own final line is not the answer either: a run is answered as finished only
+//! after its Job was retired and [`finalize`] read every component back again, and only then
+//! does the record say `completed`.
 
 use super::{Authority, Incarnation, Processes, WorkerInput};
 use crate::release_wire::{
@@ -96,13 +101,21 @@ impl Run {
             .done
     }
 
-    /// The report as it stands when the worker finishes or at the deadline. A run that ended
-    /// without a final line (the worker died or was killed) is never reported as finished.
+    fn latest(&self) -> Option<ReleaseReport> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .latest
+            .clone()
+    }
+
+    /// The report as it stands when the run is done or at the deadline. The worker's final line
+    /// is not the answer (Sol R2-F2): a run is done only after its Job was retired and
+    /// [`finalize`] checked the result, so an answer given before that is never finished.
     fn answer(&self, deadline: Instant) -> ReleaseReport {
         let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         loop {
-            let finished_line = state.latest.as_ref().is_some_and(|report| report.finished);
-            if state.done || finished_line {
+            if state.done {
                 break;
             }
             let now = Instant::now();
@@ -124,6 +137,9 @@ impl Run {
             report.finished = false;
             report
         });
+        if !state.done {
+            report.finished = false;
+        }
         if !report.finished && !matches!(report.outcome.as_str(), "busy" | "superseded" | "refused") {
             report.outcome =
                 ReleaseReport::outcome_of(&report.components, &report.stuck, false).to_owned();
@@ -197,8 +213,98 @@ fn own_incarnation() -> anyhow::Result<Incarnation> {
     Ok(Incarnation { pid, started_at })
 }
 
+/// The worker's verdict, checked by the service that holds its Job (Sol R2-F2). `restored`
+/// stands, and the record says `completed`, only when every Job this service holds is proven
+/// empty and a read-back taken after that agrees with the worker's final one. Otherwise the
+/// read-back is reported with unknown risk. Runs once the worker has exited and its Job was
+/// retired, before the run is done.
+fn finalize(run: &Run) {
+    let Some(mut report) = run.latest() else {
+        return;
+    };
+    if !report.finished || matches!(report.outcome.as_str(), "busy" | "superseded" | "refused") {
+        return;
+    }
+    if let Some(reason) = complete(run, &report) {
+        tracing::warn!("release: not completed: {reason}");
+        for component in &mut report.components {
+            component.risk = "unknown".into();
+        }
+        report.outcome = ReleaseReport::outcome_of(&report.components, &report.stuck, true).to_owned();
+        report.detail = Some(match report.detail.take() {
+            Some(detail) => format!("{detail}; {reason}"),
+            None => reason,
+        });
+        run.publish(report);
+    }
+}
+
+/// `None` when the run completed, or when it never claimed to (nothing to take back). Under C,
+/// so no worker or admission moves the record in between.
+fn complete(run: &Run, report: &ReleaseReport) -> Option<String> {
+    let claims_settled = !report.components.is_empty()
+        && report.stuck.is_empty()
+        && report.components.iter().all(|component| component.risk == "settled");
+    let own = match own_incarnation() {
+        Ok(own) => own,
+        Err(error) => return Some(format!("{error:#}")),
+    };
+    let authority = Authority::live();
+    let _held = match authority.lock(Duration::from_secs(5)) {
+        Ok(Some(held)) => held,
+        Ok(None) => return Some("the release lock could not be taken to record the restore as complete".into()),
+        Err(error) => return Some(format!("{error:#}")),
+    };
+    if !prune_pending_jobs() {
+        return Some("a process the restore started is still running".into());
+    }
+    let mut record = match authority.load() {
+        Ok(record) => record,
+        Err(error) => return Some(format!("{error:#}")),
+    };
+    if record.request_id.as_deref() != Some(run.request_id.as_str())
+        || record.job_owner != Some(own)
+        || !record.worker_finished
+    {
+        return Some("the restore record changed before the restore could be completed".into());
+    }
+    record.jobs_unproven = false;
+    let mut reason = None;
+    if claims_settled {
+        match read_back_now() {
+            Ok(after) => {
+                for component in &report.components {
+                    let now = after.iter().find(|(name, _, _)| *name == component.name);
+                    if now.is_none_or(|(_, readback, _)| *readback != component.readback || readback == "unreadable") {
+                        reason = Some(format!(
+                            "{} read back differently after the restore's processes ended",
+                            component.name
+                        ));
+                        break;
+                    }
+                }
+            }
+            Err(error) => reason = Some(format!("the final read-back failed: {error:#}")),
+        }
+        record.completed = reason.is_none();
+    }
+    if let Err(error) = authority.save(&record) {
+        return Some(format!("the completed restore could not be recorded: {error:#}"));
+    }
+    if claims_settled { reason } else { None }
+}
+
+/// The worker's read-back, taken by this service on a runtime of its own.
+fn read_back_now() -> anyhow::Result<Vec<super::worker::Reading>> {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+    let readings = runtime.block_on(super::worker::read_components());
+    runtime.shutdown_background();
+    Ok(readings)
+}
+
 /// Clear `jobs_unproven` once every Job this service holds is proven empty and no run is in
-/// progress. Under C, so a worker starting now cannot have its own mark cleared.
+/// progress. Under C, so a worker starting now cannot have its own mark cleared. It never marks
+/// a release completed: only [`finalize`] does, with a read-back.
 fn settle_jobs() {
     if !prune_pending_jobs() {
         return;
@@ -349,6 +455,7 @@ fn spawn_run(input: WorkerInput) -> anyhow::Result<Arc<Run>> {
                 let _ = child.wait();
                 // Anything the worker left in the Job ends with it, and is proven gone or kept.
                 run.retire_job();
+                finalize(&run);
                 run.finish();
                 recover_quarantine();
                 settle_jobs();

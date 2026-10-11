@@ -810,7 +810,12 @@ fn incomplete_after_refused_adopt(read_only_pending: Option<bool>) -> bool {
     read_only_pending != Some(false)
 }
 
-pub async fn disconnect_if_pending(apply_narrow: bool) -> Result<Option<tono_service_protocol::KillSwitchStatus>> {
+/// `release_generation` is the session the caller tears down; the Service refuses it once a
+/// Restore internet or a newer admitted Connect moved the generation on (Sol R2-F4).
+pub async fn disconnect_if_pending(
+    apply_narrow: bool,
+    release_generation: Option<u64>,
+) -> Result<Option<tono_service_protocol::KillSwitchStatus>> {
     if !incomplete() {
         return Ok(None);
     }
@@ -823,7 +828,7 @@ pub async fn disconnect_if_pending(apply_narrow: bool) -> Result<Option<tono_ser
     // A lost reply can follow a committed release; the caller treats errors as unconfirmed.
     // A release whose update record could not be proven or archived returns Ok with
     // `needs_attention`: the machine is open, so it must not read as armed.
-    let released = request(UpdateRequest::disconnect(apply_narrow)).await?;
+    let released = request(UpdateRequest::disconnect(apply_narrow, release_generation)).await?;
     if let Some(reason) = released.needs_attention.as_deref() {
         logging!(warn, Type::Service, "Tono: update Disconnect released protection; update record still pending: {reason}");
     }

@@ -45,31 +45,53 @@ pub(crate) enum Mode {
     Released,
 }
 
-/// Which boot something happened in: the Service's volatile boot marker and the machine's
-/// boot time. The marker alone changes on a reinstall within one boot, so two stamps are the
-/// same boot unless both parts differ; an unknown part never proves a different boot.
+/// Which boot something happened in: the release's volatile boot marker (a key no installer
+/// touches), the machine's boot time and the uptime counter when the stamp was taken.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub(crate) struct BootStamp {
     #[serde(default)]
     pub(crate) marker: Option<String>,
     #[serde(default)]
     pub(crate) booted_at: Option<u64>,
+    #[serde(default)]
+    pub(crate) uptime_ms: Option<u64>,
 }
 
 /// Boot times read from the uptime counter wander with clock changes; closer than this is
 /// one boot.
 const BOOT_TIME_TOLERANCE_SECONDS: u64 = 120;
 
+/// How a recorded boot relates to the current one (Sol R2-F3 on PR #1569).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BootRelation {
+    Same,
+    /// Provably an earlier boot: every process of it has ended.
+    Earlier,
+    /// Cannot be told apart. Callers treat it as the same boot.
+    Unknown,
+}
+
 impl BootStamp {
-    /// A different boot needs both markers known and different, and boot times that do not
-    /// put the two in one boot (a reinstall changes the marker, not the boot time).
-    pub(crate) fn same_boot_as(&self, other: &BootStamp) -> bool {
-        let marker_differs = matches!((&self.marker, &other.marker), (Some(a), Some(b)) if a != b);
-        let time_matches = matches!(
-            (self.booted_at, other.booted_at),
-            (Some(a), Some(b)) if a.abs_diff(b) <= BOOT_TIME_TOLERANCE_SECONDS
+    /// An earlier boot needs both markers known and different, and on top of that either the
+    /// uptime counter running backwards or boot times further apart than the clock can wander.
+    /// A missing part, or a marker change alone, proves nothing.
+    pub(crate) fn relation_to(&self, now: &BootStamp) -> BootRelation {
+        let (Some(then), Some(current)) = (&self.marker, &now.marker) else {
+            return BootRelation::Unknown;
+        };
+        if then == current {
+            return BootRelation::Same;
+        }
+        let uptime_went_back = matches!((self.uptime_ms, now.uptime_ms), (Some(a), Some(b)) if b < a);
+        let boot_time_moved = matches!(
+            (self.booted_at, now.booted_at),
+            (Some(a), Some(b)) if a.abs_diff(b) > BOOT_TIME_TOLERANCE_SECONDS
         );
-        !marker_differs || time_matches
+        if uptime_went_back || boot_time_moved {
+            BootRelation::Earlier
+        } else {
+            BootRelation::Unknown
+        }
     }
 }
 
@@ -89,12 +111,16 @@ pub(crate) struct Record {
     pub(crate) request_id: Option<String>,
     #[serde(default)]
     pub(crate) worker: Option<Incarnation>,
+    /// The boot the worker ran in.
     #[serde(default)]
-    pub(crate) worker_boot_session: Option<String>,
-    #[serde(default)]
-    pub(crate) worker_booted_at: Option<u64>,
+    pub(crate) worker_boot: Option<BootStamp>,
     #[serde(default)]
     pub(crate) worker_finished: bool,
+    /// Set by the release service, under C, only after the worker finished with every component
+    /// settled, every worker Job was proven empty and a read-back taken after that agreed. Until
+    /// then the release has not proven that old work cannot act, in this boot or any later one.
+    #[serde(default)]
+    pub(crate) completed: bool,
     #[serde(default)]
     pub(crate) stuck: Vec<Incarnation>,
     /// The update recovery task stays disabled until the next admitted Connect.
@@ -113,14 +139,15 @@ pub(crate) struct Record {
     #[serde(default)]
     pub(crate) jobs_unproven: bool,
     /// The boot in which an earlier record could not be read, so whatever it named was lost.
-    /// Nothing can show that work retired before that boot ends.
+    /// Nothing can show that work retired before that boot ends, and after it only a completed
+    /// release clears it.
     #[serde(default)]
     pub(crate) history_lost_boot: Option<BootStamp>,
-    /// The boot in which a DNS change handed to the WMI provider host may still be pending
-    /// (the process that submitted it was ended, or gave up waiting). Windows offers no way to
-    /// see it finish, so only the end of that boot retires it.
+    /// The boot in which a release service ended while it still held worker Jobs it had not
+    /// proven empty. Kill-on-close ended them, but nothing observed it (Sol R2-F2), so this
+    /// clears the same way as `history_lost_boot`.
     #[serde(default)]
-    pub(crate) broker_unknown_boot: Option<BootStamp>,
+    pub(crate) orphaned_jobs_boot: Option<BootStamp>,
 }
 
 impl Default for Record {
@@ -131,16 +158,16 @@ impl Default for Record {
             generation: 0,
             request_id: None,
             worker: None,
-            worker_boot_session: None,
-            worker_booted_at: None,
+            worker_boot: None,
             worker_finished: false,
+            completed: false,
             stuck: Vec::new(),
             executor_quarantined: false,
             service_quarantined: false,
             job_owner: None,
             jobs_unproven: false,
             history_lost_boot: None,
-            broker_unknown_boot: None,
+            orphaned_jobs_boot: None,
         }
     }
 }
@@ -169,35 +196,39 @@ impl std::fmt::Display for AdmissionRefusal {
     }
 }
 
-/// What the admission needs to know about processes. Injectable so the decision is tested
-/// without a live process table.
+/// What the admission needs to know about processes, the boot and the WMI DNS ledger.
+/// Injectable so the decision is tested without a live process table.
 pub(crate) struct Processes {
     /// `Some(true)` alive, `Some(false)` gone, `None` could not tell (treated as alive).
     pub(crate) alive: Box<dyn Fn(&Incarnation) -> Option<bool> + Send + Sync>,
     pub(crate) boot: Box<dyn Fn() -> BootStamp + Send + Sync>,
-}
-
-impl Record {
-    pub(crate) fn worker_boot(&self) -> BootStamp {
-        BootStamp {
-            marker: self.worker_boot_session.clone(),
-            booted_at: self.worker_booted_at,
-        }
-    }
+    /// The WMI DNS batches not known to have finished, read under C (Sol R2-F1).
+    pub(crate) broker: Box<dyn Fn() -> Result<Vec<crate::core::dns::broker_ledger::Pending>> + Send + Sync>,
 }
 
 /// This boot, as the release records it.
 pub(crate) fn current_boot() -> BootStamp {
     BootStamp {
-        marker: crate::core::boot_session::current(),
+        marker: crate::core::boot_session::release_marker(),
         booted_at: booted_at(),
+        uptime_ms: uptime_ms(),
     }
 }
 
 #[cfg(windows)]
-fn booted_at() -> Option<u64> {
+fn uptime_ms() -> Option<u64> {
     // SAFETY: no arguments; reads the system uptime counter.
-    let uptime = Duration::from_millis(unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() });
+    Some(unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() })
+}
+
+#[cfg(not(windows))]
+fn uptime_ms() -> Option<u64> {
+    None
+}
+
+#[cfg(windows)]
+fn booted_at() -> Option<u64> {
+    let uptime = Duration::from_millis(uptime_ms()?);
     SystemTime::now()
         .checked_sub(uptime)?
         .duration_since(UNIX_EPOCH)
@@ -210,21 +241,29 @@ fn booted_at() -> Option<u64> {
     None
 }
 
+/// A boot-scoped blocker: in its own boot (or one that cannot be told apart) only a restart
+/// helps; after a restart, only a completed release clears it.
+fn boot_blocker(recorded: &BootStamp, now: &BootStamp, what: &str) -> String {
+    if recorded.relation_to(now) == BootRelation::Earlier {
+        format!("{what}; choose Restore internet again")
+    } else {
+        format!("{what}; restart Windows, then choose Restore internet")
+    }
+}
+
 impl Processes {
     pub(crate) fn live() -> Self {
         Self {
             alive: Box::new(|incarnation| live_incarnation_alive(incarnation)),
             boot: Box::new(current_boot),
+            broker: Box::new(crate::core::dns::broker_ledger::outstanding),
         }
     }
 
-    fn same_boot(&self, recorded: &BootStamp) -> bool {
-        recorded.same_boot_as(&(self.boot)())
-    }
-
     /// The incarnations in `record` that are not proven gone, so a later release keeps them.
+    /// A PID with its creation time names one process in one boot, so no boot check is needed.
     pub(crate) fn unretired_incarnations(&self, record: &Record) -> Vec<Incarnation> {
-        if record.mode != Mode::Released || !self.same_boot(&record.worker_boot()) {
+        if record.mode != Mode::Released {
             return Vec::new();
         }
         let mut kept: Vec<Incarnation> = Vec::new();
@@ -236,20 +275,42 @@ impl Processes {
         kept
     }
 
-    /// `None` when nothing from the last release can still change the network. Work is
-    /// retired by proof only: the worker and every survivor gone, the worker Jobs proven
-    /// empty or ended with the release service that held them (kill-on-close), and no
-    /// lost history or pending WMI DNS change from this boot.
+    /// `None` when nothing from the last release can still change the network. Retired by proof
+    /// only (Sol R2-F2, R2-F3): the worker and every survivor gone, the release completed (its
+    /// Jobs proven empty and read back after), no WMI DNS batch outstanding from any boot, and no
+    /// lost history or orphaned Jobs. A restart ends processes, but it does not complete a
+    /// release: whatever a restart retires still waits for the next release to read it back.
     pub(crate) fn unretired_reason(&self, record: &Record) -> Option<String> {
-        if record.history_lost_boot.as_ref().is_some_and(|lost| self.same_boot(lost)) {
-            return Some("an earlier restore record could not be read; restart Windows to clear it".into());
+        let now = (self.boot)();
+        match (self.broker)() {
+            Err(error) => {
+                return Some(format!("the record of DNS changes handed to Windows cannot be read: {error:#}"));
+            }
+            Ok(pending) => {
+                if let Some(entry) = pending.iter().find(|entry| !entry.from_earlier_boot(&now)) {
+                    return Some(format!(
+                        "{} may still take effect; restart Windows, then choose Restore internet",
+                        entry.description
+                    ));
+                }
+                if !pending.is_empty() {
+                    return Some(
+                        "a DNS change from before the restart has not been checked; choose Restore internet again".into(),
+                    );
+                }
+            }
         }
-        if record.broker_unknown_boot.as_ref().is_some_and(|pending| self.same_boot(pending)) {
-            return Some(
-                "a DNS change handed to Windows may still take effect; restart Windows to clear it".into(),
-            );
+        if let Some(lost) = &record.history_lost_boot {
+            return Some(boot_blocker(lost, &now, "an earlier restore record could not be read"));
         }
-        if record.mode != Mode::Released || !self.same_boot(&record.worker_boot()) {
+        if let Some(orphaned) = &record.orphaned_jobs_boot {
+            return Some(boot_blocker(
+                orphaned,
+                &now,
+                "an earlier restore's child processes were never proven ended",
+            ));
+        }
+        if record.mode != Mode::Released {
             return None;
         }
         if let Some(worker) = record.worker
@@ -265,10 +326,18 @@ impl Processes {
         if record.jobs_unproven {
             let owner_gone = record
                 .job_owner
-                .is_some_and(|owner| (self.alive)(&owner) == Some(false));
-            if !owner_gone {
-                return Some("the restore's child processes are not yet proven ended".into());
-            }
+                .is_none_or(|owner| (self.alive)(&owner) == Some(false));
+            return Some(if owner_gone {
+                "the restore's child processes were never proven ended; restart Windows, then choose Restore internet"
+                    .into()
+            } else {
+                "the restore's child processes are not yet proven ended".into()
+            });
+        }
+        if !record.completed {
+            return Some(
+                "the last restore did not prove that every old task has stopped; choose Restore internet again".into(),
+            );
         }
         None
     }
@@ -459,12 +528,10 @@ impl Authority {
         record.generation = next_generation(record.generation);
         record.worker = None;
         record.worker_finished = false;
+        record.completed = false;
         record.stuck.clear();
         record.jobs_unproven = false;
         record.job_owner = None;
-        // Reached only when these name an earlier boot.
-        record.history_lost_boot = None;
-        record.broker_unknown_boot = None;
         record.executor_quarantined = false;
         // The main Service is answering this Connect, so its configuration is back.
         record.service_quarantined = false;

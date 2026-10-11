@@ -38,8 +38,8 @@ async fn refuse_release_after_failed_core_stop(
 fn update_operation(request: &crate::update_wire::UpdateRequest) -> Option<OperationGuard> {
     matches!(
         request,
-        crate::update_wire::UpdateRequest::Disconnect
-            | crate::update_wire::UpdateRequest::DisconnectApplyingNarrow
+        crate::update_wire::UpdateRequest::Disconnect { .. }
+            | crate::update_wire::UpdateRequest::DisconnectApplyingNarrow { .. }
             | crate::update_wire::UpdateRequest::Prepare { .. }
     )
     .then(|| OperationGuard::begin(ServiceOperationKind::ReleaseKillSwitch, IPC_HANDLER_TIMEOUT))
@@ -89,6 +89,15 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             #[cfg(windows)]
             if lifecycle_is_stopping() {
                 return service_unavailable("service is stopping");
+            }
+            // Sol R2-F4: a Disconnect queued before a Restore internet or a newer admitted Connect
+            // names an older session and is refused before it touches anything. Checked under the
+            // lifecycle lock, which StartClash admission also holds.
+            if request.payload.is_disconnect()
+                && let Err(refusal) =
+                    crate::core::release::check_release_generation(request.payload.release_generation()).await
+            {
+                return service_error(release_admission_error(&refusal));
             }
             let _operation_guard = update_operation(&request.payload);
             #[cfg(windows)]
@@ -1286,7 +1295,7 @@ mod update_operation_tests {
     #[serial]
     fn automatic_update_disconnect_is_published_as_a_kill_switch_release() {
         let before = snapshot().0;
-        let guard = update_operation(&UpdateRequest::disconnect(true));
+        let guard = update_operation(&UpdateRequest::disconnect(true, None));
         let (during, active) = snapshot();
         assert_eq!(active.unwrap().kind, ServiceOperationKind::ReleaseKillSwitch);
         assert!(during > before);
@@ -1298,7 +1307,7 @@ mod update_operation_tests {
     #[serial]
     fn update_disconnect_is_published_as_a_kill_switch_release() {
         let before = snapshot().0;
-        let guard = update_operation(&UpdateRequest::Disconnect);
+        let guard = update_operation(&UpdateRequest::disconnect(false, None));
         let (during, active) = snapshot();
         assert_eq!(
             active.map(|operation| operation.kind),

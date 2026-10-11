@@ -848,9 +848,8 @@ extension AppState {
             // release service cannot reach it. Not when a newer session won.
             var tonoProxyRemains: Bool? = false
             if case .success(let answer) = result, answer.outcome != "superseded", answer.outcome != "busy" {
-                tonoProxyRemains = await Task.detached(priority: .userInitiated) {
-                    SystemProxy.clearTonoOwnedProxy(sessionPorts: sessionPorts)
-                }.value
+                // Bounded: a clear that outlasts it is reported unknown.
+                tonoProxyRemains = await SystemProxy.clearTonoOwnedProxy(sessionPorts: sessionPorts, within: 10)
                 guard self.connectionCoordinator.protectionOperationGeneration == generation else { return }
             }
             self.finishPreemptiveRelease(result, updateWasPending: updateWasPending, tonoProxyRemains: tonoProxyRemains)

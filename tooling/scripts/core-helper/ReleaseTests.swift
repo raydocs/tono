@@ -99,6 +99,14 @@ func runReleaseSelfTests() -> Bool {
     // Only a record from this boot can block: an earlier boot ended its work.
     check(stuckAlive.unretiredReason({ var r = stuckRecord; r.workerBootSession = "earlier"; return r }()) == nil,
           "earlier boot does not block")
+    // Sol R2-F3: a restart ends processes, not an unfinished or unsettled
+    // release, and not lost history: those need a release in this boot.
+    check(idle.unretiredReason({ var r = stuckRecord; r.workerBootSession = "earlier"; r.workerFinished = false; return r }()) != nil,
+          "a restart does not retire an unfinished release")
+    check(idle.unretiredReason({ var r = stuckRecord; r.workerBootSession = "earlier"; r.unsettled = ["dns"]; return r }()) != nil,
+          "a restart does not retire an unsettled release")
+    check(idle.unretiredReason({ var r = stuckRecord; r.workerBootSession = "earlier"; r.historyLostBoot = "earlier"; return r }()) != nil,
+          "a restart does not retire lost history")
 
     // Real kernel: a dead worker's children are found by session and ended.
     check(deadWorkerSessionIsEnded(), "dead worker session is ended before admission")

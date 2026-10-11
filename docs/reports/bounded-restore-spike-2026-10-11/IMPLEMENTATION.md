@@ -30,7 +30,7 @@
 - 第二个 SCM 服务 `TonoRelease`（开发版 `TonoReleaseDev`），显示名“Tono Restore Network”。映像是 `tono-release.exe`，与已安装的 `tono-service.exe` 逐字节相同，参数为 `--release-service`。主服务每次启动时，在 C 的 try-lock 下比较 sha256，不同就停掉旧服务、替换副本并重新注册。所以解除进行中不会换掉映像。卸载器会删除该服务和这个副本。
 - 管道 `\\.\pipe\tono-release` 与主管道的 SDDL 相同，鉴权也相同（主人身份校验）。路由有三条：`GET /magic`、`POST /release`（发起，或加入正在进行的那次）、`GET /release/status`。
 - 每次解除只起一个 worker（`--release-worker`），放在服务持有的 kill-on-close Job 里运行。服务在 25 s 时答复；到 90 s 终止 Job。每次结束后以及服务启动时，都会执行 `recover_quarantine`：如果 worker 死前把主服务留在 Disabled，就把它恢复回来。
-- worker 退出不能证明它启动的子进程也结束了（Sol R-F2）。worker 在任何效果之前记下 `jobs_unproven` 和持有 Job 的解除服务身份。worker 退出后，解除服务终止 Job，并查询 Job 里还有几个活进程。为 0 才丢掉句柄；不为 0 就留着句柄，每 5 s 复查一次。只有在 C 下、没有正在进行的解除、所有 Job 都已证明清空时，才清除 `jobs_unproven`。解除服务自身结束时，kill-on-close 会结束 Job 里的一切，这也算证明。
+- worker 退出不能证明它启动的子进程也结束了（Sol R-F2）。worker 在任何效果之前记下 `jobs_unproven` 和持有 Job 的解除服务身份。worker 退出后，解除服务终止 Job，并查询 Job 里还有几个活进程。为 0 才丢掉句柄；不为 0 就留着句柄，每 5 s 复查一次。只有在 C 下、没有正在进行的解除、所有 Job 都已证明清空时，才清除 `jobs_unproven`。解除服务自身结束时，kill-on-close 会结束 Job 里的一切，但没有人观察到，所以不算证明（见 §3c）。
 - worker 的顺序：
   1. 取 C（3 s，拿不到就答复 busy）。在 C 下核对主人：保护（kill-switch 意图）或正在运行的连接属于另一个 Windows 用户，就答复 refused，什么都不改；读不到主人也拒绝。管道入口先做同样的检查。规则与主服务的 `ReleaseKillSwitch` 相同。
   2. 检查代数，过期则答复 superseded。
@@ -41,9 +41,9 @@
   7. 执行紧急解除：写入 owner 已停、WFP 解除、严格 DNS 还原。
   8. 读回 WFP、适配器 DNS、NRPT 规则和内核进程。有残留就再清理一次。
   9. 恢复主服务，等它报告 Running，再等它的管道可以连接（它在启动时的恢复步骤做完后才打开管道），然后第二次读回。主服务启动时，只要记录是 released，就不重放内核。更新执行器保持隔离，直到下一次 Connect 准入。
-  10. 判定 settled 用终结证据，不用两次读回一致（决策 094）。所有写入者都已证明结束、扫描完整、主服务和计划任务的隔离都已回读确认，WFP、NRPT 和内核才算 settled。适配器 DNS 还要求 WMI 账本里本次开机没有未销账的批次。有未销账批次时，记录 `broker_unknown_boot`，本次开机内阻挡 Connect，提示重启 Windows。
+  10. 判定 settled 用终结证据，不用两次读回一致（决策 094）。所有写入者都已证明结束、扫描完整、主服务和计划任务的隔离都已回读确认，WFP、NRPT 和内核才算 settled。适配器 DNS 还要求 WMI 账本里没有本次开机未见结束的批次（见 §3c）。
   11. 任何一步没证明自己成功（包括最后一次落盘失败），即使读回干净，总体也报 unknown。
-- WMI 账本（`core/dns/broker_ledger.rs`）：IPv4 DNS 的兼容和恢复批次经 PowerShell 调用 `SetDNSServerSearchOrder`，实际执行在 WmiPrvSE。每批开始前在 `ProgramData\Tono` 写一个条目；记不下来就不执行这一批。PowerShell 返回后删除条目；在期限到时被杀，就把条目标为 abandoned。上一次开机的条目视为已结束并删除。开机身份由服务的开机标记和开机时间共同判断，重装只会改变标记，不改变开机时间，所以不会被误判成重启。
+- WMI 账本（`core/dns/broker_ledger.rs`）：IPv4 DNS 的兼容和恢复批次经 PowerShell 调用 `SetDNSServerSearchOrder`，实际执行在 WmiPrvSE。每批开始前在 `ProgramData\Tono` 写一个条目；记不下来就不执行这一批。何时删除、准入如何读它、重启后如何处理，见 §3c。
 - Connect 准入：`StartClash` 带上本次连接尝试自己的代数（协议修订 21）。服务只在 C 下判定（1.5 s）。机器从未解除也从未准入时（代数 0），不带代数也可以连接；之后不带代数的 Connect 一律算过期。拒绝有四种：解除进行中 1017、未收尾 1018、记录损坏 1019、代数过期 1020，都返回 409，App 显示原因，并保留重试和紧急入口。
 - 解除方向的请求也要核对代数（Sol R-F4：同一个主人不等于同一个会话）。`ReleaseKillSwitch` 和 `RestoreProtectedDns` 的请求体带上被拆除会话的代数，服务在生命周期锁下、在 C 下核对。StartClash 的准入也持有这把生命周期锁。机器处于已解除状态时，任何拆除都可以执行，因为没有会话可被波及；否则代数必须与当前一致，不带代数只在代数 0 时接受。状态快照里新增 `release_generation`，供拿不到自己代数的拆除临时读取当前值，再交给服务核对。
 - App：
@@ -52,44 +52,56 @@
   - “恢复正常网络”会推进序号并竖起围栏。用户亲手点 Connect 时，App 读取当前代数，推进序号，并落下围栏。序号不对或在围栏期间拿到的票据，在 App 本地就被拒绝。服务端再按代数拒绝一次。
   - 被判代数过期时，只有在此之后没有更新的操作，才竖起围栏。这样用户新的 Connect 导致旧任务被拒时，不会连带挡住新会话自己的重连。
   - App 启动后的第一次自动尝试，会先读取代数。如果机器处于已解除状态，就竖起围栏。
-  - “恢复正常网络”的请求带的代数，是竖起围栏之后读到的当前值。用户在此之后点的 Connect 会以更新的代数准入，这次恢复就报 superseded，不去撤销它。
+  - “恢复正常网络”的请求带的代数，是竖起围栏之后、票据仍是当前时读到的值。用户在此之后点的 Connect 会以更新的代数准入，这次恢复就报 superseded，不去撤销它。归属检查见 §3c。
   - 只有 `restored` 才退出登录或退出程序；其余情况都保持“保护中”状态，显示部分、未知或忙的提示。解除服务不可用时（旧版本服务），回退到原来的断开流程。
 - 代理（Sol R-M1）：Windows App 从不设置系统代理，只清除自己以前留下的代理（`core/sysopt.rs`），所以解除不需要代理分项。
 
 ## 3b. Mac：Sol 审查后的改动（helper 4.52.51）
 
 - 终结证据（R-F1，决策 094）：先清理，再结束 Tono 自己的 `pfctl`/`networksetup`/`route` 子进程，然后再读回。子进程按共享的命令门控文本、参数里的 Tono 标记或父进程识别，参数用 `KERN_PROCARGS2` 读取。读不出参数或路径的进程算未知。分项只有在两次读回一致、隔离已回读确认、所有写入者都已结束、并且没有存活进程还能改它时才算 settled。DNS 另外要求存储的网络偏好里没有 127.0.0.1。没有 settle 的分项记入 `record.unsettled`，阻挡 Connect。
-- 保留未结束的任务（R-F2）：新的解除把上一次的 worker 记入 `record.earlier`，存活的 stuck 进程原样保留。进程检查分为存活、已退出、未知三种；未知按存活处理。准入要求每个 worker 都已退出，且它的 session 和进程组为空，并且 `workerFinished` 已置位、没有 unsettled 分项。记录损坏时记下 `historyLostBoot`，本次开机内拒绝 Connect。
+- 保留未结束的任务（R-F2）：新的解除把上一次的 worker 记入 `record.earlier`，存活的 stuck 进程原样保留。进程检查分为存活、已退出、未知三种；未知按存活处理。准入要求每个 worker 都已退出，且它的 session 和进程组为空，并且 `workerFinished` 已置位、没有 unsettled 分项。记录损坏时记下 `historyLostBoot`。
 - 显式准入（R-F3）：不再隐式准入。不带代数的请求只允许“已保护状态下的保护方向请求”。`/session/admit` 以 `expectedGeneration` 做比较交换，全程在 C 下。新增 `GET /session/status`。App 端：会话盒被退休后不能再采用准入结果；同一个盒子的准入串行进行。机器处于已解除状态时，只有用户亲手点 Connect 创建的会话盒才能准入；唤醒恢复、受保护重连、启动时的自动连接都不行。
 - 解除方向带代数（R-F4）：拆除请求在 C 下核对当前代数。没有已准入代数时，App 先读 `/session/status` 再发送。“恢复正常网络”带当前会话盒的代数，没有就取解除服务 `/release/status` 的代数。
 - 失败不当成功（R-F5）：新增 `ReleaseReport.failures`，只要有一项，结果就是 unknown。每次 `launchctl bootout` 都回读 launchd 状态（已加载、未加载、未知），并带重试。最后一次落盘失败、扫描失败、bootout 未确认，都记为失败。
 - 守护进程恢复（R-F6）：bootout 之前先持久写入 `daemonBootedOut`。`ReleaseQuarantine.recover` 在 C 下、确认 worker 已退出后，把 helper 守护进程恢复回来，回读确认已加载，然后清除标记。恢复失败记入 `daemonRecoveryFailure`，并在 `/release/status` 里显示。worker 收尾时、解除服务启动时、每次 worker 退出时都会执行；失败时每 15 s 重试一次。
 - 代理（R-M1）：恢复在公布结果之前，只清除 Tono 自己的系统代理（127.0.0.1 或 localhost 上 Tono 的端口），并回读最多 2 s。代理还在时，结果从 restored 降为 partial；读不出时降为 unknown。原来那个分离执行、忽略错误的清除已删除。
 - 紧急命令（R-M2）：`--emergency-disarm` 和 `--emergency-reset` 在 3 s 内拿到 C 时，先把记录写成已解除、换新代数、所有分项都标为未 settle，再执行命令。拿不到 C 时，作为人工破窗执行，不改记录。
+
+## 3c. Sol 第二轮审查后的改动
+
+- WMI 账本是准入和终结的依据（R2-F1，Windows）：
+  - 条目在 PowerShell 进程创建之前写入，用独占创建（`create_new`）和 `sync_all` 落盘，文件名含进程号、纳秒时间和计数器，已存在就换名，不会覆盖旧条目。
+  - 批处理脚本记录每个没有返回结果的 CIM 调用。只有脚本走到最后、每个 CIM 调用都有答复时，才打印 `TONO-WMI-SETTLED`，只有看到这一行才删除条目。超时、在期限后才创建出来的进程、等待出错、脚本中途退出，条目都保留并标为未见结束。
+  - Connect 准入在 C 下直接读账本，不再依赖解除结束时才写的标记。解除在批处理开始后崩溃、或者最后一次落盘失败，账本里的条目仍然挡住 Connect。
+  - 账本第一次使用时，为没有账本的旧版本记一个条目，开机身份取当前开机。所以升级后的这次开机里做“恢复正常网络”，DNS 的迟到风险报 unknown，Connect 要等重启 Windows 再恢复一次。
+- “已恢复”要等 Job 证明清空（R2-F2，Windows）：
+  - 解除服务不再把 worker 的最后一行直接当作答复。worker 退出后，服务先终止并清空它的 Job，再检查所有还挂着的旧 Job 是否为 0 个进程，然后自己再读一次所有分项，与 worker 的最后一次读回比较。都一致，才在 C 下把记录写成 `completed`，答复里的 restored 才保留。否则所有分项的迟到风险都报 unknown。
+  - 25 s 答复期限到时，如果这一步还没做完，答复一律标为未结束（不会是 restored）。
+  - 准入要求 `completed`。`jobs_unproven` 不再因为持有 Job 的解除服务已经退出就算证明。解除服务死后，新的解除把这件事记为 `orphaned_jobs_boot`：同一次开机内一直拒绝 Connect，提示重启 Windows；重启后要再做一次所有分项都 settle 的解除才能清除。
+- 重启不再自动清除未完成的状态（R2-F3，Mac + Windows）：
+  - 重启只证明旧进程都已结束。未完成的解除、没 settle 的分项、丢失的历史、无主的 Job、上一次开机留下的账本条目，都要在新的开机里再做一次“恢复正常网络”，读回全部 settle 之后才清除。
+  - Windows 的开机身份改用一个独立的易失注册表键 `HKLM\SOFTWARE\TonoReleaseBoot`，安装和卸载都不碰它，所以重装不会改变它。另外记录开机时间和 `GetTickCount64` 读数。只有标记不同，并且（计数器倒退，或开机时间相差超过 120 s）时，才算更早的开机。任何一部分缺失都按同一次开机处理。
+  - Mac 的 `kern.bootsessionuuid` 本来就只在重启时变化。准入去掉了“不是同一次开机就放行”的分支：进程检查只在同一次开机里做，`workerFinished`、`unsettled`、`historyLostBoot` 跨开机也照样生效。
+- 恢复操作的归属（R2-F4，Windows App）：
+  - “恢复正常网络”在竖起围栏时拿到自己的票据。取消监视器和清空会话，在持有纪元锁、确认票据仍是当前的情况下进行。读完当前代数后再确认一次票据仍是当前的，否则不发送请求。用户的 Connect 在被准入之前就会推进纪元，所以票据仍是当前时读到的代数，不可能是那次 Connect 的代数。
+  - 答复回来时，在状态锁下再确认票据仍是当前的，不是就什么都不改（不重置状态机、不清控制器信息、不清系统代理）。清除自己留下的系统代理也在状态锁内完成。
+  - 解除服务不可用时回退到普通断开，同样先在状态锁下确认票据。
+  - 更新事务的 Disconnect 现在带上被拆除会话的代数，服务在生命周期锁下、在 C 下核对，规则与 `ReleaseKillSwitch` 相同。
+- Mac 系统代理清除限时（R-M1 遗留）：清除最多等 10 s。超时就报 unknown，清除在后台自己做完；它只会去掉指向 Tono 自己端口的代理。
 
 ## 4. 已知限制（如实保留）
 
-- Mac 的紧急命令拿不到 C 时作为人工破窗执行，不经过 C。它在 C 下执行之后，Connect 会一直被拒，直到再做一次“恢复正常网络”并且所有分项都 settle。
+- 紧急命令（Mac `--emergency-*`、Windows 紧急 CLI）拿不到 C 时作为人工破窗执行，不经过 C，也不改记录。它们是测试员手动授权的破窗手段，不属于“恢复正常网络”的保证范围，测试清单里单列（Sol R-M2）。Mac 的紧急命令在 C 下执行之后，Connect 会一直被拒，直到再做一次“恢复正常网络”并且所有分项都 settle。
 - Mac 上，只要有一个进程的路径读不出，所有分项都算未知；扫描时恰好有其他程序在运行 `pfctl`/`networksetup`/`route` 写操作，相关分项也算未知。这两点都是有意偏向安全，代价是可能多出现“状态未知”。
-- Mac 的 Swift 改动只能在托管 macOS CI 上编译和运行自测，`launchctl print` 对不存在的任务返回什么，按 113 或“Could not find service”处理，未在真机核对。
-## 3b. Mac：Sol 审查后的改动（helper 4.52.51）
-
-- 终结证据（R-F1，决策 094）：先清理，再结束 Tono 自己的 `pfctl`/`networksetup`/`route` 子进程，然后再读回。子进程按共享的命令门控文本、参数里的 Tono 标记或父进程识别，参数用 `KERN_PROCARGS2` 读取。读不出参数或路径的进程算未知。分项只有在两次读回一致、隔离已回读确认、所有写入者都已结束、并且没有存活进程还能改它时才算 settled。DNS 另外要求存储的网络偏好里没有 127.0.0.1。没有 settle 的分项记入 `record.unsettled`，阻挡 Connect。
-- 保留未结束的任务（R-F2）：新的解除把上一次的 worker 记入 `record.earlier`，存活的 stuck 进程原样保留。进程检查分为存活、已退出、未知三种；未知按存活处理。准入要求每个 worker 都已退出，且它的 session 和进程组为空，并且 `workerFinished` 已置位、没有 unsettled 分项。记录损坏时记下 `historyLostBoot`，本次开机内拒绝 Connect。
-- 显式准入（R-F3）：不再隐式准入。不带代数的请求只允许“已保护状态下的保护方向请求”。`/session/admit` 以 `expectedGeneration` 做比较交换，全程在 C 下。新增 `GET /session/status`。App 端：会话盒被退休后不能再采用准入结果；同一个盒子的准入串行进行。机器处于已解除状态时，只有用户亲手点 Connect 创建的会话盒才能准入；唤醒恢复、受保护重连、启动时的自动连接都不行。
-- 解除方向带代数（R-F4）：拆除请求在 C 下核对当前代数。没有已准入代数时，App 先读 `/session/status` 再发送。“恢复正常网络”带当前会话盒的代数，没有就取解除服务 `/release/status` 的代数。
-- 失败不当成功（R-F5）：新增 `ReleaseReport.failures`，只要有一项，结果就是 unknown。每次 `launchctl bootout` 都回读 launchd 状态（已加载、未加载、未知），并带重试。最后一次落盘失败、扫描失败、bootout 未确认，都记为失败。
-- 守护进程恢复（R-F6）：bootout 之前先持久写入 `daemonBootedOut`。`ReleaseQuarantine.recover` 在 C 下、确认 worker 已退出后，把 helper 守护进程恢复回来，回读确认已加载，然后清除标记。恢复失败记入 `daemonRecoveryFailure`，并在 `/release/status` 里显示。worker 收尾时、解除服务启动时、每次 worker 退出时都会执行；失败时每 15 s 重试一次。
-- 代理（R-M1）：恢复在公布结果之前，只清除 Tono 自己的系统代理（127.0.0.1 或 localhost 上 Tono 的端口），并回读最多 2 s。代理还在时，结果从 restored 降为 partial；读不出时降为 unknown。原来那个分离执行、忽略错误的清除已删除。
-- 紧急命令（R-M2）：`--emergency-disarm` 和 `--emergency-reset` 在 3 s 内拿到 C 时，先把记录写成已解除、换新代数、所有分项都标为未 settle，再执行命令。拿不到 C 时，作为人工破窗执行，不改记录。
-
-## 4. 已知限制（如实保留），也不读写解除记录。它是测试员手动授权的破窗手段，不属于“恢复正常网络”的保证范围，测试清单里也单列（Sol R-M2）。
-- Windows 更新事务的 Disconnect（只在有待处理更新时执行）不核对代数。新会话准入后旧的更新断开仍可能作用于它，待单独处理。
-- 恢复请求在竖起围栏后读取当前代数。这次读取与解除 worker 取得 C 之间，如果一次在途的旧 StartClash 恰好被准入，这次恢复会报 superseded；那次迟到的提交随后由 App 的补偿拆除按它自己的代数解除。
-- 解除服务进程结束视为它持有的 Job 已结束（kill-on-close）。卡在内核里迟迟不退出的子进程，在这种情况下不会被继续追踪。
+- Mac 的 configd 论证（已提交的偏好会被 configd 以最后写入为准应用）依据 configd-1405 的公开源码，没有在每个受支持的 macOS 版本上实测。
+- Mac 的端到端时间不只是解除服务的期限：清除系统代理最多再等 10 s，所以不承诺“约 30 秒”一定给出结果。普通 Mac 连接走 TUN，不设置系统代理，这一步通常是空操作。
+- Mac 记录损坏时如果连开机身份也读不出（`historyLostBoot` 为空字符串），这个记录无法证明属于更早的开机，会一直拒绝 Connect，需要人工处理。实际中 `kern.bootsessionuuid` 读不出的情况未见过。
+- Windows 首次装上本版本后，同一次开机里做“恢复正常网络”，DNS 报 unknown，Connect 要等重启 Windows 再恢复一次（决策 094，旧版本没有账本）。
+- Windows 的 WMI 账本有本次开机未见结束的批次时，本次开机内不能再连接，只能重启 Windows 再恢复一次。解除服务在证明 Job 清空之前死掉时也一样。这是为了不把“可能还有迟到写入”当成已恢复，代价是可用性。
+- Windows 的开机身份依赖易失注册表键。有管理员权限的人在同一次开机里删掉这个键并把系统时钟改动超过 120 s，会被误判成重启。这属于本机管理员篡改，不在保证范围内。
+- Windows 只能证明 Job 里没有进程，不能证明 `TerminateJobObject` 之前某个子进程已经发出的内核调用都已完成；这一点和单个进程被终止的情况相同，由最后一次读回覆盖。
 - 恢复网络后重启 App，开机自动连接会被围栏挡住，直到用户手动点一次 Connect。
-- WMI 账本有未销账批次时，本次开机内不能再连接，只能重启 Windows。这是为了不把“可能还有迟到 DNS 写入”当成已恢复，代价是可用性。
-- Windows 服务代码只能在托管 Windows CI 编译和运行单元测试。SCM 注册、Job 清空查询、计划任务回读、管道等待都没有在真机执行过。
+- Windows 服务代码只能在托管 Windows CI 编译和运行单元测试。SCM 注册、Job 清空查询、计划任务回读、管道等待、易失注册表键都没有在真机执行过。
 - 被 SIGKILL 后仍卡在内核里的进程，只能记录下来并阻挡 Connect。
 - 降级到不认识 `release-state` 的旧版本，不在保证范围内。
 - 测试用户的真机结果就是实验数据，需要按 D/S/O/U 归类，不写成“全部通过”。

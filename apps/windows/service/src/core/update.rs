@@ -733,7 +733,7 @@ async fn transact(
             store.save(next)?;
             // Child waits for the persisted identity while this lock is held.
         }
-        release @ (UpdateRequest::Disconnect | UpdateRequest::DisconnectApplyingNarrow) => {
+        release @ (UpdateRequest::Disconnect { .. } | UpdateRequest::DisconnectApplyingNarrow { .. }) => {
             if !store.pending() {
                 return status(&store);
             }
@@ -2779,6 +2779,6 @@ mod tests {
             "{unreadable:#}"
         );
         assert!(update_lease_gate(&UpdateRequest::Adopt, &leased, |_| Ok(None)).is_err());
-        assert!(update_lease_gate(&UpdateRequest::Disconnect, &leased, |_| Ok(None)).is_err());
+        assert!(update_lease_gate(&UpdateRequest::disconnect(false, None), &leased, |_| Ok(None)).is_err());
     }
 }

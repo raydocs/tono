@@ -407,13 +407,15 @@ struct ReleaseProcesses {
     /// Nil when the release record can retire and Connect may be admitted:
     /// every worker of this boot gone with an empty session and group, no
     /// survivor of SIGKILL, the latest release finished with every component
-    /// settled, and no history lost in this boot. A worker from a provably
-    /// earlier boot ended with that boot; its persistent residue is read
-    /// back by the next release, and replay sources are quarantined.
+    /// settled, and no lost history. A provably earlier boot retires only
+    /// processes (Sol R2-F3): an unfinished or unsettled release, or lost
+    /// history, still needs a release in this boot to read everything back.
     func unretiredReason(_ record: ReleaseAuthority.Record) -> String? {
         let current = bootSession()
-        if let lost = record.historyLostBoot, ReleaseAuthority.sameBoot(lost, current) {
-            return "Tono's restore history was lost earlier in this session of the Mac. Restart the Mac before connecting."
+        if let lost = record.historyLostBoot {
+            return ReleaseAuthority.sameBoot(lost, current)
+                ? "Tono's restore history was lost earlier in this session of the Mac. Restart the Mac, then choose Restore internet."
+                : "Tono's restore history was lost before the Mac restarted. Choose Restore internet again."
         }
         let sameBoot = ReleaseAuthority.sameBoot(record.workerBootSession, current)
         var slots = (record.earlier ?? []).filter { ReleaseAuthority.sameBoot($0.bootSession, current) }
@@ -421,11 +423,12 @@ struct ReleaseProcesses {
         for slot in slots {
             if let reason = retireReason(slot) { return reason }
         }
-        guard sameBoot else { return nil }
-        var survivors: [Int32] = []
-        for stuck in record.stuck where liveness(stuck) != .gone { survivors.append(stuck.pid) }
-        if !survivors.isEmpty {
-            return "an old Tono process could not be stopped or checked (process \(survivors.map(String.init).joined(separator: ", ")))."
+        if sameBoot {
+            var survivors: [Int32] = []
+            for stuck in record.stuck where liveness(stuck) != .gone { survivors.append(stuck.pid) }
+            if !survivors.isEmpty {
+                return "an old Tono process could not be stopped or checked (process \(survivors.map(String.init).joined(separator: ", ")))."
+            }
         }
         if !record.workerFinished {
             return "the last restore stopped before it finished. Choose Restore internet again."
