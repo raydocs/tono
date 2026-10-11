@@ -82,5 +82,5 @@
     - helper 仍为 4.52.50，CONTRACT 已重算。
     - 所有者硬门槛「放行本身有界」本轮未达成，只报告不硬做。阻塞点：helper 没有用户放行的代数栅栏，显式 disarm 不改 target；helper 逐个处理请求，App 的特权 actor 也串行。最小方案写在 PR 正文，待所有者决定。
     - 紧急入口已按源码核实：Support 页显示的是 `--emergency-reset`（移除 helper；有挂起更新时退回旧放行，不逐项回读）；有界并逐项回读的是 `--emergency-disarm`。两者都可在 App 外以 root 在终端运行；macOS 在 App 外没有可发现的入口。
-    - CI 修正（20da92dd 的 macOS 3 个 XCTest 失败）：AI 回读抛错只在用户显式放行时改写错误说明；自动放行按设计保留 AI 拦截，保留原失败说明，AI 提示仍标为未验证。`AccountGateProtectionTests` 的假 helper 补上 AI 回读（原先落到真实 helper 而抛错）。
+    - CI 修正（20da92dd 的 macOS 3 个 XCTest 失败）：AI 回读抛错只在用户显式放行时改写错误说明；自动放行按设计保留 AI 拦截，保留原失败说明，AI 提示仍标为未验证。`AccountGateProtectionTests` 与 `NativeUpdateReleaseArbitrationTests.testRestoreAfterCommitDuringDrainRunsOrdinaryRelease` 的假 helper 补上 AI 回读（原先落到真实 helper 而抛错）。
     - Linux 无法运行 Swift，新测试未先跑红。

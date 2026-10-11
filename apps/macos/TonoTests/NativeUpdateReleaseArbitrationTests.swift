@@ -119,6 +119,7 @@ final class NativeUpdateReleaseArbitrationTests: XCTestCase {
         }
         runtime.restrictToBootstrap = {}
         runtime.refreshKillSwitchStatus = { .confirmed(requiresProtectionRecovery: false) }
+        runtime.selectiveAIRecoveryPending = { false }
         app.networkProtection = runtime
 
         await app.disconnectAndWait(releaseKillSwitch: true)
