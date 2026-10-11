@@ -71,7 +71,7 @@ final class DisarmErrorReadbackTests: XCTestCase {
     }
 
     /// One-click release whose drain never finishes: a cancelled connect
-    /// mutation has not returned. At the overall deadline the UI stops
+    /// mutation has not returned. At the UI deadline the UI stops
     /// showing "Disconnecting…" and publishes unknown with the recovery text,
     /// with nothing released and the armed intent kept. The release still runs
     /// once the drain ends, and its result replaces the interim one.

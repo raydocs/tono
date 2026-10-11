@@ -825,7 +825,7 @@ extension AppState {
         localized: "Restoring internet is taking longer than expected. Tono keeps finishing it in the background and will show the result; until then, direct internet may still be blocked. If it stays stuck, the Support page has a local recovery command."
     )
 
-    /// The explicit release's overall deadline passed (decision 092): stop
+    /// The explicit release's UI deadline passed (decision 092): stop
     /// showing "Disconnecting…" and publish the truthful interim result. The
     /// armed intent stays, nothing is released here, and the queued release
     /// publishes its final result when it lands.

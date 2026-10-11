@@ -45,9 +45,12 @@
    - a. 正常连接中点 Restore internet。
    - b. 拔网线 / 关 Wi-Fi 后登录失效状态下点 Restore internet（不依赖账号、API、隧道）。
    - c. 安装旧版候选（上一版 helper）后直接升级到本候选、在升级完成前点 Restore internet（旧 helper 路径）。
-   - d. `sudo launchctl kill SIGSTOP system/com.raydocs.tono.core-helper` 后点 Restore internet：界面最迟约 60 秒给出失败 / 未知
-     （不再停在「正在断开…」），并指向 Support 页的本地恢复命令；`SIGCONT` 后同一次放行完成并更新结果，
-     或照做恢复命令后读回已释放。
+   - d. `sudo launchctl kill SIGSTOP system/com.raydocs.tono.core-helper` 后点 Restore internet：界面最迟约 60 秒不再停在「正在断开…」，
+     改为显示「未知、仍在完成」并指向 Support 页的本地恢复命令（60 秒只是界面停止等待，**不是**恢复在 60 秒内完成）；
+     `SIGCONT` 后同一次放行完成，界面按真实读回更新为已放行 / 部分失败 / 未知；或在终端照做恢复命令
+     （App 卡死时同样可用）后读回已释放。
+   - h. 原生更新失败后（同第 5 步 b/c）点 Restore internet，并在放行进行中 `SIGSTOP` helper：同 d，最迟约 60 秒显示未知，
+     不显示已放行；`SIGCONT` 后按真实读回更新。
    - e. 放行中 / 放行后合上盖子睡眠 1 分钟再唤醒：仍已释放，不自动重连。
    - f. 放行后 `sudo launchctl kickstart -k system/com.raydocs.tono.core-helper`：仍已释放，2 分钟内不复锁。
    - g. 连续快速点三次 Restore internet：最终一次结果、已释放，不复锁。

@@ -33,7 +33,12 @@
   and retires their generation; never leaves the UI waiting forever; reports released / partially failed / unknown
   and never fakes success; restores PF, DNS **and** the AI sinkholes and blackhole routes (sites working while AI
   stays blocked is a failure); and on failure points to the local emergency exit. Test matrix: #1504 PR body;
-  device steps: owner checklist G1 step 6.
+  device steps: owner checklist G1 step 6. "Never waiting forever" is a 60 s UI deadline: past it the UI stops
+  waiting and shows "unknown, still finishing" with the recovery command. It is not a promise that recovery completes
+  in 60 s; the drain before the release has no cap, and the post-drain budget is in the PR body. The real release
+  and its PF/DNS/AI readback are device-gated. The emergency entry stays the local
+  `tono-core-helper --emergency-reset` / `--emergency-disarm` command: the Support page shows it, and Terminal runs it
+  when the app is hung.
 - In short: an automatic failure keeps the whole protection (PF, intent, protected DNS, an A29 fault); only an
   explicit Restore / Disconnect or an operator release releases.
 - Release authority, the same everywhere (decision 084 round 7): an operator `released` on record, the user's own

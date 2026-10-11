@@ -102,10 +102,14 @@ extension AppState {
                 let explicitJoined = dispatchedAutomatic && settled && nativeUpdateExplicitReleaseRequested
                 nativeUpdateExplicitReleaseRequested = false
                 nativeUpdateDisconnectTask = nil
-                // The final result (or a newer owner) replaces the interim one.
+                // This task's interim "still finishing" ends with it. A result
+                // from a retired generation was not published above, so a
+                // newer owner's state stays; only the interim text is cleared,
+                // and not while an ordinary release still shows its own.
                 if connectionCoordinator.updateReleaseStillFinishing {
                     connectionCoordinator.updateReleaseStillFinishing = false
-                    if errorMessage == Self.releaseStillFinishingMessage { errorMessage = nil }
+                    if !connectionCoordinator.releaseStillFinishing,
+                       errorMessage == Self.releaseStillFinishingMessage { errorMessage = nil }
                 }
                 // Routed again: still pending runs the plain update Disconnect,
                 // a committed update runs the ordinary explicit release.
@@ -168,7 +172,7 @@ extension AppState {
     }
 
     /// The user's Restore during a pending update shares the explicit
-    /// release's overall deadline (decision 092). The drain before
+    /// release's 60 s UI deadline (decision 092; not a completion bound). The drain before
     /// `/update/disconnect` has no bound of its own; past the deadline the UI
     /// publishes "unknown, still finishing", nothing is released early, the
     /// armed intent stays, and the running task still publishes its result.
