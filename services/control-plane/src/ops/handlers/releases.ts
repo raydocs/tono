@@ -16,7 +16,7 @@ import {
   type ClientRelease,
 } from '../releases';
 import { listUpdateChannels } from '../releases-channels';
-import { listReleaseObjects } from '../releases-objects';
+import { listReleaseObjects, releaseObjectsValidator } from '../releases-objects';
 import { ApiError } from '../../errors';
 import { listEnvelope } from '../http';
 import {
@@ -165,10 +165,7 @@ export async function getReleaseObjects(req: Request, e: Env): Promise<Response>
   const limit = parseLimit(new URL(req.url).searchParams.get('limit'), { default: 50, max: 200 });
   const { items, truncated } = await listReleaseObjects(e.RELEASES, e.DB, limit);
   const t = now();
-  const etag = weakEtag([
-    truncated ? 1 : 0,
-    ...items.map((row) => `${row.key}:${row.etag}:${row.registered ? 1 : 0}`),
-  ]);
+  const etag = weakEtag([await releaseObjectsValidator(items, truncated)]);
   const hit = notModified(req, etag);
   if (hit) return hit;
   const dto: ReleaseObjectListDto = { ...listEnvelope(items, null, t, items.length), truncated };

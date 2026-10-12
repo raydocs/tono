@@ -91,3 +91,21 @@ export async function listReleaseObjects(
   }));
   return { items, truncated: more };
 }
+
+/**
+ * A fixed-size validator for one listing: SHA-256 of everything the response
+ * body shows per object (truncated to 32 hex chars). Joining the keys instead
+ * made the header as long as the listing, and leaving out sha256 or uploadedAt
+ * let corrected metadata on identical bytes keep the old tag.
+ */
+export async function releaseObjectsValidator(
+  items: readonly ReleaseObjectDto[],
+  truncated: boolean,
+): Promise<string> {
+  const tuple = JSON.stringify([
+    truncated,
+    items.map((row) => [row.key, row.sha256, row.uploadedAt, row.sizeBytes, row.etag, row.registered]),
+  ]);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(tuple));
+  return hex(digest).slice(0, 32);
+}

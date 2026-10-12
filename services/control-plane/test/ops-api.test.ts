@@ -1002,6 +1002,35 @@ describe('ops v1 api', () => {
     expect(whole.items.map((row) => row.key)).toContain('z-newest');
   });
 
+  it('keeps the listing validator a fixed size', async () => {
+    const releases = (env as unknown as { RELEASES: R2Bucket }).RELEASES;
+    const bytes = new TextEncoder().encode('x');
+    for (let i = 0; i < 200; i += 1) {
+      await releases.put(`${String(i).padStart(4, '0')}-${'k'.repeat(1019)}`, bytes);
+    }
+    const res = await ops('releases/objects?limit=200');
+    expect(res.status).toBe(200);
+    expect(assertReleaseObjectList(await res.json()).items).toHaveLength(200);
+    expect(res.headers.get('etag')!.length).toBeLessThan(128);
+  });
+
+  it('changes the validator when only an object\'s stored sha256 changes', async () => {
+    const releases = (env as unknown as { RELEASES: R2Bucket }).RELEASES;
+    const bytes = new TextEncoder().encode('same bytes');
+    const key = 'Tono-3.0.0-build300-arm64.zip';
+    await releases.put(key, bytes, { customMetadata: { sha256: 'a'.repeat(64) } });
+    const first = await ops('releases/objects');
+    const tag = first.headers.get('etag')!;
+    expect((await ops('releases/objects', { headers: { 'if-none-match': tag } })).status).toBe(304);
+
+    await releases.put(key, bytes, { customMetadata: { sha256: 'b'.repeat(64) } });
+    const again = await ops('releases/objects', { headers: { 'if-none-match': tag } });
+    expect(again.status).toBe(200);
+    expect(again.headers.get('etag')).not.toBe(tag);
+    const row = assertReleaseObjectList(await again.json()).items.find((item) => item.key === key);
+    expect(row?.sha256).toBe('b'.repeat(64));
+  });
+
   it('refuses a release missing a required field instead of storing "undefined"', async () => {
     const full = {
       platform: 'macos', channel: 'stable', version: '9.9.9', r2Key: 'x.zip',
