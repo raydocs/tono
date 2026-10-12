@@ -9,10 +9,16 @@ import { cn } from '@/lib/utils';
  * travels with the button as its title and its `aria-describedby` text rather
  * than living in a comment. A greyed control with no explanation is the thing
  * that makes people reload the page.
+ *
+ * `danger` marks an action that takes something away from a customer or the
+ * fleet (suspending an account, withdrawing a release). It is outlined in the
+ * severity colour so it does not sit in a row looking like the expiry edit
+ * beside it; its confirm is filled in the same colour.
  */
 export function Action({
   children,
   primary,
+  danger,
   reason,
   pending,
   onClick,
@@ -20,6 +26,7 @@ export function Action({
 }: {
   children: ReactNode;
   primary?: boolean;
+  danger?: boolean;
   reason?: string | null;
   pending?: boolean;
   onClick?: () => void;
@@ -31,7 +38,7 @@ export function Action({
       type="button"
       disabled={blocked}
       title={reason || undefined}
-      className={cn('ops-action', primary && 'ops-action-primary', className)}
+      className={cn('ops-action', primary && 'ops-action-primary', danger && 'ops-action-danger', className)}
       onClick={blocked ? undefined : onClick}
     >
       {children}

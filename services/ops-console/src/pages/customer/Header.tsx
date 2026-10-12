@@ -96,7 +96,7 @@ export function CustomerHeader({
             {words.restore}
           </Action>
         ) : (
-          <Action onClick={() => setSuspending(true)}>{words.suspend}</Action>
+          <Action danger onClick={() => setSuspending(true)}>{words.suspend}</Action>
         )}
       </ActionRow>
 
@@ -255,6 +255,7 @@ function SuspendDialog({
       title={copy.suspendTitle}
       consequence={copy.suspendBody(email)}
       confirm={copy.suspendConfirm}
+      danger
       pending={ask.pending}
       failure={ask.error}
       onConfirm={() => {

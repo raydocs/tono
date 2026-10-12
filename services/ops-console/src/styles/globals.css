@@ -203,6 +203,10 @@ button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color
 .ops-action-primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }
 .ops-action-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
 .ops-action-primary:disabled { background: transparent; border-color: var(--hairline); color: var(--muted-foreground); }
+.ops-action-danger:not(:disabled) { color: hsl(var(--sev-fg)); border-color: hsl(var(--sev-line) / 0.5); }
+.ops-action-danger:hover:not(:disabled) { background: hsl(var(--sev-bg)); border-color: hsl(var(--sev-line)); }
+.ops-action-primary.ops-action-danger:not(:disabled) { background: hsl(var(--sev-line)); border-color: hsl(var(--sev-line)); color: #ffffff; }
+.ops-action-primary.ops-action-danger:hover:not(:disabled) { background: hsl(var(--sev-fg)); border-color: hsl(var(--sev-fg)); }
 
 /* The severity rail on a 今天 row: the only colour an incident line carries. */
 .sev-rail {

@@ -82,6 +82,7 @@ export function ReleaseTable({
         title={pending ? copy.releaseActions[pending.kind] : ''}
         consequence={consequence(pending, minVersion)}
         confirm={pending ? copy.releaseActions[pending.kind] : ''}
+        danger={pending?.kind === 'withdraw'}
         pending={busy || (pending?.kind === 'setMin' && minVersion.trim() === '')}
         failure={failure}
         onConfirm={confirm}
@@ -227,7 +228,7 @@ function releaseColumns(
             </Action>
           ) : null}
           {row.publishedAt !== null && row.withdrawnAt === null ? (
-            <Action onClick={() => ask({ kind: 'withdraw', row })}>
+            <Action danger onClick={() => ask({ kind: 'withdraw', row })}>
               {copy.releaseActions.withdraw}
             </Action>
           ) : null}

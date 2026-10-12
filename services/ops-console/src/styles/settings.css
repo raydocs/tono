@@ -6,29 +6,14 @@
  * sections Batch 7 has not reached yet. No routes, order, writes, filters
  * or copy move; this file only seats them. */
 
-/* ------------------------------------------------------------ hero card */
+/* ------------------------------------------------------------ section lead */
 
+/* The section name is already the shell header's title, so the lead is one
+   plain line under it, not a card repeating the name. */
 .settings-page .settings-hero {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  border-radius: 20px;
-  box-shadow: var(--shadow-card-lg);
-  padding: 22px 24px;
-}
-
-.dark .settings-page .settings-hero {
-  border-color: rgb(255 255 255 / 0.07);
-  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
-}
-
-@media (max-width: 640px) {
-  .settings-page .settings-hero {
-    padding: 18px 16px;
-    border-radius: 18px;
-  }
 }
 
 /* ------------------------------------------------- alerts: rule table */

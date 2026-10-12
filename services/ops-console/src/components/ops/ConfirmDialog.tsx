@@ -26,6 +26,7 @@ export function ConfirmDialog({
   title,
   consequence,
   confirm,
+  danger,
   pending,
   failure,
   onConfirm,
@@ -36,6 +37,8 @@ export function ConfirmDialog({
   title: string;
   consequence: string;
   confirm: string;
+  /** The confirm takes something away; it is filled in the severity colour. */
+  danger?: boolean;
   pending?: boolean;
   failure?: string | null;
   onConfirm: () => void;
@@ -57,7 +60,7 @@ export function ConfirmDialog({
         <DialogFooter>
           <ActionRow>
             <Action onClick={onCancel}>{copy.releaseConfirm.cancel}</Action>
-            <Action primary pending={pending} onClick={onConfirm}>{confirm}</Action>
+            <Action primary danger={danger} pending={pending} onClick={onConfirm}>{confirm}</Action>
           </ActionRow>
         </DialogFooter>
       </DialogContent>

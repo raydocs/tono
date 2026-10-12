@@ -317,7 +317,7 @@ export default function CustomersPage({
            columns' total it collapses to zero and no scroll can bring it
            back. A local floor keeps identities readable on a phone while the
            container keeps the sideways scroll. */
-        className="customer-list-table [&>table]:min-w-[1020px]"
+        className="customer-list-table [&>table]:min-w-[1100px]"
         sort={sort}
         onSortChange={(sort) => context.change({ sort })}
         onRowClick={(row) => (row.customer === null
