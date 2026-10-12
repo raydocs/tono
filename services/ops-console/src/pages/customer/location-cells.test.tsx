@@ -54,3 +54,34 @@ it('shows the site line without its trailing parenthetical and keeps it on the h
   expect(lines).toEqual(['Singapore', 'Harbour']);
   expect(host.firstElementChild?.getAttribute('title')).toBe(name);
 });
+
+it('shows only the first segment above and the last segment under it, the whole name on the hover', () => {
+  const name = 'Frankfurt · Main · eu-central-1a-secondary · Frankfurt-Backup-Exit';
+  const host = mount(<NodeCell name={name} />);
+  const lines = [...host.querySelectorAll('span > span')];
+  expect(lines.map((line) => line.textContent)).toEqual(['Frankfurt', 'Frankfurt-Backup-Exit']);
+  for (const line of lines) {
+    expect(line.classList.contains('truncate')).toBe(true);
+    expect(line.textContent?.endsWith('·')).toBe(false);
+    expect(line.textContent).not.toContain('· …');
+  }
+  expect(host.firstElementChild?.getAttribute('title')).toBe(name);
+});
+
+it('shows a three-part name as its first and last segment', () => {
+  const host = mount(<NodeCell name="Frankfurt · Main · eu-central-1a" />);
+  const lines = [...host.querySelectorAll('span > span')].map((line) => line.textContent);
+  expect(lines).toEqual(['Frankfurt', 'eu-central-1a']);
+});
+
+it('shows a single-part name as one line', () => {
+  const host = mount(<NodeCell name="Catalog Only" />);
+  const lines = [...host.querySelectorAll('span > span')].map((line) => line.textContent);
+  expect(lines).toEqual(['Catalog Only']);
+});
+
+it('takes the first segment above and the site without its remark under it', () => {
+  const host = mount(<NodeCell name="Singapore · Harbour · 01（remark · two）" />);
+  const lines = [...host.querySelectorAll('span > span')].map((line) => line.textContent);
+  expect(lines).toEqual(['Singapore', '01']);
+});

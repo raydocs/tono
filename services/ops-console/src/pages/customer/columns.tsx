@@ -116,7 +116,7 @@ export function customerColumns(
     {
       id: 'node',
       header: copy.customerColumns.node,
-      width: '112px',
+      width: '124px',
       sortValue: (row) => row.selectedServer ?? '',
       cell: (row) => <NodeCell name={row.selectedServer} />,
     },
@@ -155,7 +155,7 @@ export function customerColumns(
       {
         id: 'services',
         header: copy.customerColumns.services,
-        width: '112px',
+        width: '100px',
         className: 'px-2',
         cell: (row: CustomerSummaryDto) => (
           row.services.length === 0
@@ -241,13 +241,16 @@ function UsageCell({ row }: { row: CustomerSummaryDto }) {
 /**
  * The first service by name, then how many others there are.
  *
- * A fixed rule instead of a measured one: the first name is always whole,
+ * Named services come first and "other" last, so "other +2" is never what a
+ * row says while a real name is available; "other" leads only when it is the
+ * only service. A fixed rule instead of a measured one: the first name is always whole,
  * "+N" is the exact count of the rest (never shown for one service), and the
  * full list is on the hover. No partial name and no trailing separator, at any
  * column width.
  */
 export function ServicesCell({ families }: { families: CustomerSummaryDto['services'] }) {
-  const names = families.map((f) => copy.serviceName[f]);
+  const ordered = [...families.filter((f) => f !== 'other'), ...families.filter((f) => f === 'other')];
+  const names = ordered.map((f) => copy.serviceName[f]);
   const rest = names.length - 1;
   return (
     <span className="flex min-w-0 items-baseline gap-1" title={names.join(' · ')}>

@@ -9,8 +9,10 @@ import { copy } from '@/copy/copy';
  * second line (11 px, one line, the full id with an ellipsis only as a safety
  * net), which keeps every row 36 px. Both are already masked by the caller;
  * the hovers carry the masked text too, because a privacy switch that a
- * pointer undoes was never on. At phone width the second line is left off:
- * the phone keeps three columns and one line per row.
+ * pointer undoes was never on. At phone width the WeChat line is left off
+ * (the phone keeps three columns), and the address itself takes two lines:
+ * the local part, then "@domain" as the quiet 11 px line, so no address is
+ * cut in a 390 px column.
  */
 export function CustomerCell({
   address,
@@ -26,7 +28,7 @@ export function CustomerCell({
   return (
     <div className="flex min-w-0 flex-col leading-tight">
       <div className="flex items-baseline gap-2" title={address}>
-        <span className="min-w-0 truncate text-row">{address}</span>
+        <AddressText address={address} />
         {tag}
       </div>
       {wechatId === null || wechatId === '' ? null : (
@@ -39,5 +41,19 @@ export function CustomerCell({
         </span>
       )}
     </div>
+  );
+}
+
+/** One inline run on desktop; on a phone the "@domain" drops to its own quiet line. */
+function AddressText({ address }: { address: string }) {
+  const at = address.lastIndexOf('@');
+  if (at <= 0) return <span className="min-w-0 truncate text-row">{address}</span>;
+  return (
+    <span className="min-w-0 truncate text-row">
+      {address.slice(0, at)}
+      <span className="address-domain">
+        {address.slice(at)}
+      </span>
+    </span>
   );
 }

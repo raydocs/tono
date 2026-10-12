@@ -200,7 +200,7 @@ export const customerCopy = {
     EHOSTUNREACH: '到不了这台机器',
     TLS_HANDSHAKE_TIMEOUT: '加密握手超时',
     REALITY_AUTH_FAIL: '身份校验没通过',
-    CATALOG_STALE: '客户端手里的节点单子太旧',
+    CATALOG_STALE: '客户端的节点单子太旧',
     DNS_FAIL: '域名解析失败',
     CORE_EXIT_UNREACHABLE: '当前节点和核心都没通过验证',
     TONO_NODE_OR_CORE_UNREACHABLE: '当前节点和核心都没通过验证',

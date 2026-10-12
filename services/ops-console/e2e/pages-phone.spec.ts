@@ -215,3 +215,40 @@ test('the customers count sentences have no dot at either end of a line at 390 p
   expect(action!.x).toBeGreaterThan(headline!.x + headline!.width - 1);
   expect(status!.y).toBeGreaterThanOrEqual(Math.max(headline!.y + headline!.height, action!.y + action!.height) - 1);
 });
+
+/**
+ * The address is two lines on a phone, the local part and then "@domain", so
+ * no fixture address ends in an ellipsis in a 390 px column; and the bottom
+ * dock does not cover a row once the page is scrolled to its end.
+ */
+test('the customer cells show whole addresses at 390 px and the dock covers no row', async ({ page }) => {
+  await open(page, '/customers');
+  const rows = page.locator('.customer-list-table tbody tr');
+  expect(await rows.count()).toBeGreaterThanOrEqual(20);
+  const cells = await rows.evaluateAll((trs) => trs.slice(0, 20).map((tr) => {
+    const cell = tr.querySelectorAll('td')[1]!;
+    const lines = [...cell.querySelectorAll('span')];
+    return {
+      text: (cell.textContent ?? '').trim(),
+      cut: lines.filter((line) => line.scrollWidth > line.clientWidth + 1).map((line) => line.textContent),
+      domain: cell.querySelector('.address-domain')?.getBoundingClientRect().top ?? null,
+    };
+  }));
+  for (const cell of cells) {
+    expect(cell.text, cell.text).not.toContain('\u2026');
+    expect(cell.cut, cell.text).toEqual([]);
+    // "@domain" is a second line, under the local part.
+    expect(cell.domain, cell.text).not.toBeNull();
+  }
+
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const geometry = await page.evaluate(() => {
+    const dock = document.querySelector('.shell-dock')!.getBoundingClientRect();
+    const rows = [...document.querySelectorAll('.customer-list-table tbody tr')];
+    const last = rows.at(-1)!.getBoundingClientRect();
+    return { dockTop: dock.top, lastBottom: last.bottom, heights: rows.map((row) => row.getBoundingClientRect().height) };
+  });
+  expect(geometry.lastBottom).toBeLessThanOrEqual(geometry.dockTop + 0.5);
+  // Two lines (15 px and 11 px) in the same row the single line had.
+  expect(Math.max(...geometry.heights)).toBeLessThanOrEqual(44);
+});

@@ -66,6 +66,36 @@ it('shows the first service whole and a count of the rest, the full list on the 
   expect(host.querySelector('span > span')!.classList.contains('truncate')).toBe(false);
 });
 
+it('puts the named services first and the catch-all last before taking the first name and the count', () => {
+  const mixed = ['other', 'claude', 'chatgpt'] as CustomerSummaryDto['services'];
+  const host = mount(<ServicesCell families={mixed} />);
+  const parts = [...host.querySelectorAll('span > span')].map((part) => part.textContent);
+  expect(parts).toEqual([copy.serviceName.claude, '+2']);
+  expect(host.firstElementChild?.getAttribute('title')).toBe(
+    [copy.serviceName.claude, copy.serviceName.chatgpt, copy.serviceName.other].join(' · '),
+  );
+});
+
+it('says the catch-all name only when it is the only service', () => {
+  const host = mount(<ServicesCell families={['other'] as CustomerSummaryDto['services']} />);
+  expect(host.textContent).toBe(copy.serviceName.other);
+});
+
+it('splits the phone address into the local part and the @domain line', () => {
+  const host = mount(<CustomerCell address="chen.jie@example.com" wechatId={null} />);
+  const run = host.querySelector('div[title] > span')!;
+  expect(run.childNodes[0]!.textContent).toBe('chen.jie');
+  const domain = run.querySelector('span.address-domain')!;
+  expect(domain.textContent).toBe('@example.com');
+  expect(host.querySelector('div[title]')!.textContent).toBe('chen.jie@example.com');
+});
+
+it('leaves an address without an @ as one run', () => {
+  const host = mount(<CustomerCell address="masked" wechatId={null} />);
+  expect(host.querySelector('span.address-domain')).toBeNull();
+  expect(host.querySelector('div[title]')!.textContent).toBe('masked');
+});
+
 it('never cuts the follow-up date', () => {
   const followup: FollowupDto = {
     id: 'f-1', subjectType: 'user', subjectId: 'u-1', kind: 'callback', body: 'b',

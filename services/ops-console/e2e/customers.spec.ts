@@ -123,6 +123,7 @@ test.describe('customers page', () => {
         || [...cell.querySelectorAll('span')].some((span) => span.scrollWidth > span.clientWidth + 1 && !ellipsis(span));
       const read = (cell: Element) => ({
         text: (cell.textContent ?? '').trim(),
+        lines: [...cell.querySelectorAll('span > span')].map((line) => (line.textContent ?? '').trim()),
         title: cell.querySelector('[title]')?.getAttribute('title') ?? null,
         clipped: clipped(cell),
         height: cell.getBoundingClientRect().height,
@@ -141,6 +142,17 @@ test.describe('customers page', () => {
     for (const cell of cells.node) {
       expect(cell.text.endsWith('·')).toBe(false);
       expect(cell.clipped, cell.text).toBe(false);
+      // Each line is a whole segment: no line ends in a separator or carries a cut one.
+      for (const line of cell.lines) {
+        expect(line.endsWith('·'), line).toBe(false);
+        expect(line, line).not.toContain('· …');
+      }
+    }
+    // The upper line is only the first segment of the name, never the middle ones too.
+    for (const cell of named) {
+      expect(cell.lines.length, cell.text).toBeLessThanOrEqual(2);
+      if (cell.lines.length === 2) expect(cell.lines[0], cell.text).not.toContain(' · ');
+      expect(cell.title!.startsWith(cell.lines[0]!), cell.text).toBe(true);
     }
 
     const failed = cells.failure.filter((cell) => cell.text !== '—');
@@ -155,6 +167,8 @@ test.describe('customers page', () => {
     expect(served.length).toBeGreaterThan(10);
     for (const cell of cells.services) {
       expect(cell.clipped, cell.text).toBe(false);
+      // 其他 leads only when it is the only service.
+      if (cell.text.startsWith(copy.serviceName.other)) expect(cell.title).toBe(copy.serviceName.other);
       // The first name is whole; only what follows it may end in an ellipsis.
       expect(cell.first, cell.text).toBeGreaterThanOrEqual(cell.firstNatural - 1);
     }

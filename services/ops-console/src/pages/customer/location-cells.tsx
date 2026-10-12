@@ -3,14 +3,16 @@ import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
 import { codeSentence, stageWord } from '@/lib/codes';
 import { formatWhenAgo } from '@/lib/display';
-import { splitNodeName, withoutRemark } from '@/lib/node-name';
+import { nodeCity, splitNodeName, withoutRemark } from '@/lib/node-name';
 
 /**
  * The node a customer is on: the city above, the site under it.
  *
  * Eight production nodes share a city and the sites run to 50 characters, so
  * a one-line cell clipped to "Los Angeles ·" — the half that says which
- * machine. The city and the site are two lines, each on one line: a site too
+ * machine. The city and the site are two lines, each on one line: the upper
+ * line is the first segment of the name only ("Frankfurt", never
+ * "Frankfurt · Main ·"), the lower is the last segment (the site). A line too
  * long for the column ends in an ellipsis rather than growing the row, and
  * the whole name is on the hover. A trailing full-width parenthetical is left
  * off the site line (see `withoutRemark`); the hover keeps it.
@@ -18,11 +20,12 @@ import { splitNodeName, withoutRemark } from '@/lib/node-name';
 export function NodeCell({ name }: { name: string | null }) {
   if (name === null) return <Value value={null} source={copy.sourceWord.catalog} />;
   const split = splitNodeName(name);
+  const city = split.prefix === null ? null : nodeCity(name);
   return (
     <span className="flex min-w-0 flex-col leading-tight" title={name}>
-      {split.prefix === null ? null : (
+      {city === null ? null : (
         <span className="truncate text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
-          {split.prefix}
+          {city}
         </span>
       )}
       <span className="truncate text-row">{withoutRemark(split.main)}</span>
