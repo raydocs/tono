@@ -266,6 +266,46 @@ pub(super) async fn engine_collect_interface_keys() -> Result<Vec<AdapterDnsSnap
     }
 }
 
+/// The registry DNS values of exactly these interfaces by GUID, active or not; `None` for one
+/// whose values could not be read. Used for snapshot adapters that are absent from the active
+/// enumeration (disabled, unplugged): absence there is never "restored".
+pub(super) async fn engine_read_registry_adapters(
+    guids: &[String],
+) -> Result<Vec<(String, Option<AdapterDnsSnapshot>)>> {
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        let guids = guids.to_vec();
+        bounded_dns_call(DNS_CALL_TIMEOUT, "read registry adapters", move || {
+            Ok(engine::read_registry_adapters(&guids))
+        })
+        .await
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        let unreadable = test_hooks::offline_registry_unreadable();
+        let offline = test_hooks::offline_registry();
+        let active = test_hooks::collected_adapters();
+        Ok(guids
+            .iter()
+            .map(|guid| {
+                if guid_listed(&unreadable, guid) {
+                    return (guid.clone(), None);
+                }
+                let known = offline
+                    .iter()
+                    .chain(active.iter())
+                    .find(|adapter| adapter.interface_guid.eq_ignore_ascii_case(guid))
+                    .cloned()
+                    .unwrap_or_else(|| AdapterDnsSnapshot {
+                        interface_guid: guid.clone(),
+                        ..Default::default()
+                    });
+                (guid.clone(), Some(known))
+            })
+            .collect())
+    }
+}
+
 /// Every interface the registry knows about, active or not: the `Parameters\Interfaces` key
 /// spaces outlive the active set (disabled, unplugged and removed adapters keep their last
 /// written DNS values), and a TUN endpoint parked on an inactive adapter is invisible to

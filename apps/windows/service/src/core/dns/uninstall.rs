@@ -482,15 +482,53 @@ fn family_is_users_own_loopback(
     }
 }
 
-/// The adapters as the registry reads them, each with its effective state. An effective read
-/// that fails as a whole makes every adapter's state unknown.
-async fn read_dns_state() -> Result<Vec<(AdapterDnsSnapshot, EffectiveDns)>> {
-    let adapters = collect_dns_adapters().await?;
+/// What the emergency reset reads and verifies: the candidate adapters as the registry reads
+/// them, each with its effective state, and the snapshot adapters whose registry could not be
+/// read at all.
+struct DnsState {
+    adapters: Vec<(AdapterDnsSnapshot, EffectiveDns)>,
+    unreadable: Vec<String>,
+}
+
+/// The candidate adapters are the snapshot's adapters together with the currently active ones.
+/// The active enumeration alone is not enough: an adapter that is offline (disabled, unplugged)
+/// is absent from it while its registry still holds whatever the exact restore failed to
+/// replace, and it resolves through that the moment it returns. A snapshot adapter that is not
+/// active is read from the registry by GUID (registry only: it has no effective list), and one
+/// whose registry cannot be read is `unreadable`, never "restored". An effective read that fails
+/// as a whole makes every adapter's state unknown.
+async fn read_dns_state(snapshot: Option<&DnsSnapshot>) -> Result<DnsState> {
+    let mut adapters = collect_dns_adapters().await?;
+    let mut unreadable = Vec::new();
+    if let Some(snapshot) = snapshot {
+        let absent: Vec<String> = snapshot
+            .adapters
+            .iter()
+            .map(|saved| saved.interface_guid.clone())
+            .filter(|guid| !adapters.iter().any(|active| same_adapter_guid(&active.interface_guid, guid)))
+            .collect();
+        if !absent.is_empty() {
+            match engine_read_registry_adapters(&absent).await {
+                Ok(read) => {
+                    for (guid, adapter) in read {
+                        match adapter {
+                            Some(adapter) => adapters.push(adapter),
+                            None => unreadable.push(guid),
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!("dns: the registry DNS values of the inactive snapshot adapters could not be read: {error:#}");
+                    unreadable = absent;
+                }
+            }
+        }
+    }
     let effective = engine_effective_dns(&adapters).await;
     if let Err(error) = &effective {
         tracing::warn!("dns: the effective DNS of the adapters could not be read: {error:#}");
     }
-    Ok(adapters
+    let adapters = adapters
         .into_iter()
         .map(|adapter| {
             let state = match &effective {
@@ -506,7 +544,8 @@ async fn read_dns_state() -> Result<Vec<(AdapterDnsSnapshot, EffectiveDns)>> {
             };
             (adapter, state)
         })
-        .collect())
+        .collect();
+    Ok(DnsState { adapters, unreadable })
 }
 
 /// The non-uninstall emergency disarm's answer to a restore it could not prove (the release
@@ -554,12 +593,10 @@ pub(crate) async fn reset_redirected_adapters_after_failed_restore() -> Result<V
 }
 
 /// The adapters of `state` that still need a reset or cannot be proven off Tono, as
-/// `(guid, needs reset, unproven)`.
-fn unresolved_adapters(
-    state: &[(AdapterDnsSnapshot, EffectiveDns)],
-    snapshot: Option<&DnsSnapshot>,
-) -> Vec<(String, Assessment)> {
-    state
+/// `(guid, assessment)`. A snapshot adapter whose registry could not be read is unproven.
+fn unresolved_adapters(state: &DnsState, snapshot: Option<&DnsSnapshot>) -> Vec<(String, Assessment)> {
+    let mut unresolved: Vec<(String, Assessment)> = state
+        .adapters
         .iter()
         .filter_map(|(adapter, effective)| {
             let recorded = snapshot.and_then(|snapshot| {
@@ -572,7 +609,14 @@ fn unresolved_adapters(
             (assessment.reset.any() || assessment.unproven)
                 .then(|| (adapter.interface_guid.clone(), assessment))
         })
-        .collect()
+        .collect();
+    unresolved.extend(
+        state
+            .unreadable
+            .iter()
+            .map(|guid| (guid.clone(), Assessment { unproven: true, ..Assessment::default() })),
+    );
+    unresolved
 }
 
 async fn reset_adapters_still_on_tono_dns() -> Result<Vec<String>> {
@@ -580,8 +624,9 @@ async fn reset_adapters_still_on_tono_dns() -> Result<Vec<String>> {
         Ok(bytes) => parse_snapshot(&bytes).ok(),
         Err(_) => None,
     };
-    let before = read_dns_state().await?;
+    let before = read_dns_state(snapshot.as_ref()).await?;
     let resets: Vec<(AdapterDnsSnapshot, FamilyReset)> = before
+        .adapters
         .iter()
         .filter_map(|(adapter, effective)| {
             let recorded = snapshot.as_ref().and_then(|snapshot| {
@@ -609,7 +654,7 @@ async fn reset_adapters_still_on_tono_dns() -> Result<Vec<String>> {
         // The read-back, not the apply report, is the proof: the registry write and the live
         // apply are independent, and a reset the DNS Client has not adopted leaves the machine on
         // the dead resolver.
-        read_dns_state().await?
+        read_dns_state(snapshot.as_ref()).await?
     };
     let unresolved = unresolved_adapters(&after, snapshot.as_ref());
     if unresolved.is_empty() {
@@ -618,7 +663,14 @@ async fn reset_adapters_still_on_tono_dns() -> Result<Vec<String>> {
     let named = unresolved
         .iter()
         .map(|(guid, assessment)| {
-            format!("{guid} ({})", if assessment.reset.any() { "still on Tono's DNS" } else { "effective DNS unknown" })
+            let reason = if assessment.reset.any() {
+                "still on Tono's DNS"
+            } else if after.unreadable.iter().any(|unreadable| same_adapter_guid(unreadable, guid)) {
+                "registry unreadable"
+            } else {
+                "effective DNS unknown"
+            };
+            format!("{guid} ({reason})")
         })
         .collect::<Vec<_>>()
         .join(", ");

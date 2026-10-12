@@ -276,7 +276,6 @@ pub(crate) mod test_hooks {
     static OFFLINE_REGISTRY: LazyLock<Mutex<Vec<AdapterDnsSnapshot>>> =
         LazyLock::new(|| Mutex::new(Vec::new()));
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn offline_registry() -> Vec<AdapterDnsSnapshot> {
         OFFLINE_REGISTRY
             .lock()
@@ -293,7 +292,6 @@ pub(crate) mod test_hooks {
 
     static OFFLINE_REGISTRY_UNREADABLE: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn offline_registry_unreadable() -> Vec<String> {
         OFFLINE_REGISTRY_UNREADABLE
             .lock()

@@ -430,8 +430,11 @@ async fn clean_up() -> Option<String> {
     }
     let started = Instant::now();
     let deadline = started + CLEANUP_TIMEOUT;
+    // The disarm allocates its legs against `deadline`, but once WFP is gone the adapter reset
+    // leg is never skipped, so it may run a little past it. The outer timeout leaves it that
+    // grace instead of cutting the leg that keeps the machine off a dead resolver.
     match tokio::time::timeout(
-        CLEANUP_TIMEOUT,
+        CLEANUP_TIMEOUT + crate::core::windows_kill_switch::EMERGENCY_DISARM_OVERRUN_GRACE,
         crate::core::windows_kill_switch::emergency_disarm_windows_kill_switch_until(deadline),
     )
     .await
@@ -440,7 +443,7 @@ async fn clean_up() -> Option<String> {
         Ok(Err(error)) => notes.push(format!("{error:#}")),
         Err(_) => notes.push(format!(
             "the emergency disarm did not finish within {}s",
-            CLEANUP_TIMEOUT.as_secs()
+            (CLEANUP_TIMEOUT + crate::core::windows_kill_switch::EMERGENCY_DISARM_OVERRUN_GRACE).as_secs()
         )),
     }
     if let Some(note) = crate::core::windows_kill_switch::emergency_overrun_note(started.elapsed()) {

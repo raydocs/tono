@@ -822,6 +822,22 @@ pub(super) fn collect_interface_key_adapters() -> Result<Vec<AdapterDnsSnapshot>
     guids.iter().map(|guid| read_adapter(guid, None)).collect()
 }
 
+/// The registry DNS values of exactly these interfaces by GUID, active or not, `None` for an
+/// interface whose values could not be read. An interface with no DNS values at all reads as an
+/// adapter whose values are all absent (automatic): that is an answer; a failed read is not.
+pub(super) fn read_registry_adapters(guids: &[String]) -> Vec<(String, Option<AdapterDnsSnapshot>)> {
+    guids
+        .iter()
+        .map(|guid| {
+            let read = read_adapter(guid, None);
+            if let Err(error) = &read {
+                tracing::warn!("dns: the registry DNS values of adapter {guid} could not be read: {error:#}");
+            }
+            (guid.clone(), read.ok())
+        })
+        .collect()
+}
+
 /// Per-family inputs for native protected apply or legacy apply/restore. The latter batches
 /// ONE PowerShell process (cold start is the dominant cost). The exact snapshot, not this
 /// normalized live list, remains restoration authority. Live application makes the running

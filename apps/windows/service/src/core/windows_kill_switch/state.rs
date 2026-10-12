@@ -538,8 +538,14 @@ pub const EMERGENCY_DISARM_OUTER_BUDGET: std::time::Duration = std::time::Durati
 /// [`EMERGENCY_DISARM_OUTER_BUDGET`] (the adapter reset leg is never skipped once WFP is gone, so
 /// it may): the cleanup did not prove itself inside its budget, which keeps a "restored" outcome
 /// from being claimed on its word.
-pub fn emergency_overrun_note(_elapsed: std::time::Duration) -> Option<String> {
-    None
+pub fn emergency_overrun_note(elapsed: std::time::Duration) -> Option<String> {
+    (elapsed > EMERGENCY_DISARM_OUTER_BUDGET).then(|| {
+        format!(
+            "the cleanup exceeded its {}s budget (it ran {}s), so it is not proven to have finished in time",
+            EMERGENCY_DISARM_OUTER_BUDGET.as_secs(),
+            elapsed.as_secs()
+        )
+    })
 }
 
 /// Longest the post-WFP adapter reset and resolver-policy removal may take on their own.
@@ -552,18 +558,35 @@ pub(super) const EMERGENCY_SWEEP_RESERVE: std::time::Duration = std::time::Durat
 /// The exact restore on the emergency path is never cut shorter than this, whatever the deadline.
 pub(super) const EMERGENCY_MIN_RESTORE: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// What the WFP cleanup between the exact restore and the adapter reset may take: an engine call
+/// of up to 25 s (`windows_kill_switch::engine`) plus a BFE probe. Reserved up front next to the
+/// reset and the sweep.
+pub(super) const EMERGENCY_WFP_RESERVE: std::time::Duration = std::time::Duration::from_secs(25);
+
+/// The adapter reset leg is never given less than this once the WFP objects are gone, whatever
+/// the caller's deadline has left. The machine would otherwise be left on a dead resolver with the
+/// barrier already removed, and nothing watches it afterwards. The release worker therefore may
+/// overrun its [`EMERGENCY_DISARM_OUTER_BUDGET`] by up to this leg and the sweep's floor; it says
+/// so and reports unknown rather than restored.
+pub(super) const EMERGENCY_RESET_FLOOR: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How far past [`EMERGENCY_DISARM_OUTER_BUDGET`] the floored reset leg and the sweep's two-second
+/// floor can legitimately run (plus slack): the release worker's outer timeout allows this much
+/// on top of its budget instead of cutting the leg that keeps the machine off a dead resolver.
+pub const EMERGENCY_DISARM_OVERRUN_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// The budget of the exact DNS restore on the emergency path, given the time `remaining` before
 /// the caller's deadline (`None`: the caller has no deadline and gets the full DNS budget).
 ///
-/// Under a deadline the whole flow is allocated up front: the adapter reset leg and the
-/// resolver-rule sweep are reserved first, and the restore gets the rest (at least
+/// Under a deadline the whole flow is allocated up front: the WFP cleanup, the adapter reset leg
+/// and the resolver-rule sweep are reserved first, and the restore gets the rest (at least
 /// [`EMERGENCY_MIN_RESTORE`]). A truncated restore on this fail-open path only reports partial
 /// or unknown, which the reset leg then deals with; a skipped reset leaves the dead resolver.
 pub(super) fn emergency_restore_budget(remaining: Option<std::time::Duration>) -> std::time::Duration {
     match remaining {
         None => DNS_RESTORE_TIMEOUT,
         Some(remaining) => remaining
-            .saturating_sub(EMERGENCY_FALLBACK_TIMEOUT + EMERGENCY_SWEEP_RESERVE)
+            .saturating_sub(EMERGENCY_WFP_RESERVE + EMERGENCY_FALLBACK_TIMEOUT + EMERGENCY_SWEEP_RESERVE)
             .max(EMERGENCY_MIN_RESTORE)
             .min(DNS_RESTORE_TIMEOUT),
     }
@@ -571,13 +594,16 @@ pub(super) fn emergency_restore_budget(remaining: Option<std::time::Duration>) -
 
 /// The budget of the adapter reset and resolver-policy leg, given the time `remaining` before the
 /// caller's deadline, less the sweep's reserve and never more than [`EMERGENCY_FALLBACK_TIMEOUT`].
-/// `None` (no caller deadline) gets the full DNS budget. Zero means no time is left for it.
+/// `None` (no caller deadline) gets the full DNS budget. It is never less than
+/// [`EMERGENCY_RESET_FLOOR`]: this runs only once the WFP objects are gone, and it is not
+/// skipped for lack of time.
 pub(super) fn emergency_fallback_budget(remaining: Option<std::time::Duration>) -> std::time::Duration {
     match remaining {
         None => DNS_RESTORE_TIMEOUT,
         Some(remaining) => remaining
             .saturating_sub(EMERGENCY_SWEEP_RESERVE)
-            .min(EMERGENCY_FALLBACK_TIMEOUT),
+            .min(EMERGENCY_FALLBACK_TIMEOUT)
+            .max(EMERGENCY_RESET_FLOOR),
     }
 }
 
