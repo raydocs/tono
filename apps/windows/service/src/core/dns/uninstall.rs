@@ -550,9 +550,15 @@ async fn read_dns_state(snapshot: Option<&DnsSnapshot>) -> Result<DnsState> {
 
 /// Wait up to `budget` for an abandoned DNS engine call (the exact restore the emergency disarm
 /// gave up on) to return the engine's single-writer claim. `true` when it is free. A separate
-/// budget from [`reset_redirected_adapters_after_failed_restore`], which retries refusals itself.
+/// budget from [`reset_redirected_adapters_within`], which retries refusals itself.
 pub(crate) async fn wait_for_abandoned_dns_call(budget: std::time::Duration) -> bool {
     wait_for_dns_engine_idle_within(budget).await
+}
+
+/// How long the abandoned call has held the engine's claim, counted from the instant it took it
+/// (`None` when the claim is free). The emergency path plans its wait from this.
+pub(crate) fn abandoned_dns_call_held_for() -> Option<std::time::Duration> {
+    dns_engine_claim_held_for()
 }
 
 /// The non-uninstall emergency disarm's answer to a restore it could not prove (the release
@@ -591,11 +597,13 @@ pub(crate) async fn reset_redirected_adapters_after_failed_restore() -> Result<V
     // once. The caller waits for the claim on a budget of its own before this leg
     // ([`wait_for_abandoned_dns_call`]); if it is still held here, a refused call is retried
     // every 50 ms within this leg's budget (the caller bounds it) instead of failing the leg at
-    // once. The retry is only for the refusal itself: any other error is the answer.
+    // once. The retry is only for the refusal itself (a [`DnsEngineBusy`], nothing ran): any other
+    // error is the answer, including the engine timeout of a call that did run, which carries the
+    // same wedged marker text.
     let reset = loop {
         let reset = reset_adapters_still_on_tono_dns().await;
         match &reset {
-            Err(error) if format!("{error:#}").contains(DNS_ENGINE_WEDGED_PREFIX) => {
+            Err(error) if is_engine_busy_refusal(error) => {
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
             _ => break reset,
@@ -613,11 +621,38 @@ pub(crate) async fn reset_redirected_adapters_after_failed_restore() -> Result<V
     Ok(adapters)
 }
 
-/// The adapter reset leg under one budget, counted from the start of the leg.
+/// How often the leg checks the clock and the engine's claim while its work runs.
+const RESET_LEG_TICK: std::time::Duration = std::time::Duration::from_millis(25);
+
+/// The adapter reset leg of the emergency disarm, with `budget` as its floor.
+///
+/// The floor is counted from when the engine's claim is actually back: from the start of the
+/// leg if the claim is free then, otherwise from the first moment the leg sees it returned. A
+/// restore the emergency path gave up on keeps its engine call, and the claim, for as long as the
+/// call takes, and the work that follows (the candidate read, the DHCP apply, the read-back, the
+/// policy removal) must not be cut by time spent being refused. A claim that is still held when
+/// `budget` has run out from the start of the leg is not waited for any longer: the leg ends
+/// with an error, which is "not proven". So the leg lasts at most twice `budget`.
 pub(crate) async fn reset_redirected_adapters_within(budget: std::time::Duration) -> Result<Vec<String>> {
-    match tokio::time::timeout(budget, reset_redirected_adapters_after_failed_restore()).await {
-        Ok(result) => result,
-        Err(_) => bail!("the adapter reset did not finish within {budget:?}, so it could not be proven"),
+    let began = std::time::Instant::now();
+    let give_up_on_the_claim = began + budget;
+    let mut claim_returned_at = dns_engine_claim_held_for().is_none().then_some(began);
+    let mut leg = Box::pin(reset_redirected_adapters_after_failed_restore());
+    loop {
+        if let Ok(result) = tokio::time::timeout(RESET_LEG_TICK, &mut leg).await {
+            return result;
+        }
+        let now = std::time::Instant::now();
+        if claim_returned_at.is_none() && dns_engine_claim_held_for().is_none() {
+            claim_returned_at = Some(now);
+        }
+        let deadline = claim_returned_at.map_or(give_up_on_the_claim, |returned| returned + budget);
+        if now >= deadline {
+            bail!(
+                "the adapter reset did not finish within {budget:?} of the DNS engine's claim being \
+                 returned (or of the leg starting, when it never was), so it could not be proven"
+            );
+        }
     }
 }
 

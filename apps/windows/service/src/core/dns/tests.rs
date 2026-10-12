@@ -402,6 +402,51 @@
         Ok(())
     }
 
+    /// The claim records when its call took it, and the emergency path plans its wait from that
+    /// instant: `None` for a free claim, the time since the call took it for a held one.
+    #[tokio::test]
+    #[serial]
+    async fn the_claim_reports_how_long_it_has_been_held_from_the_moment_its_call_took_it() {
+        reset_dns_state().await;
+        assert_eq!(dns_engine_claim_held_for(), None, "a free claim is not held");
+        let claim = test_hooks::occupy_engine_claim();
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        let held = dns_engine_claim_held_for().expect("a held claim reports how long");
+        assert!(held >= std::time::Duration::from_millis(60), "{held:?}");
+        assert!(held < std::time::Duration::from_secs(30), "{held:?}");
+        drop(claim);
+        assert_eq!(dns_engine_claim_held_for(), None, "the returned claim is free again");
+        reset_dns_state().await;
+    }
+
+    /// Only a refusal because another call holds the claim is a busy refusal; an engine call that
+    /// ran and hit its deadline, with the same marker text, is not.
+    #[tokio::test]
+    #[serial]
+    async fn only_a_refusal_for_a_held_claim_is_a_busy_refusal() {
+        reset_dns_state().await;
+        let claim = test_hooks::occupy_engine_claim();
+        let refused = bounded_dns_call(std::time::Duration::from_secs(5), "collect", || Ok(()))
+            .await
+            .expect_err("a held claim refuses");
+        assert!(is_engine_busy_refusal(&refused), "{refused:#}");
+        assert!(is_engine_busy_refusal(&refused.context("while resetting")), "context must not hide it");
+        drop(claim);
+
+        let (release, blocked) = std::sync::mpsc::channel::<()>();
+        let timed_out = bounded_dns_call(std::time::Duration::from_millis(50), "flush", move || {
+            let _ = blocked.recv_timeout(std::time::Duration::from_secs(30));
+            Ok(())
+        })
+        .await
+        .expect_err("a call that never returns times out");
+        assert!(format!("{timed_out:#}").contains(DNS_ENGINE_WEDGED_PREFIX));
+        assert!(!is_engine_busy_refusal(&timed_out), "{timed_out:#}");
+        release.send(()).expect("the wedged call is still running");
+        let _ = wait_for_dns_engine_idle_within(std::time::Duration::from_secs(5)).await;
+        reset_dns_state().await;
+    }
+
     /// A registry call behind a filter driver can block for ever. The NRPT sweep runs on its own
     /// thread, so the uninstall gives up after its budget instead of hanging with it.
     #[test]

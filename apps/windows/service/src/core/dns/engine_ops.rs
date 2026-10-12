@@ -109,9 +109,12 @@ pub(super) fn occupy_dns_call_for_test() -> DnsCallClaim {
 /// inside the loader/registry/Dnscache. Fail-closed: nothing is applied, nothing is restored,
 /// nothing is deleted, and the machine keeps whatever the last completed call left behind —
 /// which for the restore path means the snapshot survives and the kill switch stays armed.
+///
+/// It is a [`DnsEngineBusy`] error, so a caller that waits for the claim can tell this refusal
+/// from the same marker on an engine call that did run and hit its own deadline.
 #[cfg(any(all(windows, not(feature = "test")), test))]
 pub(super) fn wedged_dns_error(operation: &str, wedged: DnsCallInFlight) -> anyhow::Error {
-    anyhow::anyhow!(
+    anyhow::Error::new(DnsEngineBusy(format!(
         "{DNS_ENGINE_WEDGED_PREFIX}: the DNS engine has been inside {} for {:?} without \
          returning, so {operation} is refused rather than started as a second concurrent \
          writer. The DNS Client service (Dnscache), a registry filter driver or third-party \
@@ -119,7 +122,53 @@ pub(super) fn wedged_dns_error(operation: &str, wedged: DnsCallInFlight) -> anyh
          including its snapshot — until that call returns or the machine is restarted.",
         wedged.operation,
         wedged.started_at.elapsed(),
-    )
+    )))
+}
+
+/// The refusal of an engine call because an earlier call still holds the single-writer claim:
+/// nothing ran. Distinct from the error of a call that did run and hit its own deadline, which
+/// carries the same [`DNS_ENGINE_WEDGED_PREFIX`] text.
+#[cfg(any(all(windows, not(feature = "test")), test))]
+#[derive(Debug)]
+pub(super) struct DnsEngineBusy(String);
+
+#[cfg(any(all(windows, not(feature = "test")), test))]
+impl std::fmt::Display for DnsEngineBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[cfg(any(all(windows, not(feature = "test")), test))]
+impl std::error::Error for DnsEngineBusy {}
+
+/// `true` when `error` is a refusal because the engine's claim is held (see [`DnsEngineBusy`]),
+/// however many layers of context it was wrapped in.
+pub(super) fn is_engine_busy_refusal(error: &anyhow::Error) -> bool {
+    #[cfg(any(all(windows, not(feature = "test")), test))]
+    {
+        error.downcast_ref::<DnsEngineBusy>().is_some()
+    }
+    #[cfg(not(any(all(windows, not(feature = "test")), test)))]
+    {
+        let _ = error;
+        false
+    }
+}
+
+/// How long the engine's single-writer claim has been held, from the instant the call that holds
+/// it took it; `None` when it is free. The emergency path plans its wait from this and not from
+/// when its own restore began: locks and file reads sit between the two.
+pub(super) fn dns_engine_claim_held_for() -> Option<std::time::Duration> {
+    #[cfg(any(all(windows, not(feature = "test")), test))]
+    {
+        let held = *dns_call_slot();
+        held.map(|held| held.started_at.elapsed())
+    }
+    #[cfg(not(any(all(windows, not(feature = "test")), test)))]
+    {
+        None
+    }
 }
 
 /// Dropped on the blocking thread the instant the engine call returns — on time, or hours

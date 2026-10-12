@@ -575,15 +575,24 @@ pub(super) const EMERGENCY_RESET_FLOOR: std::time::Duration = std::time::Duratio
 /// How far past [`EMERGENCY_DISARM_OUTER_BUDGET`] the legs of the emergency disarm are allowed to
 /// run: the release worker's outer timeout allows this much on top of its budget instead of
 /// cutting the leg that keeps the machine off a dead resolver. A budget estimate for these legs
-/// only: the exact restore (10 s), the WFP removal, the wait for the abandoned restore's claim
-/// (what is left of 30 s since the restore began, at most 20 s), the reset leg (10 s floor, 15 s
-/// cap) and the sweep floor (2 s) add up to about 47 s plus the WFP removal, so 45 s + this grace
-/// has to cover that. It does not cover the rest of the worker (a BFE probe of up to 5 s, the
+/// only, worked out from the latest the exact restore's engine call can have taken the claim
+/// (when the 10 s restore is abandoned, so at 10 s):
+///
+/// * the exact restore ends at 10 s (the WFP removal follows within milliseconds when healthy);
+/// * the wait for the claim runs from there, at most 20 s: it ends at 30 s;
+/// * the reset leg starts at 30 s and watches the claim for its floor (10 s: until 40 s). The
+///   engine bounds a call at 30 s from when it took the claim, so the claim is back by 40 s at the
+///   latest; the leg's floor then runs from that return (10 s), which ends at 50 s;
+/// * the resolver-rule sweep (2 s floor) ends at 52 s.
+///
+/// So 52 s plus the WFP removal and the file writes in between, against 45 s + this grace (65 s):
+/// 13 s of margin. A claim that is never returned ends the leg at 40 s instead, with "not
+/// proven". The estimate does not cover the rest of the worker (a BFE probe of up to 5 s, the
 /// selective follow-up, file writes, the read-backs, a second cleanup, the Service restart and the
 /// release service's finalization), and nothing here has been measured on a device. The grace
 /// never delays an answer: the release service answers its client at its own deadline whatever
 /// the worker is still doing.
-pub const EMERGENCY_DISARM_OVERRUN_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
+pub const EMERGENCY_DISARM_OVERRUN_GRACE: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// The budget of the exact DNS restore on the emergency path, given the time `remaining` before
 /// the caller's deadline (`None`: the caller has no deadline and gets the full DNS budget).
@@ -619,29 +628,33 @@ pub(super) fn emergency_fallback_allowance(remaining: Option<std::time::Duration
     }
 }
 
-/// A DNS engine call is bounded at 30 s (`dns::DNS_APPLY_TIMEOUT`, the longest mutating budget), so
-/// an exact restore that was abandoned at its own 10 s still has its engine call returning the
-/// single-writer claim by 30 s after it began. Mirrors that constant, which only exists in
-/// Windows non-test builds.
+/// A DNS engine call is bounded at 30 s (`dns::DNS_APPLY_TIMEOUT`, the longest mutating budget)
+/// from the instant it takes the engine's single-writer claim. An exact restore that was abandoned
+/// at its own 10 s therefore gives the claim back within 30 s of when the call took it, which is
+/// not the instant the restore began: lock waits and the snapshot reads come before the call. The
+/// bound holds for a call that merely runs slowly; a call that is genuinely wedged keeps the
+/// claim for as long as it is wedged. Mirrors that constant, which only exists in Windows
+/// non-test builds.
 pub(super) const EMERGENCY_ENGINE_CALL_BOUND: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The longest the emergency path waits for that claim.
 pub(super) const EMERGENCY_CLAIM_WAIT_CAP: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// How long the emergency path waits for the exact restore's abandoned engine call to return the
-/// single-writer claim before the adapter reset leg starts, given the time that has passed since
-/// the exact restore began: what is left of the engine call's own bound, at most
+/// single-writer claim before the adapter reset leg starts, given how long that call has held it
+/// (`dns::abandoned_dns_call_held_for`, counted from when the call took the claim; a free claim
+/// is not waited for at all): what is left of the engine call's own bound, at most
 /// [`EMERGENCY_CLAIM_WAIT_CAP`]. This is its own budget and is not charged against the reset leg
-/// ([`emergency_fallback_budget`]), which keeps its floor whether the wait ended with the claim
-/// returned or not.
-pub(super) fn emergency_claim_wait_budget(elapsed_since_restore_began: std::time::Duration) -> std::time::Duration {
-    scaled_for_tests(emergency_claim_wait_allowance(elapsed_since_restore_began))
+/// ([`emergency_fallback_budget`]). The leg's floor runs from the claim's return, whether that
+/// happens inside this wait or after it.
+pub(super) fn emergency_claim_wait_budget(claim_held_for: std::time::Duration) -> std::time::Duration {
+    scaled_for_tests(emergency_claim_wait_allowance(claim_held_for))
 }
 
 /// [`emergency_claim_wait_budget`] before the tests' scale (see [`emergency_fallback_allowance`]).
-pub(super) fn emergency_claim_wait_allowance(elapsed_since_restore_began: std::time::Duration) -> std::time::Duration {
+pub(super) fn emergency_claim_wait_allowance(claim_held_for: std::time::Duration) -> std::time::Duration {
     EMERGENCY_ENGINE_CALL_BOUND
-        .saturating_sub(elapsed_since_restore_began)
+        .saturating_sub(claim_held_for)
         .min(EMERGENCY_CLAIM_WAIT_CAP)
 }
 

@@ -63,7 +63,6 @@ async fn emergency_disarm_with(
     //   entry — keeps `dns::restore_protected` verbatim. That path's promise is to put the
     //   user's *own* servers back on a machine that is staying installed, and a machine that is
     //   staying installed can retry. Nothing about it is made more permissive here.
-    let restore_began = std::time::Instant::now();
     let dns_restore = if uninstall_ladder_requested() {
         bounded_dns_call_within(
             UNINSTALL_DNS_RESTORE_TIMEOUT,
@@ -185,24 +184,21 @@ async fn emergency_disarm_with(
         //
         // First the wait for the exact restore's engine call. It was abandoned at its own budget
         // but keeps running on its blocking thread, and keeps the single-writer claim until it
-        // returns. That wait has a budget of its own and is not charged against the reset leg:
-        // the leg below always has its floor, whether the wait ended with the claim returned or
-        // not, and retries a call that is still refused.
-        let wait = emergency_claim_wait_budget(restore_began.elapsed());
+        // returns. The wait is planned from the instant that call took the claim (the engine
+        // bounds a call at 30 s from there), not from when this restore began: lock waits and file
+        // reads sit between the two. It has a budget of its own and is not charged against the
+        // reset leg, and the leg's floor below is counted from the claim's return, so a call that
+        // returns after this wait has ended still leaves the leg its whole floor.
+        let wait = crate::core::dns::abandoned_dns_call_held_for()
+            .map_or(std::time::Duration::ZERO, emergency_claim_wait_budget);
         if !wait.is_zero() && !crate::core::dns::wait_for_abandoned_dns_call(wait).await {
             tracing::error!(
                 "emergency disarm: the abandoned DNS restore still holds the engine after {wait:?}; \
-                 the adapter reset leg tries anyway within its own budget"
+                 the adapter reset leg tries anyway and keeps its floor from the claim's return"
             );
         }
         let budget = emergency_fallback_budget(remaining());
-        match bounded_dns_call_within(
-            budget,
-            "emergency disarm adapter reset",
-            crate::core::dns::reset_redirected_adapters_after_failed_restore(),
-        )
-        .await
-        {
+        match crate::core::dns::reset_redirected_adapters_within(budget).await {
             Ok(adapters) => tracing::warn!(
                 "emergency disarm: DNS restore could not be proven; {} adapter(s) on a Tono \
                  DNS target were set to automatic (DHCP) and the resolver policy was removed",
