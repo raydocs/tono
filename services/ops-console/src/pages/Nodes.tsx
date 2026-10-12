@@ -156,11 +156,11 @@ export default function NodesPage({
               reason={selectedView.reason}
               className="self-start"
             />
-            <Fact label={copy.facts.ip} measured={selectedView.ip} render={privacy.ip} />
+            <Fact mono label={copy.facts.ip} measured={selectedView.ip} render={privacy.ip} />
             <Fact label={copy.facts.os} measured={selectedView.os} />
             <Fact label={copy.facts.provider} measured={selectedView.provider} />
             <Fact label={copy.facts.tags} measured={selectedView.tags} />
-            <Fact label={copy.facts.ports} measured={selectedView.ports} />
+            <Fact mono label={copy.facts.ports} measured={selectedView.ports} />
           </>
         ) : null}
       </DetailDrawer>

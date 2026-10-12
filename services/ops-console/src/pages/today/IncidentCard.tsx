@@ -94,7 +94,7 @@ function IncidentRow({
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <span className="text-micro text-[var(--muted-foreground)]">{copy.severity[row.severity]}</span>
-          <span className="min-w-0 truncate font-mono text-body text-[var(--muted-foreground)]">
+          <span className="min-w-0 truncate text-body text-[var(--muted-foreground)]">
             {subject}
           </span>
         </div>

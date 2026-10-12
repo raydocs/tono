@@ -56,11 +56,11 @@ export function Proof({
                   copy.sourceWord.manual,
                 )}
               />
-              <Fact
+              <Fact mono
                 label={copy.logWindowFacts.openedAt}
                 measured={measured(formatWhen(entry.openedAt), entry.openedAt, copy.sourceWord.manual)}
               />
-              <Fact
+              <Fact mono
                 label={copy.logWindowFacts.expiresAt}
                 measured={measured(formatWhen(entry.expiresAt), entry.expiresAt, copy.sourceWord.manual)}
               />
@@ -82,15 +82,15 @@ export function Proof({
         ) : null}
         {reports.map((report) => (
           <div key={report.referenceCode} className="grid gap-x-8 sm:grid-cols-2">
-            <Fact
+            <Fact mono
               label={copy.reportFacts.code}
               measured={measured(report.referenceCode, report.receivedAt, copy.sourceWord.telemetry)}
             />
-            <Fact
+            <Fact mono
               label={copy.reportFacts.at}
               measured={measured(formatWhen(report.receivedAt), report.receivedAt, copy.sourceWord.telemetry)}
             />
-            <Fact
+            <Fact mono
               label={copy.reportFacts.client}
               measured={measured(report.clientVersion, report.receivedAt, copy.sourceWord.telemetry)}
             />
@@ -151,7 +151,7 @@ function ProofBody({ proof }: { proof: RouteProof | null }) {
         />
         <Fact label={copy.proofFacts.protection} measured={stamp(protectionWord(evidence))} />
         <Fact label={copy.proofFacts.source} measured={stamp(source[proof.source] ?? proof.source)} />
-        <Fact
+        <Fact mono
           label={copy.proofFacts.at}
           measured={measured(at === null ? null : formatWhen(at), at, copy.sourceWord.telemetry)}
         />

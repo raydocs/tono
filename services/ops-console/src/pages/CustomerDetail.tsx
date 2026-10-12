@@ -138,7 +138,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
           <p className="text-body text-[var(--muted-foreground)]">{row.reason}</p>
         ) : null}
         <div className="grid gap-5 border-y border-[var(--hairline)] py-4 sm:grid-cols-2">
-          <Fact
+          <Fact mono
             label={copy.expiresAt}
             measured={measured(
               row.billing.expiresAt === null ? null : formatDate(row.billing.expiresAt),
@@ -159,7 +159,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
           <Section title={copy.customerSections.now}>
             <div className="grid gap-x-8 sm:grid-cols-2">
               {nowFacts(row).map((fact) => (
-                <Fact key={fact.label} label={fact.label} measured={fact.measured} tier={fact.tier} />
+                <Fact key={fact.label} label={fact.label} measured={fact.measured} mono={fact.mono} tier={fact.tier} />
               ))}
             </div>
           </Section>

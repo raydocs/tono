@@ -66,11 +66,11 @@ export function ClaudeAccount({
 
       {current === null ? null : (
         <div className="grid gap-x-8 sm:grid-cols-2">
-          <Fact
+          <Fact mono
             label={copy.claudeFacts.current}
             measured={measured(privacy.secret(current.accountRef), current.updatedAt, copy.sourceWord.manual)}
           />
-          <Fact
+          <Fact mono
             label={copy.claudeFacts.openedAt}
             measured={measured(
               current.openedAt === null ? null : formatDate(current.openedAt),

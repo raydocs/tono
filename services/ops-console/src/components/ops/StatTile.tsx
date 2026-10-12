@@ -14,6 +14,22 @@ import type { SeriesPoint } from './TimeSeries';
  * number with no threshold behind it stays grey rather than borrowing green —
  * and the number itself is coloured only for the tones that ask for action.
  */
+/**
+ * Mono is for the digits. A unit spelled in CJK ("days left") has no glyph in
+ * Geist Mono, falls back to the system face at the number's size and sits
+ * after a full-width mono space, so it read as a second number. Runs of CJK
+ * (and the space before them) become a sans unit at a smaller size.
+ */
+const CJK_RUN = /(\s*[\u3000-\u9fff\uff00-\uffef]+)/;
+
+function Spelled({ value }: { value: string }) {
+  const parts = value.split(CJK_RUN).filter((part) => part !== '');
+  if (parts.length === 1 && !CJK_RUN.test(value)) return value;
+  return parts.map((part, index) => (CJK_RUN.test(part)
+    ? <span key={index} className="stat-unit">{part.trim()}</span>
+    : part));
+}
+
 export function StatTile({
   label,
   value,
@@ -39,7 +55,7 @@ export function StatTile({
         <span className="truncate">{label}</span>
       </span>
       <span className={cn('stat-value font-mono', loud && `tone-${tone} tone-fg`)}>
-        {value ?? copy.missing}
+        {value === null ? copy.missing : <Spelled value={value} />}
       </span>
       {sub ? <span className="truncate text-fine">{sub}</span> : null}
       {trend && trendDomain ? <Spark points={trend} domain={trendDomain} className="mt-1" /> : null}

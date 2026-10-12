@@ -1,4 +1,4 @@
-import { formatBytes, timestamp } from '@legacy-lib/format';
+import { formatBytes } from '@legacy-lib/format';
 import { copy } from '@/copy/copy';
 import { nowSec } from './clock';
 
@@ -64,8 +64,14 @@ export function formatBytesMeasured(value: number | null | undefined): string {
   return formatBytes(value);
 }
 
+/**
+ * An absolute moment as `YYYY-MM-DD HH:mm`, the same shape as `formatDate` and
+ * `formatClock`; the legacy locale string printed `2026/9/8 22:23:46`, the only
+ * date on these pages in that form.
+ */
 export function formatWhen(value: number | null | undefined): string {
-  return timestamp(value);
+  if (value === null || value === undefined) return copy.missing;
+  return `${formatDate(value)} ${formatClock(value)}`;
 }
 
 /**

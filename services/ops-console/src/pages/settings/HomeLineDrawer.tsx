@@ -137,7 +137,7 @@ export function HomeLineDrawer({
               measured={measured(statusWord(existing.status), existing.updatedAt, copy.sourceWord.manual)}
             />
             <UsageFacts line={existing} />
-            <Fact
+            <Fact mono
               label={words.columns.expires}
               measured={measured(
                 existing.expiresAt === null ? null : formatDate(existing.expiresAt),
@@ -258,7 +258,7 @@ function UsageFacts({ line }: { line: HomeLineDto }) {
   const bound = shown(line.boundUsers);
   return (
     <>
-      <Fact
+      <Fact mono
         label={words.facts.up}
         measured={measured(
           usage.value === null ? null : formatBytesMeasured(usage.value.bytesUp),
@@ -266,7 +266,7 @@ function UsageFacts({ line }: { line: HomeLineDto }) {
           usage.source,
         )}
       />
-      <Fact
+      <Fact mono
         label={words.facts.down}
         measured={measured(
           usage.value === null ? null : formatBytesMeasured(usage.value.bytesDown),
@@ -274,7 +274,7 @@ function UsageFacts({ line }: { line: HomeLineDto }) {
           usage.source,
         )}
       />
-      <Fact
+      <Fact mono
         label={words.facts.users}
         measured={measured(
           bound.value === null ? null : String(bound.value),

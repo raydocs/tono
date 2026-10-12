@@ -84,11 +84,11 @@ export function Billing({
           label={copy.billingFacts.plan}
           measured={measured(billing.plan, updatedAt, copy.sourceWord.profile)}
         />
-        <Fact
+        <Fact mono
           label={copy.billingFacts.deviceLimit}
           measured={measured(String(billing.deviceLimit), updatedAt, copy.sourceWord.profile)}
         />
-        <Fact
+        <Fact mono
           label={copy.billingFacts.since}
           measured={measured(
             billing.firstEntitledAt === null ? null : formatDate(billing.firstEntitledAt),
@@ -96,7 +96,7 @@ export function Billing({
             copy.sourceWord.profile,
           )}
         />
-        <Fact
+        <Fact mono
           label={copy.billingFacts.expires}
           measured={measured(
             billing.expiresAt === null ? null : formatDate(billing.expiresAt),
@@ -175,9 +175,9 @@ function LedgerFacts({ userId }: { userId: string }) {
   const say = (value: string | null) => measured(value, at, copy.ledger.source);
   return (
     <div className="grid gap-x-8 sm:grid-cols-3">
-      <Fact label={copy.ledger.customerRevenue} measured={say(formatCny(row.revenueCnyMinor))} />
-      <Fact label={copy.ledger.customerCost} measured={say(formatCny(row.costCnyMinor))} />
-      <Fact
+      <Fact mono label={copy.ledger.customerRevenue} measured={say(formatCny(row.revenueCnyMinor))} />
+      <Fact mono label={copy.ledger.customerCost} measured={say(formatCny(row.costCnyMinor))} />
+      <Fact mono={row.marginCnyMinor !== null}
         label={copy.ledger.customerMargin}
         measured={say(row.marginCnyMinor === null
           ? copy.ledger.pending

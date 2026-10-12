@@ -142,6 +142,9 @@ body {
 button, input, select, textarea { font: inherit; color: inherit; }
 a { color: inherit; text-decoration: none; }
 
+/* Mono is for machine tokens: digits, versions, IPs and ports, hashes, dates,
+   money and ids. A name or a word (a provider, a carrier, a line's name, a
+   CJK unit) stays sans even inside a fact that is otherwise mono. */
 .font-mono, .tabular, code, kbd {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;

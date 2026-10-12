@@ -104,6 +104,8 @@ export const shellCopy = {
   renew: '续费/到期',
   lastMeasured: '最后测量',
   missing: '—',
+  /** The hover and accessible name of an empty value: what is missing and who would have said. */
+  missingFrom: (source: string) => `没有数据 · 来源 ${source}`,
   noQuota: '未设额度',
   exhaustEta: '预计耗尽',
   remaining: '剩余',

@@ -29,6 +29,7 @@ export function nowFacts(row: CustomerDetailDto): Array<{
   label: string;
   measured: Measured<string | null>;
   tier: Tier;
+  mono?: boolean;
 }> {
   const now = row.now;
   const at = now.connected.asOfSec;
@@ -61,8 +62,8 @@ export function nowFacts(row: CustomerDetailDto): Array<{
       ),
       tier: 'body',
     },
-    { label: copy.now.version, measured: stamp(version || null), tier: 'body' },
+    { label: copy.now.version, measured: stamp(version || null), tier: 'body', mono: true },
     { label: copy.now.carrier, measured: stamp(carrier || null), tier: 'body' },
-    { label: copy.now.device, measured: stamp(now.deviceId), tier: 'fine' },
+    { label: copy.now.device, measured: stamp(now.deviceId), tier: 'fine', mono: true },
   ];
 }
