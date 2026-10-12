@@ -73,6 +73,24 @@
     border-radius: 18px;
   }
 
+  /* The 600 px floor above is a desktop rule: it made the five columns
+     (platform plus four bands) scroll inside the 350 px card, clipping the
+     third. On a phone the table sizes itself to its content (the same
+     shrink-wrapped pattern as `.nodes-table`): headers never wrap, cells keep
+     6 px of padding, and the band columns share what is left, so all five
+     fit with no sideways scroll. */
+  .clients-page .clients-matrix table {
+    min-width: 0;
+    table-layout: auto;
+  }
+  .clients-page .clients-matrix :is(th, td) {
+    padding-inline: 6px;
+    white-space: nowrap;
+  }
+  .clients-page .clients-matrix :is(th, td):first-child {
+    width: 1%;
+  }
+
   /* The matrix links are bare anchors, not a shared control: 44 px here. */
   .clients-page .clients-matrix td a {
     display: inline-flex;
