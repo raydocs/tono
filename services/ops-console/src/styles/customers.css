@@ -41,10 +41,20 @@
   margin-top: 8px;
 }
 
+.customers-page .customers-hero-status {
+  margin-top: 8px;
+}
+
 @media (max-width: 640px) {
   .customers-page .customers-hero {
     padding: 18px 16px;
     border-radius: 18px;
+  }
+  /* The total and the action share one row; the health words sit beneath. */
+  .customers-page .customers-hero-row {
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: space-between;
   }
   .customers-page .ops-search { width: 100%; }
   .customers-page .ops-search input { width: 100%; }

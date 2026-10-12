@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { linesEndingInDot, open, settle } from './ops';
+import { linesEndingInDot, linesStartingInDot, open, settle } from './ops';
 
 test.use({ viewport: { width: 390, height: 844 } });
 
@@ -132,7 +132,9 @@ test('the clients hero breaks only between its three segments', async ({ page })
     expect(segment.lines).toBe(1);
     expect(segment.height).toBeLessThanOrEqual(segment.lineHeight * 1.5);
   }
-  await expect(page.locator('.clients-hero .text-verdict')).toHaveText('11 位在最新版 · 10 位落后 · 2 位未上报');
+  // On a phone the dots are gone: the three segments are separated by a gap.
+  await expect(segments).toHaveText(['11 位在最新版', '10 位落后', '2 位未上报']);
+  await expect(page.locator('.clients-hero .text-verdict .dot-joined-sep').first()).toBeHidden();
 });
 
 test('the page note drops its separator and stacks its two parts', async ({ page }) => {
@@ -167,15 +169,30 @@ test('a release row keeps its actions on one or two lines, inside the viewport',
 
 /**
  * 22 production customers broke the sentence "22 位客户 · 2 位正常 ·" after the
- * dot, with the next count alone on the line below. Both count sentences
- * (the hero and the funnel under the filters) may only break before a dot.
+ * dot, with the next count alone on the line below; the fix that kept the dot
+ * with the next count started lines with it. Chinese layout forbids both, so
+ * on a phone the segments are separated by a gap and carry no dots at all.
+ * The total is the headline beside the action; the health words and the
+ * funnel are the lines under it.
  */
-test('the customers count sentences never end a line in a middle dot at 390 px', async ({ page }) => {
+test('the customers count sentences have no dot at either end of a line at 390 px', async ({ page }) => {
   await open(page, '/customers');
-  const hero = '.customers-hero .text-verdict';
-  const funnel = 'p.text-body:has(button[aria-pressed])';
-  await expect(page.locator(hero)).toContainText('位连不上');
+  const hero = '.customers-hero .text-verdict, .customers-hero-status';
+  const funnel = 'p.text-body:not(.customers-hero-status):has(button[aria-pressed])';
+  await expect(page.locator('.customers-hero-status')).toContainText('位连不上');
   await expect(page.locator(funnel)).toContainText('位连上过');
-  expect(await linesEndingInDot(page, hero)).toEqual([]);
-  expect(await linesEndingInDot(page, funnel)).toEqual([]);
+  for (const selector of [hero, funnel]) {
+    expect(await linesEndingInDot(page, selector), `${selector} ends a line in a dot`).toEqual([]);
+    expect(await linesStartingInDot(page, selector), `${selector} starts a line with a dot`).toEqual([]);
+  }
+  // Not one dot is visible on a phone, in the hero or the funnel.
+  await expect(page.locator('.customers-hero .dot-joined-sep, ' + funnel + ' .dot-joined-sep').first()).toBeHidden();
+
+  // The headline and the action share a row; the status line is beneath both.
+  const headline = await page.locator('.customers-hero .text-verdict').boundingBox();
+  const action = await page.locator('.customers-hero').getByRole('button', { name: '开通', exact: true }).boundingBox();
+  const status = await page.locator('.customers-hero-status').boundingBox();
+  expect(Math.abs((headline!.y + headline!.height / 2) - (action!.y + action!.height / 2))).toBeLessThan(headline!.height);
+  expect(action!.x).toBeGreaterThan(headline!.x + headline!.width - 1);
+  expect(status!.y).toBeGreaterThanOrEqual(Math.max(headline!.y + headline!.height, action!.y + action!.height) - 1);
 });

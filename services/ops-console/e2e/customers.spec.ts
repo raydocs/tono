@@ -27,9 +27,10 @@ test.describe('customers page', () => {
 
     // Three platforms have shipped nothing; they are shown, greyed, and say so.
     await expect(page.getByRole('button', { name: /Linux 未发布/ })).toBeDisabled();
-    // A row is 36 px until a node or failure cell wraps onto a second line.
+    // Node, failure and service cells stay on their line, so every row is 36 px.
     const heights = await page.locator('tbody tr').evaluateAll((trs) => trs.map((tr) => tr.getBoundingClientRect().height));
-    expect(Math.min(...heights)).toBe(36);
+    expect(heights.slice(0, 8)).toEqual(Array(8).fill(36));
+    expect(heights.filter((height) => height !== 36)).toEqual([]);
     await expect(page).toHaveScreenshot('table.png');
   });
 
@@ -100,26 +101,39 @@ test.describe('customers page', () => {
 
   /**
    * The production page showed "Los Angeles ·" (the site cut off) in the node
-   * cell and "12 小…" over "TONO_S…" in the failure cell. Both cells now wrap
-   * inside their column: nothing is wider than its cell, the node never ends
-   * on the separator, and a known code reads as its Chinese sentence with the
-   * raw code on the hover.
+   * cell and "12 小…" over "TONO_S…" in the failure cell. Both cells now keep
+   * each line on one line: a text too long for its column ends in its own
+   * ellipsis (never a clipped glyph, never a taller row), the node never ends
+   * on the separator, a known code reads as its Chinese sentence with the raw
+   * code on the hover, and the first service name is never the part that is cut.
    */
-  test('the node and failure cells show their whole text, the failure as a sentence', async ({ page }) => {
+  test('the node, failure and service cells are cut only by their own ellipsis', async ({ page }) => {
     await open(page, '/customers', 'dense');
     const cells = await page.evaluate(() => {
       const column = (name: string) => {
         const index = [...document.querySelectorAll('thead th')].findIndex((th) => th.textContent?.trim() === name);
         return [...document.querySelectorAll('tbody tr')].map((row) => row.querySelectorAll('td')[index]!);
       };
+      /** Wider than what shows: only a span that ends in an ellipsis may be. */
+      const ellipsis = (span: Element) => {
+        const style = getComputedStyle(span);
+        return style.textOverflow === 'ellipsis' && style.overflow === 'hidden' && style.whiteSpace === 'nowrap';
+      };
       const clipped = (cell: Element) => cell.scrollWidth > cell.clientWidth + 1
-        || [...cell.querySelectorAll('span')].some((span) => span.scrollWidth > span.clientWidth + 1);
+        || [...cell.querySelectorAll('span')].some((span) => span.scrollWidth > span.clientWidth + 1 && !ellipsis(span));
       const read = (cell: Element) => ({
         text: (cell.textContent ?? '').trim(),
         title: cell.querySelector('[title]')?.getAttribute('title') ?? null,
         clipped: clipped(cell),
+        height: cell.getBoundingClientRect().height,
+        first: cell.querySelector('span span')?.getBoundingClientRect().width ?? 0,
+        firstNatural: (cell.querySelector('span span') as HTMLElement | null)?.scrollWidth ?? 0,
       });
-      return { node: column('当前节点').map(read), failure: column('最近失败').map(read) };
+      return {
+        node: column('当前节点').map(read),
+        failure: column('最近失败').map(read),
+        services: column('服务使用').map(read),
+      };
     });
 
     const named = cells.node.filter((cell) => cell.text !== '—');
@@ -135,6 +149,14 @@ test.describe('customers page', () => {
     for (const cell of failed) {
       expect(cell.text).toContain(copy.codeWord[cell.title as keyof typeof copy.codeWord]);
       expect(cell.text).not.toContain(cell.title!);
+    }
+
+    const served = cells.services.filter((cell) => cell.text !== '—');
+    expect(served.length).toBeGreaterThan(10);
+    for (const cell of cells.services) {
+      expect(cell.clipped, cell.text).toBe(false);
+      // The first name is whole; only what follows it may end in an ellipsis.
+      expect(cell.first, cell.text).toBeGreaterThanOrEqual(cell.firstNatural - 1);
     }
   });
 

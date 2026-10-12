@@ -1,7 +1,7 @@
 import type { FunnelStage } from '@contract';
 import { FUNNEL_STAGES } from '@contract';
 import { CountText } from '@/components/ops/CountText';
-import { DotSegment } from '@/components/ops/DotJoined';
+import { DotJoined } from '@/components/ops/DotJoined';
 import { copy } from '@/copy/copy';
 import { cn } from '@/lib/utils';
 
@@ -31,18 +31,19 @@ export function FunnelBar({
 }) {
   return (
     <p className="text-body">
-      {FUNNEL_STAGES.map((id, index) => (
-        <DotSegment key={id} first={index === 0}>
+      <DotJoined
+        parts={FUNNEL_STAGES.map((id) => (
           <button
+            key={id}
             type="button"
             aria-pressed={stage === id}
             className={cn('count-bit', id === 'connected' ? 'tone-ok' : 'tone-none')}
             onClick={() => onPick(stage === id ? null : id)}
           >
-            <CountText values={[counts[id]]} render={(values) => copy.funnelCount[id](values[0])} />
+            <CountText values={[counts[id]]} render={(values) => copy.funnelCount[id](values[0] ?? 0)} />
           </button>
-        </DotSegment>
-      ))}
+        ))}
+      />
     </p>
   );
 }

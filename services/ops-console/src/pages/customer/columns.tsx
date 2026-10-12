@@ -53,8 +53,12 @@ export function phoneColumns<T>(columns: readonly DataColumn<T>[]): DataColumn<T
  * letters and the version header to three of its four characters. The
  * 2026-10-12 cut gives 72 of those pixels to those four columns and the
  * expiry's right air, keeping about ten over the longest address (the
- * customers spec asserts none is clipped). Widths include the cells' 12 px
- * padding (border-box). Below the table floor in Customers.tsx the container
+ * customers spec asserts none is clipped). The node and failure cells then
+ * kept each line on one line, which gives the failure column 114 px, enough
+ * for every sentence up to 94 px (the 141 px one ends in an ellipsis); the status, handle and follow-up columns gave the
+ * difference, and the usage, service and version columns took the 8 px
+ * padding. The address column stays 260 px, the width the longest address
+ * with its tag needs. Widths include the cells' padding (border-box). Below the table floor in Customers.tsx the container
  * scrolls sideways rather than squeeze any column further.
  */
 export function customerColumns(
@@ -80,7 +84,7 @@ export function customerColumns(
        * this cell is one short word, and its side air is worth less than a
        * word that can be read.
        */
-      width: '94px',
+      width: '86px',
       className: 'px-2',
       sortValue: (row) => row.health,
       cell: (row) => <StatusWord word={row.health} reason={row.reason} />,
@@ -105,7 +109,7 @@ export function customerColumns(
       {
         id: 'wechat',
         header: copy.customerColumns.wechat,
-        width: '74px',
+        width: '66px',
         sortValue: (row: CustomerSummaryDto) => row.wechatId ?? '',
         cell: (row: CustomerSummaryDto) => (
           <WechatCell id={row.wechatId} mask={wechat} duplicate={row.wechatDuplicate === true} />
@@ -131,7 +135,7 @@ export function customerColumns(
     {
       id: 'failure',
       header: copy.customerColumns.failure,
-      width: '92px',
+      width: '114px',
       className: 'px-2',
       sortValue: (row) => row.lastFailure?.at ?? 0,
       cell: (row) => <FailureCell failure={row.lastFailure} />,
@@ -139,7 +143,8 @@ export function customerColumns(
     {
       id: 'usage',
       header: copy.customerColumns.usage,
-      width: '86px',
+      width: '78px',
+      className: 'px-2',
       align: 'right',
       mono: true,
       sortValue: (row) => row.usageBytes.value,
@@ -152,7 +157,7 @@ export function customerColumns(
       {
         id: 'followup',
         header: copy.customerColumns.followup,
-        width: '88px',
+        width: '84px',
         sortValue: (row: CustomerSummaryDto) => followups.get(row.userId)?.dueAt ?? 0,
         cell: (row: CustomerSummaryDto) => <FollowupCell row={followups.get(row.userId)} />,
       },
@@ -161,7 +166,8 @@ export function customerColumns(
       {
         id: 'services',
         header: copy.customerColumns.services,
-        width: '80px',
+        width: '92px',
+        className: 'px-2',
         cell: (row: CustomerSummaryDto) => (
           row.services.length === 0
             ? <Value value={null} source={copy.sourceWord.telemetry} reason={copy.customersBoard.servicesMissing} />
@@ -171,7 +177,8 @@ export function customerColumns(
       {
         id: 'version',
         header: copy.customerColumns.minVersion,
-        width: '76px',
+        width: '70px',
+        className: 'px-2',
         mono: true,
         sortValue: (row: CustomerSummaryDto) => row.minAppVersion ?? '',
         cell: (row: CustomerSummaryDto) => (
@@ -275,14 +282,16 @@ const SERVICES_SHOWN = 2;
 
 function ServicesCell({ families }: { families: CustomerSummaryDto['services'] }) {
   const rest = families.length - SERVICES_SHOWN;
+  const [first, second] = families.map((f) => copy.serviceName[f]);
   return (
     <span
       className="flex min-w-0 items-baseline gap-1"
       title={families.map((f) => copy.serviceName[f]).join(' · ')}
     >
-      <span className="min-w-0 truncate">
-        {families.slice(0, SERVICES_SHOWN).map((f) => copy.serviceName[f]).join(' · ')}
-      </span>
+      <span className="shrink-0 whitespace-nowrap">{first}</span>
+      {second === undefined ? null : (
+        <span className="min-w-0 truncate">{`· ${second}`}</span>
+      )}
       {rest > 0 ? <span className="shrink-0 text-[var(--muted-foreground)]">+{rest}</span> : null}
     </span>
   );

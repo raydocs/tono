@@ -60,9 +60,9 @@ test('the dense customer table truncates rather than reflows', async ({ page }) 
   await open(page, '/customers', 'dense');
 
   expect(await page.locator('tbody tr').count()).toBeGreaterThan(40);
-  // A row is 36 px until a node or failure cell wraps onto a second line.
+  // Long node and failure text ends in an ellipsis, so no row grows past 36 px.
   const heights = await page.locator('tbody tr').evaluateAll((trs) => trs.map((tr) => tr.getBoundingClientRect().height));
-  expect(Math.min(...heights)).toBe(36);
+  expect(heights.filter((height) => height !== 36)).toEqual([]);
   await expect(page).toHaveScreenshot('customers-dense.png');
 });
 
