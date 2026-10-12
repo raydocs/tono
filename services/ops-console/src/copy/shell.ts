@@ -100,6 +100,17 @@ export const shellCopy = {
   sessionExpired: '登录已过期',
   sessionExpiredBody: '登录已过期，页面上的数据不会再更新。重新登录后继续。',
   reload: '重新登录',
+  /** The hub did not answer a read; each of these is shown as the page's own error line too. */
+  backendTimeout: '后台 15 秒没回应',
+  backendUnreachable: '连不上后台',
+  backendError: (status: number) => `后台报错 ${status}`,
+  /** `since` is the clock time of the oldest read still on screen; null when nothing ever loaded. */
+  shellUnreachable: (since: string | null) => (
+    since === null ? '连不上后台 · 页面还没有读到数据' : `连不上后台 · 页面上的数据停在 ${since}`
+  ),
+  pageCrashed: '这页出错了',
+  pageCrashedBody: '页面渲染时出了错。重新载入后继续。',
+  reloadPage: '重新载入',
   pathNotWired: '客户去程数据尚未接入',
   renew: '续费/到期',
   lastMeasured: '最后测量',
