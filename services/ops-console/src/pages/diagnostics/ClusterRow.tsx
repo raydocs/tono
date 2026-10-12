@@ -26,12 +26,13 @@ export function ClusterRow({ cluster }: { cluster: FailureCluster }) {
       <span className="cluster-sentence" title={cluster.code}>{clusterCode(cluster.code)}</span>
       {/* Three flex items; the dots between them are CSS (`::before` on items
           two and up), hidden on a phone where the items wrap, so no line starts
-          or ends on a dot. Only the node can be long: it alone gives way, and
-          inside it only the city, so the site that tells nodes apart stays whole. */}
+          or ends on a dot. Only the node can be long: it alone gives way. Inside
+          it the city is cut first, then the site, each with an ellipsis; the
+          full name is on the node's title. */}
       <span className="cluster-detail" title={`${stage} · ${platform} · ${node}`}>
         <span className="cluster-seg cluster-stage">{stage}</span>
         <span className="cluster-seg cluster-platform">{platform}</span>
-        <span className="cluster-seg cluster-node">
+        <span className="cluster-seg cluster-node" title={node}>
           <span className="cluster-node-city">{city ?? site}</span>
           {city ? <span className="cluster-node-site">{site}</span> : null}
         </span>

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { open, settle } from './ops';
 
 type FixtureIncident = {
@@ -100,9 +100,9 @@ test.describe('today page', () => {
    * Dense has nine clusters with the only p0 stored last and the only quiet one
    * eighth, with more people than four of the open ones. The list sorts them on
    * the client: p0 first, quiet last. The meta line gives way only inside the
-   * node's city, with "·" separators that are CSS, not text.
+   * node (city first, then site), with "·" separators that are CSS, not text.
    */
-  test('dense clusters read p0 first and quiet last, and only the node city is ellipsised', async ({ page }) => {
+  test('dense clusters read p0 first and quiet last, and only the node text is ellipsised', async ({ page }) => {
     await open(page, '/today', 'dense');
     const block = page.locator('section').filter({ has: page.getByRole('heading', { name: '失败聚类' }) });
     await block.scrollIntoViewIfNeeded();
@@ -124,7 +124,7 @@ test.describe('today page', () => {
     const reach = (text: string) => Number(/^(\d+)/.exec(text.trim())?.[1]);
     expect(reach(people[people.length - 1]!)).toBeGreaterThan(reach(people[people.length - 2]!));
 
-    // Stage, platform and the site never ellipsise; only the city inside the node does, and a long one is cut.
+    // Stage and platform never ellipsise; only the city and the site inside the node do, and a long one is cut.
     const overflow = await block.locator('.cluster-detail').evaluateAll((metas) => metas.map((meta) => {
       const style = (el: Element) => getComputedStyle(el);
       const node = meta.querySelector('.cluster-node')!;
@@ -137,22 +137,82 @@ test.describe('today page', () => {
         metaOverflow: style(meta).textOverflow,
         before: getComputedStyle(node, '::before').content,
         siteBefore: site ? getComputedStyle(site, '::before').content : null,
-        siteWhole: site ? site.scrollWidth <= site.clientWidth && site.getBoundingClientRect().width > 0 : null,
+        siteWidth: site?.getBoundingClientRect().width ?? null,
         cityWidth: city?.getBoundingClientRect().width ?? 0,
         cut: city ? city.scrollWidth > city.clientWidth : false,
       };
     }));
     for (const meta of overflow) {
-      expect(meta.ellipsised).toEqual(['cluster-node-city']);
+      expect(meta.ellipsised).toEqual(['cluster-node-city', 'cluster-node-site']);
       expect(meta.metaOverflow).toBe('clip');
       expect(meta.before).toBe('"·"');
       expect(meta.cityWidth).toBeGreaterThan(0);
-      if (meta.siteWhole !== null) {
+      if (meta.siteWidth !== null) {
         expect(meta.siteBefore).toBe('"·"');
-        expect(meta.siteWhole).toBe(true);
+        expect(meta.siteWidth).toBeGreaterThan(0);
       }
     }
     expect(overflow.some((meta) => meta.cut)).toBe(true);
+  });
+
+  /**
+   * A parent's `overflow: hidden` clips glyphs without any child reporting
+   * overflow, so the check is geometric: every part of a node ends inside the
+   * node's box, and text that is wider than its own box ellipsises. The meta
+   * cell is wide enough at 1440 that none of the ordinary rows is cut.
+   */
+  async function nodeGeometry(page: Page) {
+    const block = page.locator('section').filter({ has: page.getByRole('heading', { name: '失败聚类' }) });
+    await block.scrollIntoViewIfNeeded();
+    return block.locator('li').evaluateAll((rows) => rows.map((row) => {
+      const detail = row.querySelector('.cluster-detail')!;
+      const node = row.querySelector('.cluster-node')!;
+      const parts = [...node.children].map((child) => ({
+        name: child.className,
+        overhang: child.getBoundingClientRect().right - node.getBoundingClientRect().right,
+        wider: child.scrollWidth > child.clientWidth,
+        ellipsis: getComputedStyle(child).textOverflow === 'ellipsis',
+      }));
+      return {
+        meta: detail.clientWidth,
+        nodeOverhang: node.getBoundingClientRect().right - detail.getBoundingClientRect().right,
+        parts,
+      };
+    }));
+  }
+
+  test('a node never overflows its box: each part ends inside it, or ellipsises', async ({ page }) => {
+    for (const set of ['default', 'dense'] as const) {
+      await open(page, '/today', set);
+      const rows = await nodeGeometry(page);
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(row.nodeOverhang).toBeLessThanOrEqual(0.5);
+        expect(row.parts.length).toBeGreaterThan(0);
+        for (const part of row.parts) {
+          expect(part.overhang, `${set}: ${part.name} ends inside the node`).toBeLessThanOrEqual(0.5);
+          expect(part.wider === false || part.ellipsis, `${set}: ${part.name} is whole or ellipsised`).toBe(true);
+        }
+      }
+    }
+  });
+
+  test('the meta cell is at least 290 wide at 1440, and ordinary rows are not truncated', async ({ page }) => {
+    await open(page, '/today');
+    const standard = await nodeGeometry(page);
+    expect(standard).toHaveLength(3);
+    for (const row of standard) {
+      expect(row.meta).toBeGreaterThanOrEqual(290);
+      for (const part of row.parts) expect(part.wider, `default: ${part.name}`).toBe(false);
+    }
+    // Dense row 1 holds the long name and is cut on purpose; rows 2-9 read whole.
+    await open(page, '/today', 'dense');
+    const dense = await nodeGeometry(page);
+    expect(dense).toHaveLength(9);
+    for (const row of dense.slice(1)) {
+      for (const part of row.parts) expect(part.wider, `dense: ${part.name}`).toBe(false);
+    }
+    expect(dense[0]!.parts.some((part) => part.wider)).toBe(true);
   });
 
   test('the resolved tab is a different list, not a filter on the same one', async ({ page }) => {

@@ -6,8 +6,8 @@
 
 .cluster-list {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1.4fr) auto auto;
-  column-gap: 16px;
+  grid-template-columns: auto fit-content(196px) minmax(0, 1fr) auto auto;
+  column-gap: 12px;
 }
 
 .cluster-row {
@@ -33,17 +33,24 @@
 
 .cluster-sentence {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 500;
   color: var(--foreground);
 }
 
-/* Three flex items on one line. The dot between them is a `::before` on items
- * two and up. Stage and platform never shrink; the node is the only item that
- * gives way, and inside it only the city: its ellipsis lands in the city text
- * and the site after the last " · " keeps its full width. */
+/* Three flex items on one line at 13 px, its line box pinned to the 21 px the
+ * row had at 14 px. The dot between them is a `::before` on items two and up.
+ * Stage and platform never shrink; the node is the only item that gives way.
+ * Inside it the city absorbs the squeeze first (shrink weight 100, floor 4ch),
+ * then the site ellipsises too: the node never overflows its box, so nothing
+ * is clipped mid-glyph by the overflow here. */
 .cluster-detail {
   display: flex;
   min-width: 0;
+  font-size: 13px;
+  line-height: 21px;
   white-space: nowrap;
   overflow: hidden;
   color: var(--muted-foreground);
@@ -63,14 +70,20 @@
 }
 
 .cluster-node-city {
-  flex: 1 1 auto;
+  flex: 1 100 auto;
   min-width: 4ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.cluster-node-site { flex: 0 0 auto; }
+.cluster-node-site {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .cluster-node-site::before {
   content: "·";
@@ -131,7 +144,7 @@
 
   .cluster-severity { grid-area: severity; margin-inline-end: 8px; }
   .cluster-severity:empty { display: none; }
-  .cluster-sentence { grid-area: sentence; }
+  .cluster-sentence { grid-area: sentence; white-space: normal; overflow: visible; }
   .cluster-detail {
     grid-area: detail;
     flex-wrap: wrap;
