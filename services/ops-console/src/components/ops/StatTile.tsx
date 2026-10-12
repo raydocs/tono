@@ -37,6 +37,7 @@ export function StatTile({
   tone,
   trend,
   trendDomain,
+  title,
   className,
 }: {
   label: string;
@@ -45,11 +46,13 @@ export function StatTile({
   tone?: Tone;
   trend?: readonly SeriesPoint[];
   trendDomain?: [number, number];
+  /** Hover text for what the one-line `sub` had to abbreviate. */
+  title?: string;
   className?: string;
 }) {
   const loud = tone === 'sev' || tone === 'warn' || tone === 'rem';
   return (
-    <div className={cn('stat-tile raised flex min-w-0 flex-col gap-1 rounded-[10px] bg-[var(--surface)] px-4 py-3.5', className)}>
+    <div title={title} className={cn('stat-tile raised flex min-w-0 flex-col gap-1 rounded-[10px] bg-[var(--surface)] px-4 py-3.5', className)}>
       <span className="flex items-center gap-1.5 text-micro text-[var(--muted-foreground)]">
         {tone ? <span aria-hidden className={cn('stat-dot', `tone-${tone}`)} /> : null}
         <span className="truncate">{label}</span>

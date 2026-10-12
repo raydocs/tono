@@ -38,12 +38,6 @@
   box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
 }
 
-.today-hero-eyebrow {
-  display: block;
-  margin-bottom: 10px;
-  max-width: 62ch;
-}
-
 .today-page .text-verdict {
   text-wrap: balance;
   max-width: 18ch;

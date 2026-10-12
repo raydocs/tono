@@ -354,13 +354,6 @@ button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color
   }
   .digest-fold[open] > summary::after { transform: rotate(-135deg) translateY(-2px); }
   .digest-fold[open] > .digest-body { padding-top: 12px; }
-  /* 昨夜's titles wrap here rather than ending in an ellipsis: the whole point
-     of the line is which machine it was, and that is the half being cut. */
-  .digest-fold .night-title {
-    overflow: visible;
-    white-space: normal;
-    text-overflow: clip;
-  }
 
   /* The sheet's action bar sits on the bottom edge; three buttons across it,
      each a thumb tall, is the whole reason the drawer became a sheet. */
