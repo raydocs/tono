@@ -2486,7 +2486,10 @@ extension KillSwitchManager {
             $0.hasPrefix("block drop out quick on { en0 } inet proto { tcp, udp }")
                 && $0.hasSuffix("port { 53, 853 } label \"tono-lan-dns\"")
         }
-        let holds = block != nil && ndpStateless && noDNSPass && dnsBlockKept && required.allSatisfy { line in
+        // The stateless NDP pass giving way to the tunneled stateful one (every
+        // tunnel arm) withdraws no state, so it must not become a machine flush.
+        let ndpSwapKeepsStates = stateDisposal(replacing: Set(ndpLines), with: []) == .keep
+        let holds = block != nil && ndpStateless && ndpSwapKeepsStates && noDNSPass && dnsBlockKept && required.allSatisfy { line in
             guard let at = lines.firstIndex(of: line), let block else { return false }
             return at < block
         }
