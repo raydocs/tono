@@ -1,0 +1,13 @@
+## 2026-10-12 · 运维控制台：登记发布（从发布存储预填）
+- 归属：ops 计划（客户端页）；`services/control-plane`（新增只读路由、修一处入参）与 `services/ops-console`。
+- 来源：基线 `ui/ops-console-polish-r1`（#1595，190ff6f2）→ 分支 `feat/ops-release-register`；堆叠在 #1595 之上，未合 main。
+- 缺陷修复：
+  - 客户端页是空的：发布工具只写 R2 `tono-releases` 与 GitHub，从不写 D1 `client_releases`，而唯一的写入口 `POST /api/v1/ops/releases` 只收 Cloudflare Access 会话，控制台又没有接它。现在控制台自己登记。
+  - `POST releases` 缺 `version` 时 handler 先 `String()`，存成字符串 "undefined"。`platform`、`channel`、`version`、`r2Key`、`sizeBytes`、`sha256` 现在缺任何一项都返回 400 `VALIDATION_ERROR`，库函数 `createRelease` 的签名与行为不变。
+- 新增/优化：
+  - control-plane 新路由 `GET /api/v1/ops/releases/objects?limit=50`（`releases.read`，上限 200）：列 `RELEASES` 桶里最近上传的对象，每条 `{ key, sizeBytes, uploadedAt, sha256, etag, guess, registered }`；`guess` 只认 `Tono-<v>-build<b>-arm64.zip`（macos/stable）与 `*-<v>-setup.exe`（windows/stable），其余 null；`registered` 查 `client_releases.r2_key`。只读，不新增认证路径。已写入 `docs/ops/api-contract.md`、路由表、角色表。
+  - 控制台「发布」区右上「登记发布」：抽屉先列存储里的文件（未登记在前，已登记打「已登记」且不可选），选一个后表单按文件名预填平台、渠道、版本、构建号；文件、大小、sha256 只读（存储里没有 sha256 时改为输入框并说明）；签名（可选）、最低系统版本、说明可填。保存走 `POST releases`，成功后刷新发布表与采用率；409 `RELEASE_CONFLICT` / `RELEASE_UNVERIFIED` 显示成中文原因。登记只产生「待发布」草稿行，发布仍是表格里原有的确认动作。
+- 工程与测试：control-plane `ops-releases.test.ts` 加 key 解析一例，`ops-api.test.ts` 加列表（假 R2 对象、已登记标记、guess）与必填字段 400 各一例；`ops-contract-routes.test.ts` 的路由与检查器对照表覆盖新路由。控制台 fixture 服务器应答 `releases/objects`（`fixtures/release-objects.json`，三个对象、一个已登记）并接受 `POST releases` 写入可变存储；e2e `clients.spec.ts` 加两例（登记一个文件并看到草稿行；无 sha256 的文件要求补填）。
+- 验证：control-plane `npx vitest run test/ops-releases.test.ts test/ops-api.test.ts test/ops-contract-routes.test.ts test/ops-contract.test.ts` 通过（263）；`npm run typecheck` 通过（unchecked-index 棘轮未升）；`npm run check:contract`、`check:budgets` 通过。ops-console `npm run typecheck`（indexed-access 197）、`npx vitest run`（349）、`npx eslint src e2e` 通过；Playwright `clients.spec.ts` 的行为用例通过（本机 Chromium 1234 headless shell，非 CI 版本）。
+- 候选/发布：无新包，仅源码。部署时 control-plane 与控制台需要一起发（新路由在 Worker）。
+- 剩余限制：「发布」区多了一个按钮，`clients.png`、`dense.png` 两张 macOS 基线会变，本条目没有重录（按任务要求不动 `e2e/__screenshots__`），需在 macos-26 CI 重录。控制台不能创建桶里没有的文件；对象存在与 sha256/大小的核对仍由 Worker 在 `createRelease` 与发布时做。

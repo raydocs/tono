@@ -75,6 +75,47 @@ test.describe('clients page', () => {
     await expect(row).toContainText('1.8.0');
   });
 
+  /**
+   * Register release end to end: the bucket's files are listed with the registered one
+   * last and tagged, picking one pre-fills the form from its file name, and
+   * saving makes the draft row appear in the table after the refetch.
+   */
+  test('registering a bucket file pre-fills the form and adds a draft row', async ({ page }, testInfo) => {
+    const session = `register-${testInfo.project.name}-${testInfo.repeatEachIndex}-${testInfo.retry}`;
+    await open(page, '/clients', 'default', session);
+    await page.getByRole('button', { name: '登记发布' }).click();
+
+    const drawer = page.getByRole('dialog');
+    const files = drawer.getByRole('listitem');
+    await expect(files).toHaveCount(3);
+    await expect(files.first()).toContainText('Tono-1.9.0-build1900-arm64.zip');
+    await expect(files.last()).toContainText('clients/macos/1.8.1.zip');
+    await expect(files.last()).toContainText('已登记');
+
+    await files.first().getByRole('button').click();
+    await expect(drawer.getByLabel(/^平台/)).toHaveValue('macos');
+    await expect(drawer.getByLabel(/^版本/)).toHaveValue('1.9.0');
+    await expect(drawer.getByLabel(/^构建号/)).toHaveValue('1900');
+    await drawer.getByRole('button', { name: '保存' }).click();
+
+    await expect(drawer).toBeHidden();
+    const draft = page.locator('tbody tr')
+      .filter({ hasText: /(?<![\d.])1\.9\.0(?![-\d.])/ })
+      .filter({ hasText: '待发布' });
+    await expect(draft).toHaveCount(1);
+  });
+
+  test('a file with no stored digest asks for one', async ({ page }, testInfo) => {
+    await open(page, '/clients', 'default', `register-sha-${testInfo.project.name}-${testInfo.repeatEachIndex}-${testInfo.retry}`);
+    await page.getByRole('button', { name: '登记发布' }).click();
+    const drawer = page.getByRole('dialog');
+    await drawer.getByRole('listitem').filter({ hasText: 'Tono-1.8.3-setup.exe' }).getByRole('button').click();
+    await expect(drawer.getByLabel(/^平台/)).toHaveValue('windows');
+    await expect(drawer.getByText('这个文件在存储里没有记校验值')).toBeVisible();
+    await drawer.getByRole('button', { name: '保存' }).click();
+    await expect(drawer.getByText('校验值要 64 位小写十六进制')).toBeVisible();
+  });
+
   test('a fleet with no releases says so instead of showing an empty grid', async ({ page }) => {
     await open(page, '/clients', 'empty');
     await expect(page.getByText('还没有发布过客户端')).toBeVisible();

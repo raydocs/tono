@@ -30,6 +30,7 @@ import {
   assertNodeSummary,
   assertProviderAccount,
   assertRelease,
+  assertReleaseObject,
   assertServiceUsage,
   assertSystemHealth,
   assertUpdateChannel,
@@ -944,6 +945,52 @@ describe('ops v1 api', () => {
     expect(channels.items.find((row) => row.platform === 'linux')?.kind).toBeNull();
   });
 
+  it('lists release bucket objects with a key guess and the registered flag', async () => {
+    const releases = (env as unknown as { RELEASES: R2Bucket }).RELEASES;
+    const bytes = new TextEncoder().encode('bytes');
+    const sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
+      .map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    await releases.put('Tono-1.2.3-build45-arm64.zip', bytes, { customMetadata: { sha256 } });
+    await releases.put('Tono-1.2.2-setup.exe', bytes);
+    await releases.put('notes/readme.txt', bytes);
+    await db().prepare(
+      `INSERT INTO client_releases(id, platform, channel, version, r2_key, created_at, updated_at)
+       VALUES('rel-obj', 'windows', 'stable', '1.2.2', 'Tono-1.2.2-setup.exe', ?, ?)`,
+    ).bind(NOW, NOW).run();
+    const res = await ops('releases/objects?limit=10');
+    expect(res.status).toBe(200);
+    const { items } = assertList(await res.json(), assertReleaseObject);
+    const byKey = new Map(items.map((row) => [row.key, row]));
+    expect(byKey.get('Tono-1.2.3-build45-arm64.zip')).toMatchObject({
+      sizeBytes: bytes.byteLength,
+      sha256,
+      registered: false,
+      guess: { platform: 'macos', channel: 'stable', version: '1.2.3', build: '45' },
+    });
+    expect(byKey.get('Tono-1.2.2-setup.exe')).toMatchObject({
+      registered: true,
+      guess: { platform: 'windows', version: '1.2.2', build: null },
+    });
+    expect(byKey.get('notes/readme.txt')?.guess).toBeNull();
+    expect((await ops('releases/objects?limit=1').then((r) => r.json()) as { items: unknown[] }).items).toHaveLength(1);
+  });
+
+  it('refuses a release missing a required field instead of storing "undefined"', async () => {
+    const full = {
+      platform: 'macos', channel: 'stable', version: '9.9.9', r2Key: 'x.zip',
+      sizeBytes: 5, sha256: 'a'.repeat(64),
+    };
+    for (const name of Object.keys(full)) {
+      const partial: Record<string, unknown> = { ...full };
+      delete partial[name];
+      const res = await ops('releases', json(partial));
+      expect(res.status, name).toBe(400);
+      expect(((await res.json()) as { error?: { code?: string } }).error?.code ?? '', name).toBe('VALIDATION_ERROR');
+    }
+    const rows = await db().prepare("SELECT COUNT(*) AS n FROM client_releases WHERE version = 'undefined'").first<{ n: number }>();
+    expect(rows?.n).toBe(0);
+  });
+
   it('direct-candidates accept/reject and traffic-policy draft', async () => {
     await db().prepare(
       `INSERT INTO direct_candidates(etld1, first_seen, last_seen, users, bytes_30d, status)
@@ -1355,6 +1402,7 @@ describe('ops v1 api', () => {
       'PATCH /api/v1/ops/releases/{id}',
       'GET /api/v1/ops/releases/adoption',
       'GET /api/v1/ops/releases/channels',
+      'GET /api/v1/ops/releases/objects',
       'GET /api/v1/ops/direct-candidates',
       'POST /api/v1/ops/direct-candidates/{etld1}/accept',
       'POST /api/v1/ops/direct-candidates/{etld1}/reject',

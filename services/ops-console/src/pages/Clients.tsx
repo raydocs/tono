@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type {
   AdoptionMatrixDto,
   Platform,
@@ -7,6 +7,7 @@ import type {
   UpdateChannelDto,
 } from '@contract';
 import { PLATFORMS } from '@contract';
+import { Action } from '@/components/ops/Action';
 import { CountText } from '@/components/ops/CountText';
 import { Empty } from '@/components/ops/Empty';
 import { PageNote } from '@/components/ops/PageNote';
@@ -17,6 +18,7 @@ import { releasedPlatformSet } from '@/lib/releases';
 import { oldestFetch, useResource, type Resource } from '@/lib/use-resource';
 import '@/styles/clients.css';
 import { AdoptionMatrix } from './clients/AdoptionMatrix';
+import { RegisterReleaseDrawer } from './clients/RegisterReleaseDrawer';
 import { ReleaseTable } from './clients/ReleaseTable';
 
 /**
@@ -55,6 +57,7 @@ export default function ClientsPage({
     [releases],
   );
   const shipped = useMemo(() => releasedPlatformSet(rows), [rows]);
+  const [registering, setRegistering] = useState(false);
   const totals = adoption.status === 'ready' ? bucketTotals(adoption.data) : null;
 
   return (
@@ -99,7 +102,10 @@ export default function ClientsPage({
         )}
       </Section>
 
-      <Section title={copy.clientSections.releases}>
+      <Section
+        title={copy.clientSections.releases}
+        aside={<Action onClick={() => setRegistering(true)}>{copy.releaseRegister.open}</Action>}
+      >
         {releases.status !== 'ready' ? (
           <Empty
             message={releases.status === 'loading' ? copy.loading : releases.message || copy.loadError}
@@ -133,6 +139,11 @@ export default function ClientsPage({
           </div>
         )}
       </Section>
+      <RegisterReleaseDrawer
+        open={registering}
+        onClose={() => setRegistering(false)}
+        onSaved={() => { onChanged(); adoption.reload(); channels.reload(); }}
+      />
     </div>
   );
 }

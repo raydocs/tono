@@ -13,7 +13,7 @@ import { createHy2SwitchFixtures } from './fixtures/routes/hy2-switch';
 import { createFunnelFixtures } from './fixtures/routes/funnel';
 import { createFollowupFixtures } from './fixtures/routes/followups';
 import { createLedgerFixtures } from './fixtures/routes/ledger';
-import { updateChannels } from './fixtures/routes/releases';
+import { registerRelease, releaseObjects, updateChannels } from './fixtures/routes/releases';
 import { serveNodeRoutes } from './fixtures/routes/node-detail';
 import type { FleetFixtureFile, LiveFixtureFile } from './src/lib/types';
 import fleetRaw from './fixtures/fleet-nodes.json';
@@ -364,6 +364,28 @@ function fixturesPlugin(): Plugin {
             return;
           }
           const parts = route.split('/').map(decodeURIComponent);
+          if (route === 'releases') {
+            const releases = opsFile(fileNames(set).releases, pickSession(url, set));
+            if (!releases) {
+              res.statusCode = 500;
+              res.end();
+              return;
+            }
+            void readBody(req).then((body) => {
+              const result = registerRelease(releases, body);
+              if ('error' in result) {
+                res.statusCode = result.status;
+                res.setHeader('content-type', 'application/json; charset=utf-8');
+                res.end(JSON.stringify({ error: result.error }));
+                return;
+              }
+              res.statusCode = 201;
+              res.setHeader('content-type', 'application/json; charset=utf-8');
+              res.setHeader('cache-control', 'no-store');
+              res.end(JSON.stringify(materializeOps(result.row, releases.clock)));
+            });
+            return;
+          }
           const file = parts[0] === 'incidents' && parts.length === 3
             ? opsFile(fileNames(set).incidents, pickSession(url, set))
             : null;
@@ -431,6 +453,17 @@ function fixturesPlugin(): Plugin {
           const file = opsFile(names.releases, pickSession(url, set));
           if (file) {
             sendJson(res, materializeOps(updateChannels(file), file.clock));
+            return;
+          }
+        }
+        // The register-release picker: the bucket's files, flagged by the loaded releases.
+        if (route === 'releases/objects') {
+          const file = opsFile(names.releases, pickSession(url, set));
+          if (file) {
+            const objects = JSON.parse(
+              readFileSync(path.resolve(rootDir, 'fixtures', 'release-objects.json'), 'utf8'),
+            ) as { items: Parameters<typeof releaseObjects>[1]['items'] };
+            sendJson(res, materializeOps(releaseObjects(file, objects), file.clock));
             return;
           }
         }
