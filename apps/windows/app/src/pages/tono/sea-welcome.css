@@ -6,6 +6,11 @@
   padding: 132px 56px 44px;
   box-sizing: border-box;
 }
+/* The sign-in card is dark glass over the night sky, set high enough that the
+   horizon runs under its foot instead of through the email field. */
+.sea-login:not(.sea-login--suspended) {
+  padding-top: 72px;
+}
 .sea-welcome-scene {
   position: absolute;
   /* The sky continues behind the transparent bar, as on the home. */
@@ -68,7 +73,7 @@
   font-variant-numeric: tabular-nums;
 }
 .sea-code-entry:focus-within .sea-code-boxes span[data-active="true"] {
-  outline: 2px solid var(--sea-accent);
+  outline: 2px solid var(--tono-sea-focus, #ffd9a0);
   outline-offset: 2px;
 }
 .sea-code-entry .sea-code-input {

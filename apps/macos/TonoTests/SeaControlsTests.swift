@@ -14,6 +14,12 @@ final class SeaControlsTests: XCTestCase {
         XCTAssertEqual(row.fittingSize.height, 32, accuracy: 0.5)
     }
 
+    func testListRowWashIsWarmOnlyWhenSelectedOrHovered() {
+        XCTAssertEqual(SeaWarmRowSurface.washOpacity(selected: false, hovered: false), 0)
+        XCTAssertEqual(SeaWarmRowSurface.washOpacity(selected: false, hovered: true), 0.06)
+        XCTAssertEqual(SeaWarmRowSurface.washOpacity(selected: true, hovered: true), 0.09)
+    }
+
     func testFieldMeasuresAtItsNativeTargetHeightWithoutChangingItsValue() {
         var value = "fixture@example.test"
         let field = NSHostingView(rootView: TextField("Email", text: Binding(

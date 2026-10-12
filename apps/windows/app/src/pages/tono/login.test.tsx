@@ -106,6 +106,20 @@ describe('login welcome v2', () => {
     expect(details?.open).toBe(true)
     expect(screen.getByRole('button', { name: 'Send code' })).toBeDefined()
   })
+
+  it('puts the sea sign-in form on its own glass card', () => {
+    setNewAppearance(true)
+    const { container } = render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    const card = container.querySelector('.sea-login-card')
+    expect(card?.classList.contains('tono-welcome__form')).toBe(true)
+    expect(
+      card?.contains(screen.getByRole('button', { name: 'Send code' })),
+    ).toBe(true)
+  })
 })
 
 describe('login code not received', () => {

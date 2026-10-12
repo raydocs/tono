@@ -106,13 +106,13 @@ struct SeaActionStyle: ViewModifier {
 }
 
 struct SeaToggleStyle: ToggleStyle {
-    @Environment(\.seaAccent) private var accent
     @Environment(\.isEnabled) private var enabled
     @SeaDisplayPreferences private var display
 
     func makeBody(configuration: Configuration) -> some View {
         Button { configuration.isOn.toggle() } label: {
-            Capsule().fill(configuration.isOn ? accent : .white.opacity(0.16))
+            // On is the sunrise, whatever the page tone, like the Windows switch.
+            Capsule().fill(configuration.isOn ? AnyShapeStyle(SeaTheme.primaryGradient) : AnyShapeStyle(.white.opacity(0.16)))
                 .frame(width: 36, height: 20)
                 .overlay(alignment: configuration.isOn ? .trailing : .leading) {
                     Circle().fill(configuration.isOn ? Color(hex: "171421") : SeaTheme.text)
@@ -150,9 +150,9 @@ struct SeaChoice: View {
                             .padding(.horizontal, 13).padding(.vertical, 5)
                             .background {
                                 if selection == option {
-                                    Capsule().fill(.white.opacity(0.12))
+                                    Capsule().fill(SeaTheme.warm.opacity(0.19))
                                         .overlay {
-                                            Capsule().strokeBorder(LinearGradient(colors: [.white.opacity(0.12), .clear],
+                                            Capsule().strokeBorder(LinearGradient(colors: [SeaTheme.warm.opacity(0.24), .clear],
                                                 startPoint: .top, endPoint: .center), lineWidth: 1)
                                         }
                                 }
@@ -266,15 +266,16 @@ private struct SeaFocusedField<Content: View>: View {
 
 struct SeaFieldSurface: ViewModifier {
     var focused: Bool = false
-    @Environment(\.seaAccent) private var accent
     @SeaDisplayPreferences private var display
     func body(content: Content) -> some View {
         content.font(.system(size: 15)).foregroundStyle(SeaTheme.text)
             .padding(.horizontal, 14).frame(minHeight: 48)
             .background(display.reduceTransparency ? SeaTheme.opaquePanel : .white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
             .overlay {
+                // A focused field takes the sunrise ring on every page; the tone
+                // accent stays for links and selection.
                 RoundedRectangle(cornerRadius: 12).strokeBorder(
-                    focused ? accent : .white.opacity(display.contrast == .increased ? 0.45 : 0.09), lineWidth: 1)
+                    focused ? SeaTheme.attention : .white.opacity(display.contrast == .increased ? 0.45 : 0.09), lineWidth: focused ? 1.5 : 1)
             }
     }
 }
