@@ -101,6 +101,12 @@
   color: inherit;
   text-align: left;
 }
+.sea-tray-quick-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .sea-tray-quick:hover {
   background: #ffffff0e;
 }
