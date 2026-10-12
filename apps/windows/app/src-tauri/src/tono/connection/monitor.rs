@@ -1385,6 +1385,79 @@ where
     Some(release(true).await)
 }
 
+/// Settle the result of an automatic health-failure release. Success starts the unarmed probe.
+///
+/// The Service refuses the release when it cannot prove the DNS restore, which Wi-Fi adapter
+/// churn causes for a while. The session then idles in Protected Offline with WFP armed, and
+/// nothing else would ask again. So the same release is repeated every `period` (the monitor
+/// tick) for as long as `still_owned` says this session is still the idle protected one; a user
+/// Disconnect, a new connect or a newer generation ends it. Every attempt goes through the
+/// Service's own gate, which keeps its refusals: this loop never releases anything by itself.
+async fn settle_health_release<SF, RF, PF>(
+    first: Result<(), String>,
+    period: Duration,
+    mut still_owned: impl FnMut() -> SF,
+    mut release: impl FnMut() -> RF,
+    start_probe: impl FnOnce() -> PF,
+)
+where
+    SF: std::future::Future<Output = bool>,
+    RF: std::future::Future<Output = Result<(), String>>,
+    PF: std::future::Future<Output = ()>,
+{
+    let mut result = first;
+    let mut interval = tokio::time::interval(period);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // The first tick is immediate; the retry waits one full period after the refusal.
+    interval.tick().await;
+    let mut attempt = 0_u32;
+    while let Err(error) = result {
+        if attempt == 0 {
+            logging!(
+                error,
+                Type::Service,
+                "Tono: health-failure release failed; not starting a tunnel: {error}"
+            );
+        }
+        interval.tick().await;
+        if !still_owned().await {
+            return;
+        }
+        attempt += 1;
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: retrying the refused health-failure release (attempt {attempt}) after: {error}"
+        );
+        result = release().await;
+    }
+    start_probe().await;
+}
+
+/// Whether `generation` is still the idle Protected Offline session a refused health-failure
+/// release left behind.
+fn retry_session_owned(inner: &TonoInner, generation: u64) -> bool {
+    inner.connect_generation == generation && protection_resync_watches(inner.fsm.status())
+}
+
+/// The lifecycle writer for one retry of a refused health-failure release, or `None` when the
+/// session the retry was started for is gone.
+///
+/// The ownership check and the release must be one step. A user Connect holds the lifecycle
+/// reader while its admission bumps the generation, so the writer is granted only once no
+/// admission is mid-flight, and the session is validated again under the state lock *after*
+/// the wait. The caller hands this writer to the release, which keeps it until its worker has
+/// run, so no Connect can be admitted between this validation and the release reading the
+/// generation and release ticket it tears down: both are still `generation`'s.
+async fn claim_retry_release(
+    state: &Arc<TonoState>,
+    generation: u64,
+) -> Option<tokio::sync::OwnedRwLockWriteGuard<()>> {
+    let lifecycle = state.begin_privileged_release().await;
+    let inner = state.lock().await;
+    retry_session_owned(&inner, generation).then_some(lifecycle)
+}
+
 /// The connect generation whose DIRECT binding check got no answer from the uplink read, or
 /// [`NO_UNREAD_DIRECT_BINDING`]. That check kept the session without proving the binding, so the
 /// monitor of the same generation reads the uplinks again on a later quiet tick.
@@ -1619,19 +1692,22 @@ pub(super) async fn handle_network_change_inner(
         }
     }).await;
     if let Some(result) = health_release {
-        match result {
-            Ok(()) => {
-                let generation = state.lock().await.connect_generation;
-                super::unarmed_probe::spawn_after_release(state, app, generation);
-            }
-            Err(error) => {
-                logging!(
-                    error,
-                    Type::Service,
-                    "Tono: health-failure release failed; not starting a tunnel: {error}"
-                );
-            }
-        }
+        settle_health_release(
+            result,
+            NETWORK_MONITOR_INTERVAL,
+            || async move { retry_session_owned(&*state.lock().await, generation) },
+            || async move {
+                match claim_retry_release(state, generation).await {
+                    Some(lifecycle) => {
+                        super::disconnect::release_explicit_applying_narrow_with_guard(state, app, Some(lifecycle)).await
+                    }
+                    None => Err("the session this release was retrying for is no longer the idle protected one".to_owned()),
+                }
+            },
+            // The probe belongs to the session that was validated, never to whichever
+            // generation is current by now: it checks its owner on every step.
+            || async move { super::unarmed_probe::spawn_after_release(state, app, generation) },
+        ).await;
         return NetworkChangeOutcome::Handled;
     }
     // The exclusive release guard also excludes StartClash/DNS readers, including Retry now.
@@ -1957,6 +2033,69 @@ mod tests {
         stalled.abort();
         let admitted = admitted.expect("a reader holding the token read after the first wake must be woken too");
         assert!(admitted.is_ok(), "the current failure still owns the release");
+    }
+
+    /// A retry that checked its session and then queued for the lifecycle writer behind a user
+    /// Connect's admission must not release that Connect. Admission bumps the generation while
+    /// holding its lifecycle reader, so the writer is only granted once the session the retry
+    /// was started for is already replaced.
+    #[tokio::test]
+    async fn a_retry_overtaken_by_a_connect_while_waiting_for_the_writer_claims_no_release() {
+        let state = Arc::new(TonoState::for_test());
+        let generation = {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.fsm.tunnel_died();
+            assert!(super::protection_resync_watches(inner.fsm.status()));
+            inner.connect_generation
+        };
+        let admission = state.begin_connect_mutation().await;
+        // One poll parks the retry on the lifecycle writer behind the admission's reader: it
+        // registered its wait, and nothing else can have run in between.
+        let mut retry = std::pin::pin!(super::claim_retry_release(&state, generation));
+        assert!(
+            futures::poll!(retry.as_mut()).is_pending(),
+            "the retry must be parked behind the Connect's admission"
+        );
+        state.lock().await.retire_connection_generation(false);
+        drop(admission);
+        assert!(
+            retry.await.is_none(),
+            "a retry for the replaced session must not take the writer to release the new Connect"
+        );
+        let current = state.lock().await.connect_generation;
+        assert!(
+            super::claim_retry_release(&state, current).await.is_some(),
+            "a retry for the session that is still the idle protected one gets the writer"
+        );
+    }
+
+    /// The Service refuses a health-failure release when it cannot prove the DNS restore, and
+    /// Wi-Fi adapter churn makes that proof fail for a while. A refusal must not strand the
+    /// session in Protected Offline: the release is attempted again on the next monitor tick,
+    /// and the unarmed probe starts once an attempt is accepted.
+    #[tokio::test]
+    async fn a_refused_health_release_is_retried_on_the_next_tick_and_then_starts_the_probe() {
+        let attempts = std::cell::Cell::new(0_u32);
+        let probes = std::cell::Cell::new(0_u32);
+        super::settle_health_release(
+            Err("refused: DNS restore not proven".to_string()),
+            std::time::Duration::from_millis(1),
+            || async { true },
+            || {
+                attempts.set(attempts.get() + 1);
+                let attempt = attempts.get();
+                async move {
+                    if attempt < 2 { Err("refused: DNS restore not proven".to_string()) } else { Ok(()) }
+                }
+            },
+            || async { probes.set(probes.get() + 1) },
+        ).await;
+        assert_eq!(attempts.get(), 2, "the refused release is attempted again on later ticks");
+        assert_eq!(probes.get(), 1, "the probe starts once, after the retry succeeds");
     }
 
     #[tokio::test]
