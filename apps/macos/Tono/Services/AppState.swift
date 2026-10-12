@@ -103,6 +103,8 @@ final class AppState {
     @ObservationIgnored var lastAutomaticReleaseRetryAt: Date?
     @ObservationIgnored var automaticReleaseRetryEndedAt: Date?
     @ObservationIgnored var automaticReleaseDeferredRetry: Task<Void, Never>?
+    @ObservationIgnored var automaticReleasePendingRetry = false
+    @ObservationIgnored var automaticReleaseEventTask: Task<Void, Never>?
     /// Minimum spacing between two automatic release attempts.
     @ObservationIgnored var automaticReleaseRetryCooldown: TimeInterval = 20
     /// How long after a retry ends a network notification is taken for the

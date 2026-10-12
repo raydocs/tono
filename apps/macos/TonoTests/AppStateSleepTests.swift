@@ -233,8 +233,10 @@ final class AppStateSleepTests: XCTestCase {
     //
     // The exhausted protected reconnect's automatic release failed and left
     // PF armed. Unlike the user's own Restore internet above, that is not an
-    // intent to keep: the next network change or wake runs the same release
-    // again instead of leaving the Mac offline until the user clicks.
+    // intent to keep: a real network change or a wake runs the same release
+    // again instead of leaving the Mac offline until the user clicks. A real
+    // change is a different uplink or Protected DNS state than the one the
+    // last retry started from; the retry's own DNS / PF notifications are not.
 
     private final class ReleaseProbe: @unchecked Sendable {
         var repairs = 0
@@ -249,7 +251,26 @@ final class AppStateSleepTests: XCTestCase {
         /// The non-prompting probe's answer for the retry.
         var repairRequired = false
         /// Runs inside `restoreDNS`, like the notification the real restore causes.
-        var onDNSRestore: (() -> Void)?
+        var onDNSRestore: (() async -> Void)?
+        /// Holds the status readback that follows a retry's teardown.
+        var refreshGate: ReleaseGate?
+        var refreshEntered: ReleaseGate?
+        var uplink = ReleaseProbe.homeWiFi
+
+        static let homeWiFi = NetworkUplinkSnapshot(
+            primaryService: "Wi-Fi",
+            primaryInterface: "en0",
+            ipv4Address: "192.168.1.20",
+            ipv4Gateway: "192.168.1.1",
+            ipv6Gateway: nil
+        )
+        static let otherWiFi = NetworkUplinkSnapshot(
+            primaryService: "Wi-Fi",
+            primaryInterface: "en0",
+            ipv4Address: "192.168.50.20",
+            ipv4Gateway: "192.168.50.1",
+            ipv6Gateway: nil
+        )
     }
 
     private func hostWithFailedAutomaticRelease(
@@ -275,7 +296,7 @@ final class AppStateSleepTests: XCTestCase {
         runtime.coreStatus = { (false, true) }
         runtime.restoreDNS = {
             probe.dnsRestores += 1
-            probe.onDNSRestore?()
+            await probe.onDNSRestore?()
             if probe.dnsRestores >= probe.dnsFailsFrom {
                 throw HelperIPCError.commandFailed("Protected DNS could not be restored.")
             }
@@ -291,10 +312,18 @@ final class AppStateSleepTests: XCTestCase {
             KillSwitchService.isArmed = false
         }
         runtime.restrictToBootstrap = { probe.bootstraps += 1 }
+        runtime.reassertKillSwitch = { true }
         runtime.refreshKillSwitchStatus = {
-            .confirmed(requiresProtectionRecovery: KillSwitchService.isArmed)
+            if let gate = probe.refreshGate {
+                probe.refreshEntered?.open()
+                await gate.wait()
+            }
+            return .confirmed(requiresProtectionRecovery: KillSwitchService.isArmed)
         }
         app.networkProtection = runtime
+        var audits = ProtectionAuditOperations()
+        audits.uplinkSnapshot = { probe.uplink }
+        app.protectionAudits = audits
         if viaExhaustedFailure {
             await app.applyExhaustedArmedFailure(
                 message: "The exit did not answer.",
@@ -309,6 +338,14 @@ final class AppStateSleepTests: XCTestCase {
         app.connectionCoordinator.unarmedReconnectTask = nil
         app.connectionCoordinator.unarmedReconnectOwner = nil
         return app
+    }
+
+    /// Lets the event classification, every retry it started (and the
+    /// follow-up a mid-flight event leaves) and their teardowns finish.
+    private func settleRetries(_ app: AppState) async {
+        await app.automaticReleaseEventTask?.value
+        while let task = app.automaticReleaseRetryTask { await task.value }
+        await app.connectionCoordinator.disconnectSequence?.value
     }
 
     private func finish(_ app: AppState) async {
@@ -326,8 +363,7 @@ final class AppStateSleepTests: XCTestCase {
         XCTAssertTrue(app.isProtectionBlocked)
 
         app.handleSystemNetworkChange()
-        await app.automaticReleaseRetryTask?.value
-        await app.connectionCoordinator.disconnectSequence?.value
+        await settleRetries(app)
 
         XCTAssertEqual(
             probe.dnsRestores, 2,
@@ -343,22 +379,103 @@ final class AppStateSleepTests: XCTestCase {
         await finish(app)
     }
 
-    func testNetworkChangeBurstRetriesTheAutomaticReleaseOnce() async {
+    func testRecoveryAfterAFailedRetryRunsTheReleaseAgain() async {
+        let probe = ReleaseProbe()
+        probe.dnsFailsFrom = 2
+        probe.releaseSucceedsOn = 2
+        let app = await hostWithFailedAutomaticRelease(probe)
+
+        // The first retry fails on a transient DNS error.
+        app.handleSystemNetworkChange()
+        await settleRetries(app)
+        XCTAssertTrue(KillSwitchService.isArmed)
+
+        // The network really recovers (another uplink) and nothing else will
+        // ever notify: that one event must run the release.
+        probe.dnsFailsFrom = .max
+        probe.uplink = ReleaseProbe.otherWiFi
+        app.handleSystemNetworkChange()
+        await settleRetries(app)
+
+        XCTAssertFalse(KillSwitchService.isArmed, "a real change after a failed retry must retry")
+        XCTAssertEqual(probe.releases, 2)
+        await finish(app)
+    }
+
+    func testARetrysOwnNotificationsDoNotRetriggerIt() async {
         let probe = ReleaseProbe()
         probe.dnsFailsFrom = 2
         let app = await hostWithFailedAutomaticRelease(probe)
+        // The DNS restore the retry performs makes macOS post a notification;
+        // the uplink has not moved.
+        probe.onDNSRestore = {
+            app.handleSystemNetworkChange()
+            await app.automaticReleaseEventTask?.value
+        }
 
         app.handleSystemNetworkChange()
-        await app.automaticReleaseRetryTask?.value
-        await app.connectionCoordinator.disconnectSequence?.value
+        await settleRetries(app)
+        // And the echo that lands just after the retry ended.
         app.handleSystemNetworkChange()
-        await app.automaticReleaseRetryTask?.value
-        await app.connectionCoordinator.disconnectSequence?.value
+        await settleRetries(app)
 
         XCTAssertEqual(
             probe.dnsRestores, 2,
-            "notifications of one transition must not re-run a release that just failed"
+            "a retry's own DNS / PF notifications must not re-trigger the retry"
         )
+        XCTAssertFalse(app.automaticReleasePendingRetry)
+        await finish(app)
+    }
+
+    func testRealEventDuringARetryLeavesExactlyOneFollowUp() async {
+        let probe = ReleaseProbe()
+        probe.dnsFailsFrom = 2
+        let app = await hostWithFailedAutomaticRelease(probe)
+        var fired = false
+        probe.onDNSRestore = {
+            // The network moves while the first retry's teardown runs.
+            guard !fired else { return }
+            fired = true
+            probe.uplink = ReleaseProbe.otherWiFi
+            app.handleSystemNetworkChange()
+            await app.automaticReleaseEventTask?.value
+        }
+
+        app.handleSystemNetworkChange()
+        await settleRetries(app)
+
+        XCTAssertEqual(
+            probe.dnsRestores, 3,
+            "the original release, the retry, and exactly one follow-up for the event during it"
+        )
+        XCTAssertFalse(app.automaticReleasePendingRetry)
+        XCTAssertNil(app.automaticReleaseRetryTask)
+        await finish(app)
+    }
+
+    func testWakeDuringARetryLeavesOneFollowUpAndNoLoop() async {
+        let probe = ReleaseProbe()
+        probe.dnsFailsFrom = 2
+        let app = await hostWithFailedAutomaticRelease(probe)
+        let gate = ReleaseGate()
+        probe.refreshGate = gate
+        probe.refreshEntered = ReleaseGate()
+
+        app.handleSystemNetworkChange()
+        await app.automaticReleaseEventTask?.value
+        await probe.refreshEntered?.wait()
+        XCTAssertNotNil(app.automaticReleaseRetryTask)
+        app.resumeAfterSystemWake()
+        XCTAssertTrue(
+            app.automaticReleasePendingRetry,
+            "a wake while a retry is in flight is remembered, not dropped"
+        )
+        gate.open()
+        await settleRetries(app)
+
+        XCTAssertEqual(probe.dnsRestores, 3, "the retry and exactly one follow-up for the wake")
+        XCTAssertFalse(app.automaticReleasePendingRetry)
+        XCTAssertNil(app.automaticReleaseRetryTask)
         await finish(app)
     }
 
@@ -368,8 +485,7 @@ final class AppStateSleepTests: XCTestCase {
         let app = await hostWithFailedAutomaticRelease(probe)
 
         app.resumeAfterSystemWake()
-        await app.automaticReleaseRetryTask?.value
-        await app.connectionCoordinator.disconnectSequence?.value
+        await settleRetries(app)
 
         XCTAssertEqual(probe.dnsRestores, 2, "wake must re-run the automatic release that left PF armed")
         XCTAssertNil(
@@ -377,6 +493,41 @@ final class AppStateSleepTests: XCTestCase {
             "the retry replaces wake's reconnect; it does not add one"
         )
         XCTAssertTrue(KillSwitchService.isArmed)
+        await finish(app)
+    }
+
+    func testStaleRetryTaskDoesNotOwnTheWakeAfterTheUserConnected() async {
+        let probe = ReleaseProbe()
+        probe.dnsFailsFrom = 2
+        let app = await hostWithFailedAutomaticRelease(probe)
+        let gate = ReleaseGate()
+        probe.refreshGate = gate
+        probe.refreshEntered = ReleaseGate()
+
+        // The retry's teardown is done and it waits for the status readback.
+        app.handleSystemNetworkChange()
+        await app.automaticReleaseEventTask?.value
+        await probe.refreshEntered?.wait()
+        XCTAssertNotNil(app.automaticReleaseRetryTask)
+        // The user connects (retiring the release intent), then sleeps and wakes.
+        app.connectionCoordinator.executeConnect(
+            isDisconnecting: false,
+            deferredFallback: {},
+            prepare: { (true, UUID()) },
+            onWatchdog: { _ in },
+            perform: { _, _ in }
+        )
+        app.prepareForSystemSleep()
+        app.resumeAfterSystemWake()
+
+        XCTAssertNotNil(
+            app.connectionCoordinator.wakeRecoveryTask,
+            "a retry task whose release intent is gone must not swallow the new session's wake recovery"
+        )
+        app.connectionCoordinator.cancelReconnectTasks()
+        app.connectionCoordinator.cancelConnectionTasks()
+        gate.open()
+        await settleRetries(app)
         await finish(app)
     }
 
@@ -399,7 +550,7 @@ final class AppStateSleepTests: XCTestCase {
         // The retry is queued but has not run; then the update begins.
         app.handleSystemNetworkChange()
         app.nativeUpdatePending = true
-        await app.automaticReleaseRetryTask?.value
+        await settleRetries(app)
         while let task = app.nativeUpdateDisconnectTask { await task.value }
         await app.connectionCoordinator.disconnectSequence?.value
 
@@ -416,8 +567,7 @@ final class AppStateSleepTests: XCTestCase {
         XCTAssertEqual(probe.repairs, 1)
 
         app.handleSystemNetworkChange()
-        await app.automaticReleaseRetryTask?.value
-        await app.connectionCoordinator.disconnectSequence?.value
+        await settleRetries(app)
 
         XCTAssertEqual(
             probe.repairs, 1,
@@ -427,100 +577,22 @@ final class AppStateSleepTests: XCTestCase {
         await finish(app)
     }
 
-    private func waitUntilReleased(_ app: AppState) async {
-        for _ in 0..<80 where KillSwitchService.isArmed {
-            try? await Task.sleep(for: .milliseconds(50))
-        }
-        await app.automaticReleaseRetryTask?.value
-        await app.connectionCoordinator.disconnectSequence?.value
-    }
-
-    func testNetworkEventInsideTheCooldownIsDeferredNotDropped() async {
-        let probe = ReleaseProbe()
-        probe.dnsFailsFrom = 2
-        probe.releaseSucceedsOn = 2
-        let app = await hostWithFailedAutomaticRelease(probe)
-        app.automaticReleaseRetryCooldown = 0.5
-        app.automaticReleaseRetryEchoSettle = 0
-
-        // t=0: the retry runs and the DNS restore fails transiently.
-        app.handleSystemNetworkChange()
-        await app.automaticReleaseRetryTask?.value
-        await app.connectionCoordinator.disconnectSequence?.value
-        XCTAssertTrue(KillSwitchService.isArmed)
-        // t=5: the network is back; this is the last notification there will be.
-        probe.dnsFailsFrom = .max
-        app.handleSystemNetworkChange()
-
-        await waitUntilReleased(app)
-        XCTAssertFalse(
-            KillSwitchService.isArmed,
-            "an event inside the cooldown must run the release once the cooldown ends"
-        )
-        XCTAssertEqual(probe.releases, 2)
-        await finish(app)
-    }
-
-    func testWakeInsideTheCooldownIsDeferredNotDropped() async {
-        let probe = ReleaseProbe()
-        probe.dnsFailsFrom = 2
-        probe.releaseSucceedsOn = 2
-        let app = await hostWithFailedAutomaticRelease(probe)
-        app.automaticReleaseRetryCooldown = 0.5
-        app.automaticReleaseRetryEchoSettle = 0
-
-        app.handleSystemNetworkChange()
-        await app.automaticReleaseRetryTask?.value
-        await app.connectionCoordinator.disconnectSequence?.value
-        probe.dnsFailsFrom = .max
-        app.resumeAfterSystemWake()
-
-        await waitUntilReleased(app)
-        XCTAssertFalse(KillSwitchService.isArmed, "a wake inside the cooldown must not be dropped")
-        await finish(app)
-    }
-
-    func testARetrysOwnNotificationsDoNotScheduleAnotherRetry() async {
-        let probe = ReleaseProbe()
-        probe.dnsFailsFrom = 2
-        let app = await hostWithFailedAutomaticRelease(probe)
-        app.automaticReleaseRetryCooldown = 0.2
-        // The DNS restore the retry performs makes macOS post a notification.
-        probe.onDNSRestore = { app.handleSystemNetworkChange() }
-
-        app.handleSystemNetworkChange()
-        await app.automaticReleaseRetryTask?.value
-        await app.connectionCoordinator.disconnectSequence?.value
-        // And the echo that lands just after the retry ended.
-        app.handleSystemNetworkChange()
-        try? await Task.sleep(for: .milliseconds(600))
-        await app.automaticReleaseRetryTask?.value
-        await app.connectionCoordinator.disconnectSequence?.value
-
-        XCTAssertEqual(
-            probe.dnsRestores, 2,
-            "a retry's own DNS / PF notifications must not re-trigger the retry"
-        )
-        XCTAssertNil(app.automaticReleaseDeferredRetry)
-        await finish(app)
-    }
-
     func testRetryNeverPromptsForHelperRepairAndStopsUntilTheUserActs() async {
         let probe = ReleaseProbe()
         let app = await hostWithFailedAutomaticRelease(probe)
         probe.repairRequired = true
 
         app.handleSystemNetworkChange()
-        await app.automaticReleaseRetryTask?.value
-        await app.connectionCoordinator.disconnectSequence?.value
+        await settleRetries(app)
         XCTAssertEqual(probe.repairs, 1, "the retry must not run the prompting repair")
         XCTAssertEqual(probe.dnsRestores, 1, "a host whose helper needs repair is not released half-way")
         XCTAssertTrue(KillSwitchService.isArmed)
 
-        // Even once the cooldown has passed, nothing retries until the user acts.
-        app.lastAutomaticReleaseRetryAt = .distantPast
+        // Even a real change afterwards does not retry until the user acts.
+        probe.uplink = ReleaseProbe.otherWiFi
         app.handleSystemNetworkChange()
-        XCTAssertNil(app.automaticReleaseRetryTask)
+        await settleRetries(app)
+        XCTAssertEqual(probe.dnsRestores, 1)
         await finish(app)
     }
 
@@ -532,8 +604,7 @@ final class AppStateSleepTests: XCTestCase {
         XCTAssertTrue(KillSwitchService.isArmed)
 
         app.handleSystemNetworkChange()
-        await app.automaticReleaseRetryTask?.value
-        await app.connectionCoordinator.disconnectSequence?.value
+        await settleRetries(app)
 
         XCTAssertEqual(probe.releases, 2)
         XCTAssertFalse(KillSwitchService.isArmed, "the retry releases the host")
@@ -550,8 +621,7 @@ final class AppStateSleepTests: XCTestCase {
         let app = await hostWithFailedAutomaticRelease(probe)
 
         app.handleSystemNetworkChange()
-        await app.automaticReleaseRetryTask?.value
-        await app.connectionCoordinator.disconnectSequence?.value
+        await settleRetries(app)
 
         XCTAssertTrue(KillSwitchService.isArmed)
         XCTAssertNil(
