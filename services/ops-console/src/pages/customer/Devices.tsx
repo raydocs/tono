@@ -187,6 +187,7 @@ function DeviceCard({
           {open ? copy.deviceLogsOff : copy.deviceLogsOn}
         </Action>
         <Action
+          danger
           className="ml-auto"
           reason={gone ? copy.deviceRevoked : null}
           onClick={() => setRevoking(true)}
@@ -202,6 +203,7 @@ function DeviceCard({
         title={copy.deviceRevokeTitle}
         consequence={copy.deviceRevokeBody(device.name)}
         confirm={copy.deviceRevoke}
+        danger
         pending={ask.pending}
         failure={ask.error}
         onConfirm={() => {

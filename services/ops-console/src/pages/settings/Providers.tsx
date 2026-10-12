@@ -94,6 +94,7 @@ export function Providers() {
         title={words.deleteTitle}
         body={removing ? words.deleteBody(removing.label) : ''}
         confirm={copy.settings.remove}
+        danger
         pending={write.pending}
         onClose={() => setRemoving(null)}
         onConfirm={() => {

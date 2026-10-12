@@ -124,6 +124,7 @@ export function ActionRail({
           <Action
             key={action.id}
             primary={action.id === 'pullErrors'}
+            danger={action.id === 'unlist' || action.id === 'retire'}
             reason={actionBlockReason(action, node, acceptance)}
             onClick={() => start(action)}
           >
