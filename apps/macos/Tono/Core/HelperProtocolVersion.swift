@@ -472,7 +472,11 @@ nonisolated enum HelperProtocolVersion {
     ///   bootstrap or preserve ruleset while it reconnects, and with no DHCP
     ///   pass it could not get a lease on the new network. Same two permits,
     ///   same text; the rules that need a tunnel or a setting are unchanged.
-    static let current = "4.52.52"
+    /// - 4.52.52 → 4.52.53: without a tunnel the `tono-ndp` passes render
+    ///   `no state` in both directions (Apple PF keys ICMPv6 state without the
+    ///   type, so a state from an inbound router advertisement could admit an
+    ///   Echo Request). The tunneled rule is unchanged.
+    static let current = "4.52.53"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

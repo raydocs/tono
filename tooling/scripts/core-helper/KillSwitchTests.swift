@@ -1606,8 +1606,8 @@ extension KillSwitchManager {
                 "pass out quick on lo0 all no state label \"tono-loopback\"",
                 "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\"",
                 "pass in quick inet proto udp from any port 67 to any port 68 no state label \"tono-dhcp\"",
-                "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\"",
-                "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\"",
+                "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } no state label \"tono-ndp\"",
+                "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } no state label \"tono-ndp\"",
                 "block drop out quick all label \"tono-block\"",
                 "",
             ].joined(separator: "\n")
@@ -2462,10 +2462,16 @@ extension KillSwitchManager {
         let required = [
             "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\"",
             "pass in quick inet proto udp from any port 67 to any port 68 no state label \"tono-dhcp\"",
-            "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\"",
-            "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\"",
+            "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } no state label \"tono-ndp\"",
+            "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } no state label \"tono-ndp\"",
         ]
         let block = lines.firstIndex(of: "block drop out quick all label \"tono-block\"")
+        // Apple PF keys non-error ICMPv6 state without the type, so a state made
+        // by an inbound type 134 could later admit an Echo Request. Without a
+        // tunnel both NDP directions are stateless; each has its own pass.
+        let ndpLines = lines.filter { $0.contains("label \"tono-ndp\"") }
+        let ndpStateless = ndpLines.count == 2
+            && ndpLines.allSatisfy { $0.contains(" no state ") && !$0.contains("keep state") }
         // The permit is DHCP and NDP only: nothing on a DNS port may pass
         // without a tunnel, so a lease cannot open a resolver path. Where the
         // physical-interface DNS block renders (a tunnel is up), it still does.
@@ -2480,7 +2486,7 @@ extension KillSwitchManager {
             $0.hasPrefix("block drop out quick on { en0 } inet proto { tcp, udp }")
                 && $0.hasSuffix("port { 53, 853 } label \"tono-lan-dns\"")
         }
-        let holds = block != nil && noDNSPass && dnsBlockKept && required.allSatisfy { line in
+        let holds = block != nil && ndpStateless && noDNSPass && dnsBlockKept && required.allSatisfy { line in
             guard let at = lines.firstIndex(of: line), let block else { return false }
             return at < block
         }
