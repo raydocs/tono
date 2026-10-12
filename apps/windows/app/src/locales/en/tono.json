@@ -293,6 +293,20 @@
       "tlsIntercepted": "This network is intercepting encrypted connections: something between this PC and Tono replaced Tono's certificate, and Tono will not accept it. If this network has a sign-in page, finish it in a browser; otherwise turn off any proxy or security software that inspects HTTPS, then retry.",
       "serverError": "Tono's sign-in service is unavailable right now. Retry in a few minutes.",
       "unknown": "This action did not finish. Please try again."
+    },
+    "paths": {
+      "title": "Paths tried",
+      "system_dns": "System DNS",
+      "pinned": "Pinned address",
+      "relay": "Tono relay",
+      "kind": {
+        "dns": "Name lookup failed",
+        "connect": "Couldn't connect",
+        "tls": "Secure connection failed",
+        "timeout": "Timed out",
+        "other": "Failed"
+      },
+      "elapsed": "{{seconds}} s"
     }
   },
   "pill": {
