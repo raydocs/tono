@@ -180,6 +180,8 @@ export const ledgerCopy = {
     sloUnmeasured: '缺测时长',
     sloCoverage: '有效测得',
     sloNone: '这个区间还没有连接或测量数据',
+    sloMore: (total: number) => `显示全部 ${total} 行`,
+    sloFewer: '收起',
     sloMinutes: (min: number) => `${min} 分钟`,
     sloHours: (h: number) => `${h} 小时`,
     sloPercent: (pct: number) => `${(pct * 100).toFixed(1)}%`,

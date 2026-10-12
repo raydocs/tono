@@ -31,6 +31,7 @@ export function DataTable<T>({
   className,
   sort,
   onSortChange,
+  limit,
 }: {
   rows: T[];
   columns: DataColumn<T>[];
@@ -45,6 +46,8 @@ export function DataTable<T>({
   /** Opt-in controlled sorting; other tables retain their local behavior. */
   sort?: TableSort;
   onSortChange?: (sort: TableSort) => void;
+  /** Draw only the first `limit` rows, counted after sorting so they are the sorted top. */
+  limit?: number;
 }) {
   const [localSort, setLocalSort] = useState<TableSort>({ id: null, direction: 'asc' });
   const { id: sortId, direction: sortDir } = sort ?? localSort;
@@ -69,6 +72,8 @@ export function DataTable<T>({
     return copyRows;
   }, [rows, columns, sortId, sortDir]);
 
+  const visible = limit === undefined ? sorted : sorted.slice(0, limit);
+
   function toggleSort(id: string) {
     const next: TableSort = { id, direction: sortId === id && sortDir === 'asc' ? 'desc' : 'asc' };
     if (onSortChange) onSortChange(next);
@@ -80,14 +85,14 @@ export function DataTable<T>({
     if (event.target !== event.currentTarget && (event.target as HTMLElement).closest('button, a, input, select, textarea')) return;
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      const next = sorted[index + 1];
+      const next = visible[index + 1];
       if (next) {
         setFocusId(getRowId(next));
         event.currentTarget.nextElementSibling?.querySelector<HTMLElement>('td')?.focus();
       }
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
-      const prev = sorted[index - 1];
+      const prev = visible[index - 1];
       if (prev) {
         setFocusId(getRowId(prev));
         event.currentTarget.previousElementSibling?.querySelector<HTMLElement>('td')?.focus();
@@ -155,7 +160,7 @@ export function DataTable<T>({
           </tr>
         </thead>
         <tbody>
-          {sorted.map((row, index) => {
+          {visible.map((row, index) => {
             const id = getRowId(row);
             const selected = selectedId === id;
             const focused = focusId === id;

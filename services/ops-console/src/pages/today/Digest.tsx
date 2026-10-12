@@ -324,10 +324,16 @@ function NightLine({ group }: { group: NightGroup }) {
         onClick={() => openIncident(group.lead.id)}
       >
         <span className={cn('ops-tag shrink-0', tone && `tone-${tone}`)}>{word}</span>
-        {/* Two lines at most, then the ellipsis: on a phone a one-line cut lands
-            mid-name — "Los Angeles · Mes…" identifies nothing — and the second
-            line is enough for a name. `night-title` stays as a styling hook. */}
-        <span className="night-title min-w-0 line-clamp-2 text-body underline-offset-4 hover:underline">{title}</span>
+        {/* One line on a desktop, where the aux column is 260 px wide and a
+            second line on each of ten groups pushes the digest past one
+            screen; the full title is the hover text. On a phone a one-line cut
+            lands mid-name ("Los Angeles · Mes...") and identifies nothing, so
+            up to 640 px it wraps to two lines at most. `night-title` stays as
+            a styling hook. */}
+        <span
+          className="night-title min-w-0 truncate max-[640px]:line-clamp-2 max-[640px]:whitespace-normal text-body underline-offset-4 hover:underline"
+          title={title}
+        >{title}</span>
       </button>
       {group.flap === null ? null : (
         <FlapLine

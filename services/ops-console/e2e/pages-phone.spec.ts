@@ -56,8 +56,8 @@ for (const { name, hash } of PAGES) {
     await expectTapTargets(page);
 
     if (name === 'customers') {
-      // Four columns answer "who, how are they, until when"; the rest are on the 360.
-      await expect(page.locator('.customer-list-table thead th')).toHaveCount(4);
+      // Three columns answer "who, how are they, until when"; the rest are on the 360.
+      await expect(page.locator('.customer-list-table thead th')).toHaveCount(3);
       for (const header of ['状态', '客户', '到期']) {
         await expect(page.getByRole('columnheader', { name: header, exact: true })).toBeVisible();
       }

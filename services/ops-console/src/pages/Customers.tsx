@@ -324,7 +324,7 @@ export default function CustomersPage({
         /* The address column is the only flexible one: below the fixed
            columns' total it collapses to zero and no scroll can bring it
            back. A local floor keeps identities readable while the container
-           keeps the sideways scroll; the phone shows four columns, which fit
+           keeps the sideways scroll; the phone shows three columns, which fit
            without one. */
         className="customer-list-table min-[641px]:[&>table]:min-w-[1100px]"
         sort={sort}
