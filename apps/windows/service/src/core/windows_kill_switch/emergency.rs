@@ -154,6 +154,27 @@ async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
             }
         }
     }
+    // Owner rule: a released machine resolves through the home broadband's DNS, never through a
+    // dead Tono resolver. WFP is gone, so adapters still on a Tono target can now be put back
+    // on automatic (DHCP) without a lookup ever leaving a physical adapter while the barrier was
+    // armed. The saved servers stay on disk for a later exact restore, and the original DNS
+    // error is still returned below. The uninstall ladder already did the same for itself.
+    if dns_restore.is_err() && !uninstall_ladder_requested() {
+        match bounded_dns_call(
+            "emergency disarm adapter reset",
+            crate::core::dns::reset_redirected_adapters_after_failed_restore(),
+        )
+        .await
+        {
+            Ok(adapters) => tracing::warn!(
+                "emergency disarm: DNS restore could not be proven; {} adapter(s) on a Tono DNS                  target were set to automatic (DHCP) and the resolver policy was removed",
+                adapters.len()
+            ),
+            Err(error) => tracing::error!(
+                "emergency disarm: DNS restore could not be proven and the adapter reset or                  resolver-policy removal failed: {error:#}"
+            ),
+        }
+    }
     // BRICK-W4: Tono's NRPT catch-all sends every lookup to 198.18.0.2, which nothing answers
     // once the Core is gone, and a restart does not remove it. It must be proven gone before any
     // DNS outcome below is reported as continuable. A rule that remains puts its own blocking

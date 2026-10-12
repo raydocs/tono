@@ -334,3 +334,85 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
         }
     }
 }
+
+/// The non-uninstall emergency disarm's answer to a restore it could not prove (Start-Menu
+/// "Restore Network", `--emergency-disarm`, the release service's clean-up). Runs only after the
+/// WFP objects are gone, never while the barrier is armed.
+///
+/// Owner rule: a released machine resolves through the home broadband's DNS, never through a
+/// dead Tono resolver. So, like rung 2 of the uninstall ladder, the adapters that still read as a
+/// Tono target are put back on automatic (DHCP), and then the machine-wide resolver policy (the
+/// NRPT catch-all and the Encrypted DNS pin) is removed. Differences from the ladder, on purpose:
+///
+/// * Only adapters that read as a Tono target *right now* are touched. The snapshot may list
+///   adapters an earlier partial restore already put back exactly; resetting those to DHCP would
+///   destroy the static servers the user chose. Adapters whose saved original was itself a
+///   loopback resolver are left alone too.
+/// * The snapshot file is kept under its own name, so a later exact restore can still replay the
+///   user's saved servers.
+///
+/// The adapter reset and the policy restore are independent: a failure of one does not skip the
+/// other, and the first error is returned for the caller to log. The strict
+/// `restore_protected` / `ensure_restored` / `disarm_unlocked` gate is untouched.
+pub(crate) async fn reset_redirected_adapters_after_failed_restore() -> Result<Vec<String>> {
+    if !SUPPORTED {
+        return Ok(Vec::new());
+    }
+    let _operation = DNS_OPERATION.lock().await;
+    let reset = reset_adapters_still_on_tono_dns().await;
+    let policy = restore_resolver_policy().await;
+    if let Err(error) = &policy {
+        tracing::error!("dns: the resolver policy could not be removed after a failed restore: {error:#}");
+    }
+    if let Ok(Some(note)) = &policy {
+        tracing::warn!("dns: {note}");
+    }
+    let adapters = reset?;
+    policy?;
+    Ok(adapters)
+}
+
+async fn reset_adapters_still_on_tono_dns() -> Result<Vec<String>> {
+    let snapshot = match tokio::fs::read(snapshot_path()).await {
+        Ok(bytes) => parse_snapshot(&bytes).ok(),
+        Err(_) => None,
+    };
+    let targets: Vec<String> = collect_dns_adapters()
+        .await?
+        .iter()
+        .filter(|adapter| adapter_reads_as_tono_dns(adapter))
+        .filter(|adapter| {
+            !snapshot.as_ref().is_some_and(|snapshot| {
+                snapshot.adapters.iter().any(|saved| {
+                    saved.interface_guid.eq_ignore_ascii_case(&adapter.interface_guid)
+                        && saved_dns_was_loopback(saved)
+                })
+            })
+        })
+        .map(|adapter| adapter.interface_guid.clone())
+        .collect();
+    if targets.is_empty() {
+        return Ok(targets);
+    }
+    // The same deliberately empty original the ladder's rung 2 applies: all four values absent
+    // is "automatic (DHCP)" for both families.
+    let automatic = DnsSnapshot {
+        version: SNAPSHOT_VERSION,
+        taken_at: now_unix(),
+        adapters: targets
+            .iter()
+            .map(|guid| AdapterDnsSnapshot {
+                interface_guid: guid.clone(),
+                ..Default::default()
+            })
+            .collect(),
+    };
+    let results = engine_apply_snapshot(&automatic).await?;
+    if let Some((guid, _)) = results.iter().find(|(_, ok)| !*ok) {
+        bail!("the automatic (DHCP) DNS reset did not apply to adapter {guid}");
+    }
+    if let Err(error) = engine_flush_cache().await {
+        tracing::warn!("DNS cache flush after the DHCP reset failed: {error:#}");
+    }
+    Ok(targets)
+}
