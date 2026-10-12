@@ -521,6 +521,13 @@ async function handleWrite(
       return;
     }
   }
+  // 下架 is a `catalog_retire` job that the Worker runs after the click. The
+  // job here stays queued, but the listing it changes is applied now, so the
+  // header and the action rail can be seen to move after the next read.
+  if (type === 'catalog_retire') {
+    file.detail.lifecycle = 'unlisted';
+    file.detail.catalogListed = false;
+  }
   const job = newJob(file, name, type);
   file.jobs.items.unshift(job);
   file.jobs.updatedAt = file.clock;

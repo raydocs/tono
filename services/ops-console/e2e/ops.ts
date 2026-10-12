@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import { test, type Page } from '@playwright/test';
 
 export type FixtureSet = 'default' | 'dense' | 'empty' | 'error';
 
@@ -21,6 +21,16 @@ export async function open(
   const query = params.toString();
   await page.goto(`/ops/${query ? `?${query}` : ''}#${hash}`, { waitUntil: 'networkidle' });
   await settle(page);
+}
+
+/**
+ * A fixture store of its own for one test, per project, repeat and retry: a
+ * store left unlisted or edited by the previous run of the same test would
+ * otherwise be what `--repeat-each` or a retry starts from.
+ */
+export function sessionFor(name: string): string {
+  const info = test.info();
+  return `${name}-${info.project.name}-${info.repeatEachIndex}-${info.retry}`;
 }
 
 /**
