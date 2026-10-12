@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { IncidentDto } from '@contract';
 import { Action } from '@/components/ops/Action';
 import { Empty } from '@/components/ops/Empty';
@@ -8,10 +8,12 @@ import { severityTone } from '@/lib/codes';
 import { formatDurationSince, formatWhen, formatWhenAgo } from '@/lib/display';
 import { openIncident } from '@/lib/hash-route';
 import { closureWord } from '@/lib/handling';
+import { groupIncidents } from '@/lib/incident-groups';
 import { incidentAction } from '@/lib/incidents';
 import { cn } from '@/lib/utils';
 import { CloseDialog } from './CloseDialog';
 import { IncidentPrimary } from './IncidentAction';
+import { IncidentGroupRow } from './IncidentGroup';
 
 export function IncidentList({
   rows,
@@ -26,10 +28,15 @@ export function IncidentList({
   subjectOf: (row: IncidentDto) => string;
   onChanged: () => void;
 }) {
+  // Recovered rows are history, one line each; only the live tab folds.
+  const entries = useMemo(
+    () => (resolvedTab ? null : groupIncidents(rows)),
+    [rows, resolvedTab],
+  );
   if (rows.length === 0) return <Empty message={emptyMessage} />;
   return (
     <div className="today-list">
-      {rows.map((row) => (
+      {entries === null ? rows.map((row) => (
         <IncidentRow
           key={row.id}
           row={row}
@@ -37,7 +44,17 @@ export function IncidentList({
           resolvedTab={resolvedTab}
           onChanged={onChanged}
         />
-      ))}
+      )) : entries.map((entry) => (entry.kind === 'group' ? (
+        <IncidentGroupRow key={entry.key} group={entry} onChanged={onChanged} />
+      ) : (
+        <IncidentRow
+          key={entry.row.id}
+          row={entry.row}
+          subject={subjectOf(entry.row)}
+          resolvedTab={resolvedTab}
+          onChanged={onChanged}
+        />
+      )))}
     </div>
   );
 }

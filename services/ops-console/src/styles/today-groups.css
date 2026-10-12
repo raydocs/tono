@@ -1,0 +1,58 @@
+/* A group is a summary, not a way into the drawer: only its controls act. */
+.today-page .incident-group { cursor: default; }
+
+.today-page .group-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.today-page .group-fold > summary::-webkit-details-marker { display: none; }
+
+.today-page .group-fold > summary::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--muted-foreground);
+  border-bottom: 1.5px solid var(--muted-foreground);
+  transform: rotate(45deg) translateY(-2px);
+}
+
+.today-page .group-fold[open] > summary::after { transform: rotate(-135deg) translateY(-1px); }
+
+.today-page .group-members {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+  border-top: 1px solid var(--hairline);
+}
+
+.today-page .group-member {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-height: 32px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.today-page .group-member:last-child { border-bottom: 0; }
+.today-page .group-member .incident-title { flex: 1 1 auto; }
+
+.today-page .group-detail {
+  color: var(--muted-foreground);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.today-page .group-detail:hover { text-decoration: underline; text-underline-offset: 4px; }
+.today-page .group-detail:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+
+@media (max-width: 640px) {
+  .today-page .group-fold > summary { min-height: 44px; }
+  .today-page .group-member { min-height: 44px; align-items: center; }
+  .today-page .group-detail { min-height: 44px; min-width: 44px; }
+}
