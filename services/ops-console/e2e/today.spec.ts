@@ -57,9 +57,14 @@ test.describe('today page', () => {
     await open(page, '/today');
     const block = page.locator('section').filter({ has: page.getByRole('heading', { name: '失败聚类' }) });
     await expect(block.locator('li')).toHaveCount(3);
-    await expect(block).toContainText('TONO_TLS_TIMEOUT · handshake · windows 1.8.1 · Los Angeles · Mesa · 41');
-    await expect(block).toContainText('TONO_AUTH_DNS · securingDNS · macos 1.8.0 · Tokyo · Fuji · 17');
-    await expect(block).toContainText('TONO_NODE_OR_CORE_UNREACHABLE · connect · windows 1.7.9 · Hong Kong · Victoria · 23');
+    await expect(block.locator('li').nth(0)).toHaveText(
+      '加密握手超时 · 握手 · windows 1.8.1 · Los Angeles · Mesa · 9 人 / 11 台 · 进行中',
+    );
+    await expect(block.locator('li').nth(1)).toContainText('保护 DNS · macos 1.8.0 · Tokyo · Fuji');
+    await expect(block.locator('li').nth(2)).toContainText('当前节点和核心都没通过验证 · 连接中 · windows 1.7.9');
+    // The machine code is one hover away, never printed in the line.
+    await expect(block.locator('li').nth(0).locator('[title="TONO_TLS_TIMEOUT"]')).toHaveCount(1);
+    expect(await block.innerText()).not.toContain('TONO_');
     await expect(page.getByText('失败聚类还读不到。')).toHaveCount(0);
   });
 

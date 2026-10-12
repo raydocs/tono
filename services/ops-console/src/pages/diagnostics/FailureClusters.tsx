@@ -3,7 +3,7 @@ import { Section } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { getJson } from '@/lib/api';
 import { useResource } from '@/lib/use-resource';
-import { clusterLine } from './format';
+import { ClusterRow } from './ClusterRow';
 import type { FailureClusterList } from './types';
 
 /**
@@ -33,13 +33,7 @@ export function FailureClusters() {
     <Section title={copy.diagnosticsPanel.clustersTitle}>
       <ul className="grid gap-2">
         {resource.data.clusters.map((cluster) => (
-          <li key={cluster.id} className="text-sm">
-            <span className="font-mono">{clusterLine(cluster)}</span>
-            <span className="text-[var(--muted-foreground)]">
-              {' '}
-              {copy.diagnosticsPanel.clusterReach(cluster.users, cluster.devices)} · {cluster.status}
-            </span>
-          </li>
+          <ClusterRow key={cluster.id} cluster={cluster} />
         ))}
       </ul>
     </Section>

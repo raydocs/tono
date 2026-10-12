@@ -8,6 +8,7 @@ export type FailureCluster = {
   appVersion: string;
   platform: string;
   node: string;
+  severity: 'p0' | 'normal';
   count: number;
   users: number;
   devices: number;
