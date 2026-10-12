@@ -12,7 +12,9 @@
   - 卡片质感：`.sea-panel` 加 1px 边、外阴影和 18px 背景模糊，内页背后压暗的海面透进卡片；主按钮带暖色光晕并在悬停时抬起 1px。
   - 线路页：行悬停暖色底，选中行加 2px 日出左边线（Windows `.sea-line-row`，Mac `SeaWarmRowSurface`）；推荐卡悬停抬起并带暖色边光；"推荐"标签改暖色。
     所有过渡遵守 `prefers-reduced-motion` / Mac 减少动态效果。
-- 工程与测试：Windows `login.test.tsx` 新增"海面登录表单在玻璃卡片内"一例；Mac `SeaControlsTests` 新增 `SeaWarmRowSurface.washOpacity` 一例。
+- 工程与测试：`MacSeaPolishRenderTests.testFullTransitionsWaterAndProcessCPU` 仍假定离开首页后场景时钟停（speed 0），与 #1585 的"内页场景持续动画"相反；
+  该用例在 macos-ci 被 skip，只在 screenshots-nightly 和 macos-release 跑，所以 #1585 的 ci-gate 没抓到，macos-release 运行 38209980087 才失败。
+  期望改为 speed 1（场景实例不变、回首页不重播）。Windows `login.test.tsx` 新增"海面登录表单在玻璃卡片内"一例；Mac `SeaControlsTests` 新增 `SeaWarmRowSurface.washOpacity` 一例。
 - 验证（Linux 容器，Node 22）：vitest `login`、`servers`、`settings` 通过；`tsc --noEmit`、biome format 通过。Mac 编译与 XCTest 未在本地执行，交由 hosted CI。
   预览截图（Windows 预览壳 + Linux Chromium，替代字体，静态，不是真机）：项目文件 `reports/ui-polish-20261012/batch2/`。
 - 候选/发布：无新包，仅源码。

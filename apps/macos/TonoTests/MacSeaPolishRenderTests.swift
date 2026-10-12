@@ -184,11 +184,12 @@ final class MacSeaPolishRenderTests: XCTestCase {
                 receipt.append("setNightReferenceSeconds=\(CACurrentMediaTime() - start) phase=night canonicalNightHandoffSeconds=6")
             }
         }
-        // Navigation hides, but does not replace, the scene or replay its phase transition.
+        // Navigation dims, but does not replace or pause, the scene (#1585: it keeps
+        // moving behind inner pages), and returning Home never replays its phase transition.
         fixture.app.selectedPage = .activity
         await settle(0.2)
         XCTAssertTrue(findScene(host) === scene)
-        XCTAssertEqual(scene.layer?.sublayers?.first?.speed, 0)
+        XCTAssertEqual(scene.layer?.sublayers?.first?.speed, 1, "inner pages keep the scene's clock running")
         fixture.app.selectedPage = .dashboard
         await settle(0.2)
         XCTAssertTrue(findScene(host) === scene)
