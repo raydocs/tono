@@ -34,10 +34,15 @@ export function NodeAcceptance({
   const ready = sheet.status === 'ready' ? sheet.data : null;
 
   if (lifecycle === 'listed') {
+    /* A sellable sheet has no blockers, and "0" beside the heading reads as zero checks
+       passed. The count is only worth showing while there is something to fix;
+       otherwise the word says what the zero meant. */
+    const passed = ready !== null && ready.sellable;
     return (
       <FoldedSection
         title={copy.nodeSections.acceptance}
-        count={ready === null ? null : ready.blockers.length}
+        count={ready === null || passed ? null : ready.blockers.length}
+        aside={passed ? copy.acceptancePassed : undefined}
       >
         {body}
       </FoldedSection>

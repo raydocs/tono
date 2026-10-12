@@ -22,6 +22,10 @@ import { cn } from '@/lib/utils';
 
 const CONTROL = 'h-8 w-full min-w-0 rounded-[8px] border border-[var(--hairline)] bg-[var(--background)] px-2.5 text-body outline-none focus:border-[var(--accent)] placeholder:text-[var(--muted-foreground)]';
 
+/* Shape, border, chevron and focus ring come from `.ops-select`, which is
+   unlayered and so beats the utilities a text input needs. */
+const SELECT = 'ops-select w-full min-w-0 text-body';
+
 /** A label, a control, and — when the field has a trap in it — one line of help. */
 export function Field({
   label,
@@ -94,7 +98,7 @@ export function SelectField<T extends string>({
   return (
     <Field label={label} hint={hint}>
       <select
-        className={cn(CONTROL, disabled && 'text-[var(--muted-foreground)]')}
+        className={cn(SELECT, disabled && 'text-[var(--muted-foreground)]')}
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value as T)}
@@ -126,7 +130,7 @@ export function BoolField({
   return (
     <Field label={label} hint={hint}>
       <select
-        className={CONTROL}
+        className={SELECT}
         value={value ? 'on' : 'off'}
         onChange={(event) => onChange(event.target.value === 'on')}
       >
