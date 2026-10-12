@@ -135,12 +135,6 @@ export default function TodayPage({
     <div className="page-wrap today-page">
       <section className="today-hero" aria-label={copy.pages.today}>
         <div className="min-w-0">
-          {coverage ? (
-            <span className={cn('today-hero-eyebrow text-fine', coverage.tone && `tone-${coverage.tone} tone-fg`)}>
-              {coverage.text}
-            </span>
-          ) : null}
-
           {incidents.status === 'ready' ? (
             <p className="text-verdict">
               {open.length > 0 ? (
@@ -170,6 +164,10 @@ export default function TodayPage({
           swept={swept === null || swept === undefined ? null : swept.nodesSweptFresh}
           listed={swept === null || swept === undefined ? null : swept.nodesListed}
           sweptTone={swept === null || swept === undefined || coverage?.tone === 'unk' ? 'unk' : 'ok'}
+          coverage={coverage}
+          agents={swept ? Number(swept.nodesWithAgent ?? 0) : null}
+          reported={swept ? Number(swept.customersReportedFresh ?? 0) : null}
+          active={swept ? Number(swept.customersActive ?? 0) : null}
         />
       </section>
 

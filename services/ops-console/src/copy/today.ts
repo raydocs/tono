@@ -8,6 +8,8 @@ export const todayCopy = {
     customersReported: number,
   ) => `在售 ${nodesListed} 台里 ${nodesSwept} 台 26 小时内扫过、${nodesAgent} 台探针在线；在用 ${customersActive} 位里 ${customersReported} 位 40 分钟内上报`,
   todayCoverageUnmeasured: '有些没测到',
+  todayCoverageShort: (agents: number, reported: number, active: number) =>
+    `${agents} 台探针在线 · ${reported}/${active} 位上报`,
   todayVerdict: (incidents: number, customers: number) => `现在 ${incidents} 个事故，影响 ${customers} 位客户`,
   todayClear: (when: string) => `现在没有事故。上次事故 ${when} 已恢复。`,
   todayNeverAny: '现在没有事故。',

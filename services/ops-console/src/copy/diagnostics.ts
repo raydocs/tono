@@ -4,7 +4,7 @@ export const diagnosticsCopy = {
     clustersTitle: '失败聚类',
     clustersNone: '这段时间没有打开的失败聚类。',
     clustersLoading: '正在读取失败聚类…',
-    clustersUnavailable: '失败聚类还读不到。控制面的聚类接口部署之后，这里会列出同一类失败。',
+    clustersUnavailable: '失败聚类还读不到。',
     clusterReach: (users: number, devices: number) => `${users} 人 / ${devices} 台`,
     sessionsTitle: '自动诊断',
     sessionsLoading: '正在读取自动诊断…',
