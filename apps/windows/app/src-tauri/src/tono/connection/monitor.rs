@@ -1385,6 +1385,31 @@ where
     Some(release(true).await)
 }
 
+/// Settle the result of an automatic health-failure release. Success starts the unarmed probe.
+async fn settle_health_release<SF, RF, PF>(
+    first: Result<(), String>,
+    _period: Duration,
+    _still_owned: impl FnMut() -> SF,
+    _release: impl FnMut() -> RF,
+    start_probe: impl FnOnce() -> PF,
+)
+where
+    SF: std::future::Future<Output = bool>,
+    RF: std::future::Future<Output = Result<(), String>>,
+    PF: std::future::Future<Output = ()>,
+{
+    match first {
+        Ok(()) => start_probe().await,
+        Err(error) => {
+            logging!(
+                error,
+                Type::Service,
+                "Tono: health-failure release failed; not starting a tunnel: {error}"
+            );
+        }
+    }
+}
+
 /// The connect generation whose DIRECT binding check got no answer from the uplink read, or
 /// [`NO_UNREAD_DIRECT_BINDING`]. That check kept the session without proving the binding, so the
 /// monitor of the same generation reads the uplinks again on a later quiet tick.
@@ -1619,19 +1644,19 @@ pub(super) async fn handle_network_change_inner(
         }
     }).await;
     if let Some(result) = health_release {
-        match result {
-            Ok(()) => {
+        settle_health_release(
+            result,
+            NETWORK_MONITOR_INTERVAL,
+            || async move {
+                let inner = state.lock().await;
+                inner.connect_generation == generation && protection_resync_watches(inner.fsm.status())
+            },
+            || super::disconnect::release_explicit_applying_narrow_with_guard(state, app, None),
+            || async move {
                 let generation = state.lock().await.connect_generation;
                 super::unarmed_probe::spawn_after_release(state, app, generation);
-            }
-            Err(error) => {
-                logging!(
-                    error,
-                    Type::Service,
-                    "Tono: health-failure release failed; not starting a tunnel: {error}"
-                );
-            }
-        }
+            },
+        ).await;
         return NetworkChangeOutcome::Handled;
     }
     // The exclusive release guard also excludes StartClash/DNS readers, including Retry now.
@@ -1957,6 +1982,31 @@ mod tests {
         stalled.abort();
         let admitted = admitted.expect("a reader holding the token read after the first wake must be woken too");
         assert!(admitted.is_ok(), "the current failure still owns the release");
+    }
+
+    /// The Service refuses a health-failure release when it cannot prove the DNS restore, and
+    /// Wi-Fi adapter churn makes that proof fail for a while. A refusal must not strand the
+    /// session in Protected Offline: the release is attempted again on the next monitor tick,
+    /// and the unarmed probe starts once an attempt is accepted.
+    #[tokio::test]
+    async fn a_refused_health_release_is_retried_on_the_next_tick_and_then_starts_the_probe() {
+        let attempts = std::cell::Cell::new(0_u32);
+        let probes = std::cell::Cell::new(0_u32);
+        super::settle_health_release(
+            Err("refused: DNS restore not proven".to_string()),
+            std::time::Duration::from_millis(1),
+            || async { true },
+            || {
+                attempts.set(attempts.get() + 1);
+                let attempt = attempts.get();
+                async move {
+                    if attempt < 2 { Err("refused: DNS restore not proven".to_string()) } else { Ok(()) }
+                }
+            },
+            || async { probes.set(probes.get() + 1) },
+        ).await;
+        assert_eq!(attempts.get(), 2, "the refused release is attempted again on later ticks");
+        assert_eq!(probes.get(), 1, "the probe starts once, after the retry succeeds");
     }
 
     #[tokio::test]
