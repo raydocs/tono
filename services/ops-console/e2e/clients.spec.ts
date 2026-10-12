@@ -8,9 +8,9 @@ test.describe('clients page', () => {
     // 未上报 stopped being zero when the funnel arrived: two customers have a
     // macOS client that was installed and has never reported a version.
     await expect(page.getByText('11 位在最新版 · 10 位落后 · 2 位未上报')).toBeVisible();
-    // Three platforms have shipped nothing: every cell of those rows says so
-    // in words rather than claiming nobody upgraded.
-    await expect(page.getByText('未发布')).toHaveCount(12);
+    // Three platforms have shipped nothing: they get no row of zeros to
+    // misread, one sentence names them instead.
+    await expect(page.getByText('Linux · Android · iOS 还没有发布过客户端')).toBeVisible();
     await expect(page.getByRole('heading', { name: '版本分布' })).toBeVisible();
     await expect(page.getByRole('heading', { name: '发布' })).toBeVisible();
     await settle(page);
@@ -84,7 +84,8 @@ test.describe('clients page', () => {
 
   test('the dense set keeps five platforms in one grid', async ({ page }) => {
     await open(page, '/clients', 'dense');
-    await expect(page.getByText('未发布')).toHaveCount(0);
+    // Every platform has shipped, so there is nobody for the sentence to name.
+    await expect(page.getByText('还没有发布过客户端')).toHaveCount(0);
     expect(await page.locator('tbody tr').count()).toBeGreaterThan(20);
     await settle(page);
     await expect(page).toHaveScreenshot('dense.png');

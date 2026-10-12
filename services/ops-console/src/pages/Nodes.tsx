@@ -100,7 +100,7 @@ export default function NodesPage({
   return (
     <div className="page-wrap nodes-page">
       <header className="nodes-head">
-        <p className="text-fine">{copy.nodesBoard.lead}</p>
+        <p className="nodes-lead text-fine">{copy.nodesBoard.lead}</p>
         <PageNote
           fetchedAt={oldestFetch(nodes, health, fleet)}
           backfill={health.status === 'ready' ? health.data.backfill : null}
@@ -156,11 +156,11 @@ export default function NodesPage({
               reason={selectedView.reason}
               className="self-start"
             />
-            <Fact label={copy.facts.ip} measured={selectedView.ip} render={privacy.ip} />
+            <Fact mono label={copy.facts.ip} measured={selectedView.ip} render={privacy.ip} />
             <Fact label={copy.facts.os} measured={selectedView.os} />
             <Fact label={copy.facts.provider} measured={selectedView.provider} />
             <Fact label={copy.facts.tags} measured={selectedView.tags} />
-            <Fact label={copy.facts.ports} measured={selectedView.ports} />
+            <Fact mono label={copy.facts.ports} measured={selectedView.ports} />
           </>
         ) : null}
       </DetailDrawer>

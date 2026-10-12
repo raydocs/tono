@@ -203,12 +203,13 @@ function Jump({ onClick, children }: { onClick: () => void; children: React.Reac
  * is dressed up as due today.
  *
  * The subject owns the first line alone and wraps instead of truncating:
- * sharing the line with the fixed tag and date widths crushed it to zero
- * pixels in the narrow aux column on every width, and a hover title is no
- * substitute for a readable name. Kind, note and date share the second
- * line — the note truncates, the date never does — so a row stays two
- * lines tall and the dense morning read keeps its height budget. Overdue
- * follows the Worker's Shanghai calendar-day rule, not the current second.
+ * sharing it with the date pushed a 20-character address onto two lines in
+ * the 260 px aux column, and a hover title is no substitute for a readable
+ * name. Kind, note and date share the second line — the note truncates on a
+ * desktop (its hover carries the full text) and wraps to two lines on a
+ * phone; the date never truncates — so a row stays two lines tall and the
+ * dense morning read keeps its height budget. Overdue follows the Worker's
+ * Shanghai calendar-day rule, not the current second.
  *
  * The list caps at a few rows with the rest one tap away in place: 200 owed
  * rows once stretched the morning read past 6600 px. Nothing is dropped and
@@ -257,7 +258,10 @@ function DueFollowups({
             <span className="min-w-0 text-body break-all">{subject}</span>
             <span className="flex min-w-0 items-baseline gap-2">
               <span className="tone-rem ops-tag shrink-0">{copy.followupKind[row.kind]}</span>
-              <span className="min-w-0 flex-1 truncate text-body underline-offset-4 hover:underline">{row.body}</span>
+              <span
+                className="min-w-0 flex-1 truncate max-[640px]:line-clamp-2 max-[640px]:whitespace-normal text-body underline-offset-4 hover:underline"
+                title={row.body}
+              >{row.body}</span>
               <span className="shrink-0 font-mono text-micro text-[var(--muted-foreground)]">{when}</span>
             </span>
           </button>
@@ -323,10 +327,16 @@ function NightLine({ group }: { group: NightGroup }) {
         onClick={() => openIncident(group.lead.id)}
       >
         <span className={cn('ops-tag shrink-0', tone && `tone-${tone}`)}>{word}</span>
-        {/* One line on a laptop, where there is room for one. On a phone the
-            ellipsis lands mid-name — "Los Angeles · Mes…" identifies nothing —
-            so the class is a hook the phone rules undo. */}
-        <span className="night-title min-w-0 truncate text-body underline-offset-4 hover:underline">{title}</span>
+        {/* One line on a desktop, where the aux column is 260 px wide and a
+            second line on each of ten groups pushes the digest past one
+            screen; the full title is the hover text. On a phone a one-line cut
+            lands mid-name ("Los Angeles · Mes...") and identifies nothing, so
+            up to 640 px it wraps to two lines at most. `night-title` stays as
+            a styling hook. */}
+        <span
+          className="night-title min-w-0 truncate max-[640px]:line-clamp-2 max-[640px]:whitespace-normal text-body underline-offset-4 hover:underline"
+          title={title}
+        >{title}</span>
       </button>
       {group.flap === null ? null : (
         <FlapLine

@@ -100,7 +100,7 @@ export function DetailDrawer({
             {phone ? footer : null}
             <button
               type="button"
-              className="self-start text-micro text-[var(--muted-foreground)]"
+              className="drawer-close self-start text-micro text-[var(--muted-foreground)]"
               onClick={onClose}
             >
               {copy.close}
@@ -117,11 +117,14 @@ export function Fact({
   label,
   measured,
   render,
+  mono,
   tier,
 }: {
   label: string;
   measured: Measured<string | null>;
   render?: (value: string) => string;
+  /** Machine tokens only: digits, versions, addresses, ids, dates, money. A name or a word stays sans. */
+  mono?: boolean;
   tier?: Tier;
 }) {
   return (
@@ -130,7 +133,7 @@ export function Fact({
       <Value
         value={measured.value === null ? null : (render ? render(measured.value) : measured.value)}
         source={measured.source}
-        mono
+        mono={mono}
         tier={tier}
         className="text-right"
       />

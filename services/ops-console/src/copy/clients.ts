@@ -78,5 +78,5 @@ export const clientCopy = {
   noReleases: '这个平台还没有发布记录',
   noClientsYet: '还没有发布过客户端',
   emptyAdoption: '还没有版本上报',
-  clientsUnreleasedTitle: (platform: string) => `${platform} 还没有发布过客户端`,
+  clientsUnreleasedRow: (names: string) => `${names} 还没有发布过客户端`,
 } as const;

@@ -101,7 +101,7 @@ export function FleetTable({
       onRetry={onRetry}
       bodyHeight={240}
       actions={(
-        <label className="nodes-search">
+        <label className="ops-search">
           <Search size={13} aria-hidden />
           <input
             type="search"

@@ -72,7 +72,7 @@ export function InviteDrawer({
           <TextField label={copy.inviteFields.notes} value={notes} onChange={setNotes} />
         </FieldGrid>
 
-        <Fact
+        <Fact mono
           label={copy.inviteFields.invitedAt}
           measured={measured(
             formatDate(invite.stageSinceAt),

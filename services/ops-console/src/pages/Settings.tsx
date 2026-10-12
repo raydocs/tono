@@ -23,8 +23,10 @@ export default function SettingsPage({ section }: { section: string | null }) {
     <div className={cn('page-wrap settings-page', WIDE.has(active) && 'settings-wide')}>
       <div className="settings-layout flex flex-col gap-6 min-[900px]:flex-row min-[900px]:gap-10">
         <div className="flex min-w-0 flex-1 flex-col gap-6">
+          {/* The shell header already shows the section name, outside <main>; the
+              heading stays here for the main landmark and screen readers only. */}
           <header className="settings-hero flex flex-col gap-1">
-            <h2 className="text-page">{copy.settings.sections[active]}</h2>
+            <h2 className="sr-only">{copy.settings.sections[active]}</h2>
             <p className="text-body text-[var(--muted-foreground)]">
               {copy.settings.sectionLead[active]}
             </p>

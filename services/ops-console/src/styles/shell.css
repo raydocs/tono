@@ -140,11 +140,12 @@
   .shell-frame .shell-header { min-height: 64px; }
   .shell-heading h1 { font-size: 18px; }
   .shell-heading > span { font-size: 10px; }
+  .shell-avatar { width: 44px; height: 44px; }
   .shell-search-mobile {
     display: grid;
     place-items: center;
-    width: 36px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
     border: 1px solid var(--hairline);
     border-radius: 10px;
   }

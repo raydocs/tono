@@ -68,6 +68,8 @@ export const nodeDetailCopy = {
 
   /** The verdict line, in the two answers the operator actually acts on. */
   nodeAcceptanceReady: '可以上架',
+  /** The folded sheet's word for a machine with nothing left to fix. */
+  acceptancePassed: '已通过',
   nodeAcceptanceShort: (count: string) => `还差 ${count} 项`,
   /**
    * The state word beside each line. 没测 and 不行 are deliberately not the

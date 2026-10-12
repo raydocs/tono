@@ -9,6 +9,7 @@ import { copy } from '@/copy/copy';
 import { opsApi } from '@/lib/api';
 import { compareVersions, publishBlockReason } from '@/lib/releases';
 import { formatBytesMeasured, formatDate } from '@/lib/display';
+import { useIsPhone } from '@/lib/use-phone';
 
 type Pending =
   | { kind: 'publish'; row: ReleaseDto }
@@ -36,6 +37,7 @@ export function ReleaseTable({
   channel: UpdateChannelDto | null;
   onChanged: () => void;
 }) {
+  const phone = useIsPhone();
   const [pending, setPending] = useState<Pending | null>(null);
   const [minVersion, setMinVersion] = useState('');
   const [busy, setBusy] = useState(false);
@@ -72,7 +74,7 @@ export function ReleaseTable({
     <>
       <DataTable
         rows={rows}
-        columns={releaseColumns(ask, channel)}
+        columns={releaseColumns(ask, channel, phone)}
         getRowId={(row) => row.id}
         state={rows.length === 0 ? 'empty' : 'ready'}
         className="clients-release-table"
@@ -82,6 +84,7 @@ export function ReleaseTable({
         title={pending ? copy.releaseActions[pending.kind] : ''}
         consequence={consequence(pending, minVersion)}
         confirm={pending ? copy.releaseActions[pending.kind] : ''}
+        danger={pending?.kind === 'withdraw'}
         pending={busy || (pending?.kind === 'setMin' && minVersion.trim() === '')}
         failure={failure}
         onConfirm={confirm}
@@ -132,7 +135,30 @@ function verification(row: ReleaseDto, channel: UpdateChannelDto | null): string
   );
 }
 
+/**
+ * On a phone the actions are the point of the row, and in the last column of
+ * a 1048 px table they are off screen. The checks and notes columns go, and
+ * the rest are reordered so the actions land inside the first 390 px; the
+ * fixed widths then add up to the 592 px floor in clients.css.
+ */
+const PHONE_ORDER = ['channel', 'version', 'action', 'published', 'minSupported'] as const;
+
 function releaseColumns(
+  ask: (next: Pending) => void,
+  channel: UpdateChannelDto | null,
+  phone: boolean,
+): DataColumn<ReleaseDto>[] {
+  const all = allReleaseColumns(ask, channel);
+  if (!phone) return all;
+  return PHONE_ORDER.flatMap((id) => all.filter((column) => column.id === id)).map((column) => {
+    if (column.id === 'channel') return { ...column, width: '56px' };
+    if (column.id === 'version') return { ...column, width: '112px' };
+    if (column.id === 'action') return { ...column, width: '188px', align: 'left' as const };
+    return column;
+  });
+}
+
+function allReleaseColumns(
   ask: (next: Pending) => void,
   channel: UpdateChannelDto | null,
 ): DataColumn<ReleaseDto>[] {
@@ -151,7 +177,7 @@ function releaseColumns(
       mono: true,
       sortValue: (row) => row.version,
       cell: (row) => (
-        <span className="flex items-baseline gap-2">
+        <span className="flex flex-wrap items-baseline gap-x-2">
           <span className="text-row">{row.version}</span>
           {row.withdrawnAt !== null ? <LifecycleTag>{copy.releaseState.withdrawn}</LifecycleTag> : null}
           {row.publishedAt === null ? <LifecycleTag>{copy.releaseState.draft}</LifecycleTag> : null}
@@ -217,7 +243,7 @@ function releaseColumns(
       width: '228px',
       align: 'right',
       cell: (row) => (
-        <ActionRow className="justify-end gap-1.5">
+        <ActionRow className="justify-end gap-1.5 max-[640px]:justify-start">
           {row.publishedAt === null ? (
             <Action
               reason={publishBlockReason(row, channel, copy)}
@@ -227,7 +253,7 @@ function releaseColumns(
             </Action>
           ) : null}
           {row.publishedAt !== null && row.withdrawnAt === null ? (
-            <Action onClick={() => ask({ kind: 'withdraw', row })}>
+            <Action danger onClick={() => ask({ kind: 'withdraw', row })}>
               {copy.releaseActions.withdraw}
             </Action>
           ) : null}

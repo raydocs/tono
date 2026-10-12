@@ -190,7 +190,7 @@ function BackLink() {
   return (
     <button
       type="button"
-      className="flex items-center gap-1.5 self-start text-micro text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+      className="back-link flex items-center gap-1.5 self-start text-micro text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
       onClick={closeNodePage}
     >
       <ArrowLeft size={12} strokeWidth={1.75} />

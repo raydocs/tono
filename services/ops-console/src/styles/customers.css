@@ -42,13 +42,12 @@
 }
 
 @media (max-width: 640px) {
-  .customers-page .batch-results .ops-action {
-    min-height: 44px;
-  }
   .customers-page .customers-hero {
     padding: 18px 16px;
     border-radius: 18px;
   }
+  .customers-page .ops-search { width: 100%; }
+  .customers-page .ops-search input { width: 100%; }
 }
 
 /* The dashboard band above the list: six tiles, then the expiry weeks and the

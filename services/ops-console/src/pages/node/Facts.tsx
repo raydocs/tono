@@ -42,7 +42,7 @@ export function NodeFacts({ facts, onEdit }: { facts: NodeFactsDto; onEdit: () =
       aside={<Action onClick={onEdit}>{copy.nodeEdit}</Action>}
     >
       <div className="node-facts-grid grid gap-x-8 sm:grid-cols-2">
-        <Fact label={copy.nodeFacts.ip} measured={say(facts.publicIp)} render={privacy.ip} />
+        <Fact mono label={copy.nodeFacts.ip} measured={say(facts.publicIp)} render={privacy.ip} />
         <Fact label={copy.nodeFacts.os} measured={say(facts.os)} />
         <Fact label={copy.nodeFacts.provider} measured={say(facts.provider)} />
         <AccountFact id={facts.providerAccountId} />
@@ -50,14 +50,14 @@ export function NodeFacts({ facts, onEdit }: { facts: NodeFactsDto; onEdit: () =
           label={copy.nodeFacts.tags}
           measured={say(facts.lineTags.length === 0 ? null : facts.lineTags.join(' · '))}
         />
-        <Fact label={copy.nodeFacts.port} measured={say(facts.port === null ? null : String(facts.port))} />
-        <Fact
+        <Fact mono label={copy.nodeFacts.port} measured={say(facts.port === null ? null : String(facts.port))} />
+        <Fact mono
           label={copy.nodeFacts.price}
           measured={say(money === null ? null : (cycle === null ? money : copy.nodePrice(money, cycle)))}
           render={privacy.money}
         />
-        <Fact label={copy.nodeFacts.renew} measured={when(facts.renewsAt, at)} />
-        <Fact label={copy.nodeFacts.expires} measured={when(facts.expiresAt, at)} />
+        <Fact mono label={copy.nodeFacts.renew} measured={when(facts.renewsAt, at)} />
+        <Fact mono label={copy.nodeFacts.expires} measured={when(facts.expiresAt, at)} />
         <Fact label={copy.nodeFacts.notes} measured={say(facts.notes)} />
         <Fact
           label={copy.nodeFacts.transports}
@@ -202,7 +202,7 @@ function PerGbFact({ name }: { name: string }) {
     ? null
     : row.pending ? copy.ledger.pending : formatPerGb(row.cnyPerGbMinor);
   return (
-    <Fact
+    <Fact mono
       label={copy.ledger.perGb}
       measured={value === null ? absent(copy.ledger.source) : measured(value, at, copy.ledger.source)}
       render={privacy.money}

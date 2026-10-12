@@ -272,7 +272,7 @@ function MonthPicker({ month, onChange }: { month: string; onChange: (value: str
     <label className="flex items-center gap-1.5">
       <span>{words.monthField}</span>
       <select
-        className="h-7 rounded-[8px] border border-[var(--hairline)] bg-[var(--background)] px-2 font-mono text-body outline-none focus:border-[var(--accent)]"
+        className="ops-select font-mono text-body"
         value={month}
         onChange={(event) => onChange(event.target.value)}
       >

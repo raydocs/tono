@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { copy } from '@/copy/copy';
 import { cn } from '@/lib/utils';
 
@@ -31,6 +31,7 @@ export function DataTable<T>({
   className,
   sort,
   onSortChange,
+  limit,
 }: {
   rows: T[];
   columns: DataColumn<T>[];
@@ -45,10 +46,16 @@ export function DataTable<T>({
   /** Opt-in controlled sorting; other tables retain their local behavior. */
   sort?: TableSort;
   onSortChange?: (sort: TableSort) => void;
+  /** Draw only the first `limit` rows, counted after sorting so they are the sorted top. */
+  limit?: number;
 }) {
   const [localSort, setLocalSort] = useState<TableSort>({ id: null, direction: 'asc' });
   const { id: sortId, direction: sortDir } = sort ?? localSort;
   const [focusId, setFocusId] = useState<string | null>(null);
+  // Whether the scroll box has more to show on its right. Only the phone
+  // stylesheet draws anything from it (a fade over the right edge).
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
+  const [moreRight, setMoreRight] = useState(false);
 
   const sorted = useMemo(() => {
     if (!sortId) return rows;
@@ -69,6 +76,24 @@ export function DataTable<T>({
     return copyRows;
   }, [rows, columns, sortId, sortDir]);
 
+  const visible = limit === undefined ? sorted : sorted.slice(0, limit);
+
+  useEffect(() => {
+    if (!scroller) return undefined;
+    const check = () => setMoreRight(scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 1);
+    check();
+    scroller.addEventListener('scroll', check, { passive: true });
+    window.addEventListener('resize', check);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(check);
+    observer?.observe(scroller);
+    if (scroller.firstElementChild) observer?.observe(scroller.firstElementChild);
+    return () => {
+      scroller.removeEventListener('scroll', check);
+      window.removeEventListener('resize', check);
+      observer?.disconnect();
+    };
+  }, [scroller]);
+
   function toggleSort(id: string) {
     const next: TableSort = { id, direction: sortId === id && sortDir === 'asc' ? 'desc' : 'asc' };
     if (onSortChange) onSortChange(next);
@@ -80,14 +105,14 @@ export function DataTable<T>({
     if (event.target !== event.currentTarget && (event.target as HTMLElement).closest('button, a, input, select, textarea')) return;
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      const next = sorted[index + 1];
+      const next = visible[index + 1];
       if (next) {
         setFocusId(getRowId(next));
         event.currentTarget.nextElementSibling?.querySelector<HTMLElement>('td')?.focus();
       }
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
-      const prev = sorted[index - 1];
+      const prev = visible[index - 1];
       if (prev) {
         setFocusId(getRowId(prev));
         event.currentTarget.previousElementSibling?.querySelector<HTMLElement>('td')?.focus();
@@ -121,7 +146,11 @@ export function DataTable<T>({
   }
 
   return (
-    <div className={cn('raised overflow-auto rounded-[10px] bg-[var(--surface)]', className)}>
+    <div
+      ref={setScroller}
+      data-more={moreRight ? 'true' : 'false'}
+      className={cn('data-scroll raised overflow-auto rounded-[10px] bg-[var(--surface)]', className)}
+    >
       {/* Fixed layout: with `auto`, a long CJK node name takes the width the
           numeric columns need and every other cell wraps to five lines. */}
       <table className="w-full table-fixed border-collapse text-body">
@@ -155,7 +184,7 @@ export function DataTable<T>({
           </tr>
         </thead>
         <tbody>
-          {sorted.map((row, index) => {
+          {visible.map((row, index) => {
             const id = getRowId(row);
             const selected = selectedId === id;
             const focused = focusId === id;

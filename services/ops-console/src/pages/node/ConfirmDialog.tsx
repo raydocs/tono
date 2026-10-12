@@ -109,7 +109,12 @@ export function ConfirmDialog({
 
         <DialogFooter className="gap-2">
           <Action onClick={onClose}>{copy.nodeActionBack}</Action>
-          <Action primary pending={pending || !ready} onClick={onConfirm}>
+          <Action
+            primary
+            danger={action.id === 'unlist' || action.id === 'retire'}
+            pending={pending || !ready}
+            onClick={onConfirm}
+          >
             {copy.nodeActionGo(action.label)}
           </Action>
         </DialogFooter>

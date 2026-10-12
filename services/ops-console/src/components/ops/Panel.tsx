@@ -35,7 +35,8 @@ export function Panel({
   children,
   className,
 }: {
-  title: string;
+  /** Left off when a heading directly above already names this panel. */
+  title?: string;
   description?: string;
   actions?: ReactNode;
   source?: string;
@@ -59,17 +60,19 @@ export function Panel({
 
   return (
     <section
-      aria-labelledby={headingId}
+      aria-labelledby={title === undefined ? undefined : headingId}
       aria-busy={state === 'loading' || undefined}
       className={cn('raised flex min-w-0 flex-col gap-4 rounded-[10px] bg-[var(--surface)] p-5', className)}
     >
-      <header className="flex flex-wrap items-start gap-x-4 gap-y-2">
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <h2 id={headingId} className="text-row">{title}</h2>
-          {description ? <p className="text-fine">{description}</p> : null}
-        </div>
-        {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
-      </header>
+      {title === undefined && !description && !actions ? null : (
+        <header className="flex flex-wrap items-start gap-x-4 gap-y-2">
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            {title === undefined ? null : <h2 id={headingId} className="text-row">{title}</h2>}
+            {description ? <p className="text-fine">{description}</p> : null}
+          </div>
+          {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+        </header>
+      )}
 
       <PanelBody state={state} emptyText={emptyText} onRetry={onRetry} height={bodyHeight}>
         {children}

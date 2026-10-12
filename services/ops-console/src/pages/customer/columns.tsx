@@ -24,6 +24,21 @@ export type FollowupIndex = Map<string, FollowupDto> | null;
 export type WechatMask = Mask | null;
 
 /**
+ * The three columns a 390 px phone keeps: the health word, the address, and
+ * the expiry. The selection box is left out because batch selection is desktop
+ * work and its column cost the address 40 px of 390; the rest are one tap away
+ * on the customer 360.
+ * The column objects are the desktop ones, so widths, sorting and cells cannot
+ * drift between the two layouts; a column the fleet has not filled in (the
+ * expiry, while no plan is wired) is simply absent from both.
+ */
+const PHONE_COLUMN_IDS: ReadonlySet<string> = new Set(['status', 'customer', 'expires']);
+
+export function phoneColumns<T>(columns: readonly DataColumn<T>[]): DataColumn<T>[] {
+  return columns.filter((column) => PHONE_COLUMN_IDS.has(column.id));
+}
+
+/**
  * The address is the row's name, so it gets the width nothing else claims.
  *
  * Every other column here is fixed, which makes this one the one that takes
@@ -32,22 +47,15 @@ export type WechatMask = Mask | null;
  * carries the whole address for the widths where even that is not enough, and
  * it is the masked one: the privacy toggle must not be undone by a hover.
  *
- * The fixed widths were re-cut when the followup column arrived, because the
- * table had none to spare: at 1440 px the address column already sat at exactly
- * the width its longest entry plus a lifecycle tag needs, so a ninth column
- * would have clipped every address on the page. Each one below was measured
- * against the widest thing it actually renders and given the slack that leaves
- * — which hands the address column more room than it had before, not less.
- *
- * The handle column arrived into the same nothing-to-spare, and was paid for
- * out of the three columns that were already truncating and already carrying
- * the whole value on the hover: the current node, the last failure and the
- * service list. Every column holding a number or a date — the quota, the
- * version, the expiry, the followup date and the device count — kept its
- * width, because a clipped date is a wrong date while a clipped node name is
- * still recognisable and one hover from complete. The address column comes out
- * of it with the same six pixels over its longest entry that it had before,
- * which is the constraint the whole cut was solved against.
+ * Since the page took the 1280 px dashboard width, the address column at 1440
+ * had about 80 px more than its longest entry plus a lifecycle tag, while the
+ * node, handle, service and version columns clipped their values to a few
+ * letters and the version header to three of its four characters. The
+ * 2026-10-12 cut gives 72 of those pixels to those four columns and the
+ * expiry's right air, keeping about ten over the longest address (the
+ * customers spec asserts none is clipped). Widths include the cells' 12 px
+ * padding (border-box). Below the table floor in Customers.tsx the container
+ * scrolls sideways rather than squeeze any column further.
  */
 export function customerColumns(
   mask: Mask,
@@ -67,9 +75,8 @@ export function customerColumns(
        * The 30 px are paid for by the three columns that can spare them
        * without losing a fact: 14 from the quota figure, which needs 62 px and
        * had 76, and 8 each from the handle and the service list, both of which
-       * were already truncating with the whole value one hover away. Not a
-       * pixel comes out of the addresses: at 1440 that column sits exactly at
-       * its longest entry. The narrower padding here is the same argument —
+       * were already truncating with the whole value one hover away. The
+       * narrower padding here is the same argument —
        * this cell is one short word, and its side air is worth less than a
        * word that can be read.
        */
@@ -98,7 +105,7 @@ export function customerColumns(
       {
         id: 'wechat',
         header: copy.customerColumns.wechat,
-        width: '68px',
+        width: '80px',
         sortValue: (row: CustomerSummaryDto) => row.wechatId ?? '',
         cell: (row: CustomerSummaryDto) => (
           <WechatCell id={row.wechatId} mask={wechat} duplicate={row.wechatDuplicate === true} />
@@ -117,7 +124,7 @@ export function customerColumns(
     {
       id: 'node',
       header: copy.customerColumns.node,
-      width: '80px',
+      width: '108px',
       sortValue: (row) => row.selectedServer ?? '',
       cell: (row) => <Value value={row.selectedServer} source={copy.sourceWord.catalog} />,
     },
@@ -153,7 +160,7 @@ export function customerColumns(
       {
         id: 'services',
         header: copy.customerColumns.services,
-        width: '72px',
+        width: '80px',
         cell: (row: CustomerSummaryDto) => (
           row.services.length === 0
             ? <Value value={null} source={copy.sourceWord.telemetry} />
@@ -163,7 +170,7 @@ export function customerColumns(
       {
         id: 'version',
         header: copy.customerColumns.minVersion,
-        width: '56px',
+        width: '76px',
         mono: true,
         sortValue: (row: CustomerSummaryDto) => row.minAppVersion ?? '',
         cell: (row: CustomerSummaryDto) => (
@@ -173,8 +180,8 @@ export function customerColumns(
       {
         id: 'expires',
         header: copy.customerColumns.expires,
-        width: '88px',
-        className: 'px-1',
+        width: '92px',
+        className: 'pl-1 pr-2',
         align: 'right' as const,
         mono: true,
         sortValue: (row: CustomerSummaryDto) => row.expiresAt ?? 0,

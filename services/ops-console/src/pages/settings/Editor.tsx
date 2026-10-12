@@ -166,7 +166,7 @@ export function DocumentMeta({
           {updatedAt === null ? never : formatWhen(updatedAt)}
         </span>
       </div>
-      <div className="ml-auto flex shrink-0 items-center gap-2">{children}</div>
+      <div className="toolbar-aside ml-auto flex shrink-0 items-center gap-2">{children}</div>
     </div>
   );
 }
