@@ -107,7 +107,8 @@ test.describe('node detail page', () => {
   test('a failing hub is an error, not an empty machine', async ({ page }) => {
     await open(page, page1(NODE), 'error');
 
-    await expect(page.getByRole('status')).toBeVisible();
+    // An error is an alert with a way to ask again, not a status line.
+    await expect(page.getByRole('main').getByRole('alert').first()).toBeVisible();
     await expect(page.locator('body')).not.toContainText('正常');
     await expect(page).toHaveScreenshot('error.png');
   });

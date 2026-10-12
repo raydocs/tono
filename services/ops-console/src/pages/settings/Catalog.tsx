@@ -46,7 +46,15 @@ export function Catalog() {
 
   const online = doc.online;
   if (online === null) {
-    return <DocumentGate status={doc.status === 'error' ? 'error' : 'loading'} message={doc.message} />;
+    return (
+      <DocumentGate
+        status={doc.status === 'error' ? 'error' : 'loading'}
+        message={doc.message}
+        onRetry={() => {
+          void doc.reload((row) => ({ text: words.reloadDone(row.revision), detail: null, bad: false }));
+        }}
+      />
+    );
   }
 
   const draft = doc.draft;
@@ -195,6 +203,7 @@ function History({ revision }: { revision: number }) {
       state={state}
       emptyMessage={words.historyEmpty}
       errorMessage={history.status === 'error' ? history.message : undefined}
+      onRetry={history.reload}
       className="settings-history-table"
     />
   );

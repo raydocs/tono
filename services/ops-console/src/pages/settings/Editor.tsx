@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Action } from '@/components/ops/Action';
 import { copy } from '@/copy/copy';
 import { formatWhen } from '@/lib/display';
 import type { LineDiff } from '@/lib/settings-publish';
@@ -211,7 +212,11 @@ export function CanonicalBlock({ title, text }: { title: string; text: string })
 }
 
 /** The loading and error states both editors show before there is a document. */
-export function DocumentGate({ status, message }: { status: 'loading' | 'error'; message: string }) {
+export function DocumentGate({ status, message, onRetry }: {
+  status: 'loading' | 'error';
+  message: string;
+  onRetry?: () => void;
+}) {
   if (status === 'loading') {
     return (
       <div
@@ -224,7 +229,8 @@ export function DocumentGate({ status, message }: { status: 'loading' | 'error';
   }
   return (
     <div className="panel-error rounded-[10px] px-5 py-10 text-center" role="alert">
-      {message || copy.loadError}
+      <p>{message || copy.loadError}</p>
+      {onRetry ? <Action className="mt-3" onClick={onRetry}>{copy.retry}</Action> : null}
     </div>
   );
 }

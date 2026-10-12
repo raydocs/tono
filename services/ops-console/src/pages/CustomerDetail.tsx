@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Fact } from '@/components/ops/DetailDrawer';
-import { Empty } from '@/components/ops/Empty';
+import { Empty, ErrorLine } from '@/components/ops/Empty';
 import { HeatStrip } from '@/components/ops/HeatStrip';
 import { Section } from '@/components/ops/Section';
 import { StatusWord } from '@/components/ops/StatusWord';
@@ -116,7 +116,9 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
     return (
       <div className="page-wrap">
         <BackLink />
-        <Empty message={customer.loading ? copy.loading : customer.message || copy.loadError} />
+        {customer.loading
+          ? <Empty message={copy.loading} />
+          : <ErrorLine message={customer.message || copy.loadError} onRetry={detail.reload} />}
       </div>
     );
   }
@@ -178,6 +180,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
             devices={row.devices}
             state={connections.status}
             message={connections.status === 'error' ? connections.message : undefined}
+            onRetry={connections.reload}
           />
 
           <CustomerDiagnostics userId={userId} />
@@ -188,8 +191,10 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
           >
             {activity.status === 'ready' ? (
               <HeatStrip rows={activity.data.items} source={copy.sourceWord.telemetry} />
+            ) : activity.status === 'loading' ? (
+              <Empty message={copy.loading} />
             ) : (
-              <Empty message={activity.status === 'loading' ? copy.loading : copy.loadError} />
+              <ErrorLine message={activity.message || copy.loadError} onRetry={activity.reload} />
             )}
           </Section>
 
@@ -197,12 +202,14 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
             rows={destinations.status === 'ready' ? destinations.data.items : []}
             state={destinations.status}
             message={destinations.status === 'error' ? destinations.message : undefined}
+            onRetry={destinations.reload}
           />
 
           <ServiceUsage
             rows={services.status === 'ready' ? services.data.items : []}
             state={services.status}
             message={services.status === 'error' ? services.message : undefined}
+            onRetry={services.reload}
           />
 
           <CarrierMatrix events={events} />

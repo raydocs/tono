@@ -140,6 +140,7 @@ export const nodesBoardCopy = {
     e2eStale: '上报过期',
     reported: (ago: string) => `上报于 ${ago}`,
     loadFailed: 'API 中继状态没拿到',
+    empty: '还没有登记 API 中继',
   },
   /** Which control-plane path each client ASN came in on over the last week (decision 080). */
   apiPaths: {

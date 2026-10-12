@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Action } from '@/components/ops/Action';
 import { copy } from '@/copy/copy';
 import { cn } from '@/lib/utils';
 
@@ -27,6 +28,7 @@ export function DataTable<T>({
   selectedId,
   state,
   errorMessage,
+  onRetry,
   emptyMessage,
   className,
   sort,
@@ -40,7 +42,9 @@ export function DataTable<T>({
   selectedId?: string | null;
   state: TableState;
   errorMessage?: string;
-  /** What an empty table is empty *of*; the fleet's wording is the default. */
+  /** A refetch exists: the error state offers it as a retry button under the message. */
+  onRetry?: () => void;
+  /** What an empty table is empty *of*; a table of nodes passes `copy.emptyList`. */
   emptyMessage?: string;
   className?: string;
   /** Opt-in controlled sorting; other tables retain their local behavior. */
@@ -133,14 +137,15 @@ export function DataTable<T>({
   if (state === 'error') {
     return (
       <div className="panel-error rounded-[10px] px-5 py-10 text-center" role="alert">
-        {errorMessage || copy.tableError}
+        <p>{errorMessage || copy.tableError}</p>
+        {onRetry ? <Action className="mt-3" onClick={onRetry}>{copy.retry}</Action> : null}
       </div>
     );
   }
   if (state === 'empty' || sorted.length === 0) {
     return (
       <div className="rounded-[10px] border border-dashed border-[var(--hairline)] bg-[var(--surface)] px-5 py-10 text-center text-[var(--muted-foreground)]" role="status">
-        {emptyMessage ?? copy.emptyList}
+        {emptyMessage ?? copy.emptyRows}
       </div>
     );
   }

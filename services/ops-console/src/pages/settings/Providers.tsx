@@ -78,6 +78,7 @@ export function Providers() {
           state={state}
           emptyMessage={words.empty}
           errorMessage={accounts.status === 'error' ? accounts.message : undefined}
+          onRetry={accounts.reload}
           className="settings-providers-table"
         />
       </div>

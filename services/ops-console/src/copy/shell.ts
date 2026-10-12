@@ -126,6 +126,7 @@ export const shellCopy = {
   loading: '载入中',
   loadError: '载入失败',
   emptyList: '还没有节点',
+  emptyRows: '没有记录',
   tableError: '表格没载入上来',
   retry: '重试',
   close: '关闭',

@@ -77,6 +77,7 @@ export function ReleaseTable({
         columns={releaseColumns(ask, channel, phone)}
         getRowId={(row) => row.id}
         state={rows.length === 0 ? 'empty' : 'ready'}
+        emptyMessage={copy.noReleases}
         className="clients-release-table"
       />
       <ConfirmDialog

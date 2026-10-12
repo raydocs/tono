@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Action } from '@/components/ops/Action';
-import { EmptyLine } from '@/components/ops/Empty';
+import { EmptyLine, ErrorLine } from '@/components/ops/Empty';
 import { FoldedSection } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { nodeLegacyApi } from '@/lib/node-legacy';
@@ -29,9 +29,8 @@ export function NodeQualityText({ name }: { name: string }) {
 function QualityBody({ name }: { name: string }) {
   const text = useResource(name, (signal) => nodeLegacyApi.qualityText(name, signal));
 
-  if (text.status !== 'ready') {
-    return <EmptyLine message={text.status === 'error' ? text.message : copy.loading} />;
-  }
+  if (text.status === 'error') return <ErrorLine message={text.message} onRetry={text.reload} />;
+  if (text.status === 'loading') return <EmptyLine message={copy.loading} />;
   const { securityCheck, backtrace } = text.data;
   if (securityCheck === null && backtrace === null) {
     return <EmptyLine message={copy.nodeNoQualityText} />;
