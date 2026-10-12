@@ -105,6 +105,17 @@ test.describe('clients page', () => {
     await expect(draft).toHaveCount(1);
   });
 
+  test('a cut-short scan of the bucket says so', async ({ page }, testInfo) => {
+    await page.route('**/api/v1/ops/releases/objects*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json() as Record<string, unknown>;
+      await route.fulfill({ response, json: { ...body, truncated: true } });
+    });
+    await open(page, '/clients', 'default', `register-cut-${testInfo.project.name}-${testInfo.repeatEachIndex}-${testInfo.retry}`);
+    await page.getByRole('button', { name: '登记发布' }).click();
+    await expect(page.getByRole('dialog').getByText('只读了前 2000 个文件，没读到的可能有更新的')).toBeVisible();
+  });
+
   test('a file with no stored digest asks for one', async ({ page }, testInfo) => {
     await open(page, '/clients', 'default', `register-sha-${testInfo.project.name}-${testInfo.repeatEachIndex}-${testInfo.retry}`);
     await page.getByRole('button', { name: '登记发布' }).click();

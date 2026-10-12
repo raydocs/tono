@@ -8,7 +8,7 @@ import type { ReleaseObjectDto, ReleaseObjectGuessDto } from './contract';
 import { isSha256Hex } from './releases-verify';
 
 /** Most objects one request will look at before sorting; the bucket is small. */
-const SCAN_CAP = 2000;
+export const SCAN_CAP = 2000;
 const PAGE = 1000;
 
 const MACOS_ZIP = /^Tono-(\d+(?:\.\d+)+)-build(\d+)-arm64\.zip$/;
@@ -43,22 +43,33 @@ function storedSha256(object: R2Object): string | null {
   return checksum ? hex(checksum) : null;
 }
 
+/**
+ * R2 lists keys in lexicographic order, not upload order, so a scan that stops
+ * at `scanCap` keys may have missed newer objects. `truncated` says so; the
+ * caller must show it rather than present the list as the whole bucket.
+ */
 export async function listReleaseObjects(
   bucket: R2Bucket,
   db: D1Database,
   limit: number,
-): Promise<ReleaseObjectDto[]> {
+  scan: { cap?: number; page?: number } = {},
+): Promise<{ items: ReleaseObjectDto[]; truncated: boolean }> {
+  const scanCap = scan.cap ?? SCAN_CAP;
+  const pageSize = scan.page ?? PAGE;
   const seen: R2Object[] = [];
   let cursor: string | undefined;
+  let more = false;
   do {
+    // Never ask for more than the budget left, so the scan cannot pass the cap.
     const page = await bucket.list({
-      limit: PAGE,
+      limit: Math.min(pageSize, scanCap - seen.length),
       cursor,
       include: ['customMetadata', 'httpMetadata'],
     });
     seen.push(...page.objects);
+    more = page.truncated;
     cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor && seen.length < SCAN_CAP);
+  } while (cursor && seen.length < scanCap);
 
   const newest = seen
     .sort((a, b) => b.uploaded.getTime() - a.uploaded.getTime() || (a.key < b.key ? -1 : 1))
@@ -69,7 +80,7 @@ export async function listReleaseObjects(
   ).all<{ r2_key: string }>();
   const registered = new Set((rows.results ?? []).map((row) => row.r2_key));
 
-  return newest.map((object) => ({
+  const items = newest.map((object) => ({
     key: object.key,
     sizeBytes: object.size,
     uploadedAt: Math.floor(object.uploaded.getTime() / 1000),
@@ -78,4 +89,5 @@ export async function listReleaseObjects(
     guess: guessReleaseFromKey(object.key),
     registered: registered.has(object.key),
   }));
+  return { items, truncated: more };
 }

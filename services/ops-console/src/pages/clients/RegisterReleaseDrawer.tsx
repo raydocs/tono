@@ -87,6 +87,9 @@ export function RegisterReleaseDrawer({
       ) : (
         <div className="flex flex-col gap-3">
           <p className="text-body text-[var(--muted-foreground)]">{words.pickLead}</p>
+          {objects.data.truncated ? (
+            <p className="panel-error rounded-[8px] px-3 py-2 text-body">{words.truncated}</p>
+          ) : null}
           <ul className="flex flex-col">
             {items.map((row) => (
               <li key={row.key} className="border-b border-[var(--hairline)] last:border-b-0">

@@ -15,7 +15,7 @@ import type {
   NodeSummaryDto,
   RangeKey,
   ReleaseDto,
-  ReleaseObjectDto,
+  ReleaseObjectListDto,
   ServiceUsageDto,
   SystemHealthDto,
   UpdateChannelDto,
@@ -297,7 +297,7 @@ export const opsApi = {
   releaseChannels: (signal?: AbortSignal) => getAllJson<UpdateChannelDto>('releases/channels', signal),
   /** The newest objects in the release bucket: what the register-release drawer offers. */
   releaseObjects: (signal?: AbortSignal) =>
-    getJson<ListDto<ReleaseObjectDto>>('releases/objects', signal, { limit: '50' }),
+    getJson<ReleaseObjectListDto>('releases/objects', signal, { limit: '50' }),
   /**
    * `POST releases` is wired for one caller: the register-release drawer, which starts from an
    * object the publish tooling already put in R2 and pre-fills the row from

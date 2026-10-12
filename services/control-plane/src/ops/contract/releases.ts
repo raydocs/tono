@@ -10,8 +10,10 @@ import {
   RANGE_KEYS,
   RELEASE_CHANNELS,
 } from './vocabulary';
+import type { ListDto } from './checkers';
 import {
   arrayOf,
+  assertList,
   bool,
   enumList,
   fields,
@@ -76,6 +78,15 @@ export interface ReleaseObjectDto {
   etag: string;
   guess: ReleaseObjectGuessDto | null;
   registered: boolean;
+}
+
+/**
+ * The picker's list. `truncated` is true when the bucket had more keys than
+ * one request reads; R2 lists by key, not by upload time, so the newest
+ * objects may then be missing.
+ */
+export interface ReleaseObjectListDto extends ListDto<ReleaseObjectDto> {
+  truncated: boolean;
 }
 
 export const ADOPTION_BUCKETS = ['current', 'behind_one', 'behind_more', 'unreported'] as const;
@@ -162,6 +173,15 @@ export function assertReleaseObject(value: unknown, path = 'releaseObject'): Rel
     etag: text(row, path, 'etag'),
     guess: assertObjectGuess(row.guess, `${path}.guess`),
     registered: bool(row, path, 'registered'),
+  };
+}
+
+export function assertReleaseObjectList(value: unknown, path = 'releaseObjects'): ReleaseObjectListDto {
+  const row = fields(value, path, ['items', 'nextCursor', 'total', 'updatedAt', 'counts', 'truncated']);
+  const { truncated: _truncated, ...envelope } = row;
+  return {
+    ...assertList(envelope, assertReleaseObject, path),
+    truncated: bool(row, path, 'truncated'),
   };
 }
 

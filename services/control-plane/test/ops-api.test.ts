@@ -30,12 +30,13 @@ import {
   assertNodeSummary,
   assertProviderAccount,
   assertRelease,
-  assertReleaseObject,
+  assertReleaseObjectList,
   assertServiceUsage,
   assertSystemHealth,
   assertUpdateChannel,
   PLATFORMS,
 } from '../src/ops/contract';
+import { listReleaseObjects } from '../src/ops/releases-objects';
 
 const ACCESS_TEAM_DOMAIN = 'test-team.cloudflareaccess.com';
 const ACCESS_AUDIENCE = 'test-access-audience-0001';
@@ -959,7 +960,8 @@ describe('ops v1 api', () => {
     ).bind(NOW, NOW).run();
     const res = await ops('releases/objects?limit=10');
     expect(res.status).toBe(200);
-    const { items } = assertList(await res.json(), assertReleaseObject);
+    const { items, truncated } = assertReleaseObjectList(await res.json());
+    expect(truncated).toBe(false);
     const byKey = new Map(items.map((row) => [row.key, row]));
     expect(byKey.get('Tono-1.2.3-build45-arm64.zip')).toMatchObject({
       sizeBytes: bytes.byteLength,
@@ -973,6 +975,31 @@ describe('ops v1 api', () => {
     });
     expect(byKey.get('notes/readme.txt')?.guess).toBeNull();
     expect((await ops('releases/objects?limit=1').then((r) => r.json()) as { items: unknown[] }).items).toHaveLength(1);
+  });
+
+  it('never reads past the scan cap, and says when the bucket was cut short', async () => {
+    const releases = (env as unknown as { RELEASES: R2Bucket }).RELEASES;
+    const bytes = new TextEncoder().encode('x');
+    for (const key of ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'z-newest']) await releases.put(key, bytes);
+    const asked: Array<number | undefined> = [];
+    const spy = {
+      list: (options?: R2ListOptions) => {
+        asked.push(options?.limit);
+        return releases.list(options);
+      },
+    } as unknown as R2Bucket;
+
+    const cut = await listReleaseObjects(spy, db(), 50, { cap: 5, page: 2 });
+    // 2 + 2 + the 1 left in the budget: the scan stops at the cap exactly.
+    expect(asked).toEqual([2, 2, 1]);
+    expect(cut.items).toHaveLength(5);
+    expect(cut.truncated).toBe(true);
+    // R2 lists by key, so the newest object sorts after the cut: that is why the flag exists.
+    expect(cut.items.map((row) => row.key)).not.toContain('z-newest');
+
+    const whole = await listReleaseObjects(releases, db(), 50, { cap: 100 });
+    expect(whole.truncated).toBe(false);
+    expect(whole.items.map((row) => row.key)).toContain('z-newest');
   });
 
   it('refuses a release missing a required field instead of storing "undefined"', async () => {

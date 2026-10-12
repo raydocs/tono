@@ -2,9 +2,10 @@ import { body, rejectUnexpectedKeys } from '../../request';
 import {
   assertAdoptionMatrix,
   assertRelease,
-  assertReleaseObject,
+  assertReleaseObjectList,
   assertUpdateChannel,
   type AdoptionMatrixDto,
+  type ReleaseObjectListDto,
   type ReleaseDto,
 } from '../contract';
 import {
@@ -17,6 +18,7 @@ import {
 import { listUpdateChannels } from '../releases-channels';
 import { listReleaseObjects } from '../releases-objects';
 import { ApiError } from '../../errors';
+import { listEnvelope } from '../http';
 import {
   Actor,
   Env,
@@ -25,6 +27,8 @@ import {
   decodeName,
   entityJson,
   jsonNoStore,
+  jsonWithEtag,
+  notModified,
   listJson,
   now,
   parseLimit,
@@ -159,11 +163,15 @@ export async function getReleaseChannels(req: Request, e: Env): Promise<Response
  */
 export async function getReleaseObjects(req: Request, e: Env): Promise<Response> {
   const limit = parseLimit(new URL(req.url).searchParams.get('limit'), { default: 50, max: 200 });
-  const items = await listReleaseObjects(e.RELEASES, e.DB, limit);
+  const { items, truncated } = await listReleaseObjects(e.RELEASES, e.DB, limit);
   const t = now();
-  return listJson(
-    e, req, items, null, t,
-    weakEtag(items.map((row) => `${row.key}:${row.etag}:${row.registered ? 1 : 0}`)),
-    assertReleaseObject, items.length,
-  );
+  const etag = weakEtag([
+    truncated ? 1 : 0,
+    ...items.map((row) => `${row.key}:${row.etag}:${row.registered ? 1 : 0}`),
+  ]);
+  const hit = notModified(req, etag);
+  if (hit) return hit;
+  const dto: ReleaseObjectListDto = { ...listEnvelope(items, null, t, items.length), truncated };
+  check(e, () => { assertReleaseObjectList(dto); });
+  return jsonWithEtag(dto, etag);
 }

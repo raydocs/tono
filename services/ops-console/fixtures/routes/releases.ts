@@ -78,7 +78,7 @@ export function releaseObjects(
   const rows = [...objects.items]
     .sort((a, b) => b.uploadedAt - a.uploadedAt)
     .map((row) => ({ ...row, guess: guessFromKey(row.key), registered: taken.has(row.key) }));
-  return { items: rows, nextCursor: null, total: rows.length, updatedAt: file.clock };
+  return { items: rows, nextCursor: null, total: rows.length, updatedAt: file.clock, truncated: false };
 }
 
 const REQUIRED = ['platform', 'channel', 'version', 'r2Key', 'sizeBytes', 'sha256'] as const;

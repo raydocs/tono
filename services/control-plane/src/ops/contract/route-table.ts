@@ -37,7 +37,7 @@ import {
 import { assertFunnel } from './funnel';
 import { assertIncident, assertIncidentDetail } from './incidents';
 import { assertJob } from './jobs';
-import { assertAdoptionMatrix, assertRelease, assertReleaseObject, assertUpdateChannel } from './releases';
+import { assertAdoptionMatrix, assertRelease, assertReleaseObjectList, assertUpdateChannel } from './releases';
 import { assertAlertDelivery, assertAlertRule } from './alerts';
 import { assertDigest, assertFollowupList } from './followups';
 import {
@@ -68,7 +68,6 @@ export { assertFunnel };
 export const assertIncidentList = (value: unknown) => assertList(value, assertIncident);
 export const assertJobList = (value: unknown) => assertList(value, assertJob);
 export const assertReleaseList = (value: unknown) => assertList(value, assertRelease);
-export const assertReleaseObjectList = (value: unknown) => assertList(value, assertReleaseObject);
 export const assertUpdateChannelList = (value: unknown) => assertList(value, assertUpdateChannel);
 export const assertDirectCandidateList = (value: unknown) => assertList(value, assertDirectCandidate);
 export const assertProviderAccountList = (value: unknown) => assertList(value, assertProviderAccount);

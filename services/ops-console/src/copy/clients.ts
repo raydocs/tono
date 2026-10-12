@@ -81,6 +81,7 @@ export const clientCopy = {
     registered: '已登记',
     uploaded: (when: string) => `上传于 ${when}`,
     loadFailed: '读不到发布存储里的文件',
+    truncated: '只读了前 2000 个文件，没读到的可能有更新的',
     none: '发布存储里还没有文件',
     back: '换一个文件',
     fieldKey: '文件',
