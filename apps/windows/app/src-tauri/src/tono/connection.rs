@@ -166,7 +166,7 @@ use direct::{
 };
 use platform::{detect_physical_interface, is_virtual_uplink_description};
 pub(crate) use platform::remove_legacy_runtime_copy;
-use attempt::{Attempt, attempt_for_generation};
+use attempt::{Attempt, attempt_for_generation, attempt_owned};
 #[cfg(test)]
 pub(crate) use attempt::begin_attempt;
 #[cfg(test)]

@@ -29,3 +29,8 @@
   - Windows 旧的“恢复正常网络”结果被新操作取代时不改任何状态；更新事务的 Disconnect 带代数并在服务端核对。
   - Mac 清除系统代理最多等 10 s，超时报 unknown。
   - 决策 094 更新：去掉“重启即可清除”的说法。
+- Sol 审查第 3 轮修复（详见 IMPLEMENTATION.md §3d）：
+  - Windows App：“恢复正常网络”和用户的 Connect 在第一次等待前取得归属。被更新的操作超过的恢复不做任何改动；Connect 读代数期间开始了恢复，这次 Connect 作废，不解除围栏也不启动。恢复进行中点 Connect 会提示稍后再试。
+  - Windows 解除服务：答复期限到时还没证明 Job 清空，各分项风险报 unknown；最后一次读回不一致时，报告换成最后读到的结果。
+  - Mac 旧版系统代理模式的清除写明不在旧效果隔离的保证范围内。
+  - 新增回归：两个交错（旧恢复在新 Connect 之后恢复执行；旧 Connect 拿到新恢复释放的代数）和一个报告折叠测试。Linux 上 `cargo test --lib release` 76 通过。App 和 Swift 由托管 CI 编译。

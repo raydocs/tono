@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tauri::AppHandle;
 use tono_logging::{Type, logging};
 
-use crate::tono::{commands, state::TonoState};
+use crate::tono::{commands, state::{TonoInner, TonoState}};
 
 /// Stable markers the UI maps to its own sentences.
 pub(crate) const RESTORE_PARTIAL_PREFIX: &str = "TONO_RESTORE_PARTIAL";
@@ -25,12 +25,14 @@ pub async fn restore_internet(state: Arc<TonoState>, app: AppHandle) -> Result<(
         use crate::core::service::{PreemptiveRelease, tono_restore_internet_preemptively};
 
         // From here no connect or reconnect task starts the Core until the user clicks Connect.
+        // The ticket is this click's, taken before the first wait (Sol R3-F1 on PR #1569).
         let ticket = crate::core::service::raise_release_fence();
         {
             let mut inner = state.lock().await;
-            inner.client.transport().set_auth_tunnel_port(0);
-            inner.invalidate_connection(true);
-            inner.fsm.begin_disconnect();
+            if !begin_restore(&mut inner, &ticket) {
+                logging!(info, Type::Service, "Tono: 恢复网络在开始前已被更新的操作取代，不再改动状态");
+                return Ok(());
+            }
             commands::emit_status(&app, &commands::status_of(&inner));
         }
         match tono_restore_internet_preemptively(ticket).await {
@@ -54,6 +56,21 @@ pub async fn restore_internet(state: Arc<TonoState>, app: AppHandle) -> Result<(
     {
         super::disconnect(state, app).await
     }
+}
+
+/// Restore's first change: retire every connection task and begin the disconnect, but only while
+/// `ticket` still owns the release epoch, checked under the state lock that admits attempts and
+/// orders the user's Connect claim (Sol R3-F1). A Restore that waited for the lock while a newer
+/// Restore or Connect began cancels nothing and leaves the FSM alone. `false`: superseded.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(super) fn begin_restore(inner: &mut TonoInner, ticket: &crate::core::service::ReleaseTicket) -> bool {
+    if !crate::core::service::release_ticket_current(ticket) {
+        return false;
+    }
+    inner.client.transport().set_auth_tunnel_port(0);
+    inner.invalidate_connection(true);
+    inner.fsm.begin_disconnect();
+    true
 }
 
 /// Publish the answer, but only for the Restore that still owns the release epoch, checked
@@ -140,4 +157,38 @@ fn restore_failure(report: &tono_service_protocol::release_wire::ReleaseReport) 
         report.stuck,
         report.detail.as_deref().unwrap_or("")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Sol R3-F1 (a) on PR #1569: Restore R1 takes its ticket and waits for the state lock; a
+    /// newer Connect claims the epoch and is admitted first. When R1 resumes it must not cancel,
+    /// retire or move anything the newer Connect owns.
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn a_restore_overtaken_before_its_first_change_leaves_the_newer_connect_alone() {
+        let _epoch = crate::core::service::RELEASE_EPOCH_TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = Arc::new(TonoState::for_test());
+        // R1's click: the ticket is taken before the state lock.
+        let restore = crate::core::service::raise_release_fence();
+        let mut inner = state.lock().await;
+        // The newer Connect: claimed under the state lock, generation read, attempt admitted.
+        let claim = super::super::entry::claim_user_connect(&inner).unwrap();
+        assert!(crate::core::service::finish_user_connect(&claim, Some(0x5EED_0A01)));
+        let current = inner.connect_generation;
+        let (generation, cancellation, _) = super::super::begin_attempt(&mut inner, current).await.unwrap();
+        let ticket = inner.release_ticket;
+        // R1 resumes with the lock.
+        assert!(!begin_restore(&mut inner, &restore));
+        assert_eq!(inner.connect_generation, generation);
+        assert!(!cancellation.is_cancelled());
+        assert!(inner.fsm.status().is_connecting);
+        assert!(!inner.fsm.status().is_disconnecting);
+        assert_eq!(inner.release_ticket, ticket);
+        assert!(crate::core::service::release_ticket_current(&ticket));
+    }
 }

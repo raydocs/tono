@@ -138,7 +138,10 @@ impl Run {
             report
         });
         if !state.done {
+            // The Job is not yet proven empty: keep what was read, but nothing read so far is
+            // known to stay that way (Sol R3-M2).
             report.finished = false;
+            super::mark_risk_unproven(&mut report);
         }
         if !report.finished && !matches!(report.outcome.as_str(), "busy" | "superseded" | "refused") {
             report.outcome =
@@ -225,11 +228,14 @@ fn finalize(run: &Run) {
     if !report.finished || matches!(report.outcome.as_str(), "busy" | "superseded" | "refused") {
         return;
     }
-    if let Some(reason) = complete(run, &report) {
+    if let Some(Incomplete { reason, readings }) = complete(run, &report) {
         tracing::warn!("release: not completed: {reason}");
-        for component in &mut report.components {
-            component.risk = "unknown".into();
+        // What the service read last is the state now; the worker's earlier read is not
+        // (Sol R3-M2). Either way, no component is known to stay as read.
+        if let Some(readings) = &readings {
+            super::fold_final_readings(&mut report, readings);
         }
+        super::mark_risk_unproven(&mut report);
         report.outcome = ReleaseReport::outcome_of(&report.components, &report.stuck, true).to_owned();
         report.detail = Some(match report.detail.take() {
             Some(detail) => format!("{detail}; {reason}"),
@@ -239,59 +245,83 @@ fn finalize(run: &Run) {
     }
 }
 
+/// Why a run was not completed, with the service's own final read-back when it took one.
+struct Incomplete {
+    reason: String,
+    readings: Option<Vec<super::worker::Reading>>,
+}
+
+impl From<String> for Incomplete {
+    fn from(reason: String) -> Self {
+        Self { reason, readings: None }
+    }
+}
+
 /// `None` when the run completed, or when it never claimed to (nothing to take back). Under C,
 /// so no worker or admission moves the record in between.
-fn complete(run: &Run, report: &ReleaseReport) -> Option<String> {
+fn complete(run: &Run, report: &ReleaseReport) -> Option<Incomplete> {
     let claims_settled = !report.components.is_empty()
         && report.stuck.is_empty()
         && report.components.iter().all(|component| component.risk == "settled");
     let own = match own_incarnation() {
         Ok(own) => own,
-        Err(error) => return Some(format!("{error:#}")),
+        Err(error) => return Some(format!("{error:#}").into()),
     };
     let authority = Authority::live();
     let _held = match authority.lock(Duration::from_secs(5)) {
         Ok(Some(held)) => held,
-        Ok(None) => return Some("the release lock could not be taken to record the restore as complete".into()),
-        Err(error) => return Some(format!("{error:#}")),
+        Ok(None) => {
+            return Some(String::from("the release lock could not be taken to record the restore as complete").into());
+        }
+        Err(error) => return Some(format!("{error:#}").into()),
     };
     if !prune_pending_jobs() {
-        return Some("a process the restore started is still running".into());
+        return Some(String::from("a process the restore started is still running").into());
     }
     let mut record = match authority.load() {
         Ok(record) => record,
-        Err(error) => return Some(format!("{error:#}")),
+        Err(error) => return Some(format!("{error:#}").into()),
     };
     if record.request_id.as_deref() != Some(run.request_id.as_str())
         || record.job_owner != Some(own)
         || !record.worker_finished
     {
-        return Some("the restore record changed before the restore could be completed".into());
+        return Some(String::from("the restore record changed before the restore could be completed").into());
     }
     record.jobs_unproven = false;
-    let mut reason = None;
+    let mut incomplete = None;
     if claims_settled {
         match read_back_now() {
             Ok(after) => {
                 for component in &report.components {
                     let now = after.iter().find(|(name, _, _)| *name == component.name);
                     if now.is_none_or(|(_, readback, _)| *readback != component.readback || readback == "unreadable") {
-                        reason = Some(format!(
-                            "{} read back differently after the restore's processes ended",
-                            component.name
-                        ));
+                        incomplete = Some(Incomplete {
+                            reason: format!(
+                                "{} read back differently after the restore's processes ended",
+                                component.name
+                            ),
+                            readings: None,
+                        });
                         break;
                     }
                 }
+                if let Some(incomplete) = &mut incomplete {
+                    incomplete.readings = Some(after);
+                }
             }
-            Err(error) => reason = Some(format!("the final read-back failed: {error:#}")),
+            Err(error) => incomplete = Some(format!("the final read-back failed: {error:#}").into()),
         }
-        record.completed = reason.is_none();
+        record.completed = incomplete.is_none();
     }
     if let Err(error) = authority.save(&record) {
-        return Some(format!("the completed restore could not be recorded: {error:#}"));
+        let reason = format!("the completed restore could not be recorded: {error:#}");
+        return Some(match incomplete {
+            Some(incomplete) => Incomplete { reason: format!("{}; {reason}", incomplete.reason), ..incomplete },
+            None => reason.into(),
+        });
     }
-    if claims_settled { reason } else { None }
+    if claims_settled { incomplete } else { None }
 }
 
 /// The worker's read-back, taken by this service on a runtime of its own.

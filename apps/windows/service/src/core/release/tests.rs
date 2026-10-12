@@ -269,3 +269,38 @@ fn a_pending_wmi_dns_change_blocks_even_after_a_crash_before_it_was_flagged() {
     let reason = processes.unretired_reason(&released(3)).unwrap();
     assert!(reason.contains("restart Windows"), "{reason}");
 }
+
+#[test]
+fn a_final_read_back_that_disagrees_replaces_the_workers_and_withdraws_settled() {
+    use crate::release_wire::{ReleaseComponent, ReleaseReport};
+    let component = |name: &str| ReleaseComponent {
+        name: name.into(),
+        readback: "restored".into(),
+        risk: "settled".into(),
+        detail: None,
+    };
+    let mut report = ReleaseReport::without_components("r", "restored", None);
+    report.components = vec![component("wfp"), component("dns"), component("core")];
+    super::fold_final_readings(
+        &mut report,
+        &[
+            ("wfp", "restored".into(), None),
+            ("dns", "residual".into(), None),
+        ],
+    );
+    super::mark_risk_unproven(&mut report);
+    let state: Vec<_> = report
+        .components
+        .iter()
+        .map(|component| (component.name.as_str(), component.readback.as_str(), component.risk.as_str()))
+        .collect();
+    assert_eq!(
+        state,
+        vec![
+            ("wfp", "restored", "unknown"),
+            ("dns", "residual", "unknown"),
+            ("core", "unreadable", "unknown"),
+        ]
+    );
+    assert_ne!(ReleaseReport::outcome_of(&report.components, &report.stuck, true), "restored");
+}

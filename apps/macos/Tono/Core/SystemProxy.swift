@@ -376,8 +376,13 @@ nonisolated struct SystemProxy {
     /// The clear above with a deadline on the wait (Sol R2 carry-over of
     /// R-M1). Clearing can wait on configd and on the privilege path for far
     /// longer than Restore internet may: past `seconds` the result is nil
-    /// (unknown), and a clear still running finishes on its own. It only
-    /// ever removes a proxy that points at Tono's own listener.
+    /// (unknown), and a clear still running finishes on its own. The
+    /// deadline bounds the wait, not the writer: a clear that outlives it is
+    /// not retired, cancelled or tied to a generation, and `disable()` may
+    /// restore a whole earlier snapshot rather than remove one setting (Sol
+    /// R3-M1). Legacy system-proxy mode is therefore outside Restore
+    /// internet's old-effect isolation; normal Connect uses TUN and sets no
+    /// system proxy.
     static func clearTonoOwnedProxy(sessionPorts: Set<Int>, within seconds: TimeInterval) async -> Bool? {
         let once = ProxyClearOnce()
         return await withCheckedContinuation { (continuation: CheckedContinuation<Bool?, Never>) in

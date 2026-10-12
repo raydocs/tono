@@ -678,5 +678,37 @@ pub(crate) fn executor_quarantined() -> bool {
         .unwrap_or(true)
 }
 
+/// A report that is not backed by terminal proof: every component keeps what was read, but none
+/// is known to stay that way (Sol R3-M2 on PR #1569). Current state and future stability are
+/// separate facts; only the second is withdrawn here.
+pub(crate) fn mark_risk_unproven(report: &mut crate::release_wire::ReleaseReport) {
+    for component in &mut report.components {
+        component.risk = "unknown".into();
+    }
+}
+
+/// Put the service's own final read-back into `report`, replacing the worker's earlier one: a
+/// component that now reads residual or unreadable must not stay described as restored (Sol
+/// R3-M2). A component the final read did not cover becomes unreadable.
+pub(crate) fn fold_final_readings(
+    report: &mut crate::release_wire::ReleaseReport,
+    readings: &[(&'static str, String, Option<String>)],
+) {
+    for component in &mut report.components {
+        match readings.iter().find(|(name, _, _)| *name == component.name) {
+            Some((_, readback, detail)) => {
+                component.readback = readback.clone();
+                if detail.is_some() {
+                    component.detail = detail.clone();
+                }
+            }
+            None => {
+                component.readback = "unreadable".into();
+                component.detail = Some("not covered by the final read-back".into());
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

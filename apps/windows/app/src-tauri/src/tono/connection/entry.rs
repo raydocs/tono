@@ -11,9 +11,34 @@ pub(super) fn seed_autostart_after_connect() {
 /// `tono_connect`: guard, then the full §6 transaction; any failure after
 /// arm keeps blocking and schedules the protected reconnect.
 pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
-    // The user's own Connect is the one thing that may start again after Restore internet.
-    crate::core::service::begin_user_connect().await;
-    connect_for_generation(state, app, None).await
+    // The user's own Connect is the one thing that may start again after Restore internet. It
+    // owns the release epoch from the click, decided under the state lock that orders it against
+    // Restore's first change (Sol R3-F1 on PR #1569).
+    let claim = {
+        let inner = state.lock().await;
+        claim_user_connect(&inner)?
+    };
+    if !crate::core::service::begin_user_connect(claim).await {
+        return Err(USER_CONNECT_SUPERSEDED.to_string());
+    }
+    connect_owned(state, app, None, Some(claim)).await.map_err(|failure| failure.error)
+}
+
+/// A Connect clicked before a Restore internet that began while it read the generation.
+const USER_CONNECT_SUPERSEDED: &str =
+    "TONO_STALE_GENERATION: Restore internet began after this Connect was clicked; press Connect to start again";
+
+/// Claim the epoch for the user's Connect, unless a Restore internet is under way: it has made
+/// its first change and owns the state until it answers, so this click is refused and moves
+/// nothing.
+pub(super) fn claim_user_connect(inner: &TonoInner) -> Result<crate::core::service::ReleaseTicket, String> {
+    if inner.fsm.status().is_disconnecting && crate::core::service::release_ticket().fenced {
+        return Err(format!(
+            "{}: Restore internet is still running; press Connect after it answers",
+            super::preemptive::RESTORE_BUSY_PREFIX
+        ));
+    }
+    Ok(crate::core::service::claim_user_connect())
 }
 
 /// [`connect`] that refuses to start once the connection generation is no longer
@@ -34,6 +59,14 @@ pub(super) struct ConnectFailure {
 
 pub(super) async fn connect_for_generation_tracked(
     state: Arc<TonoState>, app: AppHandle, expected_generation: Option<u64>,
+) -> Result<(), ConnectFailure> {
+    connect_owned(state, app, expected_generation, None).await
+}
+
+/// `owner`: the user's Connect claim, re-checked under the lock that admits the attempt.
+async fn connect_owned(
+    state: Arc<TonoState>, app: AppHandle, expected_generation: Option<u64>,
+    owner: Option<crate::core::service::ReleaseTicket>,
 ) -> Result<(), ConnectFailure> {
     let refused = |error: String| ConnectFailure { error, retry_generation: expected_generation };
     {
@@ -60,7 +93,7 @@ pub(super) async fn connect_for_generation_tracked(
             );
         }
     }
-    match attempt_for_generation(&state, &app, expected_generation).await {
+    match attempt_owned(&state, &app, expected_generation, owner).await {
         Attempt::Connected => {
             {
                 let mut inner = state.lock().await;

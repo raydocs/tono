@@ -758,6 +758,10 @@ static RELEASE_EPOCH: std::sync::Mutex<ReleaseEpoch> = std::sync::Mutex::new(Rel
     generation: None,
 });
 
+/// Tests that move the process-wide epoch take this, so they do not overtake each other.
+#[cfg(test)]
+pub(crate) static RELEASE_EPOCH_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn release_epoch() -> std::sync::MutexGuard<'static, ReleaseEpoch> {
     RELEASE_EPOCH
         .lock()
@@ -852,7 +856,9 @@ pub(crate) async fn prime_release_epoch() {
             let mut epoch = release_epoch();
             if epoch.serial == before.serial && epoch.generation.is_none() {
                 epoch.generation = Some(status.generation);
-                if status.mode != "secured" {
+                // Already fenced (a Restore internet holds the epoch): moving the serial on
+                // would take that Restore's ownership away from it.
+                if status.mode != "secured" && !epoch.fenced {
                     epoch.serial += 1;
                     epoch.fenced = true;
                 }
@@ -868,12 +874,31 @@ pub(crate) async fn prime_release_epoch() {
     }
 }
 
-/// An explicit Connect from the user: lift the fence and learn the generation the machine holds
-/// now, so this Connect is admitted and every ticket taken before it is not.
-pub(crate) async fn begin_user_connect() {
-    let generation = fresh_release_generation().await;
+/// An explicit Connect from the user claims the release epoch before its first wait, so every
+/// ticket taken before the click is out of date and a Restore internet clicked after it wins
+/// (Sol R3-F1 on PR #1569). The fence stays as it was until [`begin_user_connect`] has read the
+/// generation: an attempt that starts in between is still refused locally.
+///
+/// The caller holds the state lock and has checked that no Restore internet is under way.
+pub(crate) fn claim_user_connect() -> ReleaseTicket {
     let mut epoch = release_epoch();
     epoch.serial += 1;
+    ReleaseTicket {
+        serial: epoch.serial,
+        fenced: epoch.fenced,
+        generation: epoch.generation,
+    }
+}
+
+/// The second half of the user's Connect: lift the fence and record `generation`, but only while
+/// `claim` still owns the epoch. A Restore internet or a newer Connect that began during the
+/// read makes this Connect stale: it neither lifts the fence nor adopts the generation it read,
+/// which may be the one that Restore released (Sol R3-F1).
+pub(crate) fn finish_user_connect(claim: &ReleaseTicket, generation: Option<u64>) -> bool {
+    let mut epoch = release_epoch();
+    if epoch.serial != claim.serial {
+        return false;
+    }
     epoch.fenced = false;
     if generation.is_some() {
         epoch.generation = generation;
@@ -884,6 +909,14 @@ pub(crate) async fn begin_user_connect() {
             "Tono: 读取解除代数失败，沿用已知代数"
         );
     }
+    true
+}
+
+/// Read the generation the machine holds now for the Connect that made `claim`. `false` when a
+/// newer Restore internet or Connect began meanwhile; that Connect must then start nothing.
+pub(crate) async fn begin_user_connect(claim: ReleaseTicket) -> bool {
+    let generation = fresh_release_generation().await;
+    finish_user_connect(&claim, generation)
 }
 
 /// What the release service answered for one Restore internet.
