@@ -585,13 +585,16 @@ impl TonoInner {
         self.connect_error_at_ms = None;
     }
 
-    /// Retire the current connection generation and wake every stage waiting on its cancellation
-    /// token. `release_on_stale` preserves the existing late-commit contract: releasing flows
-    /// patch a late arm; protected reconnect/switch flows keep the barrier.
     /// Take the sole right to retry a refused health-failure release for `generation`, or
     /// `None` when another live loop already holds it (several health handlers can receive the
-    /// same failed release). The loop keeps the returned token for as long as it retries.
+    /// same failed release) or when `generation` is no longer the current one. The loop keeps the returned token for
+    /// as long as it retries.
     pub fn claim_health_retry(&mut self, generation: u64) -> Option<std::sync::Arc<()>> {
+        // A late joiner of a retired session's failure claims nothing, and above all must not
+        // overwrite the slot of the current session's owner.
+        if generation != self.connect_generation {
+            return None;
+        }
         if let Some((owner, token)) = &self.retry_owner {
             if *owner == generation && token.strong_count() > 0 {
                 return None;
@@ -602,6 +605,9 @@ impl TonoInner {
         Some(token)
     }
 
+    /// Retire the current connection generation and wake every stage waiting on its cancellation
+    /// token. `release_on_stale` preserves the existing late-commit contract: releasing flows
+    /// patch a late arm; protected reconnect/switch flows keep the barrier.
     pub fn invalidate_connection(&mut self, release_on_stale: bool) {
         // Decision 088: the aborts below drop an in-flight automatic hy2 attempt before it can
         // report Stale; settle that hop first.
