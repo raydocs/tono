@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { animate, useReducedMotion } from 'motion/react';
 
 /**
@@ -19,7 +19,7 @@ export function CountText({
   render,
 }: {
   values: readonly number[];
-  render: (values: number[]) => string;
+  render: (values: number[]) => ReactNode;
 }) {
   const reduce = useReducedMotion();
   const [shown, setShown] = useState<number[]>(() => [...values]);

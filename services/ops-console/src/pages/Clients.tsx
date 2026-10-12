@@ -9,6 +9,7 @@ import type {
 import { PLATFORMS } from '@contract';
 import { Action } from '@/components/ops/Action';
 import { CountText } from '@/components/ops/CountText';
+import { DotJoined } from '@/components/ops/DotJoined';
 import { Empty, ErrorLine } from '@/components/ops/Empty';
 import { PageNote } from '@/components/ops/PageNote';
 import { Section } from '@/components/ops/Section';
@@ -76,11 +77,15 @@ export default function ClientsPage({
           <p className="text-verdict">
             <CountText
               values={[totals.current, totals.behind, totals.unreported]}
-              render={(v) => [
-                copy.adoptionCount.current(v[0]),
-                copy.adoptionCount.behind(v[1]),
-                copy.adoptionCount.unreported(v[2]),
-              ].join(' · ')}
+              render={(v) => (
+                <DotJoined
+                  parts={[
+                    copy.adoptionCount.current(v[0]),
+                    copy.adoptionCount.behind(v[1]),
+                    copy.adoptionCount.unreported(v[2]),
+                  ]}
+                />
+              )}
             />
           </p>
         )}

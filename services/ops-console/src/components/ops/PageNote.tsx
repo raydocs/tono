@@ -16,6 +16,9 @@ import { cn } from '@/lib/utils';
  * The backfill half is the answer to "why is everyone silent since the
  * deploy": thirty days of telemetry are still being worked through, and saying
  * so beats letting the operator conclude the pipeline is broken.
+ *
+ * On a phone the two halves are two lines and the separator goes: a line that
+ * ends in a lone "·" with the second half wrapped under it reads as a typo.
  */
 export function PageNote({
   fetchedAt,
@@ -30,16 +33,16 @@ export function PageNote({
   if (fetchedAt === null && filling === null) return null;
   const behind = consoleBehind(fetchedAt);
   return (
-    <p className={cn('flex flex-wrap items-baseline gap-x-2 text-micro text-[var(--muted-foreground)]', className)}>
+    <p className={cn('flex flex-wrap items-baseline gap-x-2 max-[640px]:block text-micro text-[var(--muted-foreground)]', className)}>
       {fetchedAt === null ? null : (
-        <span className={cn('normal-case tracking-normal', behind && 'stamp-late')}>
+        <span className={cn('inline-block normal-case tracking-normal max-[640px]:block', behind && 'stamp-late')}>
           {behind ? copy.pageStale : copy.pageAsOf(formatWhenAgo(fetchedAt))}
         </span>
       )}
       {filling === null ? null : (
         <>
-          {fetchedAt === null ? null : <span aria-hidden>·</span>}
-          <span className="normal-case tracking-normal">{filling}</span>
+          {fetchedAt === null ? null : <span aria-hidden className="max-[640px]:hidden">·</span>}
+          <span className="inline-block normal-case tracking-normal max-[640px]:block">{filling}</span>
         </>
       )}
     </p>
