@@ -10,7 +10,8 @@
   并上传 `__screenshots__`（[run 38214953070](https://github.com/raydocs/tono/actions/runs/38214953070)）；该分支不合入。
 - 验证：同一 runner 两次运行间 `light/ledger.spec.ts/ledger-empty.png` 逐字节相同；差异最大的两张（dense-table 0.78、node-detail load 0.47）逐张看过，是节点仪表盘和负载四宫格改版，不是页面损坏。本 PR 分支上的 nightly 结果见 PR。
 - 候选/发布：无。
-- 剩余限制：`light/ledger.spec.ts/ledger.png`（账目 ›「一个月的账，一页」浅色）没有重录：在 `macos-26` 上 `toHaveScreenshot` 每次都停在 Playwright 的
-  "waiting for fonts to load"，5 s 和 60 s 期望超时都一样（[run 38216428202](https://github.com/raydocs/tono/actions/runs/38216428202)、
-  [run 38216716260](https://github.com/raydocs/tono/actions/runs/38216716260)），而同一测试的 `settle()` 里 `document.fonts.ready` 已返回，深色同一页正常。
-  nightly 仍会剩这一个失败，#1543 不关。逐张视觉核对是 UI 判断，留给所有者在 PR 的图片 diff 里看。
+- 浅色账目页（`light/ledger.spec.ts/ledger.png`）：`--update-snapshots` 在 `macos-26` 上每次都停在 Playwright 的 "waiting for fonts to load"
+  （5 s 和 60 s 期望超时都一样，[run 38216428202](https://github.com/raydocs/tono/actions/runs/38216428202)、[run 38216716260](https://github.com/raydocs/tono/actions/runs/38216716260)），
+  但普通对比模式下能截到稳定图（"captured a stable screenshot"，[run 38217020253](https://github.com/raydocs/tono/actions/runs/38217020253)）。
+  这张基线取自那次稳定截图，看过，是改版后的账目页。卡住只出现在重录模式里，不影响 nightly 的对比。
+- 剩余限制：逐张视觉核对是 UI 判断，留给所有者在 PR 的图片 diff 里看。以后再在 `macos-26` 上重录时，浅色账目页可能还会卡住，可以照这次的办法从对比运行里取稳定截图。
