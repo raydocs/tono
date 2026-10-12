@@ -20,14 +20,13 @@ These conditions are the approval: when they hold, act; do not stop to ask.
 **1. Merge** through the merge queue. Auto-merge is on for `main`. The only required status check is `ci-gate`. Merges use merge commits. Enable auto-merge with `gh pr merge --auto --merge` on a ready, non-draft PR when the conditions below hold. Do not enable it on a UI PR or a PR that needs real-hardware testing. On a conflict or a helper-version collision, rebase onto current `main` and set `HelperProtocolVersion.current` (`apps/macos/Tono/Core/HelperProtocolVersion.swift`) to main's value plus `0.0.1`.
 - `ci-gate` is green on the exact head SHA. It calls the path-filtered workflows and passes when each relevant job succeeded or was skipped because its paths were not touched. A missing `ci-gate` run is not green; dispatch `ci-gate`. Do not also dispatch those workflows on the pull request (they would run a second time). Docs-only and uncovered paths: [docs/BUILD_AND_TEST.md](docs/BUILD_AND_TEST.md#which-workflow-must-be-green-for-a-pr).
 - Ordinary work (copy, docs, UI, a normal bug or feature outside the risks below): the main session checks the
-  diff and runs the narrowest relevant test. No mandatory Jev call, planning agent, external review or second
-  model checking a report. Jev is optional, not a per-PR approval gate.
+  diff and runs the narrowest relevant test. No planning agent, external review or second model
+  checking a report.
 - High-risk changes (money, credentials/permissions, PF/WFP fail-closed behavior, privileged paths, concurrency/
   lifecycle, migrations, routing or release trust), or an owner-requested review: an independent Codex high review
   of the current diff must finish before merge/deploy. Run it in the background with named invariants and a
   coverage checklist; it never blocks implementation, tests or a draft PR. Record the covered SHA, scope,
   findings and verification in a PR comment. Pending, timed-out, incomplete or stale coverage is not a pass.
-  If Jev is explicitly chosen, use trusted main's policy, not the PR's; preserve its applicable risk floors.
   Stop rule: only major or worse blocks. Minors get one fix round; any still open after it are recorded
   open in `docs/findings.d/` (product defects) or in the PR body's limitations (engineering/test/docs items the ledger excludes),
   then merge. At least major: loosening fail-closed PF/WFP, a leak, privilege escalation, cross-account mixing, or showing

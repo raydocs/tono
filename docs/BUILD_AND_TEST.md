@@ -111,7 +111,7 @@ Docs-only means every touched path is `*.md` or under `docs/`, none is under `.a
 and no filter above matches it. `ci-gate` still runs and passes with those jobs skipped; that skip is
 not qualification of a tree the PR did not touch. A `*.md` that a filter matches (for example under
 `apps/` or `services/`) needs that workflow. Non-docs paths no filter covers (for example
-`.jev-route.json`, `.agents/`, `.claude/`, release or promote workflows) need no called workflow; apply
+`.agents/`, `.claude/`, release or promote workflows) need no called workflow; apply
 the risk-based review rules in [AGENTS.md](../AGENTS.md#finish-the-work-owner-decisions),
 not an automatic dual-vendor review for every uncovered path. Changes to routing/review policy,
 credentials/permissions or release trust still require independent review before merge/deploy.
