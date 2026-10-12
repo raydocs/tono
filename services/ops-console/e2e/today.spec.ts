@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { open, settle } from './ops';
 
 type FixtureIncident = {
@@ -56,11 +56,197 @@ test.describe('today page', () => {
 
     await open(page, '/today');
     const block = page.locator('section').filter({ has: page.getByRole('heading', { name: '失败聚类' }) });
+    await expect(block.getByRole('heading')).toHaveText('失败聚类3');
     await expect(block.locator('li')).toHaveCount(3);
-    await expect(block).toContainText('TONO_TLS_TIMEOUT · handshake · windows 1.8.1 · Los Angeles · Mesa · 41');
-    await expect(block).toContainText('TONO_AUTH_DNS · securingDNS · macos 1.8.0 · Tokyo · Fuji · 17');
-    await expect(block).toContainText('TONO_NODE_OR_CORE_UNREACHABLE · connect · windows 1.7.9 · Hong Kong · Victoria · 23');
+    // Row one is a p0: the 严重 label sits in front of the sentence, code on hover.
+    const first = block.locator('li').nth(0);
+    await expect(first.locator('.cluster-sentence')).toHaveText('保护失效，流量被放开了');
+    await expect(first.locator('.cluster-severity')).toHaveText('严重');
+    await expect(first.locator('.cluster-detail')).toHaveAttribute('title', '掉线保护 · windows 1.8.1 · Los Angeles · Mesa');
+    await expect(first.locator('.cluster-detail > .cluster-seg')).toHaveText(['掉线保护', 'windows 1.8.1', 'Los AngelesMesa']);
+    await expect(first.locator('.cluster-node-city')).toHaveText('Los Angeles');
+    await expect(first.locator('.cluster-node-site')).toHaveText('Mesa');
+    await expect(first.locator('.cluster-counts')).toHaveText('9 人 / 11 台');
+    await expect(first.locator('.cluster-status.ops-tag')).toHaveText('进行中');
+    await expect(first.locator('[title="TONO_FAIL_OPEN"]')).toHaveCount(1);
+    // Only the p0 row carries the label.
+    await expect(block.locator('.cluster-severity')).toHaveCount(3);
+    await expect(block.locator('.cluster-severity:not(:empty)')).toHaveCount(1);
+    await expect(block.locator('li').nth(1).locator('.cluster-detail')).toHaveAttribute('title', 'DNS 保护 · macos 1.8.0 · Tokyo · Fuji');
+    await expect(block.locator('li').nth(2).locator('.cluster-detail')).toHaveAttribute('title', '连接 · windows 1.7.9 · Hong Kong · Victoria');
+    await expect(block.locator('li').nth(2).locator('.cluster-sentence')).toHaveText('当前节点和核心都没通过验证');
+    // The machine code is one hover away, never printed in the block.
+    expect(await block.innerText()).not.toContain('TONO_');
     await expect(page.getByText('失败聚类还读不到。')).toHaveCount(0);
+  });
+
+  test('cluster rows line up at 1440: one x for the sentences, one line for each meta cell', async ({ page }) => {
+    await open(page, '/today');
+    const block = page.locator('section').filter({ has: page.getByRole('heading', { name: '失败聚类' }) });
+    await block.scrollIntoViewIfNeeded();
+    // The element carrying the machine code is the sentence text, whatever wraps it.
+    const sentences = block.locator('[title^="TONO_"]');
+    await expect(sentences).toHaveCount(3);
+    const xs: number[] = [];
+    for (let i = 0; i < 3; i += 1) xs.push((await sentences.nth(i).boundingBox())!.x);
+    expect(xs[1]).toBeCloseTo(xs[0]!, 1);
+    expect(xs[2]).toBeCloseTo(xs[0]!, 1);
+    // A meta cell that wrapped would be two lines tall.
+    const metas = block.locator('.cluster-detail');
+    for (let i = 0; i < 3; i += 1) expect((await metas.nth(i).boundingBox())!.height).toBeLessThanOrEqual(24);
+  });
+
+  /**
+   * With no p0 the severity column is dropped, not just emptied: an empty `auto`
+   * track still leaves its 12 px column-gap, which would put the sentences 12 px
+   * right of the heading. The same read with every severity 'normal' is routed in.
+   */
+  test('with no p0 the sentences start at the heading edge, and the p0 list keeps its 严重 cell there', async ({ page }) => {
+    await open(page, '/today');
+    const block = page.locator('section').filter({ has: page.getByRole('heading', { name: '失败聚类' }) });
+    await expect(block.locator('.cluster-list')).toHaveAttribute('data-severity', 'some');
+    const headingX = (await block.getByRole('heading').boundingBox())!.x;
+    const label = (await block.locator('.cluster-severity').first().boundingBox())!.x;
+    const p0Sentence = (await block.locator('[title="TONO_FAIL_OPEN"]').boundingBox())!.x;
+    expect(label).toBeCloseTo(headingX, 0);
+    expect(p0Sentence).toBeGreaterThan(headingX + 12);
+
+    await page.route('**/api/v1/ops/failure-clusters*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json() as { clusters: { severity: string }[] };
+      body.clusters = body.clusters.map((cluster) => ({ ...cluster, severity: 'normal' }));
+      await route.fulfill({ response, json: body });
+    });
+    // Same URL, so a goto would not reload: reload to read the routed data.
+    await page.reload({ waitUntil: 'networkidle' });
+    await settle(page);
+    await expect(block.locator('li')).toHaveCount(3);
+    await expect(block.locator('.cluster-list')).toHaveAttribute('data-severity', 'none');
+    await expect(block.locator('.cluster-severity')).toHaveCount(0);
+    const heading = (await block.getByRole('heading').boundingBox())!.x;
+    const sentences = block.locator('[title^="TONO_"]');
+    for (let i = 0; i < 3; i += 1) {
+      expect(Math.abs((await sentences.nth(i).boundingBox())!.x - heading)).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  /**
+   * Dense has nine clusters with the only p0 stored last and the only quiet one
+   * eighth, with more people than four of the open ones. The list sorts them on
+   * the client: p0 first, quiet last. The meta line gives way only inside the
+   * node (city first, then site), with "·" separators that are CSS, not text.
+   */
+  test('dense clusters read p0 first and quiet last, and only the node text is ellipsised', async ({ page }) => {
+    await open(page, '/today', 'dense');
+    const block = page.locator('section').filter({ has: page.getByRole('heading', { name: '失败聚类' }) });
+    await block.scrollIntoViewIfNeeded();
+    const rows = block.locator('li');
+    await expect(rows).toHaveCount(9);
+    await expect(rows.first().locator('.cluster-severity')).toHaveText('严重');
+    await expect(rows.first().locator('.cluster-sentence')).toHaveText('保护期间客户断网了');
+    await expect(rows.first().locator('.cluster-status')).toHaveText('进行中');
+    await expect(rows.last().locator('.cluster-status')).toHaveText('已安静');
+    await expect(rows.last()).toHaveClass(/is-quiet/);
+    await expect(block.locator('li.is-quiet')).toHaveCount(1);
+    // Only the first row is a p0, and no quiet row sits above an open one.
+    await expect(block.locator('.cluster-severity:not(:empty)')).toHaveCount(1);
+    const statuses = await rows.locator('.cluster-status').allTextContents();
+    expect(statuses.indexOf('已安静')).toBe(statuses.length - 1);
+
+    // The quiet row has more people than the open rows below it and still sits last.
+    const people = await rows.locator('.cluster-counts').allTextContents();
+    const reach = (text: string) => Number(/^(\d+)/.exec(text.trim())?.[1]);
+    expect(reach(people[people.length - 1]!)).toBeGreaterThan(reach(people[people.length - 2]!));
+
+    // Stage and platform never ellipsise; only the city and the site inside the node do, and a long one is cut.
+    const overflow = await block.locator('.cluster-detail').evaluateAll((metas) => metas.map((meta) => {
+      const style = (el: Element) => getComputedStyle(el);
+      const node = meta.querySelector('.cluster-node')!;
+      const city = node.querySelector('.cluster-node-city');
+      const site = node.querySelector('.cluster-node-site');
+      return {
+        ellipsised: [meta, ...meta.querySelectorAll('*')]
+          .filter((el) => style(el).textOverflow === 'ellipsis')
+          .map((el) => el.className),
+        metaOverflow: style(meta).textOverflow,
+        before: getComputedStyle(node, '::before').content,
+        siteBefore: site ? getComputedStyle(site, '::before').content : null,
+        siteWidth: site?.getBoundingClientRect().width ?? null,
+        cityWidth: city?.getBoundingClientRect().width ?? 0,
+        cut: city ? city.scrollWidth > city.clientWidth : false,
+      };
+    }));
+    for (const meta of overflow) {
+      expect(meta.ellipsised).toEqual(['cluster-node-city', 'cluster-node-site']);
+      expect(meta.metaOverflow).toBe('clip');
+      expect(meta.before).toBe('"·"');
+      expect(meta.cityWidth).toBeGreaterThan(0);
+      if (meta.siteWidth !== null) {
+        expect(meta.siteBefore).toBe('"·"');
+        expect(meta.siteWidth).toBeGreaterThan(0);
+      }
+    }
+    expect(overflow.some((meta) => meta.cut)).toBe(true);
+  });
+
+  /**
+   * A parent's `overflow: hidden` clips glyphs without any child reporting
+   * overflow, so the check is geometric: every part of a node ends inside the
+   * node's box, and text that is wider than its own box ellipsises. The meta
+   * cell is wide enough at 1440 that none of the ordinary rows is cut.
+   */
+  async function nodeGeometry(page: Page) {
+    const block = page.locator('section').filter({ has: page.getByRole('heading', { name: '失败聚类' }) });
+    await block.scrollIntoViewIfNeeded();
+    return block.locator('li').evaluateAll((rows) => rows.map((row) => {
+      const detail = row.querySelector('.cluster-detail')!;
+      const node = row.querySelector('.cluster-node')!;
+      const parts = [...node.children].map((child) => ({
+        name: child.className,
+        overhang: child.getBoundingClientRect().right - node.getBoundingClientRect().right,
+        wider: child.scrollWidth > child.clientWidth,
+        ellipsis: getComputedStyle(child).textOverflow === 'ellipsis',
+      }));
+      return {
+        meta: detail.clientWidth,
+        nodeOverhang: node.getBoundingClientRect().right - detail.getBoundingClientRect().right,
+        parts,
+      };
+    }));
+  }
+
+  test('a node never overflows its box: each part ends inside it, or ellipsises', async ({ page }) => {
+    for (const set of ['default', 'dense'] as const) {
+      await open(page, '/today', set);
+      const rows = await nodeGeometry(page);
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(row.nodeOverhang).toBeLessThanOrEqual(0.5);
+        expect(row.parts.length).toBeGreaterThan(0);
+        for (const part of row.parts) {
+          expect(part.overhang, `${set}: ${part.name} ends inside the node`).toBeLessThanOrEqual(0.5);
+          expect(part.wider === false || part.ellipsis, `${set}: ${part.name} is whole or ellipsised`).toBe(true);
+        }
+      }
+    }
+  });
+
+  test('the meta cell is at least 290 wide at 1440, and ordinary rows are not truncated', async ({ page }) => {
+    await open(page, '/today');
+    const standard = await nodeGeometry(page);
+    expect(standard).toHaveLength(3);
+    for (const row of standard) {
+      expect(row.meta).toBeGreaterThanOrEqual(290);
+      for (const part of row.parts) expect(part.wider, `default: ${part.name}`).toBe(false);
+    }
+    // Dense row 1 holds the long name and is cut on purpose; rows 2-9 read whole.
+    await open(page, '/today', 'dense');
+    const dense = await nodeGeometry(page);
+    expect(dense).toHaveLength(9);
+    for (const row of dense.slice(1)) {
+      for (const part of row.parts) expect(part.wider, `dense: ${part.name}`).toBe(false);
+    }
+    expect(dense[0]!.parts.some((part) => part.wider)).toBe(true);
   });
 
   test('the resolved tab is a different list, not a filter on the same one', async ({ page }) => {

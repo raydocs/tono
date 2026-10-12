@@ -4,19 +4,19 @@
     "clusters": [
       {
         "id": "fc-01",
-        "code": "TONO_TLS_TIMEOUT",
-        "stage": "handshake",
+        "code": "TONO_FAIL_OPEN",
+        "stage": "protection",
         "appVersion": "1.8.1",
         "platform": "windows",
         "node": "Los Angeles · Mesa",
-        "severity": "normal",
+        "severity": "p0",
         "count": 41,
         "users": 9,
         "devices": 11,
         "firstSeenMs": 1724892000000,
         "lastSeenMs": 1724999280000,
         "status": "open",
-        "sample": "{\"carrier\":\"unicom\",\"handshakeMs\":10000}",
+        "sample": "{\"carrier\":\"unicom\",\"channel\":\"release\"}",
         "detailPath": "/api/v1/diagnostics/clusters/fc-01"
       },
       {

@@ -15,7 +15,7 @@ export function Section({
   children,
   className,
 }: {
-  title: string;
+  title: ReactNode;
   aside?: ReactNode;
   children: ReactNode;
   className?: string;
