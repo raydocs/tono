@@ -119,9 +119,13 @@ test.describe('客户写动作', () => {
     await expect(ask).toContainText('Preview Catalog Line');
     await ask.getByRole('button', { name: '绑定', exact: true }).click();
 
+    // The gate and the drawer are both gone before anything is read back: the
+    // dialog's own sentence and the drawer's option repeat the line's name.
+    await expect(page.getByRole('dialog')).toHaveCount(0);
     await settle(page);
-    await expect(page.getByText('Preview Catalog Line')).toBeVisible();
-    await expect(page.getByRole('button', { name: '解绑' })).toBeVisible();
+    const home = page.locator('section').filter({ has: page.getByRole('heading', { name: '家宽', exact: true }) });
+    await expect(home.getByText('Preview Catalog Line')).toBeVisible();
+    await expect(home.getByRole('button', { name: '解绑' })).toBeVisible();
   });
 
   test('下发一个设备动作之后这台机器上写着它排着', async ({ page }, testInfo) => {

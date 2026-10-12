@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open, settle } from './ops';
+import { open, sessionFor, settle } from './ops';
 
 const SECTIONS = [
   'alerts', 'catalog', 'policy', 'homeinventory',
@@ -293,5 +293,133 @@ test.describe('设置', () => {
     const row = page.locator('tbody tr').filter({ hasText: 'Preview Home Alpha' });
     await expect(row.getByRole('button', { name: '删除' })).toBeDisabled();
     await expect(row.getByText('2 人', { exact: true })).toBeVisible();
+  });
+});
+
+/**
+ * The write paths of the sections the baselines only photograph: a row made in
+ * the drawer, changed in the drawer, and taken away behind its confirmation.
+ * Every test reads the table back after the write, so what is asserted is what
+ * the next GET returned and not what the browser remembers.
+ */
+test.describe('设置 · 写入流程', () => {
+  test('商家账号：新建的账号出现在表里', async ({ page }) => {
+    await open(page, '/settings/providers', 'default', sessionFor('flow-provider-new'));
+    await expect(page.getByText('1 个账号')).toBeVisible();
+
+    await page.getByRole('button', { name: '新建账号' }).click();
+    const drawer = page.getByRole('dialog');
+    await drawer.getByLabel('商家', { exact: true }).fill('vultr');
+    await drawer.getByLabel(/^标签/).fill('Flow Edge');
+    await drawer.getByRole('button', { name: '保存', exact: true }).click();
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('cell', { name: 'Flow Edge' })).toBeVisible();
+    await expect(page.getByText('2 个账号')).toBeVisible();
+  });
+
+  test('商家账号：改过的标签下一次读就是新的', async ({ page }) => {
+    await open(page, '/settings/providers', 'default', sessionFor('flow-provider-edit'));
+    await page.getByRole('cell', { name: 'Preview VPS' }).click();
+    const drawer = page.getByRole('dialog');
+    await expect(drawer.getByText('改账号').first()).toBeVisible();
+    await drawer.getByLabel(/^标签/).fill('Renamed VPS');
+    await drawer.getByRole('button', { name: '保存', exact: true }).click();
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('cell', { name: 'Renamed VPS' })).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'Preview VPS' })).toHaveCount(0);
+  });
+
+  test('商家账号：确认之后账号从表里消失', async ({ page }) => {
+    await open(page, '/settings/providers', 'default', sessionFor('flow-provider-delete'));
+    await page.getByRole('cell', { name: 'Preview VPS' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: '删除', exact: true }).click();
+
+    const confirm = page.getByRole('dialog').filter({ hasText: '关掉这个账号？' });
+    await expect(confirm.getByText(/关掉「Preview VPS」之后/)).toBeVisible();
+    await confirm.getByRole('button', { name: '删除', exact: true }).click();
+
+    await expect(page.getByText('还没有登记商家账号')).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'Preview VPS' })).toHaveCount(0);
+  });
+
+  test('家宽线路：新建的线路出现在表里', async ({ page }) => {
+    await open(page, '/settings/homelines', 'default', sessionFor('flow-line-new'));
+
+    await page.getByRole('button', { name: '新建线路' }).click();
+    const drawer = page.getByRole('dialog');
+    await drawer.getByLabel('线路名字', { exact: true }).fill('Flow Line');
+    await drawer.getByLabel(/^线路代号/).fill('flow-line');
+    await drawer.getByRole('button', { name: '保存', exact: true }).click();
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('cell', { name: /^Flow Line/ })).toBeVisible();
+  });
+
+  test('家宽线路：改过的名字下一次读就是新的', async ({ page }) => {
+    await open(page, '/settings/homelines', 'default', sessionFor('flow-line-edit'));
+    await page.getByRole('cell', { name: 'Preview Home Alpha' }).first().click();
+    const drawer = page.getByRole('dialog');
+    await drawer.getByLabel('线路名字', { exact: true }).fill('Flow Beta');
+    await drawer.getByRole('button', { name: '保存', exact: true }).click();
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('cell', { name: /^Flow Beta/ })).toBeVisible();
+    await expect(page.getByRole('cell', { name: /^Preview Home Alpha/ })).toHaveCount(0);
+  });
+
+  test('家宽线路：新建的线路确认之后记成已退', async ({ page }) => {
+    await open(page, '/settings/homelines', 'default', sessionFor('flow-line-retire'));
+    await page.getByRole('button', { name: '新建线路' }).click();
+    const drawer = page.getByRole('dialog');
+    await drawer.getByLabel('线路名字', { exact: true }).fill('Flow Line');
+    await drawer.getByLabel(/^线路代号/).fill('flow-line');
+    await drawer.getByRole('button', { name: '保存', exact: true }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    await page.getByRole('cell', { name: /^Flow Line/ }).click();
+    await page.getByRole('dialog').getByRole('button', { name: '删除', exact: true }).click();
+    const confirm = page.getByRole('dialog').filter({ hasText: '退掉这条线路？' });
+    await expect(confirm.getByText(/「Flow Line」会记成已退/)).toBeVisible();
+    await confirm.getByRole('button', { name: '删除', exact: true }).click();
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const row = page.locator('tbody tr').filter({ hasText: 'Flow Line' });
+    await expect(row.locator('.ops-tag')).toHaveText('已退');
+  });
+
+  test('告警规则：改过的延迟下一次读就是新的', async ({ page }) => {
+    await open(page, '/settings/alerts', 'default', sessionFor('flow-rule-edit'));
+    const row = page.locator('tbody tr').filter({ hasText: 'node down' });
+    await expect(row).toContainText('90 秒');
+
+    await page.getByRole('cell', { name: 'node down' }).click();
+    const drawer = page.getByRole('dialog');
+    await drawer.getByLabel(/^延迟几秒再发/).fill('300');
+    await drawer.getByRole('button', { name: '保存', exact: true }).click();
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(row).toContainText('5 分钟');
+    await expect(row).not.toContainText('90 秒');
+  });
+
+  test('分流规则：试运行之后发布，线上版本跟着走', async ({ page }) => {
+    await open(page, '/settings/policy', 'default', sessionFor('flow-policy'));
+    await expect(page.getByText('线上 r12').first()).toBeVisible();
+
+    await page.getByRole('button', { name: '开始编辑', exact: true }).click();
+    await page.getByRole('button', { name: '关掉全部直连', exact: true }).click();
+    await page.getByRole('button', { name: '试运行' }).click();
+    await expect(page.getByText('服务端会存成这样')).toBeVisible();
+    await expect(page.getByText('这份不签名也能发')).toBeVisible();
+
+    await page.getByRole('button', { name: '发布', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText(/这会改变所有客户端下次拉取的分流规则/)).toBeVisible();
+    await dialog.getByRole('button', { name: '发布', exact: true }).click();
+
+    await expect(page.getByText('线上从 r12 变成了 r13', { exact: true })).toBeVisible();
+    await expect(page.getByText('线上 r13').first()).toBeVisible();
   });
 });
