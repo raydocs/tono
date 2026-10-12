@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open, settle } from './ops';
+import { linesEndingInDot, open, settle } from './ops';
 
 test.use({ viewport: { width: 390, height: 844 } });
 
@@ -163,4 +163,19 @@ test('a release row keeps its actions on one or two lines, inside the viewport',
     expect(box!.x + box!.width, name).toBeLessThanOrEqual(390);
     expect(box!.height, name).toBeGreaterThanOrEqual(44);
   }
+});
+
+/**
+ * 22 production customers broke the sentence "22 位客户 · 2 位正常 ·" after the
+ * dot, with the next count alone on the line below. Both count sentences
+ * (the hero and the funnel under the filters) may only break before a dot.
+ */
+test('the customers count sentences never end a line in a middle dot at 390 px', async ({ page }) => {
+  await open(page, '/customers');
+  const hero = '.customers-hero .text-verdict';
+  const funnel = 'p.text-body:has(button[aria-pressed])';
+  await expect(page.locator(hero)).toContainText('位连不上');
+  await expect(page.locator(funnel)).toContainText('位连上过');
+  expect(await linesEndingInDot(page, hero)).toEqual([]);
+  expect(await linesEndingInDot(page, funnel)).toEqual([]);
 });

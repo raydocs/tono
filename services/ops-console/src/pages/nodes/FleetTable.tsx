@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import type { NodeLifecycle, NodeSummaryDto, QuotaLevel } from '@contract';
 import { Chip } from '@/components/ops/Chip';
+import { Clauses } from '@/components/ops/DotJoined';
 import { Meter } from '@/components/ops/Meter';
 import { Panel, type PanelState } from '@/components/ops/Panel';
 import { Segmented } from '@/components/ops/Segmented';
@@ -94,7 +95,7 @@ export function FleetTable({
   return (
     <Panel
       title={words.title}
-      description={words.lead}
+      description={<Clauses text={words.lead} />}
       source={words.source}
       asOfSec={asOfSec}
       state={bodyState}

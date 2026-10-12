@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { copy } from '../src/copy/copy';
 import { open, settle } from './ops';
 
 test.describe('customers page', () => {
@@ -26,7 +27,9 @@ test.describe('customers page', () => {
 
     // Three platforms have shipped nothing; they are shown, greyed, and say so.
     await expect(page.getByRole('button', { name: /Linux 未发布/ })).toBeDisabled();
-    await expect(page.locator('tbody tr').first()).toHaveCSS('height', '36px');
+    // A row is 36 px until a node or failure cell wraps onto a second line.
+    const heights = await page.locator('tbody tr').evaluateAll((trs) => trs.map((tr) => tr.getBoundingClientRect().height));
+    expect(Math.min(...heights)).toBe(36);
     await expect(page).toHaveScreenshot('table.png');
   });
 
@@ -93,6 +96,46 @@ test.describe('customers page', () => {
     const widest = table.heads.reduce((a, b) => (b.width > a.width ? b : a));
     expect(widest.head).toBe('客户');
     expect(table.clipped).toBeLessThanOrEqual(0);
+  });
+
+  /**
+   * The production page showed "Los Angeles ·" (the site cut off) in the node
+   * cell and "12 小…" over "TONO_S…" in the failure cell. Both cells now wrap
+   * inside their column: nothing is wider than its cell, the node never ends
+   * on the separator, and a known code reads as its Chinese sentence with the
+   * raw code on the hover.
+   */
+  test('the node and failure cells show their whole text, the failure as a sentence', async ({ page }) => {
+    await open(page, '/customers', 'dense');
+    const cells = await page.evaluate(() => {
+      const column = (name: string) => {
+        const index = [...document.querySelectorAll('thead th')].findIndex((th) => th.textContent?.trim() === name);
+        return [...document.querySelectorAll('tbody tr')].map((row) => row.querySelectorAll('td')[index]!);
+      };
+      const clipped = (cell: Element) => cell.scrollWidth > cell.clientWidth + 1
+        || [...cell.querySelectorAll('span')].some((span) => span.scrollWidth > span.clientWidth + 1);
+      const read = (cell: Element) => ({
+        text: (cell.textContent ?? '').trim(),
+        title: cell.querySelector('[title]')?.getAttribute('title') ?? null,
+        clipped: clipped(cell),
+      });
+      return { node: column('当前节点').map(read), failure: column('最近失败').map(read) };
+    });
+
+    const named = cells.node.filter((cell) => cell.text !== '—');
+    expect(named.length).toBeGreaterThan(20);
+    for (const cell of cells.node) {
+      expect(cell.text.endsWith('·')).toBe(false);
+      expect(cell.clipped, cell.text).toBe(false);
+    }
+
+    const failed = cells.failure.filter((cell) => cell.text !== '—');
+    expect(failed.length).toBeGreaterThan(3);
+    for (const cell of cells.failure) expect(cell.clipped, cell.text).toBe(false);
+    for (const cell of failed) {
+      expect(cell.text).toContain(copy.codeWord[cell.title as keyof typeof copy.codeWord]);
+      expect(cell.text).not.toContain(cell.title!);
+    }
   });
 
   test('expiry dates fit their cell content box without taking identity space', async ({ page }) => {

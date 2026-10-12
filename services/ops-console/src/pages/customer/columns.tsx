@@ -5,9 +5,9 @@ import { StatusWord } from '@/components/ops/StatusWord';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
 import type { FollowupDto } from '@/lib/api-followups';
-import { explainCode, stageWord } from '@/lib/codes';
-import { formatDate, formatPercent, formatWhenAgo, splitBytes } from '@/lib/display';
+import { formatDate, formatPercent, splitBytes } from '@/lib/display';
 import { shown } from '@/lib/sources';
+import { FailureCell, NodeCell } from './location-cells';
 
 type Mask = (email: string) => string;
 
@@ -105,7 +105,7 @@ export function customerColumns(
       {
         id: 'wechat',
         header: copy.customerColumns.wechat,
-        width: '80px',
+        width: '74px',
         sortValue: (row: CustomerSummaryDto) => row.wechatId ?? '',
         cell: (row: CustomerSummaryDto) => (
           <WechatCell id={row.wechatId} mask={wechat} duplicate={row.wechatDuplicate === true} />
@@ -124,16 +124,17 @@ export function customerColumns(
     {
       id: 'node',
       header: copy.customerColumns.node,
-      width: '108px',
+      width: '112px',
       sortValue: (row) => row.selectedServer ?? '',
-      cell: (row) => <Value value={row.selectedServer} source={copy.sourceWord.catalog} />,
+      cell: (row) => <NodeCell name={row.selectedServer} />,
     },
     {
       id: 'failure',
       header: copy.customerColumns.failure,
-      width: '80px',
+      width: '92px',
+      className: 'px-2',
       sortValue: (row) => row.lastFailure?.at ?? 0,
-      cell: (row) => <FailureCell row={row} />,
+      cell: (row) => <FailureCell failure={row.lastFailure} />,
     },
     {
       id: 'usage',
@@ -215,32 +216,6 @@ function WechatCell({ id, mask, duplicate }: { id: string | null; mask: Mask; du
     <span className="flex min-w-0 flex-col items-start leading-tight" title={`${shownId} · ${copy.wechatDuplicateTitle}`}>
       <span className="block min-w-0 max-w-full truncate">{shownId}</span>
       <span className="ops-tag tone-unk">{copy.wechatDuplicate}</span>
-    </span>
-  );
-}
-
-/**
- * When it happened, then what the client called it and what that means.
- *
- * `ETIMEDOUT` on its own tells an operator nothing an hour later, and the
- * Chinese sentence on its own loses the token they will paste into a search.
- * The column has 150 px, so the pair is truncated and the title carries the
- * whole thing — including the stage, which is the least of the three and the
- * first to go.
- */
-function FailureCell({ row }: { row: CustomerSummaryDto }) {
-  const failure = row.lastFailure;
-  if (!failure) return <Value value={null} source={copy.sourceWord.telemetry} />;
-  const why = explainCode(failure.code);
-  const said = failure.code ? [failure.code, why].filter(Boolean).join(' · ') : why;
-  const line = said ?? stageWord(failure.stage) ?? copy.missing;
-  const full = [stageWord(failure.stage), said].filter(Boolean).join(' · ');
-  return (
-    <span className="flex min-w-0 flex-col leading-tight" title={full || undefined}>
-      <span className="truncate font-mono text-body">{formatWhenAgo(failure.at)}</span>
-      <span className="truncate text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
-        {line}
-      </span>
     </span>
   );
 }

@@ -1,6 +1,7 @@
 import type { FunnelStage } from '@contract';
 import { FUNNEL_STAGES } from '@contract';
 import { CountText } from '@/components/ops/CountText';
+import { DotSegment } from '@/components/ops/DotJoined';
 import { copy } from '@/copy/copy';
 import { cn } from '@/lib/utils';
 
@@ -31,8 +32,7 @@ export function FunnelBar({
   return (
     <p className="text-body">
       {FUNNEL_STAGES.map((id, index) => (
-        <span key={id}>
-          {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
+        <DotSegment key={id} first={index === 0}>
           <button
             type="button"
             aria-pressed={stage === id}
@@ -41,7 +41,7 @@ export function FunnelBar({
           >
             <CountText values={[counts[id]]} render={(values) => copy.funnelCount[id](values[0])} />
           </button>
-        </span>
+        </DotSegment>
       ))}
     </p>
   );

@@ -37,7 +37,7 @@ export function Panel({
 }: {
   /** Left off when a heading directly above already names this panel. */
   title?: string;
-  description?: string;
+  description?: ReactNode;
   actions?: ReactNode;
   source?: string;
   asOfSec?: number | null;

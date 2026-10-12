@@ -14,6 +14,7 @@ import { Action } from '@/components/ops/Action';
 import { Chip } from '@/components/ops/Chip';
 import { DataGapBanner } from '@/components/ops/DataGapBanner';
 import { CountText } from '@/components/ops/CountText';
+import { DotSegment } from '@/components/ops/DotJoined';
 import { PageNote } from '@/components/ops/PageNote';
 import { DataTable, type TableState } from '@/components/ops/DataTable';
 import { copy } from '@/copy/copy';
@@ -211,8 +212,7 @@ export default function CustomersPage({
             {customers.status === 'ready' ? (
               <p className="text-verdict">
                 {(counts.all === 0 ? CUSTOMER_FILTERS.slice(0, 1) : CUSTOMER_FILTERS).map((id, index) => (
-                  <span key={id}>
-                    {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
+                  <DotSegment key={id} first={index === 0}>
                     <button
                       type="button"
                       aria-pressed={filter === id}
@@ -221,7 +221,7 @@ export default function CustomersPage({
                     >
                       <CountText values={[counts[id] ?? 0]} render={(values) => copy.customerCount[id](values[0] ?? 0)} />
                     </button>
-                  </span>
+                  </DotSegment>
                 ))}
               </p>
             ) : (
