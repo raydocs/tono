@@ -83,7 +83,7 @@ export function Digest({
         {night === 0 ? (
           <span className="text-body text-[var(--muted-foreground)]">{copy.digestNightNone}</span>
         ) : (
-          <div className="flex min-w-0 flex-col gap-1">
+          <div className="flex min-w-0 flex-col gap-0.5">
             {/* What ended carries how it ended and no colour — it is over.
                 What is still running carries how bad it is. */}
             {ended.shown.map((group) => (
