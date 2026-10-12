@@ -9,5 +9,7 @@
   installed.
 - Why stricter: nothing widens. The Codex review requirement, its stop rule and the merge
   conditions are unchanged; only the optional tool and its path list go. This supersedes the
-  `.jev-route.json` part of [008](008-2026-09-24-merge-without-asking.md).
+  jev-route parts of [008](008-2026-09-24-merge-without-asking.md): its "jev-route review depth
+  passed (cross-vendor for protected paths)" condition and its `.jev-route.json` reference. The
+  merge gate is now AGENTS.md item 1's risk-based review; 008's other conditions stand.
 - Applied in: the PR that adds this file.
