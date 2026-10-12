@@ -34,9 +34,9 @@ export function FailureClusters() {
     <Section
       title={
         <>
-          {copy.diagnosticsPanel.clustersTitle}{' '}
-          {/* The count is styled like the Today tab chips' counts. */}
-          <span className="font-mono text-micro text-[var(--muted-foreground)]">{resource.data.clusters.length}</span>
+          {copy.diagnosticsPanel.clustersTitle}
+          {/* Sized for reading, in the Today tab chips' muted colour and gap. */}
+          <span className="cluster-count">{resource.data.clusters.length}</span>
         </>
       }
     >
