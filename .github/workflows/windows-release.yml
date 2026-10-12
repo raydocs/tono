@@ -84,7 +84,7 @@ jobs:
           persist-credentials: false
       - name: Build and verify fixed windows-amd64-v2 input
         run: sh tooling/scripts/prepare-windows-sing-box.sh
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: sing-box-windows-amd64-${{ github.sha }}
           path: apps/windows/app/src-tauri/sidecar/sing-box-x86_64-pc-windows-msvc.exe
@@ -125,7 +125,7 @@ jobs:
         with:
           toolchain: 1.98.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
           cache: pnpm
@@ -199,12 +199,12 @@ jobs:
           node scripts/prepare-updater-config.mjs --verify $payload "$payload.sig"
           Remove-Item -Force $payload, "$payload.sig"
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: windows-core-${{ github.sha }}
           path: apps/windows/app/src-tauri/sidecar
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: sing-box-windows-amd64-${{ github.sha }}
           path: apps/windows/app/src-tauri/sidecar
@@ -331,7 +331,7 @@ jobs:
           "installer_sha256=$installerSha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "signature_sha256=$signatureSha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: windows-release-payload-${{ github.sha }}
           path: ${{ runner.temp }}/windows-release-payload/
@@ -375,7 +375,7 @@ jobs:
       INSTALLER_SHA256: ${{ needs.build-draft.outputs.installer_sha256 }}
       SIGNATURE_SHA256: ${{ needs.build-draft.outputs.signature_sha256 }}
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: windows-release-payload-${{ github.sha }}
           path: ${{ runner.temp }}/attest
@@ -418,7 +418,7 @@ jobs:
           sparse-checkout: apps/windows/release-notes
           sparse-checkout-cone-mode: true
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: windows-release-payload-${{ github.sha }}
           path: ${{ runner.temp }}/payload
