@@ -155,16 +155,16 @@ test.describe('customers page', () => {
     }
     /*
      * The site is what the operator reads the node by, so it is whole in every
-     * row. The one site that is not is the 33-character
-     * "Pacific-Coast-Highway-Backhaul-01", kept in the fixture on purpose as
-     * the longest production-shaped name: no column fits it, so it must end in
-     * its own ellipsis with the whole name on the hover.
+     * row. The two sites that are not are the fixtures' deliberate stress
+     * names (LONG_NODES in generate-ops-fixtures.mjs): a 33-character Latin
+     * site and the last segment of a four-segment name. No column fits them,
+     * so each ends in its own ellipsis with the whole name on the hover.
      */
-    const longest = 'Pacific-Coast-Highway-Backhaul-01';
+    const stress = ['Pacific-Coast-Highway-Backhaul-01', '法兰克福备用出口'];
     for (const cell of named) {
-      if (cell.site!.text === longest) {
+      if (stress.includes(cell.site!.text)) {
         expect(cell.site!.over, cell.text).toBeGreaterThan(0);
-        expect(cell.title, cell.text).toContain(longest);
+        expect(cell.title, cell.text).toContain(cell.site!.text);
       } else {
         expect(cell.site!.over, cell.text).toBeLessThanOrEqual(0);
       }
@@ -284,15 +284,30 @@ test.describe('customers page', () => {
         return [{ lines: Math.round(date.getBoundingClientRect().height / parseFloat(getComputedStyle(date).lineHeight)), over: date.scrollWidth - date.clientWidth }];
       });
       const versionAt = index('最低版本');
+      const usageAt = index('本期流量');
+      /** Room between the text and the content edge it is read from: the right for left-aligned, the left for right-aligned. */
+      const fits = (cell: Element, text: Element, side: 'left' | 'right') => {
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const box = cell.getBoundingClientRect();
+        const style = getComputedStyle(cell);
+        const reach = range.getBoundingClientRect();
+        return side === 'right'
+          ? box.right - parseFloat(style.paddingRight) - reach.right
+          : reach.left - (box.left + parseFloat(style.paddingLeft));
+      };
       const versions = rows.flatMap((row) => {
         const cell = row.querySelectorAll('td')[versionAt]!;
         if (!/^\d+\.\d+\.\d+/.test((cell.textContent ?? '').trim())) return [];
-        const range = document.createRange();
-        range.selectNodeContents(cell);
-        const box = cell.getBoundingClientRect();
-        return [{ text: (cell.textContent ?? '').trim(), room: box.right - parseFloat(getComputedStyle(cell).paddingRight) - range.getBoundingClientRect().right }];
+        return [{ text: (cell.textContent ?? '').trim(), room: fits(cell, cell, 'right') }];
       });
-      return { slack, dates, versions, scroll: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+      const usages = rows.flatMap((row) => {
+        const cell = row.querySelectorAll('td')[usageAt]!;
+        const figure = cell.querySelector('span span');
+        if (figure === null || !/^\d/.test((figure.textContent ?? '').trim())) return [];
+        return [{ text: (figure.textContent ?? '').trim(), room: fits(cell, figure, 'left') }];
+      });
+      return { slack, dates, versions, usages, scroll: document.documentElement.scrollWidth - document.documentElement.clientWidth };
     });
     expect(found.slack.length).toBeGreaterThan(3);
     const stale = found.slack.filter((entry) => entry.text === copy.codeWord.CATALOG_STALE);
@@ -305,9 +320,11 @@ test.describe('customers page', () => {
       expect(date.lines).toBe(1);
       expect(date.over).toBeLessThanOrEqual(0);
     }
-    // The minimum-version column gave 8 px to the failure sentences: its numbers still fit whole.
+    // The version numbers keep 8 px of room, and the traffic figures fit whole.
     expect(found.versions.length).toBeGreaterThan(3);
-    for (const version of found.versions) expect(version.room, version.text).toBeGreaterThanOrEqual(0);
+    for (const version of found.versions) expect(version.room, version.text).toBeGreaterThanOrEqual(8);
+    expect(found.usages.length).toBeGreaterThan(3);
+    for (const usage of found.usages) expect(usage.room, usage.text).toBeGreaterThanOrEqual(0);
     expect(found.scroll).toBeLessThanOrEqual(0);
   });
 

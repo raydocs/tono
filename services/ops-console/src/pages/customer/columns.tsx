@@ -54,12 +54,13 @@ export function phoneColumns<T>(columns: readonly DataColumn<T>[]): DataColumn<T
  * takes 28 (142 px with 4 px of side air, so the longest sentence keeps 20 px
  * to the cell edge), the service column 20, and the follow-up column 2 (86 px
  * with 8 px of side air, still room for a whole `YYYY-MM-DD`). The node column
- * is 148 px so the site line, the part that tells two machines in a city
- * apart, is whole for every site up to eight characters of Chinese; the 8 px
- * the failure column would otherwise have lost come from the version column
- * (62 px, "0.0.66" still whole). The address column keeps the 260 px the
- * longest address with its tag needs (the customers spec asserts none is
- * clipped). Widths include
+ * takes 16 (140 px): the site line, the part that tells two machines in a city
+ * apart, is whole for every realistic site; the two deliberate stress names in
+ * the fixtures (a 33-character Latin site and an eight-character one behind a
+ * three-segment name) end in their own ellipsis with the whole name on the
+ * hover. The version column keeps its 70 px (a three-part number keeps 8 px of
+ * room). The address column keeps the 260 px the longest address with its tag
+ * needs (the customers spec asserts none is clipped). Widths include
  * the cells' padding (border-box). Below the table floor in Customers.tsx the
  * container scrolls sideways rather than squeeze any column further.
  */
@@ -120,7 +121,7 @@ export function customerColumns(
     {
       id: 'node',
       header: copy.customerColumns.node,
-      width: '148px',
+      width: '140px',
       sortValue: (row) => row.selectedServer ?? '',
       cell: (row) => <NodeCell name={row.selectedServer} />,
     },
@@ -170,7 +171,7 @@ export function customerColumns(
       {
         id: 'version',
         header: copy.customerColumns.minVersion,
-        width: '62px',
+        width: '70px',
         className: 'px-2',
         mono: true,
         sortValue: (row: CustomerSummaryDto) => row.minAppVersion ?? '',
