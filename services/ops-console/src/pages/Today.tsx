@@ -17,12 +17,14 @@ import {
   openIncidents,
   resolvedIncidents,
 } from '@/lib/incidents';
+import { groupIncidents, groupLabel, type IncidentGroup } from '@/lib/incident-groups';
 import { minSupportedVersions } from '@/lib/releases';
 import { usePrivacy } from '@/lib/privacy';
 import type { FleetNodeDto } from '@/lib/types';
 import { oldestFetch, useResource, type Resource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
 import '@/styles/today.css';
+import '@/styles/today-groups.css';
 import { ChoreList } from './today/Chores';
 import { Digest } from './today/Digest';
 import { HeroKpis } from './today/HeroKpis';
@@ -68,6 +70,14 @@ export default function TodayPage({
   );
   const open = useMemo(() => openIncidents(all), [all]);
   const resolved = useMemo(() => resolvedIncidents(all), [all]);
+  /** The widest run of identical machines: the one line the hero adds when the list is mostly one thing. */
+  const biggestGroup = useMemo(() => {
+    let widest: IncidentGroup | null = null;
+    for (const entry of groupIncidents(open)) {
+      if (entry.kind === 'group' && (widest === null || entry.members.length > widest.members.length)) widest = entry;
+    }
+    return widest;
+  }, [open]);
   const people = useMemo(
     () => (customers.status === 'ready' ? customers.data : []),
     [customers],
@@ -149,6 +159,12 @@ export default function TodayPage({
               {incidents.status === 'loading' ? copy.loading : copy.loadError}
             </p>
           )}
+
+          {incidents.status === 'ready' && biggestGroup !== null ? (
+            <p className="text-fine mt-2">
+              {copy.todayGroupsNote(biggestGroup.members.length, groupLabel(biggestGroup))}
+            </p>
+          ) : null}
 
           <PageNote
             className="today-hero-note"
