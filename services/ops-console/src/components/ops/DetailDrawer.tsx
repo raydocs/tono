@@ -9,6 +9,7 @@ import { Value, type Tier } from './Value';
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
@@ -53,6 +54,7 @@ export function DetailDrawer({
     <Sheet open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
       <SheetContent
         side={phone ? 'bottom' : 'right'}
+        showCloseButton={false}
         className={cn(
           'drawer-shell border-0 bg-transparent p-0 shadow-none',
           phone ? 'h-[86vh]' : 'w-[420px] sm:max-w-[420px]',
@@ -87,6 +89,7 @@ export function DetailDrawer({
               <SheetTitle className="min-w-0 truncate text-row font-medium">{title}</SheetTitle>
               {action ? <div className="ml-auto shrink-0">{action}</div> : null}
             </div>
+            <SheetDescription className="sr-only">{copy.drawerDescription}</SheetDescription>
           </SheetHeader>
           {/* On a wide screen the actions stay where they were written, at the
               end of the panel: pinning them there would leave a 400 px void

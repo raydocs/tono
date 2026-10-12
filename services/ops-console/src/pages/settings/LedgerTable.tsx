@@ -32,6 +32,7 @@ export function LedgerTable({
   rows,
   state,
   message,
+  onRetry,
   locked,
   currentMonth,
   reverseReason,
@@ -41,6 +42,7 @@ export function LedgerTable({
   rows: readonly LedgerEntryDto[];
   state: TableState;
   message?: string;
+  onRetry?: () => void;
   /** A closed source month takes no edits; reversals target the current UTC month. */
   locked: boolean;
   /** Where a reversal lands, whichever month is on screen. */
@@ -84,6 +86,7 @@ export function LedgerTable({
         state={state}
         emptyMessage={words.empty}
         errorMessage={message}
+        onRetry={onRetry}
         className="settings-ledger-table"
       />
 

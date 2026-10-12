@@ -26,10 +26,13 @@ export function NodeBand({
   node,
   slo,
   month,
+  onEdit,
 }: {
   node: NodeDetailDto;
   slo: Resource<SloResponseDto>;
   month: Resource<MonthSummaryDto>;
+  /** Opens the form where the allowance and the dates are typed in. */
+  onEdit: () => void;
 }) {
   const privacy = usePrivacy();
   const capacity = node.facts.capacityUsers;
@@ -77,7 +80,7 @@ export function NodeBand({
         value={quota.used === null ? null : formatBytesMeasured(quota.used)}
         tone={QUOTA_TONE[quota.level]}
         sub={quota.quota === null
-          ? words.trafficNoQuota
+          ? <EnterLink label={words.registerQuota} onClick={onEdit} />
           : words.trafficOf(formatBytesMeasured(quota.quota), formatPercent(share))}
       />
       <StatTile
@@ -89,8 +92,17 @@ export function NodeBand({
         label={words.stat.expires}
         value={formatDeadline(ends)}
         tone={soon ? 'warn' : undefined}
-        sub={ends === null ? words.expiresNone : words.expiresOn(formatDate(ends))}
+        sub={ends === null ? <EnterLink label={words.registerExpiry} onClick={onEdit} /> : words.expiresOn(formatDate(ends))}
       />
     </div>
+  );
+}
+
+/** The empty tile's way out: the dash says nothing was typed, this says where to type it. */
+function EnterLink({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button type="button" className="text-[color:var(--accent-text)] hover:underline max-[640px]:flex max-[640px]:min-h-[44px] max-[640px]:items-center" onClick={onClick}>
+      {label}
+    </button>
   );
 }

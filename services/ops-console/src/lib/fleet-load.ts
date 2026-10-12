@@ -1,3 +1,4 @@
+import type { NodeSummaryDto } from '@contract';
 import { columns, derive, type Derived, type FleetLoadWindow, type LoadPoint } from './node-legacy';
 
 /**
@@ -99,4 +100,51 @@ export function foldFleetLoad(window: FleetLoadWindow): FleetLoad {
 /** Did any machine's load line have two columns to draw between? */
 export function hasFleetLoad(load: FleetLoad): boolean {
   return load.cpu.mean.filter((point) => point.v !== null).length >= 2;
+}
+
+/** The second block on a node, folded onto its base name (control-plane `HY2_NAME_SUFFIX`). */
+const HY2_NAME_SUFFIX = ' · hy2';
+
+/** Mirror of control-plane `catalogBaseName`: strips ` · hy2` and nothing else. */
+function baseName(name: string): string {
+  return name.endsWith(HY2_NAME_SUFFIX) ? name.slice(0, -HY2_NAME_SUFFIX.length) : name;
+}
+
+export type ReportingBreakdown = {
+  /** Series keys that reported anything: the number the band says. */
+  reporting: number;
+  /** Of those, keys that belong to a retired machine. */
+  retired: number;
+  /** Of those, keys that match no machine in the node list. */
+  unknown: number;
+  /** Keys that match a machine, retired or not. */
+  matched: number;
+  /** In-service machines that no key matches. */
+  silent: number;
+};
+
+/**
+ * Why the band's count and the page's 在役 differ. The metrics read has no
+ * catalog join, so a key is a raw node name: it may belong to a retired
+ * machine whose agent still runs, or to a name the node list never had.
+ */
+export function reportingBreakdown(
+  keys: Iterable<string>,
+  nodes: readonly { name: string; lifecycle: NodeSummaryDto['lifecycle'] }[],
+): ReportingBreakdown {
+  const byName = new Map(nodes.map((node) => [node.name, node]));
+  const seen = new Set<string>();
+  let reporting = 0;
+  let retired = 0;
+  let matched = 0;
+  for (const key of keys) {
+    reporting += 1;
+    const node = byName.get(key) ?? byName.get(baseName(key));
+    if (node === undefined) continue;
+    matched += 1;
+    seen.add(node.name);
+    if (node.lifecycle === 'retired') retired += 1;
+  }
+  const silent = nodes.filter((node) => node.lifecycle !== 'retired' && !seen.has(node.name)).length;
+  return { reporting, retired, unknown: reporting - matched, matched, silent };
 }

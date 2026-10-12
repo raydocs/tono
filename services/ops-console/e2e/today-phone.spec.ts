@@ -71,3 +71,25 @@ test('the bar on the bottom edge can end the incident without a scroll', async (
   await expect(closure).toBeVisible();
   await expect(closure.getByRole('radio')).toHaveCount(3);
 });
+
+/**
+ * A card standing in for a dozen machines is only worth having if its verbs
+ * stay as easy to hit as one row's: a thumb tall, whole on the screen, and the
+ * machine list shut so the card is not the whole first screen.
+ */
+test('the group card keeps its three actions a thumb tall and on screen', async ({ page }) => {
+  await open(page, '/today', 'dense');
+  const group = page.locator('.incident-group');
+  await expect(group).toHaveCount(1);
+  await group.scrollIntoViewIfNeeded();
+  await expect(group.locator('details')).not.toHaveAttribute('open', '');
+
+  for (const name of ['下架预览', '认领全部', '静默全部 4 小时']) {
+    const button = group.getByRole('button', { name });
+    await expect(button).toBeInViewport({ ratio: 1 });
+    expect(Math.round((await button.boundingBox())!.height)).toBeGreaterThanOrEqual(44);
+  }
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});

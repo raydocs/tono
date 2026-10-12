@@ -78,6 +78,7 @@ export function Providers() {
           state={state}
           emptyMessage={words.empty}
           errorMessage={accounts.status === 'error' ? accounts.message : undefined}
+          onRetry={accounts.reload}
           className="settings-providers-table"
         />
       </div>
@@ -150,7 +151,7 @@ function providerColumns(): DataColumn<ProviderAccountDto>[] {
             className="underline-offset-4 hover:underline"
             onClick={(event) => event.stopPropagation()}
           >
-            <span className="text-[color:var(--accent)]">{copy.settings.openLink}</span>
+            <span className="text-[color:var(--accent-text)]">{copy.settings.openLink}</span>
           </a>
         )),
     },

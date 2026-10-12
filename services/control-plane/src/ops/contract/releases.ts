@@ -10,8 +10,10 @@ import {
   RANGE_KEYS,
   RELEASE_CHANNELS,
 } from './vocabulary';
+import type { ListDto } from './checkers';
 import {
   arrayOf,
+  assertList,
   bool,
   enumList,
   fields,
@@ -51,6 +53,40 @@ export interface ReleaseDto {
   downloadUrl?: string | null;
   /** Lowest OS the build installs on, when the build declares one. */
   minOsVersion?: string | null;
+}
+
+/** What the key alone says about an object; null fields are the operator's to fill. */
+export interface ReleaseObjectGuessDto {
+  platform: Platform;
+  channel: ReleaseChannel;
+  version: string;
+  build: string | null;
+}
+
+/**
+ * One object in the release bucket, for the console's register-release drawer.
+ *
+ * `sha256` is only what R2 stored (custom metadata or the upload checksum);
+ * null means the operator has to supply it. `registered` is true when a
+ * `client_releases` row already points at the key.
+ */
+export interface ReleaseObjectDto {
+  key: string;
+  sizeBytes: number;
+  uploadedAt: number;
+  sha256: string | null;
+  etag: string;
+  guess: ReleaseObjectGuessDto | null;
+  registered: boolean;
+}
+
+/**
+ * The picker's list. `truncated` is true when the bucket had more keys than
+ * one request reads; R2 lists by key, not by upload time, so the newest
+ * objects may then be missing.
+ */
+export interface ReleaseObjectListDto extends ListDto<ReleaseObjectDto> {
+  truncated: boolean;
 }
 
 export const ADOPTION_BUCKETS = ['current', 'behind_one', 'behind_more', 'unreported'] as const;
@@ -108,6 +144,44 @@ export function assertRelease(value: unknown, path = 'release'): ReleaseDto {
     ...(row.signed === undefined ? {} : { signed: bool(row, path, 'signed') }),
     ...(row.downloadUrl === undefined ? {} : { downloadUrl: optText(row, path, 'downloadUrl') }),
     ...(row.minOsVersion === undefined ? {} : { minOsVersion: optText(row, path, 'minOsVersion') }),
+  };
+}
+
+const OBJECT_KEYS = ['key', 'sizeBytes', 'uploadedAt', 'sha256', 'etag', 'guess', 'registered'];
+const OBJECT_GUESS_KEYS = ['platform', 'channel', 'version', 'build'];
+
+function assertObjectGuess(value: unknown, path: string): ReleaseObjectGuessDto | null {
+  if (value === null) return null;
+  const row = fields(value, path, OBJECT_GUESS_KEYS);
+  return {
+    platform: oneOf<Platform>(row, path, 'platform', PLATFORMS),
+    channel: oneOf<ReleaseChannel>(row, path, 'channel', RELEASE_CHANNELS),
+    version: text(row, path, 'version'),
+    build: optText(row, path, 'build'),
+  };
+}
+
+export function assertReleaseObject(value: unknown, path = 'releaseObject'): ReleaseObjectDto {
+  const row = fields(value, path, OBJECT_KEYS);
+  const sizeBytes = int(row, path, 'sizeBytes');
+  if (sizeBytes < 0) violation(`${path}.sizeBytes`);
+  return {
+    key: text(row, path, 'key'),
+    sizeBytes,
+    uploadedAt: int(row, path, 'uploadedAt'),
+    sha256: optText(row, path, 'sha256'),
+    etag: text(row, path, 'etag'),
+    guess: assertObjectGuess(row.guess, `${path}.guess`),
+    registered: bool(row, path, 'registered'),
+  };
+}
+
+export function assertReleaseObjectList(value: unknown, path = 'releaseObjects'): ReleaseObjectListDto {
+  const row = fields(value, path, ['items', 'nextCursor', 'total', 'updatedAt', 'counts', 'truncated']);
+  const { truncated: _truncated, ...envelope } = row;
+  return {
+    ...assertList(envelope, assertReleaseObject, path),
+    truncated: bool(row, path, 'truncated'),
   };
 }
 

@@ -99,6 +99,7 @@ export function Allowlist() {
           state={state}
           emptyMessage={words.empty}
           errorMessage={entries.status === 'error' ? entries.message : undefined}
+          onRetry={entries.reload}
           className="settings-allowlist-table"
         />
       </div>

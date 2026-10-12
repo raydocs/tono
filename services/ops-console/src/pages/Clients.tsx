@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type {
   AdoptionMatrixDto,
   Platform,
@@ -7,8 +7,10 @@ import type {
   UpdateChannelDto,
 } from '@contract';
 import { PLATFORMS } from '@contract';
+import { Action } from '@/components/ops/Action';
 import { CountText } from '@/components/ops/CountText';
-import { Empty } from '@/components/ops/Empty';
+import { DotJoined } from '@/components/ops/DotJoined';
+import { Empty, ErrorLine } from '@/components/ops/Empty';
 import { PageNote } from '@/components/ops/PageNote';
 import { Section } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
@@ -17,6 +19,7 @@ import { releasedPlatformSet } from '@/lib/releases';
 import { oldestFetch, useResource, type Resource } from '@/lib/use-resource';
 import '@/styles/clients.css';
 import { AdoptionMatrix } from './clients/AdoptionMatrix';
+import { RegisterReleaseDrawer } from './clients/RegisterReleaseDrawer';
 import { ReleaseTable } from './clients/ReleaseTable';
 
 /**
@@ -55,6 +58,7 @@ export default function ClientsPage({
     [releases],
   );
   const shipped = useMemo(() => releasedPlatformSet(rows), [rows]);
+  const [registering, setRegistering] = useState(false);
   const totals = adoption.status === 'ready' ? bucketTotals(adoption.data) : null;
 
   return (
@@ -73,11 +77,15 @@ export default function ClientsPage({
           <p className="text-verdict">
             <CountText
               values={[totals.current, totals.behind, totals.unreported]}
-              render={(v) => [
-                copy.adoptionCount.current(v[0]),
-                copy.adoptionCount.behind(v[1]),
-                copy.adoptionCount.unreported(v[2]),
-              ].join(' · ')}
+              render={(v) => (
+                <DotJoined
+                  parts={[
+                    copy.adoptionCount.current(v[0]),
+                    copy.adoptionCount.behind(v[1]),
+                    copy.adoptionCount.unreported(v[2]),
+                  ]}
+                />
+              )}
             />
           </p>
         )}
@@ -90,20 +98,21 @@ export default function ClientsPage({
       <Section title={copy.clientSections.adoption}>
         {adoption.status === 'ready' ? (
           <AdoptionMatrix matrix={adoption.data} />
+        ) : adoption.status === 'loading' ? (
+          <Empty message={copy.loading} />
         ) : (
-          <Empty
-            message={adoption.status === 'loading'
-              ? copy.loading
-              : adoption.message || copy.loadError}
-          />
+          <ErrorLine message={adoption.message || copy.loadError} onRetry={adoption.reload} />
         )}
       </Section>
 
-      <Section title={copy.clientSections.releases}>
-        {releases.status !== 'ready' ? (
-          <Empty
-            message={releases.status === 'loading' ? copy.loading : releases.message || copy.loadError}
-          />
+      <Section
+        title={copy.clientSections.releases}
+        aside={<Action onClick={() => setRegistering(true)}>{copy.releaseRegister.open}</Action>}
+      >
+        {releases.status === 'loading' ? (
+          <Empty message={copy.loading} />
+        ) : releases.status === 'error' ? (
+          <ErrorLine message={releases.message || copy.loadError} onRetry={onChanged} />
         ) : shipped.size === 0 ? (
           <Empty message={copy.noReleases} />
         ) : (
@@ -133,6 +142,11 @@ export default function ClientsPage({
           </div>
         )}
       </Section>
+      <RegisterReleaseDrawer
+        open={registering}
+        onClose={() => setRegistering(false)}
+        onSaved={() => { onChanged(); adoption.reload(); channels.reload(); }}
+      />
     </div>
   );
 }

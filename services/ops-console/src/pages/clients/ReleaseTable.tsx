@@ -77,6 +77,7 @@ export function ReleaseTable({
         columns={releaseColumns(ask, channel, phone)}
         getRowId={(row) => row.id}
         state={rows.length === 0 ? 'empty' : 'ready'}
+        emptyMessage={copy.noReleases}
         className="clients-release-table"
       />
       <ConfirmDialog
@@ -96,7 +97,7 @@ export function ReleaseTable({
               {copy.releaseConfirm.minPrompt}
             </span>
             <input
-              className="h-8 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-3 font-mono text-body outline-none"
+              className="h-8 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-3 font-mono text-body"
               value={minVersion}
               onChange={(event) => setMinVersion(event.target.value)}
             />
@@ -139,7 +140,9 @@ function verification(row: ReleaseDto, channel: UpdateChannelDto | null): string
  * On a phone the actions are the point of the row, and in the last column of
  * a 1048 px table they are off screen. The checks and notes columns go, and
  * the rest are reordered so the actions land inside the first 390 px; the
- * fixed widths then add up to the 592 px floor in clients.css.
+ * fixed widths then add up to the 592 px floor in clients.css. The action
+ * column is wide enough for the long button and one short one on a line (its
+ * cell pads 8 px, not 12), so a row is one or two lines of buttons, not three.
  */
 const PHONE_ORDER = ['channel', 'version', 'action', 'published', 'minSupported'] as const;
 
@@ -151,9 +154,9 @@ function releaseColumns(
   const all = allReleaseColumns(ask, channel);
   if (!phone) return all;
   return PHONE_ORDER.flatMap((id) => all.filter((column) => column.id === id)).map((column) => {
-    if (column.id === 'channel') return { ...column, width: '56px' };
-    if (column.id === 'version') return { ...column, width: '112px' };
-    if (column.id === 'action') return { ...column, width: '188px', align: 'left' as const };
+    if (column.id === 'channel') return { ...column, width: '48px', className: 'px-2' };
+    if (column.id === 'version') return { ...column, width: '108px' };
+    if (column.id === 'action') return { ...column, width: '200px', align: 'left' as const, className: 'px-2' };
     return column;
   });
 }

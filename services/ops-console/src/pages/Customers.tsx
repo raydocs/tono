@@ -12,11 +12,13 @@ import type {
 import { ADOPTION_BUCKETS } from '@contract';
 import { Action } from '@/components/ops/Action';
 import { Chip } from '@/components/ops/Chip';
+import { DataGapBanner } from '@/components/ops/DataGapBanner';
 import { CountText } from '@/components/ops/CountText';
 import { PageNote } from '@/components/ops/PageNote';
 import { DataTable, type TableState } from '@/components/ops/DataTable';
 import { copy } from '@/copy/copy';
 import { followupApi } from '@/lib/api-followups';
+import { customerFactsGaps } from '@/lib/customer-facts';
 import {
   bucketCounts,
   CUSTOMER_FILTERS,
@@ -183,6 +185,8 @@ export default function CustomersPage({
     return index.size === 0 ? null : index;
   }, [owed]);
   const cohort = useCohort(picked, customers.reload);
+  /** Of the customers listed, the in-use ones nobody has typed an expiry for. */
+  const gaps = useMemo(() => customerFactsGaps(picked), [picked]);
   const columns = useMemo(() => {
     const full = [cohort.column, ...customerColumns(privacy.email, wired, followups, wechat)];
     return withInvites(phone ? phoneColumns(full) : full, privacy.email, wechat);
@@ -314,6 +318,16 @@ export default function CustomersPage({
         <FunnelBar counts={perStage} stage={stage} onPick={(stage) => context.change({ stage, top: 0, left: 0 })} />
       ) : null}
 
+      {customers.status === 'ready' && gaps.noExpiry.length > 0 ? (
+        <DataGapBanner
+          sentence={copy.customersBoard.expiryGap(gaps.noExpiry.length)}
+          action={{
+            label: copy.customersBoard.expiryGapAction,
+            onClick: () => cohort.pickForExpiry(gaps.noExpiry),
+          }}
+        />
+      ) : null}
+
       {cohort.bar}
       <BatchResults onChanged={customers.reload} />
 
@@ -338,6 +352,7 @@ export default function CustomersPage({
            page is an answer to a question nobody asked. */
         emptyMessage={copy.emptyCustomers}
         errorMessage={customers.status === 'error' ? customers.message : undefined}
+        onRetry={customers.reload}
       />
 
       {cohort.dialog}

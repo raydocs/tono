@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import type { CustomerSummaryDto, FunnelDto, IncidentDto, ReleaseDto, SystemHealthDto } from '@contract';
 import { CountText } from '@/components/ops/CountText';
-import { Empty } from '@/components/ops/Empty';
+import { Action } from '@/components/ops/Action';
+import { Empty, ErrorLine } from '@/components/ops/Empty';
 import { PageNote } from '@/components/ops/PageNote';
 import { copy } from '@/copy/copy';
 import { followupApi } from '@/lib/api-followups';
@@ -17,12 +18,14 @@ import {
   openIncidents,
   resolvedIncidents,
 } from '@/lib/incidents';
+import { groupIncidents, groupLabel, type IncidentGroup } from '@/lib/incident-groups';
 import { minSupportedVersions } from '@/lib/releases';
 import { usePrivacy } from '@/lib/privacy';
 import type { FleetNodeDto } from '@/lib/types';
 import { oldestFetch, useResource, type Resource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
 import '@/styles/today.css';
+import '@/styles/today-groups.css';
 import { ChoreList } from './today/Chores';
 import { Digest } from './today/Digest';
 import { HeroKpis } from './today/HeroKpis';
@@ -68,6 +71,14 @@ export default function TodayPage({
   );
   const open = useMemo(() => openIncidents(all), [all]);
   const resolved = useMemo(() => resolvedIncidents(all), [all]);
+  /** The widest run of identical machines: the one line the hero adds when the list is mostly one thing. */
+  const biggestGroup = useMemo(() => {
+    let widest: IncidentGroup | null = null;
+    for (const entry of groupIncidents(open)) {
+      if (entry.kind === 'group' && (widest === null || entry.members.length > widest.members.length)) widest = entry;
+    }
+    return widest;
+  }, [open]);
   const people = useMemo(
     () => (customers.status === 'ready' ? customers.data : []),
     [customers],
@@ -145,10 +156,19 @@ export default function TodayPage({
               ) : clearSentence(all)}
             </p>
           ) : (
-            <p className="text-verdict text-[var(--muted-foreground)]">
-              {incidents.status === 'loading' ? copy.loading : copy.loadError}
-            </p>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <p className="text-verdict text-[var(--muted-foreground)]">
+                {incidents.status === 'loading' ? copy.loading : copy.loadError}
+              </p>
+              {incidents.status === 'error' ? <Action onClick={onChanged}>{copy.retry}</Action> : null}
+            </div>
           )}
+
+          {incidents.status === 'ready' && biggestGroup !== null ? (
+            <p className="text-fine mt-2">
+              {copy.todayGroupsNote(biggestGroup.members.length, groupLabel(biggestGroup))}
+            </p>
+          ) : null}
 
           <PageNote
             className="today-hero-note"
@@ -195,8 +215,10 @@ export default function TodayPage({
           <div className="today-list-wrap">
             {tab === 'chores' ? (
               choresReady ? <ChoreList rows={chores} /> : <Empty message={copy.choresIncomplete} />
-            ) : incidents.status !== 'ready' ? (
-              <Empty message={incidents.status === 'loading' ? copy.loading : incidents.message || copy.loadError} />
+            ) : incidents.status === 'loading' ? (
+              <Empty message={copy.loading} />
+            ) : incidents.status === 'error' ? (
+              <ErrorLine message={incidents.message || copy.loadError} onRetry={onChanged} />
             ) : (
               <IncidentList
                 rows={tab === 'open' ? open : resolved}
@@ -227,6 +249,7 @@ export default function TodayPage({
             onShowOpen={() => setTab('open')}
             onShowResolved={() => setTab('resolved')}
             onShowChores={() => setTab('chores')}
+            onRetry={digest.reload}
           />
         </div>
       </div>

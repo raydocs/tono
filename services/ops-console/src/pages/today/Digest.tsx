@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { CustomerSummaryDto, IncidentDto } from '@contract';
+import { EmptyLine, ErrorLine } from '@/components/ops/Empty';
 import { copy } from '@/copy/copy';
 import { isFollowupOverdue, type DigestDto, type FollowupDto } from '@/lib/api-followups';
 import { nowSec } from '@/lib/clock';
@@ -43,6 +44,7 @@ export function Digest({
   onShowOpen,
   onShowResolved,
   onShowChores,
+  onRetry,
 }: {
   digest: Resource<DigestDto>;
   /** The list's own count, so the block and the tab behind it cannot disagree. */
@@ -54,9 +56,12 @@ export function Digest({
   onShowOpen: () => void;
   onShowResolved: () => void;
   onShowChores: () => void;
+  /** The digest's own refetch, offered beside the error sentence. */
+  onRetry?: () => void;
 }) {
   const phone = useIsPhone();
-  if (digest.status !== 'ready') return null;
+  if (digest.status === 'loading') return <EmptyLine message={copy.loading} />;
+  if (digest.status === 'error') return <ErrorLine message={digest.message} onRetry={onRetry} />;
   const { overnight, due } = digest.data;
   const night = overnight.resolved.length + overnight.opened.length;
   if (night === 0 && !beforeNoon()) return null;
@@ -78,7 +83,7 @@ export function Digest({
         {night === 0 ? (
           <span className="text-body text-[var(--muted-foreground)]">{copy.digestNightNone}</span>
         ) : (
-          <div className="flex min-w-0 flex-col gap-1">
+          <div className="flex min-w-0 flex-col gap-0.5">
             {/* What ended carries how it ended and no colour — it is over.
                 What is still running carries how bad it is. */}
             {ended.shown.map((group) => (

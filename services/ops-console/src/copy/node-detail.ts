@@ -99,7 +99,7 @@ export const nodeDetailCopy = {
     metering: '计量',
   } as const,
   nodeBindingsAllDone: '五处都登记好了',
-  nodeBindingTodo: (what: string) => `${what} 还没登记`,
+  nodeBindingTodo: (what: string) => `${what} 没登记`,
   nodeBindingsAsOf: '核对于',
   nodeBindingsNever: '还没核对过',
 
@@ -111,13 +111,13 @@ export const nodeDetailCopy = {
    * than how the machine is right now — the 证据 lines on 今天, mostly.
    */
   nodeVerdictWord: {
-    down: '整机失联',
+    down: '失联',
     blocked: '疑似被墙',
     no_probe: '没有探针',
-    degraded: '回程丢包',
+    degraded: '劣化',
     probe_unreachable: '探测不通',
     pressure: '高负载',
-    unknown: '还没测到',
+    unknown: '未测',
     ok: '大陆正常',
   } as const,
   /**
@@ -129,7 +129,7 @@ export const nodeDetailCopy = {
    * token, because a word nobody can read is worse than a quiet line.
    */
   nodeReason: {
-    unreachable: '整机连不上，探针也没有声音',
+    unreachable: '中控连不上这台机器，探针也没有声音',
     likely_blocked: '大陆三网都握不上手，像是被墙了',
     agent_missing: '这台机器在售，但上面没有探针',
     machine_pressure: '机器自己吃紧了：负载、内存或磁盘快满了',
@@ -215,9 +215,9 @@ export const nodeDetailCopy = {
     refresh: '刷新本次状态',
     lastKnown: '最后已知状态',
     unknown: '结果待确认',
-    missing: '尚未查到本次任务，不能据此判定失败或重新提交。',
+    missing: '还没查到本次任务，不能据此判定失败或重新提交。',
     readFailed: '读取本次状态失败，保留最后已知状态；没有重新下发。',
-    receiptMissing: '暂未查到本次变更回执，效果仍待验证。',
+    receiptMissing: '还没查到本次变更回执，效果仍待验证。',
     receiptFailed: '任务状态已读到，但变更回执读取失败，效果仍待验证。',
     noReceipt: '这类任务不提供变更回执；连接效果仍以最新测量为准。',
     safety: '执行完成不等于连接恢复；请以最新测量为准。客户端刷新配置也不代表故障已恢复。',
@@ -260,7 +260,7 @@ export const nodeDetailCopy = {
   nodeActionRetired: (name: string) => `${name} 已经退役`,
   nodeActionBlocked: {
     retired: '这台机器已经退役了',
-    hub: '中控机现在连不上这台机器',
+    hub: '中控连不上这台机器',
     notListed: '这台机器现在不在售',
     alreadyListed: '这台机器已经在售',
     unknownListing: '还不知道这台机器在不在售',

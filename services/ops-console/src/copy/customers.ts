@@ -18,7 +18,7 @@ export const customerCopy = {
   } as const,
   lifecycle: {
     active: '在用',
-    suspended: '已停用',
+    suspended: '停用',
     expired: '已到期',
   } as const,
   /**
@@ -159,6 +159,8 @@ export const customerCopy = {
   /** The upload went through the tunnel, so the carrier on it is the exit's. */
   carrierViaExit: '这条上报走的是隧道，看到的是出口的运营商',
   emptyTimeline: '这位客户还没有上报过连接',
+  emptyDestinations: '这位客户这周还没有去过任何目的地',
+  emptyServices: '这位客户这周还没有用过任何服务',
   noCarrierPaths: '还没有够判断的连接记录',
   eventWord: {
     connectBegin: '开始连接',

@@ -56,7 +56,7 @@ export function ConfirmDialog({
           </DialogDescription>
         </DialogHeader>
         {children}
-        {failure ? <p className="panel-error rounded-[10px] px-3 py-2 text-body">{failure}</p> : null}
+        {failure ? <p className="panel-error rounded-[10px] px-3 py-2 text-body" role="alert">{failure}</p> : null}
         <DialogFooter>
           <ActionRow>
             <Action onClick={onCancel}>{copy.releaseConfirm.cancel}</Action>

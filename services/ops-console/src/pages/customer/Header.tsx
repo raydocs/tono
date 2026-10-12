@@ -10,6 +10,7 @@ import { usePrivacy } from '@/lib/privacy';
 import { useAsk } from './ask';
 import { ExpiryDrawer } from './ExpiryDrawer';
 import { SelectField, TextField } from '../settings/form';
+import { CopyStatus } from '@/components/ops/CopyStatus';
 
 /**
  * The four things this page can do to the account, in the header's own row.
@@ -163,6 +164,7 @@ export function CustomerWechat({ wechatId }: { wechatId: string | null }) {
       >
         {copied ? copy.wechatCopied : copy.wechatCopy}
       </Action>
+      <CopyStatus copied={copied} message={copy.wechatCopied} />
     </span>
   );
 }

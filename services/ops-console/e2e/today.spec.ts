@@ -1,5 +1,30 @@
+import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { open, settle } from './ops';
+
+type FixtureIncident = {
+  id: string;
+  kind: string;
+  subjectType: string;
+  subjectId: string | null;
+  status: string;
+  parentIncidentId: string | null;
+};
+
+/**
+ * The machines the page should fold into one card, read from the same file the
+ * fixture server serves: open, not rolled up under another incident, about a
+ * node, and blocked in either spelling of the kind.
+ */
+function walledIncidents(): { id: string; node: string }[] {
+  const file = JSON.parse(
+    readFileSync(new URL('../fixtures/incidents.dense.json', import.meta.url), 'utf8'),
+  ) as { list: { items: FixtureIncident[] } };
+  return file.list.items
+    .filter((row) => row.status !== 'resolved' && row.parentIncidentId === null
+      && row.subjectType === 'node' && row.kind.replace(/_/g, '-') === 'node-blocked')
+    .map((row) => ({ id: row.id, node: row.subjectId ?? '' }));
+}
 
 test.describe('today page', () => {
   test('list', async ({ page }) => {
@@ -17,6 +42,25 @@ test.describe('today page', () => {
     await expect(page.locator('.incident-row').nth(1).getByRole('button', { name: '打开客户' }))
       .toBeVisible();
     await expect(page).toHaveScreenshot('list.png');
+  });
+
+  /**
+   * The failure-clusters block reads its own endpoint. The fixture server once
+   * had no route for it, so every set showed the unavailable line with a retry.
+   */
+  test('the failure clusters block reads its fixture: empty sentence, then three lines', async ({ page }) => {
+    await open(page, '/today', 'empty');
+    await expect(page.getByText('这段时间没有打开的失败聚类。')).toBeVisible();
+    await expect(page.getByText('失败聚类还读不到。')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '重试' })).toHaveCount(0);
+
+    await open(page, '/today');
+    const block = page.locator('section').filter({ has: page.getByRole('heading', { name: '失败聚类' }) });
+    await expect(block.locator('li')).toHaveCount(3);
+    await expect(block).toContainText('TONO_TLS_TIMEOUT · handshake · windows 1.8.1 · Los Angeles · Mesa · 41');
+    await expect(block).toContainText('TONO_AUTH_DNS · securingDNS · macos 1.8.0 · Tokyo · Fuji · 17');
+    await expect(block).toContainText('TONO_NODE_OR_CORE_UNREACHABLE · connect · windows 1.7.9 · Hong Kong · Victoria · 23');
+    await expect(page.getByText('失败聚类还读不到。')).toHaveCount(0);
   });
 
   test('the resolved tab is a different list, not a filter on the same one', async ({ page }) => {
@@ -346,4 +390,42 @@ test('复测把测量和记录一起做掉', async ({ page }, testInfo) => {
   await settle(page);
 
   await expect(drawer.getByText('已复测')).toBeVisible();
+});
+
+/**
+ * The page used to print one identical card per machine the wall took. They
+ * are one card now, and the verb that claims them is one press; the machines
+ * are a tap down, each with its own state.
+ */
+test('同一面墙带走的机器是一张卡，一次认领全部', async ({ page }, testInfo) => {
+  const incidents = walledIncidents();
+  const machines = incidents.map((row) => row.node).sort();
+  expect(machines.length).toBeGreaterThanOrEqual(3);
+  const session = `group-ack-${testInfo.project.name}-${String(testInfo.repeatEachIndex)}-${String(testInfo.retry)}`;
+  await open(page, '/today', 'dense', session);
+
+  const group = page.locator('.incident-group');
+  await expect(group).toHaveCount(1);
+  await expect(group).toContainText(`严重 · ${String(machines.length)} 台节点`);
+  await expect(group).toContainText(`${String(machines.length)} 台疑似被墙，仍在客户目录`);
+  await expect(page.getByText(`其中 ${String(machines.length)} 个是同一件事`)).toBeVisible();
+
+  // Shut until asked for; opening it lists every machine once, with its state.
+  await expect(group.locator('details')).not.toHaveAttribute('open', '');
+  await group.getByText(`${String(machines.length)} 台节点明细`).click();
+  const lines = group.locator('.group-member');
+  await expect(lines).toHaveCount(machines.length);
+  expect((await lines.locator('.incident-title').allTextContents()).sort()).toEqual(machines);
+  await expect(lines.filter({ hasText: '未认领' })).toHaveCount(machines.length);
+
+  await group.getByRole('button', { name: '认领全部' }).click();
+  await expect(lines.filter({ hasText: '已认领' })).toHaveCount(machines.length);
+  await expect(group.getByRole('button', { name: '认领全部' })).toHaveCount(0);
+
+  // Each machine still has its own drawer: 详情 opens that incident, not the group.
+  const first = lines.first();
+  const id = await first.getAttribute('data-incident');
+  expect(incidents.map((row) => row.id)).toContain(id);
+  await first.getByRole('button', { name: '详情' }).click();
+  await expect(page).toHaveURL(new RegExp(`incident=${id ?? ''}(&|#|$)`));
 });

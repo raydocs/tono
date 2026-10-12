@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Action } from '@/components/ops/Action';
 import { ConfirmDialog } from '@/components/ops/ConfirmDialog';
-import { EmptyLine } from '@/components/ops/Empty';
+import { EmptyLine, ErrorLine } from '@/components/ops/Empty';
 import { measured } from '@/components/ops/measured';
 import { MetricCard } from '@/components/ops/MetricCard';
 import { Section } from '@/components/ops/Section';
@@ -170,7 +170,9 @@ export function Ledger() {
         ) : null}
 
         {month0 === null ? (
-          <EmptyLine message={summary.status === 'error' ? summary.message : copy.loading} />
+          summary.status === 'error'
+            ? <ErrorLine message={summary.message} onRetry={summary.reload} />
+            : <EmptyLine message={copy.loading} />
         ) : (
           <Totals summary={month0} />
         )}
@@ -221,6 +223,7 @@ export function Ledger() {
               ? 'error'
               : rows.length === 0 ? 'empty' : 'ready'}
           message={entries.status === 'error' ? entries.message : undefined}
+          onRetry={entries.reload}
           locked={locked}
           currentMonth={currentMonth}
           reverseReason={reverseReason}
@@ -296,7 +299,7 @@ function Totals({ summary }: { summary: MonthSummaryDto }) {
   const cell = (value: number) => measured<number | null>(value, at, words.source);
   const money = (value: number) => ({ number: formatCny(value) ?? copy.missing });
   return (
-    <div className="settings-ledger-totals grid gap-6 py-4 sm:grid-cols-3">
+    <div className="settings-ledger-totals metric-band grid gap-6 py-4 sm:grid-cols-3">
       <MetricCard label={words.revenue} value={cell(summary.revenueCnyMinor)} format={money} />
       <MetricCard label={words.cost} value={cell(summary.costCnyMinor)} format={money} />
       <MetricCard label={words.margin} value={cell(summary.marginCnyMinor)} format={money} />

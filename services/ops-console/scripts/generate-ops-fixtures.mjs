@@ -1613,6 +1613,20 @@ function buildCoreIncidents() {
   };
 }
 
+/**
+ * The open node rows of the dense set that read as node_blocked, besides rows 1
+ * and 21, and the machine each is about. The machines differ from every other
+ * node_blocked row because 早报 folds the night by kind and subject: two of
+ * these on one machine would be one line there, and the dense 早报 would stop
+ * being the same twenty-odd groups it was.
+ */
+const WALLED_NODE_ROWS = new Map([
+  [5, '香港 · 中环'],
+  [9, 'Los Angeles · Mesa'],
+  [13, '东京 · 渋谷'],
+  [17, 'Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）'],
+]);
+
 function buildDenseIncidents() {
   const items = [];
   const details = {};
@@ -1638,11 +1652,14 @@ function buildDenseIncidents() {
     const subjectType = SUBJECT_TYPES[(n - 1) % SUBJECT_TYPES.length];
     const severity = SEVERITIES[(n - 1) % SEVERITIES.length];
     const tone = severity === 'severe' ? 'sev' : severity === 'warn' ? 'warn' : 'info';
-    const kind = kinds[(n - 1) % kinds.length];
+    // 同一面墙带走的几台机器：不挂在别的事故下、主语是节点、一直开着，
+    // 今天页才有一组可以折叠的同类事故（inc-d01 和 inc-d21 本来就是）。
+    const walled = open && subjectType === 'node' && WALLED_NODE_ROWS.has(n);
+    const kind = walled ? 'node_blocked' : kinds[(n - 1) % kinds.length];
     const subjectId = subjectType === 'user'
       ? userId(((n - 1) % 20) + 1)
       : subjectType === 'node'
-        ? FEATURED_NODES[(n - 1) % FEATURED_NODES.length]
+        ? (walled ? WALLED_NODE_ROWS.get(n) : FEATURED_NODES[(n - 1) % FEATURED_NODES.length])
         : subjectType === 'home_exit'
           ? `home-line-${String((n % 4) + 1).padStart(2, '0')}`
           : 'asia';
@@ -1657,7 +1674,7 @@ function buildDenseIncidents() {
       severity,
       status: open ? 'open' : 'resolved',
       tone,
-      title: `${open ? titlesOpen[(n - 1) % titlesOpen.length] : titlesResolved[(n - 1) % titlesResolved.length]} · ${subjectId}`,
+      title: `${open ? titlesOpen[walled ? 0 : (n - 1) % titlesOpen.length] : titlesResolved[(n - 1) % titlesResolved.length]} · ${subjectId}`,
       summary: open ? '仍在观察，尚未恢复。' : '已经恢复，留作记录。',
       parentIncidentId: open && n % 6 === 0 ? 'inc-d01' : null,
       rulesVersion: 3,

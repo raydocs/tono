@@ -25,3 +25,45 @@ test('the fleet is a three column table at 390 px, ahead of the charts', async (
   await settle(page);
   await expect(page).toHaveScreenshot('nodes.png');
 });
+
+/** The banner's action drops under its sentence and is a thumb tall, inside the screen. */
+test('the data-gap banner action is 44 px tall and inside the viewport at 390 px', async ({ page }) => {
+  await open(page, '/nodes');
+  const action = page.getByRole('button', { name: '批量登记' });
+  await expect(action).toBeVisible();
+  const box = await action.boundingBox();
+  expect(box!.height).toBeGreaterThanOrEqual(44);
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  const sentence = await page.getByText('台没登记额度').boundingBox();
+  expect(box!.y).toBeGreaterThan(sentence!.y);
+});
+
+/**
+ * Six production nodes share a city. A one-line cell showed all of them as
+ * "Los Ang…"; the site after the separator has to be readable in full.
+ */
+test('two nodes in the same city show their site name in full at 390 px', async ({ page }) => {
+  await open(page, '/nodes');
+
+  const links = page.locator('.nodes-table tbody .nodes-name a');
+  const sites: (string | null)[] = [];
+  const clipped: (boolean | undefined)[] = [];
+  for (const link of await links.all()) {
+    if (!(await link.textContent())?.startsWith('Los Angeles')) continue;
+    // The last line of the cell is the site; the muted line above it is the city.
+    const main = await link.evaluate((a) => {
+      const lines = a.querySelectorAll('span');
+      const last = lines[lines.length - 1];
+      return last ? { text: last.textContent, clipped: last.scrollHeight > last.clientHeight + 1 } : null;
+    });
+    sites.push(main?.text ?? null);
+    clipped.push(main?.clipped);
+  }
+  expect(sites).toEqual(['Mesa', 'Pacific-Coast-Highway-Backhaul-01']);
+  expect(clipped).toEqual([false, false]);
+  for (const site of sites) expect(site?.endsWith('…')).toBe(false);
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});

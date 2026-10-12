@@ -6,8 +6,10 @@ import { BLANK_ROUTE, goPage, readRoute, type OpsRoute } from '@/lib/hash-route'
 import { can, currentRole, firstAllowedPage, PAGE_REQUIRES } from '@/lib/roles';
 import { useBeat } from '@/lib/use-poll';
 import { useFleet } from '@/lib/use-fleet';
+import { unreachableSummary } from '@/lib/unreachable';
 import { newestFetch, useResource, type Resource } from '@/lib/use-resource';
 import type { ListDto } from '@contract';
+import { ErrorBoundary } from './ErrorBoundary';
 import { Shell } from './Shell';
 
 function asItems<T>(
@@ -18,6 +20,7 @@ function asItems<T>(
       status: 'ready',
       data: list.data.items,
       fetchedAt: list.fetchedAt,
+      unreachable: list.unreachable,
       reload: list.reload,
     };
   }
@@ -117,6 +120,10 @@ export function App() {
   const waiting = funnel.status === 'ready' ? funnel.data : null;
   const open = incidents.status === 'ready' ? incidents.data : [];
   const role = currentRole();
+  const unreachable = unreachableSummary(fleet, nodes, customers, funnel, incidents, releases, health);
+  const retryReads = () => {
+    for (const read of [fleet, nodes, customerList, funnel, incidents, releases, health]) read.reload();
+  };
   const page = can(PAGE_REQUIRES[route.page], role) ? route.page : firstAllowedPage(role);
 
   return (
@@ -128,8 +135,10 @@ export function App() {
       customers={people}
       funnel={waiting}
       incidents={open}
+      unreachable={unreachable === null ? null : { since: unreachable.since, onRetry: retryReads }}
     >
-      <Suspense fallback={<div className="page-wrap"><Empty message={copy.loading} /></div>}>
+      <ErrorBoundary key={`${page}/${route.nodeName ?? ''}/${route.customerId ?? ''}`}>
+        <Suspense fallback={<div className="page-wrap"><Empty message={copy.loading} /></div>}>
         {page === 'nodes' ? (
           route.nodeName
             ? <NodeDetailPage name={route.nodeName} customers={people} fleet={fleet} />
@@ -170,7 +179,8 @@ export function App() {
                     onChanged={incidents.reload}
                   />
                 )}
-      </Suspense>
+        </Suspense>
+      </ErrorBoundary>
     </Shell>
   );
 }

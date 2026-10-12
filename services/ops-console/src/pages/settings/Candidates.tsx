@@ -99,6 +99,7 @@ export function Candidates() {
           state={state}
           emptyMessage={words.empty}
           errorMessage={candidates.status === 'error' ? candidates.message : undefined}
+          onRetry={candidates.reload}
           className="settings-candidates-table"
         />
       </div>

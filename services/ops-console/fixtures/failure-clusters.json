@@ -1,0 +1,59 @@
+{
+  "clock": 1725000000,
+  "body": {
+    "clusters": [
+      {
+        "id": "fc-01",
+        "code": "TONO_TLS_TIMEOUT",
+        "stage": "handshake",
+        "appVersion": "1.8.1",
+        "platform": "windows",
+        "node": "Los Angeles · Mesa",
+        "severity": "normal",
+        "count": 41,
+        "users": 9,
+        "devices": 11,
+        "firstSeenMs": 1724892000000,
+        "lastSeenMs": 1724999280000,
+        "status": "open",
+        "sample": "{\"carrier\":\"unicom\",\"handshakeMs\":10000}",
+        "detailPath": "/api/v1/diagnostics/clusters/fc-01"
+      },
+      {
+        "id": "fc-02",
+        "code": "TONO_AUTH_DNS",
+        "stage": "securingDNS",
+        "appVersion": "1.8.0",
+        "platform": "macos",
+        "node": "Tokyo · Fuji",
+        "severity": "normal",
+        "count": 17,
+        "users": 6,
+        "devices": 7,
+        "firstSeenMs": 1724812800000,
+        "lastSeenMs": 1724989200000,
+        "status": "open",
+        "sample": "{\"resolver\":\"system\",\"channel\":\"release\"}",
+        "detailPath": "/api/v1/diagnostics/clusters/fc-02"
+      },
+      {
+        "id": "fc-03",
+        "code": "TONO_NODE_OR_CORE_UNREACHABLE",
+        "stage": "connect",
+        "appVersion": "1.7.9",
+        "platform": "windows",
+        "node": "Hong Kong · Victoria",
+        "severity": "normal",
+        "count": 23,
+        "users": 5,
+        "devices": 8,
+        "firstSeenMs": 1724928000000,
+        "lastSeenMs": 1724996400000,
+        "status": "open",
+        "sample": "{\"carrier\":\"mobile\",\"channel\":\"release\"}",
+        "detailPath": "/api/v1/diagnostics/clusters/fc-03"
+      }
+    ],
+    "updatedAt": 1724999970
+  }
+}

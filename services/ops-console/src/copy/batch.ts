@@ -11,6 +11,7 @@ export const batchCopy = {
   discover: '读取可接收动作的设备',
   renew: '续期',
   refresh: '刷新目录',
+  expiry: '设到期日',
   receipt: '回执编号',
   states: {
     waiting: '等待处理', checking: '核对中', submitting: '提交中',
@@ -24,8 +25,8 @@ export const batchCopy = {
   uncertain: '未拿到可靠的写入回执。先核对结果，不要重复提交。',
   changed: '到期日已变化，本次没有写入。请打开客户核对后重新选择。',
   renewalVerified: '重新读取的到期日与本次目标日期一致。',
-  renewalUnverified: '尚未读到本次目标日期；没有再次写入，请核对客户。',
-  receiptMissing: '尚未查到这个回执，不能据此判定失败或重新提交。',
+  renewalUnverified: '还没读到本次目标日期；没有再次写入，请核对客户。',
+  receiptMissing: '还没查到这个回执，不能据此判定失败或重新提交。',
   receiptFailed: '读取回执失败，保留最后已知状态；没有重新下发。',
   deviceDone: '客户端报告完成；不等同于客户连接体验已恢复。',
   deviceFailed: '客户端报告失败或回执已过期。请查看客户后决定是否另发动作。',

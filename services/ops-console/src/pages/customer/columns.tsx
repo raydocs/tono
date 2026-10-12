@@ -163,7 +163,7 @@ export function customerColumns(
         width: '80px',
         cell: (row: CustomerSummaryDto) => (
           row.services.length === 0
-            ? <Value value={null} source={copy.sourceWord.telemetry} />
+            ? <Value value={null} source={copy.sourceWord.telemetry} reason={copy.customersBoard.servicesMissing} />
             : <ServicesCell families={row.services} />
         ),
       },
@@ -189,6 +189,7 @@ export function customerColumns(
           <Value
             value={row.expiresAt === null ? null : formatDate(row.expiresAt)}
             source={copy.sourceWord.profile}
+            reason={copy.customersBoard.expiryMissing}
             mono
             tier="body"
           />

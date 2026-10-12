@@ -30,11 +30,13 @@ import {
   assertNodeSummary,
   assertProviderAccount,
   assertRelease,
+  assertReleaseObjectList,
   assertServiceUsage,
   assertSystemHealth,
   assertUpdateChannel,
   PLATFORMS,
 } from '../src/ops/contract';
+import { listReleaseObjects } from '../src/ops/releases-objects';
 
 const ACCESS_TEAM_DOMAIN = 'test-team.cloudflareaccess.com';
 const ACCESS_AUDIENCE = 'test-access-audience-0001';
@@ -944,6 +946,107 @@ describe('ops v1 api', () => {
     expect(channels.items.find((row) => row.platform === 'linux')?.kind).toBeNull();
   });
 
+  it('lists release bucket objects with a key guess and the registered flag', async () => {
+    const releases = (env as unknown as { RELEASES: R2Bucket }).RELEASES;
+    const bytes = new TextEncoder().encode('bytes');
+    const sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
+      .map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    await releases.put('Tono-1.2.3-build45-arm64.zip', bytes, { customMetadata: { sha256 } });
+    await releases.put('Tono-1.2.2-setup.exe', bytes);
+    await releases.put('notes/readme.txt', bytes);
+    await db().prepare(
+      `INSERT INTO client_releases(id, platform, channel, version, r2_key, created_at, updated_at)
+       VALUES('rel-obj', 'windows', 'stable', '1.2.2', 'Tono-1.2.2-setup.exe', ?, ?)`,
+    ).bind(NOW, NOW).run();
+    const res = await ops('releases/objects?limit=10');
+    expect(res.status).toBe(200);
+    const { items, truncated } = assertReleaseObjectList(await res.json());
+    expect(truncated).toBe(false);
+    const byKey = new Map(items.map((row) => [row.key, row]));
+    expect(byKey.get('Tono-1.2.3-build45-arm64.zip')).toMatchObject({
+      sizeBytes: bytes.byteLength,
+      sha256,
+      registered: false,
+      guess: { platform: 'macos', channel: 'stable', version: '1.2.3', build: '45' },
+    });
+    expect(byKey.get('Tono-1.2.2-setup.exe')).toMatchObject({
+      registered: true,
+      guess: { platform: 'windows', version: '1.2.2', build: null },
+    });
+    expect(byKey.get('notes/readme.txt')?.guess).toBeNull();
+    expect((await ops('releases/objects?limit=1').then((r) => r.json()) as { items: unknown[] }).items).toHaveLength(1);
+  });
+
+  it('never reads past the scan cap, and says when the bucket was cut short', async () => {
+    const releases = (env as unknown as { RELEASES: R2Bucket }).RELEASES;
+    const bytes = new TextEncoder().encode('x');
+    for (const key of ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'z-newest']) await releases.put(key, bytes);
+    const asked: Array<number | undefined> = [];
+    const spy = {
+      list: (options?: R2ListOptions) => {
+        asked.push(options?.limit);
+        return releases.list(options);
+      },
+    } as unknown as R2Bucket;
+
+    const cut = await listReleaseObjects(spy, db(), 50, { cap: 5, page: 2 });
+    // 2 + 2 + the 1 left in the budget: the scan stops at the cap exactly.
+    expect(asked).toEqual([2, 2, 1]);
+    expect(cut.items).toHaveLength(5);
+    expect(cut.truncated).toBe(true);
+    // R2 lists by key, so the newest object sorts after the cut: that is why the flag exists.
+    expect(cut.items.map((row) => row.key)).not.toContain('z-newest');
+
+    const whole = await listReleaseObjects(releases, db(), 50, { cap: 100 });
+    expect(whole.truncated).toBe(false);
+    expect(whole.items.map((row) => row.key)).toContain('z-newest');
+  });
+
+  it('keeps the listing validator a fixed size', async () => {
+    const releases = (env as unknown as { RELEASES: R2Bucket }).RELEASES;
+    const bytes = new TextEncoder().encode('x');
+    for (let i = 0; i < 200; i += 1) {
+      await releases.put(`${String(i).padStart(4, '0')}-${'k'.repeat(1019)}`, bytes);
+    }
+    const res = await ops('releases/objects?limit=200');
+    expect(res.status).toBe(200);
+    expect(assertReleaseObjectList(await res.json()).items).toHaveLength(200);
+    expect(res.headers.get('etag')!.length).toBeLessThan(128);
+  });
+
+  it('changes the validator when only an object\'s stored sha256 changes', async () => {
+    const releases = (env as unknown as { RELEASES: R2Bucket }).RELEASES;
+    const bytes = new TextEncoder().encode('same bytes');
+    const key = 'Tono-3.0.0-build300-arm64.zip';
+    await releases.put(key, bytes, { customMetadata: { sha256: 'a'.repeat(64) } });
+    const first = await ops('releases/objects');
+    const tag = first.headers.get('etag')!;
+    expect((await ops('releases/objects', { headers: { 'if-none-match': tag } })).status).toBe(304);
+
+    await releases.put(key, bytes, { customMetadata: { sha256: 'b'.repeat(64) } });
+    const again = await ops('releases/objects', { headers: { 'if-none-match': tag } });
+    expect(again.status).toBe(200);
+    expect(again.headers.get('etag')).not.toBe(tag);
+    const row = assertReleaseObjectList(await again.json()).items.find((item) => item.key === key);
+    expect(row?.sha256).toBe('b'.repeat(64));
+  });
+
+  it('refuses a release missing a required field instead of storing "undefined"', async () => {
+    const full = {
+      platform: 'macos', channel: 'stable', version: '9.9.9', r2Key: 'x.zip',
+      sizeBytes: 5, sha256: 'a'.repeat(64),
+    };
+    for (const name of Object.keys(full)) {
+      const partial: Record<string, unknown> = { ...full };
+      delete partial[name];
+      const res = await ops('releases', json(partial));
+      expect(res.status, name).toBe(400);
+      expect(((await res.json()) as { error?: { code?: string } }).error?.code ?? '', name).toBe('VALIDATION_ERROR');
+    }
+    const rows = await db().prepare("SELECT COUNT(*) AS n FROM client_releases WHERE version = 'undefined'").first<{ n: number }>();
+    expect(rows?.n).toBe(0);
+  });
+
   it('direct-candidates accept/reject and traffic-policy draft', async () => {
     await db().prepare(
       `INSERT INTO direct_candidates(etld1, first_seen, last_seen, users, bytes_30d, status)
@@ -1355,6 +1458,7 @@ describe('ops v1 api', () => {
       'PATCH /api/v1/ops/releases/{id}',
       'GET /api/v1/ops/releases/adoption',
       'GET /api/v1/ops/releases/channels',
+      'GET /api/v1/ops/releases/objects',
       'GET /api/v1/ops/direct-candidates',
       'POST /api/v1/ops/direct-candidates/{etld1}/accept',
       'POST /api/v1/ops/direct-candidates/{etld1}/reject',

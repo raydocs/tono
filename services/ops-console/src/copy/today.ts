@@ -36,6 +36,29 @@ export const todayCopy = {
   incidentImpactNode: (n: number) => `影响 ${n} 台节点`,
   incidentOpenFor: '已持续',
   incidentLastSeen: '最后测量',
+  /**
+   * Machines that fail the same way fold into one card. The title is the
+   * members' shared sentence when they have one, otherwise the name of the
+   * kind below, which is only ever the fallback.
+   */
+  todayGroupEyebrow: (severity: string, machines: number) => `${severity} · ${machines} 台节点`,
+  todayGroupTitle: (label: string, machines: number) => `${machines} 台${label}`,
+  todayGroupKinds: {
+    'node-blocked': '疑似被墙，仍在客户目录',
+    'node-down': '失联',
+    'node-degraded': '劣化',
+    'node-pressure': '负载偏高',
+    'node-no-probe': '在售但没有探针',
+    'node-probe-unreachable': '探测不通',
+  } as Readonly<Record<string, string>>,
+  todayGroupsNote: (members: number, label: string) => `其中 ${members} 个是同一件事：${label}`,
+  incidentGroupEarliest: '最早',
+  incidentGroupMembers: (n: number) => `${n} 台节点明细`,
+  incidentGroupClaimed: '已认领',
+  incidentGroupUnclaimed: '未认领',
+  incidentGroupDetail: '详情',
+  incidentGroupAckAll: '认领全部',
+  incidentGroupSnoozeAll: '静默全部 4 小时',
   incidentPrimary: {
     ack: '认领',
     snooze: '静默 4 小时',
@@ -273,7 +296,7 @@ export const todayCopy = {
   chore: {
     nodeRenew: (node: string, when: string) => `${node} ${when} 续费`,
     nodeQuota: (node: string, pct: string) => `${node} 本期流量已用 ${pct}`,
-    nodeProfile: (node: string) => `${node} 还没登记价格与续费日`,
+    nodeProfile: (node: string) => `${node} 没登记价格与续费日`,
     customerExpiry: (who: string, when: string) => `${who} ${when} 到期`,
     customerQuota: (who: string, pct: string) => `${who} 本期流量已用 ${pct}`,
     customerVersion: (who: string, version: string) => `${who} 还在跑 ${version}`,

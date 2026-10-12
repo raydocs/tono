@@ -10,7 +10,7 @@ import type {
 import { copy } from '@/copy/copy';
 import { formatCount, formatLatency, formatLoss, formatPercent, formatWhenAgo } from './display';
 
-const SEVERITY_RANK: Record<Severity, number> = { severe: 0, warn: 1, notice: 2 };
+export const SEVERITY_RANK: Record<Severity, number> = { severe: 0, warn: 1, notice: 2 };
 
 /**
  * 进行中: anything the operator has not finished with. An acked incident is
@@ -108,7 +108,7 @@ export type IncidentActionSpec = {
  * page got its action, so the two spellings are folded before anything is
  * matched on them.
  */
-function kindOf(incident: IncidentDto): string {
+export function kindOf(incident: IncidentDto): string {
   return incident.kind.trim().toLowerCase().replace(/_/g, '-');
 }
 
