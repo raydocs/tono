@@ -91,7 +91,7 @@ struct SeaPanel<Content: View>: View {
 struct SeaEmptyMark: View {
     var body: some View {
         Canvas { context, size in
-            let accent = SeaTheme.cool
+            let accent = SeaTheme.warm
             var moon = Path()
             moon.addArc(center: CGPoint(x: size.width * 0.62, y: 22), radius: 13,
                         startAngle: .degrees(-70), endAngle: .degrees(200), clockwise: false)

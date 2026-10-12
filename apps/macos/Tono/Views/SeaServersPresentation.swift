@@ -50,12 +50,20 @@ struct SeaSignalBars: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 2) {
-            ForEach(0..<3, id: \.self) { index in
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(index < lit ? SeaTheme.warm : SeaTheme.text.opacity(0.22))
-                    .frame(width: 3, height: CGFloat(5 + index * 3))
+            if lit == 0 {
+                // Not measured yet: one hollow ring, so "untested" never reads as "weak".
+                Circle().strokeBorder(SeaTheme.text.opacity(0.3), lineWidth: 1)
+                    .frame(width: 7, height: 7)
+            } else {
+                ForEach(0..<3, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(index < lit ? AnyShapeStyle(SeaTheme.primaryGradient)
+                                          : AnyShapeStyle(SeaTheme.text.opacity(0.22)))
+                        .frame(width: 3, height: CGFloat(5 + index * 3))
+                }
             }
         }
+        .frame(height: 11)
         .accessibilityHidden(true)
     }
 }
@@ -191,7 +199,8 @@ extension ProxiesView {
                 }
             } label: {
                 HStack(spacing: 10) {
-                    NodeRouteMark(size: 30, city: nodeCityParts(node.displayName).city)
+                    NodeRouteMark(size: 30, city: nodeCityParts(node.displayName).city,
+                                  gradient: SeaTheme.primaryGradient, warmTile: true)
                     Text(nodeRouteTitle(node)).font(.system(size: 15))
                         .foregroundStyle(SeaTheme.text).lineLimit(1)
                     Spacer(minLength: 8)

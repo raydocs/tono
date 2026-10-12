@@ -217,7 +217,11 @@ export const SeaLines = ({
             }
           }}
         >
-          <TonoNodeBadge size={30} city={nodeCityParts(server.name).city} />
+          <TonoNodeBadge
+            size={30}
+            city={nodeCityParts(server.name).city}
+            tone="sunrise"
+          />
           <span className="sea-line-name">{nodeDisplayName(server.name)}</span>
           {/* A line with no city word falls back to its own name: say it once. */}
           <span className="sea-line-city">
@@ -322,6 +326,7 @@ export const SeaLines = ({
           <TonoNodeBadge
             size={48}
             city={nodeCityParts(recommended.name).city}
+            tone="sunrise"
           />
         )}
         <div>

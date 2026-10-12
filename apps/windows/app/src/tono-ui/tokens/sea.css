@@ -199,8 +199,20 @@
   border-radius: 1px;
   background: #ffffff26;
 }
+/* Measured strength is drawn in the sunrise gradient whatever the page tone;
+   the tone accent stays for links and selection. */
 .sea-signal > span[data-lit="true"] {
-  background: var(--sea-accent);
+  background: var(--sea-primary);
+}
+/* Not measured yet: one hollow ring instead of three dark bars, so "untested"
+   never reads as "weak". */
+.sea-signal[data-level="0"] > span {
+  width: 7px;
+  height: 7px !important;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid #ffffff4d;
+  align-self: center;
 }
 .sea-toggle[aria-checked="true"] span {
   transform: translateX(16px);
@@ -257,7 +269,7 @@
 .sea-empty-mark {
   display: block;
   margin: 24px auto 10px;
-  color: var(--sea-accent);
+  color: #ffd58e;
 }
 .sea-skeleton {
   min-height: 46px;

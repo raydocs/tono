@@ -94,7 +94,7 @@
   cursor: pointer;
 }
 .sea-line-star[aria-pressed="true"] {
-  color: var(--sea-accent);
+  color: #ffd58e;
 }
 .sea-line-star:disabled {
   cursor: default;

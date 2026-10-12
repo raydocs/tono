@@ -319,11 +319,14 @@ struct NodeRouteMark: View {
     @Environment(\.colorScheme) private var colorScheme
     var size: CGFloat = 44
     var city: String? = nil
+    /// The sea look strokes with its sunrise gradient on a warm-tinted tile.
+    var gradient: LinearGradient = TonoBrand.routeGradient
+    var warmTile = false
 
     var body: some View {
         cityGlyphShape(for: city ?? "")
             .stroke(
-                TonoBrand.routeGradient,
+                gradient,
                 style: StrokeStyle(
                     lineWidth: max(1.0, size * 0.042),
                     lineCap: .round,
@@ -333,13 +336,13 @@ struct NodeRouteMark: View {
             .padding(size * 0.26)
             .frame(width: size, height: size)
             .background(
-                .primary.opacity(colorScheme == .dark ? 0.07 : 0.045),
+                warmTile ? Color(hex: "FFD6A0").opacity(0.09) : .primary.opacity(colorScheme == .dark ? 0.07 : 0.045),
                 in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
                     .strokeBorder(
-                        .primary.opacity(colorScheme == .dark ? 0.13 : 0.10),
+                        warmTile ? Color(hex: "FFD6A0").opacity(0.18) : .primary.opacity(colorScheme == .dark ? 0.13 : 0.10),
                         lineWidth: 0.7
                     )
             }

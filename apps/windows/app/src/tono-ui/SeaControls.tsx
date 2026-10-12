@@ -153,10 +153,14 @@ export const SeaSignalBars = ({
   level: 0 | 1 | 2 | 3
   label: string
 }) => (
-  <span className="sea-signal" role="img" aria-label={label}>
-    {[4, 8, 12].map((height, index) => (
-      <span key={height} style={{ height }} data-lit={index < level} />
-    ))}
+  <span className="sea-signal" role="img" aria-label={label} data-level={level}>
+    {level === 0 ? (
+      <span data-lit={false} />
+    ) : (
+      [4, 8, 12].map((height, index) => (
+        <span key={height} style={{ height }} data-lit={index < level} />
+      ))
+    )}
   </span>
 )
 interface ChoiceProps {

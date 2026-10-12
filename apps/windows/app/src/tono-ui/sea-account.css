@@ -42,16 +42,16 @@
   border: 0;
   border-radius: 99px;
   overflow: hidden;
-  accent-color: var(--sea-accent);
+  accent-color: #ffb877;
 }
 .sea-account progress::-webkit-progress-bar {
   background: #ffffff12;
 }
 .sea-account progress::-webkit-progress-value {
-  background: var(--sea-accent);
+  background: var(--sea-primary);
 }
 .sea-account progress::-moz-progress-bar {
-  background: var(--sea-accent);
+  background: var(--sea-primary);
 }
 .sea-account .tono-row {
   min-height: 48px;
