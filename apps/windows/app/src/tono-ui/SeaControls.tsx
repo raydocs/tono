@@ -100,14 +100,45 @@ export const SeaAttentionCard = ({ children }: { children: ReactNode }) => (
     {children}
   </div>
 )
+/** The empty-state mark: a crescent over the horizon, in the scene's own
+ *  language, so an empty page reads as quiet rather than unloaded. */
+const SeaEmptyMark = () => (
+  <svg
+    className="sea-empty-mark"
+    viewBox="0 0 96 56"
+    width="96"
+    height="56"
+    aria-hidden="true"
+  >
+    <path
+      d="M58 10a14 14 0 1 0 10 24A11 11 0 0 1 58 10z"
+      fill="currentColor"
+      opacity="0.8"
+    />
+    <circle cx="22" cy="14" r="1.2" fill="currentColor" opacity="0.5" />
+    <circle cx="36" cy="26" r="0.9" fill="currentColor" opacity="0.4" />
+    <circle cx="84" cy="20" r="1" fill="currentColor" opacity="0.45" />
+    <path
+      d="M4 47h88"
+      stroke="currentColor"
+      strokeWidth="1"
+      strokeLinecap="round"
+      opacity="0.35"
+    />
+  </svg>
+)
 export const SeaEmpty = ({
   children,
   action,
+  art = false,
 }: {
   children: ReactNode
   action?: ReactNode
+  /** Draw the crescent mark above the copy (page-level empties, not inline errors). */
+  art?: boolean
 }) => (
   <div className="sea-empty">
+    {art && <SeaEmptyMark />}
     <p>{children}</p>
     {action}
   </div>
@@ -122,10 +153,14 @@ export const SeaSignalBars = ({
   level: 0 | 1 | 2 | 3
   label: string
 }) => (
-  <span className="sea-signal" role="img" aria-label={label}>
-    {[4, 8, 12].map((height, index) => (
-      <span key={height} style={{ height }} data-lit={index < level} />
-    ))}
+  <span className="sea-signal" role="img" aria-label={label} data-level={level}>
+    {level === 0 ? (
+      <span data-lit={false} />
+    ) : (
+      [4, 8, 12].map((height, index) => (
+        <span key={height} style={{ height }} data-lit={index < level} />
+      ))
+    )}
   </span>
 )
 interface ChoiceProps {

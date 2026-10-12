@@ -957,48 +957,56 @@ const LoginPage = () => {
           )}
         </form>
 
-        {visibleError && (
-          <p
-            role="alert"
-            style={{
-              margin: 0,
-              fontSize: 12,
-              textAlign: 'center',
-              color: 'var(--tono-text-error)',
-            }}
-          >
-            {visibleError.replace(/ \(TONO_[A-Z0-9_]+\)$/, '')}
-          </p>
-        )}
-        {hasDiagnosticFailure && (
-          <details style={{ fontSize: 12, color: text.secondary }}>
-            <summary style={{ cursor: 'pointer' }}>
-              {t('tono.login.technicalDetails')}
-            </summary>
-            {authPaths.length > 0 && <LoginPathFailures paths={authPaths} />}
-            {authFailureSummary?.includes('\nRoutes: Tono relays') && (
-              <p style={{ margin: '8px 0', lineHeight: 1.5 }}>
-                {t('tono.login.relayFailureKinds')}
+        {(visibleError || hasDiagnosticFailure || supportAvailable) && (
+          // The sea look keeps the failure and its details in one quiet card,
+          // aligned with the form instead of floating on the horizon.
+          <div className={newAppearance ? 'sea-login-notice' : undefined}>
+            {visibleError && (
+              <p
+                role="alert"
+                style={{
+                  margin: 0,
+                  fontSize: 12,
+                  textAlign: newAppearance ? 'left' : 'center',
+                  color: 'var(--tono-text-error)',
+                }}
+              >
+                {visibleError.replace(/ \(TONO_[A-Z0-9_]+\)$/, '')}
               </p>
             )}
-            {!supportAvailable && (
-              <SupportContact
-                key={authFailureSummary}
-                compact
-                extra={authFailureSummary ?? undefined}
-              />
+            {hasDiagnosticFailure && (
+              <details style={{ fontSize: 12, color: text.secondary }}>
+                <summary style={{ cursor: 'pointer' }}>
+                  {t('tono.login.technicalDetails')}
+                </summary>
+                {authPaths.length > 0 && (
+                  <LoginPathFailures paths={authPaths} />
+                )}
+                {authFailureSummary?.includes('\nRoutes: Tono relays') && (
+                  <p style={{ margin: '8px 0', lineHeight: 1.5 }}>
+                    {t('tono.login.relayFailureKinds')}
+                  </p>
+                )}
+                {!supportAvailable && (
+                  <SupportContact
+                    key={authFailureSummary}
+                    compact
+                    extra={authFailureSummary ?? undefined}
+                  />
+                )}
+              </details>
             )}
-          </details>
-        )}
-        {supportAvailable && (
-          <div style={{ fontSize: 12, color: text.secondary }}>
-            {!visibleError && <p>{t('tono.login.recoveryEnded')}</p>}
-            <SupportContact
-              key={authFailureSummary}
-              compact
-              contact
-              extra={`${authFailureSummary ?? ''}\nRecovery cause: ${recovery.cause ?? ''}`}
-            />
+            {supportAvailable && (
+              <div style={{ fontSize: 12, color: text.secondary }}>
+                {!visibleError && <p>{t('tono.login.recoveryEnded')}</p>}
+                <SupportContact
+                  key={authFailureSummary}
+                  compact
+                  contact
+                  extra={`${authFailureSummary ?? ''}\nRecovery cause: ${recovery.cause ?? ''}`}
+                />
+              </div>
+            )}
           </div>
         )}
         {codeSent && (

@@ -7,6 +7,11 @@ struct ContentView: View {
     @SeaAppearancePreference private var seaAppearance
     @State private var columnVisibility: NavigationSplitViewVisibility = .doubleColumn
 
+    private var backdrop: SeaBackdropDim {
+        SeaBackdropDim.resolve(home: appState.selectedPage == .dashboard,
+                               reduceTransparency: displayPreferences.reduceTransparency)
+    }
+
     var body: some View {
         @Bindable var appState = appState
 
@@ -19,13 +24,15 @@ struct ContentView: View {
                     failed: appState.lastConnectionFailure != nil),
                     motionEnabled: true,
                     progress: appState.isConnecting ? SeaSceneParameters.progress(for: appState.connectionStage) : nil,
-                    active: appState.selectedPage == .dashboard,
+                    // Keeps moving behind inner pages too, where it shows dimmed.
+                    active: true,
                     traffic: { [appState] in appState.seaTrafficSample })
                     .ignoresSafeArea()
-                    .opacity(appState.selectedPage == .dashboard ? 1 : 0)
+                    .opacity(backdrop.sceneOpacity)
+                    .blur(radius: backdrop.sceneBlur)
                 SeaSecondaryScene()
                     .ignoresSafeArea()
-                    .opacity(appState.selectedPage == .dashboard ? 0 : 1)
+                    .opacity(backdrop.groundOpacity)
             } else {
                 MeshGradientBackground()
             }

@@ -153,7 +153,7 @@ export const SeaActivity = ({
             ))}
           </div>
         ) : (
-          <SeaEmpty>{empty}</SeaEmpty>
+          <SeaEmpty art>{empty}</SeaEmpty>
         )
       ) : (
         <VirtualList

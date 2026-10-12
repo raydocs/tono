@@ -18,7 +18,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it('keeps one scene across a route visit and applies an away phase without replaying sunrise', () => {
+it('keeps one scene across a route visit; a connection made away plays its sunrise there, not again on return', () => {
   vi.stubGlobal('CSS', { supports: () => true })
   vi.stubGlobal('matchMedia', () => ({
     matches: false,
@@ -47,13 +47,17 @@ it('keeps one scene across a route visit and applies an away phase without repla
     </SeaBackdrop>,
   )
   expect(scene?.getAttribute('data-phase')).toBe('connected')
+  // The scene keeps moving behind inner pages, so the sunrise plays there.
+  expect(scene?.getAttribute('data-paused')).toBe('false')
+  expect(scene?.getAttribute('data-arrival')).toBe('true')
   rerender(
     <SeaBackdrop enabled active>
       <span>Home</span>
     </SeaBackdrop>,
   )
+  // Same element, same attribute: the CSS animation does not restart on return.
   expect(container.querySelector('.sea-scene')).toBe(scene)
-  expect(scene?.getAttribute('data-arrival')).toBe('false')
+  expect(scene?.getAttribute('data-arrival')).toBe('true')
 })
 
 it('drops a home that is gone instead of keeping its sunrise without live protection', () => {

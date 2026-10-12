@@ -132,6 +132,11 @@ export const connectFromShortcut = async (
  * The new look is frameless and the old look has the Windows frame. The value read at startup
  * cannot stand for the old look: the window-state plugin restores a frameless window as saved.
  */
+/** Inner pages keep the home scene behind them, dimmed and blurred; Home,
+ *  sign-in and the intro draw their own scene, and the tray has none. */
+export const seaBackdropDimmed = (pathname: string, newAppearance: boolean) =>
+  newAppearance && !['/', '/login', '/intro', '/tray'].includes(pathname)
+
 export const applyWindowFrame = async (
   target: {
     isDecorated: () => Promise<boolean>
@@ -277,6 +282,7 @@ const TonoLayout = () => {
         data-tono-refined=""
         data-sea-appearance={newAppearance && !isTrayRoute}
         data-sea-home={isDashboardRoute}
+        data-sea-dimmed={seaBackdropDimmed(location.pathname, newAppearance)}
         data-sea-tone={tone}
         style={{
           fontFamily: TONO_FONT_STACK,
