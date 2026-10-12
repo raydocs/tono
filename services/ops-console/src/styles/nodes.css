@@ -67,6 +67,8 @@
     .nodes-wide-col { display: none; }
   }
   @media (max-width: 640px) {
+    /* The explanation is for the desk; on a phone it only pushes the list down. */
+    .nodes-lead { display: none; }
     .nodes-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .nodes-load-grid { grid-template-columns: minmax(0, 1fr); }
     .nodes-name { width: auto; }

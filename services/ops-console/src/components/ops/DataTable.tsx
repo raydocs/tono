@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { copy } from '@/copy/copy';
 import { cn } from '@/lib/utils';
 
@@ -49,6 +49,10 @@ export function DataTable<T>({
   const [localSort, setLocalSort] = useState<TableSort>({ id: null, direction: 'asc' });
   const { id: sortId, direction: sortDir } = sort ?? localSort;
   const [focusId, setFocusId] = useState<string | null>(null);
+  // Whether the scroll box has more to show on its right. Only the phone
+  // stylesheet draws anything from it (a fade over the right edge).
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
+  const [moreRight, setMoreRight] = useState(false);
 
   const sorted = useMemo(() => {
     if (!sortId) return rows;
@@ -68,6 +72,22 @@ export function DataTable<T>({
     });
     return copyRows;
   }, [rows, columns, sortId, sortDir]);
+
+  useEffect(() => {
+    if (!scroller) return undefined;
+    const check = () => setMoreRight(scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 1);
+    check();
+    scroller.addEventListener('scroll', check, { passive: true });
+    window.addEventListener('resize', check);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(check);
+    observer?.observe(scroller);
+    if (scroller.firstElementChild) observer?.observe(scroller.firstElementChild);
+    return () => {
+      scroller.removeEventListener('scroll', check);
+      window.removeEventListener('resize', check);
+      observer?.disconnect();
+    };
+  }, [scroller]);
 
   function toggleSort(id: string) {
     const next: TableSort = { id, direction: sortId === id && sortDir === 'asc' ? 'desc' : 'asc' };
@@ -121,7 +141,11 @@ export function DataTable<T>({
   }
 
   return (
-    <div className={cn('raised overflow-auto rounded-[10px] bg-[var(--surface)]', className)}>
+    <div
+      ref={setScroller}
+      data-more={moreRight ? 'true' : 'false'}
+      className={cn('data-scroll raised overflow-auto rounded-[10px] bg-[var(--surface)]', className)}
+    >
       {/* Fixed layout: with `auto`, a long CJK node name takes the width the
           numeric columns need and every other cell wraps to five lines. */}
       <table className="w-full table-fixed border-collapse text-body">
