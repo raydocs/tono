@@ -2053,15 +2053,17 @@ mod tests {
             inner.connect_generation
         };
         let admission = state.begin_connect_mutation().await;
-        let retry_state = Arc::clone(&state);
-        let retry = tokio::spawn(async move {
-            super::claim_retry_release(&retry_state, generation).await.is_some()
-        });
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // One poll parks the retry on the lifecycle writer behind the admission's reader: it
+        // registered its wait, and nothing else can have run in between.
+        let mut retry = std::pin::pin!(super::claim_retry_release(&state, generation));
+        assert!(
+            futures::poll!(retry.as_mut()).is_pending(),
+            "the retry must be parked behind the Connect's admission"
+        );
         state.lock().await.retire_connection_generation(false);
         drop(admission);
         assert!(
-            !retry.await.unwrap(),
+            retry.await.is_none(),
             "a retry for the replaced session must not take the writer to release the new Connect"
         );
         let current = state.lock().await.connect_generation;

@@ -312,6 +312,25 @@ pub(crate) mod test_hooks {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = adapters;
     }
 
+    static EFFECTIVE_DNS_UNREADABLE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    /// Adapters that are active but whose effective resolver list cannot be read (one adapter's
+    /// DNS record failing to parse), while the others answer.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_effective_dns_unreadable(guids: Vec<String>) {
+        *EFFECTIVE_DNS_UNREADABLE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = guids;
+    }
+
+    static EFFECTIVE_DNS_FAILS: AtomicBool = AtomicBool::new(false);
+
+    /// The whole effective-DNS read fails (`GetAdaptersAddresses` errors).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_effective_dns_fails(fails: bool) {
+        EFFECTIVE_DNS_FAILS.store(fails, Ordering::Relaxed);
+    }
+
     static RESET_DOES_NOT_LAND: AtomicBool = AtomicBool::new(false);
 
     pub(crate) fn reset_does_not_land() -> bool {

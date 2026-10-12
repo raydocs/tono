@@ -428,9 +428,10 @@ async fn clean_up() -> Option<String> {
         Ok(None) => {}
         Err(error) => notes.push(format!("active owner unreadable: {error:#}")),
     }
+    let deadline = Instant::now() + CLEANUP_TIMEOUT;
     match tokio::time::timeout(
         CLEANUP_TIMEOUT,
-        crate::core::windows_kill_switch::emergency_disarm_windows_kill_switch(),
+        crate::core::windows_kill_switch::emergency_disarm_windows_kill_switch_until(deadline),
     )
     .await
     {

@@ -161,6 +161,70 @@
         Ok(())
     }
 
+    /// An effective list that cannot be read is unknown, not empty: with the registry restored
+    /// and nothing proving the machine off Tono, the fallback must not claim success.
+    #[tokio::test]
+    #[serial]
+    async fn the_emergency_reset_does_not_claim_success_when_the_effective_dns_cannot_be_read() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_effective_dns_fails(true);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_after_failed_restore().await;
+        reset_dns_state().await;
+        assert!(result.is_err(), "the machine was not proven off Tono: {result:?}");
+        Ok(())
+    }
+
+    /// One unreadable adapter does not discard the others' evidence, and it does not pass for
+    /// clean either: A is reset, B stays unknown, so the fallback is still not proven.
+    #[tokio::test]
+    #[serial]
+    async fn the_emergency_reset_is_not_proven_while_another_adapters_effective_dns_is_unreadable() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1")), adapter("{B}", Some("9.9.9.9"))]).await?;
+        test_hooks::set_collected_adapters(vec![
+            adapter("{A}", Some("198.18.0.2")),
+            adapter("{B}", Some("9.9.9.9")),
+        ]);
+        test_hooks::set_effective_dns_unreadable(vec!["{B}".to_owned()]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_after_failed_restore().await;
+        let reset = test_hooks::take_last_automatic_reset();
+        reset_dns_state().await;
+        assert_eq!(reset, vec!["{A}".to_owned()], "the readable adapter is still reset");
+        assert!(result.is_err(), "B's effective state is unknown: {result:?}");
+        Ok(())
+    }
+
+    /// The exemption for a user's own local resolver is per address family. IPv4 is the user's
+    /// 127.0.0.1 and stays; IPv6 was restored to a public resolver in the registry but its live
+    /// apply failed, so it still resolves through Tono's legacy `::1` and is reset.
+    #[tokio::test]
+    #[serial]
+    async fn the_emergency_reset_resets_only_the_family_still_on_tono_next_to_a_users_own_loopback() -> Result<()> {
+        reset_dns_state().await;
+        let dual_stack = AdapterDnsSnapshot {
+            interface_guid: "{A}".to_owned(),
+            ipv4_name_server: Some("127.0.0.1".to_owned()),
+            ipv6_name_server: Some("2606:4700:4700::1111".to_owned()),
+            ..Default::default()
+        };
+        seed_snapshot(vec![dual_stack]).await?;
+        test_hooks::set_effective_dns(vec![(
+            "{A}".to_owned(),
+            vec!["127.0.0.1".parse().unwrap(), "::1".parse().unwrap()],
+        )]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_after_failed_restore().await;
+        let after = test_hooks::collected_adapters();
+        reset_dns_state().await;
+        assert_eq!(result?, vec!["{A}".to_owned()]);
+        assert_eq!(after[0].ipv4_name_server.as_deref(), Some("127.0.0.1"), "the user's own IPv4 loopback stays");
+        assert_eq!(after[0].ipv6_name_server, None, "the IPv6 family still on Tono is reset to automatic");
+        Ok(())
+    }
+
     /// A registry call behind a filter driver can block for ever. The NRPT sweep runs on its own
     /// thread, so the uninstall gives up after its budget instead of hanging with it.
     #[test]
@@ -1310,6 +1374,8 @@
         test_hooks::set_collected_adapters(Vec::new());
         test_hooks::set_effective_dns(Vec::new());
         test_hooks::set_reset_does_not_land(false);
+        test_hooks::set_effective_dns_unreadable(Vec::new());
+        test_hooks::set_effective_dns_fails(false);
         test_hooks::take_last_automatic_reset();
         // The tail of an earlier test's write window would otherwise still be running.
         SELF_WRITE_TAIL_UNTIL.store(0, Ordering::Relaxed);

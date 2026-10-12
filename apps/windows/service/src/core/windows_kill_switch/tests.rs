@@ -2237,17 +2237,24 @@ async fn emergency_disarm_with_unproven_dns_resets_the_redirected_adapter_and_dr
     Ok(())
 }
 
-/// The release worker cancels the whole disarm at its 45 s budget. The adapter reset and the
-/// policy removal after a failed restore get only what the restore and the WFP removal left of
-/// it, less the resolver-rule sweep, so they cannot run past the budget that would cut them.
+/// The release worker cancels the whole disarm at its 45 s deadline. The exact restore may
+/// legitimately take its full budget, and a restore that fails slowly must not leave the adapter
+/// reset without time: the restore is bounded so the reset leg is never skipped.
 #[test]
 fn the_emergency_fallback_leg_fits_inside_the_release_workers_budget() {
-    let sweep = std::time::Duration::from_secs(10);
-    assert_eq!(
-        emergency_fallback_budget(std::time::Duration::from_secs(30), sweep),
-        std::time::Duration::from_secs(5)
-    );
-    assert!(emergency_fallback_budget(std::time::Duration::from_secs(40), sweep).is_zero());
+    let deadline = EMERGENCY_DISARM_OUTER_BUDGET;
+    let restore = emergency_restore_budget(Some(deadline));
+    assert!(restore <= deadline - EMERGENCY_FALLBACK_TIMEOUT - EMERGENCY_SWEEP_RESERVE);
+    // The exact restore used its whole budget and failed.
+    let left = deadline.saturating_sub(restore);
+    assert!(!emergency_fallback_budget(Some(left)).is_zero());
+}
+
+/// An update-executor caller has no outer timeout, so it keeps the full DNS budgets.
+#[test]
+fn the_emergency_legs_keep_the_full_dns_budgets_without_a_caller_deadline() {
+    assert_eq!(emergency_restore_budget(None), DNS_RESTORE_TIMEOUT);
+    assert_eq!(emergency_fallback_budget(None), DNS_RESTORE_TIMEOUT);
 }
 
 // --- The uninstall-only escalation ladder ---

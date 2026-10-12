@@ -18,18 +18,29 @@ use super::*;
 /// still present, which the uninstall helper's own sweep (`with_resolver_rule_proof`) checks
 /// again and blocks on with result 3.
 pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
-    emergency_disarm_with(false).await
+    emergency_disarm_with(false, None).await
+}
+
+/// [`emergency_disarm_windows_kill_switch`] for a caller that cancels the whole disarm at
+/// `deadline` (the release worker). The legs are allocated against it up front: the exact DNS
+/// restore is bounded so the adapter reset and the resolver-rule sweep keep their time. Callers
+/// without a deadline get the full DNS budgets.
+pub async fn emergency_disarm_windows_kill_switch_until(deadline: std::time::Instant) -> Result<()> {
+    emergency_disarm_with(false, Some(deadline)).await
 }
 
 /// Automatic failed-update recovery uses the same WFP/DNS proof and reporting,
 /// but retains the secondary AI hold. The caller must first exclude strict mode
 /// and stop the Service while holding the repair and singleton owner gates.
 pub async fn emergency_disarm_windows_kill_switch_applying_narrow() -> Result<()> {
-    emergency_disarm_with(true).await
+    emergency_disarm_with(true, None).await
 }
 
-async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
-    let started = std::time::Instant::now();
+async fn emergency_disarm_with(
+    apply_narrow: bool,
+    deadline: Option<std::time::Instant>,
+) -> Result<()> {
+    let remaining = || deadline.map(|deadline| deadline.saturating_duration_since(std::time::Instant::now()));
     let _operation = WFP_OPERATION.lock().await;
     // This is still the fail-open escape hatch: WFP objects are removed even if protected DNS
     // cannot be restored. The DNS failure is nevertheless returned *after* WFP and intent
@@ -60,9 +71,13 @@ async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
         )
         .await
     } else {
-        bounded_dns_call("emergency disarm", crate::core::dns::restore_protected())
-            .await
-            .map(|_| crate::core::dns::UninstallDnsRestore::Exact)
+        bounded_dns_call_within(
+            emergency_restore_budget(remaining()),
+            "emergency disarm",
+            crate::core::dns::restore_protected(),
+        )
+        .await
+        .map(|_| crate::core::dns::UninstallDnsRestore::Exact)
     };
 
     // Persist fail-open intent *before* removing WFP when we can. Service-start recovery sees
@@ -161,10 +176,10 @@ async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
     // armed. The saved servers stay on disk for a later exact restore, and the original DNS
     // error is still returned below. The uninstall ladder already did the same for itself.
     if dns_restore.is_err() && !uninstall_ladder_requested() {
-        // The release worker cancels the whole disarm at `EMERGENCY_DISARM_OUTER_BUDGET`, so this
-        // leg gets what is left of it after the restore and WFP removal, less the sweep below.
-        // A leg that is cut short leaves the sweep's NRPT removal to finish the resolver policy.
-        let budget = emergency_fallback_budget(started.elapsed(), NRPT_SWEEP_BUDGET);
+        // Under a caller deadline (the release worker cancels the whole disarm at it) this leg
+        // gets what is left of it, less the sweep below; the restore was bounded to leave it.
+        // A caller without a deadline gets the full DNS budget.
+        let budget = emergency_fallback_budget(remaining());
         if budget.is_zero() {
             tracing::error!(
                 "emergency disarm: DNS restore could not be proven and no time is left in the \

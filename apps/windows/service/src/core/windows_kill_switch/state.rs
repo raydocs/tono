@@ -537,17 +537,35 @@ pub const EMERGENCY_DISARM_OUTER_BUDGET: std::time::Duration = std::time::Durati
 /// Longest the post-WFP adapter reset and resolver-policy removal may take on their own.
 pub(super) const EMERGENCY_FALLBACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
-/// The budget left for that fallback leg `elapsed` into the disarm: what the worker's budget still
-/// has, less the `reserve` the final resolver-rule sweep needs, never more than
-/// [`EMERGENCY_FALLBACK_TIMEOUT`]. Zero means there is no time left for it.
-pub(super) fn emergency_fallback_budget(
-    elapsed: std::time::Duration,
-    reserve: std::time::Duration,
-) -> std::time::Duration {
-    EMERGENCY_DISARM_OUTER_BUDGET
-        .saturating_sub(elapsed)
-        .saturating_sub(reserve)
-        .min(EMERGENCY_FALLBACK_TIMEOUT)
+/// What the final resolver-rule sweep needs. It runs after the reset leg, so a caller deadline
+/// reserves it up front.
+pub(super) const EMERGENCY_SWEEP_RESERVE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The exact restore on the emergency path is never cut shorter than this, whatever the deadline.
+pub(super) const EMERGENCY_MIN_RESTORE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The budget of the exact DNS restore on the emergency path, given the time `remaining` before
+/// the caller's deadline (`None`: the caller has no deadline and gets the full DNS budget).
+///
+/// Under a deadline the whole flow is allocated up front: the adapter reset leg and the
+/// resolver-rule sweep are reserved first, and the restore gets the rest (at least
+/// [`EMERGENCY_MIN_RESTORE`]). A truncated restore on this fail-open path only reports partial
+/// or unknown, which the reset leg then deals with; a skipped reset leaves the dead resolver.
+pub(super) fn emergency_restore_budget(remaining: Option<std::time::Duration>) -> std::time::Duration {
+    let _ = remaining;
+    DNS_RESTORE_TIMEOUT
+}
+
+/// The budget of the adapter reset and resolver-policy leg, given the time `remaining` before the
+/// caller's deadline, less the sweep's reserve and never more than [`EMERGENCY_FALLBACK_TIMEOUT`].
+/// `None` (no caller deadline) gets the full DNS budget. Zero means no time is left for it.
+pub(super) fn emergency_fallback_budget(remaining: Option<std::time::Duration>) -> std::time::Duration {
+    match remaining {
+        None => DNS_RESTORE_TIMEOUT,
+        Some(remaining) => remaining
+            .saturating_sub(EMERGENCY_SWEEP_RESERVE)
+            .min(EMERGENCY_FALLBACK_TIMEOUT),
+    }
 }
 
 /// SCM `StopPending` hint posted by the service. Stop is accepted before startup
