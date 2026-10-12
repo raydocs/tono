@@ -120,6 +120,7 @@
   `core::dns::tests::the_emergency_reset_is_not_refused_at_once_while_an_engine_call_holds_the_claim`（补了「必须反复重试被拒绝的调用」的断言）。
 - R5-F1（主要）：第 4 轮把「等声明释放」、候选读取、DHCP 应用、刷新、读回和策略还原都放在同一个 ≤15 秒超时里，10 秒下限对重置本身并不成立。
   反例：精确还原的引擎调用跑 26 秒（< 30 秒的 `DNS_APPLY_TIMEOUT`），10 秒处被外层放弃，WFP 很快，回退腿的 15 秒全花在等待上，约 25 秒时 future 被丢弃、没有重置；26 秒声明才释放，已经没有人在等。
+  （第 6 轮已取代其中「自精确还原开始起算」的等待和「重置腿自己的 10 秒下限」两处：等待改为从引擎调用拿到声明的时刻算，下限改为从声明归还时起算，见下一节；以下数字 47 / 52 秒也已被第 6 轮的 52 秒（含 20 秒宽限）取代。）
   现在预算拆开：(1) 等声明有自己的预算 `emergency_claim_wait_budget` = `min(30 秒 − 自精确还原开始已用时间, 20 秒)`（`windows_kill_switch/state.rs`；30 秒是引擎调用自己的上限，`EMERGENCY_ENGINE_CALL_BOUND`），在 WFP 移除之后、重置腿之前由 `emergency.rs` 调用 `dns::wait_for_abandoned_dns_call` 执行，不计入重置腿；
   (2) 之后无论等到了声明被释放，还是等待预算用完声明仍被占着，重置腿都拿到自己的完整预算（下限 10 秒、上限 15 秒）去做读取、DHCP 应用、读回和策略还原；声明仍被占着时，重置腿自己每 50 毫秒重试被拒绝的调用（`reset_redirected_adapters_after_failed_restore` 里的重试循环，仅针对「引擎被占用」的拒绝，其他错误照常返回），而不是立刻失败。
   NRPT 清扫的 2 秒下限不变。此外不变：25 秒首次答复、32 秒客户端等待。
@@ -128,4 +129,18 @@
 - R5-F2（次要）：第 4 轮和 `state.rs` 里把「最坏约 52 秒 / 常见 10–20 秒」写成了端到端保证。改为只是这几段的预算估算；BFE 探测（至多 5 秒）、选择性后续处理、文件读写、读回、第二次清理、主服务重启和发布服务的 finalize 都不在其中；「常见」是未测量的估计，等真机数据。
 - 清理与记录：从本分支删除 `docs/findings.d/WIN-RELEASE-REFUSED-NO-RETRY.md`（现在在 PR #1599，同一 ID 会冲突）。新增 `docs/findings.d/WIN-RELEASE-STATUS-REPORT-EXPOSURE.md`（open，低·推导）。
 - 新增限制：`ReleaseStatus.report` 没有大小上限也没有脱敏（原始错误、网卡 GUID、路径、残留写者 PID），是整机范围而不是按请求者划分，并且可能属于更早的代号；UI 跟进必须按请求 ID / 代号核对后再展示，并先裁剪。
+- 验证：本机不跑 Windows 工作区的 cargo；修复提交由 hosted CI 判定，ci-gate 结果见 PR 正文。仍无真机验证。
+
+### 续记 2026-10-12 · Codex 复核第 6 轮（xhigh，对 d2bfd7793）：R6-F1 主要、R6-F2 次要；老板批准最后一轮，仅 Service 侧
+- 回归先行：`963ade1af` 和 `dea317ed9` 只含测试和测试基础设施（桩引擎可延迟「声明归还后的第一次候选读取」、可模拟引擎调用自己超时、记录读取次数，预算的纯函数版本，`reset_redirected_adapters_within` 骨架仍是旧行为：从腿开始起算的单一超时），在 hosted CI 上失败的正是下列三例（run 38320257478，534 通过、3 失败，断言失败而非编译错误；上一次 `963ade1af` 的 run 38318798416 只红了前两例，端到端那例因为预算 15 秒上限而没有红，于是在 `dea317ed9` 把截止时间设为已用尽，让腿恰好只有 10 秒下限）：
+  `core::dns::tests::the_reset_floor_runs_from_the_claim_return_and_not_from_the_start_of_the_leg`、
+  `core::dns::tests::an_engine_timeout_is_an_answer_and_is_not_retried_like_a_refusal`、
+  `core::windows_kill_switch::tests::a_claim_returned_after_the_wait_and_the_first_floor_still_gets_a_full_floor_to_reset`（端到端：声明在等待结束且腿的第一段下限用完之后才归还，归还后的第一次候选读取很慢；断言重置 1 次、策略还原执行、原始错误仍返回）。
+- R6-F1（主要）：等声明的预算从 `restore_protected` 开始起算，而引擎调用的 30 秒上限从它**拿到声明**时起算，中间有锁等待和快照/退役标记的文件读取。反例：声明在 9 秒拿到，还原在 10 秒被放弃，这次调用（29 秒，在自己的上限内）38 秒归还；独立等待在 30 秒结束，重置腿的 10 秒下限到 40 秒，前 8 秒都在被拒绝，38 秒开始的候选读取在 40 秒被丢弃，DHCP 一次都没应用，WFP 已删，网卡留在死解析器上，worker 读回是 `unreadable`，「仅残留」的第二次清理也不触发，启动恢复只会警告。`state.rs` 里「声明在还原开始后 30 秒内归还」的注释也是错的，已改为「引擎调用拿到声明后 30 秒内，且仅对只是慢的调用成立」。
+  现在：(1) 声明槽本来就记录调用拿到声明的时刻（`dns/engine_ops.rs` `bounded_dns_call` 里的 `started_at`），新增与 cfg 无关的访问器 `dns_engine_claim_held_for()`（`dns/uninstall.rs` 的 `abandoned_dns_call_held_for` 对外暴露），等待预算 = `min(30 秒 − 声明已被占用的时间, 20 秒)`，声明空闲则为 0（`emergency_claim_wait_budget(claim_held_for)`，`emergency.rs` 不再用 `restore_began`）。
+  (2) 重置腿 `dns::reset_redirected_adapters_within(budget)`（`dns/uninstall.rs`）把下限从**声明归还时**起算：腿开始时声明空闲则从腿开始起算；否则每 25 毫秒看一次声明，第一次看到归还的时刻起再给一个完整的 `budget`（候选读取、DHCP 应用、读回、策略还原都在里面）；如果腿开始后 `budget` 内声明仍没归还，腿以「未证明」结束（并且声明被占用期间照旧每 50 毫秒重试被拒绝的调用），所以整段腿最长 2 × `budget`。25 秒首次答复、32 秒客户端等待不变，没有 90 秒的用户可见预算。
+  (3) `EMERGENCY_DISARM_OVERRUN_GRACE` 从 15 秒提到 20 秒。最坏情形的算术（只针对这几段，非端到端保证）：精确还原在 10 秒被放弃（此时声明最晚在 10 秒被拿到）；等声明从 10 秒起至多 20 秒，到 30 秒；重置腿 30 秒起看声明，下限 10 秒，到 40 秒；引擎调用的 30 秒上限使声明最晚 40 秒归还，下限再从归还起 10 秒，到 50 秒；NRPT 清扫 2 秒下限，到 52 秒；加上 WFP 移除和文件写入。45 + 20 = 65 秒，余量 13 秒；15 秒的旧宽限（60 秒）余量只有 8 秒。声明一直不归还则腿在 40 秒结束，报「未证明」。BFE 探测、选择性后续处理、读回、第二次清理、重启和 finalize 仍不在内；仍无真机测量。
+- 审阅者的 (b)：重置腿的重试曾以 `TONO_DNS_ENGINE_WEDGED` 文本为准，而引擎自己的超时也带这个前缀，于是一个真的跑过又超时的调用也会被当成「被占用」一直重试。现在拒绝（声明被占、什么都没跑）是类型化错误 `DnsEngineBusy`（`dns/engine_ops.rs` 的 `wedged_dns_error`，文本和前缀不变，旧断言照旧），重试只对它：`is_engine_busy_refusal` 用 `downcast_ref`，经过 `context` 包装也认得；引擎超时是结果，直接返回。
+- R6-F2（次要）：全局 `cfg(test)` 预算除数被两个异步测试设为 20，污染四个没有 `#[serial]` 的测试。改为显式注入：`emergency_fallback_allowance` / `emergency_claim_wait_allowance` 是不带除数的纯函数，`*_budget` 只是 `scaled_for_tests(allowance)`；断言真实数字的五个测试读纯函数，端到端测试仍走带除数的版本。
+- 其余测试：`dns::tests::the_reset_leg_gives_up_after_its_floor_when_the_claim_never_comes_back` 在测试提交里，骨架下就通过（守护「不归还则不无限等」，不是红灯用例）；随修复提交的还有 `dns::tests::the_claim_reports_how_long_it_has_been_held_from_the_moment_its_call_took_it` 和 `dns::tests::only_a_refusal_for_a_held_claim_is_a_busy_refusal`（访问器与类型化拒绝，同样不是红灯用例）。
 - 验证：本机不跑 Windows 工作区的 cargo；修复提交由 hosted CI 判定，ci-gate 结果见 PR 正文。仍无真机验证。
