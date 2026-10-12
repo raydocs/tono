@@ -148,14 +148,14 @@
       },
       {
         "id": "inc-d05",
-        "dedupeKey": "node:香港 · 中环:fleet_pressure:inc-d05",
-        "kind": "fleet_pressure",
+        "dedupeKey": "node:香港 · 中环:node_blocked:inc-d05",
+        "kind": "node_blocked",
         "subjectType": "node",
         "subjectId": "香港 · 中环",
         "severity": "warn",
         "status": "open",
         "tone": "warn",
-        "title": "握手失败次数超过阈值 · 香港 · 中环",
+        "title": "出口连续失败，正在观察 · 香港 · 中环",
         "summary": "仍在观察，尚未恢复。",
         "parentIncidentId": null,
         "rulesVersion": 3,
@@ -292,14 +292,14 @@
       },
       {
         "id": "inc-d09",
-        "dedupeKey": "node:Hong Kong · Victoria:home_exit_down:inc-d09",
-        "kind": "home_exit_down",
+        "dedupeKey": "node:Los Angeles · Mesa:node_blocked:inc-d09",
+        "kind": "node_blocked",
         "subjectType": "node",
-        "subjectId": "Hong Kong · Victoria",
+        "subjectId": "Los Angeles · Mesa",
         "severity": "notice",
         "status": "open",
         "tone": "info",
-        "title": "晚高峰占用偏高 · Hong Kong · Victoria",
+        "title": "出口连续失败，正在观察 · Los Angeles · Mesa",
         "summary": "仍在观察，尚未恢复。",
         "parentIncidentId": null,
         "rulesVersion": 3,
@@ -436,14 +436,14 @@
       },
       {
         "id": "inc-d13",
-        "dedupeKey": "node:Tokyo · Fuji:customer_unreachable:inc-d13",
-        "kind": "customer_unreachable",
+        "dedupeKey": "node:东京 · 渋谷:node_blocked:inc-d13",
+        "kind": "node_blocked",
         "subjectType": "node",
-        "subjectId": "Tokyo · Fuji",
+        "subjectId": "东京 · 渋谷",
         "severity": "severe",
         "status": "open",
         "tone": "sev",
-        "title": "家宽出口抖动，等待下一轮探测 · Tokyo · Fuji",
+        "title": "出口连续失败，正在观察 · 东京 · 渋谷",
         "summary": "仍在观察，尚未恢复。",
         "parentIncidentId": null,
         "rulesVersion": 3,
@@ -580,14 +580,14 @@
       },
       {
         "id": "inc-d17",
-        "dedupeKey": "node:香港 · 中环:node_degraded:inc-d17",
-        "kind": "node_degraded",
+        "dedupeKey": "node:Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）:node_blocked:inc-d17",
+        "kind": "node_blocked",
         "subjectType": "node",
-        "subjectId": "香港 · 中环",
+        "subjectId": "Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）",
         "severity": "warn",
         "status": "open",
         "tone": "warn",
-        "title": "客户连不上，已挂到节点事故下 · 香港 · 中环",
+        "title": "出口连续失败，正在观察 · Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）",
         "summary": "仍在观察，尚未恢复。",
         "parentIncidentId": null,
         "rulesVersion": 3,
@@ -1999,14 +1999,14 @@
     "inc-d05": {
       "incident": {
         "id": "inc-d05",
-        "dedupeKey": "node:香港 · 中环:fleet_pressure:inc-d05",
-        "kind": "fleet_pressure",
+        "dedupeKey": "node:香港 · 中环:node_blocked:inc-d05",
+        "kind": "node_blocked",
         "subjectType": "node",
         "subjectId": "香港 · 中环",
         "severity": "warn",
         "status": "open",
         "tone": "warn",
-        "title": "握手失败次数超过阈值 · 香港 · 中环",
+        "title": "出口连续失败，正在观察 · 香港 · 中环",
         "summary": "仍在观察，尚未恢复。",
         "parentIncidentId": null,
         "rulesVersion": 3,
@@ -2041,7 +2041,7 @@
             "at": 1724993700,
             "type": "opened",
             "actor": "system",
-            "note": "握手失败次数超过阈值 · 香港 · 中环"
+            "note": "出口连续失败，正在观察 · 香港 · 中环"
           },
           {
             "id": "iev-inc-d05-02",
@@ -2643,14 +2643,14 @@
     "inc-d09": {
       "incident": {
         "id": "inc-d09",
-        "dedupeKey": "node:Hong Kong · Victoria:home_exit_down:inc-d09",
-        "kind": "home_exit_down",
+        "dedupeKey": "node:Los Angeles · Mesa:node_blocked:inc-d09",
+        "kind": "node_blocked",
         "subjectType": "node",
-        "subjectId": "Hong Kong · Victoria",
+        "subjectId": "Los Angeles · Mesa",
         "severity": "notice",
         "status": "open",
         "tone": "info",
-        "title": "晚高峰占用偏高 · Hong Kong · Victoria",
+        "title": "出口连续失败，正在观察 · Los Angeles · Mesa",
         "summary": "仍在观察，尚未恢复。",
         "parentIncidentId": null,
         "rulesVersion": 3,
@@ -2685,7 +2685,7 @@
             "at": 1724990100,
             "type": "opened",
             "actor": "system",
-            "note": "晚高峰占用偏高 · Hong Kong · Victoria"
+            "note": "出口连续失败，正在观察 · Los Angeles · Mesa"
           },
           {
             "id": "iev-inc-d09-02",
@@ -2732,9 +2732,9 @@
             "executor": "exit_agent",
             "status": "succeeded",
             "subjectType": "node",
-            "subjectId": "Hong Kong · Victoria",
+            "subjectId": "Los Angeles · Mesa",
             "params": {
-              "node": "Hong Kong · Victoria",
+              "node": "Los Angeles · Mesa",
               "timeoutSec": 45
             },
             "attempts": 1,
@@ -3323,14 +3323,14 @@
     "inc-d13": {
       "incident": {
         "id": "inc-d13",
-        "dedupeKey": "node:Tokyo · Fuji:customer_unreachable:inc-d13",
-        "kind": "customer_unreachable",
+        "dedupeKey": "node:东京 · 渋谷:node_blocked:inc-d13",
+        "kind": "node_blocked",
         "subjectType": "node",
-        "subjectId": "Tokyo · Fuji",
+        "subjectId": "东京 · 渋谷",
         "severity": "severe",
         "status": "open",
         "tone": "sev",
-        "title": "家宽出口抖动，等待下一轮探测 · Tokyo · Fuji",
+        "title": "出口连续失败，正在观察 · 东京 · 渋谷",
         "summary": "仍在观察，尚未恢复。",
         "parentIncidentId": null,
         "rulesVersion": 3,
@@ -3365,7 +3365,7 @@
             "at": 1724986500,
             "type": "opened",
             "actor": "system",
-            "note": "家宽出口抖动，等待下一轮探测 · Tokyo · Fuji"
+            "note": "出口连续失败，正在观察 · 东京 · 渋谷"
           },
           {
             "id": "iev-inc-d13-02",
@@ -3412,9 +3412,9 @@
             "executor": "exit_agent",
             "status": "succeeded",
             "subjectType": "node",
-            "subjectId": "Tokyo · Fuji",
+            "subjectId": "东京 · 渋谷",
             "params": {
-              "node": "Tokyo · Fuji",
+              "node": "东京 · 渋谷",
               "limit": 50
             },
             "attempts": 1,
@@ -3436,9 +3436,9 @@
             "executor": "exit_agent",
             "status": "leased",
             "subjectType": "node",
-            "subjectId": "Tokyo · Fuji",
+            "subjectId": "东京 · 渋谷",
             "params": {
-              "subject": "Tokyo · Fuji",
+              "subject": "东京 · 渋谷",
               "dryRun": false
             },
             "attempts": 1,
@@ -4030,14 +4030,14 @@
     "inc-d17": {
       "incident": {
         "id": "inc-d17",
-        "dedupeKey": "node:香港 · 中环:node_degraded:inc-d17",
-        "kind": "node_degraded",
+        "dedupeKey": "node:Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）:node_blocked:inc-d17",
+        "kind": "node_blocked",
         "subjectType": "node",
-        "subjectId": "香港 · 中环",
+        "subjectId": "Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）",
         "severity": "warn",
         "status": "open",
         "tone": "warn",
-        "title": "客户连不上，已挂到节点事故下 · 香港 · 中环",
+        "title": "出口连续失败，正在观察 · Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）",
         "summary": "仍在观察，尚未恢复。",
         "parentIncidentId": null,
         "rulesVersion": 3,
@@ -4072,7 +4072,7 @@
             "at": 1724982900,
             "type": "opened",
             "actor": "system",
-            "note": "客户连不上，已挂到节点事故下 · 香港 · 中环"
+            "note": "出口连续失败，正在观察 · Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）"
           },
           {
             "id": "iev-inc-d17-02",
@@ -4119,9 +4119,9 @@
             "executor": "exit_agent",
             "status": "succeeded",
             "subjectType": "node",
-            "subjectId": "香港 · 中环",
+            "subjectId": "Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）",
             "params": {
-              "node": "香港 · 中环",
+              "node": "Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）",
               "timeoutSec": 45
             },
             "attempts": 1,
@@ -4143,9 +4143,9 @@
             "executor": "exit_agent",
             "status": "succeeded",
             "subjectType": "node",
-            "subjectId": "香港 · 中环",
+            "subjectId": "Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）",
             "params": {
-              "subject": "香港 · 中环",
+              "subject": "Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）",
               "dryRun": false
             },
             "attempts": 1,
