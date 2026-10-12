@@ -466,7 +466,17 @@ nonisolated enum HelperProtocolVersion {
     ///   the current generation. The release job puts a booted-out daemon
     ///   back after a worker crash, and the emergency commands take the
     ///   release lock when it is free.
-    static let current = "4.52.51"
+    /// - 4.52.51 → 4.52.52: PF `tono-dhcp` (limited-broadcast DHCP) and
+    ///   `tono-ndp` (neighbor discovery) render in every armed ruleset, not
+    ///   only with a tunnel. After a Wi-Fi switch the Mac is in the no-tunnel
+    ///   bootstrap or preserve ruleset while it reconnects, and with no DHCP
+    ///   pass it could not get a lease on the new network. Same two permits,
+    ///   same text; the rules that need a tunnel or a setting are unchanged.
+    /// - 4.52.52 → 4.52.53: without a tunnel the `tono-ndp` passes render
+    ///   `no state` in both directions (Apple PF keys ICMPv6 state without the
+    ///   type, so a state from an inbound router advertisement could admit an
+    ///   Echo Request). The tunneled rule is unchanged.
+    static let current = "4.52.53"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
