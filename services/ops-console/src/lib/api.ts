@@ -23,20 +23,9 @@ import type {
 import { copy } from '@/copy/copy';
 import type { FleetDto, LiveDto } from './types';
 
-export class SessionExpiredError extends Error {
-  constructor() {
-    super(copy.sessionExpired);
-    this.name = 'SessionExpiredError';
-  }
-}
+import { ApiRefusal, BackendUnreachableError, SessionExpiredError } from './api-errors';
 
-/** A write the hub turned down, with the code a page may branch on. */
-export class ApiRefusal extends Error {
-  constructor(message: string, readonly code: string) {
-    super(message);
-    this.name = 'ApiRefusal';
-  }
-}
+export { ApiRefusal, BackendUnreachableError, SessionExpiredError };
 
 export function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
@@ -83,10 +72,39 @@ export function urlFor(path: string, query?: Record<string, string>): string {
   return `/api/v1/ops/${path}${search ? `?${search}` : ''}`;
 }
 
-export async function getJson<T>(
+/**
+ * The one automatic retry a read gets. The delay lives in an object so a test
+ * can set it to zero rather than waiting a real second.
+ */
+export const readRetry = { delayMs: 1_000 };
+
+function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('aborted', 'AbortError'));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('aborted', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/** An answer we will not read still has to be let go, or the browser holds the request open. */
+function discard(response: Response): void {
+  void response.body?.cancel().catch(() => undefined);
+}
+
+async function readOnce<T>(
   path: string,
-  signal?: AbortSignal,
-  query?: Record<string, string>,
+  signal: AbortSignal | undefined,
+  query: Record<string, string> | undefined,
 ): Promise<T> {
   let response: Response;
   try {
@@ -96,28 +114,62 @@ export async function getJson<T>(
       headers: { accept: 'application/json' },
     });
   } catch (error) {
-    if (isAbortError(error)) throw error;
+    if (signal?.aborted || isAbortError(error)) throw error;
     if (error instanceof DOMException && error.name === 'TimeoutError') {
-      throw new Error(copy.loadError, { cause: error });
+      throw new BackendUnreachableError('timeout', copy.backendTimeout, undefined, { cause: error });
     }
-    throw error;
+    throw new BackendUnreachableError('network', copy.backendUnreachable, undefined, { cause: error });
   }
-  if (response.status === 401 || response.status === 403) throw new SessionExpiredError();
-  const contentType = response.headers.get('content-type');
-  if (!contentType?.toLowerCase().includes('application/json')) {
+  if (response.status === 401 || response.status === 403) {
+    discard(response);
     throw new SessionExpiredError();
   }
+  // A 5xx is the hub (or the edge in front of it) failing, whatever the body
+  // is: an HTML 502 from the edge is not a login page.
+  if (response.status >= 500) {
+    discard(response);
+    throw new BackendUnreachableError('server', copy.backendError(response.status), response.status);
+  }
+  const contentType = response.headers.get('content-type');
+  const json = contentType?.toLowerCase().includes('application/json') === true;
   if (!response.ok) {
     let message: string = copy.loadError;
-    try {
-      const envelope = await response.json() as ErrorEnvelope;
-      message = envelope.error?.message || message;
-    } catch {
-      // Keep the generic load error for non-JSON bodies.
+    if (json) {
+      try {
+        const envelope = await response.json() as ErrorEnvelope;
+        message = envelope.error?.message || message;
+      } catch {
+        // Keep the generic load error when the envelope is unreadable.
+      }
+    } else {
+      discard(response);
     }
     throw new Error(message);
   }
-  return response.json() as Promise<T>;
+  // An OK answer that is not JSON is the Access login page.
+  if (!json) {
+    discard(response);
+    throw new SessionExpiredError();
+  }
+  try {
+    return await response.json() as T;
+  } catch {
+    throw new Error(copy.loadError);
+  }
+}
+
+export async function getJson<T>(
+  path: string,
+  signal?: AbortSignal,
+  query?: Record<string, string>,
+): Promise<T> {
+  try {
+    return await readOnce<T>(path, signal, query);
+  } catch (error) {
+    if (!(error instanceof BackendUnreachableError)) throw error;
+    await pause(readRetry.delayMs, signal);
+    return readOnce<T>(path, signal, query);
+  }
 }
 
 /**

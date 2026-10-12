@@ -10,7 +10,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Action } from '@/components/ops/Action';
 import { copy } from '@/copy/copy';
+import { formatClock } from '@/lib/display';
 import { cn } from '@/lib/utils';
 import { BLANK_ROUTE, readRoute, writeRoute, type OpsRoute } from '@/lib/hash-route';
 import { trafficRange } from '@/lib/api-traffic';
@@ -44,6 +46,7 @@ export function Shell({
   customers,
   funnel,
   incidents,
+  unreachable,
 }: {
   children: ReactNode;
   fleet: FleetState;
@@ -55,6 +58,8 @@ export function Shell({
   /** ⌘K searches the people who have no customer row too; null until it lands. */
   funnel: FunnelDto | null;
   incidents: IncidentDto[];
+  /** Set while a shared read has no answer from the hub; `since` is when the oldest copy on screen arrived. */
+  unreachable?: { since: number | null; onRetry: () => void } | null;
 }) {
   const [route, setRoute] = useState<OpsRoute>(() => (
     typeof window === 'undefined' ? BLANK_ROUTE : readRoute()
@@ -104,6 +109,15 @@ export function Shell({
             >
               {copy.reload}
             </button>
+          </div>
+        ) : null}
+
+        {unreachable && !(fleet.status === 'error' && fleet.sessionExpired) ? (
+          <div className="banner-alert flex flex-wrap items-center justify-between gap-3 px-4 py-3 min-[960px]:px-6" role="alert">
+            <span className="min-w-0">
+              {copy.shellUnreachable(unreachable.since === null ? null : formatClock(unreachable.since))}
+            </span>
+            <Action onClick={unreachable.onRetry}>{copy.retry}</Action>
           </div>
         ) : null}
 

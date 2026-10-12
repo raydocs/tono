@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { opsApi, SessionExpiredError } from './api';
+import { BackendUnreachableError, opsApi, SessionExpiredError } from './api';
 import { nowSec } from './clock';
 import type { FleetDto, LiveDto } from './types';
 
 export type FleetState =
   | { status: 'loading' }
-  | { status: 'error'; message: string; sessionExpired: boolean }
-  | { status: 'ready'; fleet: FleetDto; live: LiveDto | null; fetchedAt: number };
+  | { status: 'error'; message: string; sessionExpired: boolean; unreachable?: BackendUnreachableError }
+  /** `unreachable` is set while the latest refetch got no answer; `fleet` is then the last good copy. */
+  | { status: 'ready'; fleet: FleetDto; live: LiveDto | null; fetchedAt: number; unreachable?: BackendUnreachableError };
 
 /**
  * The legacy fleet read, kept for the facts no verdict carries — the address,
@@ -39,11 +40,13 @@ export function useFleet(beat = 0): FleetState & { reload: () => void } {
       } catch (error) {
         if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return;
         const sessionExpired = error instanceof SessionExpiredError;
+        const unreachable = error instanceof BackendUnreachableError ? error : undefined;
         setState((current) => (
-          current.status === 'ready' && !sessionExpired ? current : {
+          current.status === 'ready' && !sessionExpired ? { ...current, unreachable } : {
             status: 'error',
             message: error instanceof Error ? error.message : String(error),
             sessionExpired,
+            unreachable,
           }
         ));
       }

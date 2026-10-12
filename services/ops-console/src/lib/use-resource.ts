@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { SessionExpiredError } from './api';
+import { BackendUnreachableError, SessionExpiredError } from './api';
 import { nowSec } from './clock';
 
 export type Resource<T> =
   | { status: 'loading' }
-  | { status: 'error'; message: string; sessionExpired: boolean }
-  /** `fetchedAt` is when this copy arrived, which is what 本页截至 prints. */
-  | { status: 'ready'; data: T; fetchedAt: number };
+  | { status: 'error'; message: string; sessionExpired: boolean; unreachable?: BackendUnreachableError }
+  /**
+   * `fetchedAt` is when this copy arrived, which is what 本页截至 prints.
+   * `unreachable` is set when the latest refetch got no answer from the hub:
+   * `data` is still the last good copy, and the shell says it is old.
+   */
+  | { status: 'ready'; data: T; fetchedAt: number; unreachable?: BackendUnreachableError };
 
 /**
  * One fetch, three states, and a `reload` the write actions call after a POST.
@@ -51,11 +55,13 @@ export function useResource<T>(
       (error: unknown) => {
         if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return;
         const sessionExpired = error instanceof SessionExpiredError;
+        const unreachable = error instanceof BackendUnreachableError ? error : undefined;
         setState((current) => (
-          current.status === 'ready' && !sessionExpired ? current : {
+          current.status === 'ready' && !sessionExpired ? { ...current, unreachable } : {
             status: 'error',
             message: error instanceof Error ? error.message : String(error),
             sessionExpired,
+            unreachable,
           }
         ));
       },
