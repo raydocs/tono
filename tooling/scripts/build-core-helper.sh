@@ -33,6 +33,8 @@ set -- \
   "$helper_dir/UpdateExecutor.swift" \
   "$helper_dir/UpdateTests.swift" \
   "$repo_dir/apps/macos/Tono/Models/UpdateContractV1.swift" \
+  "$repo_dir/apps/macos/Tono/Core/ProtectedDNSServiceIdentity.swift" \
+  "$repo_dir/apps/macos/Tono/Core/ControlPlaneRelays.swift" \
   "$repo_dir/tooling/scripts/helper-shared/PeerAuthorization.swift" \
   "$protocol_version_source"
 

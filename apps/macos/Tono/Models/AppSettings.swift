@@ -80,6 +80,19 @@ enum SettingsKey {
     /// on by default.
     nonisolated static let crashReportingEnabled =
         "crashReportingEnabled"
+    /// "Allow local network devices" (D7, decision D3-A). Off by default:
+    /// while connected, PF passes nothing to private, link-local or ULA
+    /// addresses except mDNS. Read at every Kill Switch arm. Not the legacy
+    /// `allowLAN` key, which was the proxy listener's LAN binding.
+    nonisolated static let allowLocalNetworkDevices =
+        "allowLocalNetworkDevices"
+
+    /// Whether the setting is on. Absent or unreadable is off.
+    nonisolated static func allowsLocalNetworkDevices(
+        defaults: UserDefaults = AppProfile.defaults
+    ) -> Bool {
+        defaults.bool(forKey: allowLocalNetworkDevices)
+    }
     static let hasCompletedOnboarding = "hasCompletedOnboarding"
     /// First-run Welcome v2 intro. Set after Skip or Get started; never re-shown.
     static let introSeen = "introSeen"
@@ -100,17 +113,22 @@ enum InterfaceLanguagePreference {
     static let simplifiedChinese = "简体中文"
     static let options = [auto, english, simplifiedChinese]
 
-    static var storedLanguage: String {
-        AppProfile.defaults.string(forKey: SettingsKey.interfaceLanguage) ?? auto
+    static func resolve(_ language: String?) -> String {
+        guard let language, options.contains(language) else { return simplifiedChinese }
+        return language
+    }
+
+    static func storedLanguage(defaults: UserDefaults = AppProfile.defaults) -> String {
+        resolve(defaults.string(forKey: SettingsKey.interfaceLanguage))
     }
 
     static var hasChosen: Bool {
         if AppProfile.defaults.bool(forKey: SettingsKey.hasChosenInterfaceLanguage) {
             return true
         }
-        // Existing installs that already picked English/Chinese in Settings
-        // should not be sent back through the first-launch chooser.
-        switch storedLanguage {
+        // Chinese is ready on first launch; a saved English/Chinese choice
+        // also stays out of the chooser. Do not overwrite the stored choice.
+        switch storedLanguage() {
         case english, simplifiedChinese:
             AppProfile.defaults.set(true, forKey: SettingsKey.hasChosenInterfaceLanguage)
             return true
@@ -128,20 +146,14 @@ enum InterfaceLanguagePreference {
     }
 
     static func apply(_ language: String) {
-        let value: String
-        switch language {
-        case english, simplifiedChinese, auto:
-            value = language
-        default:
-            value = auto
-        }
+        let value = resolve(language)
         AppProfile.defaults.set(value, forKey: SettingsKey.interfaceLanguage)
         AppProfile.defaults.set(true, forKey: SettingsKey.hasChosenInterfaceLanguage)
         syncAppleLanguages(from: value)
     }
 
     static func syncAppleLanguagesFromStore() {
-        syncAppleLanguages(from: storedLanguage)
+        syncAppleLanguages(from: storedLanguage())
     }
 
     static func syncAppleLanguages(from language: String) {

@@ -1,12 +1,15 @@
 // Collector-facing job lease/heartbeat/result. Same token as the snapshot
 // ingest route; this file is the whole HTTP surface so index.ts stays a
-// two-line delegation.
+// two-line delegation. The relay nodes' end-to-end report rides the same
+// delegation but authenticates with the exit-agent token (api-relay-report.ts).
 
 import { type Env, now, str } from '../env';
 import { ApiError } from '../errors';
 import { privileged } from '../auth';
 import { body, rejectUnexpectedKeys } from '../request';
 import { completeJob, heartbeatJob, leaseJobs } from './jobs';
+import { nodeAgentRoutes } from './node-agent';
+import { relayReportRoute } from '../api-relay-report';
 
 function requireCollector(req: Request, e: Env): Promise<void> {
   if (typeof e.OPS_COLLECTOR_TOKEN !== 'string' || e.OPS_COLLECTOR_TOKEN.length < 32) {
@@ -25,6 +28,9 @@ export async function opsIngestRoutes(
   p: string,
   m: string,
 ): Promise<Response | null> {
+  const relayReport = await relayReportRoute(req, e, p, m);
+  if (relayReport) return relayReport;
+
   if (p === '/api/v1/ops-ingest/jobs' && m === 'GET') {
     await requireCollector(req, e);
     const q = new URL(req.url).searchParams;
@@ -68,5 +74,6 @@ export async function opsIngestRoutes(
     return Response.json({ job });
   }
 
-  return null;
+  // Node self-registration (A20) has its own per-node token, not the collector's.
+  return nodeAgentRoutes(req, e, p, m);
 }

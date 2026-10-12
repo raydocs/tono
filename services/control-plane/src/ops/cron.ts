@@ -204,6 +204,7 @@ async function runRetention(db: D1Database, nowSec: number): Promise<void> {
   await retainLimited(db, 'ops_daily_slo', 'day_at', nowSec - 400 * DAY);
   await retainLimited(db, 'ops_node_jobs', 'created_at', nowSec - 90 * DAY);
   await retainLimited(db, 'node_traffic_cycle_samples', 'at', nowSec - 60 * DAY);
+  await retainLimited(db, 'ops_api_path_daily', 'day_at', nowSec - 90 * DAY);
   await retainFollowups(db, nowSec, RETAIN_LIMIT);
   await closeExpiredLogWindows(db, nowSec, RETAIN_LIMIT);
 }

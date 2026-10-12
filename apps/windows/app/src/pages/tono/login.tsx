@@ -16,11 +16,13 @@ import {
   stableTonoErrorCode,
   tonoDisconnect,
   tonoRetryRestore,
+  tonoSignInDismiss,
   tonoSignInStart,
   tonoSignInVerify,
   tonoSignOut,
 } from '@/services/tono'
 import { useAppearancePreferences } from '@/tono-ui/appearance-preferences'
+import { AUTH_ERROR_CODES } from '@/tono-ui/auth-diagnostic-codes'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { hasLiveProtection } from '@/tono-ui/protection-evidence'
 import { SeaScene } from '@/tono-ui/SeaScene'
@@ -59,25 +61,12 @@ const pastedCode = (text: string) => {
   return digits.length <= 6 ? digits : ''
 }
 
-const AUTH_ERROR_CODES = new Set([
-  'TONO_AUTH_UNREACHABLE',
-  'TONO_AUTH_DNS',
-  'TONO_AUTH_TCP',
-  'TONO_AUTH_TLS',
-  'TONO_AUTH_QUIC',
-  'TONO_AUTH_TIMEOUT',
-  'TONO_AUTH_CAPTIVE',
-  'TONO_AUTH_API',
-  'TONO_AUTH_LOCAL_CONFLICT',
-  'TONO_AUTH_FORBIDDEN',
-  'TONO_AUTH_STORE',
-  'TONO_AUTH_RATE_LIMITED',
-  'TONO_AUTH_DEVICE_LIMIT',
-  'TONO_AUTH_UNAUTHORIZED',
-  'TONO_AUTH_INVALID_CODE',
-  'TONO_SIGN_IN_NOT_SAVED',
-  'TONO_CLOCK_SKEW',
-])
+// Decision 091's native marker is the signal, not the current protection state:
+// legacy Services and other request paths may still return the generic error.
+const relayOnlyFailure = (error: unknown) => {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  return raw.match(/(?:^|: )TONO_RELAYS_UNREACHABLE: ([\s\S]*)$/)?.[1] ?? null
+}
 
 const rawAuthError = (error: unknown) =>
   error instanceof Error
@@ -89,7 +78,7 @@ const rawAuthError = (error: unknown) =>
 /** The transport part of an unreachable sign-in, after its stable code. */
 const authTransportText = (raw: string) =>
   raw.match(
-    /^TONO_(?:AUTH_[A-Z0-9_]+|CLOCK_SKEW): could not reach Tono: ([\s\S]*)$/,
+    /^TONO_(?:AUTH_[A-Z0-9_]+|CLOCK_SKEW|TLS_INTERCEPTED): could not reach Tono: (?:TONO_CAPTIVE_PORTAL: )?([\s\S]*)$/,
   )?.[1]
 
 /** Every control-plane path the failed request tried, or none. */
@@ -109,11 +98,22 @@ const authSupportSummary = (
   const code =
     foundCode && AUTH_ERROR_CODES.has(foundCode) ? foundCode : '(none)'
   const lines = [`Auth stage: ${stage}`, `Error code: ${code}`]
+  const relays = relayOnlyFailure(error)
+  if (relays !== null) {
+    lines.push('Routes: Tono relays')
+    for (const match of relays.matchAll(
+      /(?:^|; )relay ([1-3]) \([^()\r\n]{1,80}\) (dns|connect|tls|timeout|other): /g,
+    )) {
+      const [, relay, kind] = match
+      if (relay && kind) lines.push(`Relay ${relay}: ${kind}`)
+    }
+    return lines.join('\n')
+  }
   const transport = authTransportText(raw)
   if (transport) {
     const paths = controlPlanePathFailures(transport)
     const direct = transport.match(
-      /^(?:TONO_CLOCK_SKEW: )?(dns|connect|tls|timeout|other): /,
+      /^(?:TONO_(?:CLOCK_SKEW|TLS_INTERCEPTED): )?(dns|connect|tls|timeout|other): /,
     )?.[1]
     if (paths.length > 0) {
       lines.push(`Paths: ${controlPlanePathsSummary(paths)}`)
@@ -139,6 +139,7 @@ const LoginPage = () => {
   const [sentAck, setSentAck] = useState(false)
   const [sending, setSending] = useState(false)
   const [verifying, setVerifying] = useState(false)
+  const [changingEmail, setChangingEmail] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [restoringInternet, setRestoringInternet] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
@@ -185,15 +186,22 @@ const LoginPage = () => {
     status?.uiState !== 'connected' &&
     (status?.protectionBlocked === true || status?.killSwitch?.wanted === true)
 
-  const errorOffersSupport =
-    Boolean(error) &&
+  // Decision 093 owns exhaustion. Never infer it from the error, a timer or
+  // protection, and never render/copy the request's operation token.
+  const recovery = status?.signInRecovery
+  const automaticRecovery = recovery?.phase === 'automatic'
+  const authBusy = sending || verifying || changingEmail || automaticRecovery
+  const supportAvailable = recovery?.phase === 'userAction' && !authBusy
+  const visibleError = automaticRecovery ? null : error
+  const hasDiagnosticFailure =
+    Boolean(visibleError) &&
     error !== t('tono.login.invalidEmail') &&
     error !== t('tono.login.invalidCode')
   // `auth/email/start` answers 202 for every address and a failed delivery is
-  // silent, so a code that has not arrived by the time resend opens (60 s) gets
-  // its own way to support (#596). An error already carrying support wins.
-  const showNoEmailHint =
-    codeSent && countdown === 0 && !sending && !errorOffersSupport
+  // silent. A minute without mail is a self-service hint, not evidence that
+  // bounded recovery is exhausted. Neither this timer nor a relay failure
+  // authorizes an automatic contact-support prompt.
+  const showNoEmailHint = codeSent && countdown === 0 && !authBusy && !error
 
   const resetToStart = () => {
     setCodeSent(false)
@@ -206,8 +214,32 @@ const LoginPage = () => {
     autoSubmittedCodeRef.current = null
   }
 
-  const handleSendCode = useLockFn(async () => {
+  // Keep the shared fallback unchanged for other product screens.
+  const signInErrorText = (error: unknown) => {
+    const message = formatTonoActionError(error, t)
+    return message === t('tono.errors.unknownAction')
+      ? t('tono.login.errors.unknown')
+      : message
+  }
+
+  const handleChangeEmail = useLockFn(async () => {
     if (authRequestPendingRef.current) return
+    authRequestPendingRef.current = true
+    setChangingEmail(true)
+    try {
+      await tonoSignInDismiss()
+      await mutateTonoStatus()
+      resetToStart()
+    } catch (error) {
+      setError(signInErrorText(error))
+    } finally {
+      authRequestPendingRef.current = false
+      setChangingEmail(false)
+    }
+  })
+
+  const handleSendCode = useLockFn(async () => {
+    if (authRequestPendingRef.current || automaticRecovery) return
     const trimmed = email.trim().toLowerCase()
     if (!EMAIL_PATTERN.test(trimmed)) {
       setError(t('tono.login.invalidEmail'))
@@ -230,7 +262,11 @@ const LoginPage = () => {
       // not a resend cooldown — the resend cooldown stays a fixed 60s.
       setCountdown(RESEND_COUNTDOWN)
     } catch (error) {
-      setError(formatTonoActionError(error, t))
+      setError(
+        relayOnlyFailure(error) !== null
+          ? t('tono.login.errors.relaysUnreachable')
+          : signInErrorText(error),
+      )
       setAuthFailureSummary(authSupportSummary('send-code', error))
       setAuthPaths(authPathFailures(error))
     } finally {
@@ -240,7 +276,7 @@ const LoginPage = () => {
   })
 
   const handleVerify = useLockFn(async () => {
-    if (authRequestPendingRef.current) return
+    if (authRequestPendingRef.current || automaticRecovery) return
     const trimmedCode = code.trim()
     if (!/^\d{6}$/.test(trimmedCode)) {
       setError(t('tono.login.invalidCode'))
@@ -272,7 +308,11 @@ const LoginPage = () => {
         autoSubmittedCodeRef.current = null
         setRejectedAttempt((attempt) => attempt + 1)
       }
-      setError(formatTonoActionError(error, t))
+      setError(
+        relayOnlyFailure(error) !== null
+          ? t('tono.login.errors.relaysUnreachable')
+          : signInErrorText(error),
+      )
       setAuthFailureSummary(authSupportSummary('verify-code', error))
       setAuthPaths(authPathFailures(error))
     } finally {
@@ -301,11 +341,11 @@ const LoginPage = () => {
   }, [codeSent])
 
   useEffect(() => {
-    if (!codeSent || verifying || internetBlocked) return
+    if (!codeSent || verifying) return
     if (!/^\d{6}$/.test(code) || autoSubmittedCodeRef.current === code) return
     autoSubmittedCodeRef.current = code
     void handleVerify()
-  }, [code, codeSent, handleVerify, internetBlocked, verifying])
+  }, [code, codeSent, handleVerify, verifying])
 
   const handleRetryRestore = useLockFn(async () => {
     setRetrying(true)
@@ -406,8 +446,8 @@ const LoginPage = () => {
         border: `1px solid ${TONO_COLORS.protectedOffline}4D`,
       }}
     >
-      {/* The card and its sign-in gate follow the fail-closed intent; the
-          "still blocked" claim needs the Service's live barrier. */}
+      {/* Protection still describes the Service's live barrier, not whether
+          relay-only sign-in is available. This UI does not release it to send. */}
       <span style={{ fontSize: 13, fontWeight: 650 }}>
         {previousTunnelRunning
           ? t('tono.login.networkBlocked.stillRunningTitle')
@@ -424,14 +464,16 @@ const LoginPage = () => {
       </span>
       <button
         type="button"
-        className="tono-button"
+        className="tono-link"
         style={{
-          width: '100%',
-          padding: '9px 12px',
+          alignSelf: 'flex-start',
+          padding: '8px 16px',
           fontSize: 13,
           fontWeight: 600,
-          color: '#fff',
-          background: TONO_COLORS.protectedOffline,
+          color: text.primary,
+          background: 'transparent',
+          border: `1px solid ${TONO_COLORS.protectedOffline}B3`,
+          borderRadius: 999,
         }}
         onClick={handleRestoreInternet}
         disabled={restoringInternet}
@@ -441,12 +483,9 @@ const LoginPage = () => {
           : t('tono.login.networkBlocked.restore')}
       </button>
       {restoreInternetError && (
-        <>
-          <span style={{ fontSize: 12, color: 'var(--tono-text-error)' }}>
-            {restoreInternetError}
-          </span>
-          <SupportContact extra={restoreInternetError} />
-        </>
+        <span style={{ fontSize: 12, color: 'var(--tono-text-error)' }}>
+          {restoreInternetError}
+        </span>
       )}
     </div>
   ) : null
@@ -494,7 +533,6 @@ const LoginPage = () => {
               ? t('tono.login.sessionEnded.description')
               : t('tono.login.suspended.description')}
           </p>
-          <SupportContact email={email} extra={suspendedTitle} />
           <button
             type="button"
             className={newAppearance ? 'sea-button' : 'tono-link'}
@@ -610,10 +648,6 @@ const LoginPage = () => {
             </span>
             {newAppearance ? (
               <span style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                <SupportContact
-                  compact
-                  extra={t('tono.login.restoreFailed.title')}
-                />
                 <button
                   type="button"
                   className="sea-button"
@@ -643,9 +677,6 @@ const LoginPage = () => {
               </button>
             )}
           </div>
-        )}
-        {restoreFailed && !newAppearance && (
-          <SupportContact extra={t('tono.login.restoreFailed.title')} />
         )}
 
         <div
@@ -685,20 +716,26 @@ const LoginPage = () => {
         </div>
 
         <p className="tono-sr-only" role="status">
-          {sending
-            ? t('tono.login.sending')
-            : sentAck
-              ? t('tono.login.sent')
-              : verifying
-                ? t('tono.login.verifying')
-                : codeSent
-                  ? t('tono.login.codeSent')
-                  : ''}
+          {automaticRecovery
+            ? t(
+                recovery.step === 'sendCode'
+                  ? 'tono.login.sending'
+                  : 'tono.login.verifying',
+              )
+            : sending
+              ? t('tono.login.sending')
+              : sentAck
+                ? t('tono.login.sent')
+                : verifying
+                  ? t('tono.login.verifying')
+                  : codeSent
+                    ? t('tono.login.codeSent')
+                    : ''}
         </p>
 
         <form
           className={newAppearance ? 'sea-login-fields' : undefined}
-          aria-busy={sending || sentAck || verifying}
+          aria-busy={authBusy || sentAck}
           onSubmit={(event) => {
             event.preventDefault()
             if (!codeSent) void handleSendCode()
@@ -740,14 +777,7 @@ const LoginPage = () => {
                 setAuthFailureSummary(null)
                 setAuthPaths([])
               }}
-              disabled={
-                sending ||
-                sentAck ||
-                verifying ||
-                restoringInternet ||
-                internetBlocked ||
-                codeSent
-              }
+              disabled={authBusy || sentAck || restoringInternet || codeSent}
             />
           </label>
 
@@ -755,7 +785,7 @@ const LoginPage = () => {
             <>
               <p className="tono-welcome__trust">
                 <TonoIcon name="lock" size={14} />
-                <span>{t('tono.login.trust')}</span>
+                <span>{t('tono.login.privacySummary')}</span>
               </p>
               <button
                 type="submit"
@@ -765,18 +795,35 @@ const LoginPage = () => {
                     : 'tono-button tono-action tono-progress-pill'
                 }
                 style={primaryButtonStyle}
-                disabled={
-                  sending || sentAck || restoringInternet || internetBlocked
-                }
+                disabled={authBusy || sentAck || restoringInternet}
               >
                 <span>
-                  {sending
-                    ? t('tono.login.sending')
-                    : sentAck
-                      ? t('tono.login.sent')
-                      : t('tono.login.sendCode')}
+                  {automaticRecovery
+                    ? t(
+                        recovery.step === 'sendCode'
+                          ? 'tono.login.sending'
+                          : 'tono.login.verifying',
+                      )
+                    : sending
+                      ? t('tono.login.sending')
+                      : sentAck
+                        ? t('tono.login.sent')
+                        : t('tono.login.sendCode')}
                 </span>
               </button>
+              <details
+                style={{
+                  gridColumn: '1 / -1',
+                  gridRow: 3,
+                  fontSize: 12,
+                  color: text.secondary,
+                }}
+              >
+                <summary>{t('tono.login.privacyDetails')}</summary>
+                <p style={{ margin: '8px 0', lineHeight: 1.5 }}>
+                  {t('tono.login.trust')}
+                </p>
+              </details>
             </>
           ) : (
             <>
@@ -847,12 +894,7 @@ const LoginPage = () => {
                           }
                         : undefined
                     }
-                    disabled={
-                      sending ||
-                      verifying ||
-                      restoringInternet ||
-                      internetBlocked
-                    }
+                    disabled={authBusy || restoringInternet}
                   />
                 </div>
               </label>
@@ -861,14 +903,13 @@ const LoginPage = () => {
                 className="tono-button tono-action"
                 style={primaryButtonStyle}
                 disabled={
-                  sending ||
-                  verifying ||
-                  restoringInternet ||
-                  internetBlocked ||
-                  !/^\d{6}$/.test(code)
+                  authBusy || restoringInternet || !/^\d{6}$/.test(code)
                 }
               >
-                {verifying ? t('tono.login.verifying') : t('tono.login.verify')}
+                {verifying ||
+                (automaticRecovery && recovery.step === 'verifyCode')
+                  ? t('tono.login.verifying')
+                  : t('tono.login.verify')}
               </button>
               <div
                 style={{
@@ -892,13 +933,7 @@ const LoginPage = () => {
                     flexShrink: 0,
                   }}
                   onClick={countdown > 0 ? undefined : handleSendCode}
-                  disabled={
-                    sending ||
-                    verifying ||
-                    restoringInternet ||
-                    internetBlocked ||
-                    countdown > 0
-                  }
+                  disabled={authBusy || restoringInternet || countdown > 0}
                 >
                   {countdown > 0
                     ? t('tono.login.resendIn', { seconds: countdown })
@@ -913,10 +948,8 @@ const LoginPage = () => {
                   color: text.secondary,
                   alignSelf: 'center',
                 }}
-                onClick={resetToStart}
-                disabled={
-                  sending || verifying || restoringInternet || internetBlocked
-                }
+                onClick={() => void handleChangeEmail()}
+                disabled={authBusy || restoringInternet}
               >
                 {t('tono.login.changeEmail')}
               </button>
@@ -924,7 +957,7 @@ const LoginPage = () => {
           )}
         </form>
 
-        {error && (
+        {visibleError && (
           <p
             role="alert"
             style={{
@@ -934,17 +967,39 @@ const LoginPage = () => {
               color: 'var(--tono-text-error)',
             }}
           >
-            {error}
+            {visibleError.replace(/ \(TONO_[A-Z0-9_]+\)$/, '')}
           </p>
         )}
-        {errorOffersSupport && authPaths.length > 0 && (
-          <LoginPathFailures paths={authPaths} />
+        {hasDiagnosticFailure && (
+          <details style={{ fontSize: 12, color: text.secondary }}>
+            <summary style={{ cursor: 'pointer' }}>
+              {t('tono.login.technicalDetails')}
+            </summary>
+            {authPaths.length > 0 && <LoginPathFailures paths={authPaths} />}
+            {authFailureSummary?.includes('\nRoutes: Tono relays') && (
+              <p style={{ margin: '8px 0', lineHeight: 1.5 }}>
+                {t('tono.login.relayFailureKinds')}
+              </p>
+            )}
+            {!supportAvailable && (
+              <SupportContact
+                key={authFailureSummary}
+                compact
+                extra={authFailureSummary ?? undefined}
+              />
+            )}
+          </details>
         )}
-        {errorOffersSupport && (
-          <SupportContact
-            email={email}
-            extra={authFailureSummary ?? error ?? undefined}
-          />
+        {supportAvailable && (
+          <div style={{ fontSize: 12, color: text.secondary }}>
+            {!visibleError && <p>{t('tono.login.recoveryEnded')}</p>}
+            <SupportContact
+              key={authFailureSummary}
+              compact
+              contact
+              extra={`${authFailureSummary ?? ''}\nRecovery cause: ${recovery.cause ?? ''}`}
+            />
+          </div>
         )}
         {codeSent && (
           <div
@@ -1006,10 +1061,6 @@ const LoginPage = () => {
             >
               {t('tono.login.noEmail.description')}
             </span>
-            <SupportContact
-              email={email}
-              extra={t('tono.login.noEmail.title')}
-            />
           </div>
         )}
       </GlassCard>

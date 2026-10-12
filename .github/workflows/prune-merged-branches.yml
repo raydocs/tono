@@ -1,0 +1,55 @@
+# Weekly deletion of remote branches whose work is already on main (backlog
+# A26, decision D10-A: delete merged branches automatically). Selection and the
+# keep rules live in tooling/scripts/prune-merged-branches.mjs: main, release/*,
+# stability/*, branches named in a workflow, open-PR heads and bases, and any
+# branch with a commit not on main all stay. Each delete is leased to the SHA
+# it was listed at, so a branch pushed to mid-run is kept.
+#
+# The repository setting "Automatically delete head branches" covers new
+# merges; this sweeps what it misses (red/evidence branches, branches merged by
+# a local merge commit, stacked PR bases). That setting is the owner's.
+#
+# A manual run is a dry run unless `apply` is ticked.
+
+name: Prune merged branches
+
+on:
+  schedule:
+    # Mondays 04:41 UTC, off the hour and away from the D1 backup cron.
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Delete the selected branches (unticked = dry run)
+        type: boolean
+        default: false
+
+# contents: write is the only write scope (branch deletion). pull-requests:
+# read lets the script see open PRs; without it the script refuses to delete.
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: prune-merged-branches
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    if: github.repository == 'raydocs/tono'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Prune merged remote branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ (github.event_name == 'schedule' || inputs.apply) && '--apply' || '--dry-run' }}
+        run: node tooling/scripts/prune-merged-branches.mjs remote "$MODE"

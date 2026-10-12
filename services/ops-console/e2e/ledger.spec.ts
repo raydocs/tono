@@ -15,6 +15,16 @@ import { open, settle } from './ops';
 
 const LEDGER = '/settings/ledger';
 
+/**
+ * A test that writes gets its own fixture store per project, repeat and
+ * retry: a store left reversed or locked by the previous run of the same test
+ * would otherwise be what `--repeat-each` or a retry starts from.
+ */
+function sessionFor(name: string): string {
+  const info = test.info();
+  return `${name}-${info.project.name}-${info.repeatEachIndex}-${info.retry}`;
+}
+
 /** The reviewable copy: this page is taller than the 900 px viewport. */
 async function keep(page: Page, name: string) {
   if (test.info().project.name !== 'light') return;
@@ -58,8 +68,8 @@ test.describe('账目', () => {
       .toHaveAttribute('href', /months\/2026-09\/export\.csv/);
   });
 
-  test('记一笔外币，存之前就看得到折多少人民币', async ({ page }, testInfo) => {
-    await open(page, LEDGER, 'default', `ledger-add-${testInfo.project.name}`);
+  test('记一笔外币，存之前就看得到折多少人民币', async ({ page }) => {
+    await open(page, LEDGER, 'default', sessionFor('ledger-add'));
     await page.getByRole('button', { name: '记一笔' }).click();
 
     const drawer = page.getByRole('dialog');
@@ -90,8 +100,8 @@ test.describe('账目', () => {
    * why; a bill opens on dollars because that is what the invoices are in, and
    * stays changeable because some of them are not.
    */
-  test('收款只收人民币，支出默认美元', async ({ page }, testInfo) => {
-    await open(page, LEDGER, 'default', `ledger-cny-${testInfo.project.name}`);
+  test('收款只收人民币，支出默认美元', async ({ page }) => {
+    await open(page, LEDGER, 'default', sessionFor('ledger-cny'));
     await page.getByRole('button', { name: '记一笔' }).click();
 
     const drawer = page.getByRole('dialog');
@@ -115,8 +125,8 @@ test.describe('账目', () => {
   });
 
   /** The hub's half of the same rule, and the sentence it comes back as. */
-  test('收入记成外币，中间层也不收', async ({ page }, testInfo) => {
-    const session = `ledger-cny-refuse-${testInfo.project.name}`;
+  test('收入记成外币，中间层也不收', async ({ page }) => {
+    const session = sessionFor('ledger-cny-refuse');
     await open(page, LEDGER, 'default', session);
     const refused = await page.request.post(`/api/v1/ops/ledger?session=${session}`, {
       data: {
@@ -137,13 +147,13 @@ test.describe('账目', () => {
     });
   });
 
-  test('汇率还没拉到的那天，直接说出来', async ({ page }, testInfo) => {
+  test('汇率还没拉到的那天，直接说出来', async ({ page }) => {
     await page.route('**/api/v1/ops/fx?**', (route) => route.fulfill({
       status: 409,
       contentType: 'application/json',
       body: JSON.stringify({ error: { code: 'FX_RATE_MISSING', message: 'missing rate' } }),
     }));
-    await open(page, LEDGER, 'default', `ledger-fx-${testInfo.project.name}`);
+    await open(page, LEDGER, 'default', sessionFor('ledger-fx'));
     await page.getByRole('button', { name: '记一笔' }).click();
 
     const drawer = page.getByRole('dialog');
@@ -152,16 +162,22 @@ test.describe('账目', () => {
     await expect(drawer.getByText('2026-09-08 的汇率还没拉到，等入账日的汇率进来再记。')).toBeVisible();
   });
 
-  test('冲正之后两笔都标上，说清楚落在哪个月', async ({ page }, testInfo) => {
-    await open(page, LEDGER, 'default', `ledger-rev-${testInfo.project.name}`);
-    const original = page.getByRole('row').filter({ hasText: '客服号与短信' });
+  test('冲正之后两笔都标上，说清楚落在哪个月', async ({ page }) => {
+    await open(page, LEDGER, 'default', sessionFor('ledger-rev'));
+    // Rows are looked for in 条目 only: the SLO table on the same page is a
+    // thousand more rows for every role query to walk on each poll.
+    const table = page.getByRole('heading', { name: '条目', exact: true }).locator('xpath=ancestor::section[1]');
+    const original = table.getByRole('row').filter({ hasText: '客服号与短信' });
     await original.getByRole('button', { name: '冲正', exact: true }).click();
 
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByText('冲正会在 2026 年 9 月 记一笔跟「客服号与短信」相反的账，原来那笔留着，标成已冲正。')).toBeVisible();
     await dialog.getByRole('button', { name: '冲正', exact: true }).click();
+    // The dialog closes once the write has landed and the page has asked
+    // again; until then it hides the table from every role query.
+    await expect(dialog).toBeHidden();
 
-    const both = page.getByRole('row').filter({ hasText: '客服号与短信' });
+    const both = table.getByRole('row').filter({ hasText: '客服号与短信' });
     await expect(both).toHaveCount(2);
     await expect(both.filter({ hasText: '已冲正' })).toHaveCount(1);
     await expect(both.filter({ hasText: '冲正的是这笔' })).toHaveCount(1);
@@ -195,8 +211,8 @@ test.describe('账目', () => {
     await expect(page.getByText('待核对', { exact: true })).toBeVisible();
   });
 
-  test('改到期的时候可以顺手把这笔收入记上', async ({ page }, testInfo) => {
-    const session = `ledger-renew-${testInfo.project.name}`;
+  test('改到期的时候可以顺手把这笔收入记上', async ({ page }) => {
+    const session = sessionFor('ledger-renew');
     await open(page, '/customers/u-04', 'default', session);
     await page.getByRole('button', { name: '改到期' }).click();
 
@@ -214,8 +230,8 @@ test.describe('账目', () => {
     await expect(page.getByRole('row').filter({ hasText: 'wang.tao@example.com' })).toHaveCount(2);
   });
 
-  test('锁定当前 UTC 月之后不能再接收冲正', async ({ page }, testInfo) => {
-    const session = `ledger-close-${testInfo.project.name}`;
+  test('锁定当前 UTC 月之后不能再接收冲正', async ({ page }) => {
+    const session = sessionFor('ledger-close');
     await open(page, LEDGER, 'default', session);
     await page.getByRole('button', { name: '锁定本月' }).click();
 

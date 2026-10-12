@@ -89,7 +89,7 @@
 | W14 | A 连接失败等 Service status 期间 B 登录，失败归给 B | fixed(0e20f2df) | [#267](https://github.com/raydocs/tono/pull/267) | 中·已确认 | — |
 | I4 | Activity 把只有 selector 的链当作已观测终端出口 | fixed(569ce865) | [#279](https://github.com/raydocs/tono/pull/279) | 低·已确认 | — |
 | #241 | 过期策略恢复在拆除期间借用替换中的 Core 会话 | fixed(基线 576d7087 已含) | [#241](https://github.com/raydocs/tono/issues/241) | 中·已确认 | issue 保持开放等设备证据 |
-| #171 | 热切换端点收敛失败时两端都必须撤回 Connected | fixed(d769e134) | [#171](https://github.com/raydocs/tono/issues/171)，[#174](https://github.com/raydocs/tono/pull/174) | 中·实机 | 两端源码已修；issue 保持开放等已安装设备验收 |
+| #171 | 热切换端点收敛失败时两端都必须撤回 Connected | fixed(d769e134) | [#171](https://github.com/raydocs/tono/issues/171)，[#174](https://github.com/raydocs/tono/pull/174) | 中·实机 | 待实机：两端源码已修，回归测试在 main（macOS `ConnectionCoordinatorTests.testFinalEndpointFailureRecoversWithoutCommittingOrOverridingANewerOwner`，Windows `switch.rs` `failed_exact_endpoint_commit_recovers_instead_of_completing_the_switch`）；issue 已于 2026-09-26 关闭；缺已安装设备上最终端点收窄失败时 PF/WFP 端点撤除与 DNS 连续性的证据。hardware evidence pending（A31） |
 | R2-F1 | Disconnect/登出与进行中的 StartClash 竞争且释放被拒：UI 报 Not Connected 而 WFP 仍封锁，Disconnect 成空操作 | fixed(3d957265) | [#295](https://github.com/raydocs/tono/pull/295) | 中·已确认 | 含登出第二路径；实机未复现 |
 | R2-F2 | 未验证 Protected Offline 期间 Service 重启解除 WFP，App 无再同步，UI 持续显示已封锁 | fixed(244075f2) | [#299](https://github.com/raydocs/tono/pull/299) | 高·已确认 | 30 s 轮询；已验证会话进入 idle 且未排程重连时不注册轮询；无「Service 重启+存活 App」实机夹具 |
 | R2-F3 | 原生更新安装落在连接早期，失败后 FSM 卡在 Connecting | fixed(16032c48) | [#294](https://github.com/raydocs/tono/pull/294) | 中·已确认 | 收敛前比对代际；实机未复现 |
@@ -106,14 +106,14 @@
 | H16-O-F7 | 冷启动恢复把已探测到的屏障状态压到 me() 返回之后才发布，期间托盘 flyout 显示 Standby 并提供 Connect | fixed(7c8dc6e0) | [#602](https://github.com/raydocs/tono/issues/602)，[#651](https://github.com/raydocs/tono/pull/651) | 低·已确认 | 核实后收窄：仅初始未保护且持有 refresh token 的冷启动恢复、仅豁免恢复屏的托盘 flyout；Connect 会被账户准入拒绝；排在 #515 之后（restore.rs） |
 | H16-O-F1 | Protected Offline 横幅、登录「网络已被拦截」卡片与托盘提示只凭状态机锁存声称已拦截，未看 Service 的 live 屏障（= H16-C-F5） | fixed(42cea896) | [#511](https://github.com/raydocs/tono/issues/511)，[#513](https://github.com/raydocs/tono/pull/513) | 高·已确认 | 仪表盘、进度卡、托盘面板已由 b489ea16 修正；托盘提示被速率覆盖、图标不刷新见 H16-O-F2 |
 | H16-O-F2 | 托盘图标只在启动时取样，状态发布不刷新；connecting/disconnecting 显示已连接图标；速率显示整段替换提示的保护行（= H16-C-F4） | fixed(42cea896) | [#517](https://github.com/raydocs/tono/issues/517)，[#518](https://github.com/raydocs/tono/pull/518) | 中·已确认 | 反向「橙色卡住」变体为推导；未实机观察 |
-| H16-O-F6 | 退出/重启拒绝对话框不读 Service 就承诺「本机保持受保护」，而 8 s 超时后释放仍可能完成、待完成更新时主机可能从未受保护 | fixed(42cea896) | [#519](https://github.com/raydocs/tono/issues/519)，[#520](https://github.com/raydocs/tono/pull/520) | 中·推导 | 文案已确认，慢释放时序需实机；App 侧 IPC 报错而 Service 仍在释放时仍可能误说保持受保护 |
+| H16-O-F6 | 退出/重启拒绝对话框不读 Service 就承诺「本机保持受保护」，而 8 s 超时后释放仍可能完成、待完成更新时主机可能从未受保护 | fixed(42cea896) | [#519](https://github.com/raydocs/tono/issues/519)，[#520](https://github.com/raydocs/tono/pull/520) | 中·推导 | 待实机：文案与判定已修，回归测试 `window.rs` `refusal_dialog_promises_protection_only_for_a_live_barrier_after_the_release_ended`；App 侧 IPC 报错而 Service 仍在释放的情形另由 [F520-1](findings.d/F520-1.md) 修复（fixed(e2aff1a3)）；缺慢释放（超过 8 s）时对话框措辞的设备证据。hardware evidence pending（A31） |
 
 ## 3. DNS（两端）
 
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| W2 | 卸载时 NRPT 恢复失败被适配器 fallback 吞掉，误报已恢复 | fixed(0e20f2df) | [#249](https://github.com/raydocs/tono/issues/249)，[#267](https://github.com/raydocs/tono/pull/267) | 中·已确认 | issue 开放等设备/系统边界证据；第 3 档与 WFP 移除后的 DNS 错误仍能让卸载在 NRPT 规则未删时完成，续修见 [BRICK-W4](findings.d/BRICK-W4.md) |
-| W8 | Windows DNS 自写窗口内直接丢弃网络通知 | fixed(0e20f2df) | [#259](https://github.com/raydocs/tono/issues/259)，[#267](https://github.com/raydocs/tono/pull/267) | 中·已确认 | issue 开放等设备证据；macOS 对应项 R1-F5 |
+| W2 | 卸载时 NRPT 恢复失败被适配器 fallback 吞掉，误报已恢复 | fixed(0e20f2df) | [#249](https://github.com/raydocs/tono/issues/249)，[#267](https://github.com/raydocs/tono/pull/267) | 中·已确认 | 待实机：回归测试 `dns/tests.rs` `uninstall_does_not_report_dns_recovered_while_nrpt_restore_fails` 与 `nrpt_restore_failure_keeps_release_closed_and_retryable`；issue 已关闭；第 3 档与 WFP 移除后的 DNS 错误续修见 [BRICK-W4](findings.d/BRICK-W4.md)（fixed(6f399bac)）；缺 NRPT 删除失败时的设备/系统边界证据。hardware evidence pending（A31） |
+| W8 | Windows DNS 自写窗口内直接丢弃网络通知 | fixed(0e20f2df) | [#259](https://github.com/raydocs/tono/issues/259)，[#267](https://github.com/raydocs/tono/pull/267) | 中·已确认 | 待实机：回归测试 `netmon.rs` `a_real_network_change_during_dns_write_is_deferred_not_discarded`；issue 已关闭；macOS 对应项 R1-F5；缺原生 IP Helper 回调落在 DNS 自写窗口内的设备证据。hardware evidence pending（A31） |
 | M2 | macOS DNS 读取失败当作空配置，删除快照并允许释放 | fixed(0e20f2df) | [#267](https://github.com/raydocs/tono/pull/267)（含 #268） | 中·已确认 | 「拒绝假恢复」是后续 DNS 修复的约束基线 |
 | N1 | macOS getaddrinfo 阻塞在 task group 内 | fixed(1ca878cf) | [#289](https://github.com/raydocs/tono/pull/289) | 中·已确认 | — |
 | N2 | macOS DNS-SD 同步提交阻塞，timer/cancel 共用队列，旧请求未清理即堆叠 | fixed(1ca878cf) | [#289](https://github.com/raydocs/tono/pull/289) | 中·已确认 | 无确定性挂住 deallocate 的回归 |
@@ -128,11 +128,11 @@
 | R3-F2 | Windows 加密 DNS 旁路捕获文件非原子落盘，损坏后释放永久硬拒 | fixed(1d572f24) | [#305](https://github.com/raydocs/tono/pull/305)（叠在 #300 上） | 中·推导 | 需持久记录隔离证据；文件跨卸载存活。审查 a894f160 五条已在 PR 内修：恢复只读不消费丢失证据，提交后才退役；Disconnect 第二次恢复保留附注；enable 恢复路径证据留给下一次恢复；degraded 与捕获附注拼接；suppress 先写记录后隔离。附注保留在进程内，Service 重启会丢 |
 | R3-F3 | macOS `protected-dns.json` 损坏/权限异常时 restore、紧急解除、卸载、启动清理全被阻 | fixed(05c58d5d) | [#307](https://github.com/raydocs/tono/pull/307) | 中·推导 | 审查要求：DNS 恢复失败时紧急出口不得顺带拆 PF（M2） |
 | R3-F4 | macOS status() 把「快照有效但服务不可读」报成无快照，App 不再调用 restore | fixed(be1c75d2) | [#303](https://github.com/raydocs/tono/pull/303) | 低·已确认 | helper 契约版本级联（4.6.0 起） |
-| R3-O1 | Windows 恢复证明通过后删快照失败即拒绝拆 WFP，重试同样失败（ACL/AV 锁文件） | open | 待开 | 低·推导 | 观察项，未核实 |
+| R3-O1 | Windows 恢复证明通过后删快照失败即拒绝拆 WFP，重试同样失败（ACL/AV 锁文件） | fixed(cc45bf4f) | [#769](https://github.com/raydocs/tono/pull/769)（[#827](https://github.com/raydocs/tono/pull/827) 已关闭不合） | 低·推导 | 与 WIN-DNS-SNAPSHOT-DELETE-BLOCKS 同根因，由 #769（`fe91aa87`）修：恢复已证明后删快照失败按成功收尾并记 `TONO_DNS_RESTORE_DEGRADED` 告警，不再拒拆 WFP；剩余限制见该分片；待实机（2026-10-10 A15 核对） |
 | R3-O2 | Windows 外层超时丢弃 restore future 时自写窗口提前关闭，自写通知被当外部变化 | fixed(f80951fb) | [#841](https://github.com/raydocs/tono/pull/841) | 低·推导 | 注册表写入在阻塞线程上另持一把自写窗口，直到写入返回；60 秒年龄上限仍会重新发布。异步调用方自己的 guard 超时仍会放下 |
 | R3-O3 | 无快照时把静态 DNS 改为 DHCP 的孤儿修复 | accepted-design | — | 低 | 有意取舍 |
 | R3-O4 | macOS `--emergency-disarm` 不先 bootout daemon，与在线 daemon 双写 | open | 待开 | 低·推导 | 观察项；操作员手动路径 |
-| R3-O5 | macOS 按名字取第一个网络服务，多 Network Location 同名时可能写错服务 | open | 待开 | 低·实机 | 观察项 |
+| R3-O5 | macOS 按名字取第一个网络服务，多 Network Location 同名时可能写错服务 | fixed(2453dec5) | [#1473](https://github.com/raydocs/tono/pull/1473) | 低·实机 | helper 4.52.44：`/dns/enable` 只在当前 Location 里按名字找，主服务 ID 优先，仍有歧义则拒绝；之后按 ID 读写。#1473 合 main `2453dec5`；待实机（多个同名 Location 的 Mac 上 enable/restore 证据）；磁盘上有旧版仅名字快照时 enable 仍走旧的首个同名匹配（与 main 相同），该设备要等一次正常断开退休旧快照后才生效 |
 | R3-O6 | Windows 卸载器在 owner lock 不可得且无 pid 文件时仍 disarm，可能与存活 Service 并发写 DNS | open | 待开 | 低·推导 | 观察项 |
 | R3-O7 | 无快照守卫只认 TUN 地址，旧版遗留 127.0.0.1 被当作用户本地解析器 | accepted-design | — | 低 | 有意取舍，源码有注释 |
 | X2-2 | Windows NRPT 漂移未计入受保护 DNS 健康状态 | fixed(d98b217d) | [#467](https://github.com/raydocs/tono/issues/467)，[#468](https://github.com/raydocs/tono/pull/468) | 中·实机 | 需实机 |
@@ -147,7 +147,7 @@
 |---|---|---|---|---|---|
 | M4 | macOS 更新日记用旧 Mihomo 版本/build number 冒充 Core/源码身份 | fixed(0e20f2df) | [#267](https://github.com/raydocs/tono/pull/267) | 低·已确认 | — |
 | I1 | Windows 覆盖安装使用盘符相对路径 `C:Users` | fixed(f1c1c9d9) | [#276](https://github.com/raydocs/tono/pull/276) | 中·已确认 | — |
-| I2 | macOS 候选签名准入固定在 0.0.72 | fixed(f1c1c9d9) | [#276](https://github.com/raydocs/tono/pull/276)，[#273](https://github.com/raydocs/tono/issues/273) | 中·已确认 | #273 开放：最新分支的新包/已装 helper 资格未建立 |
+| I2 | macOS 候选签名准入固定在 0.0.72 | fixed(f1c1c9d9) | [#276](https://github.com/raydocs/tono/pull/276)，[#273](https://github.com/raydocs/tono/issues/273) | 中·已确认 | 待实机：回归测试 `tooling/scripts/tests/macos-candidate-workflow.test.rb`（候选准入现由 `CANDIDATE_REF`/`CANDIDATE_VERSION` 驱动，不再钉死 0.0.72）；#273 已关闭；缺最新候选分支的签名/公证包与已装 helper/Core 资格的设备证据。hardware evidence pending（A31） |
 | I3 | macOS 签名链同一 run 重复生产同名 Core artifact | fixed(f1c1c9d9) | [#276](https://github.com/raydocs/tono/pull/276) | 低·已确认 | — |
 | #26 | Windows 受保护升级需安装器绑定的交接身份和装机证明 | fixed(1ca878cf) | [#26](https://github.com/raydocs/tono/issues/26)（已关闭） | 高·实机 | 协议源码已接入；已装 macOS/Windows 11 的升级/中断恢复实机验收仍缺 |
 | #181 | 共享更新日记临时文件可被并发写坏 | fixed(34e5619b) | [#181](https://github.com/raydocs/tono/issues/181)，[#184](https://github.com/raydocs/tono/pull/184) | 低·推导 | 唯一 scratch + `create_new` + 回归已在 main；issue 保持开放等 Windows 原生验收 |
@@ -191,7 +191,7 @@
 | H17-G-F2 | Tailscale enrollment 关闭（生产配置）时吊销任务永不执行，带 tailnet 绑定设备的账户停用或销户后重新启用永远返回 409（= H17-O-F5） | fixed(3e64707e6) | [#522](https://github.com/raydocs/tono/issues/522)，[#523](https://github.com/raydocs/tono/pull/523)（409 不再永久），[#1442](https://github.com/raydocs/tono/pull/1442)（注册暂停时吊销任务照常执行） | 中·推导 | 2026-10-07 生产 D1 只读：0 台设备带 `tailscale_node_id`，1 条未完成吊销任务（设备行已不存在、从未尝试）。注册暂停时孤儿 pending 节点清扫仍不跑（新注册已被围栏；ephemeral 节点离线后由 Tailscale 自删）；token-admin 恢复路径不写审计 |
 | H17-C-F2 | 退款销户由多次独立提交组成，中途失败可留下「住宅线与产品账户已回收、VPN 仍有效」的账户 | fixed(61abd20b) | [#524](https://github.com/raydocs/tono/issues/524)，[#525](https://github.com/raydocs/tono/pull/525) | 中·推导 | 停用与全部回收是一个 `DB.batch`，停用在前；故障注入回归 `close reclaims nothing when disabling the account fails`。batch 之后的设备/会话撤销若失败，账户已停用，鉴权立即拒绝，cron 按「停用且仍有 live 设备/会话」补完。2026-10-07 核对 main，此行此前漏更新 |
 | H17-G-F5 | 同一设备再次登录或登出只作废当前会话，更早签发的 refresh token 仍然有效 | fixed | [#833](https://github.com/raydocs/tono/pull/833) | 中·已确认 | 同一设备的再次登录、refresh 与登出都会作废该设备其余未吊销会话；其他设备保持登录。refresh 有效期默认仍为 30 天 |
-| H17-C-F1 | 调低账户设备上限不会移除已超出上限的设备，直到有新设备登录（= H17-G-F1） | open | 待开 | 低·已确认 | 超出部分在下一次新设备登录时才按 LRU 轮换 |
+| H17-C-F1 | 调低账户设备上限不会移除已超出上限的设备，直到有新设备登录（= H17-G-F1） | fixed(9bc77231) | [#1487](https://github.com/raydocs/tono/pull/1487) | 低·已确认 | token-admin PATCH 调低上限时在同一事务里写上限并按 LRU 撤销超额设备（#1487 合 main `9bc77231`）；控制面未部署；待实机（部署后在生产账户上调低上限的证据）；遗留：对本 PR 之前已超额的账户调高上限也会按新上限踢设备，另记 A9-RAISE-EVICTS-OVERCAP（open） |
 
 ## 6. 客户端信任与账户隔离
 
@@ -228,7 +228,7 @@
 | H1-F3 | Windows TLS 嗅探对裸 IP 生效，与无 IP/进程条件的域名后缀直连规则组合，直连目的不受 pinned 地址约束 | fixed(d98b217d) | [#338](https://github.com/raydocs/tono/issues/338)，[#339](https://github.com/raydocs/tono/pull/339) | 高·推导 | 依赖 mihomo 嗅探语义，需实机；macOS 无嗅探，行为不同 |
 | H1-F4 | Windows WFP 只在出向授权层阻断，入向接受层无 block-all，外部发起的入向流不经隧道也不被阻断 | fixed(d98b217d) | [#328](https://github.com/raydocs/tono/issues/328)，[#343](https://github.com/raydocs/tono/pull/343) | 高·推导 | 全局 IPv6 场景最现实；macOS PF 行为不同；FILTER_NAMESPACE 与 #345 冲突，后合者需 rebase |
 | H1-F6 | 两端 DHCP 放行只按端口，不限目的地址、接口和进程 | fixed(1c211a3e) | [#341](https://github.com/raydocs/tono/issues/341)，[#345](https://github.com/raydocs/tono/pull/345)（Windows）、[#347](https://github.com/raydocs/tono/pull/347)（macOS） | 中·实机 | 取决于非特权进程能否占用 DHCP 客户端端口 |
-| D7 | macOS 连接中 `tono-lan` 对私网任意端口、任意用户放行（含直连 LAN DNS） | open | [#344](https://github.com/raydocs/tono/issues/344)，[#348](https://github.com/raydocs/tono/pull/348) | 中·推导 | 内部编号 H1-macDNS；#348 只收紧 LAN DNS，helper 4.10.0 合并时需重编号；其余私网放行仍是设计残留，Windows 无此放行；#348 已合入（只收紧 LAN DNS），其余私网放行尚无修复 PR |
+| D7 | macOS 连接中 `tono-lan` 对私网任意端口、任意用户放行（含直连 LAN DNS） | fixed(dfb06df79) | [#344](https://github.com/raydocs/tono/issues/344)，[#348](https://github.com/raydocs/tono/pull/348)，[#1506](https://github.com/raydocs/tono/pull/1506) | 中·推导 | 内部编号 H1-macDNS；#348 只收紧 LAN DNS（已合入）。#1506（A29，决策 079 D3-A / 085）：新增「允许局域网设备」开关，默认关；关时有隧道也不渲染 `tono-lan`、`tono-linklocal`、`tono-multicast`、`tono-ssdp`，私网只剩 mDNS，开时与 helper 4.52.44 相同。合入后改 fixed(<SHA>)；实机证据待补。原注「Windows 无此放行」已过时：Windows 规则 I（决策 048）连接中放行私网且无开关；待实机（2026-10-11 汇总：无签名设备 / 国内家宽证据）；A29（#1506）默认关闭「允许局域网设备」，用户打开后仍渲染原 `tono-lan` 规则（决定 085，用户选择） |
 | H12-F1 | macOS 未持有 PF enable 引用，kill switch 存活无人监督 | fixed(ca00a736) | [#420](https://github.com/raydocs/tono/issues/420)，[#421](https://github.com/raydocs/tono/pull/421) | 高·推导 | — |
 | H12-F2 | macOS helper 启动时未优先恢复 PF，且依赖 /etc/pf.conf | fixed(ca00a736) | [#423](https://github.com/raydocs/tono/issues/423)，[#424](https://github.com/raydocs/tono/pull/424)（helper）、[#425](https://github.com/raydocs/tono/pull/425)（App 显示未受保护） | 高·推导 | 两个 PR 都合入才闭合 |
 
@@ -236,7 +236,7 @@
 
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| H1-F5 | bootstrap/恢复控制面放行未绑定 Tono 程序身份（Windows permit 无 AppId；macOS PF 只能按 UID），Protected Offline 期间非 Tono 进程也能到达共享 anycast 地址 | open | [#330](https://github.com/raydocs/tono/issues/330)，[#334](https://github.com/raydocs/tono/pull/334)（Windows）；[#331](https://github.com/raydocs/tono/issues/331)，[#335](https://github.com/raydocs/tono/pull/335)（macOS，仅把注释改为 UID 边界） | 中·推导 | macOS PF 无法表达程序身份，#335 只修正描述，程序身份约束仍缺（需 helper 代理或记为风险） |
+| H1-F5 | bootstrap/恢复控制面放行未绑定 Tono 程序身份（Windows permit 无 AppId；macOS PF 只能按 UID），Protected Offline 期间非 Tono 进程也能到达共享 anycast 地址 | open | [#330](https://github.com/raydocs/tono/issues/330)，[#334](https://github.com/raydocs/tono/pull/334)（Windows，已合入）；[#331](https://github.com/raydocs/tono/issues/331)，[#335](https://github.com/raydocs/tono/pull/335)（macOS，仅把注释改为 UID 边界）；[#1539](https://github.com/raydocs/tono/pull/1539)（Windows 中继放行，W-A，已合入）；[#1507](https://github.com/raydocs/tono/pull/1507)（A30，macOS，决定 [086](decisions/086-2026-10-10-h1f5-control-window.md) Option A） | 中·推导 | macOS（#1507 合入后为 fixed）：无隧道 armed 时控制面放行只剩两个 Tono 中继 `179.253.233.220:2053`、`179.255.154.17:2053`（TCP，仅当前用户 UID，去掉 root），Cloudflare anycast 地址在任何 armed 状态都不放行；中继只转发 api/releases 两个 SNI。残留：该状态下同 UID 进程仍可经中继到达 Tono API/发布主机，无时间上限（PF 无内核级到期，见决定 086）；两个中继都不可用时 armed 期间控制面不可达（fail-closed，用户可断开）。待实机：macOS 断网保护下经中继登录/续期与 `pfctl -a tono.killswitch -sr`。Windows（所有者 W-A，决定 [090](decisions/090-2026-10-10-windows-armed-control-plane-via-relays.md)，修订 077）：无隧道 armed 时规则 C 在原有 Cloudflare 条目（pin、学到的地址、`CONTROL_PLANE_PORTS`，所有者选择保留）之外，再放行两个 Tono 中继 `179.253.233.220:2053`、`179.255.154.17:2053`，只限 TCP、精确 IP+端口、与原条目相同的 Tono 程序 AppId 条件，非 Tono 进程任何时候都不匹配；中继只转发 api/releases 两个 SNI、TLS 不终止。残留：Tono 程序自身仍可经 Cloudflare pin 到达共享 anycast；第三个中继改为 `154.84.56.196:2053`（#1538，原 38.14.195.144 入站被挡弃用）；2026-10-11 汇总：所列 PR 均已合入，macOS 仍只按 UID 约束、未绑定程序身份（#331 未关），保持 open |
 | H2-F1 | macOS helper 静默升级路由缺版本下限、签名要求弱于安装器、候选未绑定请求方 App 封存资源，可无管理员同意换成旧版或开发版 helper/核心 | fixed(ca00a736) | [#337](https://github.com/raydocs/tono/issues/337)，[#350](https://github.com/raydocs/tono/pull/350) | 中·推导 | 从下一个 helper 版本起才有可回滚目标；helper 契约版本 4.6.0 合并时需重编号；封存绑定是否可达需实机 |
 | H2-F2 | Windows StartClash 不检查已武装 WFP 的 owner，另一名交互式用户可接管后释放他人保护 | fixed(d98b217d) | [#353](https://github.com/raydocs/tono/issues/353)，[#354](https://github.com/raydocs/tono/pull/354) | 高·推导 | 新增错误码 1014，App 专用提示见 H2-F2-hint；受害方 UI 表现需实机 |
 | H2-F3 | Windows Service 只认证用户（SID + token 文件）不认证 Tono 映像，特权端也不校验 runtime YAML；macOS 对同一威胁有签名与配置白名单 | fixed(0337240e) | [#351](https://github.com/raydocs/tono/issues/351)，[#352](https://github.com/raydocs/tono/pull/352)（映像绑定）、[#357](https://github.com/raydocs/tono/pull/357)（runtime 配置校验） | 高·推导 | 两个 PR 都合入才闭合；是否在威胁模型内需所有者确认 |
@@ -349,8 +349,8 @@
 | H21-O-F5 | macOS 每次连接首次 arm 在无 TUN 时放行 root web 端口 | fixed(9bf349f7) | [#586](https://github.com/raydocs/tono/issues/586)，[#604](https://github.com/raydocs/tono/pull/604) | 高·已确认 | 仅存在 DIRECT plan 时；泄漏量需实机 |
 | R604-F1 | macOS Core 重启（`/core/sync`、崩溃）期间无隧道，reviewed-bundle 放行仍在 | fixed(c9fe191e) | [#608](https://github.com/raydocs/tono/issues/608)，[#609](https://github.com/raydocs/tono/pull/609) | 高·已确认 | 叠在 #604 上；崩溃窗口至多约 10 s；Core 运行中 utun 消失不覆盖；需实机 |
 | H21-O-F6 | macOS 控制面请求继承他人系统代理，受保护离线下被 PF 挡 | fixed(07faa7c0) | [#587](https://github.com/raydocs/tono/issues/587)，[#617](https://github.com/raydocs/tono/pull/617) | 中·已确认 | 控制面 session 空 `connectionProxyDictionary` |
-| H21-O-F7 | 其他 VPN/TUN 未识别，失败归因错误 | open | 待开 | 中·推导(PLAUSIBLE) | #458/#468 部分覆盖 |
-| H21-O-F8 | 强制门户/TLS 拦截代理未识别 | open | 待开 | 低·推导(PLAUSIBLE) | |
+| H21-O-F7 | 其他 VPN/TUN 未识别，失败归因错误 | fixed(beb871d1) | [#1480](https://github.com/raydocs/tono/pull/1480) | 中·推导(PLAUSIBLE) | #458/#468 部分覆盖；#1480（合 main `beb871d1`）两端 App 进程只读识别（macOS getifaddrs，Windows GetIfTable2），网络/TUN 类失败归因「存在其他 VPN」，诊断 `virtualAdapters` 带 `otherVpn`；不识别 PPP 类 VPN（与 PPPoE 无法区分）；需先部署控制面 `routes.ts` 再发客户端；待实机（装有其他 VPN 的两端设备上的归因与诊断证据） |
+| H21-O-F8 | 强制门户/TLS 拦截代理未识别 | fixed(44dcb4fe) | [#1488](https://github.com/raydocs/tono/pull/1488) | 低·推导(PLAUSIBLE) | 只做归因与诊断类别：控制面证书被系统信任库按签发者/链/名称拒绝 → 「网络在拦截加密连接」（macOS `APIError.tlsIntercepted`，Windows `TONO_TLS_INTERCEPTED`）；Windows 传输失败且 NLM 报 `ConstrainedInternetAccess`，或 HTTP 511 → 「网络需要网页登录（强制门户）」（`TONO_AUTH_CAPTIVE`）；诊断 `virtualAdapters` 带 `tlsIntercepted`/`captivePortal`；证书校验不变、无新探测；macOS 无公开强制门户信号；#1488 合 main `44dcb4fe`；待实机（强制门户与 TLS 拦截网络上的两端证据） |
 | H21-O-F9 | 系统时钟错误不被点名，保护期间无法校时 | fixed(13983688) | [#588](https://github.com/raydocs/tono/issues/588)，[#623](https://github.com/raydocs/tono/pull/623) | 低·已确认 | 只做分类与文案：macOS `APIError.clockSkew` 与探测 `.clock`，Windows `TONO_CLOCK_SKEW`；按传输失败参与离线准入；未开 NTP 放行；Windows hy2 不拒 NTP |
 | H21-C-F2 | 受保护离线时更新发现失败且不说明原因 | accepted-design | — | 低·推导 | fail-closed 设计；只改文案 |
 | H21-C-F3 | Windows 检查更新失败时显示「已是最新版」 | fixed(52e67294) | [#589](https://github.com/raydocs/tono/issues/589)，[#618](https://github.com/raydocs/tono/pull/618) | 中·已确认 | |

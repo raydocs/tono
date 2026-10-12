@@ -166,7 +166,8 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
     /// Manual next hand when TCP is dead. Prefer the same-city ` · hy2`
     /// sibling unless that sibling's UDP is vendor-blocked; then another
     /// city's hy2. Already on hy2: offer a different city's hy2. Nil when
-    /// nothing remains to try. G2.8 auto-switch stays off.
+    /// nothing remains to try. The automatic move (A17, `Hy2AutoSwitch`) is
+    /// narrower: the same node's twin only, and only when the catalog permits.
     static func backupChannelName(
         selected: String,
         catalogNames: Set<String>

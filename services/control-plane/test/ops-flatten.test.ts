@@ -1,6 +1,8 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { accrueActivityHours } from '../src/ops/customers';
+import { assertConnectionEvent } from '../src/ops/contract/connection-events';
+import { eventDto } from '../src/ops/handlers/nodes-data';
 import {
   edgeAttribution,
   flattenBacklog,
@@ -191,6 +193,30 @@ describe('telemetry flatten', () => {
       "SELECT kind, stage, elapsed_ms, node FROM connection_events WHERE kind = 'connectCancel'",
     ).first<Record<string, unknown>>();
     expect(cancel).toMatchObject({ kind: 'connectCancel', stage: 'startingCore', elapsed_ms: 6_000, node: 'Osaka · Nara' });
+  });
+
+  /// A19: the Windows client reports each control-plane path that failed
+  /// before the next one ran. It reaches the customer timeline with both path
+  /// labels, the failure class and the time, and is not charged to the node.
+  it('keeps a control-plane path failure with its paths and time, without a node', async () => {
+    const events = [{
+      ts: RECEIVED * 1000 - 2_000, kind: 'controlPlanePathFail',
+      from: 'pinned', to: 'system_dns', reason: 'connect', elapsedMs: 10_012,
+    }];
+    const row = windowRow('win-path', events, {
+      os_version: 'Windows 11',
+      payload_json: payload(events, { osVersion: 'Windows 11', platform: 'windows' }),
+    });
+    expect(await flattenWindow(db(), row, edgeAttribution(undefined, new Set()))).toBe(1);
+    const stored = await db().prepare(
+      "SELECT * FROM connection_events WHERE kind = 'controlPlanePathFail'",
+    ).first<Record<string, unknown>>();
+    expect(stored).toMatchObject({
+      platform: 'windows', node: null, from_node: 'pinned', to_node: 'system_dns', reason: 'connect', elapsed_ms: 10_012,
+    });
+    expect(assertConnectionEvent(eventDto(stored!))).toMatchObject({
+      kind: 'controlPlanePathFail', node: null, from: 'pinned', to: 'system_dns', reason: 'connect', elapsedMs: 10_012,
+    });
   });
 
   it('writes nothing for a window with no events', async () => {

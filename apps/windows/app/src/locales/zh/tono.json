@@ -98,7 +98,7 @@
     "retryPreview": "查看新报告",
     "recoveryTitle": "正在恢复连接",
     "recoveryActive": "Tono 正通过现有恢复流程重试，不会悄悄更换已选出口。",
-    "recoveryWaiting": "已安排重试。你可以立即重试，也可以明确选择恢复普通网络。",
+    "recoveryWaiting": "已安排重试。你可以立即重试，也可以明确选择恢复正常网络。",
     "recoveryStopped": "当前没有安排自动重试。请选择重试或查看健康检查。",
     "repairTitle": "修复后台服务？",
     "repairDescription": "Windows 可能请求管理员权限，以重启 TonoService 及其依赖服务。这不是网络重置，也不会解除保护。",
@@ -124,7 +124,8 @@
     "retry": "重试",
     "connecting": "连接中",
     "disconnecting": "断开中",
-    "pickNode": "切换线路"
+    "pickNode": "切换线路",
+    "useRoute": "改用{{city}}"
   },
   "activity": {
     "title": "活动",
@@ -197,7 +198,6 @@
     "skip": "跳过",
     "next": "继续",
     "getStarted": "开始使用 →",
-    "progress": "第 {{step}} 步，共 4 步",
     "step1": {
       "headline": "连上，就受保护。",
       "body": "打开 Tono，点一下，所有流量都走受保护线路。"
@@ -214,7 +214,7 @@
   "login": {
     "restoringSession": "正在打开你的 Tono 工作区…",
     "stillWaiting": "还在等待？",
-    "restoreInternet": "恢复网络",
+    "restoreInternet": "恢复正常网络",
     "restartTono": "重启 Tono",
     "brandLabel": "连接，从容一点",
     "brandTitle": "距离近一点。\n世界，开阔一点。",
@@ -233,11 +233,15 @@
     "sendCode": "发送验证码",
     "sendNewCode": "重新发送",
     "sending": "发送中…",
-    "sent": "已发送到邮箱",
-    "trust": "邮箱只用于登录。流量日志不会上传，除非你在设置里打开。",
+    "sent": "请求已提交",
+    "privacySummary": "邮箱用于登录。流量日志默认上传，可在设置中关闭。",
+    "privacyDetails": "隐私说明",
+    "technicalDetails": "详情",
+    "recoveryEnded": "这次登录未完成。请重试，或换个网络。",
+    "trust": "邮箱只用于登录。流量日志默认上传：你连接的主机名、发起每条连接的应用、命中的规则与路由，用于排查问题。可在设置里关闭。",
     "resendIn": "{{seconds}} 秒后可重发",
-    "codeSent": "验证码已发送。",
-    "codeSentTo": "已发到上面这封邮箱。核对完整地址，也可看垃圾箱。",
+    "codeSent": "请查收邮件。",
+    "codeSentTo": "请查看这个邮箱（也可查看垃圾箱）。",
     "codeFrom": "发件人：Tono <login@lecvia.com>",
     "codeLabel": "6 位验证码",
     "codePlaceholder": "123456",
@@ -249,11 +253,11 @@
     "invalidCode": "请输入 6 位验证码",
     "noEmail": {
       "title": "还没收到邮件？",
-      "description": "请查看垃圾箱并核对上面的邮箱地址，或重新发送。仍然收不到的话，复制下面的信息发给客服。"
+      "description": "请查看垃圾箱并核对上面的邮箱地址，或重新发送。"
     },
     "suspended": {
       "title": "账号已暂停",
-      "description": "请联系客服。"
+      "description": "这个账号暂时无法连接。请重新登录，确认账号状态。"
     },
     "sessionEnded": {
       "title": "登录已失效",
@@ -261,28 +265,34 @@
       "signIn": "重新登录"
     },
     "restoreFailed": {
-      "title": "登录状态已失效",
-      "description": "请重试，或重新登录。",
+      "title": "没能恢复登录",
+      "description": "Tono 没能和服务器确认你的登录状态，这个网络现在可能连不上服务器。请重试；一直失败再重新登录。",
       "retry": "重试"
     },
     "networkBlocked": {
       "title": "网络已被保护拦住",
-      "description": "上次连接的防泄漏还在。先恢复网络，再登录。",
-      "restore": "恢复网络",
+      "description": "保护仍在拦住普通网络流量。你仍可登录，无需关闭保护。「恢复正常网络」是可选操作：它会关闭保护，在你重新连接之前，这台电脑的流量直接出网。",
+      "restore": "恢复正常网络",
       "restoring": "正在恢复…",
-      "unverifiedDescription": "Tono 无法确认上次连接的防泄漏是否还在。先点「恢复网络」，再登录。",
+      "unverifiedDescription": "Tono 无法确认上次连接的保护是否还在。你仍可获取登录验证码。「恢复正常网络」会明确关闭保护，在你重新连接之前，这台电脑的流量直接出网；获取验证码不需要这一步。",
       "stillRunningTitle": "上次的连接仍在运行",
-      "stillRunningDescription": "上次会话的隧道仍在转发流量。恢复网络会停止它。"
+      "stillRunningDescription": "上次会话的隧道仍在转发流量。登录其他账号可能停止这条连接。「恢复正常网络」会停止连接并关闭保护。"
     },
+    "relayFailureDetails": "中继失败详情",
+    "relayFailureKinds": "connect：连接失败；timeout：等待超时；tls：安全连接失败；dns：域名解析失败；other：请求失败。这些是返回的分类，不是对你当前网络的诊断。",
     "errors": {
-      "unreachable": "登录没有完成。",
+      "unreachable": "暂时连不上 Tono 的登录服务器。请检查网络后重试。",
+      "relaysUnreachable": "Tono 的备用线路目前都无法到达。请检查网络，或稍后再试。重试不需要关闭保护。",
       "rateLimited": "尝试过多，请稍后再试。",
-      "deviceLimit": "登录没有完成。",
+      "deviceLimit": "这个账号的设备数已满。请在已登录的设备上打开「账号」，移除一台设备，然后重试。",
       "sessionExpired": "验证码已过期，请重新获取。",
       "codeRejected": "验证码错误或已过期，请重新获取。",
       "signInNotSaved": "无法在这台电脑上保存登录。请重新获取验证码后再试。",
-      "clockSkew": "登录没有完成。",
-      "serverError": "登录服务暂时繁忙或不可用，请稍后重试或联系客服。"
+      "clockSkew": "这台电脑的日期和时间不对，Tono 无法验证服务器。请在「设置 > 时间和语言 > 日期和时间」里改正，然后重试。",
+      "captivePortal": "网络需要网页登录（强制门户）：这个网络要先在浏览器里完成登录，Tono 才能连到服务器。请打开浏览器完成这个网络的登录页面，然后重试。",
+      "tlsIntercepted": "网络在拦截加密连接：这台电脑与 Tono 之间有设备或软件替换了 Tono 的证书，Tono 不会接受。如果这个网络有网页登录，请先在浏览器里完成；否则请关闭检查 HTTPS 的代理或安全软件，然后重试。",
+      "serverError": "登录服务暂时不可用，请稍后重试。",
+      "unknown": "这次操作未完成，请重试。"
     },
     "paths": {
       "title": "已尝试的连接路径",
@@ -311,7 +321,7 @@
     "subtitle": {
       "tapToConnect": "点击连接",
       "tapToDisconnect": "点击断开",
-      "tapToRestore": "点击恢复网络",
+      "tapToRestore": "点击恢复正常网络（关闭保护）",
       "restoringAccess": "正在恢复网络访问",
       "starting": "正在启动…"
     },
@@ -385,11 +395,12 @@
       "nodeUnreachable": "连接没有完成。",
       "tunDataPlaneBroken": "连接没有完成。",
       "tunIngressBroken": "线路是通的，但本机流量进不了隧道。通常是别的 VPN 或安全软件占住了网络，请先关掉再连。",
+      "otherVpnPresent": "存在其他 VPN：这台电脑上还有别的 VPN 在运行，可能与 Tono 冲突。请先退出它，再重新连接。",
       "protectedHttpsFailed": "连接没有完成。",
       "coreUnpinned": "此安装缺少内核校验，请安装最新版。",
       "coreMismatch": "内核与安装不匹配，请安装最新版。",
       "dnsPortBusy": "检测到其他代理软件（如 Clash Verge、CFW 等）正在运行并占用了系统网络。请在系统托盘彻底退出其他代理后再连接。",
-      "protectionReleaseFailed": "保护还没解除。请再点一次「恢复网络」。",
+      "protectionReleaseFailed": "保护还没解除。请再点一次「恢复正常网络」。",
       "encryptedDns": "Windows 还开着「加密 DNS」。点下面打开设置，关掉后再连接。",
       "sendDiagnostics": "发给支持"
     },
@@ -460,7 +471,7 @@
     "retryNow": "立即重试",
     "restore": "恢复正常网络",
     "restoreConfirmTitle": "恢复正常网络",
-    "restoreConfirmMessage": "将解除网络保护并恢复正常 Internet 连接。",
+    "restoreConfirmMessage": "将解除网络保护并恢复正常网络连接。",
     "copyDetails": "复制诊断信息",
     "copied": "诊断信息已复制",
     "copyFailed": "复制诊断信息失败",
@@ -583,9 +594,12 @@
     "title": "支持",
     "subtitle": "本地状态摘要。可复制一段给客服。",
     "contact": {
-      "description": "复制这段发给客服。含版本、状态和线路，不含密码。",
-      "copyMessage": "复制给客服",
-      "copied": "已复制"
+      "description": "复制版本、状态和已知失败分类，不含账号信息或地址。",
+      "copyMessage": "复制诊断",
+      "finalAction": "联系支持（复制诊断）",
+      "copied": "已复制",
+      "copyFailed": "未能复制，可手动复制安全文本。",
+      "manualCopy": "手动复制"
     },
     "refresh": "刷新",
     "loadFailed": "无法加载诊断摘要，请刷新重试。",
@@ -652,13 +666,25 @@
       "title": "偏好设置"
     },
     "privacy": {
-      "title": "隐私"
+      "title": "隐私",
+      "effectHint": "每项选择自动保存，无需重连或重启。关闭上传不会删除已经发送的数据。",
+      "reading": "正在读取已保存的选择…",
+      "readFailed": "无法读取已保存的选择。",
+      "saving": "正在保存…",
+      "saved": "已保存",
+      "saveFailed": "无法确认更改是否成功。请重新读取已保存的选择，再试一次。",
+      "reload": "重新读取已保存的选择"
     },
     "general": {
       "title": "通用",
-      "launchAtStartup": "开机自启",
-      "launchAtStartupHint": "第一次连上后会打开，可随时关掉。",
-      "language": "界面语言"
+      "effectHint": "更改会自动保存在这台电脑上，不改变当前连接。",
+      "launchAtStartup": "登录电脑时打开",
+      "launchAtStartupHint": "下次登录 Windows 时打开 Tono。首次连上后默认启用，可在这里更改。",
+      "language": "界面语言",
+      "languageHint": "保存后在当前窗口生效，无需重连或重启。",
+      "readFailed": "无法读取已保存的设置。",
+      "saveFailed": "无法确认更改是否成功。请重新读取已保存的选择，再试一次。",
+      "reload": "重新读取已保存的选择"
     },
     "appearance": {
       "title": "外观",

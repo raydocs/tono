@@ -1,0 +1,22 @@
+# Tono API relay logs (decision 077). Canonical copy: tooling/ops/relay/tono-relay.logrotate,
+# installed as /etc/logrotate.d/00-tono-relay by tooling/ops/relay/apply-relay.sh.
+#
+# The distro's /etc/logrotate.d/nginx glob (/var/log/nginx/*.log) also matches these files.
+# logrotate reads /etc/logrotate.d in name order, so "00-" puts this stanza first, and
+# `ignoreduplicates` (logrotate >= 3.21) makes the later nginx glob skip these two files instead
+# of failing the run with "duplicate log entry". The distro stanza keeps every other nginx log.
+/var/log/nginx/tono-relay.log /var/log/nginx/tono-relay-error.log {
+	daily
+	rotate 14
+	dateext
+	missingok
+	notifempty
+	compress
+	delaycompress
+	create 0640 www-data adm
+	sharedscripts
+	ignoreduplicates
+	postrotate
+		invoke-rc.d nginx rotate >/dev/null 2>&1
+	endscript
+}

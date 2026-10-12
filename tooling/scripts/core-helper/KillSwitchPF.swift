@@ -138,6 +138,45 @@ extension KillSwitchManager {
         return !Set(current).isSubset(of: Set(loaded))
     }
 
+    static let controlRelayLabel = "tono-api-relay"
+
+    /// The control-plane permit for a state (decision 086): the compiled Tono
+    /// relay endpoints, only while protection is armed without a tunnel and
+    /// an API host is active. Never derived from DNS or from the pins.
+    static func controlRelayPermitEndpoints(state: KillSwitchState) -> [KillSwitchEndpoint] {
+        let apiHostActive = !state.apiHosts.isEmpty
+            || state.resolvedHosts.keys.contains { !KillSwitchManager.defaultHosts.contains($0) }
+        guard state.armed, state.tunnelInterfaces.isEmpty, apiHostActive else { return [] }
+        return ControlPlaneRelays.endpoints.map {
+            KillSwitchEndpoint(address: $0.address, transport: "tcp", port: $0.port)
+        }
+    }
+
+    /// The relays are also exit nodes. Withdrawing the relay permit (the
+    /// tunnel arm) must not kill the Core's own connection to the same node
+    /// on its exit port, which a host-wide `pfctl -k` would: a relay address
+    /// that is still the destination of a remaining permit is spared from a
+    /// targeted kill when every withdrawn rule naming it is the relay permit.
+    /// A relay connection open at that moment can then outlive the permit; it
+    /// carries TLS to the Tono API or release host only, and no new one is
+    /// admitted. Every other withdrawal is unchanged.
+    static func sparingSharedRelayHosts(
+        _ disposal: StateDisposal,
+        withdrawn: Set<String>,
+        remaining: Set<String>
+    ) -> StateDisposal {
+        guard case .targeted(let hosts) = disposal else { return disposal }
+        let kept = hosts.filter { host in
+            let needle = " to \(host) port "
+            let withdrawnForHost = withdrawn.filter { $0.contains(needle) }
+            let onlyRelay = !withdrawnForHost.isEmpty
+                && withdrawnForHost.allSatisfy { $0.contains("label \"\(controlRelayLabel)\"") }
+            let stillPermitted = remaining.contains { $0.contains(needle) }
+            return !(onlyRelay && stillPermitted)
+        }
+        return kept.isEmpty ? .keep : .targeted(kept)
+    }
+
     static func renderRules(
         state: KillSwitchState,
         allowedUID: uid_t,
@@ -314,24 +353,35 @@ extension KillSwitchManager {
             lines.append(
                 "block drop out quick inet6 proto tcp to { fe80::/10, fc00::/7, ff00::/8 } fragment label \"tono-lan-fragment\""
             )
-            lines.append(
-                "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } no state label \"tono-lan\""
-            )
-            lines.append(
-                "pass in quick inet from { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\""
-            )
-            lines.append(
-                "pass out quick inet6 to fe80::/10 no state label \"tono-linklocal\""
-            )
-            lines.append(
-                "pass in quick inet6 to fe80::/10 keep state (if-bound) label \"tono-linklocal\""
-            )
-            lines.append(
-                "pass out quick inet6 to { ff00::/8, fc00::/7 } no state label \"tono-linklocal\""
-            )
-            lines.append(
-                "pass in quick inet6 from { fe80::/10, ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""
-            )
+            // The local network itself (D7, decision D3-A): only when the user
+            // turned on "Allow local network devices". Off, nothing to the
+            // private, link-local or ULA ranges or to IPv6 multicast passes
+            // outbound, so the router page, printers, NAS, a LAN peer's reply,
+            // MLD, DHCPv6 and unicast DHCP renewal fall to the final block
+            // (DHCP renewal falls back to the broadcast `tono-dhcp` passes).
+            // Every block above, and mDNS, IGMP, Continuity, DHCP broadcast
+            // and NDP, render either way. On renders exactly the rules that
+            // were here before the setting existed.
+            if state.allowLocalNetworkDevices {
+                lines.append(
+                    "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } no state label \"tono-lan\""
+                )
+                lines.append(
+                    "pass in quick inet from { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\""
+                )
+                lines.append(
+                    "pass out quick inet6 to fe80::/10 no state label \"tono-linklocal\""
+                )
+                lines.append(
+                    "pass in quick inet6 to fe80::/10 keep state (if-bound) label \"tono-linklocal\""
+                )
+                lines.append(
+                    "pass out quick inet6 to { ff00::/8, fc00::/7 } no state label \"tono-linklocal\""
+                )
+                lines.append(
+                    "pass in quick inet6 from { fe80::/10, ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""
+                )
+            }
             // DHCP is identified by ports alone, and any local process can send
             // from port 68, so the destination carries the bound: the limited
             // broadcast only (unicast renewal to a LAN server is `tono-lan`).
@@ -350,20 +400,24 @@ extension KillSwitchManager {
             lines.append(
                 "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\""
             )
-            // Local discovery beyond mDNS. Link-local multicast (224.0.0.0/24)
-            // and the limited broadcast are never forwarded by a router. `no
-            // state`: answers come back unicast from a LAN address, which
-            // `tono-lan` passes.
-            lines.append(
-                "pass out quick inet to { 224.0.0.0/24, 255.255.255.255 } no state label \"tono-multicast\""
-            )
-            // SSDP (DLNA casting) is the one routable group: its address and
-            // port only. A multicast router may forward it as far as its
-            // configuration allows (RFC 2365 section 10), and PF cannot bound
-            // the TTL a sender sets.
-            lines.append(
-                "pass out quick inet proto udp to 239.255.255.250 port 1900 no state label \"tono-ssdp\""
-            )
+            // Discovery beyond mDNS goes with the same setting: off, the
+            // devices it would find are unreachable anyway.
+            if state.allowLocalNetworkDevices {
+                // Local discovery beyond mDNS. Link-local multicast (224.0.0.0/24)
+                // and the limited broadcast are never forwarded by a router. `no
+                // state`: answers come back unicast from a LAN address, which
+                // `tono-lan` passes.
+                lines.append(
+                    "pass out quick inet to { 224.0.0.0/24, 255.255.255.255 } no state label \"tono-multicast\""
+                )
+                // SSDP (DLNA casting) is the one routable group: its address and
+                // port only. A multicast router may forward it as far as its
+                // configuration allows (RFC 2365 section 10), and PF cannot bound
+                // the TTL a sender sets.
+                lines.append(
+                    "pass out quick inet proto udp to 239.255.255.250 port 1900 no state label \"tono-ssdp\""
+                )
+            }
         }
         for interface in state.tunnelInterfaces.sorted() {
             // Host packets leave through the TUN while proxied replies return
@@ -377,8 +431,20 @@ extension KillSwitchManager {
             )
         }
 
+        // H1-F5, decision 086 (owner's Option A): the Tono API host is fronted
+        // by shared Cloudflare anycast, where any same-user process could reach
+        // any Cloudflare-fronted site by SNI. Its addresses are therefore never
+        // permitted. Without a tunnel the control plane is reached only through
+        // the Tono relays below, which forward the API and release SNIs alone;
+        // with a tunnel it uses the tunnel and nothing is permitted.
+        for endpoint in controlRelayPermitEndpoints(state: state) {
+            lines.append(
+                "pass out quick inet proto tcp to \(endpoint.address) port \(endpoint.port) "
+                    + "user \(allowedUID) keep state (if-bound) label \"\(controlRelayLabel)\""
+            )
+        }
         var controlEndpoints = Set<KillSwitchEndpoint>()
-        for addresses in state.resolvedHosts.values {
+        for (host, addresses) in state.resolvedHosts where KillSwitchManager.defaultHosts.contains(host) {
             for address in addresses {
                 controlEndpoints.insert(
                     .init(address: address, transport: "tcp", port: 443)
@@ -388,6 +454,8 @@ extension KillSwitchManager {
         for endpoint in controlEndpoints.sorted(by: {
             ($0.transport, $0.port, $0.address) < ($1.transport, $1.port, $1.address)
         }) {
+            // Tailscale control hosts only (Home-US bootstrap); the Tono API
+            // host is never rendered here (decision 086, above).
             // Restricted to two UIDs: root (the helper's DERP map refresh) and
             // the interactive user the app runs as (control-plane recovery while
             // the tunnel is down). Without a `user` clause — the only exception
@@ -466,6 +534,20 @@ extension KillSwitchManager {
             // part of a host specification, so the shorter `proto tcp port {…}`
             // is a parse error that takes the whole ruleset down and leaves the
             // session unable to arm at all.
+            //
+            // With "Allow local network devices" off, the address-free permit
+            // must not carry root (the Core's DIRECT outbounds, which a local
+            // proxy client can steer) to the local network, CGNAT, link-local,
+            // multicast or broadcast on its web ports. Exactly the traffic the
+            // permit below would pass to those ranges is dropped first. On
+            // renders nothing here, as before the setting existed.
+            if !state.allowLocalNetworkDevices {
+                lines.append(
+                    "block drop out quick inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 224.0.0.0/4, 255.255.255.255 } " +
+                    "port { \(reviewedBundleDirectPorts.map(String.init).joined(separator: ", ")) } " +
+                    "user root label \"tono-bundle-local\""
+                )
+            }
             for transport in ["tcp", "udp"] {
                 lines.append(
                     "pass out quick inet proto \(transport) from any to any " +
@@ -1858,30 +1940,81 @@ extension KillSwitchManager {
 
     /// Past `deadline` the command has failed, whatever it would have done:
     /// no caller may read a load, an enable or a release that never reported
-    /// back as done. The child gets SIGTERM, then SIGKILL, each waited on
-    /// for a second; one stuck in the kernel beyond that exits on its own.
-    /// `ended` runs once the child has exited and been reaped, even after
-    /// this call has given up on it.
+    /// back as done. The deadline starts before the launch: `Process.run()`
+    /// is synchronous and can stall before it returns a PID (executable I/O,
+    /// launch validation), so it runs on its own thread, and a launch still
+    /// pending at the deadline fails the command; if it returns later, its
+    /// child is terminated at once (#1542 review F1). Termination alone cannot
+    /// undo what a late command already did (a stale `pfctl -F all` flushing
+    /// a newer arm's anchor, a stale `networksetup` setter), so the command
+    /// itself runs only after an admission barrier: the launched process is
+    /// `/bin/sh` waiting on its stdin for `go`, written only once the caller
+    /// has accepted the launch; an abandoned launch gets end-of-file instead
+    /// and exits without ever executing the command (#1542 review F2). `exec`
+    /// keeps the PID, so `started` still names the command's process. A
+    /// launched child gets
+    /// SIGTERM, then SIGKILL, each waited on for a second; one stuck in the
+    /// kernel beyond that exits on its own. `ended` runs once the child has
+    /// exited and been reaped, even after this call has given up on it.
+    /// `launch` is the seam the self-test uses to stall a launch.
     static func run(
         _ executable: String,
         _ arguments: [String],
         deadline: TimeInterval = KillSwitchManager.helperCommandDeadline,
+        environment: [String: String] = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"],
         started: (pid_t) -> Void = { _ in },
-        ended: @escaping @Sendable () -> Void = {}
+        ended: @escaping @Sendable () -> Void = {},
+        launch: @escaping @Sendable (Process) throws -> Void = { try $0.run() }
     ) throws -> HelperCommandResult {
+        let end = DispatchTime.now() + deadline
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [
+            "-c", #"IFS= read -r gate || exit 125; [ "$gate" = go ] || exit 125; exec "$0" "$@""#,
+            executable,
+        ] + arguments
+        process.environment = environment
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
+        let admission = Pipe()
+        process.standardInput = admission
         let exited = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in
             ended()
             exited.signal()
         }
-        try process.run()
+        let launched = HelperCommandLaunch()
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try launch(process)
+            } catch {
+                _ = launched.report(.failed(error))
+                return
+            }
+            guard launched.report(.launched) else {
+                // Abandoned: the caller has already failed this command. No
+                // `go`: end-of-file, so the command is never executed.
+                try? admission.fileHandleForWriting.close()
+                process.terminate()
+                if exited.wait(timeout: .now() + 1) == .timedOut, process.isRunning {
+                    kill(process.processIdentifier, SIGKILL)
+                }
+                return
+            }
+            // Accepted: the caller owns this command now, inside its deadline.
+            try? admission.fileHandleForWriting.write(contentsOf: Data("go\n".utf8))
+            try? admission.fileHandleForWriting.close()
+        }
+        switch launched.wait(until: end) {
+        case .launched: break
+        case .failed(let error): throw error
+        case .abandoned:
+            let name = (executable as NSString).lastPathComponent
+            throw HelperFailure.system(
+                "\(name) did not start within \(Int(deadline.rounded(.up))) seconds."
+            )
+        }
         started(process.processIdentifier)
         // Drained on its own thread, so a child that fills the pipe still
         // exits. The block holds the read end and the process until the
@@ -1894,7 +2027,6 @@ extension KillSwitchManager {
                 output.finish(reader.readDataToEndOfFile())
             }
         }
-        let end = DispatchTime.now() + deadline
         if exited.wait(timeout: end) == .success, output.wait(until: end) {
             return .init(status: process.terminationStatus, output: output.data)
         }
@@ -1911,38 +2043,21 @@ extension KillSwitchManager {
         )
     }
 
+    /// `dscacheutil` under the same supervised runner, so its launch and its
+    /// wait share one deadline on the monotonic clock (#1542 review F1); a
+    /// lookup past it fails rather than returning a killed child's status.
     static func runBoundedSystemLookup(
         _ host: String,
         timeoutMilliseconds: Int
     ) throws -> HelperCommandResult {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/dscacheutil")
-        process.arguments = ["-q", "host", "-a", "name", host]
-        process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        try process.run()
-
-        let deadline = Date().addingTimeInterval(
-            Double(max(100, timeoutMilliseconds)) / 1_000
+        let result = try run(
+            "/usr/bin/dscacheutil", ["-q", "host", "-a", "name", host],
+            deadline: Double(max(100, timeoutMilliseconds)) / 1_000
         )
-        while process.isRunning, Date() < deadline {
-            usleep(20_000)
-        }
-        if process.isRunning {
-            process.terminate()
-            for _ in 0..<10 where process.isRunning { usleep(20_000) }
-        }
-        if process.isRunning {
-            kill(process.processIdentifier, SIGKILL)
-        }
-        process.waitUntilExit()
-        let output = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard output.count <= 64 * 1024 else {
+        guard result.output.count <= 64 * 1024 else {
             throw HelperFailure.invalid("Endpoint resolver output is too large.")
         }
-        return .init(status: process.terminationStatus, output: output)
+        return result
     }
 
     // MARK: - Pure self-tests

@@ -23,3 +23,11 @@
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：DoH、备用端口、隧道这几步失败不进入合并消息（与改前相同），面板只列固定地址、系统 DNS、中继；
   单路径失败（例如不可重发的 POST 超时）仍只显示一行原因（`Transport: <kind>`），无路径列表。
+- 2026-10-12 合入 main（merge commit，不改写历史）：
+  `transport.rs` 在 main 的 relay 优先、`PreferenceLease`、决策 091 `direct_step_allowed`/`send_over_relays` 结构上重放计时与 `path_failure`；
+  决策 091 的 relay-only 消息（`TONO_RELAYS_UNREACHABLE`）保持 main 原样，不进路径列表（它有自己的 `Routes: Tono relays` 行）。
+  main 把登录错误的技术内容收进「详情 / Details」折叠区，路径列表随之放进该折叠区首行（左对齐），截图已按合并后的界面重拍。
+  main 新增的剪贴板白名单（`SupportContact.safeDiagnosticLine`）加入 `Paths: label[<ms>ms <kind>]` 语法（最多三段，只含标签、毫秒、分类词）；
+  路径解析与 `authTransportText` 同时接受 `TONO_TLS_INTERCEPTED` 前缀和 `TONO_CAPTIVE_PORTAL:`。
+  验证（Linux，Node 22）：`npx vitest run src/pages/tono src/tono-ui src/services` 42 文件 339 通过；`pnpm typecheck` 通过（unchecked index 69 ≤ 基线 79）；
+  改动文件 eslint/biome 0 问题（`pnpm lint` 与 `biome format` 在未改动文件上的既有问题与本 PR 无关）。Rust（rustc 1.97 < 1.98）未在本机运行，交 hosted CI。

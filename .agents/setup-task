@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+started=$SECONDS
+
+# Explicit dependency preparation only: never build, test, start services or
+# authenticate here. Common setup and resume do not call this entry.
+prepare_rust() {
+  export PATH="$HOME/.cargo/bin:$PATH"
+  if ! command -v rustup >/dev/null 2>&1; then
+    local installer
+    installer="$(mktemp)"
+    curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+      https://sh.rustup.rs --output "$installer"
+    sh "$installer" -y --profile minimal --default-toolchain none
+    rm -f "$installer"
+  fi
+  local toolchain
+  toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' apps/windows/app/rust-toolchain.toml)"
+  test -n "$toolchain"
+  if ! rustup run "$toolchain" cargo --version >/dev/null 2>&1; then
+    rustup toolchain install "$toolchain" --profile minimal
+  fi
+  for manifest in "$@"; do
+    printf '\n==> Fetch locked dependencies: %s\n' "$manifest"
+    rustup run "$toolchain" cargo fetch --locked --manifest-path "$manifest"
+  done
+}
+
+case "${1:-}" in
+  kode-bridge)
+    prepare_rust apps/windows/vendor/kode-bridge/Cargo.toml
+    ;;
+  windows-rust)
+    prepare_rust apps/windows/Cargo.toml apps/windows/app/Cargo.toml \
+      apps/windows/service/Cargo.toml apps/windows/vendor/kode-bridge/Cargo.toml
+    ;;
+  icon-design)
+    if [[ ! -x .venv/bin/python ]]; then
+      python3 -m venv .venv
+    fi
+    .venv/bin/python -m pip install --disable-pip-version-check --no-input \
+      --requirement design-assets/tono-icon/requirements.txt
+    ;;
+  *)
+    echo 'Usage: .agents/setup-task {kode-bridge|windows-rust|icon-design}' >&2
+    exit 2
+    ;;
+esac
+
+printf '\nTono task dependencies ready: %s (%ss).\n' "$1" "$((SECONDS - started))"

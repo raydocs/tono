@@ -4,7 +4,10 @@ name: Desktop update sign
 # that macos-release.yml and windows-release.yml already built, and returns the
 # bundle as a workflow artifact. It cannot publish: the token reads contents and
 # actions only, and there is no release, tag, feed, bucket or promote step. Putting
-# the bundle under desktop/v1/ is a separate, owner-authorized operation.
+# the bundle under desktop/v1/ is a separate, owner-authorized operation. The one
+# exception to the read-only token is the `attest` job, which may only write a
+# build provenance attestation for the signed manifest and its two signatures
+# (decision 079 D8-A; clients do not check it) and runs no repository code.
 #
 # Several release builds share one source SHA on purpose (one per sequence), so
 # "a green run at that SHA" does not identify a package. Before anything is
@@ -785,3 +788,28 @@ jobs:
           path: ${{ runner.temp }}/desktop-update-bundle/
           if-no-files-found: error
           retention-days: 30
+
+  # Build provenance for the signed manifest and its two detached signatures, the
+  # update authority this run creates. The package copies beside them are attested
+  # by the macos-release.yml and windows-release.yml runs that built them. Writes
+  # only attestations; checks out and runs no repository code and sees no secret.
+  # A failed attestation fails the run.
+  attest:
+    needs: [guard, assemble, bundle]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ${{ needs.guard.outputs.bundle_name }}
+          path: ${{ runner.temp }}/attest
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/attest/desktop/v1/${{ needs.assemble.outputs.manifest_sha256 }}/manifest.json
+            ${{ runner.temp }}/attest/desktop/v1/${{ needs.assemble.outputs.manifest_sha256 }}/manifest.macos-arm64.sig
+            ${{ runner.temp }}/attest/desktop/v1/${{ needs.assemble.outputs.manifest_sha256 }}/manifest.windows-x86_64.sig

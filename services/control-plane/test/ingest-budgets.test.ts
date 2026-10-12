@@ -171,6 +171,7 @@ describe('ingest statement-count budgets', () => {
 });
 
 describe('parse-cost ceiling', () => {
+  // Parses a maximum-size and an over-inflating segment: ~0.7 s on Linux, the slowest case in the suite (A27).
   it('a max-size segment parses under the ceiling and hits the line cap; an over-inflating one is skipped', async () => {
     const lines: string[] = [];
     for (let i = 0; i < MAX_SEGMENT_LINES + 500; i++) {
@@ -223,5 +224,5 @@ describe('parse-cost ceiling', () => {
       'SELECT COUNT(*) AS c FROM traffic_destination_daily WHERE user_id = ?',
     ).bind('u-inflate').first<{ c: number }>();
     expect(Number(row?.c)).toBe(0);
-  });
+  }, 15_000);
 });

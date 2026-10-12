@@ -228,6 +228,55 @@ final class ArmedFailureReleaseTests: XCTestCase {
         XCTAssertEqual(AppProfile.defaults.string(forKey: SettingsKey.selectedProxyTargetName), backup.name)
     }
 
+    /// Simulated UDP fully unavailable: the user's own choice is a node's
+    /// hy2 block, hy2 is dead, and the armed failure released protection.
+    /// The unarmed loop never proves or dials the hy2 block (a TCP proof
+    /// says nothing about UDP); it proves the same node's Reality TCP block
+    /// first and dials that. No other transport, no other node first.
+    func testADeadHy2SelectionReconnectsOnTheSameNodesRealityBlock() async {
+        let app = AppState()
+        let reality = Fixture.realityNode(name: "Los Angeles · Canyon")
+        let hy2 = Fixture.hy2Node(name: reality.name + ExitHeal.hy2Suffix, id: "canyon-hy2")
+        let sibling = Fixture.realityNode(name: "Los Angeles · Mesa", id: "mesa", server: "203.0.114.9")
+        app.proxyRegions = [ProxyRegion(
+            id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [reality, hy2, sibling]
+        )]
+        app.applyProxySelection(hy2.name)
+        app.tonoTransport = TonoTransportDescriptor(port: 1080)
+        let savedArmed = KillSwitchService.isArmed
+        let savedUpdateBlock = RuntimeCleanup.nativeUpdateBlocksConnect
+        let savedUpdatePending = RuntimeCleanup.nativeUpdatePending
+        let savedSelection = AppProfile.defaults.string(forKey: SettingsKey.selectedProxyTargetName)
+        KillSwitchService.isArmed = false
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
+        let proved = ProvedNames()
+        app.unarmedTcpProof = { name in
+            proved.names.append(name)
+            return true
+        }
+        var admittedName: String?
+        app.recordConnectBootSession = {
+            admittedName = app.selectedExitNode()?.name
+            throw POSIXError(.ENOSPC) // Contain admission before any privileged runtime work.
+        }
+        defer {
+            app.connectionCoordinator.unarmedReconnectTask?.cancel()
+            app.connectionCoordinator.cancelConnectionTasks()
+            KillSwitchService.isArmed = savedArmed
+            RuntimeCleanup.nativeUpdateBlocksConnect = savedUpdateBlock
+            RuntimeCleanup.nativeUpdatePending = savedUpdatePending
+            AppProfile.defaults.set(savedSelection, forKey: SettingsKey.selectedProxyTargetName)
+        }
+
+        app.scheduleUnarmedReconnect(sleep: { _ in })
+        await app.connectionCoordinator.unarmedReconnectTask?.value
+
+        XCTAssertEqual(proved.names.first, reality.name, "the same node's Reality block is proved first")
+        XCTAssertFalse(proved.names.contains(hy2.name), "a TCP proof is never asked of the hy2 block")
+        XCTAssertEqual(admittedName, reality.name, "the reconnect dials the node's Reality TCP block")
+    }
+
     func testUnarmedReconnectWaitsForSlowReleaseCompletion() async {
         let app = AppState()
         let node = Fixture.realityNode()
@@ -354,4 +403,10 @@ final class ArmedFailureReleaseTests: XCTestCase {
         XCTAssertTrue(RuntimeCleanup.nativeUpdateBlocksConnect)
     }
 
+}
+
+/// The names a test TCP proof was asked about, in order.
+@MainActor
+private final class ProvedNames {
+    var names: [String] = []
 }

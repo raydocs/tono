@@ -1064,6 +1064,7 @@ export interface TranslationResources {
           encryptedDns: string
           hy2Idle: string
           nodeUnreachable: string
+          otherVpnPresent: string
           protectedHttpsFailed: string
           protectionHeldByAnotherUser: string
           protectionReleaseFailed: string
@@ -1253,7 +1254,6 @@ export interface TranslationResources {
         getStarted: string
         landmark: string
         next: string
-        progress: string
         skip: string
         step1: {
           body: string
@@ -1283,13 +1283,17 @@ export interface TranslationResources {
         emailLabel: string
         emailPlaceholder: string
         errors: {
+          captivePortal: string
           clockSkew: string
           codeRejected: string
           deviceLimit: string
           rateLimited: string
+          relaysUnreachable: string
           serverError: string
           sessionExpired: string
           signInNotSaved: string
+          tlsIntercepted: string
+          unknown: string
           unreachable: string
         }
         inboxInstructions: string
@@ -1323,6 +1327,11 @@ export interface TranslationResources {
           system_dns: string
           title: string
         }
+        privacyDetails: string
+        privacySummary: string
+        recoveryEnded: string
+        relayFailureDetails: string
+        relayFailureKinds: string
         resendIn: string
         restartTono: string
         restoreFailed: {
@@ -1349,6 +1358,7 @@ export interface TranslationResources {
           description: string
           title: string
         }
+        technicalDetails: string
         title: string
         trust: string
         validity: string
@@ -1639,15 +1649,27 @@ export interface TranslationResources {
           title: string
         }
         general: {
+          effectHint: string
           language: string
+          languageHint: string
           launchAtStartup: string
           launchAtStartupHint: string
+          readFailed: string
+          reload: string
+          saveFailed: string
           title: string
         }
         preferences: {
           title: string
         }
         privacy: {
+          effectHint: string
+          readFailed: string
+          reading: string
+          reload: string
+          saved: string
+          saveFailed: string
+          saving: string
           title: string
         }
         title: string
@@ -1666,8 +1688,11 @@ export interface TranslationResources {
         auditPathCopied: string
         contact: {
           copied: string
+          copyFailed: string
           copyMessage: string
           description: string
+          finalAction: string
+          manualCopy: string
         }
         copyFailed: string
         detailsCopied: string
@@ -1733,6 +1758,7 @@ export interface TranslationResources {
         pickNode: string
         quit: string
         retry: string
+        useRoute: string
       }
     }
   }

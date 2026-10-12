@@ -6,6 +6,7 @@ import { ApiError } from '../errors';
 import { type Env, type Row, now, id, tailscaleEnrollmentEnabled } from '../env';
 import { rejectUnexpectedKeys, body, email } from '../request';
 import { writeOpsAudit } from '../product-account';
+import { evictDevicesOverLimit } from '../accounts';
 
 const ACTOR = 'token-admin';
 
@@ -14,7 +15,10 @@ export async function tokenAdminWrite(
   e: Env,
   p: string,
   m: string,
-  deps: { enforceUser: (e: Env, userId: string) => Promise<unknown> },
+  deps: {
+    enforceUser: (e: Env, userId: string) => Promise<unknown>;
+    processRevocations: (e: Env) => Promise<unknown>;
+  },
 ): Promise<Response | null> {
   let mt: RegExpMatchArray | null;
   if (p === '/api/v1/admin/signup-allowlist' && m === 'DELETE') {
@@ -112,7 +116,8 @@ export async function tokenAdminWrite(
         throw new ApiError(409, 'REVOCATION_PENDING', 'Wait for tailnet device revocation before re-enabling this user');
       }
     }
-    const updated = await e.DB.prepare(
+    const userId = String(mt[1]);
+    const limitWrite = e.DB.prepare(
       `UPDATE users SET
          status = COALESCE(?, status),
          quota_bytes = CASE WHEN ? THEN ? ELSE quota_bytes END,
@@ -133,9 +138,21 @@ export async function tokenAdminWrite(
       resetUsage === true,
       resetUsage === true,
       now(),
-      mt[1],
-    ).run();
-    if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+      userId,
+    );
+    // A lowered cap takes effect now (D15-A), not at the next device login:
+    // the limit write and the eviction of the least recently seen devices
+    // beyond it are one transaction, so a failed eviction leaves the old cap
+    // in place and the request fails. Raising the cap, or writing the same
+    // one, evicts nothing, even on an account already over its old cap.
+    let evicted: string[] = [];
+    if (deviceLimit !== undefined) {
+      const outcome = await evictDevicesOverLimit(e, userId, deviceLimit, limitWrite);
+      if (!outcome.limitWriteChanges) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+      evicted = outcome.evicted;
+    } else if (!(await limitWrite.run()).meta.changes) {
+      throw new ApiError(404, 'NOT_FOUND', 'User not found');
+    }
     if (resetUsage === true) {
       await writeOpsAudit(e, ACTOR, 'user.usage-reset', 'user', mt[1], 'billing cycle reset');
     }
@@ -147,6 +164,21 @@ export async function tokenAdminWrite(
     ].filter((name): name is string => name !== null);
     if (changedFields.length) {
       await writeOpsAudit(e, ACTOR, 'user.update', 'user', mt[1], `changed ${changedFields.join(', ')}`);
+    }
+    // Evicted devices are audited like an operator's device revoke.
+    for (const deviceId of evicted) {
+      await writeOpsAudit(
+        e, ACTOR, 'device.revoke', 'device', deviceId,
+        `revoked device of user ${userId}: device limit lowered to ${deviceLimit}`,
+      );
+    }
+    if (evicted.length) {
+      try {
+        await deps.processRevocations(e);
+      } catch (x) {
+        // The jobs are durable; the cron tick retries them.
+        console.error('device-limit processRevocations failed', x instanceof Error ? x.message : String(x));
+      }
     }
     await deps.enforceUser(e, mt[1]);
     return Response.json({ ok: true });

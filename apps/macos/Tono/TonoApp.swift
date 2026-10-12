@@ -4,7 +4,7 @@ import AppKit
 @main
 struct TonoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @AppStorage(SettingsKey.interfaceLanguage, store: AppProfile.defaults) private var interfaceLanguage = "Auto"
+    @AppStorage(SettingsKey.interfaceLanguage, store: AppProfile.defaults) private var interfaceLanguage = InterfaceLanguagePreference.simplifiedChinese
     @AppStorage(SettingsKey.introSeen, store: AppProfile.defaults) private var introSeen = false
     @StateObject private var updater: AppUpdater
     @State private var appState: AppState
@@ -47,6 +47,9 @@ struct TonoApp: App {
             },
             catalogConsumer: { catalog in
                 try await appState.acceptManagedExitCatalog(catalog)
+            },
+            catalogUndecodableConsumer: {
+                appState.revokeHy2AutoSwitchForRejectedCatalog()
             },
             trafficPolicyConsumer: { policy in
                 try await appState.acceptManagedTrafficPolicy(policy)
@@ -99,7 +102,16 @@ struct TonoApp: App {
             },
             routeSplitConsumer: { appState.appTrafficLedger.cumulative },
             installedCatalogConsumer: { appState.installedManagedCatalogDigests },
-            protectionUnconfirmedConsumer: { appState.isProtectionUnconfirmed }
+            protectionUnconfirmedConsumer: { appState.isProtectionUnconfirmed },
+            gateProtectionHoldConsumer: {
+                // AI recovery rules alone do not block Tono's relays.
+                guard !appState.isConnected else { return .none }
+                switch appState.gateProtectionNotice {
+                case .blocking: return .blocking
+                case .unconfirmed: return .unconfirmed
+                case .selectiveRecovery, nil: return .none
+                }
+            }
         )
         _accountSession = State(initialValue: accountSession)
         // #582: Connect asks the account session's offline grant gate first.
@@ -126,7 +138,7 @@ struct TonoApp: App {
     static let preferredScheme: ColorScheme = .dark
 
     private var appLocale: Locale {
-        switch interfaceLanguage {
+        switch InterfaceLanguagePreference.resolve(interfaceLanguage) {
         case "简体中文": return Locale(identifier: "zh-Hans")
         case "English": return Locale(identifier: "en")
         default: return Locale.current  // "Auto" — follow system

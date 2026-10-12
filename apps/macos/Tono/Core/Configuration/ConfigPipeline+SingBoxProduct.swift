@@ -44,6 +44,46 @@ nonisolated extension ConfigPipeline {
     /// The pool before #1258. An address an app cached from a build that used
     /// it is refused like one from another slot.
     static let singBoxFormerFakeIPPool = "198.18.16.0/20"
+    /// Destinations "Allow local network devices" off refuses in the Core:
+    /// the private, link-local and ULA ranges PF's `tono-lan` /
+    /// `tono-linklocal` pass when the setting is on, and CGNAT.
+    static let localNetworkDeviceCIDRs = [
+        "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
+        "169.254.0.0/16", "fe80::/10", "fc00::/7",
+    ]
+
+    /// Off: a flow a DIRECT rule matches by name or process (a web-direct
+    /// suffix, a reviewed app's port rule, UDP 5353) is resolved where it is
+    /// routed and refused when the answer is a local address, before the
+    /// DIRECT rule can dial it; a name resolved later at dial time is
+    /// therefore never dialed into the LAN. The resolver is the one the
+    /// direct outbound would use. Rules that match the destination by
+    /// address are covered by the leading reject, and the pinned web routes
+    /// (logical rules) carry validated public addresses only.
+    static func rejectingLocalNetworkAfterResolution(_ rules: [[String: Any]]) -> [[String: Any]] {
+        let directOutbounds: Set<String> = ["DIRECT", appDirectGroupName, webDirectGroupName]
+        var result: [[String: Any]] = []
+        for rule in rules {
+            guard let outbound = rule["outbound"] as? String, directOutbounds.contains(outbound),
+                  rule["ip_cidr"] == nil, rule["type"] == nil else {
+                result.append(rule)
+                continue
+            }
+            var match = rule
+            match["action"] = nil
+            match["outbound"] = nil
+            var resolve = match
+            resolve["action"] = "resolve"
+            resolve["strategy"] = "ipv4_only"
+            if outbound != "DIRECT" { resolve["server"] = "Tono-China-DNS" }
+            result.append(resolve)
+            result.append(["type": "logical", "mode": "and",
+                           "rules": [match, ["ip_cidr": localNetworkDeviceCIDRs]],
+                           "action": "reject", "no_drop": true])
+            result.append(rule)
+        }
+        return result
+    }
 
     static func buildSingBoxRuntime(
         overlay: OverlayConfig,
@@ -203,6 +243,16 @@ nonisolated extension ConfigPipeline {
             // `no_drop`: sing-box turns a reject into a drop after 50 in 30 s.
             ["ip_cidr": [singBoxFakeIPPool, singBoxFormerFakeIPPool], "action": "reject", "no_drop": true],
         ]
+        if !overlay.allowLocalNetworkDevices {
+            // D7 (A29), "Allow local network devices" off: nothing the Core
+            // carries (TUN packets, the loopback mixed proxy, a reviewed app's
+            // or web-direct route) is dialed DIRECT to the private, link-local
+            // or ULA ranges. Ahead of every DIRECT rule. PF's off ruleset
+            // drops root's packets there too, so a Core still running an
+            // older document fails closed. Loopback, multicast and mDNS keep
+            // the rules below. On adds nothing.
+            rules.append(["ip_cidr": localNetworkDeviceCIDRs, "action": "reject", "no_drop": true])
+        }
         let assistant = home == nil ? exitGroupName : claudeHomeGroupName
         // Always, including when no residential hop is bound. Later reviewed-bundle
         // and suffix rules are first-match DIRECT; without these rows a WeChat
@@ -298,6 +348,9 @@ nonisolated extension ConfigPipeline {
         rules.append(["network": "udp", "port": [5353], "action": "route", "outbound": "DIRECT"])
         rules.append(["ip_version": 6, "action": "reject"])
         rules.append(["network": ["udp", "icmp"], "action": "reject"])
+        if !overlay.allowLocalNetworkDevices {
+            rules = rejectingLocalNetworkAfterResolution(rules)
+        }
         let exclusions = Array(Set(usable.map(\.server))).sorted().map { "\($0)/32" } + tunRouteExcludeCIDRs
         let runtime: [String: Any] = [
             "log": ["level": overlay.logLevel == "warning" ? "warn" : overlay.logLevel],

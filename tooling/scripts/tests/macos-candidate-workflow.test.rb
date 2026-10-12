@@ -152,13 +152,22 @@ signing_secret = /secrets\.(MACOS_DEVELOPER_ID_|APPLE_NOTARY_|MACOS_KEYCHAIN_|SP
 abort 'signing secrets must not be injected at workflow level' if workflow.fetch('env', {}).to_s.match?(signing_secret)
 workflow.fetch('jobs').each do |id, job|
   abort "#{id} must not inject signing secrets at job level" if job.fetch('env', {}).to_s.match?(signing_secret)
+  if id == 'attest'
+    # Build provenance only (decision 079 D8-A): OIDC plus attestation write, no
+    # repository code, no secret, no condition that could skip it green.
+    abort 'attest must hold exactly OIDC and attestation write' unless job['permissions'] == { 'contents' => 'read', 'id-token' => 'write', 'attestations' => 'write' }
+    abort 'attest must run no repository code and see no secret' unless job.fetch('steps').map { |step| step.fetch('uses', '').split('@').first } == ['actions/download-artifact', 'actions/attest-build-provenance'] && !job.to_s.include?('secrets.')
+    abort 'attest must not be skippable or fail open' if job.key?('if') || job.key?('continue-on-error') || job.fetch('steps').any? { |step| step.key?('if') || step.key?('continue-on-error') }
+    abort 'no Sparkle signature or release proof without build provenance' unless Array(workflow.fetch('jobs').fetch('validate-appcast')['needs']).include?('attest')
+    next
+  end
   abort "#{id} must not gain write permissions" if job.fetch('permissions', {}).to_s.include?('write')
   job.fetch('steps', []).each do |step|
     next unless step.fetch('uses', '').start_with?('actions/checkout@')
     abort "#{id} checkout must not persist the token in .git/config" unless step.fetch('with', {})['persist-credentials'] == false
   end
 end
-puts 'macOS release secrets: step-scoped only; no write permission; checkouts do not persist credentials'
+puts 'macOS release secrets: step-scoped only; no write permission outside the provenance-only attest job; checkouts do not persist credentials'
 
 # Reusable qualification and its caller share one immutable artifact namespace.
 qualification = YAML.load_file(File.join(root, workflow.fetch('jobs').fetch('qualify').fetch('uses')))

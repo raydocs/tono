@@ -168,7 +168,12 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// Revision 19 replaces a running sing-box process for reviewed-app DIRECT and installs the
 /// physical permits while the tunnel stays Locked. It does not use the mihomo reload bracket.
 /// A revision-18 Service keeps the proven full tunnel. MIN_REQUIRED stays 14.
-pub const PROTOCOL_REVISION: u16 = 19;
+/// Revision 20 reports what decision 090 (W-A) already rendered: rule C permits the
+/// [`API_RELAYS`] for the Tono app while armed without a tunnel. Nothing on the wire changed; the
+/// App reads the number to decide whether, armed without a tunnel, it may send the control plane
+/// through the relays alone (decision 091). An older Service, including a revision-19 build that
+/// already carried the permit, keeps the App on the full walk. MIN_REQUIRED stays 14.
+pub const PROTOCOL_REVISION: u16 = 20;
 /// Revision that introduced the Service-owned, detached-manifest update transaction.
 pub const MIN_SERVICE_REVISION_FOR_UPDATE_TRANSACTION: u16 = 16;
 /// Revision whose `POST /clash/prepare-start` compares the request's client-snapshotted
@@ -180,6 +185,8 @@ pub const MIN_SERVICE_REVISION_FOR_SING_BOX: u16 = 18;
 /// Revision that restarts sing-box for reviewed-app DIRECT and reads the rules back.
 /// Older Services keep the full tunnel; they do not enter the mihomo reload bracket.
 pub const MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT: u16 = 19;
+/// First revision that reports the relay permit in rule C (decision 090) to the App.
+pub const MIN_SERVICE_REVISION_FOR_API_RELAY_PERMIT: u16 = 20;
 /// Revisions 7 through 12 are wire/behaviour incompatible with older peers. Reject a mismatch at
 /// the protocol probe rather than failing later during a required mutation. Revision 13 is
 /// additive: a revision-12 client may still pair.
@@ -224,6 +231,27 @@ pub const REVIEWED_DIRECT_PORTS: [u16; 4] = [80, 443, 8000, 8080];
 /// permit from it and the App's transport walks it, so a port the client will try cannot be one
 /// the kill switch refuses — which is exactly what would happen if each side kept its own list.
 pub const CONTROL_PLANE_PORTS: [u16; 6] = [443, 2053, 2083, 2087, 2096, 8443];
+
+/// Tono-owned API relays outside Cloudflare (decision 077), in the order the App walks them.
+///
+/// Each is an nginx `stream` listener that admits only the SNIs `api.afk.ccwu.cc` and
+/// `releases.afk.ccwu.cc` and passes the unterminated TLS session to the Cloudflare edge, so the
+/// client still validates Cloudflare's certificate for the hostname.
+///
+/// One compiled list, used by both sides, like [`CONTROL_PLANE_PORTS`]: the App's transport and
+/// updater walk it (`bootstrap::API_RELAYS` re-exports this), and `wfp_model::session_rules`
+/// renders it into the app-scoped bootstrap API channel (rule C) while armed without a tunnel
+/// (owner decision W-A, decision 090, which amends 077). Exact IPv4 literal and port, TCP only,
+/// never resolved — a relay the client tries but rule C refuses would look like the network.
+pub const API_RELAYS: [(std::net::Ipv4Addr, u16); 3] = [
+    // Los Angeles · Westwood (DMIT)
+    (std::net::Ipv4Addr::new(179, 253, 233, 220), 2053),
+    // Los Angeles · Mesa (DMIT)
+    (std::net::Ipv4Addr::new(179, 255, 154, 17), 2053),
+    // Los Angeles · Arosscloud (AS400619): another provider than the DMIT pair (decision 089);
+    // last, so a walk that reaches a DMIT relay is unchanged.
+    (std::net::Ipv4Addr::new(154, 84, 56, 196), 2053),
+];
 /// Revision that introduced GET/POST `/bootstrap-pins`.
 pub const MIN_SERVICE_REVISION_FOR_BOOTSTRAP_PINS: u16 = 13;
 pub const MIN_SERVICE_REVISION_FOR_DIRECT_RUNTIME_RELOAD: u16 = 10;

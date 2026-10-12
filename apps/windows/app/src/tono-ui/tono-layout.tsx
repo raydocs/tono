@@ -157,7 +157,7 @@ const TonoLayout = () => {
   const { t } = useTranslation()
   const { theme } = useCustomTheme()
   const { status } = useTonoStatus()
-  const { preferences } = useTonoPreferences()
+  const { preferences, generalSave } = useTonoPreferences()
   const { language } = preferences ?? {}
   const { switchLanguage } = useI18n()
   const navigate = useNavigate()
@@ -235,11 +235,13 @@ const TonoLayout = () => {
   }, [isLoginRoute, isTrayRoute, navigate, status?.uiState])
 
   useEffect(() => {
-    if (language) {
+    // A background read may see a write whose acknowledgement is still pending
+    // or failed. Only General's successful save/reload can apply it then.
+    if (language && (!generalSave || generalSave.phase === 'saved')) {
       dayjs.locale(language === 'zh' ? 'zh-cn' : language)
       switchLanguage(language)
     }
-  }, [language, switchLanguage])
+  }, [language, switchLanguage, generalSave])
 
   if (!themeReady) {
     return (

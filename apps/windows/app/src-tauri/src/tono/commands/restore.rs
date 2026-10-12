@@ -1072,10 +1072,30 @@ pub async fn restore_session_guarded(app: AppHandle, state: Arc<TonoState>) {
         )
     });
     crate::tono::update_handoff::retire_completed_legacy_journal(env!("CARGO_PKG_VERSION"));
+    // WIN-UPDATE-PARTIAL-FILES: packages an earlier run left in Tono's own download directory.
+    AsyncHandler::spawn(|| super::update::sweep_stale_downloads());
     load_credentials(&state).await;
     crate::tono::bootstrap::hydrate_learned_pins_from_service().await;
-    let client = { Arc::clone(&state.lock().await.client) };
+    let (client, catalog_dir, signed_out) = {
+        let inner = state.lock().await;
+        let signed_out = inner.credential_error.is_none()
+            && matches!(inner.credentials.refresh_token(), Ok(None));
+        (Arc::clone(&inner.client), inner.catalog_dir.clone(), signed_out)
+    };
     let _ = client.transport().refresh_control_plane_pins().await;
+    // Backlog A4 (D14-A): a pre-login probe result younger than a day puts its path first for
+    // this launch's first request. With no session to restore, the sign-in screen is next:
+    // probe every path again in the background (handshakes only, nothing identifying), so the
+    // sign-in goes first to one that works. Restore does not wait for it.
+    if let Some(path) = crate::tono::path_probe::adopt_cached(client.transport(), &catalog_dir) {
+        logging!(info, Type::Tono, "Tono: control-plane path from the pre-login probe: {path:?}");
+    }
+    if signed_out {
+        let client = Arc::clone(&client);
+        AsyncHandler::spawn(move || async move {
+            crate::tono::path_probe::run_before_sign_in(client.transport(), &catalog_dir).await;
+        });
+    }
     let outcome = std::panic::AssertUnwindSafe(restore_session_for_generation(app.clone(), state.clone(), Some(0)))
         .catch_unwind()
         .await;

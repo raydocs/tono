@@ -1,6 +1,34 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Verifying…": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Verifying…"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "验证中…"}}}},
+    "Contact support (copy diagnostics)": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Contact support (copy diagnostics)"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "联系支持（复制诊断）"}}}},
+    "Email is for sign-in. Traffic logs upload by default; turn this off in Settings.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Email is for sign-in. Traffic logs upload by default; turn this off in Settings."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "邮箱用于登录。流量日志默认上传，可在设置中关闭。"}}}},
+    "Privacy details": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Privacy details"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "隐私说明"}}}},
+    "Request sent": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Request sent"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "请求已提交"}}}},
+    "Check %@ for an email from Tono <login@lecvia.com>, including spam. A sign-in code is valid for 10 minutes.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Check %@ for an email from Tono <login@lecvia.com>, including spam. A sign-in code is valid for 10 minutes."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "请查看 %@（含垃圾箱）里 Tono <login@lecvia.com> 发来的邮件。验证码 10 分钟内有效。"}}}},
+    "Check spam and the address above, or send a new code.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Check spam and the address above, or send a new code."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "请查看垃圾箱并核对上面的邮箱地址，或重新发送验证码。"}}}},
+    "Copy diagnostics": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Copy diagnostics"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "复制诊断"}}}},
+    "Could not copy. You can copy the safe text manually.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Could not copy. You can copy the safe text manually."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "未能复制，可手动复制安全文本。"}}}},
+    "Copy manually": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Copy manually"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "手动复制"}}}},
+    "Protection may still be on from an earlier session, and Tono's relays did not answer from this network. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Protection may still be on from an earlier session, and Tono's relays did not answer from this network. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "上次会话的保护可能仍开着，Tono 的中继没有从这个网络回应。Tono 保持保护原样。请稍后重试，或换个网络，例如手机热点。"}}}},
+    "Protection is on. Tono keeps it on. Try again in a moment or on another network, for example a phone hotspot.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Protection is on. Tono keeps it on. Try again in a moment or on another network, for example a phone hotspot."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "保护已开启，Tono 会保持它开启。请稍后重试，或换个网络，例如手机热点。"}}}},
+    "Protection may still be on from an earlier session. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Protection may still be on from an earlier session. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "上次会话的保护可能仍开着，Tono 保持保护原样。请稍后重试，或换个网络，例如手机热点。"}}}},
+    "Protection is on, and Tono's relays did not answer from this network. Tono keeps protection on. Try again in a moment or on another network, for example a phone hotspot.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Protection is on, and Tono's relays did not answer from this network. Tono keeps protection on. Try again in a moment or on another network, for example a phone hotspot."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "保护已开启，Tono 的中继没有从这个网络回应。Tono 会保持保护开启。请稍后重试，或换个网络，例如手机热点。"}}}},
+    "Tono's relays could not be reached from this network. Try again in a moment or on another network, for example a phone hotspot.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Tono's relays could not be reached from this network. Try again in a moment or on another network, for example a phone hotspot."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "这个网络暂时无法到达 Tono 的中继。请稍后重试，或换个网络，例如手机热点。"}}}},
+    "This network's DNS did not return Tono's address. Try another network, for example a phone hotspot, then retry.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "This network's DNS did not return Tono's address. Try another network, for example a phone hotspot, then retry."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "这个网络没能查到 Tono 的地址。请换个网络，例如手机热点，再重试。"}}}},
+    "Try another network, for example a phone hotspot, then retry.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Try another network, for example a phone hotspot, then retry."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "请换个网络，例如手机热点，再重试。"}}}},
+    "Applies at your next macOS login. Changing this does not affect the current connection.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Applies at your next macOS login. Changing this does not affect the current connection."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "下次登录 macOS 时生效。更改此项不影响当前连接。"}}}},
+    "Reopens Tono to apply. Quitting drops the connection and releases network protection until you connect again.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Reopens Tono to apply. Quitting drops the connection and releases network protection until you connect again."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "重开 Tono 后生效。退出会断开连接并解除网络保护，直到你再次连接。"}}}},
+    "macOS did not confirm the requested Login Items setting.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "macOS did not confirm the requested Login Items setting."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "macOS 未确认所请求的登录项设置。"}}}},
+    "Could not confirm this change. Refresh status before trying again.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Could not confirm this change. Refresh status before trying again."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "无法确认这次更改。请刷新状态后再试。"}}}},
+    "Approval needed in macOS Login Items. Tono is not enabled to open at login yet.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Approval needed in macOS Login Items. Tono is not enabled to open at login yet."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "需要在 macOS 登录项中批准。目前尚未启用登录时打开 Tono。"}}}},
+    "Login Items is unavailable. Open Tono from Applications, then refresh status.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Login Items is unavailable. Open Tono from Applications, then refresh status."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "登录项暂不可用。请从“应用程序”打开 Tono，然后刷新状态。"}}}},
+    "Open Login Items": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Open Login Items"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "打开登录项"}}}},
+    "Refresh status": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Refresh status"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "刷新状态"}}}},
+    "Turn off": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Turn off"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "关闭"}}}},
+    "Saving…": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Saving…"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "正在保存…"}}}},
+    "Saved": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Saved"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "已保存"}}}},
     "stepName.preparing": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "preparing protection"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "准备保护"}}}},
     "stepName.preparingHelper": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "preparing the secure helper"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "准备安全组件"}}}},
     "stepName.startingKillSwitch": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "starting the Kill Switch"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "开启断网保护"}}}},
@@ -92,6 +120,13 @@
     "Internal test reports send failed-connection details by default.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Internal test reports send failed-connection details by default."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "内部测试版本默认上报连接失败详情。"}}}},
     "Tell support when Tono crashed.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Tell support when Tono crashed."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "向支持反馈 Tono 崩溃。"}}}},
     "Share a periodic protection snapshot; failure reports still go through.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Share a periodic protection snapshot; failure reports still go through."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "定期分享保护快照；关闭后仍会发送基本失败报告。"}}}},
+    "Tono couldn't block local network devices, so all traffic is blocked to keep you protected. Turn the setting off and on again, or reconnect.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Tono couldn't block local network devices, so all traffic is blocked to keep you protected. Turn the setting off and on again, or reconnect."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "Tono 无法阻止访问局域网设备，为保证安全已暂停全部流量。请将该设置关闭再打开，或重新连接。"}}}},
+    "The network helper is too old to block local network devices. Reconnect to update it.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "The network helper is too old to block local network devices. Reconnect to update it."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "网络组件版本过旧，无法阻止访问局域网设备。请重新连接以更新组件。"}}}},
+    "Tono couldn't apply the local network devices setting. Reconnect to try again.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Tono couldn't apply the local network devices setting. Reconnect to try again."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "Tono 无法应用局域网设备设置。请重新连接后再试。"}}}},
+    "Tono couldn't update protection, so it keeps blocking traffic. Disconnect or reconnect to continue.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Tono couldn't update protection, so it keeps blocking traffic. Disconnect or reconnect to continue."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "Tono 无法更新保护，因此继续阻断流量。请断开或重新连接以继续。"}}}},
+    "Allow local network devices": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Allow local network devices"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "允许局域网设备"}}}},
+    "Off by default. While connected, let this Mac reach printers, file shares, casting and other devices on your local network. When off, they are blocked while connected.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Off by default. While connected, let this Mac reach printers, file shares, casting and other devices on your local network. When off, they are blocked while connected."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "默认关闭。连接时允许这台 Mac 访问局域网里的打印机、共享文件夹、投屏等设备。关闭时，连接期间无法访问这些设备。"}}}},
+    "Reach printers and other local devices while connected.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Reach printers and other local devices while connected."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "连接时可访问打印机等局域网设备。"}}}},
     "Allow support-requested snapshots and recovery actions.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Allow support-requested snapshots and recovery actions."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "允许支持请求诊断快照与恢复操作。"}}}},
     "Support tools": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Support tools"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "支持工具"}}}},
     "Technical details": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Technical details"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "技术详情"}}}},
@@ -643,6 +678,16 @@
         }
       }
     },
+    "Another VPN is running on this Mac and may conflict with Tono. Quit it, then connect again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存在其他 VPN：这台 Mac 上还有别的 VPN 在运行，可能与 Tono 冲突。请先退出它，再重新连接。"
+          }
+        }
+      }
+    },
     "Another program keeps replacing Tono's network protection. The original network is back. Quit the other VPN or firewall, then connect again.": {
       "localizations": {
         "zh-Hans": {
@@ -819,6 +864,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "这条连接使用了已配置的住宅最终出口，而不仅是云端选择器。"
+          }
+        }
+      }
+    },
+    "This network is intercepting encrypted connections: something between this Mac and Tono replaced Tono's certificate, and Tono will not accept it. If this network has a sign-in page, finish it in a browser; otherwise turn off any proxy or security software that inspects HTTPS, then retry.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "网络在拦截加密连接：这台 Mac 与 Tono 之间有设备或软件替换了 Tono 的证书，Tono 不会接受。如果这个网络有网页登录，请先在浏览器里完成；否则请关闭检查 HTTPS 的代理或安全软件，然后重试。"
           }
         }
       }
@@ -1083,12 +1138,12 @@
         }
       }
     },
-    "Your email is only used to sign in. Traffic logs are never uploaded unless you turn that on in Settings.": {
+    "Your email is only used to sign in. Traffic log upload is on by default: the hostnames you connect to, the apps that open each connection, and the matched rules and routes, used to diagnose problems. Turn it off in Settings.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "邮箱只用于登录。流量日志不会上传，除非你在设置里打开。"
+            "value": "邮箱只用于登录。流量日志默认上传：你连接的主机名、发起每条连接的应用、命中的规则与路由，用于排查问题。可在设置里关闭。"
           }
         }
       }
@@ -6263,7 +6318,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "点按恢复上网"
+            "value": "点按恢复正常网络（关闭保护）"
           }
         }
       }
@@ -7160,7 +7215,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tono 的网络助手需要修复后才能解除保护，你的流量仍处于保护中。请再次选择「恢复联网」并在管理员提示中授权。若修复持续失败，支持页面提供了一条恢复命令。%@"
+            "value": "Tono 的网络助手需要修复后才能解除保护，你的流量仍处于保护中。请再次选择「恢复正常网络」并在管理员提示中授权。若修复持续失败，支持页面提供了一条恢复命令。%@"
           }
         }
       }
@@ -8568,6 +8623,26 @@
         }
       }
     },
+    "No update available": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂无可用更新"
+          }
+        }
+      }
+    },
+    "No signed Tono release is published for this channel yet.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此更新渠道尚未发布已签名的 Tono 版本。"
+          }
+        }
+      }
+    },
     "OK": {
       "localizations": {
         "zh-Hans": {
@@ -8651,7 +8726,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "恢复普通网络"
+            "value": "恢复正常网络"
           }
         }
       }
@@ -8668,6 +8743,236 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld 毫秒"
+          }
+        }
+      }
+    },
+    "Tono's service did not answer in time. This request was not sent again on another route, in case it already arrived.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 服务没有及时应答。为免重复提交，这次请求没有改走其他路径重发。"
+          }
+        }
+      }
+    },
+    "Tono could not reach its service on any route, Tono's relays included.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 的所有连接路径都没能连上服务，包括 Tono 中继。"
+          }
+        }
+      }
+    },
+    "Tono could not reach its service on any route.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 的所有连接路径都没能连上服务。"
+          }
+        }
+      }
+    },
+    "%@ (%@)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@（%2$@）"
+          }
+        }
+      }
+    },
+    "Tried: %@.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已尝试：%@。"
+          }
+        }
+      }
+    },
+    "Retry in a moment. If it keeps failing, try another network, for example a phone hotspot.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请稍后重试。如果一直失败，请换一个网络（例如手机热点）。"
+          }
+        }
+      }
+    },
+    "This network's DNS did not return Tono's address. Try another network, for example a phone hotspot, then retry. For help, select this text and send it to Tono support.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这个网络的 DNS 没有返回 Tono 的地址。请换一个网络（例如手机热点）后重试。需要帮助时，可选中这段文字发给 Tono 客服。"
+          }
+        }
+      }
+    },
+    "Try another network, for example a phone hotspot, then retry. For help, select this text and send it to Tono support.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请换一个网络（例如手机热点）后重试。需要帮助时，可选中这段文字发给 Tono 客服。"
+          }
+        }
+      }
+    },
+    "direct connection": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直连"
+          }
+        }
+      }
+    },
+    "Tono's fixed addresses": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 固定地址"
+          }
+        }
+      }
+    },
+    "Tono's relays": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 中继"
+          }
+        }
+      }
+    },
+    "name lookup failed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "域名解析失败"
+          }
+        }
+      }
+    },
+    "no connection": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连不上"
+          }
+        }
+      }
+    },
+    "secure connection failed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加密连接失败"
+          }
+        }
+      }
+    },
+    "timed out": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "超时"
+          }
+        }
+      }
+    },
+    "failed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "失败"
+          }
+        }
+      }
+    },
+    "The connection was interrupted before Tono got an answer. This request was not sent again on another route, in case it already arrived.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接在 Tono 收到应答之前中断了。为免重复提交，这次请求没有改走其他路径重发。"
+          }
+        }
+      }
+    },
+    "Tono could not reach any of its relays.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 连不上任何一台中继。"
+          }
+        }
+      }
+    },
+    "Tono's relays could not be reached from this network. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从这个网络连不上 Tono 中继。请稍后重试，或换一个网络（例如手机热点）。需要帮助时，选中这段文字发给 Tono 支持。"
+          }
+        }
+      }
+    },
+    "Protection is on. Tono keeps it on. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保护正在开启，Tono 会保持开启。请稍后重试，或换一个网络（例如手机热点）。需要帮助时，选中这段文字发给 Tono 支持。"
+          }
+        }
+      }
+    },
+    "Protection may still be on from an earlier session. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一次会话的保护可能仍在生效，Tono 不会改变保护状态。请稍后重试，或换一个网络（例如手机热点）。需要帮助时，选中这段文字发给 Tono 支持。"
+          }
+        }
+      }
+    },
+    "Protection is on, and Tono's relays did not answer from this network. Tono keeps protection on. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保护正在开启，从这个网络连不上 Tono 中继。Tono 会保持保护开启。请稍后重试，或换一个网络（例如手机热点）。需要帮助时，选中这段文字发给 Tono 支持。"
+          }
+        }
+      }
+    },
+    "Protection may still be on from an earlier session, and Tono's relays did not answer from this network. Tono leaves protection as it is. Try again in a moment or on another network, for example a phone hotspot. For help, select this text and send it to Tono support.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一次会话的保护可能仍在生效，从这个网络连不上 Tono 中继。Tono 不会改变保护状态。请稍后重试，或换一个网络（例如手机热点）。需要帮助时，选中这段文字发给 Tono 支持。"
           }
         }
       }

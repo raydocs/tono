@@ -12,6 +12,111 @@ export function ineligible(u: Row, t = now()) {
     (u.quota_bytes !== null && u.usage_bytes >= u.quota_bytes);
 }
 
+// Least recently seen first, over the live devices aliased `candidate`: the
+// later of the row's own last_seen_at (created_at before the first sighting)
+// and its newest telemetry heartbeat, then creation time, then rowid, so ties
+// never depend on the query plan. Shared by login rotation and limit eviction.
+export const DEVICE_LRU_ORDER = `MAX(
+  COALESCE(candidate.last_seen_at, candidate.created_at),
+  COALESCE((
+    SELECT received_at FROM telemetry_windows
+    WHERE device_id = candidate.id
+    ORDER BY received_at DESC
+    LIMIT 1
+  ), 0)
+) ASC,
+candidate.created_at ASC,
+candidate.rowid ASC`;
+
+/**
+ * Set one account's device limit and, only when that lowers the stored limit,
+ * revoke its live devices beyond the new limit, least recently seen first;
+ * return the revoked device ids (D15-A, H17-C-F1, A9-RAISE-EVICTS-OVERCAP).
+ *
+ * `limitWrite` is the users UPDATE that writes `newLimit`. It runs in the same
+ * D1 batch, which is one SQLite transaction, right after the victim selection.
+ * The selection compares `newLimit` with the limit stored at that moment, so a
+ * raise or an unchanged limit evicts nothing even when the account is already
+ * over its old cap (it catches up at its next login), and concurrent calls see
+ * each other's committed limit. The excess is computed from `newLimit` and the
+ * live devices committed at that moment, so the cap and the eviction commit or
+ * roll back together and a retry finds nothing left to evict. Every eviction
+ * statement is scoped to `userId`. The victims go through the same outbox as
+ * login rotation: a tailnet revocation job, the device row, its sessions and
+ * its exit credential.
+ */
+export async function evictDevicesOverLimit(
+  e: Env,
+  userId: string,
+  newLimit: number,
+  limitWrite: D1PreparedStatement,
+): Promise<{ limitWriteChanges: number; evicted: string[] }> {
+  const t = now();
+  const evictionId = id();
+  const victims = `SELECT device_id FROM device_rotation_victims WHERE rotation_id = ?`;
+  const results = await e.DB.batch<Row>([
+    e.DB.prepare(
+      `INSERT INTO device_rotation_victims(rotation_id, device_id)
+       SELECT ?, candidate.id
+       FROM devices candidate
+       WHERE candidate.user_id = ? AND candidate.status IN ('pending', 'active')
+         AND ? < (SELECT device_limit FROM users WHERE id = ?)
+       ORDER BY ${DEVICE_LRU_ORDER}
+       LIMIT MAX(0,
+         (SELECT COUNT(*) FROM devices live
+          WHERE live.user_id = ? AND live.status IN ('pending', 'active'))
+         - ?
+       )`,
+    ).bind(evictionId, userId, newLimit, userId, userId, newLimit),
+    limitWrite,
+    e.DB.prepare(
+      `INSERT INTO revocation_jobs(
+         id, device_id, tailscale_node_id, created_at, ownership_generation, reason
+       )
+       SELECT ? || ':' || devices.id,
+              devices.id, devices.tailscale_node_id, ?, devices.claim_generation,
+              'device_limit_lowered'
+       FROM devices
+       WHERE devices.id IN (${victims})
+         AND devices.user_id = ? AND devices.tailscale_node_id IS NOT NULL
+       ON CONFLICT(tailscale_node_id) DO UPDATE SET
+         completed_at = NULL,
+         last_error = NULL,
+         last_attempt_at = 0,
+         device_id = excluded.device_id,
+         created_at = excluded.created_at,
+         ownership_generation = excluded.ownership_generation,
+         reason = excluded.reason`,
+    ).bind(evictionId, t, evictionId, userId),
+    e.DB.prepare(
+      `UPDATE devices SET
+         status = 'revoked',
+         claim_token = NULL,
+         claim_expires_at = NULL,
+         updated_at = ?
+       WHERE id IN (${victims})
+         AND user_id = ? AND status IN ('pending', 'active')`,
+    ).bind(t, evictionId, userId),
+    e.DB.prepare(
+      `UPDATE sessions SET revoked_at = ?
+       WHERE revoked_at IS NULL AND user_id = ? AND device_id IN (${victims})`,
+    ).bind(t, userId, evictionId),
+    e.DB.prepare(
+      `DELETE FROM device_exit_credentials
+       WHERE user_id = ? AND device_id IN (
+         SELECT devices.id FROM devices
+         WHERE devices.id IN (${victims}) AND devices.status = 'revoked'
+       )`,
+    ).bind(userId, evictionId),
+    e.DB.prepare(`${victims} ORDER BY device_id`).bind(evictionId),
+    e.DB.prepare('DELETE FROM device_rotation_victims WHERE rotation_id = ?').bind(evictionId),
+  ]);
+  return {
+    limitWriteChanges: Number(results[1]?.meta.changes ?? 0),
+    evicted: (results[6]?.results ?? []).map((row) => String(row.device_id)),
+  };
+}
+
 export async function directSignupAllowed(e: Env, emailAddr: string): Promise<boolean> {
   const managed = await e.DB.prepare(
     'SELECT 1 FROM signup_allowlist WHERE email = ?',

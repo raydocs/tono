@@ -1,0 +1,18 @@
+## 2026-10-11 · 恢复动作命名统一、登录恢复按钮、托盘“改用”
+- 归属：SHIP_PLAN G2；Windows app（zh/en 文案、登录页、托盘）、macOS `Localizable.xcstrings`（两条 zh 值）。
+- 来源：基线 main `80255fe9a`；分支 `claude/uiux-restore-copy`；PR 待开，未合并。
+- 缺陷修复：
+  - 同一个“解除保护、恢复上网”动作在中文里有「恢复网络」「恢复正常网络」「恢复联网」「恢复上网」四种叫法；Mac 一条助手修复提示让用户点「恢复联网」，但按钮叫「恢复正常网络」。现在 Win/Mac 中文统一为「恢复正常网络」；Win pill 副标题写明“（关闭保护）”，Mac 悬停提示同。Win 确认文案中混入的英文 “Internet” 改为“网络”。
+  - 登录受保护态的恢复入口原为无边框纯文字，改为低强调轮廓按钮（非主色填充）。点击逻辑、`tonoDisconnect`、说明文案的“会关闭保护”语义不变；登录页此处原本就没有二次确认，未新增。
+  - 托盘候选线路原只显示城市名加 →，点击会选择该线路（空闲时还会连接）。现显示“改用布法罗 / Use Buffalo”，accessible name 同。
+  - 删除未被任何 tsx 引用、且写着“共 4 步”（实际 3 步）的 `tono.intro.progress`（en/zh；其它语言文件里的同名遗留键未动）。
+- 续记（2026-10-11，review M1）：Mac `Restore normal internet` 的 zh 值与 Win `tono.login.recoveryWaiting` 中的「恢复普通网络」同改为「恢复正常网络」，仅文案；安装器/uninstaller 里的同名叙述属特权路径，仍未动。
+- 新增/优化：无。
+- 工程与测试：新增 `src/locales/restore-action-name.test.ts`（一个 `it`）；`TrayPanel.test.tsx` 两处按钮名改为 “Use Buffalo”；重新生成 i18n 类型。
+- 验证：见 PR 正文。截图为合成 IO 的 Chromium，不是真机。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：
+  - **D2 托盘在“保护中，未连上”时没有恢复入口**未实现。最小接线：`TrayPanel.tsx` 在 `uiState==='protectedOffline'` 时增加一个低强调文字入口，复用 `sea-home` 的 `onRestore`（先打开同样的确认，再调用 `tonoDisconnect`），文案 `tono.progress.restore`；不碰 service。阻塞：它是恢复/保护解除的新触发面，A13 仍在修复，应由 A13 owner 协调后接线。
+  - D4 在 860×540 生产最小窗口未复现，未改。
+  - 未改：安装器/service 里“Tono — 恢复网络 (Restore Network)”开始菜单快捷方式及 service 报错中对它的引用（特权路径，须独立清理；与按钮名仍不一致）。
+  - 真机 Windows/Mac 渲染、WebView2、VoiceOver/讲述人、Mac 新文案的原生窗口截图未做。

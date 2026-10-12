@@ -19,7 +19,11 @@ import { useUpdate } from '@/hooks/use-update'
 import { showNotice } from '@/services/notice-service'
 import { useSetUpdateState, useUpdateState } from '@/services/states'
 import { formatTonoActionError } from '@/services/tono'
-import { installUpdate } from '@/services/update'
+import {
+  cancelUpdateDownload,
+  installUpdate,
+  UPDATE_DOWNLOAD_CANCELLED,
+} from '@/services/update'
 
 type MarkdownNode = {
   type: string
@@ -239,6 +243,8 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
       // one-use installation and authenticated successor recovery.
       await installUpdate(updateInfo.manifestSha256, onDownloadEvent)
     } catch (err) {
+      // The user cancelled the download: not a refusal, the same offer may start again.
+      if (String(err).includes(UPDATE_DOWNLOAD_CANCELLED)) return
       // Keep the refusal inside the modal, and keep this offer blocked even
       // after closing/reopening it. Only a different checked manifest is new.
       setFailedOffer({
@@ -307,7 +313,11 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
       disableOk={refusal !== null}
       loading={updateState}
       onClose={() => setOpen(false)}
-      onCancel={() => setOpen(false)}
+      onCancel={() => {
+        // Cancel stops a download in flight instead of leaving it running unseen.
+        if (updateState) void cancelUpdateDownload().catch(() => false)
+        setOpen(false)
+      }}
       onOk={onUpdate}
     >
       <Box

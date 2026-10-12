@@ -124,6 +124,30 @@ export interface TonoStatus {
   updateIncomplete?: boolean
   /** The selected route dropped repeatedly while connected; set until this time. */
   routeUnstableUntilMs?: number | null
+  /** Decision 093: the current sign-in request's outcome; absent with none or after success. */
+  signInRecovery?: TonoSignInRecovery
+}
+
+/**
+ * Decision 093. `automatic`: the request is in flight and Tono may still retry it on its own.
+ * `userAction`: it ended in `cause` and nothing of it is scheduled; only the user can act
+ * (retry, another network, support). Not a promise about later network changes. Protection
+ * is a separate state and is never released by this.
+ */
+export interface TonoSignInRecovery {
+  /** Process-local request count; a newer request, a dismissal or a success replaces it. */
+  operation: number
+  step: 'sendCode' | 'verifyCode'
+  phase: 'automatic' | 'userAction'
+  cause?:
+    | 'relaysUnreachable'
+    | 'network'
+    | 'clock'
+    | 'interception'
+    | 'captive'
+    | 'localConflict'
+    | 'service'
+    | 'localStore'
 }
 
 export const TONO_STATUS_EVENT = 'tono://status'
@@ -143,6 +167,11 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   // #588: a certificate the PC's clock cannot date. First, so it wins wherever the
   // transport marked it inside another surface's error (sign-in, diagnostics, catalog).
   { prefix: 'TONO_CLOCK_SKEW', key: 'tono.login.errors.clockSkew' },
+  // H21-O-F8: the OS reports a captive portal, or the trust store refused the control
+  // plane's certificate for its issuer, signature or name. Ahead of the surface's own
+  // prefix for the same reason as the clock.
+  { prefix: 'TONO_CAPTIVE_PORTAL', key: 'tono.login.errors.captivePortal' },
+  { prefix: 'TONO_TLS_INTERCEPTED', key: 'tono.login.errors.tlsIntercepted' },
   // Sign-in could not reach the control plane. Both transport paths carry the same
   // hostname and TLS SNI, so when both fail the failure is about reaching the server at
   // all — not the account, the code, or the app. Without this entry the raw Rust error
@@ -152,7 +181,7 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   { prefix: 'TONO_AUTH_TLS', key: 'tono.login.errors.unreachable' },
   { prefix: 'TONO_AUTH_QUIC', key: 'tono.login.errors.unreachable' },
   { prefix: 'TONO_AUTH_TIMEOUT', key: 'tono.login.errors.unreachable' },
-  { prefix: 'TONO_AUTH_CAPTIVE', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_CAPTIVE', key: 'tono.login.errors.captivePortal' },
   { prefix: 'TONO_AUTH_LOCAL_CONFLICT', key: 'tono.login.errors.unreachable' },
   { prefix: 'TONO_AUTH_API', key: 'tono.login.errors.serverError' },
   { prefix: 'TONO_AUTH_FORBIDDEN', key: 'tono.login.errors.serverError' },
@@ -163,7 +192,7 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   { prefix: 'TONO_CONNECT_QUIC', key: 'tono.dashboard.errors.nodeUnreachable' },
   { prefix: 'TONO_CONNECT_TIMEOUT', key: 'tono.dashboard.errors.nodeUnreachable' },
   { prefix: 'TONO_CONNECT_TUN', key: 'tono.dashboard.errors.tunDataPlaneBroken' },
-  { prefix: 'TONO_CONNECT_CAPTIVE', key: 'tono.dashboard.errors.nodeUnreachable' },
+  { prefix: 'TONO_CONNECT_CAPTIVE', key: 'tono.login.errors.captivePortal' },
   { prefix: 'TONO_CONNECT_LOCAL_CONFLICT', key: 'tono.dashboard.errors.tunIngressBroken' },
   { prefix: 'TONO_AUTH_UNREACHABLE', key: 'tono.login.errors.unreachable' },
   { prefix: 'TONO_AUTH_RATE_LIMITED', key: 'tono.login.errors.rateLimited' },
@@ -326,6 +355,11 @@ const actionErrorRaw = (error: unknown): string =>
       : String(error)
 
 const mappedTonoActionErrorKey = (raw: string): string | null => {
+  // H21-O-F7: the backend appends this only to a network/TUN-class connect
+  // failure while another VPN adapter is up, so it is the likelier cause.
+  if (raw.includes('TONO_OTHER_VPN_PRESENT:')) {
+    return 'tono.dashboard.errors.otherVpnPresent'
+  }
   if (
     (raw.includes('TONO_NODE_OR_CORE_UNREACHABLE') ||
       raw.includes('CORE_EXIT_UNREACHABLE')) &&
@@ -392,6 +426,7 @@ const showsSupportCode = (code: string): boolean =>
   code.startsWith('TONO_AUTH_') ||
   code.startsWith('TONO_CONNECT_') ||
   code === 'TONO_CLOCK_SKEW' ||
+  code === 'TONO_TLS_INTERCEPTED' ||
   code === 'TONO_SIGN_IN_NOT_SAVED' ||
   code === 'TONO_NODE_OR_CORE_UNREACHABLE' ||
   code.startsWith('CORE_')
@@ -487,6 +522,9 @@ export const tonoSignInVerify = (email: string, code: string) =>
   call<TonoAccount>('tono_sign_in_verify', { email, code })
 
 export const tonoSignOut = () => call<void>('tono_sign_out')
+
+/** Decision 093: leave this sign-in (another email); clears its recovery outcome. */
+export const tonoSignInDismiss = () => call<void>('tono_sign_in_dismiss')
 
 export const tonoAccount = () => call<TonoAccount | null>('tono_account')
 

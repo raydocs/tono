@@ -28,6 +28,9 @@ export const FLATTEN_KINDS = [
   'appCrash',
   'networkRestore',
   'killSwitchFail',
+  // A19: a control-plane path failed undelivered and the next one ran
+  // (`from` → `to`, `reason` class, `elapsedMs`). Not a node fact: no node.
+  'controlPlanePathFail',
 ] as const;
 
 export type FlattenKind = (typeof FLATTEN_KINDS)[number];
@@ -92,7 +95,10 @@ SELECT
   ?,
   json_extract(?, '$.osArch'),
   json_extract(ev.value, '$.kind'),
-  SUBSTR(COALESCE(json_extract(ev.value, '$.node'), json_extract(?, '$.selectedServer')), 1, 120),
+  CASE
+    WHEN json_extract(ev.value, '$.kind') = 'controlPlanePathFail' THEN NULL
+    ELSE SUBSTR(COALESCE(json_extract(ev.value, '$.node'), json_extract(?, '$.selectedServer')), 1, 120)
+  END,
   json_extract(ev.value, '$.stage'),
   json_extract(ev.value, '$.outcome'),
   json_extract(ev.value, '$.code'),

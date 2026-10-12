@@ -15,14 +15,11 @@ run_step() {
 }
 
 install_system_packages() {
+  # Native Windows/macOS builds run in hosted CI, not this Linux orb.
+  # Keep portable script runtimes; do not install the Linux Tauri SDK here.
   local packages=(
     build-essential
-    libayatana-appindicator3-dev
-    librsvg2-dev
     libssl-dev
-    libwebkit2gtk-4.1-dev
-    libxslt1.1
-    patchelf
     pkg-config
     python3-venv
     ruby
@@ -85,8 +82,9 @@ install_node() {
   export PATH="$active_root/bin:$PATH"
 
   corepack enable pnpm
-  corepack prepare pnpm@11.3.0 --activate
-  corepack prepare pnpm@10.18.1
+  local manager
+  manager="$(node -p "require('./apps/windows/app/package.json').packageManager")"
+  corepack prepare "$manager" --activate
 
   node --version
   npm --version
@@ -111,64 +109,32 @@ export PATH="$HOME/.local/tono-node/bin:$HOME/.cargo/bin:$PATH"
 EOF
 }
 
-install_rust() {
-  export PATH="$HOME/.cargo/bin:$PATH"
+install_npm_dependencies() {
+  local workspace="$1"
+  local marker="$workspace/node_modules/.tono-orb-dependencies"
+  local fingerprint
+  fingerprint="$(
+    { sha256sum "$workspace/package.json" "$workspace/package-lock.json"; node --version; npm --version; } |
+      sha256sum | cut -d ' ' -f 1
+  )"
 
-  if ! command -v rustup >/dev/null 2>&1; then
-    local installer
-    installer="$(mktemp)"
-    curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
-      https://sh.rustup.rs --output "$installer"
-    sh "$installer" -y --profile minimal --default-toolchain none
-    rm -f "$installer"
+  # npm ci took 7s even with a warm cache and replaces node_modules each time.
+  # Only reuse our successful locked install, with matching inputs and intact
+  # declared dependencies. A failed install never writes a success marker.
+  if [[ -f "$marker" ]] && [[ "$(cat "$marker")" == "$fingerprint" ]] &&
+    npm --prefix "$workspace" ls --depth=0 --silent >/dev/null 2>&1; then
+    echo "Reusing locked dependencies for $workspace."
+    return
   fi
-
-  if ! rustup run 1.95.0 rustc --version >/dev/null 2>&1; then
-    rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
-  fi
-  if ! rustup component list --toolchain 1.95.0 --installed | grep -q '^rustfmt-'; then
-    rustup component add --toolchain 1.95.0 rustfmt
-  fi
-  if ! rustup component list --toolchain 1.95.0 --installed | grep -q '^clippy-'; then
-    rustup component add --toolchain 1.95.0 clippy
-  fi
-  if [[ "$(rustup default | awk '{print $1}')" != 1.95.0-* ]]; then
-    rustup default 1.95.0
-  fi
-
-  rustc --version
-  cargo --version
+  npm --prefix "$workspace" ci --no-audit --no-fund
+  printf '%s\n' "$fingerprint" > "$marker"
 }
 
 install_node_dependencies() {
-  npm --prefix services/control-plane ci --no-audit --no-fund
+  install_npm_dependencies services/control-plane
+  install_npm_dependencies services/ops-console
   (cd apps/windows/app && pnpm install --frozen-lockfile)
   (cd apps/windows/crates/tono-plugin-core && pnpm install --frozen-lockfile)
-}
-
-install_python_dependencies() {
-  if [[ ! -x .venv/bin/python ]]; then
-    python3 -m venv .venv
-  fi
-  .venv/bin/python -m pip install \
-    --disable-pip-version-check \
-    --no-input \
-    --requirement design-assets/tono-icon/requirements.txt
-}
-
-fetch_rust_dependencies() {
-  local manifests=(
-    apps/windows/Cargo.toml
-    apps/windows/app/Cargo.toml
-    apps/windows/service/Cargo.toml
-    apps/windows/vendor/kode-bridge/Cargo.toml
-  )
-  local manifest
-
-  for manifest in "${manifests[@]}"; do
-    echo "Fetching dependencies for $manifest"
-    cargo fetch --locked --manifest-path "$manifest"
-  done
 }
 
 prepare_local_environment() {
@@ -180,13 +146,12 @@ prepare_local_environment() {
   fi
 }
 
-run_step 'Install system build packages' install_system_packages
+run_step 'Install portable script prerequisites' install_system_packages
 run_step 'Install the pinned Node.js and pnpm toolchains' install_node
 run_step 'Persist toolchains for future login shells' persist_toolchain_path
-run_step 'Install the pinned Rust toolchain' install_rust
 run_step 'Install locked Node.js dependencies' install_node_dependencies
-run_step 'Install pinned Python design dependencies' install_python_dependencies
-run_step 'Cache locked Rust dependencies' fetch_rust_dependencies
 run_step 'Prepare the local development environment' prepare_local_environment
 
+# Task-specific Rust/Core builds and icon-design dependencies are installed by
+# their task workflow. Existing toolchains, package caches and .venv are kept.
 printf '\nTono orb setup complete in %ss.\n' "$SECONDS"

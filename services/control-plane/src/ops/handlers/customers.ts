@@ -1,7 +1,7 @@
 import { ApiError } from '../../errors';
 import { sniffPlatform } from '../customers';
 import { listFailureClusters, loadCustomerDiagnostics } from '../../telemetry/diagnostics-read';
-import { loadCustomerListCounts, loadCustomerPage } from '../customers-list';
+import { customerSortKey, loadCustomerListCounts, loadCustomerPage } from '../customers-list';
 import { activityHours, customerStatus, customerStatuses, deviceCountsFor, servicesForUsers } from '../customers-read';
 import {
   SERVICE_FAMILIES,
@@ -28,7 +28,7 @@ import {
   type ServiceFamily,
   type ServiceUsageDto,
 } from '../contract';
-import { funnelDays, loadFunnelFacts, stageSentence, type FunnelPerson } from '../funnel';
+import { funnelDays, loadDuplicateWechatKeys, loadFunnelFacts, stageSentence, wechatKey, type FunnelPerson } from '../funnel';
 import { loadLogWindows } from '../shared-admin/diagnostics-logs';
 import { customerFreshnessVerdict, neverUsedOverride } from '../verdict-customers';
 import { eventDto } from './nodes-data';
@@ -146,6 +146,7 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
   const deviceCountByUser = await deviceCountsFor(e.DB, userIds);
   const servicesByUser = await servicesForUsers(e.DB, userIds, t - 30 * 86_400);
   const counts = await loadCustomerListCounts(e.DB, filter);
+  const duplicateWechat = await loadDuplicateWechatKeys(e.DB);
   const items: CustomerSummaryDto[] = [];
   for (const user of page.users) {
     const email = String(user.email);
@@ -162,6 +163,7 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
     const platforms: Platform[] = [];
     const p = asPlatform(status?.platform);
     if (p) platforms.push(p);
+    const wechat = wechatKey(user.wechat_id);
     items.push({
       userId, email, wechatId: nullText(user.wechat_id),
       verdict, health: word.word, tone: word.tone, reason,
@@ -179,11 +181,15 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
       lastSeenAt: status?.lastSeenAt ?? null,
       stage, stageSinceAt, firstConnectedAt: person?.firstConnectedAt ?? null,
       updatedAt,
+      ...(wechat !== null && duplicateWechat.has(wechat) ? { wechatDuplicate: true } : {}),
     });
   }
   const sliced = items.length > limit ? items.slice(0, limit) : items;
   const last = sliced[sliced.length - 1];
-  const nextCursor = items.length > limit && last ? encodeCursor(last.email, last.userId) : null;
+  const lastRank = page.users[sliced.length - 1]?.exact_rank;
+  const nextCursor = items.length > limit && last
+    ? encodeCursor(customerSortKey(lastRank, last.email), last.userId)
+    : null;
   const updatedAt = sliced.reduce((max, row) => Math.max(max, row.updatedAt), t);
   return listJson(
     e, req, sliced, nextCursor, updatedAt,

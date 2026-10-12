@@ -22,6 +22,9 @@ extension AppState {
             prepare: { [weak self] in
                 guard let self else { return (false, UUID()) }
                 guard !self.isConnected && !self.isConnecting else { return (false, UUID()) }
+                // A17: every attempt is judged from the user's own block, not
+                // from the previous attempt's automatic hy2 dial.
+                self.restoreSelectionAfterHy2AutoDial()
                 guard !self.catalogSelectionRequiresChoice else {
                     self.errorMessage = String(localized: "Choose an available cloud server before reconnecting.")
                     return (false, UUID())
@@ -103,6 +106,9 @@ extension AppState {
                 // Any fresh connect attempt is user-visible intent to try again; the
                 // reconnect loop re-pauses if the same user-action failure repeats.
                 self.protectedReconnectPausedForUserAction = false
+                // A29: every automatic caller refuses while a protected fault
+                // holds, so a connect admitted here is the user's Reconnect.
+                self.clearProtectedFaultForUserAction()
                 // This boot now has a session: a launch in a later boot that
                 // finds this record restarted without a clean release, and
                 // does not reconnect by itself. Every automatic caller refuses
@@ -122,6 +128,9 @@ extension AppState {
                 self.config.mode = ProxyMode.rule.rawValue.lowercased()
                 self.proxyMode = .rule
 
+                // A17: the admitted attempt may dial the same node's hy2 block
+                // (in memory only; PF follows the dialed node like a manual pick).
+                self.applyHy2AutoSwitchForConnect()
                 let selectedExit = self.preferManagedCatalogExitForConnect()
                 let selectedExitName = selectedExit?.name ?? ConfigPipeline.homeNodeName
                 LocalTrafficAudit.shared.recordEvent(
@@ -194,6 +203,7 @@ extension AppState {
                 let port = self.config.mixedPort
                 let selectedExit = self.preferManagedCatalogExitForConnect()
                 let selectedExitName = selectedExit?.name ?? ConfigPipeline.homeNodeName
+                let localNetwork = LocalNetworkDevicesSync.desired
                 let overlay = ConfigPipeline.OverlayConfig(
                     mixedPort: port,
                     externalController: self.config.externalController,
@@ -206,7 +216,9 @@ extension AppState {
                     tonoTransport: self.tonoTransport,
                     claudeHomeNodeName: self.managedCatalogRouting?.homeProxy,
                     defaultNodeName: self.managedCatalogRouting?.defaultProxy,
-                    claudeHomeSocks5: self.managedCatalogRouting?.homeSocks5
+                    claudeHomeSocks5: self.managedCatalogRouting?.homeSocks5,
+                    allowLocalNetworkDevices: localNetwork.allow,
+                    localNetworkDevicesGeneration: localNetwork.generation
                 )
                 let apiHost = (Bundle.main.object(forInfoDictionaryKey: "TonoAPIBaseURL") as? String)
                     .flatMap { URL(string: $0)?.host }
@@ -517,6 +529,8 @@ extension AppState {
                 // round trip and could interrupt a healthy first connection.
                 let committed = await self.onCoreStarted(api: api)
                 guard committed else { return }
+                // Only past the same readiness checks as any attempt.
+                self.hy2AutoSwitch.noteConnected(dialed: selectedExitName, now: Date())
                 self.recordVerifiedRouteSuccess(selectedExitName, owner: routeOwner, generation: generation,
                                                 catalogDigest: routeCatalogDigest)
                 // Pins are for the *next* fail-closed window, not this
@@ -627,9 +641,15 @@ extension AppState {
                     // and the copyable classified detail. The dashboard must
                     // not interpolate them — handshake eof used to land as
                     // English debug on the main card.
+                    // H21-O-F7: a tunnel/exit-class failure while another VPN's
+                    // interface is up names that VPN. Read-only getifaddrs; only
+                    // the sentence (and the repeat signature built from it) changes.
                     let failureMessage = coreErrors.contains(where: Hy2IdleSupport.isQuicIdle)
                         ? Hy2IdleSupport.userMessage
-                        : ConnectionFailurePresentation.userFacingMessage(
+                        : OtherVPNDetection.attributedMessage(
+                            for: self.lastClassifiedFailure,
+                            interfaces: OtherVPNDetection.currentInterfaces()
+                        ) ?? ConnectionFailurePresentation.userFacingMessage(
                             classified: self.lastClassifiedFailure
                         )
                     // Deterministic failures repeat verbatim; a fourth try of
@@ -649,6 +669,7 @@ extension AppState {
                     ) {
                         _ = self.rotateCatalogExitAfterConnectFailure()
                     }
+                    self.noteHy2AutoSwitchConnectFailure(dialed: selectedExitName)
                     if environmentalFailure {
                         // Leave the counter untouched either way.
                         self.consecutiveNoNetworkServiceFailures += 1
@@ -695,11 +716,39 @@ extension AppState {
                         )
                         self.lastConnectionFailure = preservedFailure
                         self.completedConnectionStages = preservedStages
+                        // The unarmed loop ended when it started this connect
+                        // after a TCP proof. A failure before PF armed (the
+                        // network service gone mid-handoff, a catalog exit it
+                        // cannot dial) would leave nothing to try again: no
+                        // loop, and a network change restarts only a loop that
+                        // still owns the generation. Hand recovery back to the
+                        // loop at its preserved rung, after this release
+                        // (it waits for the teardown). Never for a failure that
+                        // needs the user, nor at helper preparation, which may
+                        // raise an administrator prompt.
+                        if Self.unarmedLoopResumesAfterPreArmFailure(
+                            startedByUnarmedLoop: preservingUnarmedBackoff,
+                            stage: failedStage,
+                            error: error
+                        ) {
+                            self.scheduleUnarmedReconnect()
+                        }
                     }
             }
         }
     )
 }
+
+    /// Whether a connect that failed before PF armed goes back to the
+    /// unarmed reconnect loop: only one that loop started, and only for a
+    /// failure that neither needs the user nor came from helper preparation.
+    static func unarmedLoopResumesAfterPreArmFailure(
+        startedByUnarmedLoop: Bool,
+        stage: ConnectionStage,
+        error: any Error
+    ) -> Bool {
+        startedByUnarmedLoop && stage != .preparingHelper && !failureRequiresUserAction(error)
+    }
 
     /// A released host starts a genuinely new story; stale failure history
     /// must not let a single failure in a future session trip the "repeated
@@ -772,6 +821,16 @@ extension AppState {
         automaticFailureRelease: Bool = false,
         ordinaryQuit: Bool = false
     ) {
+        // A29: while a protected fault holds, no automatic release runs; the
+        // user's own Disconnect (or Restore internet, or Quit) proceeds and
+        // ends the fault.
+        if LocalNetworkDevicesSync.holdsProtectedFault {
+            if automaticFailureRelease {
+                holdProtectedFault()
+                return
+            }
+            if releaseKillSwitch || ordinaryQuit { clearProtectedFaultForUserAction() }
+        }
         if nativeUpdatePending || RuntimeCleanup.nativeUpdateBlocksConnect
             || (releaseKillSwitch && RuntimeCleanup.nativeUpdatePending) {
             if ordinaryQuit { return } // The native executor owns teardown.
@@ -1794,6 +1853,7 @@ extension AppState {
                 )
             }
         }
+        self.convergeLocalNetworkDevices()
         // This refresh existed because pins were the only thing routing
         // these hosts direct, so a rotated CDN answer stranded the flow
         // on a stale /32. Pins are no longer that load-bearing: the
@@ -2348,6 +2408,12 @@ extension AppState {
         resumeWhenReachable: Bool,
         exhaustedTunnelLoss: Bool = false
     ) async {
+        // A29: a protected fault is not an exhausted failure. Hold it: no
+        // release, no teardown, no reconnect.
+        if LocalNetworkDevicesSync.holdsProtectedFault {
+            holdProtectedFault()
+            return
+        }
         let releases = ExhaustedFailureNetwork.afterFailure(strictKillSwitchExplicit: false)
             .releasesSystemNetwork
         let preferred = selectedExitNode()?.name ?? ConfigPipeline.homeNodeName
@@ -2427,6 +2493,10 @@ extension AppState {
             try await Task.sleep(for: .seconds(delay))
         }
     ) {
+        if LocalNetworkDevicesSync.holdsProtectedFault {
+            holdProtectedFault()
+            return
+        }
         if protectedReconnectPausedForUserAction { return }
         connectionCoordinator.protectedReconnectTask?.cancel()
         connectionCoordinator.protectedReconnectTask = nil
@@ -2532,6 +2602,10 @@ extension AppState {
         repairRequested: Bool = false
     ) {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
+        if LocalNetworkDevicesSync.holdsProtectedFault {
+            holdProtectedFault()
+            return
+        }
         // A network-change kick carries new information: a repeated-failure
         // pause may be lifted (the environment changed, the outcome can
         // differ). A user-action pause stays — only Retry Now lifts it, or
@@ -2806,9 +2880,11 @@ extension AppState {
         )
     }
 
-    /// User-tapped next hand. Does not run on its own (G2.8 stays off).
+    /// User-tapped next hand. The automatic same-node move is A17
+    /// (`Hy2AutoSwitch`), gated by the catalog's `hy2AutoSwitch`.
     func tryBackupChannelManually() {
         guard let backup = backupHy2SiblingName() else { return }
+        hy2AutoSwitch.noteManualSelection(backup)
         guard applyProxySelection(backup) else { return }
         persistProxySelection(backup)
         if isProtectionBlocked {

@@ -43,7 +43,7 @@ final class PinRefreshKeepSessionTests: XCTestCase {
         RuntimeCleanup.nativeUpdatePending = false
         KillSwitchService.isArmed = true
         KillSwitchService.armIPC.prepare = { _ in }
-        KillSwitchService.armIPC.deliver = { _ in (true, true, true, false, false, 0) }
+        KillSwitchService.armIPC.deliver = { _ in (true, true, true, false, false, 0, LocalNetworkDevicesSync.desired.allow) }
         defer {
             app.connectionCoordinator.cancelReconnectTasks()
             KillSwitchService.armIPC = savedIPC
@@ -141,7 +141,7 @@ final class PinRefreshKeepSessionTests: XCTestCase {
         RuntimeCleanup.nativeUpdatePending = false
         KillSwitchService.isArmed = true
         KillSwitchService.armIPC.prepare = { _ in }
-        KillSwitchService.armIPC.deliver = { _ in (true, true, true, false, false, 0) }
+        KillSwitchService.armIPC.deliver = { _ in (true, true, true, false, false, 0, LocalNetworkDevicesSync.desired.allow) }
         defer {
             app.connectionCoordinator.cancelReconnectTasks()
             KillSwitchService.armIPC = savedIPC
@@ -254,7 +254,7 @@ final class PinRefreshKeepSessionTests: XCTestCase {
         RuntimeCleanup.nativeUpdatePending = false
         KillSwitchService.isArmed = true
         KillSwitchService.armIPC.prepare = { _ in }
-        KillSwitchService.armIPC.deliver = { _ in (true, true, true, false, false, 0) }
+        KillSwitchService.armIPC.deliver = { _ in (true, true, true, false, false, 0, LocalNetworkDevicesSync.desired.allow) }
         defer {
             app.connectionCoordinator.cancelReconnectTasks()
             KillSwitchService.armIPC = savedIPC
@@ -331,7 +331,7 @@ final class PinRefreshKeepSessionTests: XCTestCase {
         KillSwitchService.armIPC.prepare = { _ in }
         KillSwitchService.armIPC.deliver = { _ in
             armCount += 1
-            return (true, true, true, false, false, 0)
+            return (true, true, true, false, false, 0, LocalNetworkDevicesSync.desired.allow)
         }
         defer {
             KillSwitchService.armIPC = savedIPC
@@ -459,7 +459,7 @@ final class PinRefreshKeepSessionTests: XCTestCase {
         let savedIPC = KillSwitchService.armIPC
         let savedArmed = KillSwitchService.isArmed
         KillSwitchService.armIPC.prepare = { _ in }
-        KillSwitchService.armIPC.deliver = { _ in (true, true, true, false, false, 0) }
+        KillSwitchService.armIPC.deliver = { _ in (true, true, true, false, false, 0, LocalNetworkDevicesSync.desired.allow) }
         defer {
             RuntimeCleanup.launchProtectionConsumer = savedConsumer
             AppProfile.defaults.set(savedSlot, forKey: SingBoxFakeIPRotation.defaultsKey)

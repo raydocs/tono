@@ -100,7 +100,9 @@ export function customerColumns(
         header: copy.customerColumns.wechat,
         width: '68px',
         sortValue: (row: CustomerSummaryDto) => row.wechatId ?? '',
-        cell: (row: CustomerSummaryDto) => <WechatCell id={row.wechatId} mask={wechat} />,
+        cell: (row: CustomerSummaryDto) => (
+          <WechatCell id={row.wechatId} mask={wechat} duplicate={row.wechatDuplicate === true} />
+        ),
       },
     ]),
     {
@@ -197,10 +199,16 @@ export function customerColumns(
  * no handle gets the em dash and the word for where one would have come from,
  * like every other absent fact on the page.
  */
-function WechatCell({ id, mask }: { id: string | null; mask: Mask }) {
+function WechatCell({ id, mask, duplicate }: { id: string | null; mask: Mask; duplicate: boolean }) {
   if (id === null || id === '') return <Value value={null} source={copy.sourceWord.profile} />;
   const shownId = mask(id);
-  return <span className="block min-w-0 truncate" title={shownId}>{shownId}</span>;
+  if (!duplicate) return <span className="block min-w-0 truncate" title={shownId}>{shownId}</span>;
+  return (
+    <span className="flex min-w-0 flex-col items-start leading-tight" title={`${shownId} · ${copy.wechatDuplicateTitle}`}>
+      <span className="block min-w-0 max-w-full truncate">{shownId}</span>
+      <span className="ops-tag tone-unk">{copy.wechatDuplicate}</span>
+    </span>
+  );
 }
 
 /**

@@ -205,11 +205,24 @@ pub async fn switch_selected_node(
             }
             return;
         }
-        let previous = inner
-            .nodes
-            .iter()
-            .find(|node| node.name == previous_name)
-            .cloned();
+        // A17: the live runtime may dial the previous node's hy2 block automatically.
+        // Judge the hot switch, its endpoints, rollback and socket cleanup by the exact
+        // node the runtime dials (admitted before Connected); the base name stays the
+        // UI selection only.
+        let previous = match inner.hy2_switch.live_exit() {
+            Some(live)
+                if live.is_hysteria2()
+                    && !tono_core::is_hy2_catalog_name(&previous_name)
+                    && tono_core::catalog_base_name(&live.name) == previous_name =>
+            {
+                Some(live.clone())
+            }
+            _ => inner
+                .nodes
+                .iter()
+                .find(|node| node.name == previous_name)
+                .cloned(),
+        };
         let next = inner.nodes.iter().find(|node| node.name == next_name).cloned();
         let routing = inner.routing.clone();
         let nodes = inner.nodes.clone();
@@ -218,6 +231,10 @@ pub async fn switch_selected_node(
         (previous, next, routing, nodes, secret, port)
     };
     let (previous, next, routing, nodes, secret, port) = snapshot;
+    // The controller proxy the runtime dials now (` · hy2` for an automatic hop).
+    let previous_dial = previous
+        .as_ref()
+        .map_or_else(|| previous_name.clone(), |node| node.name.clone());
     let Some(next) = next else {
         restore_selected_node(&state, &app, generation, &previous_name).await;
         return;
@@ -283,7 +300,7 @@ pub async fn switch_selected_node(
         return;
     }
     if state.lock().await.connect_generation != generation {
-        let _ = select_exit_group(&secret, port, &previous_name).await;
+        let _ = select_exit_group(&secret, port, &previous_dial).await;
         let _ = service::tono_replace_proxy_endpoints(&session, old_endpoints).await;
         return;
     }
@@ -301,7 +318,7 @@ pub async fn switch_selected_node(
                 anyhow::bail!("previous exit is unavailable for rollback");
             }
             anyhow::ensure!(state.lock().await.connect_generation == generation, "switch retired");
-            select_exit_group(&secret, port, &previous_name).await.map_err(anyhow::Error::msg)?;
+            select_exit_group(&secret, port, &previous_dial).await.map_err(anyhow::Error::msg)?;
             verify_tun_data_plane().await.map_err(anyhow::Error::msg)?;
             anyhow::ensure!(state.lock().await.connect_generation == generation, "switch retired");
             service::tono_replace_proxy_endpoints(&session, old_endpoints.clone()).await?;
@@ -316,7 +333,7 @@ pub async fn switch_selected_node(
         return;
     }
 
-    close_connections_bound_to(&state, generation, &previous_name).await;
+    close_connections_bound_to(&state, generation, &previous_dial).await;
     if state.lock().await.connect_generation != generation {
         return;
     }
@@ -383,7 +400,7 @@ pub(super) async fn cold_switch_selected_node(
     match attempt_for_generation(&state, &app, Some(generation)).await {
         Attempt::Failed { generation, error, account_owner } => {
             if fail_connect(&state, &app, generation, error, account_owner).await {
-                schedule_reconnect_for_generation(&state, &app, generation).await;
+                super::reconnect::follow_failed_reconnect(&state, &app, generation).await;
             }
         }
         Attempt::GuardRejected(reason) if guard_rejection_is_transient(&reason) => {

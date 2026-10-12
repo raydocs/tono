@@ -14,12 +14,11 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { SWRConfig } from 'swr'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { setNewAppearance } from '@/tono-ui/appearance-preferences'
-
 import { tonoStatusQueryKey } from '@/hooks/use-tono'
 import LoginPage from '@/pages/tono/login'
 import { removeCacheData } from '@/services/query-client'
 import type { TonoStatus } from '@/services/tono'
+import { setNewAppearance } from '@/tono-ui/appearance-preferences'
 
 /**
  * Contract test for the layout auth guard: the payloads below are shaped like
@@ -293,7 +292,7 @@ describe('TonoAuthGuard', () => {
 })
 
 describe('login flow under status pushes', () => {
-  it('can restore normal internet from the signed-out login screen', async () => {
+  it('can restore normal internet from the signed-out login screen without requiring it to sign in', async () => {
     tonoStatusMock.mockResolvedValue({
       ...statusPayload('signedOut'),
       uiState: 'protectedOffline',
@@ -319,13 +318,22 @@ describe('login flow under status pushes', () => {
     const restoreButton = await screen.findByRole('button', {
       name: 'tono.login.networkBlocked.restore',
     })
+    // Decision 091: sign-in uses the permitted relays; release is optional.
     expect(
       (
         screen.getByRole('button', {
           name: 'tono.login.sendCode',
         }) as HTMLButtonElement
       ).disabled,
-    ).toBe(true)
+    ).toBe(false)
+    expect(
+      (
+        screen.getByPlaceholderText(
+          'tono.login.emailPlaceholder',
+        ) as HTMLInputElement
+      ).disabled,
+    ).toBe(false)
+    expect(tonoDisconnectMock).not.toHaveBeenCalled()
     fireEvent.click(restoreButton)
 
     await waitFor(() => expect(tonoDisconnectMock).toHaveBeenCalledTimes(1))

@@ -1,10 +1,10 @@
 /* eslint-disable @eslint-react/no-unnecessary-use-prefix -- Stateless adapters retain the production hook names; this dev-only entry has no native hook effects. */
 import { createTheme } from '@mui/material'
-import i18n from 'i18next'
 
 import type {
   TonoDiagnosticsReport,
   TonoLocalDiagnosticsReport,
+  TonoSignInRecovery,
 } from '../../services/tono'
 import { tonoStatus as simulatedStatus } from '../sea-home/fixtures'
 
@@ -28,23 +28,37 @@ const theme = createTheme({
 export const useCustomTheme = () => ({ theme })
 export const useLoadingOverlay = () => {}
 export const useLayoutEvents = () => {}
-export const useI18n = () => ({
-  currentLanguage: i18n.language,
-  supportedLanguages: ['zh', 'en'],
-  switchLanguage: async () => {},
-  isLoading: false,
-  t: i18n.t,
-})
-export const useTonoPreferences = () => ({
-  preferences: {
-    language: params.get('lang') === 'zh' ? 'zh' : 'en',
-    theme_mode: 'dark',
-    enable_auto_launch: false,
-    auto_check_update: false,
-  },
-  patchPreferences: async () => {},
-  mutatePreferences: () => {},
-})
+export { useI18n } from '../../hooks/use-i18n'
+export {
+  useTonoPreferences,
+  readGeneralSave,
+  tonoGeneralSaveQueryKey,
+  type GeneralSave,
+} from '../../hooks/use-tono-preferences'
+let generalPreferences: TonoPreferences = {
+  language: params.get('lang') ?? undefined,
+  theme_mode: 'dark',
+  enable_auto_launch: false,
+  auto_check_update: false,
+}
+let generalReadFailed = false
+let generalSaveFailed = false
+export const getTonoPreferences = async () => {
+  await privacyDelay('generalReadDelay')
+  if (params.has('generalReadError') && !generalReadFailed) {
+    generalReadFailed = true
+    throw new Error('Synthetic settings read failure')
+  }
+  return { ...generalPreferences }
+}
+export const patchTonoPreferences = async (value: Partial<TonoPreferences>) => {
+  generalPreferences = { ...generalPreferences, ...value }
+  await privacyDelay('generalSaveDelay')
+  if (params.has('generalSaveError') && !generalSaveFailed) {
+    generalSaveFailed = true
+    throw new Error('Synthetic settings lost reply; value may be saved')
+  }
+}
 export const useUpdate = () => ({
   updateInfo: null,
   checkUpdate: async () => null,
@@ -92,15 +106,49 @@ export const tonoDevices = async () => [
     createdAt: 1790000000,
   },
 ]
-export const tonoAuditEnabled = async () => false
+let auditChoice = false
+let telemetryChoice = false
+let networkChoice = false
+let privacyReadFailed = false
+let privacySaveFailed = false
+const privacyDelay = (name: string) =>
+  new Promise<void>((resolve) =>
+    setTimeout(
+      resolve,
+      Math.max(0, Math.min(30000, Number(params.get(name)) || 0)),
+    ),
+  )
+export const tonoAuditEnabled = async () => auditChoice
+export const tonoSetAuditEnabled = async (value: boolean) => {
+  auditChoice = value
+}
 export const tonoAuditLogPath = async () => ({
   path: 'C:\\Tono-preview\\audit.log',
   exists: false,
   bytes: 0,
 })
 export const tonoInternalBuild = async () => false
-export const tonoPeriodicTelemetryEnabled = async () => false
-export const tonoNetworkLogUploadEnabled = async () => false
+export const tonoPeriodicTelemetryEnabled = async () => telemetryChoice
+export const tonoSetPeriodicTelemetryEnabled = async (value: boolean) => {
+  telemetryChoice = value
+}
+// Privacy feedback uses only synthetic local state; no native consent or upload.
+export const tonoNetworkLogUploadEnabled = async () => {
+  await privacyDelay('privacyReadDelay')
+  if (params.has('privacyReadError') && !privacyReadFailed) {
+    privacyReadFailed = true
+    throw new Error('Synthetic saved-choice read failure')
+  }
+  return networkChoice
+}
+export const tonoSetNetworkLogUploadEnabled = async (value: boolean) => {
+  await privacyDelay('privacySaveDelay')
+  if (params.has('privacySaveError') && !privacySaveFailed) {
+    privacySaveFailed = true
+    throw new Error('Synthetic persistence refusal')
+  }
+  networkChoice = value
+}
 export const tonoCheckTerminalEnv = async () => ({ variables: [], sources: [] })
 export const tonoCancelServerTests = async () => {}
 export const tonoRefreshCatalog = async () => {}
@@ -167,7 +215,40 @@ export const tonoUpdateRoutePreferences = async (
   return tonoRoutePreferences()
 }
 
-// Sign-in fixture uses no credentials or network; only synthetic status events.
+// Decision093 snapshots from synthetic IO, not a replacement recovery engine.
+// No credentials or network; the operation token is never rendered or copied.
+const signInFixtureIO = async (step: TonoSignInRecovery['step']) => {
+  const signInRecovery: TonoSignInRecovery = {
+    operation: 1,
+    step,
+    phase: 'automatic',
+  }
+  window.dispatchEvent(
+    new CustomEvent('preview-home-state', { detail: { signInRecovery } }),
+  )
+  await privacyDelay('authDelay')
+  if (params.has('relaysDown')) {
+    window.dispatchEvent(
+      new CustomEvent('preview-home-state', {
+        detail: {
+          signInRecovery: {
+            ...signInRecovery,
+            phase: 'userAction',
+            cause: 'relaysUnreachable',
+          },
+        },
+      }),
+    )
+    throw new Error(
+      'TONO_AUTH_TCP: could not reach Tono: TONO_RELAYS_UNREACHABLE: relay 2 (192.0.2.2:2053) timeout: synthetic timeout; relay 3 (192.0.2.3:2053) tls: synthetic TLS failure; relay 1 (192.0.2.1:2053) connect: synthetic connection failure',
+    )
+  }
+  window.dispatchEvent(
+    new CustomEvent('preview-home-state', {
+      detail: { signInRecovery: undefined },
+    }),
+  )
+}
 export const tonoSignInStart = async () => {
   // Every control-plane path failed: the transport's combined message, synthetic detail only.
   if (params.has('unreachable'))
@@ -179,9 +260,11 @@ export const tonoSignInStart = async () => {
       detail: { accountState: 'authenticating' },
     }),
   )
+  await signInFixtureIO('sendCode')
   return { challengeId: 'synthetic', expiresIn: 600, message: '' }
 }
 export const tonoSignInVerify = async () => {
+  await signInFixtureIO('verifyCode')
   if (params.has('badCode'))
     throw new Error('TONO_AUTH_INVALID_CODE: Synthetic rejected code')
   const suspended = params.has('paused')
@@ -191,6 +274,13 @@ export const tonoSignInVerify = async () => {
     }),
   )
   return { email: 'preview@example.test', suspended, deviceLimit: 3 }
+}
+export const tonoSignInDismiss = async () => {
+  window.dispatchEvent(
+    new CustomEvent('preview-home-state', {
+      detail: { signInRecovery: undefined },
+    }),
+  )
 }
 
 // Populated, privacy-safe activity/account fixtures; no native feed or account IO.

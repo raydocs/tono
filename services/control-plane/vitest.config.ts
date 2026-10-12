@@ -31,7 +31,7 @@ export default defineConfig({
           TAILSCALE_ENROLLMENT_ENABLED: 'true',
           // Public half of a keypair generated for these tests only, so the
           // signature path is exercised against real Ed25519 rather than a stub.
-          // The private half lives in worker.test.ts; neither is the production
+          // The private half lives in worker-traffic-policy.test.ts; neither is the production
           // key, which exists only in the operator's keychain.
           TRAFFIC_POLICY_PUBLIC_KEY: '1ZcCKTp4auuTmkJfICPgVTOQDLhnM5We3v63lob0KO4=',
           TEST_MIGRATIONS: migrations,

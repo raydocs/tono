@@ -23,6 +23,7 @@ import { catalogResource } from './catalog';
 import { trafficPolicyResource } from './traffic-policy';
 import { productAccountsResource } from './product-accounts';
 import { auditResource } from './audit';
+import { hy2AutoSwitchResource } from './hy2-auto-switch';
 
 export {
   publicAction,
@@ -92,5 +93,7 @@ export async function sharedAdministrativeResource(
   if (products) return products;
   const audit = await auditResource(req, e, resource, m);
   if (audit) return audit;
+  const hy2 = await hy2AutoSwitchResource(req, e, resource, m, actorEmail);
+  if (hy2) return hy2;
   return null;
 }

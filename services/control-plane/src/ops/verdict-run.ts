@@ -23,6 +23,7 @@ import {
   persistPathStreaks,
 } from './verdict-facts';
 import { customerDesires } from './verdict-customers';
+import { loadRelayDesires } from './relay-alerts';
 
 const ID_CHUNK = 90;
 
@@ -157,10 +158,13 @@ export async function runVerdictPass(
     return { nodes: 0, transitions: await toAlertTransitions(e.DB, raw) };
   }
   const output = evaluate(input);
-  let desires = output.desires;
+  // Relay incidents are judged from their own two tables on every fleet pass;
+  // the count lives in those rows, so a node-ingest pass agrees with the cron.
+  const fleet = [...output.desires, ...await loadRelayDesires(e.DB, nowSec)];
+  let desires = fleet;
   if (scope === 'none') {
     desires = [
-      ...output.desires.filter((d) => d.subjectType !== 'user'),
+      ...fleet.filter((d) => d.subjectType !== 'user'),
       ...await liveDesires(e.DB, (row) => row.subject_type === 'user'),
     ];
   }

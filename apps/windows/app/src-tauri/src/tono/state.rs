@@ -240,6 +240,8 @@ pub struct TonoInner {
     /// Generation of the current email-auth transaction. Starting/resending, signing out, or
     /// replacing a challenge invalidates network responses from every older transaction.
     pub sign_in_generation: u64,
+    /// Decision 093: the outcome of the current sign-in request, for the sign-in screen.
+    pub sign_in_recovery: crate::tono::sign_in_recovery::SignInRecoveryLedger,
     /// Who in this process answers for a pending session marker: the sign-in in flight, or the
     /// adopted sign-in whose commit task waits for its session to be durable.
     pub session_marker: crate::tono::credentials::SessionMarker,
@@ -352,6 +354,9 @@ pub struct TonoInner {
     /// In-memory sticky dial. Never persisted and never applied while the
     /// barrier is up. See `tono_core::heal`.
     pub heal: tono_core::heal::Session,
+    /// A17 same-node hy2 auto-switch: counters, backoff, and the remembered
+    /// choices persisted next to the catalog cache. See `tono_core::hy2_switch`.
+    pub hy2_switch: tono_core::hy2_switch::Hy2AutoSwitch,
     /// Cloud WeChat-DIRECT policy (Build 28): monotonic tracker plus the
     /// latest validated document. The cache shares the catalog's directory
     /// and safety checks (`managed-traffic-policy.json`).
@@ -578,6 +583,9 @@ impl TonoInner {
     /// token. `release_on_stale` preserves the existing late-commit contract: releasing flows
     /// patch a late arm; protected reconnect/switch flows keep the barrier.
     pub fn invalidate_connection(&mut self, release_on_stale: bool) {
+        // Decision 088: the aborts below drop an in-flight automatic hy2 attempt before it can
+        // report Stale; settle that hop first.
+        crate::tono::connection::settle_stopped_auto_hop(self);
         self.retire_connection_generation(release_on_stale);
         self.tasks.abort_connection_tasks();
     }
@@ -741,7 +749,16 @@ impl TonoState {
     fn with_catalog_dir(
         catalog_dir: PathBuf, audit: Arc<crate::tono::audit::Audit>, credentials: Arc<SessionCredentialStore>,
     ) -> Result<Self> {
-        let transport = TonoTransport::new()?;
+        // A19: each control-plane path that fails before another one runs goes on the timeline.
+        let path_audit = audit.clone();
+        let transport = TonoTransport::new()?.with_path_failure_sink(Box::new(move |failure| {
+            path_audit.log(crate::tono::audit::AuditEvent::ControlPlanePathFail {
+                from: failure.path,
+                to: failure.next_path,
+                reason: failure.reason,
+                elapsed_ms: failure.elapsed_ms,
+            });
+        }));
         let fake_ip_slot_file = catalog_dir.join("fake-ip-slot");
         // The production client is built only here: every server answer on this session reaches
         // the offline gate (#582).
@@ -769,6 +786,7 @@ impl TonoState {
                 account: None,
                 challenge_id: None,
                 sign_in_generation: 0,
+                sign_in_recovery: Default::default(),
                 session_marker: Default::default(),
                 installation_id,
                 sing_box_core: false,
@@ -809,6 +827,7 @@ impl TonoState {
                 next_retry_at_ms: None,
                 catalog_failover_tried: std::collections::BTreeSet::new(),
                 heal: tono_core::heal::Session::for_preferred("", "none"),
+                hy2_switch: Default::default(),
                 policy_tracker: tono_core::policy::PolicyTracker::new(),
                 traffic_policy: None,
                 pending_policy_change: None,

@@ -178,12 +178,14 @@ export const SeaSegmented = ({
   value,
   options,
   onChange,
-}: ChoiceProps) => (
-  <fieldset aria-label={label} className="sea-segmented">
+  disabled = false,
+}: ChoiceProps & { disabled?: boolean }) => (
+  <fieldset aria-label={label} className="sea-segmented" disabled={disabled}>
     {options.map((option) => (
       <button
         key={option.value}
         type="button"
+        disabled={disabled}
         aria-pressed={value === option.value}
         onClick={() => onChange(option.value)}
       >

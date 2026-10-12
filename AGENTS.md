@@ -80,6 +80,8 @@ Read the findings (`node tooling/scripts/records.mjs findings`: [docs/FINDINGS_L
 review or bug fix; in the delivering PR add one `docs/findings.d/<ID>.md` per new finding ([format](docs/findings.d/README.md)) and update
 status in that fragment, or in the ledger row if the ID has none. Delete stale docs.
 Lines `release/macos`, `release/windows`, `main` (sole production Worker source; merge commits, no rewrite): [docs/RELEASE_LINES.md](docs/RELEASE_LINES.md).
+Merged branches are deleted (D10-A): `node tooling/scripts/prune-merged-branches.mjs remote|worktrees` (dry-run; `--apply` acts, never `--force`)
+removes only branches whose tip is on main and merged worktrees with a clean tree; the weekly workflow applies the remote part.
 
 ## Session state
 

@@ -187,11 +187,16 @@ export function Ledger() {
           <Section title={words.recon}>
             <LedgerRecon summary={month0} />
           </Section>
-          <Section title={words.slo}>
-            <LedgerSlo />
-          </Section>
         </>
       )}
+      {/* The SLO table reads nothing from the ledger, and it is about a
+          thousand rows. Hidden, not unmounted, while the summary reloads:
+          remounting it after every write threw the table away and fetched
+          and drew it again, which is seconds of main thread on a slow
+          machine with the reverse dialog still open on top. */}
+      <Section title={words.slo} className={month0 === null ? 'hidden' : undefined}>
+        <LedgerSlo />
+      </Section>
 
       <Section
         title={words.entries}

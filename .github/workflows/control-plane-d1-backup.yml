@@ -16,6 +16,13 @@
 #
 # A 90-day lifecycle rule on prefix `backups/` must be set in the Cloudflare
 # dashboard; this workflow cannot install it. See docs/ops/d1-backups.md.
+#
+# Alert: the `alert` job runs after every backup attempt. A backup that did not
+# succeed (including one that stopped at "Require Cloudflare credentials")
+# opens one issue labelled `d1-backup-failure`, or comments on the one already
+# open; the next successful backup closes it. It uses only GITHUB_TOKEN with
+# `issues: write` on that job, no Cloudflare secret, no checkout and no
+# artifact, so it works while the Cloudflare secrets are still missing.
 
 name: Control plane D1 backup
 
@@ -96,4 +103,52 @@ jobs:
           if [ -z "$probe" ]; then
             echo "uploaded object is missing or empty: $OBJECT_KEY (wrangler exit $status)" >&2
             exit 1
+          fi
+
+  alert:
+    # Runs whatever the backup job concluded, so a backup that never reached
+    # Cloudflare still raises an alert. Only this job may write issues; the
+    # backup job keeps the read-only token above. The workflow-level
+    # concurrency group stops two runs from racing to open two issues.
+    needs: backup
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BACKUP_RESULT: ${{ needs.backup.result }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      DOC_URL: ${{ github.server_url }}/${{ github.repository }}/blob/main/docs/ops/d1-backups.md
+      ALERT_LABEL: d1-backup-failure
+      ALERT_TITLE: Control plane D1 backup is failing
+    steps:
+      - name: Open, update or close the backup-failure issue
+        run: |
+          set -eu
+          gh label create "$ALERT_LABEL" --force --color B60205 \
+            --description "Nightly control-plane D1 backup did not succeed"
+          open=$(gh issue list --label "$ALERT_LABEL" --state open --limit 20 \
+            --json number --jq '.[].number')
+          if [ "$BACKUP_RESULT" = success ]; then
+            for number in $open; do
+              gh issue close "$number" \
+                --comment "Backup succeeded again: $RUN_URL"
+            done
+            exit 0
+          fi
+          body=$(printf '%s\n\n%s\n\n%s\n' \
+            "Control plane D1 backup run ended with \`$BACKUP_RESULT\` at $(date -u +%Y-%m-%dT%H:%M:%SZ): $RUN_URL" \
+            "If the log says \`missing repository secrets\`, the owner action in $DOC_URL is still pending (backlog D16). Otherwise read the failed step in the run log." \
+            "This issue closes itself on the next successful backup.")
+          # Several open alert issues (one opened by hand) get one comment, on
+          # the newest; the next success closes them all.
+          set -- $open
+          first=${1:-}
+          if [ -n "$first" ]; then
+            gh issue comment "$first" --body "$body"
+          else
+            gh issue create --title "$ALERT_TITLE" --label "$ALERT_LABEL" --body "$body"
           fi

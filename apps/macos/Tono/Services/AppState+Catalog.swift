@@ -25,9 +25,14 @@ extension AppState {
                 allowRuntimeTransition: true
             )
         } catch {
+            // A17: a refused catalog grants nothing, so no automatic hy2.
+            if ManagedExitCatalogOwnership.currentAccount == owner { revokeHy2AutoSwitchForRejectedCatalog() }
             errorMessage = String(localized: "Cloud server update was rejected; the last verified catalog remains active. \(error.localizedDescription)")
             throw error
         }
+        // A17: `hy2AutoSwitch` is outside both digests, so it is read from
+        // every 200, including one whose install above was a no-op.
+        applyHy2AutoSwitchPermission(response.hy2AutoSwitch, owner: owner)
     }
 
     func installManagedExitCatalog(

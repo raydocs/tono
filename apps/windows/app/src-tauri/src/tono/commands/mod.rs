@@ -41,7 +41,7 @@ pub mod quit;
 pub mod update;
 pub use account::{
     load_credentials, tono_account, tono_devices, tono_repair_service, tono_revoke_device,
-    tono_service_prerequisites, tono_sign_in_start, tono_sign_in_verify, tono_sign_out,
+    tono_service_prerequisites, tono_sign_in_dismiss, tono_sign_in_start, tono_sign_in_verify, tono_sign_out,
 };
 pub use catalog::{
     tono_cancel_server_tests, tono_catalog_status, tono_refresh_catalog, tono_select_server,
@@ -133,6 +133,10 @@ pub struct TonoStatus {
     /// catalog. Absent once any server answer arrives.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub offline_verified_at_ms: Option<i64>,
+    /// Decision 093: whether the current sign-in request is still Tono's to retry, or has ended
+    /// with only the user's actions left. Absent with no request or after a success.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sign_in_recovery: Option<crate::tono::sign_in_recovery::SignInRecovery>,
 }
 
 /// Last published immutable UI snapshot. The status command reads this without joining the large
@@ -253,7 +257,15 @@ pub fn ui_state_key(ui_state: UiState) -> &'static str {
 }
 
 /// Snapshot the product state for the status command and the status event.
+///
+/// Also hands the API transport what carries the control plane now (decision 091): every
+/// connection and kill-switch change is published through here, before its network call
+/// (H16-O-F7), and the transport reads it before each path it tries.
 pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
+    inner.client.transport().set_control_plane_reach(crate::tono::transport::control_plane_reach_of(
+        &inner.fsm,
+        inner.kill_switch.as_ref(),
+    ));
     let status = inner.fsm.status();
     let stage = status.stage;
     let revision = inner.catalog_tracker.current_revision();
@@ -299,6 +311,7 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         update_incomplete: update::incomplete() || crate::tono::update_handoff::incomplete(),
         route_unstable_until_ms: inner.selected_route_unstable_until_ms(epoch_millis()),
         offline_verified_at_ms: inner.offline.offline_verified_at_ms(),
+        sign_in_recovery: inner.sign_in_recovery.current(),
     }
 }
 
@@ -380,6 +393,34 @@ mod tests {
         vscode_workspace_discovery, powershell_profile_roots,
     };
     use tono_core::connection::{ConnectStage, UiState};
+
+    /// Decision 093: a sign-in outcome and the protection recovery are separate states. Ending
+    /// a sign-in request leaves the published protection fields as they were, and a connection
+    /// generation change from the protection side (reconnect, heal) keeps the outcome.
+    #[tokio::test]
+    async fn a_sign_in_outcome_and_protection_recovery_do_not_touch_each_other() {
+        use crate::tono::sign_in_recovery::{SignInStep, cause_of};
+        let state = crate::tono::state::TonoState::for_test();
+        let mut inner = state.lock().await;
+        let protection = |status: &super::TonoStatus| {
+            (status.ui_state.clone(), status.protection_blocked, serde_json::to_value(&status.kill_switch).unwrap())
+        };
+        let before = super::status_of(&inner);
+        let operation = inner.sign_in_recovery.begin(SignInStep::SendCode);
+        assert!(inner.sign_in_recovery.finish(operation, cause_of(&tono_core::auth::ApiError::Transport {
+            kind: tono_core::auth::TransportKind::Connect,
+            message: format!("{}: relay 1 (192.0.2.1:2053) connect: c", crate::tono::transport::RELAYS_UNREACHABLE),
+        })));
+        let ended = super::status_of(&inner);
+        assert_eq!(protection(&ended), protection(&before));
+        let json = serde_json::to_value(&ended).unwrap();
+        assert_eq!(json["signInRecovery"]["phase"], "userAction");
+        assert_eq!(json["signInRecovery"]["cause"], "relaysUnreachable");
+        assert_eq!(json["signInRecovery"]["step"], "sendCode");
+
+        inner.invalidate_connection(true);
+        assert_eq!(super::status_of(&inner).sign_in_recovery, ended.sign_in_recovery);
+    }
 
     #[test]
     fn account_info_carries_plan_usage_and_expiry_for_display() {

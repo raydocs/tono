@@ -282,6 +282,26 @@ describe('connectErrorSuggestsServerSwitch', () => {
     ).toBe('translated:tono.login.errors.unreachable (TONO_AUTH_DNS)')
   })
 
+  it('names a captive portal or an intercepted certificate wherever the transport marked it (H21-O-F8)', () => {
+    const translate = (key: string) => `translated:${key}`
+    expect(
+      formatTonoActionError(
+        new Error(
+          'TONO_TLS_INTERCEPTED: could not reach Tono: pinned[TONO_TLS_INTERCEPTED: connect: invalid peer certificate: UnknownIssuer]',
+        ),
+        translate,
+      ),
+    ).toBe('translated:tono.login.errors.tlsIntercepted (TONO_TLS_INTERCEPTED)')
+    expect(
+      formatTonoActionError(
+        new Error(
+          'TONO_AUTH_CAPTIVE: could not reach Tono: TONO_CAPTIVE_PORTAL: pinned[connect: timed out]',
+        ),
+        translate,
+      ),
+    ).toBe('translated:tono.login.errors.captivePortal (TONO_AUTH_CAPTIVE)')
+  })
+
   it('maps the stable unreachable prefix to the actionable locale key', () => {
     expect(
       formatTonoActionError(

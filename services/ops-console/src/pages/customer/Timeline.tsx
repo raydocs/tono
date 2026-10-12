@@ -133,8 +133,13 @@ export function Timeline({
 }
 
 function Row({ row, who }: { row: ConnectionEventDto; who?: (userId: string) => string | null }) {
-  const subject = who ? (who(row.userId) ?? row.userId) : row.node;
-  const explanation = explainCode(row.code);
+  // A control-plane path change names no node: the column carries the two paths
+  // and the code column the failure class.
+  const pathChange = row.kind === 'controlPlanePathFail';
+  const subject = who ? (who(row.userId) ?? row.userId)
+    : pathChange ? [row.from, row.to].filter(Boolean).join(' → ') || null : row.node;
+  const code = pathChange ? (row.reason ?? null) : row.code;
+  const explanation = pathChange ? null : explainCode(row.code);
   const client = [row.appVersion, row.osVersion].filter(Boolean).join(' · ');
   return (
     <div className={cn(GRID, 'data-row border-b border-[var(--hairline)] py-1 last:border-b-0')}>
@@ -150,10 +155,10 @@ function Row({ row, who }: { row: ConnectionEventDto; who?: (userId: string) => 
         {stageWord(row.stage) ?? copy.missing}
       </span>
       <span className="min-w-0 truncate text-body" title={row.error ?? undefined}>
-        {row.code ? (
+        {code ? (
           <>
-            <span className="font-mono">{row.code}</span>
-            <span className="text-[var(--muted-foreground)]"> {explanation}</span>
+            <span className="font-mono">{code}</span>
+            {explanation ? <span className="text-[var(--muted-foreground)]"> {explanation}</span> : null}
           </>
         ) : copy.missing}
       </span>

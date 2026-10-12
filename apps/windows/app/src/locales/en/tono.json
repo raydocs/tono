@@ -124,7 +124,8 @@
     "retry": "Retry",
     "connecting": "Connecting…",
     "disconnecting": "Disconnecting…",
-    "pickNode": "Switch server"
+    "pickNode": "Switch server",
+    "useRoute": "Use {{city}}"
   },
   "activity": {
     "title": "Activity",
@@ -197,7 +198,6 @@
     "skip": "Skip",
     "next": "Continue",
     "getStarted": "Get started →",
-    "progress": "Step {{step}} of 4",
     "step1": {
       "headline": "Connected means protected.",
       "body": "Open Tono, click once, and all your traffic takes the protected route."
@@ -233,11 +233,15 @@
     "sendCode": "Send code",
     "sendNewCode": "Send again",
     "sending": "Sending…",
-    "sent": "Sent to your inbox",
-    "trust": "Your email is only used to sign in. Traffic logs are never uploaded unless you turn that on in Settings.",
+    "sent": "Request sent",
+    "privacySummary": "Email is for sign-in. Traffic logs upload by default; turn this off in Settings.",
+    "privacyDetails": "Privacy details",
+    "technicalDetails": "Details",
+    "recoveryEnded": "This sign-in did not finish. Retry, or try another network.",
+    "trust": "Your email is only used to sign in. Traffic log upload is on by default: the hostnames you connect to, the apps that open each connection, and the matched rules and routes, used to diagnose problems. Turn it off in Settings.",
     "resendIn": "Resend in {{seconds}}s",
-    "codeSent": "Code sent.",
-    "codeSentTo": "Sent to the address above. Check the full address, and spam.",
+    "codeSent": "Check your inbox.",
+    "codeSentTo": "Check this inbox and spam for a Tono code.",
     "codeFrom": "From Tono <login@lecvia.com>",
     "codeLabel": "6-digit code",
     "codePlaceholder": "123456",
@@ -249,11 +253,11 @@
     "invalidCode": "Enter the 6-digit code",
     "noEmail": {
       "title": "No email yet?",
-      "description": "Check spam and the address above, or send again. If it still doesn't arrive, copy the details below for support."
+      "description": "Check spam and the address above, or send again."
     },
     "suspended": {
       "title": "Account paused",
-      "description": "Contact support."
+      "description": "This account cannot connect right now. Sign in again to check its status."
     },
     "sessionEnded": {
       "title": "Session ended",
@@ -261,28 +265,34 @@
       "signIn": "Sign in again"
     },
     "restoreFailed": {
-      "title": "Session expired",
-      "description": "Retry, or sign in again.",
+      "title": "Couldn't restore your sign-in",
+      "description": "Tono couldn't confirm your session with its server; this network may not reach it right now. Retry; if it keeps failing, sign in again.",
       "retry": "Retry"
     },
     "networkBlocked": {
       "title": "Internet is blocked",
-      "description": "Leak protection from the last session is still on. Restore the network, then sign in.",
+      "description": "Protection keeps regular internet traffic blocked. You can still sign in without turning it off. Restore network is optional: it turns protection off and lets this PC's traffic go out directly until you connect again.",
       "restore": "Restore network",
       "restoring": "Restoring…",
-      "unverifiedDescription": "Tono cannot confirm whether leak protection from the last session is still on. Choose Restore network, then sign in.",
+      "unverifiedDescription": "Tono cannot confirm whether protection from the last session is still on. You can still request a sign-in code. Restore network explicitly turns protection off and lets this PC's traffic go out directly until you connect again; it is not required to request a code.",
       "stillRunningTitle": "Previous connection still running",
-      "stillRunningDescription": "The last session's tunnel is still carrying traffic. Restore network stops it."
+      "stillRunningDescription": "The last session's tunnel is still carrying traffic. Signing in with another account may stop that connection. Restore network stops it and turns protection off."
     },
+    "relayFailureDetails": "Relay failure details",
+    "relayFailureKinds": "connect: connection failed; timeout: took too long; tls: secure connection failed; dns: name lookup failed; other: request failed. These are the reported categories, not a diagnosis of your network.",
     "errors": {
-      "unreachable": "Sign-in didn't complete.",
+      "unreachable": "Tono couldn't reach its sign-in server. Check your network, then retry.",
+      "relaysUnreachable": "Tono's backup routes cannot be reached right now. Check your network or try again later. You do not need to turn protection off to retry.",
       "rateLimited": "Too many tries. Wait a few minutes.",
-      "deviceLimit": "Sign-in didn't complete.",
-      "sessionExpired": "Sign-in didn't complete.",
+      "deviceLimit": "This account already has its maximum number of devices. On a device that is signed in, open Account and remove one, then retry.",
+      "sessionExpired": "That code expired. Request a new one.",
       "codeRejected": "That code was not accepted.",
-      "signInNotSaved": "Sign-in didn't complete.",
-      "clockSkew": "Sign-in didn't complete.",
-      "serverError": "Sign-in didn't complete."
+      "signInNotSaved": "Couldn't save the sign-in on this PC. Request a new code and try again.",
+      "clockSkew": "This PC's date and time look wrong, so Tono cannot verify its server. Set the correct date and time in Settings > Time & language > Date & time, then retry.",
+      "captivePortal": "This network needs a web sign-in (captive portal) before Tono can reach its server. Open a browser, finish the network's sign-in page, then retry.",
+      "tlsIntercepted": "This network is intercepting encrypted connections: something between this PC and Tono replaced Tono's certificate, and Tono will not accept it. If this network has a sign-in page, finish it in a browser; otherwise turn off any proxy or security software that inspects HTTPS, then retry.",
+      "serverError": "Tono's sign-in service is unavailable right now. Retry in a few minutes.",
+      "unknown": "This action did not finish. Please try again."
     },
     "paths": {
       "title": "Paths tried",
@@ -385,6 +395,7 @@
       "nodeUnreachable": "The connection didn't complete.",
       "tunDataPlaneBroken": "The connection didn't complete.",
       "tunIngressBroken": "The connection didn't complete.",
+      "otherVpnPresent": "Another VPN is running on this PC and may conflict with Tono. Quit it, then connect again.",
       "protectedHttpsFailed": "The connection didn't complete.",
       "coreUnpinned": "This copy of Tono is missing its integrity check. Install the latest Tono — reinstalling the same copy will not help.",
       "coreMismatch": "This copy of Tono does not match its core. Install the latest Tono.",
@@ -583,9 +594,12 @@
     "title": "Support & Diagnostics",
     "subtitle": "Local status. Copy a note for support.",
     "contact": {
-      "description": "Copy this note for support. It includes version, status, and node — not passwords.",
-      "copyMessage": "Copy for support",
-      "copied": "Copied"
+      "description": "Copy version, status and known failure categories. No account details or addresses are included.",
+      "copyMessage": "Copy diagnostics",
+      "finalAction": "Contact support (copy diagnostics)",
+      "copied": "Copied",
+      "copyFailed": "Could not copy. You can copy the safe text manually.",
+      "manualCopy": "Copy manually"
     },
     "refresh": "Refresh",
     "loadFailed": "Couldn't load the diagnostics summary. Refresh to try again.",
@@ -652,13 +666,25 @@
       "title": "Preferences"
     },
     "privacy": {
-      "title": "Privacy"
+      "title": "Privacy",
+      "effectHint": "Each choice saves automatically. No reconnect or restart is needed. Turning uploads off does not delete data already sent.",
+      "reading": "Reading saved choice…",
+      "readFailed": "Couldn't read the saved choice.",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "saveFailed": "Couldn't confirm the change. Reload the saved choice before trying again.",
+      "reload": "Reload saved choice"
     },
     "general": {
       "title": "General",
-      "launchAtStartup": "Launch at Startup",
-      "launchAtStartupHint": "Turned on after the first successful connect. You can turn it off.",
-      "language": "Interface Language"
+      "effectHint": "Changes save automatically on this PC. They do not change your current connection.",
+      "launchAtStartup": "Open at sign-in",
+      "launchAtStartupHint": "Open Tono at your next Windows sign-in. Enabled after the first successful connection; you can change it here.",
+      "language": "Interface Language",
+      "languageHint": "Applies to this window after saving. No reconnect or restart needed.",
+      "readFailed": "Couldn't read the saved settings.",
+      "saveFailed": "Couldn't confirm the change. Reload the saved choices before trying again.",
+      "reload": "Reload saved choices"
     },
     "appearance": {
       "title": "Appearance",

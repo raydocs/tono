@@ -36,6 +36,8 @@ import { getSystemHealth } from './system';
 import { postReplay } from './replay';
 import { getSlo } from './slo';
 import { getApiRelays } from './api-relays';
+import { getApiPaths } from './api-paths';
+import { deleteNodeAgentToken, getNodeAgents, postNodeAgentToken } from './node-agents';
 import {
   getFx, getLedger, getMonth, getMonthExport, patchLedger, postLedger, postLedgerReverse, postMonthClose,
 } from './ledger';
@@ -123,12 +125,16 @@ export const OPS_V1_ROUTES = [
   'GET /api/v1/ops/nodes/{name}/receipts',
   'GET /api/v1/ops/slo',
   'GET /api/v1/ops/api-relays',
+  'GET /api/v1/ops/api-paths',
 
   // dept:b
   // append your entries inside your block
 
   // dept:c
   // append your entries inside your block
+  'GET /api/v1/ops/node-agents',
+  'POST /api/v1/ops/nodes/{name}/agent-token',
+  'DELETE /api/v1/ops/nodes/{name}/agent-token',
 
   // dept:d
   // append your entries inside your block
@@ -218,12 +224,16 @@ const ROUTES: Array<{ method: string; re: RegExp; handle: Handler }> = [
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/receipts$/, handle: (req, e, _a, p) => getNodeReceipts(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/slo$/, handle: (req, e) => getSlo(req, e) },
   { method: 'GET', re: /^\/api\/v1\/ops\/api-relays$/, handle: (req, e) => getApiRelays(req, e) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/api-paths$/, handle: (req, e) => getApiPaths(req, e) },
 
   // dept:b
   // append your entries inside your block
 
   // dept:c
   // append your entries inside your block
+  { method: 'GET', re: /^\/api\/v1\/ops\/node-agents$/, handle: (req, e) => getNodeAgents(req, e) },
+  { method: 'POST', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/agent-token$/, handle: (req, e, a, p) => postNodeAgentToken(req, e, p[0] ?? '', a) },
+  { method: 'DELETE', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/agent-token$/, handle: (req, e, a, p) => deleteNodeAgentToken(req, e, p[0] ?? '', a) },
 
   // dept:d
   // append your entries inside your block

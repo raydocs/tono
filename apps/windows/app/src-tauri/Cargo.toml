@@ -117,6 +117,7 @@ tono-service-protocol = { path = "../../service", version = "2.6.7", features = 
 arc-swap = "1.9.2"
 tokio-rustls = "0.26.5"
 rustls = { version = "0.23.44", features = ["ring"] }
+rustls-platform-verifier = "0.7.1"
 webpki-roots = "1.0.9"
 rust_iso3166 = "0.2.0"
 dark-light = "3"
@@ -161,6 +162,7 @@ runas = "=1.2.0"
 winreg = "0.56.0"
 windows-service = "0.8.1"
 windows = { version = "0.62.2", features = [
+  "Networking_Connectivity",
   "Win32_Foundation",
   "Win32_Globalization",
   "Win32_Graphics_Dwm",

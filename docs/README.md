@@ -55,6 +55,8 @@ Living operator docs. The current ops backlog is
 | [ops/parity-audit.md](ops/parity-audit.md) | Client/ops parity |
 | [ops/rollout-ops2.md](ops/rollout-ops2.md) | `/ops2/` rollout runbook |
 | [ops/transport-hy2.md](ops/transport-hy2.md) | hy2 transport |
+| [ops/api-relay.md](ops/api-relay.md) | API relay outside Cloudflare (decision 077) |
+| [ops/cn-acceptance.md](ops/cn-acceptance.md) | One-command network acceptance run from a mainland China machine |
 | [ops/billing-model-proposal.md](ops/billing-model-proposal.md) | Billing proposal (undecided) |
 
 ## Screenshots

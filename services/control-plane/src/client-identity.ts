@@ -1,4 +1,6 @@
 import { now, type Env } from './env';
+import { recordApiPath } from './api-paths';
+import { API_PATH_KINDS } from './ops/contract/api-paths';
 
 // Which client build is talking to the control plane. Recorded on sign-in,
 // token refresh and catalog fetch whatever the device's telemetry settings are,
@@ -31,7 +33,7 @@ export const PATH_HEADER = 'X-Tono-Path';
  * Tono API relay arrives from an exit node's address, so the edge ASN names the
  * node rather than the customer; the client's own word is the only truth.
  */
-export const CLIENT_PATHS = new Set(['pinned', 'system_dns', 'relay', 'doh', 'alt_port', 'tunnel']);
+export const CLIENT_PATHS: ReadonlySet<string> = new Set(API_PATH_KINDS);
 const PATH_SHAPE = /^[a-z_]{1,16}$/;
 
 /** How old a stored path may get before the same path is stamped again. */
@@ -41,6 +43,28 @@ export const CLIENT_PATH_RESTAMP_SECONDS = 3_600;
 export function clientPath(req: Request): string | null {
   const raw = req.headers.get(PATH_HEADER)?.trim() ?? '';
   return PATH_SHAPE.test(raw) && CLIENT_PATHS.has(raw) ? raw : null;
+}
+
+export const PATH_FAILED_HEADER = 'X-Tono-Path-Failed';
+/** Six known paths and their commas fit in 64; a longer value is not a list we read. */
+const PATH_FAILED_MAX = 96;
+
+/**
+ * `X-Tono-Path-Failed: <kind>[,<kind>...]`: the paths this attempt tried and
+ * lost before the one it arrived on (decision 080). Null when the header is
+ * absent or over-long: that client does not report, so its arrival says
+ * nothing about failure. Present but empty means "nothing failed first".
+ * Unknown or malformed tokens are dropped, duplicates folded.
+ */
+export function clientPathFailures(req: Request): string[] | null {
+  const raw = req.headers.get(PATH_FAILED_HEADER);
+  if (raw === null || raw.length > PATH_FAILED_MAX) return null;
+  const out = new Set<string>();
+  for (const token of raw.split(',')) {
+    const kind = token.trim();
+    if (PATH_SHAPE.test(kind) && CLIENT_PATHS.has(kind)) out.add(kind);
+  }
+  return [...out];
 }
 
 /**
@@ -69,12 +93,14 @@ export async function recordClient(e: Env, req: Request, deviceId: string): Prom
   if (path) {
     const t = now();
     try {
-      await e.DB.prepare(
+      const stamped = await e.DB.prepare(
         `UPDATE devices SET client_path = ?, client_path_at = ?
          WHERE id = ? AND (client_path IS NOT ? OR client_path_at IS NULL OR client_path_at <= ?)`,
       ).bind(path, t, deviceId, path, t - CLIENT_PATH_RESTAMP_SECONDS).run();
+      // The daily ASN x path count rides the stamp's cadence: no stamp, no write.
+      if (Number(stamped.meta?.changes ?? 0) > 0) await recordApiPath(e.DB, req, path, clientPathFailures(req), t);
     } catch {
-      // Observability only, as above; a missing column before the migration lands is swallowed too.
+      // Observability only, as above; a missing column or table before the migration lands is swallowed too.
     }
   }
 }

@@ -1,0 +1,320 @@
+{
+  "target": "198.46.140.254",
+  "label": "Buffalo · Erie",
+  "hy2Port": 443,
+  "controlPort": 33434,
+  "measurementIds": {
+    "icmp": "2g4hLuGwlPrNfZpfV00021I4G",
+    "tcp443": "2UEzYH3PDl8SrlpDy00021I4G",
+    "udpHy2": "2VE4HQIvtK6Lj4Ecr00021I4G",
+    "udpControl": "2MHl6bFEmyDhAQbtN00021I4G"
+  },
+  "rows": [
+    {
+      "city": "Beijing",
+      "asn": 9808,
+      "network": "China Mobile Communications Group",
+      "carrier": "China Mobile",
+      "icmp": {
+        "minMs": 230.151,
+        "avgMs": 230.528,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 229.8,
+        "avgMs": 230.6,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "left-china",
+        "lastHop": "38.122.36.59",
+        "lastHopName": null,
+        "lastHopAsn": 174,
+        "lastHopMs": 230.7,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "left-china",
+        "lastHop": "38.122.36.23",
+        "lastHopName": null,
+        "lastHopAsn": 174,
+        "lastHopMs": 230.7,
+        "preTargetAsn": null
+      }
+    },
+    {
+      "city": "Kunming",
+      "asn": 9808,
+      "network": "China Mobile Communications Group",
+      "carrier": "China Mobile",
+      "icmp": {
+        "minMs": 283.852,
+        "avgMs": 284.197,
+        "loss": 20,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 310.3,
+        "avgMs": 2318,
+        "loss": 40,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "62.115.159.243",
+        "lastHopName": "hostpapa-ic-384813.ip.twelve99-cust.net",
+        "lastHopAsn": 1299,
+        "lastHopMs": 287.2,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.46.140.254",
+        "lastHopName": "198-46-140-254-host.colocrossing.com",
+        "lastHopAsn": 36352,
+        "lastHopMs": 302.9,
+        "preTargetAsn": 1299
+      }
+    },
+    {
+      "city": "Nanning",
+      "asn": 9808,
+      "network": "China Mobile Communications Group",
+      "carrier": "China Mobile",
+      "icmp": {
+        "minMs": 295.093,
+        "avgMs": 303.966,
+        "loss": 20,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 313.7,
+        "avgMs": 2359,
+        "loss": 20,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "62.115.159.243",
+        "lastHopName": "hostpapa-ic-384813.ip.twelve99-cust.net",
+        "lastHopAsn": 1299,
+        "lastHopMs": 306.3,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.46.140.254",
+        "lastHopName": "198-46-140-254-host.colocrossing.com",
+        "lastHopAsn": 36352,
+        "lastHopMs": 306.7,
+        "preTargetAsn": 1299
+      }
+    },
+    {
+      "city": "Dongguan",
+      "asn": 4134,
+      "network": "Chinanet Backbone",
+      "carrier": "China Telecom",
+      "icmp": {
+        "minMs": 220.131,
+        "avgMs": 222.645,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 217.8,
+        "avgMs": 224.8,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "38.122.36.59",
+        "lastHopName": null,
+        "lastHopAsn": 174,
+        "lastHopMs": 221.4,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.46.140.254",
+        "lastHopName": "198-46-140-254-host.colocrossing.com",
+        "lastHopAsn": 36352,
+        "lastHopMs": 227,
+        "preTargetAsn": 174
+      }
+    },
+    {
+      "city": "Guangzhou",
+      "asn": 4134,
+      "network": "Chinanet Backbone",
+      "carrier": "China Telecom",
+      "icmp": {
+        "minMs": 211.971,
+        "avgMs": 220.069,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 213,
+        "avgMs": 226.3,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "unclassified",
+        "lastHop": "38.122.36.67",
+        "lastHopName": null,
+        "lastHopAsn": null,
+        "lastHopMs": 217.7,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.46.140.254",
+        "lastHopName": "198-46-140-254-host.colocrossing.com",
+        "lastHopAsn": null,
+        "lastHopMs": 234.8,
+        "preTargetAsn": null
+      }
+    },
+    {
+      "city": "Nanjing",
+      "asn": 4134,
+      "network": "Chinanet Backbone",
+      "carrier": "China Telecom",
+      "icmp": {
+        "minMs": 261.034,
+        "avgMs": 261.056,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 211.3,
+        "avgMs": 226.3,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "38.122.36.67",
+        "lastHopName": null,
+        "lastHopAsn": 174,
+        "lastHopMs": 233.8,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.46.140.254",
+        "lastHopName": "198-46-140-254-host.colocrossing.com",
+        "lastHopAsn": 36352,
+        "lastHopMs": 236.7,
+        "preTargetAsn": 174
+      }
+    },
+    {
+      "city": "Changsha",
+      "asn": 4837,
+      "network": "CHINA UNICOM China169 Backbone",
+      "carrier": "China Unicom",
+      "icmp": {
+        "minMs": 247.656,
+        "avgMs": 247.881,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 240.3,
+        "avgMs": 247.1,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "207.162.196.106",
+        "lastHopName": "ip4.gtt.net",
+        "lastHopAsn": 3257,
+        "lastHopMs": 237,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.46.140.254",
+        "lastHopName": "198-46-140-254-host.colocrossing.com",
+        "lastHopAsn": 36352,
+        "lastHopMs": 249.4,
+        "preTargetAsn": 3257
+      }
+    },
+    {
+      "city": "Guilin",
+      "asn": 4837,
+      "network": "CHINA UNICOM China169 Backbone",
+      "carrier": "China Unicom",
+      "icmp": {
+        "minMs": 263.321,
+        "avgMs": 263.606,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 224.3,
+        "avgMs": 252.9,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "207.162.196.106",
+        "lastHopName": "ip4.gtt.net",
+        "lastHopAsn": 3257,
+        "lastHopMs": 234.4,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.46.140.254",
+        "lastHopName": "198-46-140-254-host.colocrossing.com",
+        "lastHopAsn": 36352,
+        "lastHopMs": 264.9,
+        "preTargetAsn": 3257
+      }
+    },
+    {
+      "city": "Xi'an",
+      "asn": 4837,
+      "network": "CHINA UNICOM China169 Backbone",
+      "carrier": "China Unicom",
+      "icmp": {
+        "minMs": 260.79,
+        "avgMs": 261.389,
+        "loss": 0,
+        "status": "finished"
+      },
+      "tcp443": {
+        "minMs": 238.8,
+        "avgMs": 248.3,
+        "loss": 0,
+        "status": "finished"
+      },
+      "udpHy2": {
+        "verdict": "host-edge",
+        "lastHop": "207.162.198.190",
+        "lastHopName": "ip4.gtt.net",
+        "lastHopAsn": 3257,
+        "lastHopMs": 252.4,
+        "preTargetAsn": null
+      },
+      "udpControl": {
+        "verdict": "target-replied",
+        "lastHop": "198.46.140.254",
+        "lastHopName": "198-46-140-254-host.colocrossing.com",
+        "lastHopAsn": 36352,
+        "lastHopMs": 253.9,
+        "preTargetAsn": 3257
+      }
+    }
+  ]
+}

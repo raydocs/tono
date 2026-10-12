@@ -128,6 +128,22 @@ pub fn guard_rejection_is_transient(reason: &str) -> bool {
         || reason == CATALOG_NOT_READY_REJECTION
 }
 
+/// Whether a failed protected reconnect left the original network released: no barrier, no
+/// Protected Offline, nothing in flight.
+///
+/// The ladder runs only while the barrier holds ([`reconnect_allowed`]). On Windows an armed,
+/// verified attempt that fails without an explicit strict kill switch releases the original
+/// network ([`plan_failure`]), so after a startup resume, Retry now, a rebuild switch or a policy
+/// rebuild failed once, nothing retried and the PC stayed disconnected. In this state the
+/// unarmed probe is the recovery, as after a user connect's fail-open and a health release.
+pub fn failure_released_the_network(status: &ConnectionStatus, kill_switch_armed: bool) -> bool {
+    !kill_switch_armed
+        && !status.is_protection_blocked
+        && !status.is_connected
+        && !status.is_connecting
+        && !status.is_disconnecting
+}
+
 /// Whether a protected reconnect may run: the barrier is up, the machine is
 /// idle in Protected Offline, and the catalog is not waiting for the user.
 pub fn reconnect_allowed(requires_choice: bool, status: &ConnectionStatus, kill_switch_armed: bool) -> bool {

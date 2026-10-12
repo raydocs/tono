@@ -98,6 +98,17 @@ npx --prefix services/control-plane wrangler d1 execute tono-control-plane-ops-p
 1. **生产库的迁移记录停在 0033。** `0034`–`0038`（设备出口凭证、审计加固、计量切换、回收重试）从来没在生产上应用过，只有 `revocation_jobs_pending` 这个索引名先存在。部署脚本会把 0034–0049 共 16 个一起应用；演练证明它们在生产数据上能干净跑完。其中 0035 加了 `sessions_require_eligible_device` 触发器、0037 加了阻止未配对计量切换的触发器——这是主干代码本来就期望的状态。
 2. **本地跑 `wrangler d1 export … --config wrangler.jsonc` 会报认证错误**（wrangler 4.129 的 profile 解析在带 `--config` 时落到默认账号），去掉 `--config` 就正常；夜间工作流用 API token，不受影响。手工备份时按 `tooling/scripts/backup-control-plane-d1.sh` 的步骤但不带 `--config`。
 
+本地先演练（不连 Cloudflare，任何机器可跑，`services/control-plane` 先 `npm ci`）：
+
+```sh
+tooling/scripts/rehearse-control-plane-migrations.sh [--high-water NNNN]
+```
+
+它只用 `--local`：静态检查生产高水位（默认 0095，脚本顶部 `PRODUCTION_HIGH_WATER`，每次带迁移的部署后上调）之后的
+迁移只增（无 `DROP`、`RENAME`、无 DEFAULT 的 `NOT NULL` 加列），在空库和「迁到高水位 + 合成 preview 种子」两个本地库上
+各跑一次 `wrangler d1 migrations apply`，核对旧表 / 旧列 / 行数不变、两边终态结构一致，最后打印上面 §2 第 1 条的
+preview 命令给所有者用 `tono` profile 跑。带 `--remote` 或生产库名的参数直接拒绝。
+
 重做演练（每次部署前）：
 
 ```sh

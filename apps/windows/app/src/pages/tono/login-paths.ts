@@ -19,7 +19,7 @@ export interface ControlPlanePathFailure {
 
 // A relay's failure names its address (`203.0.113.1:2053: `) before the classification.
 const PATH_FAILURE =
-  /(?:^|\]; )(system_dns|pinned|relay)\[(\d{1,9})ms (?:\d{1,3}(?:\.\d{1,3}){3}:\d{1,5}: )?(?:TONO_CLOCK_SKEW: )?(?:(dns|connect|tls|timeout|other): )?/g
+  /(?:^|\]; )(system_dns|pinned|relay)\[(\d{1,9})ms (?:\d{1,3}(?:\.\d{1,3}){3}:\d{1,5}: )?(?:TONO_(?:CLOCK_SKEW|TLS_INTERCEPTED): )?(?:(dns|connect|tls|timeout|other): )?/g
 
 /** Every path in the combined message, in the order they ran. Empty for any other text. */
 export const controlPlanePathFailures = (

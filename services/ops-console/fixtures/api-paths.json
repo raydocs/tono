@@ -1,0 +1,41 @@
+{
+  "clock": 1725000000,
+  "body": {
+    "since": 1724457600,
+    "days": 7,
+    "rows": [
+      {
+        "asn": 4134, "asOrg": "Chinanet", "path": "system_dns", "arrived": 412, "ok": 96, "fail": 3,
+        "successRate": { "value": 0.9697, "asOfSec": 1724999700, "source": "telemetry" }
+      },
+      {
+        "asn": 4837, "asOrg": "CHINA UNICOM China169 Backbone", "path": "system_dns", "arrived": 233, "ok": 0, "fail": 0,
+        "successRate": { "value": null, "asOfSec": null, "source": "telemetry" }
+      },
+      {
+        "asn": 9808, "asOrg": "China Mobile Communications Group Co., Ltd.", "path": "pinned", "arrived": 88, "ok": 41, "fail": 0,
+        "successRate": { "value": 1, "asOfSec": 1724998200, "source": "telemetry" }
+      },
+      {
+        "asn": 9808, "asOrg": "China Mobile Communications Group Co., Ltd.", "path": "system_dns", "arrived": 12, "ok": 2, "fail": 41,
+        "successRate": { "value": 0.0465, "asOfSec": 1724998200, "source": "telemetry" }
+      },
+      {
+        "asn": null, "asOrg": null, "path": "relay", "arrived": 27, "ok": 27, "fail": 0,
+        "successRate": { "value": 1, "asOfSec": 1724996400, "source": "telemetry" }
+      },
+      {
+        "asn": 4134, "asOrg": "Chinanet", "path": "doh", "arrived": 9, "ok": 9, "fail": 0,
+        "successRate": { "value": 1, "asOfSec": 1724990000, "source": "telemetry" }
+      },
+      {
+        "asn": null, "asOrg": null, "path": "tunnel", "arrived": 14, "ok": 0, "fail": 0,
+        "successRate": { "value": null, "asOfSec": null, "source": "telemetry" }
+      },
+      {
+        "asn": 4134, "asOrg": "Chinanet", "path": "pinned", "arrived": 0, "ok": 0, "fail": 2,
+        "successRate": { "value": 0, "asOfSec": 1724980000, "source": "telemetry" }
+      }
+    ]
+  }
+}

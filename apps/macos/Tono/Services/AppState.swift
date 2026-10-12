@@ -248,6 +248,9 @@ final class AppState {
     var proxyRegions: [ProxyRegion] = []
     var selectedNodeId: String? = nil
     var routePreferences = LocalRoutePreferences()
+    /// A17: same-node hy2 after repeated Reality connect failures, when the
+    /// exit catalog permits it. Changes only the dialed selection.
+    @ObservationIgnored var hy2AutoSwitch = Hy2AutoSwitch()
 
     // Rules
     var rules: [RuleItem] = []
@@ -468,6 +471,12 @@ final class AppState {
     var residentialRouteAuditContext: ResidentialRouteAuditContext?
     var residentialRouteAuditGeneration: UInt64 = 0
     var pendingFullConfigReload = false
+    /// D7: the "Allow local network devices" fault shown under the setting,
+    /// or nil (see `LocalNetworkDevicesSync`).
+    var localNetworkDevicesFaultMessage: String?
+    /// The automatic-reconnect pause was set by a held A29 fault (and is
+    /// lifted with it), not by another cause.
+    var localNetworkDevicesHoldPaused = false
     var pendingOptionalPolicyReload = false
     /// Applies of one accepted document that failed on this session before
     /// touching the Core and were queued again.
@@ -493,6 +502,10 @@ final class AppState {
         config.secret = Self.controllerSecret()
         RuntimeCleanup.launchProtectionConsumer = { [weak self] protection in
             self?.adoptLaunchProtection(protection)
+        }
+        // A17: sign-out or another account leaves no hy2 auto-switch state.
+        ManagedExitCatalogOwnership.accountTeardownObserver = { [weak self] in
+            self?.hy2AutoSwitch.discardAccount()
         }
         automaticResumeHeldAfterRestart = RuntimeCleanup.holdsAutomaticResume(
             recordedBootSession: RuntimeCleanup.recordedConnectBootSession,
@@ -1220,7 +1233,8 @@ final class AppState {
     }
 
     func persistProxySelection(_ target: String?) {
-        if let target = normalizedProxyTarget(target) {
+        // An automatic hy2 dial is a detour of the user's Reality choice.
+        if let target = normalizedProxyTarget(target).map({ hy2AutoSwitch.persistedTarget(for: $0) }) {
             noteCatalogFailoverLanding(on: target)
             AppProfile.defaults.set(target, forKey: SettingsKey.selectedProxyTargetName)
         } else {
@@ -2863,7 +2877,8 @@ final class AppState {
     }
 
     func currentOwnedRuntimeOverlay() -> ConfigPipeline.OverlayConfig {
-        ConfigPipeline.OverlayConfig(
+        let localNetwork = LocalNetworkDevicesSync.desired
+        return ConfigPipeline.OverlayConfig(
             mixedPort: config.mixedPort,
             externalController: config.externalController,
             secret: config.secret,
@@ -2875,7 +2890,9 @@ final class AppState {
             tonoTransport: tonoTransport,
             claudeHomeNodeName: managedCatalogRouting?.homeProxy,
             defaultNodeName: managedCatalogRouting?.defaultProxy,
-            claudeHomeSocks5: managedCatalogRouting?.homeSocks5
+            claudeHomeSocks5: managedCatalogRouting?.homeSocks5,
+            allowLocalNetworkDevices: localNetwork.allow,
+            localNetworkDevicesGeneration: localNetwork.generation
         )
     }
 

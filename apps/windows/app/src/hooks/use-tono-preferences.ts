@@ -3,13 +3,31 @@ import { useCallback } from 'react'
 import { getTonoPreferences, patchTonoPreferences } from '@/services/cmds'
 import { getPreloadConfig, setPreloadConfig } from '@/services/preload'
 import { getCacheData, setCacheData, useQuery } from '@/services/query-client'
+import type { TonoActionErrorDescription } from '@/services/tono'
 
 export const tonoPreferencesQueryKey = ['getTonoPreferences'] as const
+export const tonoGeneralSaveQueryKey = ['tonoGeneralSave'] as const
+export type GeneralSave = {
+  phase: 'reading' | 'saving' | 'saved' | 'failed'
+  error?: TonoActionErrorDescription
+}
+export const readGeneralSave = () =>
+  getCacheData<GeneralSave>(tonoGeneralSaveQueryKey)
 
 export const useTonoPreferences = () => {
   const initial = getPreloadConfig()
+  const { data: generalSave } = useQuery({
+    queryKey: tonoGeneralSaveQueryKey,
+    queryFn: readGeneralSave,
+    initialData: readGeneralSave,
+  })
 
-  const { data: preferences, refetch } = useQuery({
+  const {
+    data: preferences,
+    error,
+    isFetching,
+    refetch,
+  } = useQuery({
     queryKey: [...tonoPreferencesQueryKey],
     queryFn: async () => {
       const config = await getTonoPreferences()
@@ -42,13 +60,17 @@ export const useTonoPreferences = () => {
   const patchPreferences = useCallback(
     async (value: Partial<TonoPreferences>) => {
       await patchTonoPreferences(value)
-      await refetch()
+      return refetch()
     },
     [refetch],
   )
 
   return {
     preferences,
+    generalSave,
+    error,
+    isFetching,
+    refetchPreferences: refetch,
     mutatePreferences,
     patchPreferences,
   }

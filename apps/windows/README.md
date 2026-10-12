@@ -295,7 +295,8 @@ Mirrors the macOS transaction; the service performs the privileged steps:
 3. Service **atomically persists protection intent** (fail-closed floor).
 4. Service installs bootstrap WFP policy: block all outbound (v4+v6),
    permit loopback/DHCP/NDP, permit Mihomo→endpoint, plus a bounded
-   bootstrap permit for the API host.
+   bootstrap permit for the API host (its pinned/learned addresses and the
+   compiled Tono API relays, TCP, Tono app only; decision 090).
 5. Service writes the runtime copy and starts the verified Mihomo binary.
 6. Service waits for the controller, then the expected WinTUN adapter.
 7. **Lock phase**: service permits the TUN interface and retracts the API

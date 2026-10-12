@@ -34,6 +34,9 @@ final class AppUpdater: ObservableObject {
         guard canCheckForUpdates, let appState else { return }
         canCheckForUpdates = false
         var retryRequested = false
+        // Set once the user chose Install and Restart: from then on a failure
+        // answers that choice, even when a background check offered it.
+        var offerAccepted = false
         defer {
             canCheckForUpdates = true
             if retryRequested { Task { await check(userInitiated: true) } }
@@ -42,7 +45,18 @@ final class AppUpdater: ObservableObject {
             if let pending = try await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate(), pending.pending {
                 throw NativeUpdateDownload.failure(pending.diagnostic ?? "A previous update is pending. Installation and recovery evidence are retained.")
             }
-            let offer = try await NativeUpdateDownload.discover()
+            guard let offer = try await NativeUpdateDownload.discover() else {
+                // Nothing is published on the update channel (the release
+                // host's 404): no update, not a failure. Background checks
+                // stay silent and keep their six-hour cadence.
+                if userInitiated {
+                    let alert = NSAlert()
+                    alert.messageText = String(localized: "No update available")
+                    alert.informativeText = String(localized: "No signed Tono release is published for this channel yet.")
+                    alert.runModal()
+                }
+                return
+            }
             let available = try await PrivilegedRuntimeCoordinator.shared.verifyUpdateOffer(
                 manifest: offer.bytes, signature: offer.signature
             )
@@ -56,6 +70,7 @@ final class AppUpdater: ObservableObject {
                 return
             }
             guard Self.offerAlert(version: offer.manifest.appVersion).runModal() == .alertFirstButtonReturn else { return }
+            offerAccepted = true
             let package = try await NativeUpdateDownload.package(for: offer)
             defer { try? FileManager.default.removeItem(at: package.deletingLastPathComponent()) }
             try await appState.installNativeUpdate(manifest: offer.bytes, signature: offer.signature, package: package)
@@ -63,9 +78,14 @@ final class AppUpdater: ObservableObject {
             // InstallStarted stamp. The executor waits for this process to exit.
             (NSApp.delegate as? AppDelegate)?.terminateForNativeUpdate()
         } catch {
-            // Missing metadata is an error, never "up to date". Background
+            // Missing metadata (other than an unpublished channel, above) is
+            // an error, never "up to date". Background
             // discovery does not raise a modal or perform a fallback install.
-            if userInitiated || appState.nativeUpdatePending {
+            if Self.reportsFailure(
+                userInitiated: userInitiated,
+                offerAccepted: offerAccepted,
+                updatePending: appState.nativeUpdatePending
+            ) {
                 appState.errorMessage = error.localizedDescription
                 let pending = try? await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate()
                 appState.updateIncomplete = pending?.pending ?? appState.nativeUpdatePending
@@ -82,6 +102,15 @@ final class AppUpdater: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Whether a failed check tells the user. A background check stays quiet
+    /// until it has asked the user something: once they chose Install and
+    /// Restart, a package that could not be downloaded (every path down, as
+    /// on a network that blocks the release host) must say so instead of
+    /// leaving the click unanswered.
+    nonisolated static func reportsFailure(userInitiated: Bool, offerAccepted: Bool, updatePending: Bool) -> Bool {
+        userInitiated || offerAccepted || updatePending
     }
 
     /// An attempt is disconnect-retriable only when the privileged retire can

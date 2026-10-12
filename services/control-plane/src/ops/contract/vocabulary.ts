@@ -179,6 +179,9 @@ export const CONNECTION_EVENT_KINDS = [
   'connectBegin',
   'connectOk',
   'connectFail',
+  // User-cancelled connect: neither ok nor fail. The flattener stores it, so
+  // the contract has to accept it or strict mode rejects the whole list.
+  'connectCancel',
   'nodeSwitch',
   'connectCatalogFailover',
   'healthProbeFail',
@@ -193,6 +196,7 @@ export const CONNECTION_EVENT_KINDS = [
   'appCrash',
   'networkRestore',
   'killSwitchFail',
+  'controlPlanePathFail',
 ] as const;
 export type ConnectionEventKind = (typeof CONNECTION_EVENT_KINDS)[number];
 

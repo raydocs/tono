@@ -213,6 +213,7 @@ describe('ops GET route ↔ checker table', () => {
     }
   });
 
+  // Every ops GET route in one test: ~0.5 s on Linux, among the slowest cases (A27).
   it('runs the mapped checker on every GET response', async () => {
     await seedReads();
     for (const row of GET_ROUTE_TABLE) {
@@ -241,5 +242,5 @@ describe('ops GET route ↔ checker table', () => {
       const again = await ops(path, { headers: { 'if-none-match': etag! } });
       expect(again.status, path).toBe(304);
     }
-  });
+  }, 15_000);
 });

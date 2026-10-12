@@ -1,5 +1,7 @@
-import { getTonoPreferences } from './cmds'
+import { getTonoPreferences } from '@/services/cmds'
+
 import {
+  FALLBACK_LANGUAGE,
   cacheLanguage,
   getCachedLanguage,
   initializeLanguage,
@@ -70,11 +72,6 @@ const preloadLanguage = async (
   preferences?: TonoPreferences | null,
   loadConfig: () => Promise<TonoPreferences | null> = preloadConfig,
 ) => {
-  const cachedLanguage = getCachedLanguage()
-  if (cachedLanguage) {
-    return cachedLanguage
-  }
-
   let resolvedConfig = preferences
 
   if (resolvedConfig === undefined) {
@@ -89,18 +86,12 @@ const preloadLanguage = async (
     }
   }
 
-  const languageFromConfig = resolvedConfig?.language
-  if (languageFromConfig) {
-    const resolved = resolveLanguage(languageFromConfig)
-    cacheLanguage(resolved)
-    return resolved
-  }
-
-  const browserLanguage = resolveLanguage(
-    typeof navigator !== 'undefined' ? navigator.language : undefined,
-  )
-  cacheLanguage(browserLanguage)
-  return browserLanguage
+  // A successful native read owns the choice; the cache may be a prior fallback.
+  const language = resolvedConfig
+    ? resolveLanguage(resolvedConfig.language)
+    : (getCachedLanguage() ?? FALLBACK_LANGUAGE)
+  cacheLanguage(language)
+  return language
 }
 
 export const preloadAppData = async () => {

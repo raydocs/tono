@@ -23,8 +23,10 @@ export const LoginPathFailures = ({
         display: 'flex',
         flexDirection: 'column',
         gap: 4,
-        alignItems: 'center',
+        // Inside the error's Details disclosure, aligned with its other lines.
+        alignItems: 'flex-start',
         width: '100%',
+        margin: '8px 0',
       }}
     >
       <strong style={{ fontSize: 12, color: text.primary }}>{title}</strong>

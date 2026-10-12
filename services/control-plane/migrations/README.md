@@ -94,3 +94,19 @@ Ops tables after the sequence was unique. Applied in numeric order:
 
 - `0094_device_client_path.sql` — `devices.client_path` / `client_path_at`: the transport path (`X-Tono-Path`) that carried the device's last sign-in, refresh or catalog fetch
 - `0095_api_relay_probes.sql` — `api_relay_probes`: the cron's last TCP check of each Tono-owned API relay, with `ok_since` / `failing_since`
+
+## 0096
+
+- `0096_api_relay_reports.sql` — `api_relay_reports`: each relay node's own end-to-end HTTPS check through its local `:2053`, reported with its exit-node token, with `ok_since` / `failing_since`
+
+## 0097
+
+- `0097_ops_node_agents.sql` — `ops_node_agents`: per-node heartbeat token (salted SHA-256 only, revocable) and the node's last self-reported IP / roles / agent version next to the observed `CF-Connecting-IP` (A20). Never read for routing or listing.
+
+## 0099
+
+- `0099_ops_api_path_daily.sql` — `ops_api_path_daily`: per UTC day, client ASN (0 = unknown: relay, tunnel, exit ASN) and `X-Tono-Path`, stamped arrivals plus the `X-Tono-Path-Failed` success/failure counts from reporting clients (decision 080). 0096–0098 are reserved for parallel work
+
+## 0100
+
+- `0100_hy2_auto_switch.sql` — `users.internal_account` (ops-set) and `users.hy2_auto_switch` (`NULL` | `on` | `off`) plus singleton `hy2_auto_switch_settings.all_accounts`; the per-device exit catalog serves the resolved `hy2AutoSwitch` (D1-C: internal accounts on, everyone else off until an operator flips the global switch)

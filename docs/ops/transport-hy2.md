@@ -1,5 +1,189 @@
 # Hysteria2 三网证明（T0）
 
+## A18 自动切换开关：客户端怎么读
+
+[Amp 待办](amp-backlog-2026-10-10.md) A18，D1-C（[决定 079](../decisions/079-2026-10-10-amp-backlog-defaults.md)，
+形状见暂定[决定 081](../decisions/081-2026-10-10-hy2-auto-switch-flag-shape.md)）。客户端实现是 A17。
+
+- **字段**：`GET /api/v1/exit-catalog` 的响应顶层多一个可选布尔 `hy2AutoSwitch`，只在已登录设备的每账户视图上出现
+  （和 `routingSha256` 同一视图）。缺失（旧 Worker、ops/admin 明文目录）按 `false`。
+  ```json
+  { "revision": 54, "yaml": "proxies: …", "sha256": "…", "routingSha256": "…", "hy2AutoSwitch": true }
+  ```
+- **含义**：`true` 只允许客户端在当前节点主块（VLESS Reality）连不上时，**自己**换到**同一节点**的 ` · hy2` 块
+  （同基名、同一 Tono 身份；`catalog-yaml.ts` 不变量）。不允许换到别的节点，不增删目录条目；`false` 时手选 hy2
+  照旧可用，只是不自动切。本次响应里没有 hy2 块（客户端没发 `X-Tono-Accept: hy2`，或被 `HY2_CATALOG_EMAILS`
+  灰度名单挡掉）时恒为 `false`。
+- **不在摘要里**：`hy2AutoSwitch` 不进 `sha256`，也不进 `routingSha256`（已发布的 Windows 按固定配方校验后者）。
+  所以客户端每次拿到 200 的目录响应都要读它，**包括** `(revision, sha256, routingSha256)` 没变、安装结果是
+  「未变化」的那次；缓存目录时一并缓存，离线按缓存值，没有缓存按 `false`。
+- **生效时机**：账户层开关变化时控制面给该账户的设备排 `refresh_catalog`；全体开关不推送，客户端下次取目录时生效。
+- **怎么算**（`services/control-plane/src/hy2-auto-switch.ts`）：本账户「关」→ 关；本账户「开」→ 开；否则全体开关开
+  或该账户被标为内部账户 → 开；其余关。迁移 0100 的默认：全体关、没有内部账户、没有单独设置，即所有账户关，
+  直到运维在客户页标内部账户或在 设置 › 目录 翻全体开关。「两周后对全体开」是运维按按钮，没有定时器。
+- **后台**：`GET|PUT /api/v1/ops/hy2-auto-switch`（`{ allAccounts }`，`settings.publish`）、
+  `GET|PUT /api/v1/ops/users/{id}/hy2-auto-switch`（`{ internalAccount?, override?: "on"|"off"|null }`，
+  `customers.write`）；每次实际变更写一条 `ops_audit`（`hy2-auto-switch.global` / `user.hy2-auto-switch`）。
+  签名的分流规则（traffic policy）与其签名、校验都没动。
+
+## 2026-10-10 三网公共探针（A16 第 1 步）
+
+[Amp 待办](amp-backlog-2026-10-10.md) A16，D2-A。本轮**没有 SSH 到任何节点**，节点侧未改，443 上的 `tono-xray`
+只被做了 TCP 建连（不发数据）。数据来自公开测量网络 [Globalping](https://globalping.io)（匿名 API，每小时 250 次测试，
+无账号、无密钥），探针按运营商主 ASN 选：移动 AS9808、电信 AS4134、联通 AS4837，每个节点每家 3 个探针。
+复跑脚本 [`tooling/ops/hy2/globalping_carriers.py`](../../tooling/ops/hy2/globalping_carriers.py)；每次的 measurement ID
+与逐探针结果在 [evidence/2026-10-10-hy2-carriers](evidence/2026-10-10-hy2-carriers/)。时间 2026-10-10 10:14–10:20 UTC，
+共用 181 次测试（含 1 次试跑）。
+
+每个节点在同一组探针上跑四项：ICMP ping 5 包；TCP 443 建连 5 次（Reality 主通道的对照）；mtr UDP 到 hy2 端口
+（443/UDP）；mtr UDP 到一个没人监听的对照端口 33434。hy2 服务端对非 QUIC 的包不回任何东西，所以 hy2 端口那条
+mtr 最远只能看到主机前一跳。判定：
+
+- `host-edge`：hy2 端口的 UDP 包到了主机门口——最后应答的一跳在主机的 /24（网关），或与同一探针对照端口路径上
+  紧挨主机的那一跳同属一个网络（同一家转接商的交接路由）。
+- `target-replied`（对照端口）：主机本身回了 ICMP 端口不可达，即 UDP 包确实送进了这台机器。
+- `left-china`：出了中国运营商网络（含 CMI/CN2/CUG 的国际段）但没到主机门口；`unclassified`：该探针没有 ASN
+  数据；`probe-lan`：探针自己的内网就不再应答；`no-reply`：第一跳都没应答。
+
+### 测了哪些节点
+
+库里有 IPv4 且 9 月 24 日记为装有 hy2 的四台，hy2 均为 UDP 443（见下文「部署之后怎么 append」表）：
+`Buffalo · Niagara` `23.94.79.123`、`Buffalo · Erie` `198.46.140.254`、`US-VLESS-Reality`（Grove）`198.12.84.154`、
+`Los Angeles · Marina` `144.225.255.114`（Marina 第一轮有两个探针结果不可用，补跑一轮）。
+
+没测：Harbor、Canyon（9 月 24 日记为有 hy2，但 IP 不在库里）；Sunset、Mesa（9 月 11 日装过 hy2，9 月 24 日的 hy2
+名单里没有它们）；东京 `45.8.173.206`（商家拦入站 UDP，工单 #529，未知是否已放行）。
+
+### 汇总（节点 × 运营商）
+
+| 节点 | 运营商 | 探针 | ICMP 均值 | TCP 443 均值（最小） | hy2 端口 UDP 路径 |
+|---|---|---|---|---|---|
+| Niagara | 移动 | 南宁、上海、台山 | 267–309 ms | **1111–4351 ms**（244–277） | 3/3 host-edge |
+| Niagara | 电信 | 广州、桂林、西安 | 209–219 ms | 216–230 ms（206–224） | 2/3 host-edge，1 unclassified¹ |
+| Niagara | 联通 | 长沙、南宁、西安 | 202–269 ms | 247–263 ms（223–259） | 3/3 host-edge |
+| Erie | 移动 | 北京、昆明、南宁 | 231–304 ms | **231–2359 ms**（230–314） | 2/3 host-edge，1 left-china² |
+| Erie | 电信 | 东莞、广州、南京 | 220–261 ms | 225–226 ms（211–218） | 2/3 host-edge，1 unclassified¹ |
+| Erie | 联通 | 长沙、桂林、西安 | 248–264 ms | 247–253 ms（224–240） | 3/3 host-edge |
+| Grove | 移动 | 南宁、上海、台山 | 185–200 ms | **1206–2656 ms**（**1190–1200**） | 3/3 host-edge |
+| Grove | 电信 | 东莞、广州、南京 | 171–175 ms | 171–185 ms（168–174） | 3/3 host-edge |
+| Grove | 联通 | 长沙、桂林、西安 | 174–223 ms | 191–219 ms（178–196） | 3/3 host-edge |
+| Marina | 移动 | 广州、昆明、南宁、上海、台山（两轮 6 次） | 153–173 ms | 148–175 ms（145–173） | 4/6 host-edge，2 no-reply³ |
+| Marina | 电信 | 东莞、广州、南京、西安（两轮 6 次） | 141–169 ms | 139–169 ms（137–161） | 6/6 host-edge |
+| Marina | 联通 | 长沙、桂林、南宁、芜湖（两轮 6 次） | 164–186 ms | 168–181 ms（162–176） | 5/6 host-edge，1 probe-lan⁴ |
+
+共 45 条 hy2 端口路径，39 条 host-edge。不同探针合计：移动 6 个城市、电信 5 个、联通 5 个。
+
+1. 电信广州那个探针没有 ASN 数据；原始 hop 显示 hy2 端口的包已到 Cogent 布法罗（`buf02.atlas.cogentco.com`），
+   与对照端口路径上主机前一跳是同一段，对照端口主机已应答。
+2. 移动北京到 Erie：两条 UDP 路径都停在 Cogent AS174（231 ms），对照端口主机也没回；ICMP 与 TCP 都正常。
+3. 移动广州那个探针两轮都是**第一跳就不应答** UDP 443，而同一探针到同一节点的对照端口 UDP 能走到 Marina 网关。
+   即这台探针所在的接入网 / 路由器丢弃出方向 UDP 443（常见的 QUIC 屏蔽），与节点无关；只一个样本。
+4. 联通芜湖探针的 mtr 过了自己的私网就不再有应答，不说明路径。
+
+对照端口：三台 Dedirock（ColoCrossing AS36352）从三家运营商都 `target-replied`，UDP 包确实进了主机。Marina 的对照
+端口没有主机应答，符合 ego-lite 只放行 UDP 443 的防火墙；它的 hy2 端口路径停在其 /24 网关 `144.225.255.1`。
+逐探针结果（同一脚本输出）：
+
+<details><summary>45 行逐探针表</summary>
+
+| Node | Carrier | Probe | ICMP min / avg, loss | TCP 443 min / avg, loss | UDP hy2 port path | UDP control port |
+|---|---|---|---|---|---|---|
+| Buffalo · Niagara | China Mobile | Nanning AS9808 | 289 / 309 ms, 40% | 277 / 1512 ms, 0% | host-edge (AS1299 308 ms) | target-replied (AS36352 332 ms) |
+| Buffalo · Niagara | China Mobile | Shanghai AS9808 | 276 / 291 ms, 0% | 244 / 1111 ms, 0% | host-edge (AS1299 292 ms) | target-replied (AS36352 291 ms) |
+| Buffalo · Niagara | China Mobile | Taishan AS9808 | 265 / 267 ms, 0% | 266 / 4351 ms, 40% | host-edge (AS1299 270 ms) | target-replied (AS36352 261 ms) |
+| Buffalo · Niagara | China Telecom | Guangzhou AS4134 | 206 / 209 ms, 0% | 206 / 216 ms, 0% | unclassified (AS? 211 ms) | target-replied (AS? 209 ms) |
+| Buffalo · Niagara | China Telecom | Guilin AS4134 | 217 / 219 ms, 0% | 224 / 230 ms, 0% | host-edge (AS174 234 ms) | target-replied (AS36352 223 ms) |
+| Buffalo · Niagara | China Telecom | Xi'an AS4134 | 217 / 218 ms, 20% | 213 / 216 ms, 0% | host-edge (AS174 229 ms) | target-replied (AS36352 225 ms) |
+| Buffalo · Niagara | China Unicom | Changsha AS4837 | 202 / 202 ms, 0% | 259 / 263 ms, 0% | host-edge (AS3257 214 ms) | target-replied (AS36352 213 ms) |
+| Buffalo · Niagara | China Unicom | Nanning AS4837 | 269 / 269 ms, 0% | 223 / 247 ms, 0% | host-edge (AS3257 289 ms) | target-replied (AS36352 269 ms) |
+| Buffalo · Niagara | China Unicom | Xi'an AS4837 | 257 / 257 ms, 0% | 250 / 251 ms, 0% | host-edge (AS3257 257 ms) | target-replied (AS36352 254 ms) |
+| Buffalo · Erie | China Mobile | Beijing AS9808 | 230 / 231 ms, 0% | 230 / 231 ms, 0% | left-china (AS174 231 ms) | left-china (AS174 231 ms) |
+| Buffalo · Erie | China Mobile | Kunming AS9808 | 284 / 284 ms, 20% | 310 / 2318 ms, 40% | host-edge (AS1299 287 ms) | target-replied (AS36352 303 ms) |
+| Buffalo · Erie | China Mobile | Nanning AS9808 | 295 / 304 ms, 20% | 314 / 2359 ms, 20% | host-edge (AS1299 306 ms) | target-replied (AS36352 307 ms) |
+| Buffalo · Erie | China Telecom | Dongguan AS4134 | 220 / 223 ms, 0% | 218 / 225 ms, 0% | host-edge (AS174 221 ms) | target-replied (AS36352 227 ms) |
+| Buffalo · Erie | China Telecom | Guangzhou AS4134 | 212 / 220 ms, 0% | 213 / 226 ms, 0% | unclassified (AS? 218 ms) | target-replied (AS? 235 ms) |
+| Buffalo · Erie | China Telecom | Nanjing AS4134 | 261 / 261 ms, 0% | 211 / 226 ms, 0% | host-edge (AS174 234 ms) | target-replied (AS36352 237 ms) |
+| Buffalo · Erie | China Unicom | Changsha AS4837 | 248 / 248 ms, 0% | 240 / 247 ms, 0% | host-edge (AS3257 237 ms) | target-replied (AS36352 249 ms) |
+| Buffalo · Erie | China Unicom | Guilin AS4837 | 263 / 264 ms, 0% | 224 / 253 ms, 0% | host-edge (AS3257 234 ms) | target-replied (AS36352 265 ms) |
+| Buffalo · Erie | China Unicom | Xi'an AS4837 | 261 / 261 ms, 0% | 239 / 248 ms, 0% | host-edge (AS3257 252 ms) | target-replied (AS36352 254 ms) |
+| US-VLESS-Reality (Grove) | China Mobile | Nanning AS9808 | 189 / 189 ms, 0% | 1200 / 2432 ms, 0% | host-edge (AS46887 192 ms) | target-replied (AS36352 193 ms) |
+| US-VLESS-Reality (Grove) | China Mobile | Shanghai AS9808 | 200 / 200 ms, 0% | 1199 / 2656 ms, 0% | host-edge (AS46887 202 ms) | target-replied (AS36352 204 ms) |
+| US-VLESS-Reality (Grove) | China Mobile | Taishan AS9808 | 184 / 185 ms, 0% | 1190 / 1206 ms, 20% | host-edge (AS46887 192 ms) | target-replied (AS36352 182 ms) |
+| US-VLESS-Reality (Grove) | China Telecom | Dongguan AS4134 | 167 / 172 ms, 0% | 168 / 176 ms, 0% | host-edge (AS1299 173 ms) | target-replied (AS36352 170 ms) |
+| US-VLESS-Reality (Grove) | China Telecom | Guangzhou AS4134 | 172 / 175 ms, 0% | 168 / 171 ms, 0% | host-edge (AS1299 181 ms) | target-replied (AS36352 173 ms) |
+| US-VLESS-Reality (Grove) | China Telecom | Nanjing AS4134 | 167 / 171 ms, 0% | 174 / 185 ms, 0% | host-edge (AS1299 168 ms) | target-replied (AS36352 175 ms) |
+| US-VLESS-Reality (Grove) | China Unicom | Changsha AS4837 | 174 / 174 ms, 0% | 178 / 191 ms, 0% | host-edge (AS46887 194 ms) | target-replied (AS36352 188 ms) |
+| US-VLESS-Reality (Grove) | China Unicom | Guilin AS4837 | 190 / 190 ms, 0% | 196 / 206 ms, 0% | host-edge (AS46887 195 ms) | target-replied (AS36352 200 ms) |
+| US-VLESS-Reality (Grove) | China Unicom | Xi'an AS4837 | 212 / 223 ms, 0% | 192 / 219 ms, 0% | host-edge (AS46887 200 ms) | target-replied (AS36352 191 ms) |
+| Los Angeles · Marina | China Mobile | Guangzhou AS9808 | 164 / 164 ms, 0% | 162 / 164 ms, 0% | no-reply | left-china (AS197196 178 ms) |
+| Los Angeles · Marina | China Mobile | Kunming AS9808 | 171 / 172 ms, 0% | 167 / 173 ms, 0% | host-edge (AS197196 179 ms) | left-china (AS197196 180 ms) |
+| Los Angeles · Marina | China Mobile | Taishan AS9808 | 168 / 170 ms, 0% | 170 / 175 ms, 0% | host-edge (AS197196 212 ms) | left-china (AS197196 186 ms) |
+| Los Angeles · Marina | China Telecom | Guangzhou AS4134 | 168 / 169 ms, 0% | 161 / 169 ms, 0% | host-edge (AS197196 201 ms) | left-china (AS197196 198 ms) |
+| Los Angeles · Marina | China Telecom | Nanjing AS4134 | 141 / 141 ms, 0% | 137 / 139 ms, 0% | host-edge (AS197196 147 ms) | left-china (AS197196 143 ms) |
+| Los Angeles · Marina | China Telecom | Xi'an AS4134 | 155 / 155 ms, 0% | 152 / 154 ms, 0% | host-edge (AS197196 162 ms) | left-china (AS197196 155 ms) |
+| Los Angeles · Marina | China Unicom | Guilin AS4837 | 174 / 175 ms, 0% | 167 / 179 ms, 0% | host-edge (AS197196 203 ms) | left-china (AS197196 187 ms) |
+| Los Angeles · Marina | China Unicom | Nanning AS4837 | 185 / 186 ms, 0% | 175 / 181 ms, 0% | host-edge (AS197196 222 ms) | left-china (AS197196 180 ms) |
+| Los Angeles · Marina | China Unicom | Wuhu AS4837 | 168 / 168 ms, 0% | 162 / 168 ms, 0% | probe-lan (AS? 2 ms) | probe-lan (AS? 2 ms) |
+| Los Angeles · Marina (2) | China Mobile | Guangzhou AS9808 | 165 / 165 ms, 0% | 161 / 163 ms, 0% | no-reply | left-china (AS197196 205 ms) |
+| Los Angeles · Marina (2) | China Mobile | Nanning AS9808 | 173 / 173 ms, 0% | 173 / 174 ms, 0% | host-edge (AS197196 179 ms) | left-china (AS197196 176 ms) |
+| Los Angeles · Marina (2) | China Mobile | Shanghai AS9808 | 146 / 153 ms, 0% | 145 / 148 ms, 0% | host-edge (AS197196 172 ms) | left-china (AS197196 189 ms) |
+| Los Angeles · Marina (2) | China Telecom | Dongguan AS4134 | 155 / 155 ms, 0% | 158 / 162 ms, 0% | host-edge (AS197196 161 ms) | left-china (AS197196 164 ms) |
+| Los Angeles · Marina (2) | China Telecom | Guangzhou AS4134 | 163 / 164 ms, 0% | 155 / 161 ms, 0% | host-edge (AS? 216 ms) | unclassified (AS? 176 ms) |
+| Los Angeles · Marina (2) | China Telecom | Nanjing AS4134 | 141 / 141 ms, 0% | 138 / 141 ms, 0% | host-edge (AS197196 183 ms) | left-china (AS197196 161 ms) |
+| Los Angeles · Marina (2) | China Unicom | Changsha AS4837 | 164 / 164 ms, 0% | 163 / 168 ms, 0% | host-edge (AS197196 195 ms) | left-china (AS197196 198 ms) |
+| Los Angeles · Marina (2) | China Unicom | Guilin AS4837 | 175 / 175 ms, 0% | 176 / 178 ms, 0% | host-edge (AS197196 189 ms) | left-china (AS197196 188 ms) |
+| Los Angeles · Marina (2) | China Unicom | Nanning AS4837 | 185 / 185 ms, 0% | 174 / 180 ms, 0% | host-edge (AS197196 197 ms) | left-china (AS197196 180 ms) |
+
+</details>
+
+### 能说明什么、不能说明什么
+
+- **能说明：** 2026-10-10，移动、电信、联通的 Globalping 探针发往四台节点 UDP 443 的包，在不同城市都送到了
+  主机门口，未见在出境处被统一丢弃；三台 Dedirock 的 UDP 包确实进了主机。延迟：Grove / Marina 约 140–225 ms，
+  Niagara / Erie 约 200–310 ms。
+- **TCP 443 对照里的移动异常：** 移动经 CMI（AS58453）到三台 Dedirock，TCP 443 建连均值 1.1–4.4 s；Grove 每次
+  最小都约 1.2 s，等于第一个 SYN 每次都没换回应答、靠 1 秒重传。同一批探针 ICMP 正常，同节点的电信、联通正常，
+  移动经 CMIN2（AS58807）到 Marina 正常。和「移动用不了」的反馈一致，但每个探针只有 5 次建连，**是观察，不是结论**。
+- **不能说明：** QUIC / Hysteria2 握手能否完成。mtr 的 UDP 载荷不是 QUIC，按 QUIC Initial（SNI、Hysteria 特征）
+  做识别的封锁不会被触发；也没测吞吐、长连接与丢包随时间的变化。Globalping 探针是志愿者主机（多数标 eyeball，
+  南京电信一台是机房），不等于客户家宽。
+- 按 SHIP_PLAN §2.6，三网 `ok | throttled | blocked` 仍**未判定**：UDP 路径通，握手未测。G2.8 / A17 自动切换的前提
+  不变，需要下面的握手结果。
+
+### 真实握手：`hy2_probe.py`（老板的三网设备，或节点本机）
+
+[`tooling/ops/hy2/hy2_probe.py`](../../tooling/ops/hy2/hy2_probe.py) 用官方 `hysteria` 客户端（v2.12.2，与节点同版，
+`provision-reality-node.rb` 里有 linux-amd64 摘要）的 `ping` 模式做 N 次完整 QUIC + TLS + hy2 鉴权握手，再经隧道 TCP 建连
+一次 `--target`。证书只认 `--cert`（`insecure: false`），脚本先核对 `--cert` 的 SHA-256 等于目录 `fingerprint`，不等就不发包。
+`--auth-file` 放一个**专用、有权限的测试账户 UUID**（hy2 allowlist 只收 roster UUID，旧共享探测口令已不在），文件必须
+本人所有、0600；值只进临时 0600 配置，不打印，客户端输出里出现也会被替换成 `[redacted]`。本机 orb 用本地 hysteria
+服务端验证过：正确口令 3/3 ok；错误口令 `auth-rejected`；没人监听 `timeout`；错 SNI `tls`；证书与指纹不符直接拒绝（exit 1）。
+
+```sh
+# 在电信 / 联通 / 移动家宽各一台机器上，各跑一遍（cert 为节点公开叶子证书：/opt/tono-hy2/current/cert.pem，
+# 9 月的 Dedirock 手装为 /opt/tono-hy2/tls/cert.pem；fingerprint 见本文 append 表）
+python3 tooling/ops/hy2/hy2_probe.py --hysteria ./hysteria --server 23.94.79.123:443 --sni www.microsoft.com \
+  --cert niagara.pem --fingerprint 1e5374a79bdb83b04c3d3c84722c03211d1c941c2de9f92431d2198ba7212cad \
+  --auth-file ~/.tono-hy2-probe --count 5 --carrier cmcc --vantage "上海 移动家宽" --markdown
+# 节点本机自检：--server 127.0.0.1:443 --cert /opt/tono-hy2/current/cert.pem --carrier node
+```
+
+输出一行 JSON（`tono.hy2-probe.v1`：握手成功数、经隧道建连 min/median/max、失败分类 `auth-rejected | tls | timeout |
+handshake | proxy-connect`、hysteria 版本，不含口令），`--markdown` 再给一行，贴进下表。退出码 0 全过、2 有失败、1 未发包。
+`--vantage` 只写城市与接入类型，不写住址、账号或家庭 IP。
+
+| 日期 | 运营商 | 探测点 | 节点 | 握手 | 经隧道建连 min / median / max | 结论 | hysteria |
+|---|---|---|---|---|---|---|---|
+| 待测 | cmcc | 需老板提供的移动家宽 | | | | | |
+| 待测 | ct | 需老板提供的电信家宽 | | | | | |
+| 待测 | cu | 需老板提供的联通家宽 | | | | | |
+| 待测 | node | 各 hy2 节点本机（节点安装待做：本轮 orb 不能 SSH） | | | | | |
+
+D2-A 允许改节点 hy2 配置（先备份、不碰 443 的 xray），本轮没有 SSH，所以节点侧没有动作；节点本机自检要在下次有
+SSH 的会话里把脚本拷到节点、用测试账户跑一次。
+
+---
+
 ## 2026-09-13 补充：Panstar Marina 单机已通，仍非家宽三网证明
 
 用户另指定 `vm-jPZp8D` / #7012 / `144.225.255.114`（目录基名 `Los Angeles · Marina`）。
@@ -212,3 +396,22 @@ rm -rf "$dir"
 | sunset.yaml | `Los Angeles · Sunset · hy2` | `192.236.205.232` | `0ff3ab6b1bec3a3766f88955a84064ae73ea4724cb4d8602780e06dfbceceeb7` |
 | mesa.yaml | `Los Angeles · Mesa · hy2` | `107.174.123.27` | `f59731347bf068d79f9d9e78c074e4686b981383a5c9029a5650e703e6afba41` |
 | grove.yaml | `US-VLESS-Reality · hy2` | `198.12.84.154` | `a4a8308980004c8a5cda98597b87986671f230445df863c23d380f012c72f909` |
+
+## A17 macOS 客户端：同节点自动换到 hy2
+
+[Amp 待办](amp-backlog-2026-10-10.md) A17 的 macOS 半边，D1-C；取舍见暂定[决定 082](../decisions/082-2026-10-10-hy2-auto-switch-macos-client.md)。
+开关是 A18 的 `hy2AutoSwitch`（目录 200 响应顶层布尔，缺失按 `false`）。代码：`apps/macos/Tono/Core/Hy2AutoSwitch.swift`。
+
+- **前提**：本次启动里本账户最近一次目录 200 带 `hy2AutoSwitch: true`。`false`、缺失、目录被拒或 200 的正文解不开、换账户：只走 Reality，
+  并清掉记忆与计数。开关不跨启动缓存；启动后第一次 200 之前不自动切。
+- **何时切**：同一 Reality 块连续 **3** 次连接失败且分类为 `CORE_EXIT_UNREACHABLE`，下一次连接拨同一节点的
+  ` · hy2` 块（基名 + 后缀、`type: hysteria2`、密码等于 Reality 块的 UUID、内核能校验 SPKI 钉扎、不是东京那种
+  商家拦 UDP 的块）。DNS、helper、TUN 等失败不计数也不清零。不换到别的节点。
+- **记住**：自动 hy2 走完同样的就绪检查、真正 Connected 之后，记住该节点 **24 h**（UserDefaults，账户按 SHA-256 分开，
+  只存基名和时间）；期间连接直接拨 hy2（成功不续期），过期后先试 Reality。开始一次自动 hy2 就消耗该节点的计数和记忆，
+  **30 min** 内不再自动试 hy2；只有 Connected 把记忆还回来，所以失败、看门狗超时、被取消的自动 hy2 都不会重复；中间 Reality 连上也不解除这 30 min。登出、换账户清空全部状态。
+  hy2 块从目录消失、开关变 `false`、用户手选该节点任一块，都会清掉记忆。
+- **不变**：只在内存里换本次拨号的选中块，保存的选择仍是 Reality；PF 按拨号节点放行，与手选 hy2 完全同一条路径，
+  不新增放行；helper 协议不变；手选 hy2 照旧。
+- **限制**：失败放行后的无武装重连仍先做 Reality 的 TCP 证明；TCP 完全不通（SYN 被丢）时这条梯子不会自己连，
+  要等用户再点连接凑满 3 次。三网握手证明（§2.6）仍未做，服务端开关默认全关。

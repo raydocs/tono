@@ -21,6 +21,7 @@ function workflow() {
 }
 const jobs = () => Object.entries(workflow().jobs)
 const scripts = job => (job.steps ?? []).map(step => step.run ?? '').join('\n')
+const PROVENANCE_JOB = 'attest'
 
 test('only an operator dispatch starts it', () => {
   assert.deepEqual(Object.keys(workflow().on), ['workflow_dispatch'])
@@ -29,8 +30,17 @@ test('only an operator dispatch starts it', () => {
 test('the token can read contents and actions and nothing else', () => {
   assert.deepEqual(workflow().permissions, { contents: 'read', actions: 'read' })
   for (const [name, job] of jobs()) {
+    if (name === PROVENANCE_JOB) continue
     assert.equal(job.permissions, undefined, `${name} must not replace the read-only token`)
   }
+})
+
+test('only the provenance job writes, and only an attestation from downloaded bytes', () => {
+  // Decision 079 D8-A: build provenance is generated and auditable; clients do not check it.
+  const job = workflow().jobs[PROVENANCE_JOB]
+  assert.deepEqual(job.permissions, { contents: 'read', 'id-token': 'write', attestations: 'write' })
+  assert.deepEqual(job.steps.map(step => step.uses?.split('@')[0]), ['actions/download-artifact', 'actions/attest-build-provenance'])
+  assert.doesNotMatch(JSON.stringify(job), /secrets\./, 'the provenance job sees no secret')
 })
 
 test('every job waits for the release/windows ref guard, which cannot be skipped', () => {
@@ -83,6 +93,7 @@ test('each signing key is visible to one step-level env in its own environment j
 
 test('no step can release, upload to a bucket, promote, push or write through the API', () => {
   const allowed = new Set(['actions/checkout', 'actions/setup-node', 'actions/upload-artifact', 'pnpm/action-setup'])
+  const provenance = new Set(['actions/download-artifact', 'actions/attest-build-provenance'])
   const forbidden = [
     /\bgh\s+release\b/, /\bgh\s+workflow\b/, /\bgh\s+run\s+(rerun|cancel)\b/, /\bgh\s+pr\b/,
     /\bgh\s+api\b[^\n]*\s(-X|--method|-f|-F|--field|--raw-field|--input)\b/,
@@ -95,7 +106,8 @@ test('no step can release, upload to a bucket, promote, push or write through th
     for (const step of job.steps ?? []) {
       if (step.uses) {
         const [action, ref] = step.uses.split('@')
-        assert.ok(allowed.has(action), `${name} uses unexpected action ${step.uses}`)
+        const permitted = name === PROVENANCE_JOB ? provenance : allowed
+        assert.ok(permitted.has(action), `${name} uses unexpected action ${step.uses}`)
         assert.match(ref ?? '', /^[0-9a-f]{40}$/, `${step.uses} is pinned to a commit`)
       }
       for (const pattern of forbidden) assert.doesNotMatch(step.run ?? '', pattern, `${name}: ${step.name}`)

@@ -1,6 +1,7 @@
 import AppKit
 import ImageIO
 import ScreenCaptureKit
+import ServiceManagement
 import SwiftUI
 import Vision
 import XCTest
@@ -85,6 +86,226 @@ func nativeWindowRequest<Value>(
 /// Synthetic state only: no sign-in, helper calls, browser scans or uploads.
 @MainActor
 final class MacUsabilityRenderTests: XCTestCase {
+    func testDefaultChineseFirstRenderPreservesStoredEnglishAndAuto() async throws {
+        let suite = "tono-default-language-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(InterfaceLanguagePreference.storedLanguage(defaults: defaults), "简体中文")
+        XCTAssertNil(defaults.object(forKey: SettingsKey.interfaceLanguage))
+        defaults.set("unknown-locale", forKey: SettingsKey.interfaceLanguage)
+        XCTAssertEqual(InterfaceLanguagePreference.storedLanguage(defaults: defaults), "简体中文")
+        XCTAssertEqual(defaults.string(forKey: SettingsKey.interfaceLanguage), "unknown-locale")
+        defaults.removeObject(forKey: SettingsKey.interfaceLanguage)
+
+        let app = AppState()
+        let login = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        login.state = .signedOut
+        login.authMethods = .init(email: .init(enabled: true, clientId: nil),
+            apple: .init(enabled: false, clientId: nil), google: .init(enabled: false, clientId: nil))
+        // Production views, selected from the production stored-language resolver.
+        // Process/bundle English is explicit in the test scheme; it is not a user default.
+        func renderFirstRun(_ suffix: String, introLabels: [String], loginLabels: [String]) async throws {
+            let language = InterfaceLanguagePreference.storedLanguage(defaults: defaults)
+            let locale = Locale(identifier: language == InterfaceLanguagePreference.english ? "en" : "zh-Hans")
+            // Use the actual button's source key and the app's compiled catalog,
+            // selected by the same production default that drives this window.
+            // A wrong default, missing translation or wrong button key fails here.
+            let localization = try XCTUnwrap(Bundle.preferredLocalizations(
+                from: Bundle.main.localizations, forPreferences: [locale.identifier]).first)
+            let resourceURL = try XCTUnwrap(Bundle.main.url(forResource: localization, withExtension: "lproj"))
+            let catalog = try XCTUnwrap(Bundle(url: resourceURL))
+            let title = catalog.localizedString(forKey: LoginView.sendCodeTitleKey, value: nil, table: nil)
+            XCTAssertEqual(title, language == InterfaceLanguagePreference.english ? "Send a sign-in code" : "发送验证码")
+            let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("test-results/renders", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let evidence = "source=LoginView.sendCodeTitleKey catalog=app-bundle locale=\(locale.identifier) localization=\(localization) resolvedTitle=\(title) buttonOCR=not-claimed device=unverified\n"
+            try Data(evidence.utf8).write(to: folder.appendingPathComponent("default-language-login-" + suffix + "-resolved-title.txt"), options: .atomic)
+            try await capture("default-language-intro-" + suffix, width: 760, height: 680,
+                              annotate: false, darkAppearance: true,
+                              nativeOpacity: .isolatedSubpixelEdges, nativeLabels: introLabels) {
+                WelcomeIntroView().modifier(SeaPageAppearance())
+                    .environment(\.seaAppearanceOverride, true).environment(\.locale, locale)
+            }
+            try await capture("default-language-login-" + suffix, width: 760, height: 720,
+                              annotate: false, darkAppearance: true,
+                              nativeOpacity: .isolatedSubpixelEdges, nativeLabels: loginLabels) {
+                LoginView(session: login).modifier(SeaPageAppearance())
+                    .environment(\.seaAppearanceOverride, true).environment(\.locale, locale).environment(app)
+            }
+        }
+        try await renderFirstRun("fresh-zh", introLabels: ["连上，就受保护。", "下一步"],
+                                 loginLabels: ["登录 Tono"])
+        defaults.set("English", forKey: SettingsKey.interfaceLanguage)
+        XCTAssertEqual(InterfaceLanguagePreference.storedLanguage(defaults: defaults), "English")
+        XCTAssertEqual(defaults.string(forKey: SettingsKey.interfaceLanguage), "English")
+        try await renderFirstRun("saved-en", introLabels: ["Connected means protected.", "Next"],
+                                 loginLabels: ["Sign in to Tono", "Send a sign-in code"])
+        defaults.set("Auto", forKey: SettingsKey.interfaceLanguage)
+        XCTAssertEqual(InterfaceLanguagePreference.storedLanguage(defaults: defaults), "Auto")
+        XCTAssertEqual(defaults.string(forKey: SettingsKey.interfaceLanguage), "Auto")
+        XCTAssertNil(login.emailChallenge)
+        XCTAssertNil(app.connectionCoordinator.connectTask)
+    }
+
+    func testLoginDiagnosticsCopyReportsFailureWithoutLeakingIdentity() async throws {
+        let copy = SignInDiagnosticCopy()
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        XCTAssertNil(copy.copied)
+        XCTAssertTrue(copy.manualText.isEmpty)
+        XCTAssertNil(pasteboard.string(forType: .string))
+        copy.copy { text in
+            pasteboard.clearContents()
+            return pasteboard.setString(text, forType: .string)
+        }
+        XCTAssertEqual(copy.copied, true)
+        let text = try XCTUnwrap(pasteboard.string(forType: .string))
+        XCTAssertEqual(text.components(separatedBy: "\n").count, 3)
+        XCTAssertTrue(text.hasPrefix("Tono sign-in diagnostics\nVersion: "))
+        XCTAssertTrue(text.hasSuffix("\nAuth stage: sign-in"))
+        XCTAssertFalse(text.contains("@"))
+        XCTAssertFalse(text.contains("Email:"))
+        copy.copy(cause: .relaysUnreachable) { _ in false }
+        XCTAssertEqual(copy.copied, false)
+        XCTAssertEqual(copy.manualText, text + "\nRecovery cause: relaysUnreachable")
+        try await capture("login-copy-failed", width: 420, height: 180, annotate: false,
+                          darkAppearance: true, nativeOpacity: .isolatedSubpixelEdges,
+                          nativeLabels: ["Copy diagnostics", "Could not copy. You can copy the safe text manually."]) {
+            SignInDiagnosticCopyButton(copy: copy).padding(24)
+        }
+        copy.copy { _ in true }
+        XCTAssertEqual(copy.copied, true)
+        XCTAssertTrue(copy.manualText.isEmpty)
+
+        let app = AppState()
+        let login = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        login.authMethods = .init(email: .init(enabled: true, clientId: nil),
+            apple: .init(enabled: false, clientId: nil), google: .init(enabled: false, clientId: nil))
+        login.state = .signedOut
+        let operation = login.signInRecoveryLedger.begin(.sendCode)
+        try await capture("login-recovery-automatic", width: 760, height: 720, annotate: false,
+                          darkAppearance: true, nativeOpacity: .isolatedSubpixelEdges,
+                          nativeLabels: ["Sign in to Tono", "Sending…"]) {
+            LoginView(session: login).modifier(SeaPageAppearance())
+                .environment(\.seaAppearanceOverride, true).environment(app)
+        }
+        login.signInRecoveryLedger.finish(operation, cause: .relaysUnreachable)
+        login.state = .error("Tono could not reach any of its relays. Try again in a moment or on another network.")
+        try await capture("login-recovery-user-action", width: 760, height: 820, annotate: false,
+                          darkAppearance: true, nativeOpacity: .isolatedSubpixelEdges,
+                          nativeLabels: ["Sign in to Tono", "Contact support (copy diagnostics)", "Send a sign-in code"]) {
+            LoginView(session: login).modifier(SeaPageAppearance())
+                .environment(\.seaAppearanceOverride, true).environment(app)
+        }
+        login.state = .error("Tono 的备用线路目前无法到达。请稍后重试，或换个网络。")
+        // Small CJK controls are visually reviewed in the original PNG, not
+        // claimed as Vision witnesses; #1561 separately asserts the real send title.
+        try await capture("login-recovery-user-action-zh-narrow", width: 640, height: 820, annotate: false,
+                          darkAppearance: true, nativeOpacity: .isolatedSubpixelEdges,
+                          nativeLabels: ["登录 Tono"]) {
+            LoginView(session: login).modifier(SeaPageAppearance())
+                .environment(\.seaAppearanceOverride, true).environment(\.locale, Locale(identifier: "zh-Hans")).environment(app)
+        }
+        XCTAssertNil(app.connectionCoordinator.connectTask)
+    }
+
+    func testLoginItemsWaitForConfirmationAndRecoverUnknownChanges() async throws {
+        let suite = "tono-login-items-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var actual: SMAppService.Status = .notRegistered
+        var needsApproval = true
+        var reply: CheckedContinuation<Void, Error>?
+        defer { reply?.resume(returning: ()) }
+        let preference = LoginItemPreference(
+            readStatus: { actual },
+            register: { actual = needsApproval ? .requiresApproval : .enabled },
+            unregister: {
+                actual = .notRegistered
+                try await withCheckedThrowingContinuation { reply = $0 }
+            }, defaults: defaults
+        )
+        let app = AppState()
+        let account = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
+        account.user = try JSONDecoder().decode(TonoUser.self, from: Data(#"{"id":"synthetic-sea-pages","email":"fixture@example.test","plan":"Fixture plan","quotaBytes":1000000000,"usageBytes":250000000}"#.utf8))
+        account.state = .ready
+        // No OS registration, helper, account request or protection mutation.
+        func render(_ name: String, width: CGFloat = 760, sea: Bool = true, chinese: Bool = false,
+                    labels: [String]) async throws {
+            try await capture(name, width: width, height: 920, annotate: false, darkAppearance: sea,
+                              nativeOpacity: .isolatedSubpixelEdges, nativeLabels: labels) {
+                ZStack { MeshGradientBackground(); SettingsView(loginItems: preference) }
+                    .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, sea)
+                    .environment(\.locale, Locale(identifier: chinese ? "zh-Hans" : "en"))
+                    .environment(app).environment(account).environmentObject(AppUpdater(enabled: false))
+            }
+        }
+        func settle() async throws {
+            let deadline = Date().addingTimeInterval(2)
+            while preference.isUpdating && Date() < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertFalse(preference.isUpdating, "synthetic completion must settle")
+        }
+        try await render("settings-general-normal", labels: ["Settings", "General", "Interface Language"])
+        preference.setEnabled(true)
+        try await settle()
+        XCTAssertEqual(preference.status, .requiresApproval)
+        XCTAssertFalse(preference.saved)
+        XCTAssertFalse(preference.canChange)
+        try await render("settings-general-approval", labels: ["Open Login Items", "Refresh status", "Turn off"])
+        actual = .enabled // The user approves in macOS, then returns to Tono.
+        preference.refresh()
+        XCTAssertTrue(preference.enabled)
+        preference.setEnabled(false)
+        XCTAssertTrue(preference.isUpdating)
+        preference.refresh() // Must not clear a write whose reply is pending.
+        preference.setEnabled(true) // A second page cannot overtake that write.
+        try await render("settings-general-saving", labels: ["Saving…", "Interface Language"])
+        XCTAssertFalse(preference.canChange)
+        XCTAssertFalse(preference.saved)
+        let completion = try XCTUnwrap(reply)
+        reply = nil
+        completion.resume(throwing: NSError(domain: "SyntheticLostReply", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Synthetic reply lost after macOS stored OFF."]))
+        try await settle()
+        XCTAssertNotNil(preference.error)
+        XCTAssertFalse(preference.canChange)
+        XCTAssertFalse(preference.saved)
+        // A recreated production SettingsView's onAppear must preserve failure.
+        try await render("settings-general-error", labels: ["Could not confirm this change.", "Refresh status"])
+        XCTAssertNotNil(preference.error)
+        actual = .notFound
+        preference.refresh() // Unavailable is not a successful recovery read.
+        XCTAssertNotNil(preference.error)
+        XCTAssertFalse(preference.canChange)
+        actual = .notRegistered
+        try await render("settings-general-error-after-unavailable", labels: ["Could not confirm this change.", "Refresh status"])
+        preference.setEnabled(true)
+        XCTAssertFalse(preference.isUpdating)
+        XCTAssertNotNil(preference.error)
+        XCTAssertFalse(preference.canChange)
+        preference.refresh()
+        XCTAssertFalse(preference.enabled)
+        XCTAssertTrue(preference.canChange)
+        needsApproval = false
+        preference.setEnabled(true)
+        try await settle()
+        XCTAssertTrue(preference.enabled)
+        XCTAssertTrue(preference.saved)
+        XCTAssertTrue(defaults.bool(forKey: SettingsKey.launchAtStartup))
+        try await render("settings-general-saved", labels: ["Saved", "Interface Language"])
+        try await render("settings-general-zh-narrow", width: 660, chinese: true,
+                         labels: ["设置", "界面语言", "登录时打开"])
+        try await render("settings-general-classic", sea: false, labels: ["Settings", "Interface Language"])
+        actual = .notFound
+        preference.refresh()
+        XCTAssertFalse(preference.canChange)
+        XCTAssertFalse(preference.saved)
+        try await render("settings-general-unavailable", labels: ["Login Items is unavailable.", "Refresh status"])
+    }
+
     func testIsolatedRasterEdgesCannotHideMissingNativeContent() {
         let opaque = NativeRenderPixel(red: 0.8, green: 0.4, blue: 0.2, alpha: 1)
         let edge = NativeRenderPixel(red: 0.8, green: 0.4, blue: 0.2, alpha: CGFloat(253) / 255)
@@ -596,7 +817,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         let processLanguage = Locale.preferredLanguages.first ?? "missing"
         let bundleLanguage = Bundle.main.preferredLocalizations.first ?? "missing"
         let testBundleLanguage = Bundle(for: type(of: self)).preferredLocalizations.first ?? "missing"
-        receipt.append("language source=English fixture strings processPreferred=\(processLanguage) bundlePreferred=\(bundleLanguage) testBundlePreferred=\(testBundleLanguage) AppleLanguages=\(ProcessInfo.processInfo.environment["AppleLanguages"] ?? "unset") SwiftUILocale=en")
+        receipt.append("language processPreferred=\(processLanguage) bundlePreferred=\(bundleLanguage) testBundlePreferred=\(testBundleLanguage) AppleLanguages=\(ProcessInfo.processInfo.environment["AppleLanguages"] ?? "unset"); fixture locale override may differ; requiredLabels=\(requiredLabels)")
         guard processLanguage.lowercased().hasPrefix("en"), bundleLanguage.lowercased().hasPrefix("en") else {
             receipt.append("acceptance=failed: process or app bundle preferred language is not English")
             XCTFail("\(name): English native-text source not established before capture")
@@ -811,7 +1032,19 @@ final class MacUsabilityRenderTests: XCTestCase {
     ) -> Bool {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
-        request.recognitionLanguages = ["en-US"]
+        // Fixture locale can differ from the English test process. Preserve the
+        // English recognizer for existing fixtures; Chinese labels need Han OCR.
+        let hasChineseLabels = required.contains { label in
+            label.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) }
+        }
+        request.recognitionLanguages = hasChineseLabels ? ["zh-Hans", "en-US"] : ["en-US"]
+        if hasChineseLabels {
+            // Do not pre-filter Chinese glyphs before recognition. The 8px
+            // input filter still omitted visible control text on the hosted
+            // 1x image. Acceptance below independently requires >=8px original
+            // bounds, exact tokens, confidence, contrast and completeness.
+            request.minimumTextHeight = 0
+        }
         request.usesLanguageCorrection = true
         do {
             try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
@@ -826,7 +1059,7 @@ final class MacUsabilityRenderTests: XCTestCase {
             if abs(left.2.midY - right.2.midY) > 0.015 { return left.2.midY > right.2.midY }
             return left.2.minX < right.2.minX
         }
-        receipt.append("Vision lines=\(lines.count) recognition=accurate language=en-US correction=true")
+        receipt.append("Vision lines=\(lines.count) recognition=accurate languages=\(request.recognitionLanguages) minimumTextHeight=\(request.minimumTextHeight) correction=true")
         for (index, line) in lines.prefix(80).enumerated() {
             receipt.append("OCR[\(index)] text=\(line.0.debugDescription) confidence=\(line.1) box=\(line.2)")
         }

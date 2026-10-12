@@ -73,6 +73,12 @@ extension AccountSession {
                         return
                     }
                 }
+                // Backlog A4 (D14-A): the sign-in screen is next. Handshake
+                // every control-plane path in the background, without
+                // identity, so the sign-in goes first to one that works. Not
+                // awaited: the screen does not wait for it. After any release
+                // above; a path PF still blocks just fails.
+                Task { [api] in await api.probePathsBeforeSignIn() }
                 state = .signedOut
                 await loadAuthMethods()
                 return
@@ -195,8 +201,8 @@ extension AccountSession {
         guard let apiError = error as? TonoAPIClient.APIError else { return false }
         switch apiError {
         // #588: a clock error is also a failure before any status line; the
-        // offline grant, not a refusal, decides.
-        case .transport, .clockSkew: return true
+        // offline grant, not a refusal, decides. H21-O-F8: so is interception.
+        case .transport, .clockSkew, .tlsIntercepted, .unreachable: return true
         default: return false
         }
     }
@@ -276,7 +282,7 @@ extension AccountSession {
             authMethods = nil
             if state != .authenticating {
                 state = .error(
-                    (error as? LocalizedError)?.errorDescription
+                    accountErrorMessage(error)
                         ?? String(localized: "Tono sign-in is temporarily unavailable.")
                 )
             }
@@ -319,6 +325,7 @@ extension AccountSession {
         default: return
         }
         emailChallenge = nil
+        signInRecoveryLedger.dismiss()
         state = .signedOut
     }
 
@@ -335,14 +342,18 @@ extension AccountSession {
             return
         }
         state = .authenticating
+        let operation = signInRecoveryLedger.begin(.sendCode)
         do {
             emailChallenge = try await api.startEmailSignIn(TonoEmailStartRequest(
                 email: TonoAccountRules.normalizedEmail(email),
                 deviceName: TonoAccountRules.normalizedDeviceName(deviceName),
                 installationId: try keychain.installationId()
             ))
+            // The code is on its way: waiting for the email is not a failure.
+            signInRecoveryLedger.finish(operation, cause: nil)
             state = .signedOut
         } catch {
+            signInRecoveryLedger.finish(operation, cause: SignInRecovery.cause(of: error))
             await fail(error)
         }
     }
@@ -495,6 +506,10 @@ extension AccountSession {
                 return false
             } catch {
                 guard !Task.isCancelled, accountReadRevision == accountRevision else { return false }
+                // The client turns an undecodable 2xx body into `invalidResponse`.
+                if error as? TonoAPIClient.APIError == .invalidResponse {
+                    catalogUndecodableConsumer()
+                }
                 // Keep the last verified, mode-0600 cache. Catalog
                 // availability must never turn a temporary control-plane
                 // failure into a clearnet fallback or erase usable exits.
@@ -875,9 +890,20 @@ extension AccountSession {
         // A failed revoke from the device-limit list belongs to the attempt
         // that raised it, not to the one starting here.
         deviceActionError = nil
+        let recoveryOperation = signInRecoveryLedger.begin(.verifyCode)
+        // Only a failure of the request itself ends it as recovery-relevant;
+        // once Tono answered, what follows is the account's own runtime.
+        defer { signInRecoveryLedger.finish(recoveryOperation, cause: nil) }
         do {
             try await api.prepareForAuthentication()
-            let response = try await operation()
+            let response: TonoAuthResponse
+            do {
+                response = try await operation()
+            } catch {
+                signInRecoveryLedger.finish(recoveryOperation, cause: SignInRecovery.cause(of: error))
+                throw error
+            }
+            signInRecoveryLedger.finish(recoveryOperation, cause: nil)
             try Task.checkCancellation()
             try await api.adopt(response)
             try Task.checkCancellation()

@@ -1,5 +1,13 @@
 import { applyD1Migrations, env, type D1Migration } from 'cloudflare:test';
-import { beforeAll, beforeEach } from 'vitest';
+import { beforeAll, beforeEach, vi } from 'vitest';
+
+// No test dials the network. The cron's API relay probe (`src/api-relays.ts`)
+// would otherwise open TCP to the real relays on every scheduled tick, and a
+// relay that drops packets holds each cron test for the probe's 5 s timeout.
+// Probe tests inject their own `connect`.
+vi.mock('cloudflare:sockets', () => ({
+  connect: () => ({ opened: Promise.reject(new Error('no network in tests')), close: () => undefined }),
+}));
 
 declare global {
   namespace Cloudflare {
@@ -36,6 +44,7 @@ beforeEach(async () => {
   await env.DB.prepare('DELETE FROM ops_node_status').run();
   await env.DB.prepare('DELETE FROM ops_node_profiles').run();
   await env.DB.prepare('DELETE FROM ops_node_identity').run();
+  await env.DB.prepare('DELETE FROM ops_node_agents').run();
   await env.DB.prepare('DELETE FROM node_traffic_cycle_samples').run();
   await env.DB.prepare('DELETE FROM node_traffic_cycles').run();
   await env.DB.prepare('DELETE FROM node_error_daily').run();

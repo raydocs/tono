@@ -11,7 +11,16 @@
         "latencyMs": 142,
         "error": null,
         "okSince": 1724913600,
-        "failingSince": null
+        "failingSince": null,
+        "endToEnd": {
+          "ok": true,
+          "observedAt": 1724999820,
+          "httpStatus": 200,
+          "latencyMs": 418,
+          "error": null,
+          "okSince": 1724913600,
+          "failingSince": null
+        }
       },
       {
         "name": "Los Angeles · Mesa",
@@ -22,7 +31,16 @@
         "latencyMs": null,
         "error": "tcp connect: timed out after 5000 ms",
         "okSince": null,
-        "failingSince": 1724998800
+        "failingSince": 1724998800,
+        "endToEnd": {
+          "ok": false,
+          "observedAt": 1724999760,
+          "httpStatus": null,
+          "latencyMs": null,
+          "error": "connect: refused",
+          "okSince": null,
+          "failingSince": 1724998800
+        }
       }
     ]
   }

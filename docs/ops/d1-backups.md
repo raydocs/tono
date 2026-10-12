@@ -22,6 +22,30 @@ tooling/scripts/backup-control-plane-d1.sh --dry-run --keep-local /tmp/tono-d1-b
 
 CI 使用仓库密钥 `CLOUDFLARE_API_TOKEN` 和 `CLOUDFLARE_ACCOUNT_ID`。笔记本可以用 `wrangler login`，不要把 token 打进终端或脚本日志。
 
+## 失败告警
+
+工作流的 `alert` job 在每次备份之后都跑（`needs: backup`、`if: always()`），不需要 Cloudflare 密钥、不 checkout、不上传 artifact，所以在密钥缺失、备份停在「Require Cloudflare credentials」时也能告警：
+
+- 备份结果不是 `success`（失败、超时或取消）：打开一个带标签 `d1-backup-failure`、标题「Control plane D1 backup is failing」的 issue；已经有打开的同标签 issue 就只在最新那个上追加一条评论（结果、UTC 时间、运行链接）。不会每晚新开一个。
+- 备份成功：给所有打开的 `d1-backup-failure` issue 留「Backup succeeded again」评论并关闭。
+- 权限只在 `alert` job 上给 `GITHUB_TOKEN` 的 `issues: write`；备份 job 仍是顶层的 `contents: read`。标签不存在时由同一 job 用 `gh label create --force` 建好。
+- 通知靠 GitHub 对新 issue / 评论的正常邮件和站内通知；关注仓库的人会收到。
+
+结构和失败路径的回归：`tooling/scripts/tests/control-plane-d1-backup-workflow.test.mjs`（services-ci 的 `*.test.mjs` glob 会跑它）。
+
+## 仍待所有者：Cloudflare 凭据（backlog D16，#208）
+
+告警只说明「没备份」，不替代备份。真正落 R2 还要所有者做以下几步；代理不能编造或设置这些密钥：
+
+1. 在 Cloudflare 控制台建一个 API token，Account Resources 只选拥有 `tono-control-plane` 和 `tono-releases` 的那个账号：
+   - Account → **D1 → Edit**：`wrangler d1 export` 走 D1 导出接口，按 Cloudflare API 文档它要写权限，只读不够；D1 token 不能限到单库，所以账号范围就是边界，用途只有导出 `tono-control-plane`。
+   - Account → **Workers R2 Storage → Edit**：`wrangler r2 object put` 写 `tono-releases/backups/control-plane-d1/` 和读回校验。
+   - 不给 Workers 部署、DNS 或其他权限。
+2. 记下该账号的 Account ID（控制台右侧栏，或已登录笔记本上 `npx wrangler whoami`）。
+3. 写入仓库密钥，值由所有者在提示中输入，不要放进命令行参数或日志：`gh secret set CLOUDFLARE_API_TOKEN`、`gh secret set CLOUDFLARE_ACCOUNT_ID`。
+4. 手动跑一次 `gh workflow run control-plane-d1-backup.yml`；成功时 `alert` job 会自动关闭 `d1-backup-failure` issue。若导出步骤报 403，按报错补对应权限，不要放宽到整个账号的其他产品。
+5. 下面「保留期」那条 R2 生命周期规则同样只能在控制台设置。
+
 ## 保留期
 
 脚本**不能**配置 R2 生命周期。必须在 Cloudflare 控制台给桶 `tono-releases` 加上一条 **90 天** 的生命周期规则，前缀限定为 `backups/`。

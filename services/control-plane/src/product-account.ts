@@ -172,6 +172,46 @@ export function opsAuditStatement(
   );
 }
 
+/**
+ * Like `opsAuditStatement`, but the summary is `summaryPrefix` followed by
+ * `summarySql` evaluated over `from` in this same statement, and the row is
+ * written only when `from` matches. A batch can put it before its UPDATE (same
+ * WHERE) to record the pre-update state it reads inside the transaction,
+ * rather than a value read before the batch. `summarySql` takes no binds.
+ */
+export function opsAuditStatementFrom(
+  e: Env,
+  actorEmail: string | undefined,
+  action: string,
+  targetType: string,
+  targetId: string | null,
+  summaryPrefix: string,
+  summarySql: string,
+  from: { sql: string; binds: unknown[] },
+  meta?: OpsAuditMeta,
+) {
+  return e.DB.prepare(
+    `INSERT INTO ops_audit(
+       id, at, actor_email, action, target_type, target_id, summary,
+       actor_type, actor_role, request_id
+     )
+     SELECT ?, ?, ?, ?, ?, ?, substr(? || (${summarySql}), 1, 500), ?, ?, ?
+     ${from.sql}`,
+  ).bind(
+    id(),
+    now(),
+    (actorEmail || 'unknown').slice(0, 254),
+    action.slice(0, 80),
+    targetType.slice(0, 80),
+    targetId,
+    summaryPrefix,
+    resolveActorType(actorEmail, meta),
+    (meta?.actorRole ?? 'owner').slice(0, 40),
+    meta?.requestId ?? null,
+    ...from.binds,
+  );
+}
+
 export async function writeOpsAudit(
   e: Env,
   actorEmail: string | undefined,

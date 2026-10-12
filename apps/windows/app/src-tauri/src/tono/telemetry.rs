@@ -110,6 +110,7 @@ const INCLUDE_KINDS: &[&str] = &[
     "coreRestart",
     "healthProbeFail",
     "syncFail",
+    "controlPlanePathFail",
     "policySyncOk",
     "policyActivated",
     "policyActivationSkipped",

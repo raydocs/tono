@@ -106,6 +106,16 @@ pub enum AuditEvent {
     SyncFail {
         error: String,
     },
+    /// A19: a control-plane path failed provably undelivered and the next one ran
+    /// (`transport::PathFailure`, the macOS `control_plane_path_failed`). `from` and `to` are
+    /// `X-Tono-Path` labels and `reason` the failure class, so the customer timeline shows how
+    /// this machine reached the control plane without carrying an address.
+    ControlPlanePathFail {
+        from: &'static str,
+        to: &'static str,
+        reason: &'static str,
+        elapsed_ms: u64,
+    },
     SelectionVanished {
         node: String,
     },
