@@ -318,10 +318,12 @@
         )
         .await;
         let resets = test_hooks::take_automatic_resets();
+        let refusals = test_hooks::take_engine_refusals().len();
         drop(claim);
         reset_dns_state().await;
         assert!(outcome.is_err(), "the refusal was taken as the answer: {outcome:?}");
         assert_eq!(resets, 0);
+        assert!(refusals >= 3, "the leg must keep retrying a refused call, tried {refusals} time(s)");
         Ok(())
     }
 
@@ -1479,6 +1481,7 @@
         test_hooks::set_effective_dns_unreadable(Vec::new());
         test_hooks::set_effective_dns_fails(false);
         test_hooks::take_last_automatic_reset();
+        test_hooks::take_engine_refusals();
         // The tail of an earlier test's write window would otherwise still be running.
         SELF_WRITE_TAIL_UNTIL.store(0, Ordering::Relaxed);
     }

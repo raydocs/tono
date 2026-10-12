@@ -600,13 +600,41 @@ pub(super) fn emergency_restore_budget(remaining: Option<std::time::Duration>) -
 /// [`EMERGENCY_RESET_FLOOR`]: this runs only once the WFP objects are gone, and it is not
 /// skipped for lack of time.
 pub(super) fn emergency_fallback_budget(remaining: Option<std::time::Duration>) -> std::time::Duration {
-    match remaining {
+    scaled_for_tests(match remaining {
         None => DNS_RESTORE_TIMEOUT,
         Some(remaining) => remaining
             .saturating_sub(EMERGENCY_SWEEP_RESERVE)
             .min(EMERGENCY_FALLBACK_TIMEOUT)
             .max(EMERGENCY_RESET_FLOOR),
-    }
+    })
+}
+
+/// How long the emergency path waits for the exact restore's abandoned engine call to return the
+/// single-writer claim before the adapter reset leg starts, given the time that has passed since
+/// the exact restore began.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn emergency_claim_wait_budget(_elapsed_since_restore_began: std::time::Duration) -> std::time::Duration {
+    std::time::Duration::ZERO
+}
+
+/// Tests shrink the emergency budgets by this factor so a late release of the claim can be
+/// modelled in milliseconds. Always 1 outside `cfg(test)`.
+#[cfg(test)]
+static TEST_BUDGET_DIVISOR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+
+#[cfg(test)]
+pub(super) fn set_test_budget_divisor(divisor: u32) {
+    TEST_BUDGET_DIVISOR.store(divisor.max(1), std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(test)]
+fn scaled_for_tests(budget: std::time::Duration) -> std::time::Duration {
+    budget / TEST_BUDGET_DIVISOR.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[cfg(not(test))]
+fn scaled_for_tests(budget: std::time::Duration) -> std::time::Duration {
+    budget
 }
 
 /// SCM `StopPending` hint posted by the service. Stop is accepted before startup

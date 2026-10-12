@@ -315,6 +315,12 @@ pub(crate) mod test_hooks {
         Box::new(super::engine_ops::occupy_dns_call_for_test())
     }
 
+    /// The moments at which a stub engine call was refused because the claim was held.
+    #[cfg(test)]
+    pub(crate) fn take_engine_refusals() -> Vec<std::time::Instant> {
+        super::engine_ops::take_refusals()
+    }
+
     static LIVE_DNS_ON_LOOPBACK: AtomicBool = AtomicBool::new(false);
 
     pub(crate) fn live_dns_is_on_loopback() -> bool {

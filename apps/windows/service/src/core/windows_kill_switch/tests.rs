@@ -2314,14 +2314,25 @@ async fn emergency_disarm_resets_the_redirected_adapter_even_when_the_deadline_i
     Ok(())
 }
 
-/// The exact restore timed out and its engine call still holds the claim, and the claim is not
-/// released within the reset leg's budget. WFP is removed, the original error is returned, no
-/// success is claimed and no adapter is reset; the leg waited out its budget instead of taking
-/// the immediate refusal for an answer.
-#[tokio::test]
-#[serial]
-async fn a_claim_that_is_never_released_leaves_the_fallback_unproven_after_waiting_its_budget()
--> Result<()> {
+/// Shrinks the emergency budgets for one test and restores them afterwards.
+struct ScaledBudgets;
+
+impl ScaledBudgets {
+    fn by(divisor: u32) -> Self {
+        set_test_budget_divisor(divisor);
+        Self
+    }
+}
+
+impl Drop for ScaledBudgets {
+    fn drop(&mut self) {
+        set_test_budget_divisor(1);
+    }
+}
+
+/// A machine whose exact restore cannot be proven and whose adapter is still on the Tono target,
+/// with the release service's protection armed.
+async fn arm_an_unprovable_redirected_machine() -> Result<()> {
     cleanup().await;
     remove_superseded_snapshots().await;
     arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
@@ -2337,12 +2348,77 @@ async fn a_claim_that_is_never_released_leaves_the_fallback_unproven_after_waiti
     }]);
     simulate_machine_still_on_loopback_dns();
     crate::core::dns::test_hooks::take_automatic_resets();
+    crate::core::dns::test_hooks::take_last_automatic_reset();
+    crate::core::dns::test_hooks::take_engine_refusals();
+    Ok(())
+}
+
+/// The wait for the exact restore's abandoned engine call is its own budget (the engine call is
+/// bounded at 30 s from when the restore began, capped at 20 s) and is never charged against the
+/// reset leg's floor.
+#[test]
+fn the_claim_wait_budget_is_what_is_left_of_the_engine_calls_own_bound() {
+    let secs = std::time::Duration::from_secs;
+    assert_eq!(emergency_claim_wait_budget(secs(0)), secs(20));
+    assert_eq!(emergency_claim_wait_budget(secs(10)), secs(20));
+    assert_eq!(emergency_claim_wait_budget(secs(12)), secs(18));
+    assert_eq!(emergency_claim_wait_budget(secs(26)), secs(4));
+    assert_eq!(emergency_claim_wait_budget(secs(30)), secs(0));
+    assert_eq!(emergency_claim_wait_budget(secs(50)), secs(0));
+}
+
+/// The exact restore's engine call outlives the 10 s that was given to it and returns the claim
+/// at a finite late time, after the wait for it has ended. The reset leg is a separate budget
+/// with its own floor, so it still retries the refused call, gets the claim and resets the
+/// adapter: the old single timeout for wait and reset together had expired by then.
+#[tokio::test]
+#[serial]
+async fn a_claim_released_late_still_gets_its_adapter_reset_inside_the_legs_own_floor() -> Result<()> {
+    arm_an_unprovable_redirected_machine().await?;
+    let _scaled = ScaledBudgets::by(20);
+    let claim = crate::core::dns::test_hooks::occupy_engine_claim();
+    let released = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(1300));
+        drop(claim);
+    });
+
+    let result = emergency_disarm_windows_kill_switch_until(
+        std::time::Instant::now() + EMERGENCY_DISARM_OUTER_BUDGET,
+    )
+    .await;
+    released.join().unwrap();
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    let reset_adapters = crate::core::dns::test_hooks::take_last_automatic_reset();
+    crate::core::dns::test_hooks::set_collected_adapters(Vec::new());
+    let message = format!("{:#}", result.expect_err("the original DNS error is still returned"));
+    assert!(ARMED.lock().unwrap().is_none(), "WFP is removed");
+    assert!(message.contains(crate::core::dns::WFP_REMOVED_CONTINUE_PREFIX), "{message}");
+    assert_eq!(resets, 1, "the reset ran once the claim was returned");
+    assert_eq!(reset_adapters, vec!["{ETHERNET}".to_owned()]);
+
+    cleanup().await;
+    Ok(())
+}
+
+/// The exact restore timed out and its engine call never returns the claim. WFP is removed, the
+/// original error is returned, no success is claimed and no adapter is reset; the wait ran its own
+/// budget and the reset leg then ran its floor and was refused over and over rather than skipped.
+#[tokio::test]
+#[serial]
+async fn a_claim_that_is_never_released_leaves_the_fallback_unproven_after_waiting_and_retrying()
+-> Result<()> {
+    arm_an_unprovable_redirected_machine().await?;
+    let _scaled = ScaledBudgets::by(20);
     let claim = crate::core::dns::test_hooks::occupy_engine_claim();
 
     let started = std::time::Instant::now();
-    let result = emergency_disarm_windows_kill_switch_until(std::time::Instant::now()).await;
+    let result = emergency_disarm_windows_kill_switch_until(started).await;
     let elapsed = started.elapsed();
     let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    let refused_in_the_leg = crate::core::dns::test_hooks::take_engine_refusals()
+        .into_iter()
+        .filter(|at| at.duration_since(started) >= std::time::Duration::from_millis(1100))
+        .count();
     drop(claim);
     crate::core::dns::test_hooks::set_collected_adapters(Vec::new());
     let message = format!("{:#}", result.expect_err("the original DNS error is still returned"));
@@ -2350,8 +2426,12 @@ async fn a_claim_that_is_never_released_leaves_the_fallback_unproven_after_waiti
     assert!(message.contains(crate::core::dns::WFP_REMOVED_CONTINUE_PREFIX), "{message}");
     assert_eq!(resets, 0, "nothing was reset while the claim was held");
     assert!(
-        elapsed >= std::time::Duration::from_secs(9),
-        "the refusal was taken as the answer after {elapsed:?}; the leg must wait out its budget"
+        elapsed >= std::time::Duration::from_millis(1400),
+        "the wait and the leg's floor were not both spent: {elapsed:?}"
+    );
+    assert!(
+        refused_in_the_leg >= 3,
+        "after the wait the reset leg must have run and been refused, saw {refused_in_the_leg} refusal(s)"
     );
 
     cleanup().await;

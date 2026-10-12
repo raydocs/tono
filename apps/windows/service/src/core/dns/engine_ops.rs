@@ -71,9 +71,24 @@ pub(super) fn dns_call_in_flight() -> Option<DnsCallInFlight> {
 #[cfg(test)]
 pub(super) fn refuse_while_claimed(operation: &'static str) -> Result<()> {
     match *dns_call_slot() {
-        Some(wedged) => Err(wedged_dns_error(operation, wedged)),
+        Some(wedged) => {
+            REFUSALS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(std::time::Instant::now());
+            Err(wedged_dns_error(operation, wedged))
+        }
         None => Ok(()),
     }
+}
+
+/// When each refusal above happened, so a test can tell which stage of a leg was refused.
+#[cfg(test)]
+static REFUSALS: Mutex<Vec<std::time::Instant>> = Mutex::new(Vec::new());
+
+#[cfg(test)]
+pub(super) fn take_refusals() -> Vec<std::time::Instant> {
+    std::mem::take(&mut *REFUSALS.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
 }
 
 /// Take the single-writer claim the way an abandoned engine call holds it; dropping the returned
