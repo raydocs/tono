@@ -2138,18 +2138,43 @@ mod tests {
         assert_eq!(attempts.get(), 1, "exactly one loop retries the shared failed release");
     }
 
-    /// The right to retry belongs to one generation's live loop and nothing else: a later
-    /// session, or the same one once its loop is gone, can take it.
+    /// The right to retry belongs to one live loop. Once that loop is gone the same session
+    /// can hand it to another, and a later session (reached through the real retire path) gets
+    /// its own.
     #[tokio::test]
-    async fn the_retry_right_passes_to_a_later_generation_and_to_a_dead_loop() {
+    async fn the_retry_right_passes_on_when_its_loop_is_gone_and_to_a_later_session() {
         let state = Arc::new(TonoState::for_test());
         let mut inner = state.lock().await;
         let generation = inner.connect_generation;
         let owner = inner.claim_health_retry(generation).expect("first claim");
         assert!(inner.claim_health_retry(generation).is_none(), "a live loop is the only owner");
-        assert!(inner.claim_health_retry(generation + 1).is_some(), "a later generation can own");
         drop(owner);
-        assert!(inner.claim_health_retry(generation).is_some(), "an aborted or finished loop frees it");
+        let second = inner.claim_health_retry(generation);
+        assert!(second.is_some(), "an aborted or finished loop frees the right for its session");
+        inner.retire_connection_generation(false);
+        let later = inner.connect_generation;
+        assert_ne!(later, generation);
+        assert!(inner.claim_health_retry(later).is_some(), "a later session can own a retry");
+        drop(second);
+    }
+
+    /// A late joiner of a retired session's failure must not displace the owner of the current
+    /// one: the slot would then say the old generation and let a second current-generation
+    /// caller claim as well.
+    #[tokio::test]
+    async fn a_late_claim_for_a_retired_generation_cannot_displace_the_current_owner() {
+        let state = Arc::new(TonoState::for_test());
+        let mut inner = state.lock().await;
+        let retired = inner.connect_generation;
+        inner.retire_connection_generation(false);
+        let current = inner.connect_generation;
+        let owner = inner.claim_health_retry(current).expect("the current session claims");
+        assert!(inner.claim_health_retry(retired).is_none(), "a retired generation claims nothing");
+        assert!(
+            inner.claim_health_retry(current).is_none(),
+            "the current owner is still the only one after the late claim"
+        );
+        drop(owner);
     }
 
     #[tokio::test]
