@@ -84,6 +84,10 @@ pub async fn service_status_snapshot(owner: &AuthenticatedOwner) -> Result<Servi
         kill_switch: windows_kill_switch,
         network_events,
         update_attempt_pending,
+        release_generation: crate::core::release::Authority::live()
+            .load()
+            .ok()
+            .map(|record| record.generation),
     })
 }
 

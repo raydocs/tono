@@ -244,7 +244,7 @@ async fn fresh_arm_releases_after_app_verification_never_arrives() -> Result<()>
 async fn automatic_pending_update_disconnect_retains_the_ai_hold() -> Result<()> {
     cleanup().await;
     locked_direct_test_session().await?;
-    let request = crate::update_wire::UpdateRequest::disconnect(true);
+    let request = crate::update_wire::UpdateRequest::disconnect(true, None);
     let wire = serde_json::to_vec(&request)?;
     let received: crate::update_wire::UpdateRequest = serde_json::from_slice(&wire)?;
     let released = release_for_update_disconnect(received.applies_narrow_on_disconnect()).await?;

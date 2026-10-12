@@ -220,6 +220,11 @@ pub struct OwnerCredentials {
 pub struct ReleaseKillSwitchPayload {
     #[serde(default)]
     pub apply_narrow_layer: bool,
+    /// The release generation of the session this teardown is for (revision 21). The Service
+    /// refuses it once a restore or a newer Connect has moved the generation on, so an old
+    /// teardown cannot reach a newer session. Also the body of `POST /dns/restore`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_generation: Option<u64>,
 }
 
 /// `null` (older clients) or the payload object.
@@ -235,6 +240,13 @@ impl ReleaseKillSwitchBody {
         match self {
             Self::Options(options) => options.apply_narrow_layer,
             Self::Absent(()) => false,
+        }
+    }
+
+    pub fn release_generation(&self) -> Option<u64> {
+        match self {
+            Self::Options(options) => options.release_generation,
+            Self::Absent(()) => None,
         }
     }
 }
@@ -686,6 +698,10 @@ pub struct StartClashRequest {
     /// contract is byte-identical to what existing clients send; absent from older clients.
     #[serde(default)]
     pub windows_kill_switch: Option<KillSwitchConfig>,
+    /// The release generation this App last saw (revision 21). A start prepared before a
+    /// Restore internet carries the old one and is refused as stale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_generation: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -697,6 +713,9 @@ pub struct OwnerSessionHandle {
 pub struct StartClashResult {
     pub session: OwnerSessionHandle,
     pub proxy_outcome: ProxyApplyOutcome,
+    /// The release generation this session was admitted under (revision 21).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_generation: Option<u64>,
 }
 
 /// What staging a bundle into the running core's generation achieved.
@@ -775,6 +794,18 @@ pub enum ServiceErrorCode {
     /// are taken on main by `StaleReleaseEpoch`, `ProtectionHeldByAnotherUser` and
     /// `RemoteSessionConnectRefused`.)
     AppIdentityUnproven = 1016,
+    /// `StartClash` refused: a Restore internet run holds the release lock right now. Retry
+    /// once it has answered. Mapped to 409 Conflict.
+    ReleaseInProgress = 1017,
+    /// `StartClash` refused: the last Restore internet left a worker or a writer that may still
+    /// change the network. Mapped to 409 Conflict.
+    ReleaseUnfinished = 1018,
+    /// `StartClash` refused: `release-state.json` cannot be read, and it is never retired
+    /// automatically. Mapped to 409 Conflict.
+    ReleaseRecordCorrupt = 1019,
+    /// `StartClash` refused: it was prepared for a session a Restore internet already ended.
+    /// Mapped to 409 Conflict.
+    StaleGeneration = 1020,
 }
 
 pub fn owner_key(identity: &OwnerIdentity) -> String {
@@ -917,6 +948,11 @@ pub struct ServiceStatusSnapshot {
     /// absence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_attempt_pending: Option<bool>,
+    /// The release generation on disk (revision 21), read fresh for this snapshot. A teardown
+    /// with no captured generation sends this one, so a Connect admitted after the read still
+    /// refuses it. `None` when unreadable or from an older Service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_generation: Option<u64>,
 }
 
 /// Whether an already-running Windows Core is safe to preserve until `StartClash` replaces it.
@@ -1025,6 +1061,7 @@ mod tests {
             }),
             kill_switch: None,
             windows_kill_switch: None,
+            release_generation: None,
         };
         let encoded = serde_json::to_vec(&request).expect("request should serialize");
         let decoded: StartClashRequest =

@@ -1462,6 +1462,10 @@ fn service_error(error: ServiceError) -> Result<HttpResponse> {
         crate::ServiceErrorCode::ProtectionHeldByAnotherUser => StatusCode::CONFLICT,
         crate::ServiceErrorCode::RemoteSessionConnectRefused => StatusCode::CONFLICT,
         crate::ServiceErrorCode::AppIdentityUnproven => StatusCode::SERVICE_UNAVAILABLE,
+        crate::ServiceErrorCode::ReleaseInProgress
+        | crate::ServiceErrorCode::ReleaseUnfinished
+        | crate::ServiceErrorCode::ReleaseRecordCorrupt
+        | crate::ServiceErrorCode::StaleGeneration => StatusCode::CONFLICT,
         _ => StatusCode::UNPROCESSABLE_ENTITY,
     };
     json_response::<()>(status, error.code as u16, error.message, None)
@@ -1607,6 +1611,10 @@ fn test_proxy_barrier_reset() {
 
 mod handlers;
 use handlers::create_ipc_router;
+#[cfg(all(windows, not(feature = "test")))]
+mod release_routes;
+#[cfg(all(windows, not(feature = "test")))]
+pub use release_routes::run_release_server_until;
 
 #[cfg(test)]
 mod release_dns_compensation_tests {

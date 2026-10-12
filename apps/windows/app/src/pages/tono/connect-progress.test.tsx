@@ -66,6 +66,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   tonoRetryNow: tonoRetryNowMock,
   tonoConnect: tonoConnectMock,
   tonoDisconnect: tonoDisconnectMock,
+  tonoRestoreInternet: tonoDisconnectMock,
   tonoDiagnosticsReport: tonoDiagnosticsReportMock,
   tonoLocalDiagnosticsReport: tonoDiagnosticsReportMock,
   tonoPrepareSupportReport: tonoPrepareSupportReportMock,

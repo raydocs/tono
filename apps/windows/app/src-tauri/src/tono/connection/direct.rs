@@ -118,7 +118,8 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
     loop {
         // Tokio's first tick is immediate, closing the finalize-to-monitor handoff window.
         interval.tick().await;
-        {
+        // The session this heartbeat belongs to; its selective release names it.
+        let release_generation = {
             let inner = state.lock().await;
             if inner.connect_generation != generation || !inner.fsm.status().is_connected {
                 return;
@@ -126,7 +127,8 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
             if !direct_lease_policy_is_current(inner.traffic_policy.as_ref(), &heartbeat.policy) {
                 return;
             }
-        }
+            inner.release_ticket.generation
+        };
         let renewal = grace
             .renew(async {
                 match service::tono_renew_direct_runtime_reload(
@@ -182,7 +184,11 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
                         Type::Service,
                         "Tono: authenticated DIRECT lease renewal failed; releasing general traffic and keeping AI-service destinations blocked: {redacted}"
                     );
-                    match service::tono_release_kill_switch_applying_narrow().await {
+                    match service::tono_release_kill_switch_applying_narrow(
+                        service::teardown_release_generation(release_generation).await,
+                    )
+                    .await
+                    {
                         Ok(status) => {
                             logging!(
                                 warn,

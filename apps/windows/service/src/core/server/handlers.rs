@@ -38,11 +38,23 @@ async fn refuse_release_after_failed_core_stop(
 fn update_operation(request: &crate::update_wire::UpdateRequest) -> Option<OperationGuard> {
     matches!(
         request,
-        crate::update_wire::UpdateRequest::Disconnect
-            | crate::update_wire::UpdateRequest::DisconnectApplyingNarrow
+        crate::update_wire::UpdateRequest::Disconnect { .. }
+            | crate::update_wire::UpdateRequest::DisconnectApplyingNarrow { .. }
             | crate::update_wire::UpdateRequest::Prepare { .. }
     )
     .then(|| OperationGuard::begin(ServiceOperationKind::ReleaseKillSwitch, IPC_HANDLER_TIMEOUT))
+}
+
+/// The refusal a StartClash gets when the release authority does not admit it.
+fn release_admission_error(refusal: &crate::core::release::AdmissionRefusal) -> ServiceError {
+    use crate::core::release::AdmissionRefusal;
+    let code = match refusal {
+        AdmissionRefusal::InProgress => crate::ServiceErrorCode::ReleaseInProgress,
+        AdmissionRefusal::Unfinished(_) => crate::ServiceErrorCode::ReleaseUnfinished,
+        AdmissionRefusal::Corrupt(_) => crate::ServiceErrorCode::ReleaseRecordCorrupt,
+        AdmissionRefusal::Stale => crate::ServiceErrorCode::StaleGeneration,
+    };
+    ServiceError::new(code, refusal.to_string())
 }
 
 /// How a StartClash whose owner-proxy transition failed reports the error after this request
@@ -77,6 +89,15 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             #[cfg(windows)]
             if lifecycle_is_stopping() {
                 return service_unavailable("service is stopping");
+            }
+            // Sol R2-F4: a Disconnect queued before a Restore internet or a newer admitted Connect
+            // names an older session and is refused before it touches anything. Checked under the
+            // lifecycle lock, which StartClash admission also holds.
+            if request.payload.is_disconnect()
+                && let Err(refusal) =
+                    crate::core::release::check_release_generation(request.payload.release_generation()).await
+            {
+                return service_error(release_admission_error(&refusal));
             }
             let _operation_guard = update_operation(&request.payload);
             #[cfg(windows)]
@@ -510,6 +531,14 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     ControlFlow::Continue(guard) => guard,
                     ControlFlow::Break(response) => return response,
                 };
+            // Same owner is not same session (Sol R-F4): a teardown for a session a restore or a
+            // newer Connect has replaced is refused before it touches DNS, the Core or WFP.
+            // Checked under the lifecycle lock, which StartClash admission also holds.
+            if let Err(refusal) =
+                crate::core::release::check_release_generation(request.payload.release_generation()).await
+            {
+                return service_error(release_admission_error(&refusal));
+            }
             let _operation_guard = OperationGuard::begin(
                 ServiceOperationKind::ReleaseKillSwitch,
                 IPC_HANDLER_TIMEOUT,
@@ -595,8 +624,8 @@ pub(super) fn create_ipc_router() -> Result<Router> {
         })
         .post(IpcCommand::RestoreProtectedDns.as_ref(), |ctx| async move {
             trace!("Received RestoreProtectedDns command");
-            let (_request, owner) =
-                match authenticate_request::<AuthenticatedRequest<()>>(&ctx).await {
+            let (request, owner) =
+                match authenticate_request::<AuthenticatedRequest<crate::core::structure::ReleaseKillSwitchBody>>(&ctx).await {
                     ControlFlow::Continue(authenticated) => authenticated,
                     ControlFlow::Break(response) => return response,
                 };
@@ -608,6 +637,11 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     ControlFlow::Continue(guard) => guard,
                     ControlFlow::Break(response) => return response,
                 };
+            if let Err(refusal) =
+                crate::core::release::check_release_generation(request.payload.release_generation()).await
+            {
+                return service_error(release_admission_error(&refusal));
+            }
             let _operation_guard =
                 OperationGuard::begin(ServiceOperationKind::RestoreDns, IPC_HANDLER_TIMEOUT);
             match dns::restore_protected().await {
@@ -799,6 +833,14 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             };
             let _operation_guard =
                 OperationGuard::begin(ServiceOperationKind::StartCore, IPC_HANDLER_TIMEOUT);
+            // PROPOSAL §10 v5: a Connect runs only under a generation the release authority
+            // admitted. A release that is running, unfinished or newer than this request
+            // refuses it before anything is armed.
+            let release_generation =
+                match crate::core::release::admit_start(start_request.release_generation).await {
+                    Ok(generation) => generation,
+                    Err(refusal) => return service_error(release_admission_error(&refusal)),
+                };
             let previous_owner = match load_active_owner().await {
                 Ok(owner) => owner,
                 Err(error) => {
@@ -921,6 +963,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     generation: active.generation,
                 },
                 proxy_outcome,
+                release_generation: Some(release_generation),
             })
         })
         .get(IpcCommand::GetClashLogs.as_ref(), |ctx| async move {
@@ -1252,7 +1295,7 @@ mod update_operation_tests {
     #[serial]
     fn automatic_update_disconnect_is_published_as_a_kill_switch_release() {
         let before = snapshot().0;
-        let guard = update_operation(&UpdateRequest::disconnect(true));
+        let guard = update_operation(&UpdateRequest::disconnect(true, None));
         let (during, active) = snapshot();
         assert_eq!(active.unwrap().kind, ServiceOperationKind::ReleaseKillSwitch);
         assert!(during > before);
@@ -1264,7 +1307,7 @@ mod update_operation_tests {
     #[serial]
     fn update_disconnect_is_published_as_a_kill_switch_release() {
         let before = snapshot().0;
-        let guard = update_operation(&UpdateRequest::Disconnect);
+        let guard = update_operation(&UpdateRequest::disconnect(false, None));
         let (during, active) = snapshot();
         assert_eq!(
             active.map(|operation| operation.kind),

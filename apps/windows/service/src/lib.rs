@@ -9,6 +9,8 @@ mod core;
 pub mod update_contract;
 #[cfg(any(feature = "client", feature = "standalone"))]
 pub mod update_wire;
+#[cfg(any(feature = "client", feature = "standalone", feature = "test"))]
+pub mod release_wire;
 // The DIRECT admission lists, compiled from the same source as the compilers.
 #[cfg(any(feature = "client", feature = "standalone"))]
 #[path = "../../crates/tono-core/src/direct_domains.rs"]
@@ -67,6 +69,12 @@ pub use core::{
 };
 #[cfg(all(feature = "standalone", windows))]
 pub use core::{note_power_event, start_network_monitor};
+#[cfg(all(feature = "standalone", windows, not(feature = "test")))]
+pub use core::{
+    release_service_recover_quarantine, release_service_remove, release_service_shutdown,
+    release_service_spawn_install,
+    release_worker_run, run_release_server_until,
+};
 
 #[cfg(feature = "test")]
 pub use core::test_owner_credentials;
@@ -173,7 +181,11 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// App reads the number to decide whether, armed without a tunnel, it may send the control plane
 /// through the relays alone (decision 091). An older Service, including a revision-19 build that
 /// already carried the permit, keeps the App on the full walk. MIN_REQUIRED stays 14.
-pub const PROTOCOL_REVISION: u16 = 20;
+/// Revision 21 adds the release authority (PROPOSAL §10 v5): `StartClash` carries the release
+/// generation the App last saw and is admitted only under the machine release lock, and the
+/// separate `TonoRelease` service answers Restore internet on its own pipe. An older App sends
+/// no generation and is admitted as before; MIN_REQUIRED stays 14.
+pub const PROTOCOL_REVISION: u16 = 21;
 /// Revision that introduced the Service-owned, detached-manifest update transaction.
 pub const MIN_SERVICE_REVISION_FOR_UPDATE_TRANSACTION: u16 = 16;
 /// Revision whose `POST /clash/prepare-start` compares the request's client-snapshotted
@@ -187,6 +199,9 @@ pub const MIN_SERVICE_REVISION_FOR_SING_BOX: u16 = 18;
 pub const MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT: u16 = 19;
 /// First revision that reports the relay permit in rule C (decision 090) to the App.
 pub const MIN_SERVICE_REVISION_FOR_API_RELAY_PERMIT: u16 = 20;
+/// First revision that admits StartClash under the release authority and installs the
+/// separate release service.
+pub const MIN_SERVICE_REVISION_FOR_PREEMPTIVE_RELEASE: u16 = 21;
 /// Revisions 7 through 12 are wire/behaviour incompatible with older peers. Reject a mismatch at
 /// the protocol probe rather than failing later during a required mutation. Revision 13 is
 /// additive: a revision-12 client may still pair.

@@ -402,7 +402,11 @@
       "dnsPortBusy": "The connection didn't complete.",
       "protectionReleaseFailed": "Leak protection is still on, so this PC stays blocked. Try Restore normal internet again.",
       "encryptedDns": "The connection didn't complete.",
-      "sendDiagnostics": "Send to support"
+      "sendDiagnostics": "Send to support",
+      "releaseInProgress": "Tono is restoring normal internet. Connect once it finishes, in a few seconds.",
+      "releaseUnfinished": "The last internet restore has not fully finished, so Tono cannot connect yet. Choose Restore Normal Internet again, or restart the PC and connect.",
+      "releaseRecordCorrupt": "Tono cannot read the record of the last internet restore, so it will not connect. Restart the PC; if that does not help, contact support.",
+      "staleGeneration": "This connection was started before the internet restore and was cancelled. Connect again."
     },
     "status": {
       "connecting": "Connecting",
@@ -513,7 +517,10 @@
       "securingDNS": "securing DNS",
       "checkingExit": "checking the exit",
       "verifyingTraffic": "verifying the connection"
-    }
+    },
+    "restorePartial": "Internet is not fully restored: some of Tono's network settings are still in effect. Choose Restore Normal Internet again; if that does not help, restart the PC.",
+    "restoreUnknown": "Tono cannot confirm that the internet is restored. Choose Restore Normal Internet again; if that does not help, restart the PC.",
+    "restoreBusy": "Restoring the internet. Wait a few seconds, then try again."
   },
   "nodes": {
     "title": "Nodes",

@@ -238,6 +238,28 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
     prefix: 'TONO_RELEASE_RECONCILING',
     key: 'tono.dashboard.errors.releaseReconciling',
   },
+  // Restore internet through the release service: anything but a clean, settled read-back
+  // keeps the blocked state and says so (PROPOSAL §10 v5).
+  { prefix: 'TONO_RESTORE_PARTIAL', key: 'tono.progress.restorePartial' },
+  { prefix: 'TONO_RESTORE_UNKNOWN', key: 'tono.progress.restoreUnknown' },
+  { prefix: 'TONO_RESTORE_BUSY', key: 'tono.progress.restoreBusy' },
+  // A Connect the release authority did not admit says why.
+  {
+    prefix: 'TONO_RELEASE_IN_PROGRESS',
+    key: 'tono.dashboard.errors.releaseInProgress',
+  },
+  {
+    prefix: 'TONO_RELEASE_UNFINISHED',
+    key: 'tono.dashboard.errors.releaseUnfinished',
+  },
+  {
+    prefix: 'TONO_RELEASE_RECORD_CORRUPT',
+    key: 'tono.dashboard.errors.releaseRecordCorrupt',
+  },
+  {
+    prefix: 'TONO_STALE_GENERATION',
+    key: 'tono.dashboard.errors.staleGeneration',
+  },
   {
     prefix: 'TONO_SERVICE_TOO_OLD',
     key: 'tono.dashboard.errors.serviceTooOld',
@@ -604,6 +626,9 @@ export const tonoRepairService = () => call<void>('tono_repair_service')
 export const tonoConnect = () => call<void>('tono_connect')
 
 export const tonoDisconnect = () => call<void>('tono_disconnect')
+
+/** Restore Normal Internet: resolves only when the read-back proved it restored. */
+export const tonoRestoreInternet = () => call<void>('tono_restore_internet')
 
 export const tonoStatus = () => call<TonoStatus>('tono_status')
 

@@ -7,6 +7,13 @@ extension AppState {
         connect(preservingUnarmedBackoff: false)
     }
 
+    /// Connect from the user's own click: the only connect that may protect
+    /// a Mac again after Restore internet released it.
+    func userConnect() {
+        connectionCoordinator.beginUserConnect()
+        connect()
+    }
+
     func connect(preservingUnarmedBackoff: Bool) {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
         if !preservingUnarmedBackoff { unarmedReconnectAttempt = 0 }
@@ -794,7 +801,245 @@ extension AppState {
         if !isConnected && (isProtectionBlocked || isProtectionUnconfirmed || KillSwitchService.isArmed) {
             noteProtectionLoss(NetworkLossReport.restoreNetwork)
         }
+        if HelperManager.releaseServiceInstalled {
+            restoreInternetPreemptively()
+            return
+        }
         disconnect(releaseKillSwitch: true)
+    }
+
+    /// Restore internet through the separate release service (helper
+    /// 4.52.50+). Nothing here waits for the old session's tasks or for the
+    /// runtime actor: the service ends the old writers itself, and the old
+    /// session's late requests carry its retired generation. The result is
+    /// shown as the service read it back: restored only when every component
+    /// is clean and nothing that could change the network is left.
+    func restoreInternetPreemptively() {
+        if LocalNetworkDevicesSync.holdsProtectedFault { clearProtectedFaultForUserAction() }
+        let expectedGeneration = connectionCoordinator.helperSession.value
+        let updateWasPending = nativeUpdatePending || RuntimeCleanup.nativeUpdatePending
+        connectionCoordinator.beginPreemptiveRelease()
+        prepareTeardownState(releaseKillSwitch: true)
+        resetReleasedSessionHistory()
+        isDisconnecting = true
+        disconnectionStartedAt = Date()
+        disconnectionStage = .restoringNetwork
+        let requestID = UUID().uuidString
+        let generation = connectionCoordinator.protectionOperationGeneration
+        LocalTrafficAudit.shared.recordEvent("preemptive_release_requested", details: [:])
+        let sessionPorts: Set<Int> = config.mixedPort > 0 ? [config.mixedPort] : []
+        Task { [weak self] in
+            // R-F4: the Restore names the session it is for. With no admitted
+            // session it names the generation current now, read from the
+            // release service, so a Connect admitted in between supersedes it.
+            let result = await Task.detached(priority: .userInitiated) {
+                Result {
+                    try HelperManager.requestRelease(
+                        requestID: requestID,
+                        expectedGeneration: expectedGeneration ?? HelperManager.releaseStatusGeneration()
+                    )
+                }
+            }.value
+            guard let self else { return }
+            // A newer Connect or Restore owns the UI now.
+            guard self.connectionCoordinator.protectionOperationGeneration == generation else { return }
+            // R-M1: a system proxy Tono set points at a listener that is gone.
+            // It is cleared and read back before anything is reported; the
+            // release service cannot reach it. Not when a newer session won.
+            var tonoProxyRemains: Bool? = false
+            if case .success(let answer) = result, answer.outcome != "superseded", answer.outcome != "busy" {
+                // Bounded: a clear that outlasts it is reported unknown.
+                tonoProxyRemains = await SystemProxy.clearTonoOwnedProxy(sessionPorts: sessionPorts, within: 10)
+                guard self.connectionCoordinator.protectionOperationGeneration == generation else { return }
+            }
+            self.finishPreemptiveRelease(result, updateWasPending: updateWasPending, tonoProxyRemains: tonoProxyRemains)
+        }
+    }
+
+    private func finishPreemptiveRelease(
+        _ result: Result<HelperManager.ReleaseOutcome, Error>,
+        updateWasPending: Bool,
+        tonoProxyRemains: Bool?
+    ) {
+        isDisconnecting = false
+        disconnectionStartedAt = nil
+        consumePendingNetworkChange()
+        let outcome: HelperManager.ReleaseOutcome
+        switch result {
+        case .success(let answer):
+            outcome = answer.includingSystemProxy(tonoProxyRemains: tonoProxyRemains)
+        case .failure(let error):
+            // The service did not answer. The queued release is the only
+            // other path; it reports its own result.
+            LocalTrafficAudit.shared.recordEvent(
+                "preemptive_release_unavailable",
+                details: ["error": error.localizedDescription]
+            )
+            disconnect(releaseKillSwitch: true)
+            return
+        }
+        LocalTrafficAudit.shared.recordEvent(
+            "preemptive_release_answered",
+            details: [
+                "outcome": outcome.outcome,
+                "finished": String(outcome.finished),
+                "components": outcome.components.map { "\($0.name)=\($0.readback)/\($0.risk)" }.joined(separator: ","),
+            ]
+        )
+        let pfClean = outcome.components.contains { $0.name == "pf" && $0.readback == "restored" }
+        let coreClean = outcome.components.contains { $0.name == "core" && $0.readback == "restored" }
+        if pfClean { KillSwitchService.isArmed = false }
+        if coreClean { RuntimeCleanup.clearCoreStarted() }
+        if updateWasPending { RuntimeCleanup.nativeUpdateBlocksConnect = true }
+        switch outcome.outcome {
+        case "restored":
+            isProtectionBlocked = false
+            isProtectionUnconfirmed = false
+            protectedDNSService = nil
+            recoveryCause = nil
+            RuntimeCleanup.clearConnectBootSession()
+            automaticResumeHeldAfterRestart = false
+            errorMessage = HelperManager.takeProtectedDNSRestoreNotice()
+        case "superseded":
+            // A newer connection owns the network; nothing was changed.
+            break
+        case "busy":
+            connectionCoordinator.notePreemptiveReleaseUnconfirmed()
+            isProtectionBlocked = true
+            errorMessage = String(localized: "Another Restore internet is still running. Wait a moment, then choose Restore internet again.")
+        case "partial":
+            connectionCoordinator.notePreemptiveReleaseUnconfirmed()
+            isProtectionBlocked = true
+            let items = Self.releaseComponentNames(outcome.components.filter { $0.readback != "restored" })
+            errorMessage = String(localized: "Restore internet finished, but these are still in place: \(items). Choose Restore internet again.")
+        default:
+            connectionCoordinator.notePreemptiveReleaseUnconfirmed()
+            isProtectionBlocked = true
+            let items = Self.releaseComponentNames(outcome.components.filter { $0.readback != "restored" || $0.risk != "settled" })
+            errorMessage = items.isEmpty
+                ? String(localized: "Tono could not confirm that the internet is restored. Choose Restore internet again. If it keeps failing, the Support page has a recovery command.")
+                : String(localized: "Tono could not confirm that the internet is restored (\(items)). Choose Restore internet again. If it keeps failing, the Support page has a recovery command.")
+        }
+    }
+
+    /// Plain names for the components a release reports.
+    static func releaseComponentNames(_ components: [HelperManager.ReleaseOutcome.Component]) -> String {
+        ListFormatter.localizedString(byJoining: components.map { component -> String in
+            switch component.name {
+            case "pf": String(localized: "network protection rules")
+            case "ai": String(localized: "AI service protection")
+            case "dns": String(localized: "DNS settings")
+            case "core": String(localized: "Tono's network core")
+            case "proxy": String(localized: "system proxy settings")
+            default: component.name
+            }
+        })
+    }
+
+    /// The UI and connection state a teardown resets before any privileged
+    /// work, shared by the queued teardown and the preemptive Restore.
+    func prepareTeardownState(releaseKillSwitch: Bool) {
+        LocalTrafficAudit.shared.recordEvent(
+            "disconnect_requested",
+            details: [
+                "release_kill_switch": String(releaseKillSwitch),
+                "was_connected": String(self.isConnected),
+            ]
+        )
+        // Recorded here, at the top, because everything it reports is gone by
+        // the time the teardown below returns: `trafficStats` is replaced with
+        // a fresh one and `isConnected` goes false further down, and the
+        // release branch resets session history. The session start is
+        // consumed here so a health-driven disconnect followed by the user's
+        // own "Restore internet" cannot bank a second, empty session.
+        let sessionStartedAt = self.connectedSessionStartedAt
+        self.connectedSessionStartedAt = nil
+        if self.isConnected, let sessionStartedAt {
+            ConnectionTelemetryBuffer.shared.record(
+                "disconnectOk",
+                elapsedMs: max(0, Int(Date().timeIntervalSince(sessionStartedAt) * 1_000)),
+                node: self.selectedExitNode()?.name,
+                // Mihomo's top-level counters are cumulative, not the sum of live flows.
+                bytesUp: self.trafficStats.totalUpload,
+                bytesDown: self.trafficStats.totalDownload
+            )
+        }
+        let protectionMayBeActive = self.isProtectionBlocked
+            || self.isConnected
+            || self.isConnecting
+            || KillSwitchService.isArmed
+        // An explicit release can spend up to 180 seconds on the administrator
+        // repair prompt. Keep the UI protected/offline until core stop, DNS
+        // restoration, and PF disarm have all committed.
+        self.isProtectionBlocked = !releaseKillSwitch || protectionMayBeActive
+        if releaseKillSwitch {
+            self.resetReleasedSessionHistory()
+        }
+        // Connection-scoped observations. `/connections` stops arriving once the
+        // core is gone, so leaving these set would have the next session judge a
+        // phantom stream from the previous one — old enough to look in-flight —
+        // and needlessly defer its first pin refreshes.
+        self.oldestProxiedConnectionStart = nil
+        self.lastManagedDirectActivity = nil
+        self.pinRefreshDeferralCount = 0
+        self.catalogApplyDeferralCount = 0
+        self.connectionCoordinator.networkEnvironmentTask?.cancel()
+        self.connectionCoordinator.networkEnvironmentTask = nil
+        self.networkInfoTask?.cancel()
+        self.networkInfoTask = nil
+        self.pendingFullConfigReload = false
+        self.pendingOptionalPolicyReload = false
+        if self.pendingRemovedCatalogExit {
+            self.applyDefaultProxySelection(persist: true)
+        }
+        self.pendingRemovedCatalogExit = false
+        self.pendingDirectPolicyReload = nil
+        self.loadedRuntimeConfigDigest = nil
+        self.residentialRouteAuditGeneration &+= 1
+        self.residentialRouteAuditContext = nil
+        LocalTrafficAudit.shared.setResidentialRouteContext(nil)
+        LocalTrafficAudit.setAssistantDirectFirstMember(nil)
+
+        self.isConnecting = false
+        self.connectionStage = .preparing
+        self.isDisconnecting = true
+        self.disconnectionStartedAt = Date()
+        self.disconnectionStage = .finishingOperation
+        self.switchingNodeId = nil
+
+        // Stop WebSocket streams
+        self.webSocket?.stopAll()
+        self.webSocket = nil
+        self.coreController = nil
+        self.proxyService.setAPI(nil)
+
+        // Stop UI-side streams/timers immediately; blocking system operations
+        // continue on the serialized runtime actor.
+        self.stopProxyGuard()
+        self.stopLatencyTestTimer()
+
+        // Reset state
+        self.isConnected = false
+        self.lastUplinkSnapshot = nil
+        self.isProxyDegraded = false
+        // In-place recovery belongs to the session being torn down.
+        // Left set, it outranked Protected Offline and Not Connected on
+        // the dashboard until the next successful connect.
+        self.isRecoveringProtectedConnection = false
+        self.networkInfo = NetworkInfo()
+        self.trafficStats = TrafficStats()
+        self.trafficFeedLive = false
+        self.connectionsFeedLive = false
+        self.connections = []
+        self.connectionsDisplayLimited = false
+        self.appTrafficLedger.reset()
+        self.logEntries = []
+        self.activeRules = []
+        self.ruleProviders = [:]
+        self.providerRulesCache = []
+        self.providerRulesLoaded = false
+        self.isLoadingProviderRules = false
+        self.activeDirectPolicy = nil
     }
 
     /// Stops Mihomo/TUN. The default leaves the kill switch armed. An exhausted
@@ -872,108 +1117,7 @@ extension AppState {
             releaseDisposition: releaseDisposition,
             pendingTasks: pendingTasks,
             prepare: { [weak self] in
-                guard let self else { return }
-                LocalTrafficAudit.shared.recordEvent(
-                    "disconnect_requested",
-                    details: [
-                        "release_kill_switch": String(releaseKillSwitch),
-                        "was_connected": String(self.isConnected),
-                    ]
-                )
-                // Recorded here, at the top, because everything it reports is gone by
-                // the time the teardown below returns: `trafficStats` is replaced with
-                // a fresh one and `isConnected` goes false further down, and the
-                // release branch resets session history. The session start is
-                // consumed here so a health-driven disconnect followed by the user's
-                // own "Restore internet" cannot bank a second, empty session.
-                let sessionStartedAt = self.connectedSessionStartedAt
-                self.connectedSessionStartedAt = nil
-                if self.isConnected, let sessionStartedAt {
-                    ConnectionTelemetryBuffer.shared.record(
-                        "disconnectOk",
-                        elapsedMs: max(0, Int(Date().timeIntervalSince(sessionStartedAt) * 1_000)),
-                        node: self.selectedExitNode()?.name,
-                        // Mihomo's top-level counters are cumulative, not the sum of live flows.
-                        bytesUp: self.trafficStats.totalUpload,
-                        bytesDown: self.trafficStats.totalDownload
-                    )
-                }
-                let protectionMayBeActive = self.isProtectionBlocked
-                    || self.isConnected
-                    || self.isConnecting
-                    || KillSwitchService.isArmed
-                // An explicit release can spend up to 180 seconds on the administrator
-                // repair prompt. Keep the UI protected/offline until core stop, DNS
-                // restoration, and PF disarm have all committed.
-                self.isProtectionBlocked = !releaseKillSwitch || protectionMayBeActive
-                if releaseKillSwitch {
-                    self.resetReleasedSessionHistory()
-                }
-                // Connection-scoped observations. `/connections` stops arriving once the
-                // core is gone, so leaving these set would have the next session judge a
-                // phantom stream from the previous one — old enough to look in-flight —
-                // and needlessly defer its first pin refreshes.
-                self.oldestProxiedConnectionStart = nil
-                self.lastManagedDirectActivity = nil
-                self.pinRefreshDeferralCount = 0
-                self.catalogApplyDeferralCount = 0
-                self.connectionCoordinator.networkEnvironmentTask?.cancel()
-                self.connectionCoordinator.networkEnvironmentTask = nil
-                self.networkInfoTask?.cancel()
-                self.networkInfoTask = nil
-                self.pendingFullConfigReload = false
-                self.pendingOptionalPolicyReload = false
-                if self.pendingRemovedCatalogExit {
-                    self.applyDefaultProxySelection(persist: true)
-                }
-                self.pendingRemovedCatalogExit = false
-                self.pendingDirectPolicyReload = nil
-                self.loadedRuntimeConfigDigest = nil
-                self.residentialRouteAuditGeneration &+= 1
-                self.residentialRouteAuditContext = nil
-                LocalTrafficAudit.shared.setResidentialRouteContext(nil)
-                LocalTrafficAudit.setAssistantDirectFirstMember(nil)
-
-                self.isConnecting = false
-                self.connectionStage = .preparing
-                self.isDisconnecting = true
-                self.disconnectionStartedAt = Date()
-                self.disconnectionStage = .finishingOperation
-                self.switchingNodeId = nil
-
-                // Stop WebSocket streams
-                self.webSocket?.stopAll()
-                self.webSocket = nil
-                self.coreController = nil
-                self.proxyService.setAPI(nil)
-
-                // Stop UI-side streams/timers immediately; blocking system operations
-                // continue on the serialized runtime actor.
-                self.stopProxyGuard()
-                self.stopLatencyTestTimer()
-
-                // Reset state
-                self.isConnected = false
-                self.lastUplinkSnapshot = nil
-                self.isProxyDegraded = false
-                // In-place recovery belongs to the session being torn down.
-                // Left set, it outranked Protected Offline and Not Connected on
-                // the dashboard until the next successful connect.
-                self.isRecoveringProtectedConnection = false
-                self.networkInfo = NetworkInfo()
-                self.trafficStats = TrafficStats()
-                self.trafficFeedLive = false
-                self.connectionsFeedLive = false
-                self.connections = []
-                self.connectionsDisplayLimited = false
-                self.appTrafficLedger.reset()
-                self.logEntries = []
-                self.activeRules = []
-                self.ruleProviders = [:]
-                self.providerRulesCache = []
-                self.providerRulesLoaded = false
-                self.isLoadingProviderRules = false
-                self.activeDirectPolicy = nil
+                self?.prepareTeardownState(releaseKillSwitch: releaseKillSwitch)
             },
             operation: { [weak self, coreRuntime] requestID in
             var transitionError: String?

@@ -122,6 +122,9 @@ enum UpdateExecutor {
                     guard let attempt = try openedStorage.load().attempt, attempt.receipt.phase != .committed else { return false }
                     if attempt.execution == .consumed && (attempt.receipt.blockedReason != nil || attempt.disconnectRequested) { return false }
                     if [.consumed, .replacing, .rollingBack].contains(attempt.execution) {
+                        // A user Restore quarantined the executor; only the
+                        // next admitted Connect brings it back.
+                        guard (try? ReleaseAuthority().load())?.executorQuarantined != true else { return false }
                         try launch(storage: openedStorage, attempt: attempt)
                         return true
                     }

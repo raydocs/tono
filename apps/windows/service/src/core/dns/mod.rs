@@ -133,6 +133,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
+pub(crate) mod broker_ledger;
 mod enable;
 mod enable_decisions;
 mod engine_ops;
@@ -577,6 +578,10 @@ async fn observe_for_update_with(barrier_wanted: bool) -> Result<DnsProtectionSt
 
 #[cfg(all(windows, not(feature = "test")))]
 mod engine;
+#[cfg(all(windows, not(feature = "test")))]
+mod release_readback;
+#[cfg(all(windows, not(feature = "test")))]
+pub(crate) use release_readback::{ReleaseDnsReadback, release_readback};
 
 
 

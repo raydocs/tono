@@ -402,7 +402,11 @@
       "dnsPortBusy": "检测到其他代理软件（如 Clash Verge、CFW 等）正在运行并占用了系统网络。请在系统托盘彻底退出其他代理后再连接。",
       "protectionReleaseFailed": "保护还没解除。请再点一次「恢复正常网络」。",
       "encryptedDns": "Windows 还开着「加密 DNS」。点下面打开设置，关掉后再连接。",
-      "sendDiagnostics": "发给支持"
+      "sendDiagnostics": "发给支持",
+      "releaseInProgress": "正在恢复正常网络，完成后才能连接。请稍等几秒再试。",
+      "releaseUnfinished": "上一次恢复正常网络还没有完全结束，暂时不能连接。请再点一次「恢复正常网络」，或重启电脑后再连。",
+      "releaseRecordCorrupt": "Tono 读不到上一次恢复网络的记录，为安全起见暂时不能连接。请重启电脑；仍不行请联系客服。",
+      "staleGeneration": "这次连接是在恢复网络之前发起的，已作废。请重新连接。"
     },
     "status": {
       "connecting": "连接中",
@@ -513,7 +517,10 @@
       "securingDNS": "保护 DNS",
       "checkingExit": "检查出口",
       "verifyingTraffic": "验证连接"
-    }
+    },
+    "restorePartial": "网络还没有完全恢复：Tono 的部分网络设置仍在生效。请再点一次「恢复正常网络」；仍不行请重启电脑。",
+    "restoreUnknown": "Tono 无法确认网络是否已经恢复。请再点一次「恢复正常网络」；仍不行请重启电脑。",
+    "restoreBusy": "正在恢复网络，请稍等几秒再试。"
   },
   "nodes": {
     "title": "线路",

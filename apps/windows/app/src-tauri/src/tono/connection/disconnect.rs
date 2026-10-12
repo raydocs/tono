@@ -300,19 +300,27 @@ async fn run_release_sequence(
         }
     }
 
+    // The session this release tears down, read while the release guard keeps any attempt from
+    // replacing it (Sol R-F4: same owner is not same session).
+    let release_generation =
+        service::teardown_release_generation(state.lock().await.release_ticket.generation).await;
+
     #[cfg(windows)]
     let status = {
         // User Disconnect and failed-Prepare recovery request this durable release.
         // Quit, sign-out and ordinary failure cleanup keep the pending-update fence.
         let update_release = if _explicit_disconnect {
-            pending_update_release_result(state, commands::update::disconnect_if_pending(apply_narrow).await).await?
+            pending_update_release_result(
+                state,
+                commands::update::disconnect_if_pending(apply_narrow, release_generation).await,
+            ).await?
         } else { None };
         match update_release {
             Some(status) => status,
             None => match if apply_narrow {
-                service::tono_release_kill_switch_applying_narrow().await
+                service::tono_release_kill_switch_applying_narrow(release_generation).await
             } else {
-                service::tono_release_kill_switch().await
+                service::tono_release_kill_switch(release_generation).await
             } {
                 Ok(status) => status,
                 Err(error) => return Err(release_failed(state, &error).await),
@@ -322,14 +330,14 @@ async fn run_release_sequence(
 
     #[cfg(not(windows))]
     let status = {
-        service::tono_restore_protected_dns()
+        service::tono_restore_protected_dns(release_generation)
             .await
             .map_err(|error| format!("DNS restore failed; protection stays on: {error}"))?;
         let core_active = matches!(*CoreManager::global().get_running_mode(), RunningMode::Service);
         if stop_core_before_release(core_active, service::tono_session_live()) {
             let _ = service::tono_stop_core(false).await;
         }
-        match service::tono_release_kill_switch().await {
+        match service::tono_release_kill_switch(release_generation).await {
             Ok(status) => status,
             Err(error) => return Err(release_failed(state, &error).await),
         }
@@ -426,9 +434,29 @@ fn idle_release_can_be_skipped(
 pub(crate) async fn disconnect_for_generation(
     state: Arc<TonoState>, app: AppHandle, expected_generation: Option<u64>,
 ) -> Result<(), String> {
+    disconnect_owned(state, app, expected_generation, None).await
+}
+
+/// The ordinary release a Restore internet falls back to. It runs only while that Restore still
+/// owns the release epoch, checked under the lock that admits attempts (Sol R2-F4 on PR #1569):
+/// once the user clicked Connect or Restore again, this older Restore changes nothing.
+#[cfg(windows)]
+pub(crate) async fn disconnect_for_restore(
+    state: Arc<TonoState>, app: AppHandle, ticket: crate::core::service::ReleaseTicket,
+) -> Result<(), String> {
+    disconnect_owned(state, app, None, Some(ticket)).await
+}
+
+async fn disconnect_owned(
+    state: Arc<TonoState>, app: AppHandle, expected_generation: Option<u64>,
+    restore_ticket: Option<crate::core::service::ReleaseTicket>,
+) -> Result<(), String> {
     let operation = {
         let mut inner = state.lock().await;
         if expected_generation.is_some_and(|generation| inner.connect_generation != generation) {
+            return Ok(());
+        }
+        if restore_ticket.is_some_and(|ticket| !crate::core::service::release_ticket_current(&ticket)) {
             return Ok(());
         }
         inner.client.transport().set_auth_tunnel_port(0);

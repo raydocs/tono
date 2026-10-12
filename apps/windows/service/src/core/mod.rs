@@ -63,6 +63,20 @@ mod proxy;
 #[cfg(feature = "standalone")]
 mod reconcile;
 #[cfg(feature = "standalone")]
+pub(crate) mod release;
+#[cfg(all(feature = "standalone", windows, not(feature = "test")))]
+pub use release::daemon::{
+    recover_quarantine as release_service_recover_quarantine, shutdown as release_service_shutdown,
+};
+#[cfg(all(feature = "standalone", windows, not(feature = "test")))]
+pub use release::install::{
+    remove as release_service_remove, spawn_ensure_installed as release_service_spawn_install,
+};
+#[cfg(all(feature = "standalone", windows, not(feature = "test")))]
+pub use release::worker::run as release_worker_run;
+#[cfg(all(feature = "standalone", windows, not(feature = "test")))]
+pub use server::run_release_server_until;
+#[cfg(feature = "standalone")]
 mod repair;
 #[cfg(feature = "standalone")]
 mod runtime;

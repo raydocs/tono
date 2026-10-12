@@ -39,6 +39,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   tonoSignInDismiss: mocks.dismiss,
   tonoSignOut: mocks.signOut,
   tonoDisconnect: mocks.disconnect,
+  tonoRestoreInternet: mocks.disconnect,
   tonoRetryRestore: vi.fn(),
   formatTonoActionError: (error: Error) => error.message,
 }))

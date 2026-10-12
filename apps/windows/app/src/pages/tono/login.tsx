@@ -14,7 +14,7 @@ import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
   stableTonoErrorCode,
-  tonoDisconnect,
+  tonoRestoreInternet,
   tonoRetryRestore,
   tonoSignInDismiss,
   tonoSignInStart,
@@ -369,7 +369,7 @@ const LoginPage = () => {
       // This explicit owner-gated release is intentionally available before
       // authentication. A persisted fail-closed Service state can otherwise
       // block the login API while the auth guard hides the dashboard escape.
-      await tonoDisconnect()
+      await tonoRestoreInternet()
       await mutateTonoStatus()
       setError(null)
       setAuthFailureSummary(null)

@@ -957,6 +957,7 @@ fn resumable_startup_runtime() -> (ServiceStatusSnapshot, DnsProtectionStatus) {
             }),
             network_events: Default::default(),
             update_attempt_pending: None,
+            release_generation: None,
         },
         DnsProtectionStatus {
             enabled: true,

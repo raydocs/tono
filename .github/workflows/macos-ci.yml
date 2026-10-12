@@ -333,6 +333,11 @@ jobs:
         # the failing cases, which needs the ability to chown to another user.
         run: sudo apps/macos/Tono/Resources/tono-core-helper --staging-self-test
 
+      - name: Helper preemptive release self-test
+        # Machine lock, release record, admission, generation verdicts, and a
+        # real session-leader worker that must report busy without the lock.
+        run: sudo apps/macos/Tono/Resources/tono-core-helper --release-self-test
+
       - name: Helper native update transaction self-test
         # Production store, staging and executor boundaries with temporary I/O,
         # not a signing bypass or installed-device PF/DNS acceptance.

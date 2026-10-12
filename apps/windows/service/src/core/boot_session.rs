@@ -20,10 +20,40 @@ pub(crate) fn current() -> Option<String> {
     CURRENT.get_or_init(compute).clone()
 }
 
+/// The release authority's own boot marker (Sol R2-F3 on PR #1569): a volatile key under
+/// `HKLM\SOFTWARE` that no installer creates or deletes, so unlike [`current`] a fresh install
+/// within one boot keeps it. `None` when it could not be read or created; the release treats
+/// that as an unknown boot, never as a different one.
+pub(crate) fn release_marker() -> Option<String> {
+    static RELEASE: OnceLock<Option<String>> = OnceLock::new();
+    RELEASE.get_or_init(compute_release).clone()
+}
+
 /// Every test in one process shares one boot.
 #[cfg(feature = "test")]
 fn compute() -> Option<String> {
     Some("tests-share-one-boot".to_owned())
+}
+
+#[cfg(feature = "test")]
+fn compute_release() -> Option<String> {
+    Some("tests-share-one-boot".to_owned())
+}
+
+#[cfg(all(not(windows), not(feature = "test")))]
+fn compute_release() -> Option<String> {
+    None
+}
+
+#[cfg(all(windows, not(feature = "test")))]
+fn compute_release() -> Option<String> {
+    match volatile_marker("SOFTWARE", "TonoReleaseBoot") {
+        Ok(marker) => Some(marker),
+        Err(error) => {
+            tracing::warn!("the release boot marker is unavailable, so boot changes stay unknown: {error:#}");
+            None
+        }
+    }
 }
 
 #[cfg(all(not(windows), not(feature = "test")))]
@@ -33,7 +63,8 @@ fn compute() -> Option<String> {
 
 #[cfg(all(windows, not(feature = "test")))]
 fn compute() -> Option<String> {
-    match windows_marker() {
+    let service_key = format!(r"SYSTEM\CurrentControlSet\Services\{}", crate::WINDOWS_SERVICE_NAME);
+    match volatile_marker(&service_key, "BootSession") {
         Ok(marker) => Some(marker),
         Err(error) => {
             tracing::warn!(
@@ -45,10 +76,10 @@ fn compute() -> Option<String> {
     }
 }
 
-/// Open the existing Service key (never create it), create its volatile `BootSession` subkey,
+/// Open the existing `parent` key under HKLM (never create it), create its volatile `subkey`,
 /// and read `Id`; a missing or empty `Id` is written once and read back.
 #[cfg(all(windows, not(feature = "test")))]
-fn windows_marker() -> anyhow::Result<String> {
+fn volatile_marker(parent_path: &str, subkey_name: &str) -> anyhow::Result<String> {
     use anyhow::Context as _;
     use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, FILETIME};
     use windows_sys::Win32::System::Registry::{
@@ -108,10 +139,7 @@ fn windows_marker() -> anyhow::Result<String> {
         ))
     }
 
-    let service_key = wide(&format!(
-        r"SYSTEM\CurrentControlSet\Services\{}",
-        crate::WINDOWS_SERVICE_NAME
-    ));
+    let service_key = wide(parent_path);
     let mut parent = std::ptr::null_mut();
     // SAFETY: NUL-terminated key path under HKLM; `parent` is a valid out-pointer.
     check(
@@ -124,11 +152,11 @@ fn windows_marker() -> anyhow::Result<String> {
                 &mut parent,
             )
         },
-        "failed to open the Service's registry key",
+        "failed to open the boot marker's parent key",
     )?;
     let parent = Key(parent);
 
-    let subkey = wide("BootSession");
+    let subkey = wide(subkey_name);
     let mut handle = std::ptr::null_mut();
     let mut disposition = 0_u32;
     // SAFETY: valid parent handle and NUL-terminated subkey; `handle` and `disposition` are

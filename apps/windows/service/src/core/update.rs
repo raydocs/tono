@@ -733,7 +733,7 @@ async fn transact(
             store.save(next)?;
             // Child waits for the persisted identity while this lock is held.
         }
-        release @ (UpdateRequest::Disconnect | UpdateRequest::DisconnectApplyingNarrow) => {
+        release @ (UpdateRequest::Disconnect { .. } | UpdateRequest::DisconnectApplyingNarrow { .. }) => {
             if !store.pending() {
                 return status(&store);
             }
@@ -1719,6 +1719,11 @@ pub fn finish_manual() -> Result<()> {
 /// evidence exists. ONSTART recovery can repair binaries even if Service will
 /// not load. A live Service also wakes that same independent executor.
 pub fn reconcile_before_desired() -> Result<bool> {
+    // After a Restore internet only an admitted Connect brings a Core back (PROPOSAL §10 v5).
+    if super::release::replay_held() {
+        tracing::warn!("the network was restored and no Connect admitted since; no Core replay");
+        return Ok(true);
+    }
     let mut store = open_store()?;
     if store.state.manual_installer.is_some() {
         return Ok(true);
@@ -1740,6 +1745,13 @@ pub fn reconcile_before_desired() -> Result<bool> {
         return Ok(true);
     }
     let a = store.attempt()?;
+    // A Restore internet quarantined the update executor (PROPOSAL §10 v5). It stays down,
+    // task and direct launch alike, until a Connect is admitted; the pending attempt still
+    // holds desired-state replay, as any pending update does.
+    if super::release::executor_quarantined() {
+        tracing::warn!("update recovery is quarantined by a network restore until the next Connect");
+        return Ok(true);
+    }
     if store.independent_recovery_pending()? {
         // Recovery itself does not run through the task; the task only covers a Service that
         // cannot load. A failed registration must not keep the recovery executor from running
@@ -2767,6 +2779,6 @@ mod tests {
             "{unreadable:#}"
         );
         assert!(update_lease_gate(&UpdateRequest::Adopt, &leased, |_| Ok(None)).is_err());
-        assert!(update_lease_gate(&UpdateRequest::Disconnect, &leased, |_| Ok(None)).is_err());
+        assert!(update_lease_gate(&UpdateRequest::disconnect(false, None), &leased, |_| Ok(None)).is_err());
     }
 }

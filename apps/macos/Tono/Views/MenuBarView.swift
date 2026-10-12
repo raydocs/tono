@@ -226,7 +226,7 @@ struct MenuBarView: View {
         } else {
             VStack(spacing: 0) {
                 actionButton(title: "Connect", prominent: true) {
-                    appState.connect()
+                    appState.userConnect()
                 }
                 .disabled(!canAct)
                 if appState.shouldOfferManualBackupChannel() {

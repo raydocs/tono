@@ -202,7 +202,9 @@ pub async fn tono_prepare_update(
                 "TONO_UPDATE_JOURNAL: core did not stop before install: {error}"
             ));
         }
-        let dns_restored = service::tono_restore_protected_dns().await
+        let release_generation =
+            service::teardown_release_generation(state.lock().await.release_ticket.generation).await;
+        let dns_restored = service::tono_restore_protected_dns(release_generation).await
             .map(|_| ())
             .map_err(|error| {
                 logging!(warn, Type::System,
@@ -306,7 +308,7 @@ pub async fn quit_release(app: AppHandle) -> Result<(), String> {
             // only owner credentials; keep release and owned proxy cleanup running even if the
             // interactive Quit waiter expires.
             return tauri::async_runtime::spawn(async {
-                let status = service::tono_release_kill_switch().await
+                let status = service::tono_release_kill_switch(service::teardown_release_generation(None).await).await
                     .map_err(|error| format!("Quit release without product state failed: {error:#}"))?;
                 if status.wanted || status.live {
                     return Err("Quit release without product state returned an armed kill switch".into());
@@ -545,6 +547,7 @@ mod quit_tests {
             }),
             network_events: Default::default(),
             update_attempt_pending: None,
+            release_generation: None,
         };
         assert!(
             !quit_needs_service_release(false, Some(&snapshot)),
