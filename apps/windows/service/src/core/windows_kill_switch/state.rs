@@ -604,13 +604,19 @@ pub(super) fn emergency_restore_budget(remaining: Option<std::time::Duration>) -
 /// [`EMERGENCY_RESET_FLOOR`]: this runs only once the WFP objects are gone, and it is not
 /// skipped for lack of time.
 pub(super) fn emergency_fallback_budget(remaining: Option<std::time::Duration>) -> std::time::Duration {
-    scaled_for_tests(match remaining {
+    scaled_for_tests(emergency_fallback_allowance(remaining))
+}
+
+/// [`emergency_fallback_budget`] before the tests' scale: the real figure, which a test that
+/// asserts it must read without depending on a divisor another test has set.
+pub(super) fn emergency_fallback_allowance(remaining: Option<std::time::Duration>) -> std::time::Duration {
+    match remaining {
         None => DNS_RESTORE_TIMEOUT,
         Some(remaining) => remaining
             .saturating_sub(EMERGENCY_SWEEP_RESERVE)
             .min(EMERGENCY_FALLBACK_TIMEOUT)
             .max(EMERGENCY_RESET_FLOOR),
-    })
+    }
 }
 
 /// A DNS engine call is bounded at 30 s (`dns::DNS_APPLY_TIMEOUT`, the longest mutating budget), so
@@ -629,11 +635,14 @@ pub(super) const EMERGENCY_CLAIM_WAIT_CAP: std::time::Duration = std::time::Dura
 /// ([`emergency_fallback_budget`]), which keeps its floor whether the wait ended with the claim
 /// returned or not.
 pub(super) fn emergency_claim_wait_budget(elapsed_since_restore_began: std::time::Duration) -> std::time::Duration {
-    scaled_for_tests(
-        EMERGENCY_ENGINE_CALL_BOUND
-            .saturating_sub(elapsed_since_restore_began)
-            .min(EMERGENCY_CLAIM_WAIT_CAP),
-    )
+    scaled_for_tests(emergency_claim_wait_allowance(elapsed_since_restore_began))
+}
+
+/// [`emergency_claim_wait_budget`] before the tests' scale (see [`emergency_fallback_allowance`]).
+pub(super) fn emergency_claim_wait_allowance(elapsed_since_restore_began: std::time::Duration) -> std::time::Duration {
+    EMERGENCY_ENGINE_CALL_BOUND
+        .saturating_sub(elapsed_since_restore_began)
+        .min(EMERGENCY_CLAIM_WAIT_CAP)
 }
 
 /// Tests shrink the emergency budgets by this factor so a late release of the claim can be

@@ -2244,11 +2244,11 @@ async fn emergency_disarm_with_unproven_dns_resets_the_redirected_adapter_and_dr
 fn the_emergency_fallback_leg_has_a_hard_floor_once_wfp_is_gone() {
     let floor = std::time::Duration::from_secs(10);
     for left in [0, 1, 5, 9, 10, 11, 20, 25, 45] {
-        let budget = emergency_fallback_budget(Some(std::time::Duration::from_secs(left)));
+        let budget = emergency_fallback_allowance(Some(std::time::Duration::from_secs(left)));
         assert!(budget >= floor, "{left}s left gave the reset leg only {budget:?}");
         assert!(budget <= EMERGENCY_FALLBACK_TIMEOUT, "{left}s left gave {budget:?}");
     }
-    assert_eq!(emergency_fallback_budget(Some(std::time::Duration::ZERO)), floor);
+    assert_eq!(emergency_fallback_allowance(Some(std::time::Duration::ZERO)), floor);
 }
 
 /// The restore on the emergency path fails after 20 s, the WFP cleanup that follows takes 16 s,
@@ -2261,7 +2261,7 @@ fn the_reset_leg_still_runs_after_a_slow_restore_and_a_slow_wfp_cleanup() {
         .saturating_sub(std::time::Duration::from_secs(20))
         .saturating_sub(std::time::Duration::from_secs(16));
     assert_eq!(left, std::time::Duration::from_secs(9));
-    assert!(emergency_fallback_budget(Some(left)) >= std::time::Duration::from_secs(10));
+    assert!(emergency_fallback_allowance(Some(left)) >= std::time::Duration::from_secs(10));
 }
 
 /// Under the worker's deadline the exact restore gets 10 s, so the network comes back inside the
@@ -2274,8 +2274,8 @@ fn the_exact_restore_gets_ten_seconds_under_the_workers_deadline() {
     assert_eq!(emergency_restore_budget(Some(secs(7))), secs(7), "never more than what is left");
     assert_eq!(emergency_restore_budget(Some(std::time::Duration::ZERO)), secs(5));
     assert_eq!(emergency_restore_budget(None), DNS_RESTORE_TIMEOUT);
-    assert_eq!(emergency_fallback_budget(Some(EMERGENCY_DISARM_OUTER_BUDGET - secs(10))), secs(15));
-    assert_eq!(emergency_fallback_budget(None), DNS_RESTORE_TIMEOUT);
+    assert_eq!(emergency_fallback_allowance(Some(EMERGENCY_DISARM_OUTER_BUDGET - secs(10))), secs(15));
+    assert_eq!(emergency_fallback_allowance(None), DNS_RESTORE_TIMEOUT);
 }
 
 /// End to end: the deadline is already spent when WFP has been removed (a slow restore and a
@@ -2350,6 +2350,7 @@ async fn arm_an_unprovable_redirected_machine() -> Result<()> {
     crate::core::dns::test_hooks::take_automatic_resets();
     crate::core::dns::test_hooks::take_last_automatic_reset();
     crate::core::dns::test_hooks::take_engine_refusals();
+    crate::core::dns::test_hooks::take_engine_read_delay();
     Ok(())
 }
 
@@ -2359,12 +2360,12 @@ async fn arm_an_unprovable_redirected_machine() -> Result<()> {
 #[test]
 fn the_claim_wait_budget_is_what_is_left_of_the_engine_calls_own_bound() {
     let secs = std::time::Duration::from_secs;
-    assert_eq!(emergency_claim_wait_budget(secs(0)), secs(20));
-    assert_eq!(emergency_claim_wait_budget(secs(10)), secs(20));
-    assert_eq!(emergency_claim_wait_budget(secs(12)), secs(18));
-    assert_eq!(emergency_claim_wait_budget(secs(26)), secs(4));
-    assert_eq!(emergency_claim_wait_budget(secs(30)), secs(0));
-    assert_eq!(emergency_claim_wait_budget(secs(50)), secs(0));
+    assert_eq!(emergency_claim_wait_allowance(secs(0)), secs(20));
+    assert_eq!(emergency_claim_wait_allowance(secs(10)), secs(20));
+    assert_eq!(emergency_claim_wait_allowance(secs(12)), secs(18));
+    assert_eq!(emergency_claim_wait_allowance(secs(26)), secs(4));
+    assert_eq!(emergency_claim_wait_allowance(secs(30)), secs(0));
+    assert_eq!(emergency_claim_wait_allowance(secs(50)), secs(0));
 }
 
 /// The exact restore's engine call outlives the 10 s that was given to it and returns the claim
@@ -2438,6 +2439,45 @@ async fn a_claim_that_is_never_released_leaves_the_fallback_unproven_after_waiti
     Ok(())
 }
 
+/// The restore's engine call returns the claim after the wait for it has ended and after the
+/// first stretch of the reset leg, and the candidate read right after the return is slow (as is
+/// the wake-up of a machine that has just been starved). The leg's floor is counted from the claim's
+/// return, so the read, the DHCP apply, the read-back and the policy removal all still run: the
+/// floor counted from the start of the leg had expired by the time the read finished and the
+/// adapter stayed on the dead resolver with WFP already gone.
+#[tokio::test]
+#[serial]
+async fn a_claim_returned_after_the_wait_and_the_first_floor_still_gets_a_full_floor_to_reset() -> Result<()> {
+    arm_an_unprovable_redirected_machine().await?;
+    let _scaled = ScaledBudgets::by(10);
+    let claim = crate::core::dns::test_hooks::occupy_engine_claim();
+    crate::core::dns::test_hooks::delay_next_engine_read(std::time::Duration::from_millis(700));
+    let released = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(2600));
+        drop(claim);
+    });
+    crate::core::dns::test_hooks::take_encrypted_restores();
+
+    let result = emergency_disarm_windows_kill_switch_until(
+        std::time::Instant::now() + EMERGENCY_DISARM_OUTER_BUDGET,
+    )
+    .await;
+    released.join().unwrap();
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    let reset_adapters = crate::core::dns::test_hooks::take_last_automatic_reset();
+    let policy_restores = crate::core::dns::test_hooks::take_encrypted_restores();
+    crate::core::dns::test_hooks::set_collected_adapters(Vec::new());
+    let message = format!("{:#}", result.expect_err("the original DNS error is still returned"));
+    assert!(ARMED.lock().unwrap().is_none(), "WFP is removed");
+    assert!(message.contains(crate::core::dns::WFP_REMOVED_CONTINUE_PREFIX), "{message}");
+    assert_eq!(resets, 1, "the slow read after the claim's return was cut off before the reset");
+    assert_eq!(reset_adapters, vec!["{ETHERNET}".to_owned()]);
+    assert!(policy_restores >= 1, "the resolver policy must be removed after the reset");
+
+    cleanup().await;
+    Ok(())
+}
+
 /// The release worker reports a disarm that ran past its budget honestly: a note, so the outcome
 /// cannot be "restored", and none for a disarm that finished inside it.
 #[test]
@@ -2452,7 +2492,7 @@ fn a_disarm_that_overran_its_budget_leaves_a_note_and_one_within_it_does_not() {
 #[test]
 fn the_emergency_legs_keep_the_full_dns_budgets_without_a_caller_deadline() {
     assert_eq!(emergency_restore_budget(None), DNS_RESTORE_TIMEOUT);
-    assert_eq!(emergency_fallback_budget(None), DNS_RESTORE_TIMEOUT);
+    assert_eq!(emergency_fallback_allowance(None), DNS_RESTORE_TIMEOUT);
 }
 
 // --- The uninstall-only escalation ladder ---

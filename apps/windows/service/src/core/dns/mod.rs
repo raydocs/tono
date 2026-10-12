@@ -321,6 +321,56 @@ pub(crate) mod test_hooks {
         super::engine_ops::take_refusals()
     }
 
+    /// How long the next stub read of the adapters (the emergency leg's candidate read) is
+    /// delayed once it gets past the claim, so a test can model a slow read right after the
+    /// engine call that held the claim finally returned.
+    #[cfg(test)]
+    static ENGINE_READ_DELAY: Mutex<Option<std::time::Duration>> = Mutex::new(None);
+
+    #[cfg(test)]
+    pub(crate) fn delay_next_engine_read(delay: std::time::Duration) {
+        *ENGINE_READ_DELAY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(delay);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_engine_read_delay() -> Option<std::time::Duration> {
+        ENGINE_READ_DELAY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+
+    /// The stub read of the adapters fails the way an engine call that hit its own deadline
+    /// does (the wedged marker, but not a refusal because another call holds the claim).
+    #[cfg(test)]
+    static COLLECT_TIMES_OUT: AtomicBool = AtomicBool::new(false);
+
+    #[cfg(test)]
+    pub(crate) fn set_collect_times_out(times_out: bool) {
+        COLLECT_TIMES_OUT.store(times_out, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn collect_times_out() -> bool {
+        COLLECT_TIMES_OUT.load(Ordering::Relaxed)
+    }
+
+    /// How many stub reads of the adapters got past the claim since the last take.
+    #[cfg(test)]
+    static COLLECT_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    #[cfg(test)]
+    pub(crate) fn note_collect_call() {
+        COLLECT_CALLS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_collect_calls() -> usize {
+        COLLECT_CALLS.swap(0, Ordering::Relaxed)
+    }
+
     static LIVE_DNS_ON_LOOPBACK: AtomicBool = AtomicBool::new(false);
 
     pub(crate) fn live_dns_is_on_loopback() -> bool {

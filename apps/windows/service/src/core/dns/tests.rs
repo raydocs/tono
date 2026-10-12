@@ -327,6 +327,81 @@
         Ok(())
     }
 
+    /// The claim is returned late, after the wait for it and the first stretch of the leg, and the
+    /// first read after it is slow. The leg's floor runs from the claim's return, not from the start
+    /// of the wait: a budget counted from the start had already expired when the read finished and
+    /// dropped it before any DHCP apply.
+    #[tokio::test]
+    #[serial]
+    async fn the_reset_floor_runs_from_the_claim_return_and_not_from_the_start_of_the_leg() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_live_dns_on_loopback(true);
+        test_hooks::delay_next_engine_read(std::time::Duration::from_millis(400));
+        let claim = test_hooks::occupy_engine_claim();
+        let released = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            drop(claim);
+        });
+        let result = reset_redirected_adapters_within(std::time::Duration::from_millis(600)).await;
+        released.join().unwrap();
+        let reset = test_hooks::take_last_automatic_reset();
+        reset_dns_state().await;
+        assert_eq!(reset, vec!["{A}".to_owned()], "the reset must run once the claim is back: {result:?}");
+        assert_eq!(result?, vec!["{A}".to_owned()]);
+        Ok(())
+    }
+
+    /// A claim that never comes back leaves the leg its floor from its own start, refused and
+    /// retried, and then an honest "not proven"; it does not wait for ever.
+    #[tokio::test]
+    #[serial]
+    async fn the_reset_leg_gives_up_after_its_floor_when_the_claim_never_comes_back() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let claim = test_hooks::occupy_engine_claim();
+        let started = std::time::Instant::now();
+        let result = reset_redirected_adapters_within(std::time::Duration::from_millis(300)).await;
+        let elapsed = started.elapsed();
+        let resets = test_hooks::take_automatic_resets();
+        let refusals = test_hooks::take_engine_refusals().len();
+        drop(claim);
+        reset_dns_state().await;
+        assert!(result.is_err(), "nothing was reset, so nothing is proven: {result:?}");
+        assert_eq!(resets, 0);
+        assert!(refusals >= 3, "the refused call must be retried, tried {refusals} time(s)");
+        assert!(elapsed >= std::time::Duration::from_millis(280), "gave up after only {elapsed:?}");
+        assert!(elapsed < std::time::Duration::from_secs(3), "did not give up: {elapsed:?}");
+        Ok(())
+    }
+
+    /// An engine call that hit its own deadline carries the same wedged marker as the refusal of a
+    /// call made while another still holds the claim, but it is an answer: retrying it as if it
+    /// were a busy claim would loop on a call that did run, every 50 ms, until the budget ends.
+    #[tokio::test]
+    #[serial]
+    async fn an_engine_timeout_is_an_answer_and_is_not_retried_like_a_refusal() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_live_dns_on_loopback(true);
+        test_hooks::set_collect_times_out(true);
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_millis(800),
+            reset_redirected_adapters_after_failed_restore(),
+        )
+        .await;
+        let calls = test_hooks::take_collect_calls();
+        reset_dns_state().await;
+        let result = outcome.expect("an engine timeout is the answer: the leg must not loop on it");
+        assert!(result.is_err(), "{result:?}");
+        assert_eq!(calls, 1, "the timed-out read was retried {calls} time(s)");
+        Ok(())
+    }
+
     /// A registry call behind a filter driver can block for ever. The NRPT sweep runs on its own
     /// thread, so the uninstall gives up after its budget instead of hanging with it.
     #[test]
@@ -1482,6 +1557,9 @@
         test_hooks::set_effective_dns_fails(false);
         test_hooks::take_last_automatic_reset();
         test_hooks::take_engine_refusals();
+        test_hooks::take_engine_read_delay();
+        test_hooks::set_collect_times_out(false);
+        test_hooks::take_collect_calls();
         // The tail of an earlier test's write window would otherwise still be running.
         SELF_WRITE_TAIL_UNTIL.store(0, Ordering::Relaxed);
     }

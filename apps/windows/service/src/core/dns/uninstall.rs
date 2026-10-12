@@ -613,6 +613,14 @@ pub(crate) async fn reset_redirected_adapters_after_failed_restore() -> Result<V
     Ok(adapters)
 }
 
+/// The adapter reset leg under one budget, counted from the start of the leg.
+pub(crate) async fn reset_redirected_adapters_within(budget: std::time::Duration) -> Result<Vec<String>> {
+    match tokio::time::timeout(budget, reset_redirected_adapters_after_failed_restore()).await {
+        Ok(result) => result,
+        Err(_) => bail!("the adapter reset did not finish within {budget:?}, so it could not be proven"),
+    }
+}
+
 /// The adapters of `state` that still need a reset or cannot be proven off Tono, as
 /// `(guid, assessment)`. A snapshot adapter whose registry could not be read is unproven.
 fn unresolved_adapters(state: &DnsState, snapshot: Option<&DnsSnapshot>) -> Vec<(String, Assessment)> {

@@ -310,7 +310,19 @@ pub(super) async fn engine_collect() -> Result<Vec<AdapterDnsSnapshot>> {
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
         #[cfg(test)]
-        refuse_while_claimed("collect")?;
+        {
+            refuse_while_claimed("collect")?;
+            test_hooks::note_collect_call();
+            if let Some(delay) = test_hooks::take_engine_read_delay() {
+                tokio::time::sleep(delay).await;
+            }
+            if test_hooks::collect_times_out() {
+                bail!(
+                    "{DNS_ENGINE_WEDGED_PREFIX}: the DNS engine did not answer within 25s during \
+                     collect; protected DNS was left in its last known state."
+                );
+            }
+        }
         Ok(test_hooks::collected_adapters())
     }
 }
