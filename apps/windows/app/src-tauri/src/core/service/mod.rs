@@ -778,6 +778,11 @@ pub(crate) fn release_ticket() -> ReleaseTicket {
     }
 }
 
+/// Whether a Restore internet has fenced the epoch and no user Connect has lifted it since.
+pub(crate) fn release_fenced() -> bool {
+    release_epoch().fenced
+}
+
 /// Restore internet: every ticket taken before now is out of date, and no attempt starts the
 /// Core again until the user clicks Connect.
 pub(crate) fn raise_release_fence() -> ReleaseTicket {

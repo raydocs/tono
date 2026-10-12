@@ -32,7 +32,7 @@ const USER_CONNECT_SUPERSEDED: &str =
 /// its first change and owns the state until it answers, so this click is refused and moves
 /// nothing.
 pub(super) fn claim_user_connect(inner: &TonoInner) -> Result<crate::core::service::ReleaseTicket, String> {
-    if inner.fsm.status().is_disconnecting && crate::core::service::release_ticket().fenced {
+    if inner.fsm.status().is_disconnecting && crate::core::service::release_fenced() {
         return Err(format!(
             "{}: Restore internet is still running; press Connect after it answers",
             super::preemptive::RESTORE_BUSY_PREFIX
