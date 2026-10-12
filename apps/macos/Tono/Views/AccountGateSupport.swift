@@ -24,7 +24,7 @@ struct AccountBlockedView: View {
     var body: some View {
         VStack(spacing: 14) {
             VStack(spacing: 10) {
-                Image(systemName: "exclamationmark.shield")
+                Image(systemName: "person.crop.circle.badge.exclamationmark")
                     .font(.system(size: 30, weight: .light))
                     .foregroundStyle(TonoStatus.blocked)
                 Text("This Tono account cannot connect")

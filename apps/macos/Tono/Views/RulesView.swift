@@ -246,7 +246,7 @@ struct RulesView: View {
                     )
                 }
             } else {
-                Label("Managed by Tono", systemImage: "lock.shield")
+                Label("Managed by Tono", systemImage: "lock.fill")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
             }
