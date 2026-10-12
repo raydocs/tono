@@ -231,7 +231,7 @@ extension ProxiesView {
                 isSwitching: switching, latency: latency, didFail: didFail))
         }
         .padding(.leading, 4).padding(.trailing, 14)
-        .background(selected ? Color.white.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 10))
+        .modifier(SeaWarmRowSurface(selected: selected, reduceMotion: reduceMotion))
         .overlay(alignment: .bottom) {
             Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
         }
@@ -272,5 +272,32 @@ extension ProxiesView {
                 catalogIssueRow(label: String(localized: "Traffic policy refresh failed"), reason: reason)
             }
         }
+    }
+}
+
+
+/// Hover and selection on a sea list row: a warm wash with a sunrise edge on
+/// the selected row, matching the Windows rows.
+struct SeaWarmRowSurface: ViewModifier {
+    let selected: Bool
+    let reduceMotion: Bool
+    @State private var hovered = false
+
+    static func washOpacity(selected: Bool, hovered: Bool) -> Double {
+        selected ? 0.09 : (hovered ? 0.06 : 0)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .background(Color(hex: "FFD6A0").opacity(Self.washOpacity(selected: selected, hovered: hovered)),
+                        in: RoundedRectangle(cornerRadius: 10))
+            .overlay(alignment: .leading) {
+                if selected {
+                    RoundedRectangle(cornerRadius: 1).fill(Color(hex: "FFB877"))
+                        .frame(width: 2).padding(.vertical, 8)
+                }
+            }
+            .onHover { hovered = $0 }
+            .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: hovered)
     }
 }
