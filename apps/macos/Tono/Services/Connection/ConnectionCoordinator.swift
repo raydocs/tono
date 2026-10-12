@@ -21,12 +21,20 @@ final class ConnectionCoordinator {
     /// helper's sleep gate refused its disarm, or any other failure) keeps
     /// the intent until the user connects again, so wake and network-change
     /// recovery cannot turn it into a reconnect (X1-2).
-    private var disconnectQueueReleaseIntent = false
-    /// Origin of the retained release intent: the newest request was the
-    /// automatic failure release, not the user's own. An automatic release
-    /// that ended with PF still armed is retried by the next network change
-    /// or wake; the user's release is never retried on their behalf.
-    private var disconnectQueueReleaseIsAutomatic = false
+    private var retainedRelease: RetainedRelease?
+    private var disconnectQueueReleaseIntent: Bool { retainedRelease != nil }
+    /// The release intent with its origin. The user's own release is kept
+    /// until they connect; the app's automatic failure release is retried by
+    /// the next network change or wake. `resumesWhenReleased` is the recovery
+    /// policy the original release carried: a retry reuses it, so a release
+    /// that never reconnected (paused, restart-held, user-action failure)
+    /// never gains a reconnect by being retried. `needsUserRepair` ends the
+    /// retries: the helper needs an administrator the user has to approve.
+    struct RetainedRelease: Equatable {
+        var isAutomatic: Bool
+        var resumesWhenReleased = false
+        var needsUserRepair = false
+    }
     enum ReleaseDisposition: Equatable { case preserve, automatic, ordinaryQuit, explicit }
     // Explicit release survives an overlapping Quit, including its initial
     // preserve teardown. Only a newly admitted Connect retires this choice.
@@ -82,7 +90,7 @@ final class ConnectionCoordinator {
         coreMonitorTask?.cancel()
         coreMonitorTask = nil
         disconnectRequestID &+= 1
-        disconnectQueueReleaseIntent = false
+        retainedRelease = nil
         explicitReleaseDominatesQuit = true
         helperSession.retire()
         helperSession = HelperSessionGeneration()
@@ -100,8 +108,7 @@ final class ConnectionCoordinator {
     /// A preemptive release that could not confirm the network is restored
     /// keeps the release intent, like the queued path, until the user connects.
     func notePreemptiveReleaseUnconfirmed() {
-        disconnectQueueReleaseIntent = true
-        disconnectQueueReleaseIsAutomatic = false
+        retainedRelease = RetainedRelease(isAutomatic: false)
     }
 
     /// Whether the pending or in-flight teardown queue's newest request is an
@@ -113,9 +120,19 @@ final class ConnectionCoordinator {
         disconnectQueueReleaseIntent
     }
 
-    /// The retained or in-flight release is the automatic failure release.
-    var disconnectQueueRequestsAutomaticRelease: Bool {
-        disconnectQueueReleaseIntent && disconnectQueueReleaseIsAutomatic
+    /// The retained release is the app's own automatic failure release and
+    /// may be run again; nil for the user's release or one awaiting the user.
+    var automaticReleaseRetry: RetainedRelease? {
+        guard let release = retainedRelease, release.isAutomatic,
+              !release.needsUserRepair else { return nil }
+        return release
+    }
+
+    /// The release request `requestID` could not repair the helper without
+    /// the user; automatic retries stop until a newer request or Connect.
+    func noteAutomaticReleaseNeedsUserRepair(_ requestID: Int) {
+        guard requestID == disconnectRequestID, retainedRelease?.isAutomatic == true else { return }
+        retainedRelease?.needsUserRepair = true
     }
 
     /// All teardown requests share one queue. Drain cancelled connection work
@@ -125,6 +142,7 @@ final class ConnectionCoordinator {
         waitingFor pendingTasks: [Task<Void, Never>] = [],
         releaseIntent: Bool = false,
         releaseDisposition: ReleaseDisposition? = nil,
+        automaticReleaseResumes: Bool = false,
         operation: @escaping @MainActor (Int) async -> Void
     ) {
         cancelDeferredConnect()
@@ -132,8 +150,12 @@ final class ConnectionCoordinator {
         let requestID = disconnectRequestID
         let disposition = releaseDisposition ?? (releaseIntent ? .explicit : .preserve)
         if disposition == .explicit { explicitReleaseDominatesQuit = true }
-        disconnectQueueReleaseIntent = releaseIntent
-        disconnectQueueReleaseIsAutomatic = releaseIntent && disposition == .automatic
+        retainedRelease = releaseIntent
+            ? RetainedRelease(
+                isAutomatic: disposition == .automatic,
+                resumesWhenReleased: disposition == .automatic && automaticReleaseResumes
+            )
+            : nil
         let previousDisconnect = disconnectSequence
         let session = helperSession
         disconnectSequence = Task {
@@ -154,7 +176,7 @@ final class ConnectionCoordinator {
     ) {
         guard requestID == disconnectRequestID else { return }
         if !releaseUnconfirmed {
-            disconnectQueueReleaseIntent = false
+            retainedRelease = nil
         }
         update()
     }
@@ -289,7 +311,7 @@ final class ConnectionCoordinator {
         // An admitted connect is the user's newer intent; it retires a release
         // that could not confirm PF was released. A connect refused by
         // `prepare` is not, so the intent survives it.
-        disconnectQueueReleaseIntent = false
+        retainedRelease = nil
         explicitReleaseDominatesQuit = false
 
         let currentGeneration = protectionOperationGeneration
@@ -319,6 +341,7 @@ final class ConnectionCoordinator {
     func executeDisconnect(
         releaseKillSwitch: Bool,
         releaseDisposition: ReleaseDisposition? = nil,
+        automaticReleaseResumes: Bool = false,
         pendingTasks: [Task<Void, Never>],
         prepare: () -> Void,
         operation: @escaping @MainActor (Int) async -> Void
@@ -333,6 +356,7 @@ final class ConnectionCoordinator {
             waitingFor: pendingTasks,
             releaseIntent: releaseKillSwitch,
             releaseDisposition: releaseDisposition,
+            automaticReleaseResumes: automaticReleaseResumes,
             operation: operation
         )
     }

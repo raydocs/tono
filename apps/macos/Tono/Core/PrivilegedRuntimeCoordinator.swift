@@ -80,6 +80,13 @@ actor PrivilegedRuntimeCoordinator {
         try KillSwitchService.installIfNeeded()
     }
 
+    /// Read-only probe for an automatic release retry, which never prompts:
+    /// true when the explicit release would have to repair the helper (or
+    /// the helper belongs to another account), so the user must act.
+    func explicitReleaseRepairIsRequired() -> Bool {
+        HelperManager.helperBoundAccount() != nil || HelperManager.explicitReleaseRequiresRepair()
+    }
+
     func installAndStartCore(
         configDirectory: String,
         configSHA256: String,

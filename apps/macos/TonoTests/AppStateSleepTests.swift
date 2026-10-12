@@ -246,6 +246,8 @@ final class AppStateSleepTests: XCTestCase {
         /// `restoreDNS` throws from this call number on.
         var dnsFailsFrom = Int.max
         var repairError: Error?
+        /// The non-prompting probe's answer for the retry.
+        var repairRequired = false
     }
 
     private func hostWithFailedAutomaticRelease(
@@ -266,6 +268,7 @@ final class AppStateSleepTests: XCTestCase {
             probe.repairs += 1
             if let error = probe.repairError { throw error }
         }
+        runtime.releaseRepairRequired = { probe.repairRequired }
         runtime.stopCore = { _ in true }
         runtime.coreStatus = { (false, true) }
         runtime.restoreDNS = {
@@ -418,6 +421,25 @@ final class AppStateSleepTests: XCTestCase {
             "a refused administrator prompt waits for the user; a notification must not prompt again"
         )
         XCTAssertTrue(KillSwitchService.isArmed)
+        await finish(app)
+    }
+
+    func testRetryNeverPromptsForHelperRepairAndStopsUntilTheUserActs() async {
+        let probe = ReleaseProbe()
+        let app = await hostWithFailedAutomaticRelease(probe)
+        probe.repairRequired = true
+
+        app.handleSystemNetworkChange()
+        await app.automaticReleaseRetryTask?.value
+        await app.connectionCoordinator.disconnectSequence?.value
+        XCTAssertEqual(probe.repairs, 1, "the retry must not run the prompting repair")
+        XCTAssertEqual(probe.dnsRestores, 1, "a host whose helper needs repair is not released half-way")
+        XCTAssertTrue(KillSwitchService.isArmed)
+
+        // Even once the cooldown has passed, nothing retries until the user acts.
+        app.lastAutomaticReleaseRetryAt = .distantPast
+        app.handleSystemNetworkChange()
+        XCTAssertNil(app.automaticReleaseRetryTask)
         await finish(app)
     }
 

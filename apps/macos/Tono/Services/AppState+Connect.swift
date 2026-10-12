@@ -1052,7 +1052,11 @@ extension AppState {
     /// user's explicit one: see the operation below.
     ///
     /// `automaticFailureRelease` uses the helper's selective release so an
-    /// exhausted recovery does not remove the secondary AI hold.
+    /// exhausted recovery does not remove the secondary AI hold. A failed one
+    /// is retried by the next network change or wake with the recovery policy
+    /// recorded here: `resumeAfterAutomaticRelease` is whether a reconnect
+    /// followed the release, and `interactiveRepair: false` (the retry) never
+    /// raises the helper's administrator prompt.
     ///
     /// `exhaustedTunnelLoss` is only the core monitor's missing-TUN verdict.
     /// That path must not run the pending-update disconnect: doing so releases
@@ -1064,6 +1068,8 @@ extension AppState {
         afterUnarmedConnectFailure: Bool = false,
         exhaustedTunnelLoss: Bool = false,
         automaticFailureRelease: Bool = false,
+        resumeAfterAutomaticRelease: Bool = false,
+        interactiveRepair: Bool = true,
         ordinaryQuit: Bool = false
     ) {
         // A29: while a protected fault holds, no automatic release runs; the
@@ -1115,6 +1121,7 @@ extension AppState {
         connectionCoordinator.executeDisconnect(
             releaseKillSwitch: releaseKillSwitch,
             releaseDisposition: releaseDisposition,
+            automaticReleaseResumes: resumeAfterAutomaticRelease,
             pendingTasks: pendingTasks,
             prepare: { [weak self] in
                 self?.prepareTeardownState(releaseKillSwitch: releaseKillSwitch)
@@ -1139,7 +1146,11 @@ extension AppState {
                     // answers, but its "restored" does not mean this build's
                     // DNS contract. Repair either once, while PF remains
                     // fail-closed, before attempting any release operation.
-                    try await networkProtection.repairForRelease()
+                    if interactiveRepair {
+                        try await networkProtection.repairForRelease()
+                    } else if await networkProtection.releaseRepairRequired() {
+                        throw AutomaticReleaseRetryError.helperNeedsRepair
+                    }
                 } catch {
                     helperReadyForRelease = false
                     if case HelperIPCError.boundToAnotherUser(_) = error {
@@ -1157,6 +1168,12 @@ extension AppState {
                     )
                     await MainActor.run {
                         self?.noteProtectionLoss(NetworkLossReport.killSwitchStuck)
+                        // Only the user can approve the repair: a refused
+                        // prompt, a rejected helper, another account's helper.
+                        // Later notifications must not ask again.
+                        if !interactiveRepair || Self.failureRequiresUserAction(error) {
+                            self?.connectionCoordinator.noteAutomaticReleaseNeedsUserRepair(requestID)
+                        }
                     }
                 }
             }
@@ -2517,6 +2534,14 @@ extension AppState {
         return failure
     }
 
+    /// Why an automatic release retry stopped before touching the host.
+    enum AutomaticReleaseRetryError: LocalizedError {
+        case helperNeedsRepair
+        var errorDescription: String? {
+            String(localized: "The helper needs an administrator repair that automatic retries do not ask for.")
+        }
+    }
+
     /// Failures the automatic reconnect loop can never resolve: repeating the
     /// identical transaction would re-raise the same administrator prompt or
     /// fail installation the same way. Weak-network and transient helper
@@ -2576,7 +2601,7 @@ extension AppState {
         }
         let preservedFailure = lastConnectionFailure
         let preservedStages = completedConnectionStages
-        errorMessage = message
+        if !retryingUnconfirmedRelease { errorMessage = message }
         if releases {
             let holdsUpdateBarrier = nativeUpdatePending
                 || RuntimeCleanup.nativeUpdateBlocksConnect
@@ -2592,12 +2617,17 @@ extension AppState {
             disconnect(
                 releaseKillSwitch: true,
                 exhaustedTunnelLoss: exhaustedTunnelLoss,
-                automaticFailureRelease: true
+                automaticFailureRelease: true,
+                resumeAfterAutomaticRelease: resumeWhenReachable,
+                interactiveRepair: !retryingUnconfirmedRelease
             )
             if exhaustedTunnelLoss, holdsUpdateBarrier { return }
             let releaseGeneration = connectionCoordinator.protectionOperationGeneration
             lastConnectionFailure = preservedFailure
             completedConnectionStages = preservedStages
+            // The retry runs in its own task, so it can wait for the release
+            // it queued and decide on the outcome, not on the attempt.
+            if retryingUnconfirmedRelease { await finishPendingDisconnect() }
             // Release clears the pause. Put it back when the helper rejects
             // this app, and do not start an unarmed connect that would clear
             // it again.
@@ -2610,7 +2640,9 @@ extension AppState {
             if observation == .rejected {
                 protectedReconnectPausedForUserAction = true
                 protectedReconnectPauseLiftsOnNetworkChange = false
-            } else if resumeWhenReachable {
+            } else if resumeWhenReachable,
+                      !retryingUnconfirmedRelease
+                        || (!KillSwitchService.isArmed && !isProtectionBlocked) {
                 scheduleUnarmedReconnect()
             }
         } else {
@@ -2620,28 +2652,44 @@ extension AppState {
         }
     }
 
-    /// The automatic failure release ended with PF still armed and nothing
+    /// The app's own automatic release ended with PF still armed and nothing
     /// is draining it now, so no queued teardown owns the host.
     var automaticReleaseAwaitsRetry: Bool {
-        connectionCoordinator.disconnectQueueRequestsAutomaticRelease
+        connectionCoordinator.automaticReleaseRetry != nil
             && KillSwitchService.isArmed
             && !isConnected && !isConnecting && !isDisconnecting
     }
 
+    /// Every gate that keeps an automatic release from running: a pending
+    /// native update (local or helper-side) owns release, and a protected
+    /// fault (A29) stops every automatic path.
+    private var automaticReleaseRetryMayRun: Bool {
+        automaticReleaseAwaitsRetry
+            && !nativeUpdatePending && !RuntimeCleanup.nativeUpdateBlocksConnect
+            && !RuntimeCleanup.nativeUpdatePending
+            && !LocalNetworkDevicesSync.holdsProtectedFault
+    }
+
+    static let automaticReleaseRetryCooldown: TimeInterval = 20
+
     /// Runs the same automatic release again (AI hold kept) after a network
-    /// change or wake. A protected fault, a pending native update and a
-    /// release already running keep their own guards.
-    func retryUnconfirmedAutomaticRelease() {
-        guard automaticReleaseRetryTask == nil,
-              !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect,
-              !LocalNetworkDevicesSync.holdsProtectedFault else { return }
+    /// change or wake, with the recovery policy the original carried and no
+    /// administrator prompt. The gates are read again when the task runs, so
+    /// an update that starts first retires a queued retry. One retry per
+    /// cooldown: a transition's burst of notifications must not repeat it.
+    func retryUnconfirmedAutomaticRelease(now: Date = Date()) {
+        guard automaticReleaseRetryTask == nil, automaticReleaseRetryMayRun else { return }
+        if let last = lastAutomaticReleaseRetryAt,
+           now.timeIntervalSince(last) < Self.automaticReleaseRetryCooldown { return }
+        lastAutomaticReleaseRetryAt = now
         automaticReleaseRetryTask = Task { [weak self] in
             guard let self else { return }
             defer { self.automaticReleaseRetryTask = nil }
-            guard self.automaticReleaseAwaitsRetry else { return }
+            guard !Task.isCancelled, self.automaticReleaseRetryMayRun,
+                  let retry = self.connectionCoordinator.automaticReleaseRetry else { return }
             await self.applyExhaustedArmedFailure(
-                message: self.errorMessage ?? "",
-                resumeWhenReachable: true,
+                message: "",
+                resumeWhenReachable: retry.resumesWhenReleased,
                 retryingUnconfirmedRelease: true
             )
         }

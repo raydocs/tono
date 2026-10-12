@@ -9,6 +9,10 @@ struct NetworkProtectionOperations {
     var repairForRelease: () async throws -> Void = {
         try await PrivilegedRuntimeCoordinator.shared.repairHelperForExplicitReleaseIfNeeded()
     }
+    /// The automatic retry's non-prompting stand-in for `repairForRelease`.
+    var releaseRepairRequired: () async -> Bool = {
+        await PrivilegedRuntimeCoordinator.shared.explicitReleaseRepairIsRequired()
+    }
     var stopCore: (CoreRuntimeManager) async -> Bool = { await $0.stopAsync() }
     var coreStatus: () async -> (running: Bool, verified: Bool) = {
         let status = await PrivilegedRuntimeCoordinator.shared.coreStatus()

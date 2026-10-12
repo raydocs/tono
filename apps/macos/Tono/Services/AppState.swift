@@ -100,6 +100,7 @@ final class AppState {
     @ObservationIgnored var unarmedUplinkBaseline: NetworkUplinkSnapshot?
     @ObservationIgnored var unarmedNetworkKickTask: Task<Void, Never>?
     @ObservationIgnored var automaticReleaseRetryTask: Task<Void, Never>?
+    @ObservationIgnored var lastAutomaticReleaseRetryAt: Date?
     /// Test seam. Nil uses a TCP connect that does not install PF.
     /// Not observed: an optional MainActor closure cannot be yielded by Observation.
     @ObservationIgnored
