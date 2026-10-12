@@ -20,6 +20,8 @@ export const nodeBoardCopy = {
     costNone: '账目里没有这台',
     expiresOn: (date: string) => `${date} 到期`,
     expiresNone: '没有登记到期日',
+    registerQuota: '登记额度',
+    registerExpiry: '登记到期日',
     load: {
       lead: '这台机器自己的忙闲，来自节点探针。',
       rangeLabel: '负载时间范围',

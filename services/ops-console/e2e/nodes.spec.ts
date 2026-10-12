@@ -3,6 +3,12 @@ import { open, settle } from './ops';
 
 const rows = '.nodes-table tbody tr';
 
+/** A test that writes gets its own fixture store per project, repeat and retry. */
+function sessionFor(name: string): string {
+  const info = test.info();
+  return `${name}-${info.project.name}-${info.repeatEachIndex}-${info.retry}`;
+}
+
 test.describe('nodes page', () => {
   test('dashboard', async ({ page }) => {
     await open(page, '/nodes');
@@ -72,6 +78,47 @@ test.describe('nodes page', () => {
     await expect(row).toBeVisible();
     await row.click();
     await expect(page).toHaveURL(/#\/nodes\/[^?]+$/);
+  });
+
+  /**
+   * The fixture server accepts the profile PATCH but only into its one
+   * node-detail store; the list this page reads is static, so the rows keep
+   * saying 未设额度 here. What is asserted is the part the page owns: who was
+   * picked, what was refused before sending, and the result line.
+   */
+  test('the gap banner opens a batch form that registers the machines picked', async ({ page }) => {
+    await open(page, '/nodes', 'default', sessionFor('nodes-batch'));
+    await expect(page.getByText('5 台没登记额度')).toBeVisible();
+    await page.getByRole('button', { name: '批量登记' }).click();
+
+    const drawer = page.getByRole('dialog');
+    await expect(drawer.getByText('已选 5 / 38 台')).toBeVisible();
+    // Nothing filled yet: the button is shut, with the reason as its title.
+    const save = drawer.getByRole('button', { name: '登记', exact: true });
+    await expect(save).toBeDisabled();
+
+    for (const box of await drawer.getByRole('checkbox', { checked: true }).all()) await box.uncheck();
+    await drawer.getByRole('checkbox', { name: /那霸/ }).check();
+    await drawer.getByRole('checkbox', { name: /马尼拉/ }).check();
+    await expect(drawer.getByText('已选 2 / 38 台')).toBeVisible();
+
+    await drawer.getByLabel('每周期流量（GB）').fill('100');
+    // A quota needs its rules chosen, not guessed.
+    await expect(save).toBeDisabled();
+    await drawer.getByLabel('怎么翻页').selectOption({ label: '每月固定某天' });
+    await drawer.getByLabel('算哪个方向').selectOption({ label: '上下行都算' });
+    await expect(save).toBeEnabled();
+
+    const written: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'PATCH') written.push(request.postData() ?? '');
+    });
+    await save.click();
+    await expect(drawer.getByText('已登记 2 台 · 失败 0 台')).toBeVisible();
+    expect(written).toHaveLength(2);
+    expect(JSON.parse(written[0] ?? '{}')).toEqual({
+      quota: { quotaBytes: 100_000_000_000, cycleKind: 'calendar_day', cycleAnchorDay: 1, counts: 'in_out' },
+    });
   });
 
   test('the ⌘K drawer still opens from ?node=', async ({ page }) => {
