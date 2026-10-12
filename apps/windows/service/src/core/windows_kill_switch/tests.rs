@@ -2458,10 +2458,10 @@ async fn a_claim_returned_after_the_wait_and_the_first_floor_still_gets_a_full_f
     });
     crate::core::dns::test_hooks::take_encrypted_restores();
 
-    let result = emergency_disarm_windows_kill_switch_until(
-        std::time::Instant::now() + EMERGENCY_DISARM_OUTER_BUDGET,
-    )
-    .await;
+    // The caller's deadline is spent by the time WFP is gone, so the leg has exactly its floor
+    // (10 s, 1 s scaled): it runs from 2.0 s to 3.0 s, while the claim comes back at 2.6 s and the
+    // read after it takes 0.7 s.
+    let result = emergency_disarm_windows_kill_switch_until(std::time::Instant::now()).await;
     released.join().unwrap();
     let resets = crate::core::dns::test_hooks::take_automatic_resets();
     let reset_adapters = crate::core::dns::test_hooks::take_last_automatic_reset();
