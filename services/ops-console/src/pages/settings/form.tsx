@@ -154,7 +154,7 @@ export function Toolbar({ children, aside }: { children?: ReactNode; aside?: Rea
       <div className="flex min-w-0 flex-wrap items-center gap-2 text-micro text-[var(--muted-foreground)]">
         {children}
       </div>
-      <div className="ml-auto flex shrink-0 items-center gap-2">{aside}</div>
+      <div className="toolbar-aside ml-auto flex shrink-0 items-center gap-2">{aside}</div>
     </div>
   );
 }

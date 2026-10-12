@@ -129,7 +129,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
 
       <header className="customer-hero-card flex flex-col gap-3" aria-label={privacy.email(row.email)}>
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-verdict">{privacy.email(row.email)}</h1>
+          <h1 className="text-verdict [overflow-wrap:anywhere]">{privacy.email(row.email)}</h1>
           <StatusWord word={row.health} reason={row.reason} />
           <span className="ops-tag">{copy.lifecycle[row.lifecycle]}</span>
           <CustomerWechat wechatId={row.wechatId} />
@@ -257,7 +257,7 @@ function BackLink() {
   return (
     <button
       type="button"
-      className="flex items-center gap-1.5 self-start text-micro text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+      className="back-link flex items-center gap-1.5 self-start text-micro text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
       onClick={closeCustomer}
     >
       <ArrowLeft size={12} strokeWidth={1.75} />

@@ -71,16 +71,12 @@
     border-radius: 18px;
   }
 
-  /* 44 px targets, sized locally — the shared controls are untouched. */
+  /* The matrix links are bare anchors, not a shared control: 44 px here. */
   .clients-page .clients-matrix td a {
     display: inline-flex;
     align-items: center;
     justify-content: flex-end;
     min-width: 44px;
-    min-height: 44px;
-  }
-
-  .clients-page .clients-release-table .ops-action {
     min-height: 44px;
   }
 }

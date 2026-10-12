@@ -256,6 +256,41 @@ button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color
 .ops-action-primary.ops-action-danger:not(:disabled) { background: hsl(var(--sev-line)); border-color: hsl(var(--sev-line)); color: #ffffff; }
 .ops-action-primary.ops-action-danger:hover:not(:disabled) { background: hsl(var(--sev-fg)); border-color: hsl(var(--sev-fg)); }
 
+/* Every pressable control on a phone is a thumb tall, set once here rather
+   than page by page: a page that forgot its local copy left 24 px chips and
+   30 px buttons under the thumb. Desktop sizes are untouched. */
+@media (max-width: 640px) {
+  .ops-action, .ops-chip, .quality-range-btn, .ops-select, .ops-search { min-height: 44px; }
+  .data-row { height: 44px; }
+  /* A segmented switch wider than the screen scrolls inside itself instead of
+     breaking each label one character per line. */
+  .quality-range { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  /* The drawer's pinned bar is what a mis-tap is recovered from, one-handed. */
+  .drawer-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+    min-height: 44px;
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--foreground);
+  }
+  .back-link { min-height: 44px; }
+}
+
+/* A toolbar's actions wrap under the stamp instead of pushing the last one
+   off a narrow screen; each button keeps its own size. */
+.toolbar-aside {
+  flex-wrap: wrap;
+  flex-shrink: 1;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
+  row-gap: 8px;
+}
+
 /* The severity rail on a 今天 row: the only colour an incident line carries. */
 .sev-rail {
   flex: none;

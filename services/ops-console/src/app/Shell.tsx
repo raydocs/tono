@@ -181,7 +181,7 @@ function PreferencesMenu({
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={copy.preferences}
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[999px] border border-[var(--hairline)] bg-[var(--background)] text-[var(--muted-foreground)] outline-none hover:text-[var(--foreground)]"
+        className="shell-avatar flex h-8 w-8 shrink-0 items-center justify-center rounded-[999px] border border-[var(--hairline)] bg-[var(--background)] text-[var(--muted-foreground)] outline-none hover:text-[var(--foreground)]"
       >
         <UserRound size={14} strokeWidth={1.75} />
       </DropdownMenuTrigger>

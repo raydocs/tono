@@ -100,7 +100,7 @@ export function DetailDrawer({
             {phone ? footer : null}
             <button
               type="button"
-              className="self-start text-micro text-[var(--muted-foreground)]"
+              className="drawer-close self-start text-micro text-[var(--muted-foreground)]"
               onClick={onClose}
             >
               {copy.close}
