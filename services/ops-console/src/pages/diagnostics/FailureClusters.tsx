@@ -3,6 +3,7 @@ import { Section } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { getJson } from '@/lib/api';
 import { useResource } from '@/lib/use-resource';
+import '@/styles/today-clusters.css';
 import { ClusterRow } from './ClusterRow';
 import type { FailureClusterList } from './types';
 
@@ -30,8 +31,16 @@ export function FailureClusters() {
     return <p className="text-fine" role="status">{copy.diagnosticsPanel.clustersNone}</p>;
   }
   return (
-    <Section title={copy.diagnosticsPanel.clustersTitle}>
-      <ul className="grid gap-2">
+    <Section
+      title={
+        <>
+          {copy.diagnosticsPanel.clustersTitle}{' '}
+          {/* The count is styled like the Today tab chips' counts. */}
+          <span className="font-mono text-micro text-[var(--muted-foreground)]">{resource.data.clusters.length}</span>
+        </>
+      }
+    >
+      <ul className="cluster-list">
         {resource.data.clusters.map((cluster) => (
           <ClusterRow key={cluster.id} cluster={cluster} />
         ))}

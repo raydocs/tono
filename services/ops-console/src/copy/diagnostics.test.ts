@@ -8,6 +8,10 @@ it('says a known cluster code, stage and status in Chinese and leaves an unknown
   expect(clusterCode('toString')).toBe('toString');
   expect(clusterStage('verifyingTraffic')).toBe('验证流量');
   expect(clusterStage('protection')).toBe('掉线保护');
+  // Stages are nouns, not progressive verbs.
+  expect(clusterStage('connect')).toBe('连接');
+  expect(clusterStage('connected')).toBe('连接后');
+  expect(clusterStage('securingDNS')).toBe('DNS 保护');
   expect(clusterStage('somethingNew')).toBe('somethingNew');
   expect(clusterStatus('open')).toBe('进行中');
   expect(clusterStatus('quiet')).toBe('已安静');

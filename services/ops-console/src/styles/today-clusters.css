@@ -1,0 +1,59 @@
+/* Failure clusters on Today: one hairline-divided row per cluster, four
+ * columns that share x positions because every row uses the same tracks.
+ * Under 641 px a row stacks: sentence, details, then counts and status. */
+
+.cluster-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.cluster-row {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2.4fr) 6.5rem 4.5rem;
+  align-items: baseline;
+  column-gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 14px;
+}
+
+.cluster-row:last-child { border-bottom: 0; }
+
+.cluster-sentence {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.cluster-detail {
+  min-width: 0;
+  color: var(--muted-foreground);
+}
+
+.cluster-counts {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cluster-status { justify-self: end; }
+
+@media (max-width: 640px) {
+  .cluster-row {
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      "sentence sentence"
+      "detail detail"
+      "counts status";
+    row-gap: 4px;
+    column-gap: 10px;
+  }
+
+  .cluster-sentence { grid-area: sentence; }
+  .cluster-detail { grid-area: detail; }
+  .cluster-counts { grid-area: counts; text-align: left; }
+  .cluster-status { grid-area: status; justify-self: start; }
+}

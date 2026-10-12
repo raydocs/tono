@@ -134,7 +134,7 @@
         "devices": 7,
         "firstSeenMs": 1724863200000,
         "lastSeenMs": 1724985600000,
-        "status": "open",
+        "status": "quiet",
         "sample": "{\"carrier\":\"mobile\",\"channel\":\"release\"}",
         "detailPath": "/api/v1/diagnostics/clusters/fc-08"
       },

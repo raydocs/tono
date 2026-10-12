@@ -56,14 +56,22 @@ test.describe('today page', () => {
 
     await open(page, '/today');
     const block = page.locator('section').filter({ has: page.getByRole('heading', { name: '失败聚类' }) });
+    await expect(block.getByRole('heading')).toHaveText('失败聚类 3');
     await expect(block.locator('li')).toHaveCount(3);
-    await expect(block.locator('li').nth(0)).toHaveText(
-      '加密握手超时 · 握手 · windows 1.8.1 · Los Angeles · Mesa · 9 人 / 11 台 · 进行中',
-    );
-    await expect(block.locator('li').nth(1)).toContainText('保护 DNS · macos 1.8.0 · Tokyo · Fuji');
-    await expect(block.locator('li').nth(2)).toContainText('当前节点和核心都没通过验证 · 连接中 · windows 1.7.9');
-    // The machine code is one hover away, never printed in the line.
-    await expect(block.locator('li').nth(0).locator('[title="TONO_TLS_TIMEOUT"]')).toHaveCount(1);
+    // Row one is a p0: the 严重 label sits in front of the sentence, code on hover.
+    const first = block.locator('li').nth(0);
+    await expect(first.locator('.cluster-sentence')).toHaveText('严重保护失效，流量被放开了');
+    await expect(first.locator('.cluster-sentence .text-micro')).toHaveText('严重');
+    await expect(first.locator('.cluster-detail')).toHaveText('掉线保护 · windows 1.8.1 · Los Angeles · Mesa');
+    await expect(first.locator('.cluster-counts')).toHaveText('9 人 / 11 台');
+    await expect(first.locator('.cluster-status.ops-tag')).toHaveText('进行中');
+    await expect(first.locator('[title="TONO_FAIL_OPEN"]')).toHaveCount(1);
+    // Only the p0 row carries the label.
+    await expect(block.locator('.cluster-sentence .text-micro')).toHaveCount(1);
+    await expect(block.locator('li').nth(1).locator('.cluster-detail')).toHaveText('DNS 保护 · macos 1.8.0 · Tokyo · Fuji');
+    await expect(block.locator('li').nth(2).locator('.cluster-detail')).toHaveText('连接 · windows 1.7.9 · Hong Kong · Victoria');
+    await expect(block.locator('li').nth(2).locator('.cluster-sentence')).toHaveText('当前节点和核心都没通过验证');
+    // The machine code is one hover away, never printed in the block.
     expect(await block.innerText()).not.toContain('TONO_');
     await expect(page.getByText('失败聚类还读不到。')).toHaveCount(0);
   });
