@@ -1,6 +1,6 @@
 ## 2026-10-11 · 抢占式“恢复正常网络”（Mac + Windows，测试版源码）
-- 归属：所有者 2026-10-11 直接指派（一键恢复网络可靠性），不属于 0.0.75 G1–G4，G4 冻结期间不合入；影响 macOS helper/App、Windows 服务/App。
-- 来源：分支 `claude/bounded-restore-proposal-mzjlr6`，草稿 PR #1569；提交 14dc9c4（Mac helper）、fe905ce（Mac App）、4ac679c（Windows 服务）、ee2a908（Windows App）及其后续。未合 main。
+- 归属：所有者 2026-10-11 直接指派（一键恢复网络可靠性），不属于 0.0.75 G1–G4；所有者 2026-10-12 指示合入 main（客户换 Wi‑Fi 后只能卸载才能上网），真机测试仍待完成；影响 macOS helper/App、Windows 服务/App。
+- 来源：分支 `claude/bounded-restore-proposal-mzjlr6`，草稿 PR #1569；提交 14dc9c4（Mac helper）、fe905ce（Mac App）、4ac679c（Windows 服务）、ee2a908（Windows App）及其后续。2026-10-12 按所有者指示合入 main。
 - 缺陷修复：旧版：“恢复正常网络”要排在旧连接、旧更新、旧守卫之后执行，旧任务可能把恢复卡住，也可能在之后重新挡网，或者破坏新的连接。改后：恢复由独立的解除组件执行（Mac 的 launchd job、Windows 的 `TonoRelease` 服务），不等旧任务；先隔离并终止旧写入者，再解除，按分项读回；答复只有 restored、partial、unknown 三种。Connect 只能在机器锁下通过准入，带着过期代数的旧请求会被拒绝。
 - 新增/优化：Windows 协议修订 21，新增错误码 1017–1020（解除中、未收尾、记录损坏、代数过期）；Mac helper 4.52.50。设计依据和简化见 [IMPLEMENTATION.md](../reports/bounded-restore-spike-2026-10-11/IMPLEMENTATION.md)。
 - 工程与测试：Mac 新增 helper 特权自测，加上 `PreemptiveReleaseSessionTests`；Windows 新增释放模块单测和前端 vitest 用例。
