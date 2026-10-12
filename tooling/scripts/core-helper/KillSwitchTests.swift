@@ -2438,6 +2438,39 @@ extension KillSwitchManager {
         return failures.isEmpty
     }
 
+    /// Wi-Fi switch: with no tunnel (the connect bootstrap, the preserve
+    /// teardown, a re-assert, the emergency block) the Mac still has to get a
+    /// DHCP lease and resolve neighbors on the new network. The broadcast
+    /// DHCP passes and NDP render in a ruleset without a tunnel, ahead of the
+    /// final block.
+    static func runNoTunnelDHCPNDPSelfTest() -> Bool {
+        let state = KillSwitchState(
+            armed: true, tailscaleBootstrapEnabled: false, apiHosts: [], exitHints: [],
+            tunnelInterfaces: [], resolvedHosts: [:], pinnedHosts: [:], derpEndpoints: [],
+            cachedDERPEndpoints: [], proxyTargets: [], sessionDirectEndpoints: [],
+            reviewedBundleDirectEnabled: false, allowLocalNetworkDevices: false
+        )
+        let rules = renderRules(state: state, allowedUID: 501, physicalInterfaces: ["en0"])
+        let lines = rules.split(separator: "\n").map(String.init)
+        let required = [
+            "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\"",
+            "pass in quick inet proto udp from any port 67 to any port 68 no state label \"tono-dhcp\"",
+            "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\"",
+            "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\"",
+        ]
+        let block = lines.firstIndex(of: "block drop out quick all label \"tono-block\"")
+        let holds = block != nil && required.allSatisfy { line in
+            guard let at = lines.firstIndex(of: line), let block else { return false }
+            return at < block
+        }
+        if !holds {
+            FileHandle.standardError.write(Data(
+                "self-test: no-tunnel-ruleset-passes-dhcp-and-ndp-before-the-block failed\n".utf8
+            ))
+        }
+        return holds
+    }
+
     static func runNetworkSelfTest() -> Bool {
         guard let endpoints = try? fetchDERPEndpoints() else { return false }
         return endpoints.count >= 2 &&

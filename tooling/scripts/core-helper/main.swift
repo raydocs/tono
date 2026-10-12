@@ -2146,6 +2146,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && SocketServer.runOrphanedBootstrapSelectiveReleaseSelfTest()
             && KillSwitchManager.runUnprovenHealthSelfTest()
             && KillSwitchManager.runControlRelayPermitSelfTest()
+            && KillSwitchManager.runNoTunnelDHCPNDPSelfTest()
             && emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: false)
             && !emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: true)
             && emergencyReleaseDespiteStaleCore(strictKillSwitchEnabled: false)
