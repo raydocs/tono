@@ -282,6 +282,17 @@ button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color
   background: hsl(var(--tone-line));
 }
 
+/* The severity word on an incident card: 严重 in the cluster severity cell's
+   text colour at 12 px / 500, 注意 in the amber the 早报 pill uses. 提示 stays
+   muted micro text. Colour and weight only; the rail and layout are untouched. */
+.incident-row .incident-sev-severe,
+.incident-row .incident-sev-warn {
+  font-size: 12px;
+  font-weight: 500;
+}
+.incident-row .incident-sev-severe { color: hsl(var(--sev-fg)); }
+.incident-row .incident-sev-warn { color: hsl(var(--warn-fg)); }
+
 /* Seven days of daily bytes. A bar above the week's mean carries whatever tone
    the surrounding block is in (the quota tone, on a node card); the rest stay
    grey, so the shape says which days were heavy rather than colouring the

@@ -2,8 +2,10 @@ import { EmptyLine, ErrorLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { getJson } from '@/lib/api';
+import { sortClusters } from '@/lib/failure-clusters';
 import { useResource } from '@/lib/use-resource';
-import { clusterLine } from './format';
+import '@/styles/today-clusters.css';
+import { ClusterRow } from './ClusterRow';
 import type { FailureClusterList } from './types';
 
 /**
@@ -29,17 +31,20 @@ export function FailureClusters() {
   if (resource.data.clusters.length === 0) {
     return <p className="text-fine" role="status">{copy.diagnosticsPanel.clustersNone}</p>;
   }
+  const hasSevere = resource.data.clusters.some((cluster) => cluster.severity === 'p0');
   return (
-    <Section title={copy.diagnosticsPanel.clustersTitle}>
-      <ul className="grid gap-2">
-        {resource.data.clusters.map((cluster) => (
-          <li key={cluster.id} className="text-sm">
-            <span className="font-mono">{clusterLine(cluster)}</span>
-            <span className="text-[var(--muted-foreground)]">
-              {' '}
-              {copy.diagnosticsPanel.clusterReach(cluster.users, cluster.devices)} · {cluster.status}
-            </span>
-          </li>
+    <Section
+      title={
+        <>
+          {copy.diagnosticsPanel.clustersTitle}
+          {/* Sized for reading, in the Today tab chips' muted colour and gap. */}
+          <span className="cluster-count">{resource.data.clusters.length}</span>
+        </>
+      }
+    >
+      <ul className="cluster-list" data-severity={hasSevere ? 'some' : 'none'}>
+        {sortClusters(resource.data.clusters).map((cluster) => (
+          <ClusterRow key={cluster.id} cluster={cluster} showSeverity={hasSevere} />
         ))}
       </ul>
     </Section>
