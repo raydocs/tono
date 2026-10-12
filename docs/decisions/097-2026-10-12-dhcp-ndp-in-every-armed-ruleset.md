@@ -5,13 +5,21 @@
   the helper's emergency block). The widened permit is exactly two pairs, text unchanged: DHCPv4
   from port 68 to the limited broadcast `255.255.255.255` port 67 out (stateful, if-bound) and
   port 67 to port 68 in (`no state`); and ICMPv6 types 133–137 (router/neighbor solicitation and
-  advertisement, redirect) both ways. Same set as Windows' `intent_floor`, which permits DHCP and
-  NDP in every armed mode including block-all. mDNS, IGMP, Continuity, `tono-lan`, link-local and
-  multicast stay tunnel-only and keep the "Allow local network devices" gating. Rejected: leaving
-  them tunnel-only and fixing the lease some other way (the Mac is in the no-tunnel ruleset exactly
-  while it reconnects after a Wi-Fi switch, so no other path exists before the lease), and
-  permitting unicast DHCP renewal or DHCPv6 too (wider than the Windows floor, not needed for a
-  first lease on a new network).
+  advertisement, redirect) both ways, `no state` in the no-tunnel rulesets (Apple PF keys
+  non-error ICMPv6 state without the type, so a state from an inbound router advertisement could
+  admit an Echo Request; each direction has its own pass) and the existing
+  `keep state (if-bound)` text in tunneled rulesets (pre-existing, out of scope). This follows
+  Windows' `intent_floor` in kind, not in content: Windows has infrastructure exceptions in every
+  armed mode including block-all, and its floor also permits bounded DHCPv4 unicast renewal and
+  DHCPv6 (`apps/windows/service/src/core/wfp_model.rs` 250–303, 348–364). The Mac change is
+  narrower than that floor. mDNS, IGMP and Continuity stay tunnel-only and are not gated by
+  "Allow local network devices"; `tono-lan`, link-local, multicast and SSDP stay tunnel-only and
+  are gated by it. In tunneled rulesets the DHCP and NDP passes come after the physical-interface
+  DNS blocks. Rejected: leaving them tunnel-only and
+  fixing the lease some other way (the Mac is in the no-tunnel ruleset exactly while it reconnects
+  after a Wi-Fi switch, so no other path exists before the lease), and adding unicast DHCP renewal
+  or DHCPv6 now (not needed for a first lease on a new network; a later decision may add them
+  toward the Windows floor).
 - Why stricter: it widens availability, not exposure. The outbound permit names the limited
   broadcast only, so port 68 cannot reach a public host. The inbound permit is `no state`, so it
   creates no return path for port 68 to answer an arbitrary host; a reply is a one-shot datagram
@@ -33,4 +41,4 @@
   (`restoreDNS` runs only when `releaseKillSwitch`, lines 1187–1203), so it holds through the
   reconnect window. In a fresh connect's bootstrap window it is not yet written; there the lease's
   DNS could be what the system picks, and only PF (no 53/853 pass) keeps a query off the wire.
-- Applied in: PR #1591 (`claude/wifi-switch-mac-pf-dhcp`), helper 4.52.52.
+- Applied in: PR #1591 (`claude/wifi-switch-mac-pf-dhcp`), helper 4.52.53.

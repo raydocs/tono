@@ -399,11 +399,18 @@ extension KillSwitchManager {
         lines.append(
             "pass in quick inet proto udp from any port 67 to any port 68 no state label \"tono-dhcp\""
         )
+        // Without a tunnel the NDP passes keep no state: Apple PF keys non-error
+        // ICMPv6 state by addresses and id without the type, and looks state up
+        // before rules, so a state made by an inbound router advertisement
+        // (spoofable by a LAN peer) could admit an Echo Request from any local
+        // process. Both directions have their own pass, so no return state is
+        // needed. With a tunnel the rule keeps its existing text.
+        let ndpState = state.tunnelInterfaces.isEmpty ? "no state" : "keep state (if-bound)"
         lines.append(
-            "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\""
+            "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } \(ndpState) label \"tono-ndp\""
         )
         lines.append(
-            "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\""
+            "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } \(ndpState) label \"tono-ndp\""
         )
         if !state.tunnelInterfaces.isEmpty {
             // Discovery beyond mDNS goes with the same setting: off, the
