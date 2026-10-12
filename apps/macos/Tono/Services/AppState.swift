@@ -99,6 +99,7 @@ final class AppState {
     /// `lastUplinkSnapshot`, which belongs to a connected session.
     @ObservationIgnored var unarmedUplinkBaseline: NetworkUplinkSnapshot?
     @ObservationIgnored var unarmedNetworkKickTask: Task<Void, Never>?
+    @ObservationIgnored var automaticReleaseRetryTask: Task<Void, Never>?
     /// Test seam. Nil uses a TCP connect that does not install PF.
     /// Not observed: an optional MainActor closure cannot be yielded by Observation.
     @ObservationIgnored
@@ -595,6 +596,16 @@ final class AppState {
                 }
                 return
             }
+            // An automatic release that left PF armed is the app's own
+            // failure, not the user's choice: run it again.
+            if automaticReleaseAwaitsRetry {
+                LocalTrafficAudit.shared.recordEvent(
+                    "automatic_release_network_retry",
+                    details: auditProtectionDetails()
+                )
+                retryUnconfirmedAutomaticRelease()
+                return
+            }
             // PF still armed after the user's Restore internet failed is not
             // a session to recover; only the user's next Connect is (X1-2).
             guard KillSwitchService.isArmed, isTonoReady,
@@ -905,6 +916,12 @@ final class AppState {
             "system_did_wake",
             details: wakeDetails
         )
+        // The automatic release that failed before the sleep is retried, not
+        // reconnected over: the host must not stay offline until a click.
+        if automaticReleaseAwaitsRetry {
+            retryUnconfirmedAutomaticRelease()
+            return
+        }
         guard shouldResume else { return }
         recoveryCause = .wake
         connectionCoordinator.bumpGeneration()

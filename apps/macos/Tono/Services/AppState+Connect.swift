@@ -2550,7 +2550,8 @@ extension AppState {
     func applyExhaustedArmedFailure(
         message: String,
         resumeWhenReachable: Bool,
-        exhaustedTunnelLoss: Bool = false
+        exhaustedTunnelLoss: Bool = false,
+        retryingUnconfirmedRelease: Bool = false
     ) async {
         // A29: a protected fault is not an exhausted failure. Hold it: no
         // release, no teardown, no reconnect.
@@ -2585,7 +2586,7 @@ extension AppState {
             // tunnel loss, so that case is a stuck filter, not a fail-open.
             if exhaustedTunnelLoss, holdsUpdateBarrier {
                 noteProtectionLoss(NetworkLossReport.killSwitchStuck)
-            } else {
+            } else if !retryingUnconfirmedRelease {
                 noteProtectionLoss(NetworkLossReport.failOpen)
             }
             disconnect(
@@ -2616,6 +2617,33 @@ extension AppState {
             noteProtectionLoss(NetworkLossReport.killSwitchStuck)
             disconnect(releaseKillSwitch: false)
             scheduleProtectedReconnect()
+        }
+    }
+
+    /// The automatic failure release ended with PF still armed and nothing
+    /// is draining it now, so no queued teardown owns the host.
+    var automaticReleaseAwaitsRetry: Bool {
+        connectionCoordinator.disconnectQueueRequestsAutomaticRelease
+            && KillSwitchService.isArmed
+            && !isConnected && !isConnecting && !isDisconnecting
+    }
+
+    /// Runs the same automatic release again (AI hold kept) after a network
+    /// change or wake. A protected fault, a pending native update and a
+    /// release already running keep their own guards.
+    func retryUnconfirmedAutomaticRelease() {
+        guard automaticReleaseRetryTask == nil,
+              !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect,
+              !LocalNetworkDevicesSync.holdsProtectedFault else { return }
+        automaticReleaseRetryTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.automaticReleaseRetryTask = nil }
+            guard self.automaticReleaseAwaitsRetry else { return }
+            await self.applyExhaustedArmedFailure(
+                message: self.errorMessage ?? "",
+                resumeWhenReachable: true,
+                retryingUnconfirmedRelease: true
+            )
         }
     }
 

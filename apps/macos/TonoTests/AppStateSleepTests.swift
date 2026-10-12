@@ -239,20 +239,30 @@ final class AppStateSleepTests: XCTestCase {
             )
         ]
         var releases = 0
+        var dnsRestores = 0
+        var bootstraps = 0
         let retried = expectation(description: "second automatic release")
         var runtime = NetworkProtectionOperations()
         runtime.repairForRelease = {}
         runtime.stopCore = { _ in true }
         runtime.coreStatus = { (false, true) }
-        runtime.restoreDNS = { true }
+        runtime.restoreDNS = {
+            dnsRestores += 1
+            // The retry fails at the DNS step: DNS must be restored before
+            // the PF release, so the release must not be reached.
+            if dnsRestores == 2 {
+                retried.fulfill()
+                throw HelperIPCError.commandFailed("Protected DNS could not be restored.")
+            }
+            return true
+        }
         runtime.disableSystemProxy = {}
         runtime.disarm = {}
         runtime.releaseAfterFailure = {
             releases += 1
-            if releases == 2 { retried.fulfill() }
             throw HelperIPCError.commandFailed("The helper could not release the Kill Switch.")
         }
-        runtime.restrictToBootstrap = {}
+        runtime.restrictToBootstrap = { bootstraps += 1 }
         runtime.refreshKillSwitchStatus = {
             .confirmed(requiresProtectionRecovery: true)
         }
@@ -272,9 +282,16 @@ final class AppStateSleepTests: XCTestCase {
         await fulfillment(of: [retried], timeout: 5)
         await app.connectionCoordinator.disconnectSequence?.value
         XCTAssertEqual(
-            releases, 2,
-            "a network change must retry an automatic release that left PF armed"
+            dnsRestores, 2,
+            "a network change must re-run the automatic release that left PF armed"
         )
+        XCTAssertEqual(
+            releases, 1,
+            "a retry whose DNS restore failed must not release PF"
+        )
+        XCTAssertEqual(bootstraps, 1, "the failed retry keeps the fail-closed bootstrap rules")
+        XCTAssertTrue(KillSwitchService.isArmed)
+        XCTAssertTrue(app.isProtectionBlocked)
     }
 
     /// MAC-WAKE-NO-SERVICE-RELEASE regression: wake connected as soon as PF

@@ -22,6 +22,11 @@ final class ConnectionCoordinator {
     /// the intent until the user connects again, so wake and network-change
     /// recovery cannot turn it into a reconnect (X1-2).
     private var disconnectQueueReleaseIntent = false
+    /// Origin of the retained release intent: the newest request was the
+    /// automatic failure release, not the user's own. An automatic release
+    /// that ended with PF still armed is retried by the next network change
+    /// or wake; the user's release is never retried on their behalf.
+    private var disconnectQueueReleaseIsAutomatic = false
     enum ReleaseDisposition: Equatable { case preserve, automatic, ordinaryQuit, explicit }
     // Explicit release survives an overlapping Quit, including its initial
     // preserve teardown. Only a newly admitted Connect retires this choice.
@@ -96,6 +101,7 @@ final class ConnectionCoordinator {
     /// keeps the release intent, like the queued path, until the user connects.
     func notePreemptiveReleaseUnconfirmed() {
         disconnectQueueReleaseIntent = true
+        disconnectQueueReleaseIsAutomatic = false
     }
 
     /// Whether the pending or in-flight teardown queue's newest request is an
@@ -105,6 +111,11 @@ final class ConnectionCoordinator {
     /// is confirmed, and a new Connect retires an unconfirmed one.
     var disconnectQueueRequestsRelease: Bool {
         disconnectQueueReleaseIntent
+    }
+
+    /// The retained or in-flight release is the automatic failure release.
+    var disconnectQueueRequestsAutomaticRelease: Bool {
+        disconnectQueueReleaseIntent && disconnectQueueReleaseIsAutomatic
     }
 
     /// All teardown requests share one queue. Drain cancelled connection work
@@ -122,6 +133,7 @@ final class ConnectionCoordinator {
         let disposition = releaseDisposition ?? (releaseIntent ? .explicit : .preserve)
         if disposition == .explicit { explicitReleaseDominatesQuit = true }
         disconnectQueueReleaseIntent = releaseIntent
+        disconnectQueueReleaseIsAutomatic = releaseIntent && disposition == .automatic
         let previousDisconnect = disconnectSequence
         let session = helperSession
         disconnectSequence = Task {
