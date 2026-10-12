@@ -63,6 +63,7 @@ async fn emergency_disarm_with(
     //   entry — keeps `dns::restore_protected` verbatim. That path's promise is to put the
     //   user's *own* servers back on a machine that is staying installed, and a machine that is
     //   staying installed can retry. Nothing about it is made more permissive here.
+    let restore_began = std::time::Instant::now();
     let dns_restore = if uninstall_ladder_requested() {
         bounded_dns_call_within(
             UNINSTALL_DNS_RESTORE_TIMEOUT,
@@ -181,6 +182,19 @@ async fn emergency_disarm_with(
         // already gone, so skipping the reset for lack of time would leave the adapter on a dead
         // resolver. A late answer is better than a dead resolver. A caller without a deadline
         // gets the full DNS budget.
+        //
+        // First the wait for the exact restore's engine call. It was abandoned at its own budget
+        // but keeps running on its blocking thread, and keeps the single-writer claim until it
+        // returns. That wait has a budget of its own and is not charged against the reset leg:
+        // the leg below always has its floor, whether the wait ended with the claim returned or
+        // not, and retries a call that is still refused.
+        let wait = emergency_claim_wait_budget(restore_began.elapsed());
+        if !wait.is_zero() && !crate::core::dns::wait_for_abandoned_dns_call(wait).await {
+            tracing::error!(
+                "emergency disarm: the abandoned DNS restore still holds the engine after {wait:?}; \
+                 the adapter reset leg tries anyway within its own budget"
+            );
+        }
         let budget = emergency_fallback_budget(remaining());
         match bounded_dns_call_within(
             budget,

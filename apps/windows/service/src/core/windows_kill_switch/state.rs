@@ -572,13 +572,17 @@ pub(super) const EMERGENCY_RESTORE_BUDGET: std::time::Duration = std::time::Dura
 /// so and reports unknown rather than restored.
 pub(super) const EMERGENCY_RESET_FLOOR: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// How far past [`EMERGENCY_DISARM_OUTER_BUDGET`] the floored reset leg and the sweep's two-second
-/// floor can legitimately run: the release worker's outer timeout allows this much on top of its
-/// budget instead of cutting the leg that keeps the machine off a dead resolver. The worst case is
-/// the restore (10 s), a pathologically slow WFP removal (25 s), the reset leg (15 s) and the
-/// sweep floor (2 s), about 52 s; the typical case is 10 to 20 s. The grace only matters in that
-/// worst case and never delays an answer: the release service answers its client at its own
-/// deadline whatever the worker is still doing.
+/// How far past [`EMERGENCY_DISARM_OUTER_BUDGET`] the legs of the emergency disarm are allowed to
+/// run: the release worker's outer timeout allows this much on top of its budget instead of
+/// cutting the leg that keeps the machine off a dead resolver. A budget estimate for these legs
+/// only: the exact restore (10 s), the WFP removal, the wait for the abandoned restore's claim
+/// (what is left of 30 s since the restore began, at most 20 s), the reset leg (10 s floor, 15 s
+/// cap) and the sweep floor (2 s) add up to about 47 s plus the WFP removal, so 45 s + this grace
+/// has to cover that. It does not cover the rest of the worker (a BFE probe of up to 5 s, the
+/// selective follow-up, file writes, the read-backs, a second cleanup, the Service restart and the
+/// release service's finalization), and nothing here has been measured on a device. The grace
+/// never delays an answer: the release service answers its client at its own deadline whatever
+/// the worker is still doing.
 pub const EMERGENCY_DISARM_OVERRUN_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// The budget of the exact DNS restore on the emergency path, given the time `remaining` before
@@ -609,12 +613,27 @@ pub(super) fn emergency_fallback_budget(remaining: Option<std::time::Duration>) 
     })
 }
 
+/// A DNS engine call is bounded at 30 s (`dns::DNS_APPLY_TIMEOUT`, the longest mutating budget), so
+/// an exact restore that was abandoned at its own 10 s still has its engine call returning the
+/// single-writer claim by 30 s after it began. Mirrors that constant, which only exists in
+/// Windows non-test builds.
+pub(super) const EMERGENCY_ENGINE_CALL_BOUND: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The longest the emergency path waits for that claim.
+pub(super) const EMERGENCY_CLAIM_WAIT_CAP: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// How long the emergency path waits for the exact restore's abandoned engine call to return the
 /// single-writer claim before the adapter reset leg starts, given the time that has passed since
-/// the exact restore began.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(super) fn emergency_claim_wait_budget(_elapsed_since_restore_began: std::time::Duration) -> std::time::Duration {
-    std::time::Duration::ZERO
+/// the exact restore began: what is left of the engine call's own bound, at most
+/// [`EMERGENCY_CLAIM_WAIT_CAP`]. This is its own budget and is not charged against the reset leg
+/// ([`emergency_fallback_budget`]), which keeps its floor whether the wait ended with the claim
+/// returned or not.
+pub(super) fn emergency_claim_wait_budget(elapsed_since_restore_began: std::time::Duration) -> std::time::Duration {
+    scaled_for_tests(
+        EMERGENCY_ENGINE_CALL_BOUND
+            .saturating_sub(elapsed_since_restore_began)
+            .min(EMERGENCY_CLAIM_WAIT_CAP),
+    )
 }
 
 /// Tests shrink the emergency budgets by this factor so a late release of the claim can be

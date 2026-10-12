@@ -548,6 +548,13 @@ async fn read_dns_state(snapshot: Option<&DnsSnapshot>) -> Result<DnsState> {
     Ok(DnsState { adapters, unreadable })
 }
 
+/// Wait up to `budget` for an abandoned DNS engine call (the exact restore the emergency disarm
+/// gave up on) to return the engine's single-writer claim. `true` when it is free. A separate
+/// budget from [`reset_redirected_adapters_after_failed_restore`], which retries refusals itself.
+pub(crate) async fn wait_for_abandoned_dns_call(budget: std::time::Duration) -> bool {
+    wait_for_dns_engine_idle_within(budget).await
+}
+
 /// The non-uninstall emergency disarm's answer to a restore it could not prove (the release
 /// service's clean-up and the non-ladder update-executor recovery). Runs only after the WFP
 /// objects are gone, never while the barrier is armed. `--emergency-disarm` and the Start-Menu
@@ -580,10 +587,20 @@ pub(crate) async fn reset_redirected_adapters_after_failed_restore() -> Result<V
     }
     let _operation = DNS_OPERATION.lock().await;
     // The exact restore that just failed or timed out may have left its engine call running on a
-    // blocking thread, still holding the single-writer claim: every engine call below would be
-    // refused at once. Wait for it (the caller bounds the whole leg) rather than count the refusal.
-    wait_for_dns_engine_idle().await;
-    let reset = reset_adapters_still_on_tono_dns().await;
+    // blocking thread, still holding the single-writer claim, so an engine call is refused at
+    // once. The caller waits for the claim on a budget of its own before this leg
+    // ([`wait_for_abandoned_dns_call`]); if it is still held here, a refused call is retried
+    // every 50 ms within this leg's budget (the caller bounds it) instead of failing the leg at
+    // once. The retry is only for the refusal itself: any other error is the answer.
+    let reset = loop {
+        let reset = reset_adapters_still_on_tono_dns().await;
+        match &reset {
+            Err(error) if format!("{error:#}").contains(DNS_ENGINE_WEDGED_PREFIX) => {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            _ => break reset,
+        }
+    };
     let policy = restore_resolver_policy().await;
     if let Err(error) = &policy {
         tracing::error!("dns: the resolver policy could not be removed after a failed restore: {error:#}");

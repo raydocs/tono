@@ -100,15 +100,32 @@
   （`dns/engine_ops.rs` 的 `bounded_dns_call` / `DnsCallClaim`）。WFP 移除（很快）之后回退腿的 `collect_dns_adapters()` 与策略还原都被这条声明立即拒绝，重置腿的 10 秒下限根本用不上，工作线程第二次清理只在读回为 `residual` 时才触发，
   结果是 WFP 已移除、有效 DNS 还在死目标上。
   现在：(1) 精确还原预算固定 10 秒（`EMERGENCY_RESTORE_BUDGET`，不超过剩余，下限 5 秒；无截止时间的调用方仍是 40 秒）；之后是 WFP 移除（自带 25 秒上限，正常是毫秒级）；
-  (2) 精确还原失败或超时后进入回退腿，`reset_redirected_adapters_after_failed_restore` 先持 DNS 操作锁，再 `wait_for_dns_engine_idle()` 轮询（50 毫秒）等那条声明被释放，然后才做 DHCP 重置和策略还原；立即被拒绝不再算作用掉预算。
-  等待由回退腿自己的预算（15 秒，下限 10 秒）约束；声明在预算内没有释放，则整条腿超时，返回「未证明」，不会假成功：WFP 已移除，原 DNS 错误照旧返回，NRPT 清扫（2 秒下限）照常运行。
-  常见情形约 10–20 秒，落在 25 秒首次答复之内；最坏情形（WFP 病态地慢）约 10 + 25 + 15 + 2 = 52 秒，所以外层超时保留 45 秒 + 15 秒宽限（`EMERGENCY_DISARM_OVERRUN_GRACE`）。宽限只影响工作线程什么时候结束，从不延迟首次答复：发布服务按自己的 25 秒截止答复。
+  (2) 精确还原失败或超时后进入回退腿，`reset_redirected_adapters_after_failed_restore` 先持 DNS 操作锁，再 `wait_for_dns_engine_idle()` 轮询（50 毫秒）等那条声明被释放，然后才做 DHCP 重置和策略还原；立即被拒绝不再算作用掉预算（第 5 轮把等待和重置的预算拆开，见下）。
+  （第 5 轮指出这里等待和重置共用同一个 ≤15 秒超时，已拆开，见第 5 轮。）
 - R4-F2（次要）第 3 轮写的「迟到的 unknown 更好」夸大了：发布服务 25 秒答复、客户端等 32 秒、App 在第一次答复上就结算（`release_wire.rs`、`release/daemon.rs`、App `core/service/mod.rs`、`preemptive.rs`），后台的最终报告不会送回原来那次点击。
   本 PR 不改 25 秒答复和 32 秒客户端等待。改为让最终结果在 `/release/status` 的下一次读取里可见：`ReleaseStatus` 新增可选 `report`（旧响应没有该字段仍可解析），`release/daemon.rs` 的 `status()` 返回当前或最近一次 run 的报告
   （按 `answer` 的口径：未完成则标记 `finished=false` 且风险未证明），其中含工作线程的逐组件读回和 `detail`，`detail` 里有「清理超出 45 秒预算」的备注，`finalize` 追加的原因也在其中。
   App 现有的状态轮询只读 `mode`/`generation`/`running`，不会展示它：界面需要后续工作来显示「仍在恢复… / 最终结果」，不在本 PR 范围（见 PR 的限制一节）。
 - 测试：见上四例；`release_wire::tests::the_status_carries_the_final_report_and_an_older_status_still_parses` 覆盖状态载荷的往返与向后兼容（随修复提交，不是红灯用例）。
   发布服务守护进程（`release/daemon.rs`）和工作线程（`release/worker.rs`）只在 Windows 非 test 特性下编译，没有 service 测试能驱动它们；这两处的接线只由非 test 的 Windows 作业编译，无自动化行为测试。
-- App 侧移出：被拒的健康释放重试（`monitor.rs` 的 `settle_health_release` 及其测试）和 `WIN-RELEASE-REFUSED-NO-RETRY` 记录已拆到分支 `claude/wifi-switch-win-app-retry`；本说明与 PR 正文不再把它们记为本 PR 的内容。本分支上的 `monitor.rs` 没有回退，待拆出的 PR 先合入后再并入 main。
-- 残留：(1) 引擎调用若在 15 秒内一直不释放声明（例如 Dnscache 真卡死），回退腿报「未证明」，网卡可能仍在死目标上；NRPT 清扫仍会删规则。(2) 最坏情形约 52 秒，超出 45 秒时有备注，结果只会是 partial/unknown。(3) 仍无真机验证。
+- App 侧移出：被拒的健康释放重试（`monitor.rs` 的 `settle_health_release` 及其测试）和 `WIN-RELEASE-REFUSED-NO-RETRY` 记录已拆到分支 `claude/wifi-switch-win-app-retry`；本说明与 PR 正文不再把它们记为本 PR 的内容（该记录现在属于 PR #1599，第 5 轮已从本分支删除，避免同一 ID 冲突）。本分支上的 `monitor.rs` 没有回退，待拆出的 PR 先合入后再并入 main。
+- 残留：(1) 引擎调用若在等待预算和重置腿预算内一直不释放声明（例如 Dnscache 真卡死），回退腿报「未证明」，网卡可能仍在死目标上；NRPT 清扫仍会删规则。(2) 这几段合计可能超出 45 秒（第 5 轮给出估算），超出时有备注，结果只会是 partial/unknown。(3) 仍无真机验证。
 - 验证：本机不跑 Windows 工作区的 cargo；修复提交由 hosted CI 判定，ci-gate 结果见 PR 正文。
+
+### 续记 2026-10-12 · Codex 复核第 5 轮（xhigh，对 7907605b1）：R4-F1 部分、R4-F2 部分；再做一轮，仅 Service 侧
+- 回归先行：`594218606` 只含测试和测试基础设施（测试用的预算除数、桩引擎记录被拒绝的时刻、等待预算的接口骨架，行为仍是旧的），在 hosted CI 上失败的正是下列用例（run 38310251132），见 PR 正文的 ci-gate 表：
+  `core::windows_kill_switch::tests::the_claim_wait_budget_is_what_is_left_of_the_engine_calls_own_bound`、
+  `core::windows_kill_switch::tests::a_claim_released_late_still_gets_its_adapter_reset_inside_the_legs_own_floor`、
+  `core::windows_kill_switch::tests::a_claim_that_is_never_released_leaves_the_fallback_unproven_after_waiting_and_retrying`（替换第 4 轮的同类用例）、
+  `core::dns::tests::the_emergency_reset_is_not_refused_at_once_while_an_engine_call_holds_the_claim`（补了「必须反复重试被拒绝的调用」的断言）。
+- R5-F1（主要）：第 4 轮把「等声明释放」、候选读取、DHCP 应用、刷新、读回和策略还原都放在同一个 ≤15 秒超时里，10 秒下限对重置本身并不成立。
+  反例：精确还原的引擎调用跑 26 秒（< 30 秒的 `DNS_APPLY_TIMEOUT`），10 秒处被外层放弃，WFP 很快，回退腿的 15 秒全花在等待上，约 25 秒时 future 被丢弃、没有重置；26 秒声明才释放，已经没有人在等。
+  现在预算拆开：(1) 等声明有自己的预算 `emergency_claim_wait_budget` = `min(30 秒 − 自精确还原开始已用时间, 20 秒)`（`windows_kill_switch/state.rs`；30 秒是引擎调用自己的上限，`EMERGENCY_ENGINE_CALL_BOUND`），在 WFP 移除之后、重置腿之前由 `emergency.rs` 调用 `dns::wait_for_abandoned_dns_call` 执行，不计入重置腿；
+  (2) 之后无论等到了声明被释放，还是等待预算用完声明仍被占着，重置腿都拿到自己的完整预算（下限 10 秒、上限 15 秒）去做读取、DHCP 应用、读回和策略还原；声明仍被占着时，重置腿自己每 50 毫秒重试被拒绝的调用（`reset_redirected_adapters_after_failed_restore` 里的重试循环，仅针对「引擎被占用」的拒绝，其他错误照常返回），而不是立刻失败。
+  NRPT 清扫的 2 秒下限不变。此外不变：25 秒首次答复、32 秒客户端等待。
+  预算估算（仅这几段，见 R5-F2）：精确还原 10 秒 + WFP 移除 + 等声明（自还原开始起至多到 30 秒，至多 20 秒）+ 重置腿 15 秒 + 清扫 2 秒，约 47 秒再加 WFP 移除；`EMERGENCY_DISARM_OVERRUN_GRACE` 仍是 15 秒，45 + 15 = 60 秒覆盖它（WFP 病态慢到 25 秒时约 52 秒）。宽限只决定工作线程什么时候结束，从不延迟首次答复：发布服务按自己的 25 秒截止答复。
+  测试用预算除数把这些预算缩小到毫秒级（默认 1，只在 `cfg(test)` 存在），所以「声明在有限的晚时刻释放」不需要睡 12 秒。
+- R5-F2（次要）：第 4 轮和 `state.rs` 里把「最坏约 52 秒 / 常见 10–20 秒」写成了端到端保证。改为只是这几段的预算估算；BFE 探测（至多 5 秒）、选择性后续处理、文件读写、读回、第二次清理、主服务重启和发布服务的 finalize 都不在其中；「常见」是未测量的估计，等真机数据。
+- 清理与记录：从本分支删除 `docs/findings.d/WIN-RELEASE-REFUSED-NO-RETRY.md`（现在在 PR #1599，同一 ID 会冲突）。新增 `docs/findings.d/WIN-RELEASE-STATUS-REPORT-EXPOSURE.md`（open，低·推导）。
+- 新增限制：`ReleaseStatus.report` 没有大小上限也没有脱敏（原始错误、网卡 GUID、路径、残留写者 PID），是整机范围而不是按请求者划分，并且可能属于更早的代号；UI 跟进必须按请求 ID / 代号核对后再展示，并先裁剪。
+- 验证：本机不跑 Windows 工作区的 cargo；修复提交由 hosted CI 判定，ci-gate 结果见 PR 正文。仍无真机验证。

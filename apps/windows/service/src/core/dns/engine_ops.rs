@@ -151,19 +151,23 @@ impl Drop for DnsCallClaim {
     }
 }
 
-/// Wait until no DNS engine call holds the single-writer claim. A restore whose caller gave up
-/// leaves its blocking thread running and the claim standing, so the next engine call is refused
-/// at once; a caller that must still write after that (the emergency adapter reset, once WFP is
-/// gone) waits here for the thread to return instead of reading the refusal as an answer. Never
-/// returns while the claim stands: the caller bounds it, and an expired bound means "not proven".
-pub(super) async fn wait_for_dns_engine_idle() {
+/// Wait up to `budget` for the DNS engine's single-writer claim to be returned. A restore whose
+/// caller gave up leaves its blocking thread running and the claim standing, so the next engine
+/// call is refused at once; a caller that must still write after that (the emergency adapter
+/// reset, once WFP is gone) waits here for the thread to return. `true` when the claim is free,
+/// `false` when `budget` ran out with it still held. Not charged to any later budget.
+pub(super) async fn wait_for_dns_engine_idle_within(budget: std::time::Duration) -> bool {
     #[cfg(any(all(windows, not(feature = "test")), test))]
     {
+        let deadline = std::time::Instant::now() + budget;
         let mut announced = false;
         loop {
             // A statement of its own: the slot's guard must not live across the sleep.
             let held = *dns_call_slot();
-            let Some(held) = held else { return };
+            let Some(held) = held else { return true };
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
             if !announced {
                 announced = true;
                 tracing::warn!(
@@ -173,6 +177,11 @@ pub(super) async fn wait_for_dns_engine_idle() {
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
+    }
+    #[cfg(not(any(all(windows, not(feature = "test")), test)))]
+    {
+        let _ = budget;
+        true
     }
 }
 
