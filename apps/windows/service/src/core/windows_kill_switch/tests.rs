@@ -2264,20 +2264,18 @@ fn the_reset_leg_still_runs_after_a_slow_restore_and_a_slow_wfp_cleanup() {
     assert!(emergency_fallback_budget(Some(left)) >= std::time::Duration::from_secs(10));
 }
 
-/// The up-front reservation covers the WFP cleanup between the restore and the reset (an engine
-/// call of up to 25 s plus a BFE probe) next to the reset (15 s) and the sweep (10 s).
+/// Under the worker's deadline the exact restore gets 10 s, so the network comes back inside the
+/// first answer window; the reset leg keeps its floor. Callers without a deadline keep 40 s.
 #[test]
-fn the_exact_restore_budget_reserves_the_wfp_cleanup_too() {
+fn the_exact_restore_gets_ten_seconds_under_the_workers_deadline() {
     let secs = std::time::Duration::from_secs;
-    assert_eq!(emergency_restore_budget(Some(secs(120))), DNS_RESTORE_TIMEOUT);
-    assert_eq!(emergency_restore_budget(Some(secs(60))), secs(10));
-    assert_eq!(emergency_restore_budget(Some(secs(55))), secs(5));
-    assert_eq!(
-        emergency_restore_budget(Some(EMERGENCY_DISARM_OUTER_BUDGET)),
-        secs(5),
-        "the restore is never cut below its minimum"
-    );
+    assert_eq!(emergency_restore_budget(Some(EMERGENCY_DISARM_OUTER_BUDGET)), secs(10));
+    assert_eq!(emergency_restore_budget(Some(secs(120))), secs(10));
+    assert_eq!(emergency_restore_budget(Some(secs(7))), secs(7), "never more than what is left");
     assert_eq!(emergency_restore_budget(Some(std::time::Duration::ZERO)), secs(5));
+    assert_eq!(emergency_restore_budget(None), DNS_RESTORE_TIMEOUT);
+    assert_eq!(emergency_fallback_budget(Some(EMERGENCY_DISARM_OUTER_BUDGET - secs(10))), secs(15));
+    assert_eq!(emergency_fallback_budget(None), DNS_RESTORE_TIMEOUT);
 }
 
 /// End to end: the deadline is already spent when WFP has been removed (a slow restore and a
@@ -2311,6 +2309,50 @@ async fn emergency_disarm_resets_the_redirected_adapter_even_when_the_deadline_i
     assert!(result.is_err(), "the original DNS error is still returned");
     assert_eq!(resets, 1, "the reset leg is never skipped once WFP is gone");
     assert_eq!(reset_adapters, vec!["{ETHERNET}".to_owned()]);
+
+    cleanup().await;
+    Ok(())
+}
+
+/// The exact restore timed out and its engine call still holds the claim, and the claim is not
+/// released within the reset leg's budget. WFP is removed, the original error is returned, no
+/// success is claimed and no adapter is reset; the leg waited out its budget instead of taking
+/// the immediate refusal for an answer.
+#[tokio::test]
+#[serial]
+async fn a_claim_that_is_never_released_leaves_the_fallback_unproven_after_waiting_its_budget()
+-> Result<()> {
+    cleanup().await;
+    remove_superseded_snapshots().await;
+    arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+    atomic_write(
+        &dns_snapshot_path(),
+        &serde_json::to_vec_pretty(&redirected_snapshot())?,
+    )
+    .await?;
+    crate::core::dns::test_hooks::set_collected_adapters(vec![crate::core::dns::AdapterDnsSnapshot {
+        interface_guid: "{ETHERNET}".to_owned(),
+        ipv4_name_server: Some("198.18.0.2".to_owned()),
+        ..Default::default()
+    }]);
+    simulate_machine_still_on_loopback_dns();
+    crate::core::dns::test_hooks::take_automatic_resets();
+    let claim = crate::core::dns::test_hooks::occupy_engine_claim();
+
+    let started = std::time::Instant::now();
+    let result = emergency_disarm_windows_kill_switch_until(std::time::Instant::now()).await;
+    let elapsed = started.elapsed();
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    drop(claim);
+    crate::core::dns::test_hooks::set_collected_adapters(Vec::new());
+    let message = format!("{:#}", result.expect_err("the original DNS error is still returned"));
+    assert!(ARMED.lock().unwrap().is_none(), "WFP is removed");
+    assert!(message.contains(crate::core::dns::WFP_REMOVED_CONTINUE_PREFIX), "{message}");
+    assert_eq!(resets, 0, "nothing was reset while the claim was held");
+    assert!(
+        elapsed >= std::time::Duration::from_secs(9),
+        "the refusal was taken as the answer after {elapsed:?}; the leg must wait out its budget"
+    );
 
     cleanup().await;
     Ok(())

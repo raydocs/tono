@@ -66,6 +66,30 @@ pub(super) fn dns_call_in_flight() -> Option<DnsCallInFlight> {
     *dns_call_slot()
 }
 
+/// The stub engine's stand-in for [`bounded_dns_call`]'s fail-fast refusal while an earlier call
+/// still holds the single-writer claim, so a test can model an abandoned engine call.
+#[cfg(test)]
+pub(super) fn refuse_while_claimed(operation: &'static str) -> Result<()> {
+    match *dns_call_slot() {
+        Some(wedged) => Err(wedged_dns_error(operation, wedged)),
+        None => Ok(()),
+    }
+}
+
+/// Take the single-writer claim the way an abandoned engine call holds it; dropping the returned
+/// guard is the blocking thread finally returning.
+#[cfg(test)]
+pub(super) fn occupy_dns_call_for_test() -> DnsCallClaim {
+    let epoch = DNS_CALL_EPOCH.fetch_add(1, Ordering::AcqRel);
+    *dns_call_slot() = Some(DnsCallInFlight {
+        operation: "restore",
+        started_at: std::time::Instant::now(),
+        epoch,
+        abandoned: true,
+    });
+    DnsCallClaim(epoch)
+}
+
 /// Refusal for a caller that wants to start an engine call while an earlier one is still
 /// inside the loader/registry/Dnscache. Fail-closed: nothing is applied, nothing is restored,
 /// nothing is deleted, and the machine keeps whatever the last completed call left behind —
@@ -236,6 +260,8 @@ pub(super) async fn engine_collect() -> Result<Vec<AdapterDnsSnapshot>> {
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
+        #[cfg(test)]
+        refuse_while_claimed("collect")?;
         Ok(test_hooks::collected_adapters())
     }
 }
@@ -543,6 +569,8 @@ pub(super) async fn engine_effective_dns(
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
+        #[cfg(test)]
+        refuse_while_claimed("read effective DNS")?;
         if test_hooks::effective_dns_fails() {
             bail!("the effective DNS of the adapters could not be read");
         }
@@ -602,6 +630,8 @@ pub(super) async fn engine_reset_families(
     {
         // The stub models "the reset lands completely or not at all", per family: the registry
         // values and the effective list of the reset families stop reading as Tono's.
+        #[cfg(test)]
+        refuse_while_claimed("reset families")?;
         let _self_write = SelfWriteWindow::open();
         let ok = !test_hooks::live_apply_fails();
         if ok {
@@ -665,6 +695,8 @@ pub(super) async fn engine_restore_encrypted_dns() -> Result<bool> {
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
+        #[cfg(test)]
+        refuse_while_claimed("restore encrypted DNS")?;
         #[cfg(test)]
         test_hooks::note_encrypted_restore();
         if test_hooks::encrypted_restore_fails() {

@@ -307,6 +307,14 @@ pub(crate) mod test_hooks {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = guids;
     }
 
+    /// An engine call that its caller abandoned and that still holds the single-writer claim:
+    /// every DNS engine call is refused until the returned guard is dropped (the blocking thread
+    /// finally returning).
+    #[cfg(test)]
+    pub(crate) fn occupy_engine_claim() -> Box<dyn std::any::Any + Send> {
+        Box::new(super::engine_ops::occupy_dns_call_for_test())
+    }
+
     static LIVE_DNS_ON_LOOPBACK: AtomicBool = AtomicBool::new(false);
 
     pub(crate) fn live_dns_is_on_loopback() -> bool {

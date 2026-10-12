@@ -274,6 +274,57 @@
         Ok(())
     }
 
+    /// The exact restore's 10 s outer timeout only abandons its future: the engine call keeps
+    /// running on its blocking thread and keeps the single-writer claim, so every further DNS call
+    /// is refused at once. The fallback waits for that claim to be released and only then resets,
+    /// instead of treating the refusal as an answer.
+    #[tokio::test]
+    #[serial]
+    async fn the_emergency_reset_waits_for_an_in_flight_engine_call_and_then_resets() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let claim = test_hooks::occupy_engine_claim();
+        let released = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            drop(claim);
+        });
+        let started = std::time::Instant::now();
+        let result = reset_redirected_adapters_after_failed_restore().await;
+        let waited = started.elapsed();
+        released.join().unwrap();
+        let reset = test_hooks::take_last_automatic_reset();
+        reset_dns_state().await;
+        assert_eq!(reset, vec!["{A}".to_owned()]);
+        assert_eq!(result?, vec!["{A}".to_owned()]);
+        assert!(waited >= std::time::Duration::from_millis(250), "returned after only {waited:?}");
+        Ok(())
+    }
+
+    /// A claim that is not released is not a verdict either way: the fallback keeps waiting (its
+    /// caller bounds it) and neither resets nor reports a success while it does.
+    #[tokio::test]
+    #[serial]
+    async fn the_emergency_reset_is_not_refused_at_once_while_an_engine_call_holds_the_claim() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let claim = test_hooks::occupy_engine_claim();
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_millis(400),
+            reset_redirected_adapters_after_failed_restore(),
+        )
+        .await;
+        let resets = test_hooks::take_automatic_resets();
+        drop(claim);
+        reset_dns_state().await;
+        assert!(outcome.is_err(), "the refusal was taken as the answer: {outcome:?}");
+        assert_eq!(resets, 0);
+        Ok(())
+    }
+
     /// A registry call behind a filter driver can block for ever. The NRPT sweep runs on its own
     /// thread, so the uninstall gives up after its budget instead of hanging with it.
     #[test]
