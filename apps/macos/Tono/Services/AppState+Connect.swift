@@ -1072,6 +1072,9 @@ extension AppState {
         interactiveRepair: Bool = true,
         ordinaryQuit: Bool = false
     ) {
+        // A new automatic release starts a new incident for its retries; the
+        // retry itself (no interactive repair) keeps the baseline it set.
+        if automaticFailureRelease, interactiveRepair { automaticReleaseBaseline = nil }
         // A29: while a protected fault holds, no automatic release runs; the
         // user's own Disconnect (or Restore internet, or Quit) proceeds and
         // ends the fault.
@@ -2670,63 +2673,101 @@ extension AppState {
             && !LocalNetworkDevicesSync.holdsProtectedFault
     }
 
-    /// Runs the same automatic release again (AI hold kept) after a network
-    /// change or wake, with the recovery policy the original carried and no
-    /// administrator prompt. The gates are read again when the task runs, so
-    /// an update that starts first retires a queued retry.
-    ///
-    /// Attempts are rate-limited by coalescing, never by dropping: an event
-    /// inside the cooldown leaves one deferred retry for the cooldown's end,
-    /// because a transient failure followed by a stable network produces no
-    /// further notification to retry on. The DNS / PF changes the retry makes
-    /// itself post notifications too: those arrive while it is in flight or
-    /// within `automaticReleaseRetryEchoSettle` of its end and are not events
-    /// (a wake always is), so a failing retry cannot re-trigger itself.
-    func retryUnconfirmedAutomaticRelease(now: Date = Date(), fromWake: Bool = false) {
-        if automaticReleaseRetryTask != nil {
-            if fromWake { deferAutomaticReleaseRetry(now: now) }
-            return
+    /// Network notifications and wake belong to the automatic release only
+    /// while its retained intent (of the newest teardown request) exists and
+    /// the host is idle with PF armed, or its retry is still in flight. A task
+    /// handle alone never owns them: a retry that outlived its intent is stale.
+    var automaticReleaseOwnsEvents: Bool {
+        connectionCoordinator.automaticReleaseRetry != nil
+            && (automaticReleaseAwaitsRetry || automaticReleaseRetryTask != nil)
+    }
+
+    /// What tells a real network event from the retry's own echo.
+    struct AutomaticReleaseObservation: Equatable {
+        var uplink: NetworkUplinkSnapshot
+        var dns: PrivilegedRuntimeCoordinator.ProtectedDNSIntegrity?
+    }
+
+    private func readAutomaticReleaseObservation() async -> AutomaticReleaseObservation {
+        let uplink = await protectionAudits.uplinkSnapshot()
+        var dns: PrivilegedRuntimeCoordinator.ProtectedDNSIntegrity?
+        if let service = protectedDNSService {
+            dns = await protectionAudits.protectedDNSIntegrity(service)
         }
-        guard automaticReleaseRetryMayRun else { return }
-        if !fromWake, let ended = automaticReleaseRetryEndedAt,
-           now.timeIntervalSince(ended) < automaticReleaseRetryEchoSettle { return }
-        if let last = lastAutomaticReleaseRetryAt,
-           now.timeIntervalSince(last) < automaticReleaseRetryCooldown {
-            deferAutomaticReleaseRetry(now: now)
-            return
-        }
-        automaticReleaseDeferredRetry?.cancel()
-        automaticReleaseDeferredRetry = nil
-        lastAutomaticReleaseRetryAt = now
-        automaticReleaseRetryTask = Task { [weak self] in
+        return AutomaticReleaseObservation(uplink: uplink, dns: dns)
+    }
+
+    /// A notification, classified by state, not by time: with no baseline yet
+    /// it is the first event; otherwise it counts only if the uplink is not
+    /// `.stay` against the retry's baseline or the Protected DNS state differs.
+    /// The rest is the echo of the retry's own DNS / PF changes.
+    func observeAutomaticReleaseNetworkEvent() {
+        automaticReleaseEventTask?.cancel()
+        automaticReleaseEventTask = Task { [weak self] in
             guard let self else { return }
-            defer {
-                self.automaticReleaseRetryEndedAt = Date()
-                self.automaticReleaseRetryTask = nil
-            }
-            guard !Task.isCancelled, self.automaticReleaseRetryMayRun,
-                  let retry = self.connectionCoordinator.automaticReleaseRetry else { return }
-            await self.applyExhaustedArmedFailure(
+            let observed = await self.readAutomaticReleaseObservation()
+            guard !Task.isCancelled else { return }
+            if let baseline = self.automaticReleaseBaseline,
+               NetworkUplinkSnapshot.classify(from: baseline.uplink, to: observed.uplink) == .stay,
+               baseline.dns == observed.dns { return }
+            self.requestAutomaticReleaseRetry()
+        }
+    }
+
+    /// A real event (network change or wake). One retry at a time: during one
+    /// it leaves a single follow-up for when that retry finishes.
+    func requestAutomaticReleaseRetry() {
+        if automaticReleaseRetryTask != nil {
+            automaticReleasePendingRetry = true
+            return
+        }
+        startAutomaticReleaseRetry()
+    }
+
+    private func startAutomaticReleaseRetry() {
+        guard automaticReleaseRetryTask == nil, automaticReleaseRetryMayRun else { return }
+        automaticReleaseRetryTask = Task { [weak self] in
+            await self?.runAutomaticReleaseRetry()
+        }
+    }
+
+    /// Runs the same automatic release again (AI hold kept), with the recovery
+    /// policy the original carried and no administrator prompt. Every gate is
+    /// read again right before the release, so an update that started first
+    /// retires the retry. A teardown it queues is awaited here, so the
+    /// readback and the follow-up decision see its outcome.
+    private func runAutomaticReleaseRetry() async {
+        let started = await readAutomaticReleaseObservation()
+        if !Task.isCancelled, automaticReleaseRetryMayRun,
+           let retry = connectionCoordinator.automaticReleaseRetry {
+            automaticReleaseBaseline = started
+            await applyExhaustedArmedFailure(
                 message: "",
                 resumeWhenReachable: retry.resumesWhenReleased,
                 retryingUnconfirmedRelease: true
             )
+            // The state the retry itself left behind, so what it posts after
+            // this point compares equal.
+            if !Task.isCancelled { automaticReleaseBaseline = await readAutomaticReleaseObservation() }
         }
+        // A cancelled retry was retired by whoever cancelled it.
+        guard !Task.isCancelled else { return }
+        automaticReleaseRetryTask = nil
+        let followUp = automaticReleasePendingRetry
+        automaticReleasePendingRetry = false
+        // Released (or no longer ours): the next failure is a new incident.
+        if connectionCoordinator.automaticReleaseRetry == nil { automaticReleaseBaseline = nil }
+        if followUp { startAutomaticReleaseRetry() }
     }
 
-    /// One deferred retry for the end of the cooldown (at least a second out,
-    /// so a retry still in flight is polled, not spun on). It re-runs every
-    /// gate and the retained-intent check through the same entry point.
-    private func deferAutomaticReleaseRetry(now: Date) {
-        guard automaticReleaseDeferredRetry == nil else { return }
-        let elapsed = lastAutomaticReleaseRetryAt.map { now.timeIntervalSince($0) } ?? 0
-        let delay = max(1, automaticReleaseRetryCooldown - elapsed)
-        automaticReleaseDeferredRetry = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(delay))
-            guard let self, !Task.isCancelled else { return }
-            self.automaticReleaseDeferredRetry = nil
-            self.retryUnconfirmedAutomaticRelease(fromWake: true)
-        }
+    /// The user took over the host, or the machine is sleeping.
+    func cancelAutomaticReleaseRetry() {
+        automaticReleaseRetryTask?.cancel()
+        automaticReleaseRetryTask = nil
+        automaticReleaseEventTask?.cancel()
+        automaticReleaseEventTask = nil
+        automaticReleasePendingRetry = false
+        automaticReleaseBaseline = nil
     }
 
     /// Whether a network change may restart the unarmed loop: only a loop

@@ -38,7 +38,7 @@
 - 仍不动：A29 守卫、strict、PF 规则、helper、`HelperProtocolVersion`、未 armed 循环退避。
 - 新的剩余限制：其他自动释放入口（目录移除、代理、重启保持等）失败后只会被重试为释放，不会带重连，需要用户 Connect；重试期间若 helper 需要修复，要等用户点 Restore internet。
 
-### 续记 2026-10-12 · Codex 复核第 2 轮（对 c575d9bb：第 1 轮五项均已解决；新增 1 major、1 minor）
+### 续记 2026-10-12 · Codex 复核第 2 轮（已被第 3 轮取代，仅作历史；对 c575d9bb：第 1 轮五项均已解决；新增 1 major、1 minor）
 - MAJOR（冷却丢事件）：20 秒冷却把冷却内的网络变化 / 唤醒直接丢掉（唤醒还不会落到原来的唤醒恢复）。瞬时失败后网络恢复、不再有通知，Mac 会一直 armed 到用户点击；
   已停止的连接态核心监视器也不会兜底。改为合并而不是丢弃：冷却内的事件只留一个延后重试（`automaticReleaseDeferredRetry`，单飞、冷却结束时触发），
   触发时经同一入口重新读取 `automaticReleaseRetryMayRun` 与保留意图，所以更新 / A29 故障 / 用户已操作都会让它作废；唤醒同样合并，不再被吞。
@@ -46,3 +46,18 @@
   冷却和回声窗口是实例属性，供测试缩短。测试 `testNetworkEventInsideTheCooldownIsDeferredNotDropped`、`testWakeInsideTheCooldownIsDeferredNotDropped`、`testARetrysOwnNotificationsDoNotScheduleAnotherRetry`。
 - MINOR（过期说明）：剩余限制里“每次网络变化重跑并可能再弹授权框”已改成对第 1 版的历史说明。
 - 新的剩余限制：失败的释放最坏每 20 秒由真实事件重试一次（不会无事件自循环）；回声窗口按时间判断，不比较网络状态。
+
+### 续记 2026-10-12 · Codex 复核第 3 轮（对 8b1a4c1e）：去掉所有基于时间的启发式
+- 评审：第 2 轮的合并只修了一半——3 秒回声窗口仍会丢掉失败后 3 秒内到达的真实恢复通知（回归测试把窗口设成 0，绕过了生产分支）；
+  唤醒把「有重试任务句柄」当成所有权，过期的重试任务（拆除已完成、卡在状态回读，用户 Connect 已让意图作废）会吞掉新会话的唤醒恢复；
+  唤醒在重试途中会生成延后任务并每秒自我重排，直到在途任务退出。
+- 设计变更（所有者批准）：删除 20 秒冷却、3 秒回声窗口和延后 sleep 任务，改为按状态判断：
+  - 回声与真实事件：重试开始时记录基线（`NetworkUplinkSnapshot` 与有 Protected DNS 服务时的 DNS 完整性），重试结束回读后刷新基线。之后的网络通知只有在
+    `NetworkUplinkSnapshot.classify(from: 基线, to: 当前) != .stay` 或 DNS 完整性与基线不同时才算真实事件，否则是这次重试自己造成的回声，直接忽略；没有基线时第一个事件算真实事件。唤醒永远是真实事件。
+  - 单飞加待办：重试在途时到达的真实事件只置 `automaticReleasePendingRetry`；重试结束（拆除与回读之后）若待办成立且 `automaticReleaseAwaitsRetry` 与 `automaticReleaseRetryMayRun` 的所有闸门仍成立，就清除待办并恰好启动一次后续重试，否则清除待办。没有 sleep、没有轮询；后续重试自己的回声同样按状态比较过滤，所以没有真实变化就不会自循环。
+  - 唤醒所有权：只有当前请求的保留自动释放意图存在（且主机空闲 PF armed，或其重试仍在途）才走重试分支（`automaticReleaseOwnsEvents`），任务句柄单独不算；
+    用户的 Connect / Disconnect / Restore internet / Quit 经协调器 `onReleaseSuperseded` 取消重试任务、待办与基线，睡眠准备同样取消；过期任务不再存在，唤醒落到原有的唤醒恢复。
+  - 新一次自动释放（非重试）清空基线，释放确认后基线也清空，避免上一次事件的基线把下一次故障的第一个通知当成回声。
+- 测试（生产配置，不再改冷却 / 窗口参数，用注入的上行快照代替计时）：`testRecoveryAfterAFailedRetryRunsTheReleaseAgain`、`testARetrysOwnNotificationsDoNotRetriggerIt`、
+  `testRealEventDuringARetryLeavesExactlyOneFollowUp`、`testWakeDuringARetryLeavesOneFollowUpAndNoLoop`、`testStaleRetryTaskDoesNotOwnTheWakeAfterTheUserConnected`。旧的冷却 / 回声窗口测试随机制删除。
+- 剩余限制：网络通知发生在最初那次（非重试）自动释放的拆除过程中时不计入重试（和以前相同）；回声判断只比较上行与 DNS 完整性两项状态。

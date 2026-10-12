@@ -22,6 +22,10 @@ final class ConnectionCoordinator {
     /// the intent until the user connects again, so wake and network-change
     /// recovery cannot turn it into a reconnect (X1-2).
     private var retainedRelease: RetainedRelease?
+    /// The user (Connect, Disconnect, Restore internet, Quit) took over the
+    /// host: whoever retries the automatic release must stop. Not called for
+    /// the automatic release itself, which re-enters this coordinator.
+    var onReleaseSuperseded: (@MainActor () -> Void)?
     private var disconnectQueueReleaseIntent: Bool { retainedRelease != nil }
     /// The release intent with its origin. The user's own release is kept
     /// until they connect; the app's automatic failure release is retried by
@@ -91,6 +95,7 @@ final class ConnectionCoordinator {
         coreMonitorTask = nil
         disconnectRequestID &+= 1
         retainedRelease = nil
+        onReleaseSuperseded?()
         explicitReleaseDominatesQuit = true
         helperSession.retire()
         helperSession = HelperSessionGeneration()
@@ -312,6 +317,7 @@ final class ConnectionCoordinator {
         // that could not confirm PF was released. A connect refused by
         // `prepare` is not, so the intent survives it.
         retainedRelease = nil
+        onReleaseSuperseded?()
         explicitReleaseDominatesQuit = false
 
         let currentGeneration = protectionOperationGeneration
@@ -346,6 +352,7 @@ final class ConnectionCoordinator {
         prepare: () -> Void,
         operation: @escaping @MainActor (Int) async -> Void
     ) {
+        if releaseDisposition != .automatic { onReleaseSuperseded?() }
         bumpGeneration()
         cancelConnectionTasks()
         if releaseKillSwitch {

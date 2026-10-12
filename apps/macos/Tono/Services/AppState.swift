@@ -100,16 +100,13 @@ final class AppState {
     @ObservationIgnored var unarmedUplinkBaseline: NetworkUplinkSnapshot?
     @ObservationIgnored var unarmedNetworkKickTask: Task<Void, Never>?
     @ObservationIgnored var automaticReleaseRetryTask: Task<Void, Never>?
-    @ObservationIgnored var lastAutomaticReleaseRetryAt: Date?
-    @ObservationIgnored var automaticReleaseRetryEndedAt: Date?
-    @ObservationIgnored var automaticReleaseDeferredRetry: Task<Void, Never>?
+    /// The uplink and Protected DNS state the running (or last) automatic
+    /// release retry started from. A later notification is a real event only
+    /// if the state differs; otherwise it is that retry's own echo.
+    @ObservationIgnored var automaticReleaseBaseline: AutomaticReleaseObservation?
+    /// A real event arrived while a retry was in flight: one follow-up.
     @ObservationIgnored var automaticReleasePendingRetry = false
     @ObservationIgnored var automaticReleaseEventTask: Task<Void, Never>?
-    /// Minimum spacing between two automatic release attempts.
-    @ObservationIgnored var automaticReleaseRetryCooldown: TimeInterval = 20
-    /// How long after a retry ends a network notification is taken for the
-    /// echo of that retry's own DNS / PF changes rather than a new event.
-    @ObservationIgnored var automaticReleaseRetryEchoSettle: TimeInterval = 3
     /// Test seam. Nil uses a TCP connect that does not install PF.
     /// Not observed: an optional MainActor closure cannot be yielded by Observation.
     @ObservationIgnored
@@ -511,6 +508,9 @@ final class AppState {
 
     init() {
         config.secret = Self.controllerSecret()
+        connectionCoordinator.onReleaseSuperseded = { [weak self] in
+            self?.cancelAutomaticReleaseRetry()
+        }
         RuntimeCleanup.launchProtectionConsumer = { [weak self] protection in
             self?.adoptLaunchProtection(protection)
         }
@@ -574,6 +574,9 @@ final class AppState {
     /// once. PF remains the synchronous leak boundary while this runs.
     func handleSystemNetworkChange() {
         if isConnecting || isDisconnecting {
+            // A retry's own teardown posts notifications too; only a changed
+            // state counts as an event for it.
+            if automaticReleaseOwnsEvents { observeAutomaticReleaseNetworkEvent() }
             // The transition window cannot judge a network change yet: the
             // connect has not captured the baseline the reconciliation
             // compares against, and the coordinator's own arm/start/teardown
@@ -608,12 +611,12 @@ final class AppState {
             }
             // An automatic release that left PF armed is the app's own
             // failure, not the user's choice: run it again.
-            if automaticReleaseAwaitsRetry {
+            if automaticReleaseOwnsEvents {
                 LocalTrafficAudit.shared.recordEvent(
                     "automatic_release_network_retry",
                     details: auditProtectionDetails()
                 )
-                retryUnconfirmedAutomaticRelease()
+                observeAutomaticReleaseNetworkEvent()
                 return
             }
             // PF still armed after the user's Restore internet failed is not
@@ -846,6 +849,9 @@ final class AppState {
 
     func prepareForSystemSleep() {
         guard !nativeUpdatePending else { return } // Root power monitor still tightens PF.
+        // A retry is not carried across the sleep; wake decides again from the
+        // retained release intent.
+        cancelAutomaticReleaseRetry()
         // An explicit Restore internet can still be draining its privileged
         // release — held on the serialized queue, possibly blocked for up to
         // 180 s on the administrator repair prompt. Sleep must not rewrite
@@ -928,8 +934,11 @@ final class AppState {
         )
         // The automatic release that failed before the sleep is retried, not
         // reconnected over: the host must not stay offline until a click.
-        if automaticReleaseAwaitsRetry || automaticReleaseRetryTask != nil {
-            retryUnconfirmedAutomaticRelease(fromWake: true)
+        // Owned by the retained automatic release intent of the current
+        // request, never by a task handle: a retry that outlived its intent
+        // (the user connected meanwhile) leaves wake to the normal recovery.
+        if automaticReleaseOwnsEvents {
+            requestAutomaticReleaseRetry()
             return
         }
         guard shouldResume else { return }
