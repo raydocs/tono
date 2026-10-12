@@ -205,6 +205,7 @@ function WorstNodes({ rows, domain }: { rows: ReturnType<typeof nodeQuality>; do
         </thead>
         <tbody>
           {shown.map((row) => (
+            // The row click is a mouse convenience; the name link is the keyboard path.
             <tr key={row.node} className="quality-row" onClick={() => openNodePage(row.node)}>
               <td className="quality-node">
                 <a href={`#/nodes/${encodeURIComponent(row.node)}`} onClick={(event) => event.stopPropagation()}>

@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { copy } from '@/copy/copy';
+import { CopyStatus } from '@/components/ops/CopyStatus';
 
 const words = copy.settings.candidates;
 
@@ -70,6 +71,7 @@ export function DraftDialog({
               >
                 {copied ? copy.settings.copied : copy.settings.copyText}
               </Action>
+              <CopyStatus copied={copied} message={copy.settings.copied} />
             </>
           )}
           <Action onClick={onClose}>{copy.close}</Action>

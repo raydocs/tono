@@ -205,6 +205,7 @@ function Row({
   const split = phone ? splitNodeName(label) : null;
 
   return (
+    // The row click is a mouse convenience; the name link is the keyboard path.
     <tr className={cn('quality-row', view.retired && 'nodes-row-retired')} onClick={() => openNodePage(node.name)}>
       {phone ? status : null}
       <td className="nodes-name">

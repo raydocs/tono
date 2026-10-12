@@ -11,6 +11,7 @@ import { stageSentence } from '@/lib/funnel';
 import { usePrivacy } from '@/lib/privacy';
 import { useAsk, WriteError } from './ask';
 import { FieldGrid, TextField } from '../settings/form';
+import { CopyStatus } from '@/components/ops/CopyStatus';
 
 /**
  * The whole of what there is to know about somebody who was opened and never
@@ -106,6 +107,7 @@ export function InviteDrawer({
           >
             {copied ? copy.copiedWechat : copy.copyWechat}
           </Action>
+          <CopyStatus copied={copied} message={copy.copiedWechat} />
           <Action
             pending={ask.pending}
             onClick={() => ask.ask({

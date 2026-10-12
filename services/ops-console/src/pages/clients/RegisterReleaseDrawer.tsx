@@ -31,7 +31,7 @@ function unregisteredFirst(items: readonly ReleaseObjectDto[]): ReleaseObjectDto
 }
 
 const READONLY = 'min-h-8 w-full min-w-0 break-all rounded-[8px] border border-[var(--hairline)] bg-[var(--background)] px-2.5 py-1.5 font-mono text-body';
-const AREA = 'min-h-[72px] w-full min-w-0 rounded-[8px] border border-[var(--hairline)] bg-[var(--background)] px-2.5 py-1.5 font-mono text-body outline-none focus:border-[var(--accent)]';
+const AREA = 'min-h-[72px] w-full min-w-0 rounded-[8px] border border-[var(--hairline)] bg-[var(--background)] px-2.5 py-1.5 font-mono text-body focus:border-[var(--accent)]';
 
 /**
  * Register release: put a file that is already in the release bucket on the books.

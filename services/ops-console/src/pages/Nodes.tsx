@@ -159,7 +159,7 @@ export default function NodesPage({
         action={selectedView ? (
           <button
             type="button"
-            className="text-micro text-[color:var(--accent)] hover:underline"
+            className="text-micro text-[color:var(--accent-text)] hover:underline"
             onClick={() => openNodePage(selectedView.node.name)}
           >
             {copy.nodeOpenPage}

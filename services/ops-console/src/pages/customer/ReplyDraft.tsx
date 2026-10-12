@@ -14,6 +14,7 @@ import {
   type ReplySection,
 } from '@/lib/customers';
 import { useResource } from '@/lib/use-resource';
+import { CopyStatus } from '@/components/ops/CopyStatus';
 
 /**
  * Support mode: the answer, drafted from the evidence already on this page.
@@ -107,6 +108,7 @@ export function ReplyDraft({
             {copied ? copy.replyCopied : copy.replyCopy}
           </Action>
         ) : null}
+        <CopyStatus copied={copied} message={copy.replyCopied} />
       </ActionRow>
       {!open ? null : composed === null ? (
         <Empty message={context.status === 'error' ? context.message : copy.loading} />
@@ -131,8 +133,9 @@ export function ReplyDraft({
             ))}
           </div>
           <textarea
-            className="min-h-[320px] w-full rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-3 py-2 text-body leading-relaxed outline-none"
+            className="min-h-[320px] w-full rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-3 py-2 text-body leading-relaxed"
             value={text}
+            aria-label={copy.replyDraft}
             onChange={(event) => { setText(event.target.value); setCopied(false); }}
           />
           <p className="text-micro normal-case tracking-normal text-[var(--muted-foreground)]">

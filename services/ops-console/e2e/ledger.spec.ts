@@ -241,7 +241,8 @@ test.describe('账目', () => {
     await dialog.getByRole('button', { name: '锁定', exact: true }).click();
 
     await expect(page.getByText(/已锁定 · owner@example\.test/)).toBeVisible();
-    await expect(page.getByText('这个月已经锁了，不能改；冲正只能记入未锁定的当前 UTC 月。')).toBeVisible();
+    // Each blocked action also carries this reason in a hidden span for aria-describedby; the first match is the visible line.
+    await expect(page.getByText('这个月已经锁了，不能改；冲正只能记入未锁定的当前 UTC 月。').first()).toBeVisible();
     await expect(page.getByRole('button', { name: '记一笔' })).toBeDisabled();
     await expect(page.getByRole('button', { name: '改备注' }).first()).toBeDisabled();
     await expect(page.getByRole('button', { name: '冲正', exact: true }).first()).toBeDisabled();

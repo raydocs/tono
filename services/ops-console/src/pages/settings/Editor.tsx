@@ -5,6 +5,7 @@ import { formatWhen } from '@/lib/display';
 import type { LineDiff } from '@/lib/settings-publish';
 import { cn } from '@/lib/utils';
 import type { Notice } from './use-document';
+import { CopyStatus } from '@/components/ops/CopyStatus';
 
 /**
  * The furniture the two publishing sections share: a text box you can count
@@ -61,7 +62,7 @@ export function CodeBox({
         className={cn(
           LINE,
           height,
-          'relative block w-full resize-none bg-transparent py-2 pl-[52px] pr-3 outline-none',
+          'relative block w-full resize-none bg-transparent py-2 pl-[52px] pr-3',
         )}
       />
     </div>
@@ -203,6 +204,7 @@ export function CanonicalBlock({ title, text }: { title: string; text: string })
         >
           {copied ? copy.settings.copied : copy.settings.copyText}
         </button>
+        <CopyStatus copied={copied} message={copy.settings.copied} />
       </div>
       <pre className={cn('max-h-[200px] overflow-auto rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] p-3 whitespace-pre', LINE)}>
         {text}

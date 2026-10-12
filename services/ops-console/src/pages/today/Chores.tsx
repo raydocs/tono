@@ -6,6 +6,7 @@ import type { Chore } from '@/lib/chores';
 import { formatDate } from '@/lib/display';
 import { openCustomer, openInvite, openNodePage } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
+import { CopyStatus } from '@/components/ops/CopyStatus';
 
 /**
  * The chores, and the two things a chore about a person needs that a chore
@@ -124,6 +125,7 @@ function CopyHandle({ handle }: { handle: string | null }) {
       >
         {copied ? copy.copiedWechat : copy.copyWechat}
       </Action>
+      <CopyStatus copied={copied} message={copy.copiedWechat} />
     </span>
   );
 }

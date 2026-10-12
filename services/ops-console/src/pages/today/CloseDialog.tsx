@@ -108,7 +108,7 @@ export function CloseDialog({
             </span>
             <input
               type="text"
-              className="h-8 w-full min-w-0 rounded-[8px] border border-[var(--hairline)] bg-[var(--background)] px-2.5 text-body outline-none"
+              className="h-8 w-full min-w-0 rounded-[8px] border border-[var(--hairline)] bg-[var(--background)] px-2.5 text-body"
               value={reason}
               onChange={(event) => setReason(event.target.value)}
             />

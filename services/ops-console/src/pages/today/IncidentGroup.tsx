@@ -32,16 +32,19 @@ export function IncidentGroupRow({
 }) {
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState('');
   const waiting = unclaimed(group);
   const lastSeen = Math.max(...group.members.map((member) => member.lastSeenAt));
   const leads = group.members.some((member) => incidentAction(member)?.go === 'node');
 
   /** One write after another: a flaky hub should fail on the first, not on all twelve at once. */
-  async function each(targets: readonly IncidentDto[], write: (id: string) => Promise<unknown>) {
+  async function each(targets: readonly IncidentDto[], done: string, write: (id: string) => Promise<unknown>) {
     setPending(true);
     setFailure(null);
+    setOutcome('');
     try {
       for (const member of targets) await write(member.id);
+      setOutcome(done);
     } catch (error) {
       setFailure(error instanceof Error ? error.message : copy.actionFailed);
     } finally {
@@ -71,7 +74,8 @@ export function IncidentGroupRow({
             <span className="font-mono normal-case tracking-normal">{formatWhenAgo(lastSeen)}</span>
           </span>
         </div>
-        {failure ? <p className="panel-error rounded-[10px] px-3 py-2 text-body">{failure}</p> : null}
+        {failure ? <p className="panel-error rounded-[10px] px-3 py-2 text-body" role="alert">{failure}</p> : null}
+        <p role="status" className={outcome === '' ? 'sr-only' : 'text-micro text-[var(--muted-foreground)]'}>{outcome}</p>
         <details className="group-fold">
           <summary className="text-micro text-[var(--muted-foreground)]">
             {copy.incidentGroupMembers(group.members.length)}
@@ -110,14 +114,14 @@ export function IncidentGroupRow({
           <Action
             primary={!leads}
             pending={pending}
-            onClick={() => { void each(waiting, (id) => opsApi.ackIncident(id)); }}
+            onClick={() => { void each(waiting, copy.incidentEvent.acked, (id) => opsApi.ackIncident(id)); }}
           >
             {copy.incidentGroupAckAll}
           </Action>
         ) : null}
         <Action
           pending={pending}
-          onClick={() => { void each(group.members, (id) => opsApi.snoozeIncident(id)); }}
+          onClick={() => { void each(group.members, copy.incidentEvent.snoozed, (id) => opsApi.snoozeIncident(id)); }}
         >
           {copy.incidentGroupSnoozeAll}
         </Action>
