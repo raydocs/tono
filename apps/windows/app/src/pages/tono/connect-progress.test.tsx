@@ -230,7 +230,7 @@ describe('ConnectProgressCard', () => {
     expect(
       (await screen.findByTestId('tono-recovery-feedback')).textContent,
     ).toContain('No automatic retry is scheduled')
-    fireEvent.click(screen.getByRole('button', { name: 'Retry Now' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Retry now' }))
     await waitFor(() => expect(tonoRetryNowMock).toHaveBeenCalledTimes(1))
     expect(tonoConnectMock).not.toHaveBeenCalled()
   })
@@ -243,7 +243,7 @@ describe('ConnectProgressCard', () => {
     expect(await screen.findByText('Protection not verified')).toBeDefined()
     expect(
       screen.getByText(
-        'Tono cannot confirm network protection. Repair the service if prompted, or choose Restore Normal Internet.',
+        'Tono cannot confirm network protection. Repair the service if prompted, or choose “Restore normal internet”.',
       ),
     ).toBeDefined()
     expect(screen.queryByText(enTono.progress.statusBody)).toBeNull()
@@ -271,7 +271,7 @@ describe('ConnectProgressCard', () => {
     expect(screen.queryByText('Preparing protection…')).toBeNull()
     expect(screen.queryByTestId('tono-step-preparing')).toBeNull()
     expect(
-      screen.getByRole('button', { name: 'Restore Normal Internet' }),
+      screen.getByRole('button', { name: 'Restore normal internet' }),
     ).toBeDefined()
     expect(screen.getByRole('button', { name: 'Copy details' })).toBeDefined()
     expect(
@@ -290,7 +290,7 @@ describe('ConnectProgressCard', () => {
     expect(screen.queryByText(/TOTAL/)).toBeNull()
     expect(screen.queryByTestId('tono-step-preparing')).toBeNull()
     expect(
-      screen.getByRole('button', { name: 'Restore Normal Internet' }),
+      screen.getByRole('button', { name: 'Restore normal internet' }),
     ).toBeDefined()
     expect(screen.getByRole('button', { name: 'Copy details' })).toBeDefined()
     expect(
@@ -309,7 +309,7 @@ describe('ConnectProgressCard', () => {
     expect(screen.queryByText(/TOTAL/)).toBeNull()
     expect(screen.queryByTestId('tono-step-preparing')).toBeNull()
     expect(
-      screen.getByRole('button', { name: 'Restore Normal Internet' }),
+      screen.getByRole('button', { name: 'Restore normal internet' }),
     ).toBeDefined()
     expect(screen.getByRole('button', { name: 'Copy details' })).toBeDefined()
     expect(
@@ -427,7 +427,7 @@ describe('ConnectProgressCard', () => {
     })
   }, 10000)
 
-  it('calls tono_retry_now when Retry Now is clicked', async () => {
+  it('calls tono_retry_now when Retry now is clicked', async () => {
     tonoConnectProgressMock.mockResolvedValue(
       makeProgress({ retryAttempt: 1, nextRetryAtMs: Date.now() + 30000 }),
     )
@@ -435,7 +435,7 @@ describe('ConnectProgressCard', () => {
     const { onRefreshStatus } = renderCard({ uiState: 'protectedOffline' })
 
     const retryButton = await screen.findByRole('button', {
-      name: 'Retry Now',
+      name: 'Retry now',
     })
     fireEvent.click(retryButton)
 
@@ -444,7 +444,7 @@ describe('ConnectProgressCard', () => {
     await waitFor(() => expect(onRefreshStatus).toHaveBeenCalled())
   })
 
-  it('offers Retry Now via connect after a released handshake eof', async () => {
+  it('offers Retry now via connect after a released handshake eof', async () => {
     tonoConnectProgressMock.mockResolvedValue(
       makeProgress({
         error:
@@ -463,7 +463,7 @@ describe('ConnectProgressCard', () => {
     expect(screen.queryByText(enTono.progress.protectionUnknownBody)).toBeNull()
     expect(screen.queryByText(enTono.progress.statusBody)).toBeNull()
     expect(enTono.progress.releasedFailureBody).not.toMatch(
-      /blocked|Restore Normal Internet/i,
+      /blocked|Restore normal internet/i,
     )
 
     fireEvent.click(await screen.findByTestId('tono-progress-retry'))
@@ -514,7 +514,7 @@ describe('ConnectProgressCard', () => {
     ).toBeNull()
   })
 
-  it('does not offer Retry Now on idle Not Connected', async () => {
+  it('does not offer Retry now on idle Not Connected', async () => {
     tonoConnectProgressMock.mockResolvedValue(makeProgress({ error: null }))
 
     renderCard({ uiState: 'notConnected', onChooseRoute: vi.fn() })
@@ -532,13 +532,13 @@ describe('ConnectProgressCard', () => {
     const { onRefreshStatus } = renderCard({ uiState: 'protectedOffline' })
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Restore Normal Internet' }),
+      await screen.findByRole('button', { name: 'Restore normal internet' }),
     )
     const dialog = await screen.findByRole('dialog', {
       name: 'Restore normal internet',
     })
     fireEvent.click(
-      within(dialog).getByRole('button', { name: 'Restore Normal Internet' }),
+      within(dialog).getByRole('button', { name: 'Restore normal internet' }),
     )
 
     await waitFor(() => expect(tonoDisconnectMock).toHaveBeenCalledTimes(1))
@@ -552,11 +552,11 @@ describe('ConnectProgressCard', () => {
     renderCard({ uiState: 'protectedOffline' })
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Restore Normal Internet' }),
+      await screen.findByRole('button', { name: 'Restore normal internet' }),
     )
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(
-      within(dialog).getByRole('button', { name: 'Restore Normal Internet' }),
+      within(dialog).getByRole('button', { name: 'Restore normal internet' }),
     )
 
     await screen.findByText(
@@ -1006,7 +1006,7 @@ describe('ConnectProgressCard', () => {
         selectedServer: tokyo,
       })
 
-      await screen.findByRole('button', { name: 'Restore Normal Internet' })
+      await screen.findByRole('button', { name: 'Restore normal internet' })
       expect(screen.queryByTestId('tono-try-backup-channel')).toBeNull()
       expect(tonoSelectServerMock).not.toHaveBeenCalled()
     })

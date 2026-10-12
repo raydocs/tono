@@ -710,7 +710,8 @@ const LoginPage = () => {
           <p
             style={{
               margin: 0,
-              maxWidth: 320,
+              // The sea card is wide enough to keep the Chinese intro on one line.
+              maxWidth: newAppearance ? 380 : 320,
               fontSize: 13,
               lineHeight: 1.55,
               color: text.secondary,
