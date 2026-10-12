@@ -68,7 +68,7 @@ struct SupportView: View {
                         reportCopied: copiedTarget == .report
                     )
                     if seaEnabled {
-                        SeaPanel("Current state", icon: "shield.lefthalf.filled") {
+                        SeaPanel("Current state", icon: "sun.horizon") {
                             SupportRow(label: String(localized: "Protection"), value: protectionText(snapshot))
                             SupportRow(label: String(localized: "Network helper"), value: helperText)
                             SupportRow(label: String(localized: "Core engine"), value: coreText)
@@ -373,7 +373,7 @@ struct SupportView: View {
     private var browserDNSCard: some View {
         let outcome = browserDNSReport?.outcome
         return SupportCard(
-            icon: "network.badge.shield.half.filled",
+            icon: "network",
             title: String(localized: "Browser Secure DNS")
         ) {
             Text(outcome == nil
@@ -598,7 +598,7 @@ struct SupportView: View {
     // MARK: - Diagnostics Report
 
     private func diagnosticsCard(report: String) -> some View {
-        SupportCard(icon: "shield.lefthalf.filled", title: String(localized: "Redacted Diagnostics Report")) {
+        SupportCard(icon: "doc.text.magnifyingglass", title: String(localized: "Redacted Diagnostics Report")) {
             Text(String(localized: "This is what Tono reports when support requests a diagnostic snapshot, followed by the catalog and traffic-policy state the uploaded snapshot has no field for. It carries no hostnames, IP addresses, process names or account tokens. It is a separate, smaller report than the audit log above, which in this test build is uploaded in full."))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
