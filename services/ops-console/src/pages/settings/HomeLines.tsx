@@ -131,6 +131,7 @@ export function HomeLines() {
         title={words.deleteTitle}
         body={removing ? words.deleteBody(removing.displayName) : ''}
         confirm={copy.settings.remove}
+        danger
         pending={write.pending}
         onClose={() => setRemoving(null)}
         onConfirm={() => {

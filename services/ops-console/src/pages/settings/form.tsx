@@ -186,7 +186,7 @@ export function FormFooter({
         </Action>
         <Action onClick={onCancel}>{copy.settings.cancel}</Action>
         {onRemove ? (
-          <Action className="ml-auto" pending={pending} onClick={onRemove}>
+          <Action danger className="ml-auto" pending={pending} onClick={onRemove}>
             {copy.settings.remove}
           </Action>
         ) : null}
@@ -207,6 +207,7 @@ export function ConfirmDialog({
   title,
   body,
   confirm,
+  danger,
   pending,
   onConfirm,
   onClose,
@@ -215,6 +216,7 @@ export function ConfirmDialog({
   title: string;
   body: string;
   confirm: string;
+  danger?: boolean;
   pending: boolean;
   onConfirm: () => void;
   onClose: () => void;
@@ -232,8 +234,8 @@ export function ConfirmDialog({
           </DialogDescription>
         </DialogHeader>
         <ActionRow>
-          <Action primary pending={pending} onClick={onConfirm}>{confirm}</Action>
           <Action onClick={onClose}>{copy.settings.cancel}</Action>
+          <Action primary danger={danger} pending={pending} onClick={onConfirm}>{confirm}</Action>
         </ActionRow>
       </DialogContent>
     </Dialog>

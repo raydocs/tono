@@ -102,6 +102,7 @@ export function Alerts() {
         title={words.deleteTitle}
         body={removing ? words.deleteBody(removing.name) : ''}
         confirm={copy.settings.remove}
+        danger
         pending={write.pending}
         onClose={() => setRemoving(null)}
         onConfirm={() => {
