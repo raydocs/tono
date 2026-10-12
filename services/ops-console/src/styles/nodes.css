@@ -72,7 +72,11 @@
     .nodes-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .nodes-load-grid { grid-template-columns: minmax(0, 1fr); }
     .nodes-name { width: auto; }
-    .nodes-quota-col { width: auto; }
+    .nodes-table th:first-child, .nodes-table td:first-child { width: 1%; white-space: nowrap; }
+    .nodes-quota-col { width: 1%; }
+    /* Side by side, the meter and its figure leave the name column 37 px, which is
+       why every city was clipped to its first letters; stacked, the name gets the room. */
+    .nodes-quota { flex-direction: column; align-items: flex-start; gap: 4px; }
     .nodes-quota .meter { width: 32px; }
   }
 }

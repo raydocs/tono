@@ -81,7 +81,7 @@ export function IncidentGroupRow({
               <li key={member.id} data-incident={member.id} className="group-member text-body">
                 <button
                   type="button"
-                  className="incident-title min-w-0 truncate"
+                  className="incident-title min-w-0 truncate max-[640px]:line-clamp-2 max-[640px]:whitespace-normal max-[640px]:[overflow-wrap:anywhere]"
                   onClick={() => { if (member.subjectId) openNodePage(member.subjectId); }}
                 >
                   {member.subjectId ?? copy.missing}
