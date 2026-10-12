@@ -57,11 +57,35 @@ it('puts the full meta text on the cell title and splits it into three flex item
   const meta = `${clusterStage('verifyingTraffic')} · windows 0.0.75 · Los Angeles · Marina`;
   expect(root.querySelector('.cluster-detail')?.getAttribute('title')).toBe(meta);
   const segments = [...root.querySelectorAll('.cluster-detail > .cluster-seg')].map((node) => node.textContent);
-  expect(segments).toEqual([clusterStage('verifyingTraffic'), 'windows 0.0.75', 'Los Angeles · Marina']);
+  expect(segments).toEqual([clusterStage('verifyingTraffic'), 'windows 0.0.75', 'Los AngelesMarina']);
   // The separators are CSS on items two and up, so no dot element or text is in the markup between them.
   expect(root.querySelector('.cluster-dot')).toBeNull();
   expect(root.querySelector('.cluster-detail')?.children).toHaveLength(3);
-  expect(root.querySelector('.cluster-node')?.textContent).toBe('Los Angeles · Marina');
+  expect(root.querySelector('.cluster-node')?.textContent).toBe('Los AngelesMarina');
+});
+
+it('splits the node into a city that can give way and a site that cannot, keeping the whole name on the title', () => {
+  const root = document.createElement('div');
+  root.innerHTML = renderToString(<ul><ClusterRow cluster={cluster} /></ul>);
+  const node = root.querySelector('.cluster-node');
+  expect([...(node?.children ?? [])].map((child) => [child.className, child.textContent])).toEqual([
+    ['cluster-node-city', 'Los Angeles'],
+    ['cluster-node-site', 'Marina'],
+  ]);
+  // The dot between city and site is CSS on the site, never text.
+  expect(node?.textContent).not.toContain('·');
+  expect(root.querySelector('.cluster-detail')?.getAttribute('title')).toContain('Los Angeles · Marina');
+});
+
+it('renders only the city child for a node with no site and for a cluster that picked no node', () => {
+  for (const [node, text] of [['Singapore', 'Singapore'], ['unselected', copy.diagnosticsPanel.clusterNoNode], ['', copy.diagnosticsPanel.clusterNoNode]] as const) {
+    const root = document.createElement('div');
+    root.innerHTML = renderToString(<ul><ClusterRow cluster={{ ...cluster, node }} /></ul>);
+    const children = [...(root.querySelector('.cluster-node')?.children ?? [])];
+    expect(children.map((child) => child.className)).toEqual(['cluster-node-city']);
+    expect(children[0]?.textContent).toBe(text);
+    expect(root.querySelector('.cluster-node-site')).toBeNull();
+  }
 });
 
 it('marks a quiet row with is-quiet and leaves an open row without it', () => {

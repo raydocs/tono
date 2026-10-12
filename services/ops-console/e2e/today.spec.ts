@@ -63,7 +63,9 @@ test.describe('today page', () => {
     await expect(first.locator('.cluster-sentence')).toHaveText('保护失效，流量被放开了');
     await expect(first.locator('.cluster-severity')).toHaveText('严重');
     await expect(first.locator('.cluster-detail')).toHaveAttribute('title', '掉线保护 · windows 1.8.1 · Los Angeles · Mesa');
-    await expect(first.locator('.cluster-seg')).toHaveText(['掉线保护', 'windows 1.8.1', 'Los Angeles · Mesa']);
+    await expect(first.locator('.cluster-detail > .cluster-seg')).toHaveText(['掉线保护', 'windows 1.8.1', 'Los AngelesMesa']);
+    await expect(first.locator('.cluster-node-city')).toHaveText('Los Angeles');
+    await expect(first.locator('.cluster-node-site')).toHaveText('Mesa');
     await expect(first.locator('.cluster-counts')).toHaveText('9 人 / 11 台');
     await expect(first.locator('.cluster-status.ops-tag')).toHaveText('进行中');
     await expect(first.locator('[title="TONO_FAIL_OPEN"]')).toHaveCount(1);
@@ -96,10 +98,11 @@ test.describe('today page', () => {
 
   /**
    * Dense has nine clusters with the only p0 stored last and the only quiet one
-   * eighth. The list sorts them on the client: p0 first, quiet last. The meta
-   * line gives way only at the node, with a "·" before it that is CSS, not text.
+   * eighth, with more people than four of the open ones. The list sorts them on
+   * the client: p0 first, quiet last. The meta line gives way only inside the
+   * node's city, with "·" separators that are CSS, not text.
    */
-  test('dense clusters read p0 first and quiet last, and only the node is ellipsised', async ({ page }) => {
+  test('dense clusters read p0 first and quiet last, and only the node city is ellipsised', async ({ page }) => {
     await open(page, '/today', 'dense');
     const block = page.locator('section').filter({ has: page.getByRole('heading', { name: '失败聚类' }) });
     await block.scrollIntoViewIfNeeded();
@@ -116,25 +119,38 @@ test.describe('today page', () => {
     const statuses = await rows.locator('.cluster-status').allTextContents();
     expect(statuses.indexOf('已安静')).toBe(statuses.length - 1);
 
-    // Stage and platform never ellipsise; the node does, and the long one is cut.
+    // The quiet row has more people than the open rows below it and still sits last.
+    const people = await rows.locator('.cluster-counts').allTextContents();
+    const reach = (text: string) => Number(/^(\d+)/.exec(text.trim())?.[1]);
+    expect(reach(people[people.length - 1]!)).toBeGreaterThan(reach(people[people.length - 2]!));
+
+    // Stage, platform and the site never ellipsise; only the city inside the node does, and a long one is cut.
     const overflow = await block.locator('.cluster-detail').evaluateAll((metas) => metas.map((meta) => {
       const style = (el: Element) => getComputedStyle(el);
       const node = meta.querySelector('.cluster-node')!;
+      const city = node.querySelector('.cluster-node-city');
+      const site = node.querySelector('.cluster-node-site');
       return {
-        stage: style(meta.querySelector('.cluster-stage')!).textOverflow,
-        platform: style(meta.querySelector('.cluster-platform')!).textOverflow,
-        node: style(node).textOverflow,
+        ellipsised: [meta, ...meta.querySelectorAll('*')]
+          .filter((el) => style(el).textOverflow === 'ellipsis')
+          .map((el) => el.className),
         metaOverflow: style(meta).textOverflow,
         before: getComputedStyle(node, '::before').content,
-        cut: node.scrollWidth > node.clientWidth,
+        siteBefore: site ? getComputedStyle(site, '::before').content : null,
+        siteWhole: site ? site.scrollWidth <= site.clientWidth && site.getBoundingClientRect().width > 0 : null,
+        cityWidth: city?.getBoundingClientRect().width ?? 0,
+        cut: city ? city.scrollWidth > city.clientWidth : false,
       };
     }));
     for (const meta of overflow) {
-      expect(meta.stage).toBe('clip');
-      expect(meta.platform).toBe('clip');
+      expect(meta.ellipsised).toEqual(['cluster-node-city']);
       expect(meta.metaOverflow).toBe('clip');
-      expect(meta.node).toBe('ellipsis');
       expect(meta.before).toBe('"·"');
+      expect(meta.cityWidth).toBeGreaterThan(0);
+      if (meta.siteWhole !== null) {
+        expect(meta.siteBefore).toBe('"·"');
+        expect(meta.siteWhole).toBe(true);
+      }
     }
     expect(overflow.some((meta) => meta.cut)).toBe(true);
   });

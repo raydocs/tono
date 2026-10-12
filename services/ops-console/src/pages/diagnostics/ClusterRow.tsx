@@ -1,5 +1,6 @@
 import { copy } from '@/copy/copy';
 import { clusterCode, clusterNode, clusterStage, clusterStatus } from '@/copy/diagnostics';
+import { splitNodeName } from '@/lib/node-name';
 import type { FailureCluster } from './types';
 
 /**
@@ -16,6 +17,7 @@ export function ClusterRow({ cluster }: { cluster: FailureCluster }) {
   const stage = clusterStage(cluster.stage);
   const platform = `${cluster.platform} ${cluster.appVersion}`;
   const node = clusterNode(cluster.node);
+  const { prefix: city, main: site } = splitNodeName(node);
   return (
     <li className={cluster.status === 'quiet' ? 'cluster-row is-quiet' : 'cluster-row'}>
       {/* Always rendered so the sentences share one x; empty unless p0. The
@@ -24,11 +26,15 @@ export function ClusterRow({ cluster }: { cluster: FailureCluster }) {
       <span className="cluster-sentence" title={cluster.code}>{clusterCode(cluster.code)}</span>
       {/* Three flex items; the dots between them are CSS (`::before` on items
           two and up), hidden on a phone where the items wrap, so no line starts
-          or ends on a dot. Only the node can be long: it alone gives way. */}
+          or ends on a dot. Only the node can be long: it alone gives way, and
+          inside it only the city, so the site that tells nodes apart stays whole. */}
       <span className="cluster-detail" title={`${stage} · ${platform} · ${node}`}>
         <span className="cluster-seg cluster-stage">{stage}</span>
         <span className="cluster-seg cluster-platform">{platform}</span>
-        <span className="cluster-seg cluster-node">{node}</span>
+        <span className="cluster-seg cluster-node">
+          <span className="cluster-node-city">{city ?? site}</span>
+          {city ? <span className="cluster-node-site">{site}</span> : null}
+        </span>
       </span>
       <span className="cluster-counts">{copy.diagnosticsPanel.clusterReach(cluster.users, cluster.devices)}</span>
       <span className="ops-tag cluster-status">{clusterStatus(cluster.status)}</span>

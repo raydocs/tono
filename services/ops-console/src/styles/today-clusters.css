@@ -39,7 +39,8 @@
 
 /* Three flex items on one line. The dot between them is a `::before` on items
  * two and up. Stage and platform never shrink; the node is the only item that
- * gives way, with an ellipsis straight after its last character. */
+ * gives way, and inside it only the city: its ellipsis lands in the city text
+ * and the site after the last " · " keeps its full width. */
 .cluster-detail {
   display: flex;
   min-width: 0;
@@ -57,10 +58,23 @@
 .cluster-platform { flex: none; }
 
 .cluster-node {
+  display: flex;
   min-width: 0;
+}
+
+.cluster-node-city {
+  flex: 1 1 auto;
+  min-width: 4ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cluster-node-site { flex: 0 0 auto; }
+
+.cluster-node-site::before {
+  content: "·";
+  margin: 0 6px;
 }
 
 .cluster-counts {
