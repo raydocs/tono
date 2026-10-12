@@ -85,6 +85,82 @@
         Ok(())
     }
 
+    /// The exact restore writes the user's registry values back even when its live apply failed,
+    /// so the registry alone says "restored" while the adapter's effective resolver list still
+    /// holds the dead Tono endpoint. Only that adapter is reset; the one whose registry and
+    /// effective lists are both the user's is left alone.
+    #[tokio::test]
+    #[serial]
+    async fn the_emergency_reset_selects_an_adapter_whose_effective_dns_is_still_tono() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1")), adapter("{B}", Some("9.9.9.9"))]).await?;
+        test_hooks::set_effective_dns(vec![
+            ("{A}".to_owned(), vec!["198.18.0.2".parse().unwrap()]),
+            ("{B}".to_owned(), vec!["9.9.9.9".parse().unwrap()]),
+        ]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_after_failed_restore().await;
+        let reset = test_hooks::take_last_automatic_reset();
+        reset_dns_state().await;
+        assert_eq!(reset, vec!["{A}".to_owned()]);
+        assert_eq!(result?, vec!["{A}".to_owned()]);
+        Ok(())
+    }
+
+    /// The reset's own report is not the proof: the machine is read back, like the uninstall
+    /// ladder does, and a reset after which an adapter still reads as Tono's is not a success.
+    #[tokio::test]
+    #[serial]
+    async fn the_emergency_reset_is_not_a_success_while_the_read_back_still_shows_tono() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_live_dns_on_loopback(true);
+        test_hooks::set_reset_does_not_land(true);
+        let result = reset_redirected_adapters_after_failed_restore().await;
+        reset_dns_state().await;
+        assert!(result.is_err(), "the read-back still shows Tono's resolver: {result:?}");
+        Ok(())
+    }
+
+    /// The user's own local resolver as the saved original is not a reason to leave the adapter
+    /// on a dead Tono endpoint: what exempts an adapter is that its current value is still that
+    /// original, and this one is on 198.18.0.2.
+    #[tokio::test]
+    #[serial]
+    async fn the_emergency_reset_covers_an_adapter_whose_saved_original_was_a_local_resolver() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("127.0.0.1"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_after_failed_restore().await;
+        let reset = test_hooks::take_last_automatic_reset();
+        reset_dns_state().await;
+        assert_eq!(reset, vec!["{A}".to_owned()]);
+        assert_eq!(result?, vec!["{A}".to_owned()]);
+        Ok(())
+    }
+
+    /// A plain loopback on an adapter the snapshot never recorded is the user's own resolver
+    /// (Pi-hole, Acrylic), not evidence of Tono's: resetting it would destroy their setup.
+    #[tokio::test]
+    #[serial]
+    async fn the_emergency_reset_leaves_an_unrecorded_adapter_on_the_users_own_loopback_alone() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("9.9.9.9"))]).await?;
+        test_hooks::set_collected_adapters(vec![
+            adapter("{A}", Some("198.18.0.2")),
+            adapter("{B}", Some("127.0.0.1")),
+        ]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_after_failed_restore().await;
+        let reset = test_hooks::take_last_automatic_reset();
+        reset_dns_state().await;
+        assert_eq!(reset, vec!["{A}".to_owned()]);
+        assert_eq!(result?, vec!["{A}".to_owned()]);
+        Ok(())
+    }
+
     /// A registry call behind a filter driver can block for ever. The NRPT sweep runs on its own
     /// thread, so the uninstall gives up after its budget instead of hanging with it.
     #[test]
@@ -1232,6 +1308,9 @@
         test_hooks::take_automatic_resets();
         test_hooks::take_encrypted_restores();
         test_hooks::set_collected_adapters(Vec::new());
+        test_hooks::set_effective_dns(Vec::new());
+        test_hooks::set_reset_does_not_land(false);
+        test_hooks::take_last_automatic_reset();
         // The tail of an earlier test's write window would otherwise still be running.
         SELF_WRITE_TAIL_UNTIL.store(0, Ordering::Relaxed);
     }

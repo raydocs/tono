@@ -1434,6 +1434,24 @@ where
     start_probe().await;
 }
 
+/// Whether `generation` is still the idle Protected Offline session a refused health-failure
+/// release left behind.
+fn retry_session_owned(inner: &TonoInner, generation: u64) -> bool {
+    inner.connect_generation == generation && protection_resync_watches(inner.fsm.status())
+}
+
+/// The lifecycle writer for one retry of a refused health-failure release, or `None` when the
+/// session the retry was started for is gone.
+async fn claim_retry_release(
+    state: &Arc<TonoState>,
+    generation: u64,
+) -> Option<tokio::sync::OwnedRwLockWriteGuard<()>> {
+    if !retry_session_owned(&*state.lock().await, generation) {
+        return None;
+    }
+    Some(state.begin_privileged_release().await)
+}
+
 /// The connect generation whose DIRECT binding check got no answer from the uplink read, or
 /// [`NO_UNREAD_DIRECT_BINDING`]. That check kept the session without proving the binding, so the
 /// monitor of the same generation reads the uplinks again on a later quiet tick.
@@ -1671,11 +1689,15 @@ pub(super) async fn handle_network_change_inner(
         settle_health_release(
             result,
             NETWORK_MONITOR_INTERVAL,
+            || async move { retry_session_owned(&*state.lock().await, generation) },
             || async move {
-                let inner = state.lock().await;
-                inner.connect_generation == generation && protection_resync_watches(inner.fsm.status())
+                match claim_retry_release(state, generation).await {
+                    Some(lifecycle) => {
+                        super::disconnect::release_explicit_applying_narrow_with_guard(state, app, Some(lifecycle)).await
+                    }
+                    None => Err("the session this release was retrying for is no longer the idle protected one".to_owned()),
+                }
             },
-            || super::disconnect::release_explicit_applying_narrow_with_guard(state, app, None),
             || async move {
                 let generation = state.lock().await.connect_generation;
                 super::unarmed_probe::spawn_after_release(state, app, generation);
@@ -2006,6 +2028,37 @@ mod tests {
         stalled.abort();
         let admitted = admitted.expect("a reader holding the token read after the first wake must be woken too");
         assert!(admitted.is_ok(), "the current failure still owns the release");
+    }
+
+    /// A retry that checked its session and then queued for the lifecycle writer behind a user
+    /// Connect's admission must not release that Connect. Admission bumps the generation while
+    /// holding its lifecycle reader, so the writer is only granted once the session the retry
+    /// was started for is already replaced.
+    #[tokio::test]
+    async fn a_retry_overtaken_by_a_connect_while_waiting_for_the_writer_claims_no_release() {
+        let state = Arc::new(TonoState::for_test());
+        let generation = {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.fsm.tunnel_died();
+            assert!(super::protection_resync_watches(inner.fsm.status()));
+            inner.connect_generation
+        };
+        let admission = state.begin_connect_mutation().await;
+        let retry_state = Arc::clone(&state);
+        let retry = tokio::spawn(async move {
+            super::claim_retry_release(&retry_state, generation).await.is_some()
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        state.lock().await.retire_connection_generation(false);
+        drop(admission);
+        assert!(
+            !retry.await.unwrap(),
+            "a retry for the replaced session must not take the writer to release the new Connect"
+        );
     }
 
     /// The Service refuses a health-failure release when it cannot prove the DNS restore, and

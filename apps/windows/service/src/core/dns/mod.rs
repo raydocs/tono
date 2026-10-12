@@ -282,6 +282,34 @@ pub(crate) mod test_hooks {
         LIVE_DNS_ON_LOOPBACK.store(on_loopback, Ordering::Relaxed);
     }
 
+    static EFFECTIVE_DNS: LazyLock<Mutex<Vec<(String, Vec<std::net::IpAddr>)>>> =
+        LazyLock::new(|| Mutex::new(Vec::new()));
+
+    /// What the DNS Client resolves through per active adapter right now (the effective list
+    /// `GetAdaptersAddresses` reports), as opposed to the registry values `collected_adapters`
+    /// stands for. The two differ exactly when a restore wrote the registry back but its live
+    /// apply failed.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_effective_dns(adapters: Vec<(String, Vec<std::net::IpAddr>)>) {
+        *EFFECTIVE_DNS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = adapters;
+    }
+
+    static RESET_DOES_NOT_LAND: AtomicBool = AtomicBool::new(false);
+
+    pub(crate) fn reset_does_not_land() -> bool {
+        RESET_DOES_NOT_LAND.load(Ordering::Relaxed)
+    }
+
+    /// Simulate an automatic (DHCP) reset that reports success while the machine keeps
+    /// resolving through the Tono endpoint: the registry write and the CIM call returned, the
+    /// DNS Client has not adopted it.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_reset_does_not_land(does_not_land: bool) {
+        RESET_DOES_NOT_LAND.store(does_not_land, Ordering::Relaxed);
+    }
+
     static LIVE_APPLY_FAILS: AtomicBool = AtomicBool::new(false);
 
     pub(crate) fn live_apply_fails() -> bool {
