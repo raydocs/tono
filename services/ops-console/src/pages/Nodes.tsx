@@ -100,7 +100,7 @@ export default function NodesPage({
   return (
     <div className="page-wrap nodes-page">
       <header className="nodes-head">
-        <p className="text-fine">{copy.nodesBoard.lead}</p>
+        <p className="nodes-lead text-fine">{copy.nodesBoard.lead}</p>
         <PageNote
           fetchedAt={oldestFetch(nodes, health, fleet)}
           backfill={health.status === 'ready' ? health.data.backfill : null}
