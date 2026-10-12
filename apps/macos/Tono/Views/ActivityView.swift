@@ -506,6 +506,7 @@ struct ActivityView: View {
                     }
                     seaRouteCounts
                 } else {
+                    if !appState.isConnected { SeaEmptyMark() }
                     Text(appState.isConnected ? "Reading connections…" : "Connect Tono to view live activity.")
                         .font(.system(size: 12))
                         .foregroundStyle(SeaTheme.muted)

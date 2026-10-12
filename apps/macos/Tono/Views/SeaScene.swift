@@ -64,6 +64,21 @@ struct SeaPageAppearance: ViewModifier {
 
 /// A quiet, non-status-bearing horizon under the native secondary pages.
 /// It never implies a confirmed connection; the dashboard alone owns that.
+/// How the shared scene shows behind pages. Home shows it whole; inner pages
+/// keep it as a dim, blurred horizon under the ground gradient instead of
+/// dropping to a flat page. Reduce Transparency keeps the opaque ground alone.
+struct SeaBackdropDim: Equatable {
+    var sceneOpacity: Double
+    var sceneBlur: CGFloat
+    var groundOpacity: Double
+
+    static func resolve(home: Bool, reduceTransparency: Bool) -> SeaBackdropDim {
+        if home { return SeaBackdropDim(sceneOpacity: 1, sceneBlur: 0, groundOpacity: 0) }
+        if reduceTransparency { return SeaBackdropDim(sceneOpacity: 0, sceneBlur: 0, groundOpacity: 1) }
+        return SeaBackdropDim(sceneOpacity: 0.7, sceneBlur: 14, groundOpacity: 0.45)
+    }
+}
+
 struct SeaSecondaryScene: View {
     @SeaDisplayPreferences private var displayPreferences
     private var reduceTransparency: Bool { displayPreferences.reduceTransparency }

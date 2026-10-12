@@ -86,13 +86,40 @@ struct SeaPanel<Content: View>: View {
     }
 }
 
+/// The empty-state mark: a crescent over the horizon in the scene's own
+/// language, so an empty panel reads as quiet rather than unloaded.
+struct SeaEmptyMark: View {
+    var body: some View {
+        Canvas { context, size in
+            let accent = SeaTheme.cool
+            var moon = Path()
+            moon.addArc(center: CGPoint(x: size.width * 0.62, y: 22), radius: 13,
+                        startAngle: .degrees(-70), endAngle: .degrees(200), clockwise: false)
+            moon.addArc(center: CGPoint(x: size.width * 0.62 + 5, y: 19), radius: 11,
+                        startAngle: .degrees(200), endAngle: .degrees(-70), clockwise: true)
+            moon.closeSubpath()
+            context.fill(moon, with: .color(accent.opacity(0.8)))
+            for (x, y, r, a) in [(size.width * 0.22, 14.0, 1.2, 0.5), (size.width * 0.38, 26.0, 0.9, 0.4), (size.width * 0.88, 20.0, 1.0, 0.45)] {
+                context.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)),
+                             with: .color(accent.opacity(a)))
+            }
+            var horizon = Path()
+            horizon.move(to: CGPoint(x: 4, y: 47))
+            horizon.addLine(to: CGPoint(x: size.width - 4, y: 47))
+            context.stroke(horizon, with: .color(accent.opacity(0.35)), lineWidth: 1)
+        }
+        .frame(width: 96, height: 56)
+        .accessibilityHidden(true)
+    }
+}
+
 struct SeaPageHeading: View {
     let title: String
     var subtitle: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(LocalizedStringKey(title))
-                .font(.system(size: 28, weight: .light)).tracking(-0.5)
+                .font(.system(size: 28, weight: .regular)).tracking(-0.5)
                 .foregroundStyle(SeaTheme.text).accessibilityAddTraits(.isHeader)
             if let subtitle {
                 Text(LocalizedStringKey(subtitle)).font(.system(size: 13))

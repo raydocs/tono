@@ -30,7 +30,7 @@
   --tono-radius-card-lg: 18px;
   --tono-radius-card-sm: 18px;
   --tono-size-page-title: 28px;
-  --tono-weight-title: 300;
+  --tono-weight-title: 400;
   --tono-page-padding: 0px;
   font-family: var(--sea-font);
   color: var(--sea-text);
@@ -253,6 +253,11 @@
 }
 .sea-empty p {
   margin: 0 0 12px;
+}
+.sea-empty-mark {
+  display: block;
+  margin: 24px auto 10px;
+  color: var(--sea-accent);
 }
 .sea-skeleton {
   min-height: 46px;

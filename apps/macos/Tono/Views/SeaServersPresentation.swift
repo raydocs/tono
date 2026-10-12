@@ -70,7 +70,7 @@ extension ProxiesView {
     var seaHeaderRow: some View {
         HStack(alignment: .center, spacing: 12) {
             Text("Servers")
-                .font(.system(size: 28, weight: .light)).tracking(-0.5)
+                .font(.system(size: 28, weight: .regular)).tracking(-0.5)
                 .foregroundStyle(SeaTheme.text).accessibilityAddTraits(.isHeader)
                 .lineLimit(1)
             Spacer(minLength: 12)
