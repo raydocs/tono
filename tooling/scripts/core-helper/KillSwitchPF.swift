@@ -382,24 +382,30 @@ extension KillSwitchManager {
                     "pass in quick inet6 from { fe80::/10, ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""
                 )
             }
-            // DHCP is identified by ports alone, and any local process can send
-            // from port 68, so the destination carries the bound: the limited
-            // broadcast only (unicast renewal to a LAN server is `tono-lan`).
-            // Server replies come from the server's own address, so the inbound
-            // permit cannot name one; `no state` keeps it from creating a return
-            // path that would let port 68 answer an arbitrary public host.
-            lines.append(
-                "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\""
-            )
-            lines.append(
-                "pass in quick inet proto udp from any port 67 to any port 68 no state label \"tono-dhcp\""
-            )
-            lines.append(
-                "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\""
-            )
-            lines.append(
-                "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\""
-            )
+        }
+        // Every ruleset, tunnel or not. After a network move the Mac sits in the
+        // no-tunnel bootstrap or preserve ruleset while it reconnects, and
+        // without these it cannot take a lease on the new network or resolve
+        // its router. Windows permits the same two in every armed mode.
+        // DHCP is identified by ports alone, and any local process can send
+        // from port 68, so the destination carries the bound: the limited
+        // broadcast only (unicast renewal to a LAN server is `tono-lan`).
+        // Server replies come from the server's own address, so the inbound
+        // permit cannot name one; `no state` keeps it from creating a return
+        // path that would let port 68 answer an arbitrary public host.
+        lines.append(
+            "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\""
+        )
+        lines.append(
+            "pass in quick inet proto udp from any port 67 to any port 68 no state label \"tono-dhcp\""
+        )
+        lines.append(
+            "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\""
+        )
+        lines.append(
+            "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\""
+        )
+        if !state.tunnelInterfaces.isEmpty {
             // Discovery beyond mDNS goes with the same setting: off, the
             // devices it would find are unreachable anyway.
             if state.allowLocalNetworkDevices {

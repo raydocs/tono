@@ -1572,7 +1572,8 @@ extension KillSwitchManager {
             // and only while the Core is running. Boot, launch and status()
             // do not. A saved utun that is not up must render the no-tunnel
             // form: no Continuity, mDNS, LAN,
-            // link-local, DHCP or NDP pass and no rule for that utun. A utun
+            // link-local pass and no rule for that utun (DHCP and NDP render in
+            // every ruleset). A utun
             // that is up (a helper restart mid-session) is kept. The
             // reinstall needs root and pfctl, so this checks the
             // `restorableState` filter it renders through.
@@ -1582,7 +1583,7 @@ extension KillSwitchManager {
             )
             let tunnelOnlyLabels = [
                 "tono-continuity", "tono-mdns", "tono-igmp", "tono-lan", "tono-linklocal",
-                "tono-dhcp", "tono-ndp", "tono-multicast", "tono-dns-multicast",
+                "tono-multicast", "tono-dns-multicast",
                 "tono-fragment-multicast", "tono-ssdp", "tono-tunnel",
             ]
             let bootRestoreHasNoTunnelPass =
@@ -1603,6 +1604,10 @@ extension KillSwitchManager {
                 "# Managed by Tono Kill Switch — do not edit",
                 "pass in quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
                 "pass out quick on lo0 all no state label \"tono-loopback\"",
+                "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\"",
+                "pass in quick inet proto udp from any port 67 to any port 68 no state label \"tono-dhcp\"",
+                "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\"",
+                "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\"",
                 "block drop out quick all label \"tono-block\"",
                 "",
             ].joined(separator: "\n")
