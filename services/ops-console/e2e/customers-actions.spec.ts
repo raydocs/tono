@@ -60,10 +60,10 @@ test.describe('客户写动作', () => {
     await expect(page.locator('tbody')).toContainText('shen.yi@example.com');
   });
 
-  test('改到期之后头上写的就是新日期', async ({ page }, testInfo) => {
+  test('设到期日之后头上写的就是新日期', async ({ page }, testInfo) => {
     const session = fresh('expiry', testInfo);
     await open(page, '/customers/u-04', 'default', session);
-    await page.getByRole('button', { name: '改到期' }).click();
+    await page.getByRole('button', { name: '设到期日', exact: true }).click();
     await page.getByRole('button', { name: '续 30 天' }).click();
 
     const ask = gate(page, /的到期改成/);
@@ -76,10 +76,10 @@ test.describe('客户写动作', () => {
     await expect(head(page)).toContainText(date ?? '');
   });
 
-  test('停用之后这位客户带着已停用的标', async ({ page }, testInfo) => {
+  test('停用之后这位客户带着停用的标', async ({ page }, testInfo) => {
     const session = fresh('close', testInfo);
     await open(page, '/customers/u-02', 'default', session);
-    await expect(head(page)).not.toContainText('已停用');
+    await expect(head(page).locator('.ops-tag')).not.toContainText('停用');
     await page.getByRole('button', { name: '停用', exact: true }).click();
 
     const ask = gate(page, /马上不能登录/);
@@ -87,7 +87,7 @@ test.describe('客户写动作', () => {
     await ask.getByRole('button', { name: '停用', exact: true }).click();
 
     await settle(page);
-    await expect(head(page)).toContainText('已停用');
+    await expect(head(page).locator('.ops-tag')).toContainText('停用');
     await expect(page.getByRole('button', { name: '恢复' })).toBeVisible();
   });
 
@@ -180,10 +180,10 @@ test.describe('客户写动作', () => {
     const sun = page.locator('tbody tr').filter({ hasText: 'sun.yan@example.com' });
     const chen = page.locator('tbody tr').filter({ hasText: 'chen.lin@example.com' });
     // The dash says why it is a dash, in the hover and the accessible name.
-    await expect(sun.getByLabel('还没登记到期日 · 批量设置到期在表上方')).toBeVisible();
+    await expect(sun.getByLabel('没登记到期日 · 批量设到期日在表上方')).toBeVisible();
     await expect(sun.getByLabel('客户端没开日志上传，所以没有服务使用')).toBeVisible();
 
-    await page.getByRole('button', { name: '批量设置到期', exact: true }).click();
+    await page.getByRole('button', { name: '批量设到期日', exact: true }).click();
     await expect(page.getByText('选中 2 位客户')).toBeVisible();
 
     // The open dialog hides the table from role queries, so who is picked is
@@ -362,7 +362,7 @@ test.describe('客户写动作', () => {
 
   test('头上四个按钮不再说接口未接入', async ({ page }) => {
     await open(page, '/customers/u-04');
-    for (const label of ['发起远程诊断', '重发凭证', '改到期', '停用']) {
+    for (const label of ['发起远程诊断', '重发凭证', '设到期日', '停用']) {
       await expect(page.getByRole('button', { name: label, exact: true })).toBeEnabled();
     }
   });

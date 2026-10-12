@@ -336,8 +336,8 @@ test.describe('设置 · 写入流程', () => {
     await page.getByRole('cell', { name: 'Preview VPS' }).click();
     await page.getByRole('dialog').getByRole('button', { name: '删除', exact: true }).click();
 
-    const confirm = page.getByRole('dialog').filter({ hasText: '关掉这个账号？' });
-    await expect(confirm.getByText(/关掉「Preview VPS」之后/)).toBeVisible();
+    const confirm = page.getByRole('dialog').filter({ hasText: '删除这个账号？' });
+    await expect(confirm.getByText(/删除「Preview VPS」之后/)).toBeVisible();
     await confirm.getByRole('button', { name: '删除', exact: true }).click();
 
     await expect(page.getByText('还没有登记商家账号')).toBeVisible();

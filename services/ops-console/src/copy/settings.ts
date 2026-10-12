@@ -181,8 +181,8 @@ export const settingsCopy = {
       label: '你自己叫它什么，列表里显示这个。',
     } as const,
     unit: (n: number) => `${n} 台`,
-    deleteTitle: '关掉这个账号？',
-    deleteBody: (label: string) => `关掉「${label}」之后，它不再出现在这张表里。已经登记在它名下的节点不受影响，账单也不会自己停。`,
+    deleteTitle: '删除这个账号？',
+    deleteBody: (label: string) => `删除「${label}」之后，它不再出现在这张表里。已经登记在它名下的节点不受影响，账单也不会自己停。`,
   },
 
   /* ------------------------------------------------------------ 家宽资产 */
@@ -206,7 +206,7 @@ export const settingsCopy = {
     status: {
       active: '在用',
       retired: '已退',
-      paused: '暂停',
+      disabled: '停用',
     } as const,
     billingKind: {
       monthly: '包月',

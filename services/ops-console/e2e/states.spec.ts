@@ -5,7 +5,7 @@ test('empty fleet says so instead of showing zero cards', async ({ page }) => {
   await open(page, '/nodes', 'empty');
 
   await expect(page.locator('.nodes-table tbody tr')).toHaveCount(0);
-  await expect(page.getByText('一台节点都没有')).toBeVisible();
+  await expect(page.getByText('还没有节点')).toBeVisible();
   await expect(page).toHaveScreenshot('empty.png');
 });
 

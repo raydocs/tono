@@ -21,7 +21,7 @@
 /* Fixed columns add up to 640 px; the flexible name column gets a 160 px
    readable floor of its own, so a rule name never collapses while the
    DataTable's inner scroll carries the excess. Derived per table — not
-   the clients 1048. */
+   the clients 1104. */
 .settings-page .settings-alerts .settings-rules-table table {
   min-width: 800px;
 }

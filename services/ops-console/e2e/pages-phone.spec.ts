@@ -76,7 +76,7 @@ test('the customers expiry banner action is 44 px tall and inside the viewport',
   });
   expect(cleared.ok()).toBe(true);
   await open(page, '/customers', 'default', session);
-  const action = page.getByRole('button', { name: '批量设置到期', exact: true });
+  const action = page.getByRole('button', { name: '批量设到期日', exact: true });
   await expect(action).toBeVisible();
   const box = await action.boundingBox();
   expect(box!.height).toBeGreaterThanOrEqual(44);

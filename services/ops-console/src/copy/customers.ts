@@ -18,7 +18,7 @@ export const customerCopy = {
   } as const,
   lifecycle: {
     active: '在用',
-    suspended: '已停用',
+    suspended: '停用',
     expired: '已到期',
   } as const,
   /**
