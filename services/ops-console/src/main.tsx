@@ -5,6 +5,7 @@ import { PrivacyProvider } from '@/lib/privacy';
 import { ThemeProvider } from '@/lib/theme';
 import { migrateLegacyRoute } from '@/lib/legacy-route';
 import '@/styles/globals.css';
+import '@/styles/phone.css';
 
 migrateLegacyRoute();
 createRoot(document.getElementById('root')!).render(
