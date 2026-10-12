@@ -136,6 +136,31 @@ impl Drop for DnsCallClaim {
     }
 }
 
+/// Wait until no DNS engine call holds the single-writer claim. A restore whose caller gave up
+/// leaves its blocking thread running and the claim standing, so the next engine call is refused
+/// at once; a caller that must still write after that (the emergency adapter reset, once WFP is
+/// gone) waits here for the thread to return instead of reading the refusal as an answer. Never
+/// returns while the claim stands: the caller bounds it, and an expired bound means "not proven".
+pub(super) async fn wait_for_dns_engine_idle() {
+    #[cfg(any(all(windows, not(feature = "test")), test))]
+    {
+        let mut announced = false;
+        loop {
+            // A statement of its own: the slot's guard must not live across the sleep.
+            let held = *dns_call_slot();
+            let Some(held) = held else { return };
+            if !announced {
+                announced = true;
+                tracing::warn!(
+                    "dns: waiting for the in-flight {} call to return before writing again",
+                    held.operation
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+}
+
 /// The status watchdog reads every `DNS_WATCHDOG_INTERVAL`: only the rare, mutating operations
 /// may announce themselves at info, or the service log would carry two lines every two seconds
 /// forever.

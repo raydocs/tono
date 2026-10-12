@@ -579,6 +579,10 @@ pub(crate) async fn reset_redirected_adapters_after_failed_restore() -> Result<V
         return Ok(Vec::new());
     }
     let _operation = DNS_OPERATION.lock().await;
+    // The exact restore that just failed or timed out may have left its engine call running on a
+    // blocking thread, still holding the single-writer claim: every engine call below would be
+    // refused at once. Wait for it (the caller bounds the whole leg) rather than count the refusal.
+    wait_for_dns_engine_idle().await;
     let reset = reset_adapters_still_on_tono_dns().await;
     let policy = restore_resolver_policy().await;
     if let Err(error) = &policy {

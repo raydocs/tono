@@ -119,6 +119,12 @@ pub struct ReleaseStatus {
     pub mode: String,
     pub generation: u64,
     pub running: bool,
+    /// What the current or last release this service ran has reported so far: the per-component
+    /// read-back and the detail, including any note that the cleanup ran past its budget. A
+    /// release answered at [`RELEASE_ANSWER_SECONDS`] may still be working; its final result is
+    /// read here once `finished`. `None` when no release has run since the service started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<ReleaseReport>,
 }
 
 #[cfg(test)]
@@ -149,5 +155,24 @@ mod tests {
         assert_eq!(ReleaseReport::outcome_of(&[clean.clone()], &[], false), "unknown");
         assert_eq!(ReleaseReport::outcome_of(&[clean], &[7], true), "unknown");
         assert_eq!(ReleaseReport::outcome_of(&[], &[], true), "unknown");
+    }
+
+    #[test]
+    fn the_status_carries_the_final_report_and_an_older_status_still_parses() {
+        let mut report = ReleaseReport::without_components("r1", "unknown", Some("the cleanup exceeded its 45s budget".into()));
+        report.components = vec![component("restored", "settled")];
+        let status = ReleaseStatus {
+            mode: "released".into(),
+            generation: 3,
+            running: false,
+            report: Some(report.clone()),
+        };
+        let wire = serde_json::to_string(&status).unwrap();
+        assert_eq!(serde_json::from_str::<ReleaseStatus>(&wire).unwrap().report, Some(report));
+        let older: ReleaseStatus =
+            serde_json::from_str(r#"{"mode":"secured","generation":1,"running":false}"#).unwrap();
+        assert_eq!(older.report, None);
+        let quiet = serde_json::to_string(&older).unwrap();
+        assert!(!quiet.contains("report"), "{quiet}");
     }
 }

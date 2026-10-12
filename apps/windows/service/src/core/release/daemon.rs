@@ -403,11 +403,16 @@ pub(crate) async fn start_or_join(request: ReleaseRequest, owner_key: String) ->
 }
 
 pub(crate) fn status() -> ReleaseStatus {
-    let running = CURRENT
+    let current = CURRENT
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .as_ref()
-        .is_some_and(|run| !run.is_done());
+        .clone();
+    let running = current.as_ref().is_some_and(|run| !run.is_done());
+    // The first answer is given at `RELEASE_ANSWER_SECONDS` and the worker may still be working
+    // (a floored reset leg can run past its budget). What it reports after that, including the
+    // note that the cleanup overran and the final per-component read-back, is only visible here:
+    // the report as it stands now, marked unfinished and unproven while the run is not done.
+    let report = current.map(|run| run.answer(Instant::now()));
     // An unreadable record is not reported as secured: the App treats anything but `secured`
     // as a restore it cannot vouch for.
     let (mode, generation) = match Authority::live().load() {
@@ -424,6 +429,7 @@ pub(crate) fn status() -> ReleaseStatus {
         mode: mode.to_owned(),
         generation,
         running,
+        report,
     }
 }
 

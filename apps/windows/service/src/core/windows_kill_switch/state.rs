@@ -558,10 +558,12 @@ pub(super) const EMERGENCY_SWEEP_RESERVE: std::time::Duration = std::time::Durat
 /// The exact restore on the emergency path is never cut shorter than this, whatever the deadline.
 pub(super) const EMERGENCY_MIN_RESTORE: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// What the WFP cleanup between the exact restore and the adapter reset may take: an engine call
-/// of up to 25 s (`windows_kill_switch::engine`) plus a BFE probe. Reserved up front next to the
-/// reset and the sweep.
-pub(super) const EMERGENCY_WFP_RESERVE: std::time::Duration = std::time::Duration::from_secs(25);
+/// The exact DNS restore's budget on the emergency path under a caller deadline (the release
+/// worker). The owner's product rule is that the user waits for roughly 35 s at most, and the
+/// release service answers at 25 s, so the network has to come back inside that window in the
+/// common case: 10 s for the exact restore, then the WFP removal (milliseconds when healthy), then
+/// the adapter reset leg. A restore that needs longer is abandoned and left to the reset leg.
+pub(super) const EMERGENCY_RESTORE_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The adapter reset leg is never given less than this once the WFP objects are gone, whatever
 /// the caller's deadline has left. The machine would otherwise be left on a dead resolver with the
@@ -571,24 +573,24 @@ pub(super) const EMERGENCY_WFP_RESERVE: std::time::Duration = std::time::Duratio
 pub(super) const EMERGENCY_RESET_FLOOR: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// How far past [`EMERGENCY_DISARM_OUTER_BUDGET`] the floored reset leg and the sweep's two-second
-/// floor can legitimately run (plus slack): the release worker's outer timeout allows this much
-/// on top of its budget instead of cutting the leg that keeps the machine off a dead resolver.
+/// floor can legitimately run: the release worker's outer timeout allows this much on top of its
+/// budget instead of cutting the leg that keeps the machine off a dead resolver. The worst case is
+/// the restore (10 s), a pathologically slow WFP removal (25 s), the reset leg (15 s) and the
+/// sweep floor (2 s), about 52 s; the typical case is 10 to 20 s. The grace only matters in that
+/// worst case and never delays an answer: the release service answers its client at its own
+/// deadline whatever the worker is still doing.
 pub const EMERGENCY_DISARM_OVERRUN_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// The budget of the exact DNS restore on the emergency path, given the time `remaining` before
 /// the caller's deadline (`None`: the caller has no deadline and gets the full DNS budget).
 ///
-/// Under a deadline the whole flow is allocated up front: the WFP cleanup, the adapter reset leg
-/// and the resolver-rule sweep are reserved first, and the restore gets the rest (at least
-/// [`EMERGENCY_MIN_RESTORE`]). A truncated restore on this fail-open path only reports partial
-/// or unknown, which the reset leg then deals with; a skipped reset leaves the dead resolver.
+/// Under a deadline it is [`EMERGENCY_RESTORE_BUDGET`], never more than what is left (and never
+/// below [`EMERGENCY_MIN_RESTORE`]). A truncated restore on this fail-open path only reports
+/// partial or unknown, which the reset leg then deals with; the reset leg is never skipped.
 pub(super) fn emergency_restore_budget(remaining: Option<std::time::Duration>) -> std::time::Duration {
     match remaining {
         None => DNS_RESTORE_TIMEOUT,
-        Some(remaining) => remaining
-            .saturating_sub(EMERGENCY_WFP_RESERVE + EMERGENCY_FALLBACK_TIMEOUT + EMERGENCY_SWEEP_RESERVE)
-            .max(EMERGENCY_MIN_RESTORE)
-            .min(DNS_RESTORE_TIMEOUT),
+        Some(remaining) => EMERGENCY_RESTORE_BUDGET.min(remaining.max(EMERGENCY_MIN_RESTORE)),
     }
 }
 
