@@ -18,7 +18,7 @@
 - 验证：本机不运行 xcodebuild；由 PR #1592 的 hosted `ci-gate` 验证（先仅测试的失败，再修复后的结果，见 PR 正文）。无实机测试。
 - 候选/发布：无新包，仅源码。
 - 剩余限制：高风险（释放语义 + 连接 FSM），合并前需独立 Codex 评审；待实机（切换 Wi-Fi 后自动释放失败再恢复）。
-  每次网络变化都会重跑一次释放，helper 修复若需要管理员授权则可能再次弹出授权框。
+  （第 1 版曾写“每次网络变化重跑释放、可能再弹授权框”，已由下面第 1 轮续记作废：重试不再弹授权框，且有冷却。）
 
 ### 续记 2026-10-12 · Codex 评审第 1 轮（对 1b1441aa，FAIL：4 major、1 minor）与修复
 - 评审发现与处理：
@@ -37,3 +37,12 @@
 - 覆盖补充：唤醒路径重试 `testFailedAutomaticReleaseIsRetriedByWake`；用户释放不被重试：`testSleepGateRefusedReleaseDoesNotReconnectOnWake` 直接断言 `disarm` 只调用一次且无重试任务。
 - 仍不动：A29 守卫、strict、PF 规则、helper、`HelperProtocolVersion`、未 armed 循环退避。
 - 新的剩余限制：其他自动释放入口（目录移除、代理、重启保持等）失败后只会被重试为释放，不会带重连，需要用户 Connect；重试期间若 helper 需要修复，要等用户点 Restore internet。
+
+### 续记 2026-10-12 · Codex 复核第 2 轮（对 c575d9bb：第 1 轮五项均已解决；新增 1 major、1 minor）
+- MAJOR（冷却丢事件）：20 秒冷却把冷却内的网络变化 / 唤醒直接丢掉（唤醒还不会落到原来的唤醒恢复）。瞬时失败后网络恢复、不再有通知，Mac 会一直 armed 到用户点击；
+  已停止的连接态核心监视器也不会兜底。改为合并而不是丢弃：冷却内的事件只留一个延后重试（`automaticReleaseDeferredRetry`，单飞、冷却结束时触发），
+  触发时经同一入口重新读取 `automaticReleaseRetryMayRun` 与保留意图，所以更新 / A29 故障 / 用户已操作都会让它作废；唤醒同样合并，不再被吞。
+  自循环防护：重试在途时（含它自己拆除产生的 DNS / PF 通知）事件不算数；重试结束后 `automaticReleaseRetryEchoSettle`（3 秒）内的网络通知按回声忽略，唤醒不受此限；
+  冷却和回声窗口是实例属性，供测试缩短。测试 `testNetworkEventInsideTheCooldownIsDeferredNotDropped`、`testWakeInsideTheCooldownIsDeferredNotDropped`、`testARetrysOwnNotificationsDoNotScheduleAnotherRetry`。
+- MINOR（过期说明）：剩余限制里“每次网络变化重跑并可能再弹授权框”已改成对第 1 版的历史说明。
+- 新的剩余限制：失败的释放最坏每 20 秒由真实事件重试一次（不会无事件自循环）；回声窗口按时间判断，不比较网络状态。

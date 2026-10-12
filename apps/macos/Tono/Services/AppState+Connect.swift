@@ -2673,16 +2673,37 @@ extension AppState {
     /// Runs the same automatic release again (AI hold kept) after a network
     /// change or wake, with the recovery policy the original carried and no
     /// administrator prompt. The gates are read again when the task runs, so
-    /// an update that starts first retires a queued retry. One retry per
-    /// cooldown: a transition's burst of notifications must not repeat it.
-    func retryUnconfirmedAutomaticRelease(now: Date = Date()) {
-        guard automaticReleaseRetryTask == nil, automaticReleaseRetryMayRun else { return }
+    /// an update that starts first retires a queued retry.
+    ///
+    /// Attempts are rate-limited by coalescing, never by dropping: an event
+    /// inside the cooldown leaves one deferred retry for the cooldown's end,
+    /// because a transient failure followed by a stable network produces no
+    /// further notification to retry on. The DNS / PF changes the retry makes
+    /// itself post notifications too: those arrive while it is in flight or
+    /// within `automaticReleaseRetryEchoSettle` of its end and are not events
+    /// (a wake always is), so a failing retry cannot re-trigger itself.
+    func retryUnconfirmedAutomaticRelease(now: Date = Date(), fromWake: Bool = false) {
+        if automaticReleaseRetryTask != nil {
+            if fromWake { deferAutomaticReleaseRetry(now: now) }
+            return
+        }
+        guard automaticReleaseRetryMayRun else { return }
+        if !fromWake, let ended = automaticReleaseRetryEndedAt,
+           now.timeIntervalSince(ended) < automaticReleaseRetryEchoSettle { return }
         if let last = lastAutomaticReleaseRetryAt,
-           now.timeIntervalSince(last) < automaticReleaseRetryCooldown { return }
+           now.timeIntervalSince(last) < automaticReleaseRetryCooldown {
+            deferAutomaticReleaseRetry(now: now)
+            return
+        }
+        automaticReleaseDeferredRetry?.cancel()
+        automaticReleaseDeferredRetry = nil
         lastAutomaticReleaseRetryAt = now
         automaticReleaseRetryTask = Task { [weak self] in
             guard let self else { return }
-            defer { self.automaticReleaseRetryTask = nil }
+            defer {
+                self.automaticReleaseRetryEndedAt = Date()
+                self.automaticReleaseRetryTask = nil
+            }
             guard !Task.isCancelled, self.automaticReleaseRetryMayRun,
                   let retry = self.connectionCoordinator.automaticReleaseRetry else { return }
             await self.applyExhaustedArmedFailure(
@@ -2690,6 +2711,21 @@ extension AppState {
                 resumeWhenReachable: retry.resumesWhenReleased,
                 retryingUnconfirmedRelease: true
             )
+        }
+    }
+
+    /// One deferred retry for the end of the cooldown (at least a second out,
+    /// so a retry still in flight is polled, not spun on). It re-runs every
+    /// gate and the retained-intent check through the same entry point.
+    private func deferAutomaticReleaseRetry(now: Date) {
+        guard automaticReleaseDeferredRetry == nil else { return }
+        let elapsed = lastAutomaticReleaseRetryAt.map { now.timeIntervalSince($0) } ?? 0
+        let delay = max(1, automaticReleaseRetryCooldown - elapsed)
+        automaticReleaseDeferredRetry = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self, !Task.isCancelled else { return }
+            self.automaticReleaseDeferredRetry = nil
+            self.retryUnconfirmedAutomaticRelease(fromWake: true)
         }
     }
 

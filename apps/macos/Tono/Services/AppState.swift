@@ -926,8 +926,8 @@ final class AppState {
         )
         // The automatic release that failed before the sleep is retried, not
         // reconnected over: the host must not stay offline until a click.
-        if automaticReleaseAwaitsRetry {
-            retryUnconfirmedAutomaticRelease()
+        if automaticReleaseAwaitsRetry || automaticReleaseRetryTask != nil {
+            retryUnconfirmedAutomaticRelease(fromWake: true)
             return
         }
         guard shouldResume else { return }
