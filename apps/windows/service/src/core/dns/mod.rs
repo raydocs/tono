@@ -301,6 +301,56 @@ pub(crate) mod test_hooks {
             .retain(|(guid, _)| !guids.iter().any(|reset| reset.eq_ignore_ascii_case(guid)));
     }
 
+    /// A per-family reset that lands: for each `(adapter, ipv4, ipv6)` the registry values of
+    /// the reset families go back to automatic (absent) and the effective list loses that
+    /// family's servers. The other family keeps what it had.
+    pub(crate) fn land_reset(resets: &[(String, bool, bool)]) {
+        {
+            let mut collected = COLLECTED_ADAPTERS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for adapter in collected.iter_mut() {
+                let Some((_, v4, v6)) = resets
+                    .iter()
+                    .find(|(guid, _, _)| guid.eq_ignore_ascii_case(&adapter.interface_guid))
+                else {
+                    continue;
+                };
+                if *v4 {
+                    adapter.ipv4_name_server = None;
+                    adapter.ipv4_profile_name_server = None;
+                }
+                if *v6 {
+                    adapter.ipv6_name_server = None;
+                    adapter.ipv6_profile_name_server = None;
+                }
+            }
+        }
+        let mut effective = EFFECTIVE_DNS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for (guid, servers) in effective.iter_mut() {
+            let Some((_, v4, v6)) = resets
+                .iter()
+                .find(|(reset, _, _)| reset.eq_ignore_ascii_case(guid))
+            else {
+                continue;
+            };
+            servers.retain(|server| !(if server.is_ipv6() { *v6 } else { *v4 }));
+        }
+    }
+
+    pub(crate) fn effective_dns_unreadable() -> Vec<String> {
+        EFFECTIVE_DNS_UNREADABLE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub(crate) fn effective_dns_fails() -> bool {
+        EFFECTIVE_DNS_FAILS.load(Ordering::Relaxed)
+    }
+
     /// What the DNS Client resolves through per active adapter right now (the effective list
     /// `GetAdaptersAddresses` reports), as opposed to the registry values `collected_adapters`
     /// stands for. The two differ exactly when a restore wrote the registry back but its live

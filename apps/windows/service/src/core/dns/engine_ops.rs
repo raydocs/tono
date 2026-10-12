@@ -484,11 +484,12 @@ pub(super) async fn engine_any_loopback(adapters: &[AdapterDnsSnapshot]) -> Resu
 }
 
 /// The effective resolver list (what the DNS Client resolves through, not the registry) of every
-/// active adapter among `adapters`. The registry alone cannot tell an adapter whose restore
-/// landed from one whose registry was written back while its live apply failed.
+/// active adapter among `adapters`; `None` for an active adapter whose list could not be read.
+/// The registry alone cannot tell an adapter whose restore landed from one whose registry was
+/// written back while its live apply failed. A whole-read failure is the `Err`.
 pub(super) async fn engine_effective_dns(
     adapters: &[AdapterDnsSnapshot],
-) -> Result<Vec<(String, Vec<std::net::IpAddr>)>> {
+) -> Result<Vec<(String, Option<Vec<std::net::IpAddr>>)>> {
     let guids = adapters
         .iter()
         .map(|adapter| adapter.interface_guid.clone())
@@ -502,16 +503,85 @@ pub(super) async fn engine_effective_dns(
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
-        Ok(test_hooks::effective_dns()
+        if test_hooks::effective_dns_fails() {
+            bail!("the effective DNS of the adapters could not be read");
+        }
+        let unreadable = test_hooks::effective_dns_unreadable();
+        let mut read: Vec<(String, Option<Vec<std::net::IpAddr>>)> = test_hooks::effective_dns()
             .into_iter()
             .filter(|(guid, _)| guid_listed(&guids, guid))
-            .collect())
+            .map(|(guid, servers)| (guid, Some(servers)))
+            .collect();
+        read.extend(
+            unreadable
+                .into_iter()
+                .filter(|guid| guid_listed(&guids, guid))
+                .map(|guid| (guid, None)),
+        );
+        Ok(read)
     }
 }
 
 #[cfg(not(all(windows, not(feature = "test"))))]
 fn guid_listed(guids: &[String], guid: &str) -> bool {
     guids.iter().any(|listed| listed.eq_ignore_ascii_case(guid))
+}
+
+/// Put the listed families of the listed adapters back on automatic (DHCP), leaving every other
+/// value as the caller passed it. Each entry is the adapter as the registry reads now plus which
+/// families to reset. This is the ordinary restore path applied to a deliberately empty
+/// original, per family: a `None` value is what the engine turns into a registry delete and a
+/// DHCP live apply, and a kept value is written back unchanged.
+pub(super) async fn engine_reset_families(
+    resets: &[(AdapterDnsSnapshot, FamilyReset)],
+) -> Result<Vec<(String, bool)>> {
+    let snapshot = DnsSnapshot {
+        version: SNAPSHOT_VERSION,
+        taken_at: now_unix(),
+        adapters: resets
+            .iter()
+            .map(|(adapter, reset)| AdapterDnsSnapshot {
+                interface_guid: adapter.interface_guid.clone(),
+                ipv4_name_server: (!reset.v4).then(|| adapter.ipv4_name_server.clone()).flatten(),
+                ipv4_profile_name_server: (!reset.v4)
+                    .then(|| adapter.ipv4_profile_name_server.clone())
+                    .flatten(),
+                ipv6_name_server: (!reset.v6).then(|| adapter.ipv6_name_server.clone()).flatten(),
+                ipv6_profile_name_server: (!reset.v6)
+                    .then(|| adapter.ipv6_profile_name_server.clone())
+                    .flatten(),
+                ..Default::default()
+            })
+            .collect(),
+    };
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        return engine_apply_snapshot(&snapshot).await;
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        // The stub models "the reset lands completely or not at all", per family: the registry
+        // values and the effective list of the reset families stop reading as Tono's.
+        let _self_write = SelfWriteWindow::open();
+        let ok = !test_hooks::live_apply_fails();
+        if ok {
+            #[cfg(test)]
+            test_hooks::note_automatic_reset(&snapshot);
+            if !test_hooks::reset_does_not_land() {
+                test_hooks::set_live_dns_on_loopback(false);
+                let landed: Vec<(String, bool, bool)> = resets
+                    .iter()
+                    .map(|(adapter, reset)| (adapter.interface_guid.clone(), reset.v4, reset.v6))
+                    .collect();
+                test_hooks::land_reset(&landed);
+            }
+        }
+        Ok(snapshot
+            .adapters
+            .iter()
+            .map(|adapter| (adapter.interface_guid.clone(), ok))
+            .collect())
+    }
 }
 
 pub(super) async fn engine_flush_cache() -> Result<()> {

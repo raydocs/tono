@@ -720,9 +720,16 @@ fn active_adapters_read(include_dns: bool) -> Result<Vec<ActiveAdapter>> {
                     let dns_servers = if include_dns {
                         // SAFETY: the DNS records and socket addresses belong to this
                         // successful IP Helper buffer and are copied before it is dropped.
-                        Some(unsafe {
-                            native_apply::read_dns_servers(adapter.FirstDnsServerAddress)
-                        }?)
+                        // One adapter's unreadable list is that adapter's `None`, not the
+                        // whole enumeration's failure: its readers treat `None` as unknown and
+                        // keep every other adapter's evidence.
+                        unsafe { native_apply::read_dns_servers(adapter.FirstDnsServerAddress) }
+                            .map_err(|error| {
+                                tracing::warn!(
+                                    "dns: the effective DNS servers of {guid} could not be read: {error:#}"
+                                );
+                            })
+                            .ok()
                     } else {
                         None
                     };
@@ -1488,21 +1495,16 @@ fn effective_lists_tono_dns(guids: &[String], active: &[ActiveAdapter]) -> Resul
 }
 
 /// The effective resolver list of every active adapter among `guids`, for the emergency reset's
-/// target selection. An active adapter whose list was not read is an error, never an empty list.
+/// target selection and its verification. An active adapter whose list could not be read is
+/// reported as `None` (unknown), never as an empty list, and does not hide the others.
 pub(super) fn effective_dns_servers(
     guids: &[String],
-) -> Result<Vec<(String, Vec<std::net::IpAddr>)>> {
-    active_adapters_read(true)?
+) -> Result<Vec<(String, Option<Vec<std::net::IpAddr>>)>> {
+    Ok(active_adapters_read(true)?
         .into_iter()
         .filter(|adapter| guids.iter().any(|guid| guid.eq_ignore_ascii_case(&adapter.guid)))
-        .map(|adapter| {
-            let guid = adapter.guid;
-            let servers = adapter
-                .dns_servers
-                .with_context(|| format!("effective DNS servers of {guid} were not read"))?;
-            Ok((guid, servers))
-        })
-        .collect()
+        .map(|adapter| (adapter.guid, adapter.dns_servers))
+        .collect())
 }
 
 /// Whether every adapter is in the protected state. The two families do not answer the same

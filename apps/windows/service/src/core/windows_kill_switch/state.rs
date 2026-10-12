@@ -552,8 +552,13 @@ pub(super) const EMERGENCY_MIN_RESTORE: std::time::Duration = std::time::Duratio
 /// [`EMERGENCY_MIN_RESTORE`]). A truncated restore on this fail-open path only reports partial
 /// or unknown, which the reset leg then deals with; a skipped reset leaves the dead resolver.
 pub(super) fn emergency_restore_budget(remaining: Option<std::time::Duration>) -> std::time::Duration {
-    let _ = remaining;
-    DNS_RESTORE_TIMEOUT
+    match remaining {
+        None => DNS_RESTORE_TIMEOUT,
+        Some(remaining) => remaining
+            .saturating_sub(EMERGENCY_FALLBACK_TIMEOUT + EMERGENCY_SWEEP_RESERVE)
+            .max(EMERGENCY_MIN_RESTORE)
+            .min(DNS_RESTORE_TIMEOUT),
+    }
 }
 
 /// The budget of the adapter reset and resolver-policy leg, given the time `remaining` before the

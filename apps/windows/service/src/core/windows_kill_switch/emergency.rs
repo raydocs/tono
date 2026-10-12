@@ -210,8 +210,15 @@ async fn emergency_disarm_with(
     // DNS outcome below is reported as continuable. A rule that remains puts its own blocking
     // marker in front of that outcome (see the end of this function). Only this entry point
     // (the uninstall helper and the elevated recovery CLI) runs the sweep; the Service never does.
-    const NRPT_SWEEP_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
-    let resolver_rule = crate::core::dns::remove_tono_resolver_rule_within(NRPT_SWEEP_BUDGET);
+    //
+    // The sweep blocks its thread until it answers or gives up, so the caller's outer timeout
+    // cannot cut it short: under a deadline its budget is the time that is left (never below two
+    // seconds, so the rule is always tried), and it can still end after the deadline by that much.
+    const NRPT_SWEEP_BUDGET: std::time::Duration = EMERGENCY_SWEEP_RESERVE;
+    let sweep_budget = remaining().map_or(NRPT_SWEEP_BUDGET, |left| {
+        left.clamp(std::time::Duration::from_secs(2), NRPT_SWEEP_BUDGET)
+    });
+    let resolver_rule = crate::core::dns::remove_tono_resolver_rule_within(sweep_budget);
     // Everything below runs only once the WFP objects are provably gone: the engine_call `?`
     // above returns before it. Every imperfect DNS outcome is therefore tagged so the
     // uninstaller continues — the barrier that could leave a brick is already down.

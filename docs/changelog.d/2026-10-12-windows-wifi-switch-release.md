@@ -46,8 +46,31 @@
   纯回环只对快照记录过的网卡、且当前值不再是用户保存的那个原值时才算 Tono 的；未记录网卡上的纯回环不作为 Tono 所有权证据，不动。
 - F4（次要）文档：`--emergency-disarm` 命令行和开始菜单入口设 `TONO_UNINSTALL_DNS_LADDER=1`，本来就走卸载阶梯，被 `!uninstall_ladder_requested()` 排除；上文与
   `WIN-NRPT-KEPT-AFTER-EMERGENCY-DISARM` 已改为：新分支覆盖释放服务 `clean_up`（「恢复正常网络」按钮，#1569）和不带阶梯的更新执行器恢复。
-- 复核剩余风险已处理：释放工作线程整个清理步骤的外层预算是 45 秒（`release/worker.rs`），而新回退腿原先用完整的 DNS 还原预算（40 秒）。
+- 复核剩余风险（仅部分处理，第 2 轮 R2-F3 指出下面的做法会让慢失败的精确还原把重置挤掉，已在第 2 轮改为显式截止时间）：释放工作线程整个清理步骤的外层预算是 45 秒（`release/worker.rs`），而新回退腿原先用完整的 DNS 还原预算（40 秒）。
   现在 45 秒预算是 `EMERGENCY_DISARM_OUTER_BUDGET`（worker 直接引用，不会漂移），回退腿的预算为 `min(15 秒, 45 秒 − 已用时间 − 10 秒资源解析规则清扫)`，没有剩余时间则跳过并记录；
   被截断时随后的 `remove_tono_resolver_rule_within` 清扫仍删除 NRPT 规则。限制：若精确还原本身已耗尽 40 秒，回退腿没有时间，网卡留在 Tono 目标上，只靠清扫删 NRPT；该情形下返回的 DNS 错误和 `release_readback` 会如实报告 dns 残留。
 - 工程与测试：除上列五例外新增 `windows_kill_switch::tests::the_emergency_fallback_leg_fits_inside_the_release_workers_budget`；DNS 测试桩新增有效 DNS（`set_effective_dns`）与「重置报告成功但没有落地」（`set_reset_does_not_land`）两个钩子。
+- 验证：本机不跑 Windows 工作区的 cargo；修复提交由 hosted CI 判定，ci-gate 结果见 PR 正文。仍无真机验证。
+
+### 续记 2026-10-12 · Codex 复核第 2 轮（对 2c96ac52d）：F1、F4 已解决；F2/F3 部分；预算修复带出 1 条新的主要问题，同一轮全部处理
+- 回归先行：`4af083885`（测试、测试桩和显式截止时间的接口骨架，行为仍是旧的）在 hosted CI 上失败的正是这四例（run 38292895442，app-rust 通过）：
+  `core::dns::tests::the_emergency_reset_does_not_claim_success_when_the_effective_dns_cannot_be_read`、
+  `core::dns::tests::the_emergency_reset_is_not_proven_while_another_adapters_effective_dns_is_unreadable`、
+  `core::dns::tests::the_emergency_reset_resets_only_the_family_still_on_tono_next_to_a_users_own_loopback`、
+  `core::windows_kill_switch::tests::the_emergency_fallback_leg_fits_inside_the_release_workers_budget`。
+- R2-F1（主要）有效 DNS 读失败被当成空列表：无注册表目标时不读回就报成功；有部分目标时读回只查已选网卡，漏掉「注册表已还原、有效 DNS 仍是 198.18.0.2」的网卡；原生读取还是全有或全无。
+  现在每块网卡的有效状态是 `NotActive` / `Servers` / `Unknown`：整次读失败、或某块网卡的 DNS 记录读不出（原生层改为该网卡 `None`，不再拖垮整次枚举），都记为 `Unknown`，永远不是「空」。
+  已记录在快照里、或注册表读作 Tono 的网卡，有效状态为 `Unknown` 时标记为「未证明」。重置后重新读取全部网卡并复用同一评估，覆盖所有候选（快照里的每块网卡加上注册表或有效 DNS 上仍在 Tono 目标的每块网卡），
+  任何一块仍在 Tono 目标上或仍为 `Unknown` 都返回错误并记录 `fallback could not be proven`，不再报成功；没有目标时也只在每块候选都读到了才算成功。`still_on_loopback=true` 的硬拒绝、WFP 武装期间无 DNS 外泄的规则、53/853 均未改。
+- R2-F2（主要）整网卡豁免忽略有效 DNS 和地址族：IPv4 原值是用户自己的 127.0.0.1、IPv6 原值是公共解析器，注册表已全部还原但 IPv6 实时应用失败、有效 IPv6 仍是 Tono 的 `::1`，整张网卡被跳过。
+  现在逐地址族评估（`assess_adapter`）：某一族只有在「保存的原值是回环、注册表等于该原值、且有效列表（读到时）正是该原值」时才豁免；198.18.0.2 无论哪个视图出现都算 Tono 的。
+  引擎本来支持逐族重置（每族 `None` 即自动/DHCP，保留的族原样写回），所以只重置仍在 Tono 上的那一族；例外：IPv4 被重置时，没有静态服务器的 IPv6 族跟着重置（与卸载阶梯一致，避免留下「保护态空 IPv6」）。
+- R2-F3（主要）预算：`min(15 秒, 45 秒 − 已用时间 − 10 秒)` 在已用时间 ≥ 35 秒时整个跳过重置，而精确还原最长可用 40 秒，慢失败的还原保证重置不执行；更新执行器调用方也被套上不存在的 45 秒上限。
+  现在截止时间是显式的：新增 `emergency_disarm_windows_kill_switch_until(deadline)`，释放工作线程传入自己的截止时间（`now + EMERGENCY_DISARM_OUTER_BUDGET`），更新执行器和其他调用方仍走无截止时间的入口，得到完整的 DNS 预算（精确还原 40 秒、重置腿 40 秒）。
+  有截止时间时一开始就整体分配：重置腿（15 秒）和 NRPT 清扫（10 秒）先保留，精确还原只拿 `剩余 − 25 秒`（下限 5 秒，上限 40 秒），只在这条 fail-open 的紧急路径上；正常的 `disarm_unlocked` 路径未动。
+  被截断的精确还原在此路径上本来就只会报告部分/未知，而被跳过的重置会把死解析器留在机器上，所以取舍偏向保住重置。NRPT 清扫的预算改为 `min(10 秒, 剩余)`（至少 2 秒，规则总会被尝试）。
+- 残留：(1) NRPT 清扫内部是同步 `recv_timeout`，外层 Tokio 超时无法抢占，最多可在截止时间之后多占 `min(10 秒, 剩余)`（至少 2 秒）。(2) 精确还原被截断时，其引擎调用的阻塞线程可能仍在运行，引擎的在途标记会让紧接着的重置腿被拒绝并如实报错；极端慢的 PowerShell 批处理下仍可能出现。
+  (3) 有效 DNS 读不出时，已记录网卡会让回退报「未证明」（即使用户确实用自己的本地解析器），回退返回错误；策略移除不受影响，原 DNS 错误照旧返回。
+- 测试卫生：`a_retry_overtaken_by_a_connect_while_waiting_for_the_writer_claims_no_release` 不再 sleep 100 毫秒，改为把 `claim_retry_release` 固定后只 poll 一次，该次 poll 必然停在写者上（`futures::poll!`），没有时序依赖。
+- 工程与测试：除上列四例外新增 `windows_kill_switch::tests::the_emergency_legs_keep_the_full_dns_budgets_without_a_caller_deadline`；DNS 测试桩新增 `set_effective_dns_unreadable`、`set_effective_dns_fails`，并让逐族重置真实地改写桩里的注册表值和有效列表。
 - 验证：本机不跑 Windows 工作区的 cargo；修复提交由 hosted CI 判定，ci-gate 结果见 PR 正文。仍无真机验证。
