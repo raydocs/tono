@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 /**
@@ -33,16 +33,25 @@ export function Action({
   className?: string;
 }) {
   const blocked = Boolean(reason) || pending === true;
+  const reasonId = useId();
+  // aria-disabled, not disabled: a disabled button leaves the tab order, so a
+  // keyboard user never meets the reason. This one stays focusable and says why.
+  // The reason is `hidden`, not sr-only: aria-describedby still reads it, and an
+  // absolutely placed span inside a scrolled table stretched the phone page sideways.
   return (
-    <button
-      type="button"
-      disabled={blocked}
-      title={reason || undefined}
-      className={cn('ops-action', primary && 'ops-action-primary', danger && 'ops-action-danger', className)}
-      onClick={blocked ? undefined : onClick}
-    >
-      {children}
-    </button>
+    <>
+      <button
+        type="button"
+        aria-disabled={blocked || undefined}
+        aria-describedby={blocked && reason ? reasonId : undefined}
+        title={reason || undefined}
+        className={cn('ops-action', primary && 'ops-action-primary', danger && 'ops-action-danger', className)}
+        onClick={blocked ? undefined : onClick}
+      >
+        {children}
+      </button>
+      {blocked && reason ? <span id={reasonId} hidden>{reason}</span> : null}
+    </>
   );
 }
 

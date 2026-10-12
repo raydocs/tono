@@ -160,6 +160,9 @@ export function DataTable<T>({
               <th
                 key={col.id}
                 style={col.width ? { width: col.width } : undefined}
+                aria-sort={col.sortValue
+                  ? (sortId === col.id ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none')
+                  : undefined}
                 className={cn(
                   'overflow-hidden px-3 whitespace-nowrap text-micro font-medium text-[var(--muted-foreground)]',
                   col.align === 'right' ? 'text-right' : 'text-left',
@@ -176,7 +179,7 @@ export function DataTable<T>({
                     onClick={() => toggleSort(col.id)}
                   >
                     {col.header}
-                    {sortId === col.id ? <span className="font-mono">{sortDir === 'asc' ? '↑' : '↓'}</span> : null}
+                    {sortId === col.id ? <span className="font-mono" aria-hidden>{sortDir === 'asc' ? '↑' : '↓'}</span> : null}
                   </button>
                 ) : col.headerHidden ? <span className="sr-only">{col.header}</span> : col.header}
               </th>

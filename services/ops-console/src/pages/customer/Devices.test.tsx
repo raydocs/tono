@@ -23,7 +23,7 @@ it('shows a failed standing read instead of empty history and prevents an unknow
   expect(host.textContent).toContain('Device standing read failed');
   expect(host.textContent).not.toContain(copy.deviceNoAction);
   const toggle = Array.from(host.querySelectorAll('button')).find((button) => button.textContent === copy.deviceLogsOn);
-  expect(toggle?.disabled).toBe(true);
+  expect(toggle?.getAttribute('aria-disabled')).toBe('true');
 });
 
 it('shows the path the device last reached the control plane by, and how long ago', () => {

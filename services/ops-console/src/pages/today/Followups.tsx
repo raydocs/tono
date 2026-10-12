@@ -82,8 +82,9 @@ export function FollowupLog({
       ) : items.map((row) => <FollowupRow key={row.id} row={row} />)}
       <div className="flex gap-2">
         <input
-          className="h-8 min-w-0 flex-1 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-3 text-body outline-none placeholder:text-[var(--muted-foreground)]"
+          className="h-8 min-w-0 flex-1 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-3 text-body placeholder:text-[var(--muted-foreground)]"
           placeholder={copy.incidentDrawer.notePrompt}
+          aria-label={copy.incidentDrawer.notePrompt}
           value={note}
           onChange={(event) => setNote(event.target.value)}
         />

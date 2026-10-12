@@ -4,6 +4,14 @@
 @import "./charts.css";
 @import "./dashboard.css";
 
+/* One keyboard focus ring for every control; components that draw their own
+   (specificity above zero) still win. Programmatic page focus on <main> is
+   not a control and shows no ring. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+main[tabindex="-1"]:focus-visible { outline: none; }
 
 .hairline { border-color: var(--hairline); }
 .hairline-b { border-bottom: 1px solid var(--hairline); }
@@ -203,8 +211,8 @@
   transition: border-color 150ms ease, transform 150ms ease;
 }
 button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--foreground) 22%, transparent); }
-.ops-chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-.ops-chip[aria-pressed="true"] .font-mono { color: var(--accent); }
+.ops-chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-text); }
+.ops-chip[aria-pressed="true"] .font-mono { color: var(--accent-text); }
 /* The accent is too dark to read as 11 px text on the dark surface; the ring keeps it. */
 .dark .ops-chip[aria-pressed="true"],
 .dark .ops-chip[aria-pressed="true"] .font-mono { color: var(--foreground); }
@@ -229,7 +237,7 @@ button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color
 }
 
 /* Actions. Exactly one per view gets the accent; the rest are outlines, and a
-   disabled one keeps its reason in the title attribute. */
+   disabled one keeps its reason in the title attribute and `aria-describedby`. */
 .ops-action {
   display: inline-flex;
   align-items: center;
@@ -243,15 +251,15 @@ button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color
   white-space: nowrap;
   transition: transform 150ms ease, background 150ms ease, border-color 150ms ease;
 }
-.ops-action:hover:not(:disabled) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--foreground) 22%, transparent); }
-.ops-action:disabled { color: var(--muted-foreground); background: transparent; cursor: not-allowed; }
+.ops-action:hover:not(:disabled, [aria-disabled="true"]) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--foreground) 22%, transparent); }
+.ops-action:is(:disabled, [aria-disabled="true"]) { color: var(--muted-foreground); background: transparent; cursor: not-allowed; }
 .ops-action-primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }
-.ops-action-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
-.ops-action-primary:disabled { background: transparent; border-color: var(--hairline); color: var(--muted-foreground); }
-.ops-action-danger:not(:disabled) { color: hsl(var(--sev-fg)); border-color: hsl(var(--sev-line) / 0.5); }
-.ops-action-danger:hover:not(:disabled) { background: hsl(var(--sev-bg)); border-color: hsl(var(--sev-line)); }
-.ops-action-primary.ops-action-danger:not(:disabled) { background: hsl(var(--sev-line)); border-color: hsl(var(--sev-line)); color: #ffffff; }
-.ops-action-primary.ops-action-danger:hover:not(:disabled) { background: hsl(var(--sev-fg)); border-color: hsl(var(--sev-fg)); }
+.ops-action-primary:hover:not(:disabled, [aria-disabled="true"]) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.ops-action-primary:is(:disabled, [aria-disabled="true"]) { background: transparent; border-color: var(--hairline); color: var(--muted-foreground); }
+.ops-action-danger:not(:disabled, [aria-disabled="true"]) { color: hsl(var(--sev-fg)); border-color: hsl(var(--sev-line) / 0.5); }
+.ops-action-danger:hover:not(:disabled, [aria-disabled="true"]) { background: hsl(var(--sev-bg)); border-color: hsl(var(--sev-line)); }
+.ops-action-primary.ops-action-danger:not(:disabled, [aria-disabled="true"]) { background: hsl(var(--sev-line)); border-color: hsl(var(--sev-line)); color: #ffffff; }
+.ops-action-primary.ops-action-danger:hover:not(:disabled, [aria-disabled="true"]) { background: hsl(var(--sev-fg)); border-color: hsl(var(--sev-fg)); }
 
 /* A toolbar's actions wrap under the stamp instead of pushing the last one
    off a narrow screen; each button keeps its own size. */

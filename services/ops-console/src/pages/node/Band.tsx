@@ -101,7 +101,7 @@ export function NodeBand({
 /** The empty tile's way out: the dash says nothing was typed, this says where to type it. */
 function EnterLink({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <button type="button" className="text-[color:var(--accent)] hover:underline max-[640px]:flex max-[640px]:min-h-[44px] max-[640px]:items-center" onClick={onClick}>
+    <button type="button" className="text-[color:var(--accent-text)] hover:underline max-[640px]:flex max-[640px]:min-h-[44px] max-[640px]:items-center" onClick={onClick}>
       {label}
     </button>
   );

@@ -96,7 +96,7 @@ export function ReleaseTable({
               {copy.releaseConfirm.minPrompt}
             </span>
             <input
-              className="h-8 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-3 font-mono text-body outline-none"
+              className="h-8 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-3 font-mono text-body"
               value={minVersion}
               onChange={(event) => setMinVersion(event.target.value)}
             />

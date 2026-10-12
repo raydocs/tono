@@ -96,10 +96,10 @@ export function BatchProfileDrawer({
           <span className="text-micro text-[var(--muted-foreground)]">{words.pickLabel}</span>
           <span className="text-micro text-[var(--muted-foreground)]">{words.pickedCount(names.length, active.length)}</span>
           <span className="ml-auto flex gap-3 text-micro">
-            <button type="button" className="text-[color:var(--accent)] hover:underline" onClick={() => setPicked(new Set(active.map((row) => row.name)))}>
+            <button type="button" className="text-[color:var(--accent-text)] hover:underline" onClick={() => setPicked(new Set(active.map((row) => row.name)))}>
               {words.pickAll}
             </button>
-            <button type="button" className="text-[color:var(--accent)] hover:underline" onClick={() => setPicked(new Set(missing))}>
+            <button type="button" className="text-[color:var(--accent-text)] hover:underline" onClick={() => setPicked(new Set(missing))}>
               {words.pickMissing}
             </button>
           </span>
@@ -188,7 +188,7 @@ export function BatchProfileDrawer({
       </FieldGrid>
 
       <div className="flex flex-col gap-2 border-t border-[var(--hairline)] pt-4">
-        {busy ? <p className="text-body text-[var(--muted-foreground)]">{words.progress(pending, names.length)}</p> : null}
+        {busy ? <p className="text-body text-[var(--muted-foreground)]" role="status">{words.progress(pending, names.length)}</p> : null}
         {result ? (
           <div role="status" className={cn('flex flex-col gap-1 text-body', result.failed.length > 0 && 'panel-error rounded-[8px] px-3 py-2')}>
             <p>{words.result(result.done.length, result.failed.length)}</p>

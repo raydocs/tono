@@ -97,7 +97,7 @@
 .navigation-link[aria-current="page"],
 .navigation-link[data-active="true"] {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
@@ -181,3 +181,18 @@
   .navigation-link { transition: none; }
   .navigation-sheet { animation: none; transition: none; }
 }
+
+/* Off-screen until a keyboard lands on it, then the first thing on the page. */
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 100;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 13px;
+  transform: translateY(-200%);
+}
+.skip-link:focus-visible { transform: none; }

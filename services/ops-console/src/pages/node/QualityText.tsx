@@ -5,6 +5,7 @@ import { FoldedSection } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { nodeLegacyApi } from '@/lib/node-legacy';
 import { useResource } from '@/lib/use-resource';
+import { CopyStatus } from '@/components/ops/CopyStatus';
 
 /**
  * The raw sweep: what the scan actually printed about this machine.
@@ -69,6 +70,7 @@ function Block({ title, body }: { title: string; body: string | null }) {
         >
           {copied ? copy.nodeQualityCopied : copy.nodeQualityCopy}
         </Action>
+        <CopyStatus copied={copied} message={copy.nodeQualityCopied} />
       </div>
       <pre className="max-h-[320px] overflow-auto rounded-[10px] border border-[var(--hairline)] bg-[var(--surface)] px-3 py-2 font-mono text-fine leading-relaxed whitespace-pre">
         {body}
