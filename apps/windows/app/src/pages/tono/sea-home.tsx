@@ -200,7 +200,8 @@ export const SeaHome = ({
             )
           : state === 'connected'
             ? protectedNow
-              ? `${connectHint} ${minutes < 1 ? t('tono.home.duration.justConnected') : t(minutes === 1 ? 'tono.home.duration.minutes_one' : 'tono.home.duration.minutes_other', { count: minutes })}`
+              ? // Full-width CJK punctuation already carries its own spacing.
+                `${connectHint}${/[。！？]\s*$/.test(connectHint) ? '' : ' '}${minutes < 1 ? t('tono.home.duration.justConnected') : t(minutes === 1 ? 'tono.home.duration.minutes_one' : 'tono.home.duration.minutes_other', { count: minutes })}`
               : t('tono.progress.protectionUnknownBody')
             : failed
               ? t('tono.progress.releasedFailureBody')
@@ -209,7 +210,7 @@ export const SeaHome = ({
     state === 'connecting'
       ? 'tono.dashboard.cancelConnecting'
       : state === 'disconnecting'
-        ? 'tono.pill.title.disconnecting'
+        ? 'tono.home.title.disconnecting'
         : state === 'protectedOffline'
           ? 'tono.progress.retryNow'
           : state === 'connected'
@@ -323,6 +324,7 @@ export const SeaHome = ({
       className="tono-home"
       data-state={state}
       data-failed={failed}
+      data-phase={phase}
       data-tone={phase === 'idle' ? 'cool' : 'warm'}
       data-tono-theme="dark"
       style={{
@@ -474,7 +476,10 @@ export const SeaHome = ({
             setSheetOpen(true)
           }}
         >
-          {t('tono.home.details')} <span aria-hidden="true">⌃</span>
+          {t('tono.home.details')}
+          <span className="tono-home__caret" data-up="true" aria-hidden="true">
+            <TonoIcon name="chevronDown" size={12} />
+          </span>
         </button>
       </div>
       {sheetOpen && (
@@ -511,7 +516,9 @@ export const SeaHome = ({
             onClick={closeSheet}
             aria-label={t('tono.home.closeDetails')}
           >
-            ⌄
+            <span className="tono-home__caret" aria-hidden="true">
+              <TonoIcon name="chevronDown" size={12} />
+            </span>
           </button>
         </div>
         <div className="tono-home__tiles">{details}</div>

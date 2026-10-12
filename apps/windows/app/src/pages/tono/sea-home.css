@@ -574,11 +574,14 @@
   .tono-home__column {
     left: 32px !important;
   }
-  .tono-home:is([data-state="protectedOffline"], [data-failed="true"])
-    .tono-home__column {
+  .tono-home[data-phase="failed"] .tono-home__column {
     top: 16% !important;
     width: calc(100% - 64px) !important;
     max-height: calc(84% - 60px) !important;
+  }
+  /* The failed sky is dark on the left; the sentence can run past the wash feather. */
+  .tono-home[data-phase="failed"] .tono-home__sentence {
+    max-width: min(400px, calc(100% - 24px), calc(60cqw - 120px));
   }
   .tono-home__telemetry {
     left: 32px !important;
@@ -694,6 +697,10 @@
   color: #ffe2b0 !important;
   background: rgba(255, 217, 160, 0.1) !important;
 }
+/* The node badge paints its glyph with the legacy violet gradient; the new look is warm only. */
+.tono-home__tiles svg[stroke^="url("] {
+  stroke: #ffd9a0;
+}
 
 .tono-home__row-name {
   flex: 1;
@@ -725,4 +732,17 @@
   color: rgba(246, 242, 236, 0.86);
   cursor: pointer;
   padding: 4px 0;
+}
+/* The home already draws the stage dots under the sentence; the card's copy is redundant there. */
+.tono-home__progress-card [data-testid="tono-connect-dots"] {
+  display: none !important;
+}
+.tono-home__caret {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 4px;
+  color: rgba(246, 242, 236, 0.76);
+}
+.tono-home__caret[data-up="true"] {
+  transform: rotate(180deg);
 }

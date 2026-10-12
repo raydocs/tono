@@ -344,7 +344,7 @@ it('starts the sunset in the same commit as the authoritative disconnecting titl
   ).toBe(enTono.home.title.disconnecting)
   expect(
     screen
-      .getByRole('button', { name: enTono.pill.title.disconnecting })
+      .getByRole('button', { name: enTono.home.title.disconnecting })
       .hasAttribute('disabled'),
   ).toBe(true)
 })
