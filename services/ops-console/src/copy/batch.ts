@@ -11,6 +11,7 @@ export const batchCopy = {
   discover: '读取可接收动作的设备',
   renew: '续期',
   refresh: '刷新目录',
+  expiry: '设到期日',
   receipt: '回执编号',
   states: {
     waiting: '等待处理', checking: '核对中', submitting: '提交中',
