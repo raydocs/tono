@@ -236,14 +236,14 @@ extension AppState {
             details: ["enabled": String(allow), "generation": String(setting.generation)]
         )
         showLocalNetworkDevicesFault()
-        if isConnected, !isDisconnecting { reloadCoreConfig() }
+        if isConnected, !teardownInFlight { reloadCoreConfig() }
     }
 
     /// One bounded step of the health check toward PF and the Core both
     /// holding the setting (`LocalNetworkDevicesSync.takeAutomaticAttempt`).
     func convergeLocalNetworkDevices() {
         defer { showLocalNetworkDevicesFault() }
-        guard isConnected, !isDisconnecting, switchingNodeId == nil,
+        guard isConnected, !teardownInFlight, switchingNodeId == nil,
               connectionCoordinator.configReloadTask == nil,
               LocalNetworkDevicesSync.takeAutomaticAttempt() else { return }
         let desired = LocalNetworkDevicesSync.desired

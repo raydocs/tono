@@ -443,7 +443,54 @@ nonisolated enum HelperProtocolVersion {
     ///   `KILLSWITCH_LOCAL_NETWORK_FAULT[_STOP_CORE]`). While that fault is
     ///   held, no failed arm releases, whatever its tunnel, and an
     ///   abandoned prompt-free helper upgrade does not disarm it.
-    static let current = "4.52.49"
+    /// - 4.52.49 → 4.52.50: operator release (R3-O4, decision 084). A
+    ///   persisted target (`secured <n>` / `released <n>`) joins the helper's
+    ///   state: `--emergency-disarm` sets `released` in memory first and
+    ///   persists it within a bounded budget under the target lock, boots the
+    ///   daemon out, releases PF first (Tono's anchor only), then DNS, the AI
+    ///   layer and the rest, reads PF / DNS / AI resolvers / AI routes back
+    ///   (failed read = unknown) and restarts the daemon only once its
+    ///   `released` generation reads back from disk.
+    ///   While released (or unreadable) every arm, Core start/sync, DNS
+    ///   enable, PF supervision, power barrier and owner relaunch is refused;
+    ///   only `/session/connect` (the app's explicit user Connect, a
+    ///   compare-and-swap on the generation from `GET /session`) begins a
+    ///   newer `secured` generation, and arms carry it. AI sinkholes and
+    ///   blackhole routes are removed, never reinstalled, while released.
+    ///   Every wait of the command is bounded (MAC-EMERGENCY-UNBOUNDED-WAITS).
+    ///   Every PF block load reads the target before and after itself (a
+    ///   load that threw included) and is undone under a release; a released
+    ///   daemon also releases a block it reads in Tono's anchor without saved
+    ///   intent; a 127.0.0.1 write's undo restores the originals captured
+    ///   before it; repairing an unreadable target is one atomic rename, and a
+    ///   target missing beside a repair's leftovers refuses; every helper
+    ///   child (launchctl, ditto, open, the Core's launch and config check,
+    ///   the install script) and the update lock are bounded, and every one,
+    ///   the Core included, passes #1542's admission gate (the install
+    ///   script's stdin is relayed after `go`). A failed update executor run
+    ///   keeps the block and protected DNS unless an operator release, the
+    ///   attempt's Disconnect or no saved protection asks otherwise, and
+    ///   counts a daemon stopped only on launchd's "no such service"; a
+    ///   failed helper start follows the same rule. An unreadable target
+    ///   refuses re-arms but releases nothing (block, intent, A29 fault, AI
+    ///   and DNS held). A launch accepted inside its deadline is asked again
+    ///   (`admit`) before `go`, and a Core once more after it starts. Writing
+    ///   `go` and the caller's commit timeout are one atomic decision, so a
+    ///   launch the caller already failed never runs. An update Disconnect
+    ///   is recorded verified only when PF, Core, TUN, DNS, the system proxy
+    ///   and (for the user's release) the AI layer all read back released;
+    ///   otherwise it answers `UPDATE_DISCONNECT_UNVERIFIED`.
+    ///   The user's own release fences the helper the same way (decision
+    ///   094): `/killswitch/disarm` and the user's `/update/disconnect`
+    ///   persist `released <n+1>` (kept in memory if the disk refuses) before
+    ///   anything else, then stop the Core and restore DNS, so older arms,
+    ///   starts, syncs and DNS enables are refused with "Protection is off.
+    ///   Click Connect in Tono to reconnect." until the next user Connect.
+    ///   No route, field or file format changed. PF reads released only when
+    ///   pfctl answered and showed Tono's block absent (a failed or
+    ///   unparseable query is unknown), and each update Disconnect withdraws
+    ///   an earlier proof before it runs; retirement also reads AI back.
+    static let current = "4.52.50"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

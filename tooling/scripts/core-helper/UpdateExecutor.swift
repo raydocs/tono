@@ -12,10 +12,7 @@ enum UpdateExecutor {
     static let daemonPlist = "/Library/LaunchDaemons/\(daemonLabel).plist"
 
     static func retire() throws {
-        do { try UpdatePackage.run("/bin/launchctl", ["bootout", "system/" + label]) }
-        catch {
-            if (try? UpdatePackage.run("/bin/launchctl", ["print", "system/" + label])) != nil { throw error }
-        }
+        try bootout(label)
         guard unlink(plist) == 0 || errno == ENOENT else { throw HelperFailure.system("Cannot retire committed update entry.") }
         try UpdateStorage.syncDirectory("/Library/LaunchDaemons")
     }
@@ -28,7 +25,7 @@ enum UpdateExecutor {
         try UpdatePackage.snapshot(source, owner: uid, target: target, to: archive)
         try UpdateZIP.validate(archive)
         try ensureRootDirectory(directory + "/expanded", permissions: 0o700)
-        try UpdatePackage.run("/usr/bin/ditto", ["-x", "-k", archive, directory + "/expanded"])
+        try UpdatePackage.run("/usr/bin/ditto", ["-x", "-k", archive, directory + "/expanded"], deadline: HelperChildDeadline.ditto)
         let bundle = directory + "/expanded/Tono.app"
         try UpdatePackage.secureTree(bundle)
         try UpdatePackage.checkTarget(bundle, manifest: manifest)
@@ -68,28 +65,46 @@ enum UpdateExecutor {
         try UpdateStorage.write(data, to: plist)
         guard chmod(plist, 0o644) == 0 else { throw HelperFailure.system("Cannot secure update launch entry.") }
         // An already running executor owns the lock; never bootout/kick it.
-        do { try UpdatePackage.run("/bin/launchctl", ["bootstrap", "system", plist]) }
-        catch { try UpdatePackage.run("/bin/launchctl", ["print", "system/" + label]) }
+        do { try UpdatePackage.run("/bin/launchctl", ["bootstrap", "system", plist], deadline: HelperChildDeadline.launchctl) }
+        catch { try UpdatePackage.run("/bin/launchctl", ["print", "system/" + label], deadline: HelperChildDeadline.launchctl) }
     }
 
-    /// Startup failure used to install an emergency block, and skipped that
-    /// block entirely when the allowed uid could not be read (BRICK-M13).
-    /// There is no strict kill switch, and no uid is required to release.
-    private static func armEmergencyBlock() {
-        // Same class as a crash/hang release: open the general block, then
-        // best-effort restore a saved dead-loopback DNS snapshot and apply
-        // the secondary AI sinkhole. releaseInstalledBlock alone omitted
-        // both (M4-UPDATE-SELECTIVE-OMISSION / M4-UPDATE-LEDGER-DNS).
-        KillSwitchManager.releaseInstalledBlock()
-        if let dns = try? ProtectedDNSManager() {
-            try? dns.restore(deferringLossNotice: true)
+    /// What a startup failure does to saved protection (#1504 review R6-F3).
+    /// It was `armEmergencyBlock`, which (despite the name) released PF and
+    /// protected DNS and applied the AI layer on every startup failure, a
+    /// bounded `launchctl bootstrap` and `print` that merely ran out of time
+    /// included. Now it is the executor's own failure policy: the release
+    /// (`releaseAfterFailure`: PF, then DNS, then AI) runs only under an
+    /// explicit release intent (`failureMayRelease`: an operator `released`
+    /// on record, the attempt's own Disconnect, or no saved protection);
+    /// otherwise the block, its intent, protected DNS and an A29 fault stay
+    /// as they are, and the failure is thrown, so launchd's restart retries.
+    /// `disconnectRequested` is the attempt's, as read under the update lock
+    /// this runs in (nil when it could not be read); this never takes that
+    /// lock again.
+    static func settleStartupFailure(disconnectRequested: Bool?,
+                                     recovery: FailureRecovery = FailureRecovery()) {
+        guard failureMayRelease(target: recovery.target(), disconnectRequested: disconnectRequested,
+                                protectionSaved: recovery.protectionSaved()) else {
+            FileHandle.standardError.write(Data("tono: startup failed; saved protection kept\n".utf8))
+            return
         }
-        SelectiveFailOpenInstaller.applyBestEffort()
+        recovery.release()
+    }
+
+    /// Release authority for a daemon start that fails after `startup`
+    /// (#1504 review R7-F2): the same rule as a failed executor run. The
+    /// attempt's Disconnect is not read here (that read waits on the update
+    /// lock); a Disconnect already released when it was made.
+    static func startupFailureMayRelease(recovery: FailureRecovery = FailureRecovery()) -> Bool {
+        failureMayRelease(target: recovery.target(), disconnectRequested: nil,
+                          protectionSaved: recovery.protectionSaved())
     }
 
     /// Called before constructing CoreManager or restoring normal desired
     /// state. A corrupt ledger stops launch. The default failure action
-    /// releases a saved kill switch; it does not install one (BRICK-M13).
+    /// (`settleStartupFailure`) releases a saved kill switch only under an
+    /// explicit release intent, and never installs one (BRICK-M13, R6-F3).
     /// Intent is read only under the update lock, including when normal store
     /// opening failed but the existing root directory and lock are secure.
     /// A Mac that was never connected is not blocked by a store it cannot read.
@@ -101,7 +116,12 @@ enum UpdateExecutor {
     /// action, exit success.
     static func startup(storage: UpdateStorage? = nil,
                         protectionWanted: () -> Bool = KillSwitchManager.stateFileExists,
-                        emergencyBlock: () throws -> Void = armEmergencyBlock) throws -> Bool {
+                        launchExecutor: (UpdateStorage, UpdateStorage.Attempt) throws -> Void = {
+                            try UpdateExecutor.launch(storage: $0, attempt: $1)
+                        },
+                        onFailure: (_ disconnectRequested: Bool?) -> Void = {
+                            UpdateExecutor.settleStartupFailure(disconnectRequested: $0)
+                        }) throws -> Bool {
         do {
             let openedStorage: UpdateStorage
             do { openedStorage = try storage ?? UpdateStorage() }
@@ -111,25 +131,27 @@ enum UpdateExecutor {
                 // lockless read. Preserve the original startup failure.
                 do {
                     try UpdateStorage.withRootLockForStartup {
-                        if protectionWanted() { try? emergencyBlock() }
+                        if protectionWanted() { onFailure(nil) }
                     }
                 } catch HelperFailure.stopping { return true }
                 catch { }
                 throw openingError
             }
             return try openedStorage.locked {
+                var disconnectRequested: Bool?
                 do {
                     guard let attempt = try openedStorage.load().attempt, attempt.receipt.phase != .committed else { return false }
+                    disconnectRequested = attempt.disconnectRequested
                     if attempt.execution == .consumed && (attempt.receipt.blockedReason != nil || attempt.disconnectRequested) { return false }
                     if [.consumed, .replacing, .rollingBack].contains(attempt.execution) {
-                        try launch(storage: openedStorage, attempt: attempt)
+                        try launchExecutor(openedStorage, attempt)
                         return true
                     }
                     return false
                 } catch HelperFailure.stopping(let message) {
                     throw HelperFailure.stopping(message)
                 } catch {
-                    if protectionWanted() { try? emergencyBlock() }
+                    if protectionWanted() { onFailure(disconnectRequested) }
                     throw error
                 }
             }
@@ -146,114 +168,180 @@ enum UpdateExecutor {
 
     static func run() -> Bool {
         guard geteuid() == 0 else { return false }
+        return settle(FailureRecovery()) { try execute() }
+    }
+
+    /// What a failed executor run may do to the network (#1504 review
+    /// R5-F3), behind seams for the self-test. Each reader answers nil when
+    /// it cannot tell.
+    struct FailureRecovery {
+        /// The saved connection target: `released` is an operator release.
+        var target: () -> HelperTarget.Reading = { HelperTarget.read() }
+        /// The consumed attempt's own Disconnect request.
+        var disconnectRequested: () -> Bool? = {
+            guard let storage = try? UpdateStorage() else { return nil }
+            do {
+                return try storage.locked { try storage.load().attempt?.disconnectRequested ?? false }
+            } catch {
+                return nil
+            }
+        }
+        /// `killswitch.state`: present, definitely absent, or nil.
+        var protectionSaved: () -> Bool? = {
+            var metadata = stat()
+            if lstat(killSwitchStatePath, &metadata) == 0 { return true }
+            return errno == ENOENT ? false : nil
+        }
+        var release: () -> Void = { UpdateExecutor.releaseAfterFailure() }
+        /// Marks a consumed attempt blocked; true when it did.
+        var markBlocked: () -> Bool = { UpdateExecutor.markConsumedAttemptBlocked() }
+        var startDaemon: () throws -> Void = { try UpdateExecutor.startDaemon() }
+    }
+
+    /// Only an explicit release intent lets a failed run release the network:
+    /// an operator release on record, the attempt's own Disconnect, or no
+    /// saved protection at all (the user is disconnected). A failure, a
+    /// timeout or a launch with no answer is none of these; neither is a
+    /// reading that cannot be made (unknown refuses, never releases).
+    static func failureMayRelease(target: HelperTarget.Reading, disconnectRequested: Bool?,
+                                  protectionSaved: Bool?) -> Bool {
+        if case .recorded(let recorded) = target, recorded.mode == .released { return true }
+        if disconnectRequested == true { return true }
+        return protectionSaved == false
+    }
+
+    /// Runs `body`; on any failure keeps all evidence (an exception is never
+    /// "not installed") and settles the network. A failed rollback used to
+    /// leave the helper stopped and PF up with no recovery short of another
+    /// boot (BRICK-M8), so this released PF and DNS on every failure, and a
+    /// bounded `launchctl bootstrap` or successor `open` that merely ran out
+    /// of time (the daemon may well be starting) released a protected
+    /// update's block and DNS with nobody asking for it (#1504 review R5-F3).
+    /// Now the block and protected DNS stay unless `failureMayRelease`; the
+    /// daemon is still started for a blocked attempt (it restores saved
+    /// protection), and an interrupted replacement or rollback exits failed
+    /// so launchd reruns this executor (`KeepAlive`), which retries recovery.
+    static func settle(_ recovery: FailureRecovery, _ body: () throws -> Bool) -> Bool {
         do {
-            let uid = try readAllowedUID()
-            let storage = try UpdateStorage()
-            let initial = try storage.locked { try storage.load().attempt }
-            guard let initial else { return true }
-            guard initial.receipt.phase != .committed else { return true }
-            if initial.execution == .replaced || initial.execution == .rolledBack {
-                try startDaemon()
-                try launchSuccessor(uid: uid, attempt: initial)
-                return true
-            }
-            if initial.execution == .consumed && (initial.receipt.blockedReason != nil || initial.disconnectRequested) {
-                try startDaemon()
-                return true
-            }
-            // Allow the initiating UI to read the consumed receipt and quit.
-            // Do not hold flock during this wait (the status query needs it).
-            if initial.execution == .consumed, initial.initiatingBoot == (try TonoAuthenticatedPeer.bootSession()) {
-                for _ in 0..<300 where processExists(initial.initiatingToken) { usleep(100_000) }
-                guard !processExists(initial.initiatingToken) else {
-                    throw HelperFailure.invalid("Initiating App did not exit after update consumption.")
-                }
-            }
-            try storage.locked {
-                try perform(storage: storage, validate: { attempt in
-                    let manifest = try UpdatePackage.verifyManifest(attempt.manifest, signature: attempt.signature)
-                    let directory = storage.attemptDirectory(attempt)
-                    guard attempt.receipt.owner == "uid:\(uid):YY57758GS7:com.raydocs.tono",
-                          attempt.receipt.installedLocationSha256 == UpdateTransaction.location,
-                          try UpdateStorage.fileDigest(directory + "/package.zip") == manifest.target(.macosArm64).artifactSha256 else {
-                        throw HelperFailure.invalid("Executor target binding differs from the consumed input.")
-                    }
-                    try UpdatePackage.checkTarget(directory + "/expanded/Tono.app", manifest: manifest)
-                    // Consumption is already durable. Stop the old daemon,
-                    // then independently re-observe/restore offline ownership
-                    // before touching the first installed binary. This also
-                    // reconciles DNS/PF after a reboot between prepare/execute.
-                    try stopDaemon()
-                    let firewall = try KillSwitchManager(allowedUID: uid)
-                    let runtime = try UpdateRuntime(core: CoreManager(allowedUID: uid), firewall: firewall,
-                        dns: ProtectedDNSManager(), power: PowerTransitionGate())
-                    let expected: UpdateContractV1.Protection = attempt.receipt.requiredRecovery == .unprotected ? .unprotected : .protectedOffline
-                    guard try runtime.prepare(attempt.receipt.requiredRecovery) == expected else {
-                        throw HelperFailure.invalid("Executor cannot verify offline Core/TUN/DNS/proxy/PF state.")
-                    }
-                }, replace: { attempt in
-                    try stopDaemon()
-                    let directory = storage.attemptDirectory(attempt)
-                    try replaceFile(from: directory + "/expanded/Tono.app", to: UpdatePackage.appPath, in: directory)
-                    try replaceFile(from: directory + "/expanded/Tono.app" + UpdatePackage.coreExecutable, to: mihomoPath, in: directory)
-                    try replaceFile(from: directory + "/expanded/Tono.app" + UpdatePackage.helperExecutable, to: UpdatePackage.helperPath, in: directory)
-                    let manifest = try UpdateContractV1.ReleaseManifest.decode(attempt.manifest)
-                    guard try UpdatePackage.components(UpdatePackage.appPath, installed: true) == manifest.target(.macosArm64).components else {
-                        throw HelperFailure.invalid("Installed components did not converge.")
-                    }
-                }, rollback: { attempt in
-                    try stopDaemon()
-                    let directory = storage.attemptDirectory(attempt)
-                    guard let original = attempt.originalComponents,
-                          try UpdateStorage.fileDigest(directory + "/backup.app" + UpdatePackage.appExecutable) == original.appSha256,
-                          try UpdateStorage.fileDigest(directory + "/backup.core") == original.coreSha256,
-                          try UpdateStorage.fileDigest(directory + "/backup.helper") == original.privilegedSha256 else {
-                        throw HelperFailure.invalid("Rollback assets are not the captured installation.")
-                    }
-                    _ = try UpdatePackage.verifyCode(directory + "/backup.app", identifier: "com.raydocs.tono")
-                    _ = try UpdatePackage.verifyCode(directory + "/backup.core", identifier: "sing-box")
-                    _ = try UpdatePackage.verifyCode(directory + "/backup.helper", identifier: "com.raydocs.tono.helper")
-                    try replaceFile(from: directory + "/backup.app", to: UpdatePackage.appPath, in: directory)
-                    try replaceFile(from: directory + "/backup.core", to: mihomoPath, in: directory)
-                    try replaceFile(from: directory + "/backup.helper", to: UpdatePackage.helperPath, in: directory)
-                    guard try UpdatePackage.components(UpdatePackage.appPath, installed: true) == original else {
-                        throw HelperFailure.invalid("Rollback components did not converge.")
-                    }
-                })
-            }
-            try startDaemon()
-            let installed = try storage.locked { try storage.load().attempt }
-            guard let installed else { throw HelperFailure.invalid("Installed update evidence disappeared.") }
-            try launchSuccessor(uid: uid, attempt: installed)
-            return true
+            return try body()
         } catch {
-            // Keep all evidence; do not turn an exception into "not installed".
-            // A failed rollback used to leave the helper stopped and PF up
-            // with no recovery short of another boot (BRICK-M8). Release the
-            // network first. Do not claim the rollback succeeded.
-            KillSwitchManager.releaseInstalledBlock()
-            if let dns = try? ProtectedDNSManager() {
-                try? dns.restore(deferringLossNotice: true)
+            if failureMayRelease(target: recovery.target(), disconnectRequested: recovery.disconnectRequested(),
+                                 protectionSaved: recovery.protectionSaved()) {
+                recovery.release()
             }
-            // Crash/hang release applies the secondary AI layer after PF is
-            // gone; update failure must too, or the next helper launch skips
-            // it once the intent file is deleted (M4-UPDATE-SELECTIVE-OMISSION).
-            SelectiveFailOpenInstaller.applyBestEffort()
             // Before the replacing write no binary mutation occurred. Mark
             // this consumed attempt blocked and make diagnostics available.
-            if let storage = try? UpdateStorage() {
-                let blocked = try? storage.locked { () throws -> Bool in
-                    var ledger = try storage.load()
-                    guard ledger.attempt?.execution == .consumed else { return false }
-                    ledger.attempt?.receipt.blockedReason = .installationUncertain
-                    try storage.save(ledger)
-                    return true
-                }
-                if blocked == true { try? startDaemon(); return true }
-            }
+            if recovery.markBlocked() { try? recovery.startDaemon(); return true }
             // Interrupted replacement/rollback retries recovery, not install.
             return false
         }
+    }
+
+    /// The release a failed run makes under an explicit release intent:
+    /// the general block first, then a saved dead-loopback DNS snapshot,
+    /// then the secondary AI layer once PF is gone, or the next helper
+    /// launch skips it once the intent file is deleted
+    /// (M4-UPDATE-SELECTIVE-OMISSION).
+    static func releaseAfterFailure() {
+        KillSwitchManager.releaseInstalledBlock()
+        if let dns = try? ProtectedDNSManager() {
+            try? dns.restore(deferringLossNotice: true)
+        }
+        SelectiveFailOpenInstaller.applyBestEffort()
+    }
+
+    static func markConsumedAttemptBlocked() -> Bool {
+        guard let storage = try? UpdateStorage() else { return false }
+        let blocked = try? storage.locked { () throws -> Bool in
+            var ledger = try storage.load()
+            guard ledger.attempt?.execution == .consumed else { return false }
+            ledger.attempt?.receipt.blockedReason = .installationUncertain
+            try storage.save(ledger)
+            return true
+        }
+        return blocked == true
+    }
+
+    private static func execute() throws -> Bool {
+        let uid = try readAllowedUID()
+        let storage = try UpdateStorage()
+        let initial = try storage.locked { try storage.load().attempt }
+        guard let initial else { return true }
+        guard initial.receipt.phase != .committed else { return true }
+        if initial.execution == .replaced || initial.execution == .rolledBack {
+            try startDaemon()
+            try launchSuccessor(uid: uid, attempt: initial)
+            return true
+        }
+        if initial.execution == .consumed && (initial.receipt.blockedReason != nil || initial.disconnectRequested) {
+            try startDaemon()
+            return true
+        }
+        // Allow the initiating UI to read the consumed receipt and quit.
+        // Do not hold flock during this wait (the status query needs it).
+        if initial.execution == .consumed, initial.initiatingBoot == (try TonoAuthenticatedPeer.bootSession()) {
+            for _ in 0..<300 where processExists(initial.initiatingToken) { usleep(100_000) }
+            guard !processExists(initial.initiatingToken) else {
+                throw HelperFailure.invalid("Initiating App did not exit after update consumption.")
+            }
+        }
+        try storage.locked {
+            try perform(storage: storage, validate: { attempt in
+                let manifest = try UpdatePackage.verifyManifest(attempt.manifest, signature: attempt.signature)
+                let directory = storage.attemptDirectory(attempt)
+                guard attempt.receipt.owner == "uid:\(uid):YY57758GS7:com.raydocs.tono",
+                      attempt.receipt.installedLocationSha256 == UpdateTransaction.location,
+                      try UpdateStorage.fileDigest(directory + "/package.zip") == manifest.target(.macosArm64).artifactSha256 else {
+                    throw HelperFailure.invalid("Executor target binding differs from the consumed input.")
+                }
+                try UpdatePackage.checkTarget(directory + "/expanded/Tono.app", manifest: manifest)
+                // Consumption is already durable. Stop the old daemon,
+                // then independently re-observe/restore offline ownership
+                // before touching the first installed binary. This also
+                // reconciles DNS/PF after a reboot between prepare/execute.
+                try stopDaemon()
+                let firewall = try KillSwitchManager(allowedUID: uid)
+                let runtime = try UpdateRuntime(core: CoreManager(allowedUID: uid), firewall: firewall,
+                    dns: ProtectedDNSManager(), power: PowerTransitionGate())
+                let expected: UpdateContractV1.Protection = attempt.receipt.requiredRecovery == .unprotected ? .unprotected : .protectedOffline
+                guard try runtime.prepare(attempt.receipt.requiredRecovery) == expected else {
+                    throw HelperFailure.invalid("Executor cannot verify offline Core/TUN/DNS/proxy/PF state.")
+                }
+            }, replace: { attempt in
+                try stopDaemon()
+                let directory = storage.attemptDirectory(attempt)
+                try replaceFile(from: directory + "/expanded/Tono.app", to: UpdatePackage.appPath, in: directory)
+                try replaceFile(from: directory + "/expanded/Tono.app" + UpdatePackage.coreExecutable, to: mihomoPath, in: directory)
+                try replaceFile(from: directory + "/expanded/Tono.app" + UpdatePackage.helperExecutable, to: UpdatePackage.helperPath, in: directory)
+                let manifest = try UpdateContractV1.ReleaseManifest.decode(attempt.manifest)
+                guard try UpdatePackage.components(UpdatePackage.appPath, installed: true) == manifest.target(.macosArm64).components else {
+                    throw HelperFailure.invalid("Installed components did not converge.")
+                }
+            }, rollback: { attempt in
+                try stopDaemon()
+                let directory = storage.attemptDirectory(attempt)
+                guard let original = attempt.originalComponents,
+                      try UpdateStorage.fileDigest(directory + "/backup.app" + UpdatePackage.appExecutable) == original.appSha256,
+                      try UpdateStorage.fileDigest(directory + "/backup.core") == original.coreSha256,
+                      try UpdateStorage.fileDigest(directory + "/backup.helper") == original.privilegedSha256 else {
+                    throw HelperFailure.invalid("Rollback assets are not the captured installation.")
+                }
+                _ = try UpdatePackage.verifyCode(directory + "/backup.app", identifier: "com.raydocs.tono")
+                _ = try UpdatePackage.verifyCode(directory + "/backup.core", identifier: "sing-box")
+                _ = try UpdatePackage.verifyCode(directory + "/backup.helper", identifier: "com.raydocs.tono.helper")
+                try replaceFile(from: directory + "/backup.app", to: UpdatePackage.appPath, in: directory)
+                try replaceFile(from: directory + "/backup.core", to: mihomoPath, in: directory)
+                try replaceFile(from: directory + "/backup.helper", to: UpdatePackage.helperPath, in: directory)
+                guard try UpdatePackage.components(UpdatePackage.appPath, installed: true) == original else {
+                    throw HelperFailure.invalid("Rollback components did not converge.")
+                }
+            })
+        }
+        try startDaemon()
+        let installed = try storage.locked { try storage.load().attempt }
+        guard let installed else { throw HelperFailure.invalid("Installed update evidence disappeared.") }
+        try launchSuccessor(uid: uid, attempt: installed)
+        return true
     }
 
     /// Real durable execution boundary used by the daemon's independent entry
@@ -334,17 +422,37 @@ enum UpdateExecutor {
     }
 
     private static func stopDaemon() throws {
-        do { try UpdatePackage.run("/bin/launchctl", ["bootout", "system/" + daemonLabel]) }
-        catch {
-            // Already absent after a crash is fine; a still-registered daemon
-            // is not. No concurrent daemon may own replacement/recovery.
-            if (try? UpdatePackage.run("/bin/launchctl", ["print", "system/" + daemonLabel])) != nil { throw error }
+        try bootout(daemonLabel)
+    }
+
+    /// `launchctl bootout system/<label>`. Already absent after a crash is
+    /// fine; a still-registered daemon is not: no concurrent daemon may own
+    /// replacement or recovery. Only launchd's definite "no such service"
+    /// (`print` exit 113) counts as absent (#1504 review R5-F4): a bootout
+    /// or a `print` that failed otherwise, ran out of time or never started
+    /// is no answer, and the stop is refused, as `--emergency-disarm`'s own
+    /// stop does (`OperatorDaemonStop`).
+    static func bootout(
+        _ label: String,
+        launchctl: ([String]) throws -> Int32 = {
+            try UpdatePackage.status("/bin/launchctl", $0, deadline: HelperChildDeadline.launchctl)
+        }
+    ) throws {
+        let service = "system/" + label
+        var failure: any Error = HelperFailure.system("Native update operation failed: launchctl.")
+        do {
+            guard try launchctl(["bootout", service]) != 0 else { return }
+        } catch {
+            failure = error
+        }
+        guard (try? launchctl(["print", service])) == OperatorDaemonStop.launchctlNoSuchService else {
+            throw failure
         }
     }
 
     private static func startDaemon() throws {
-        do { try UpdatePackage.run("/bin/launchctl", ["bootstrap", "system", daemonPlist]) }
-        catch { try UpdatePackage.run("/bin/launchctl", ["print", "system/" + daemonLabel]) }
+        do { try UpdatePackage.run("/bin/launchctl", ["bootstrap", "system", daemonPlist], deadline: HelperChildDeadline.launchctl) }
+        catch { try UpdatePackage.run("/bin/launchctl", ["print", "system/" + daemonLabel], deadline: HelperChildDeadline.launchctl) }
     }
 
     private static func launchSuccessor(uid: uid_t, attempt: UpdateStorage.Attempt) throws {
@@ -353,7 +461,7 @@ enum UpdateExecutor {
         // Re-enter this path after a crash between the replaced write and
         // launch. The executor does not impersonate the App on helper IPC;
         // Launch Services starts a fresh process that must authenticate anew.
-        try UpdatePackage.run("/bin/launchctl", ["asuser", String(uid), "/usr/bin/sudo", "-u", "#\(uid)", "/usr/bin/open", "-n", UpdatePackage.appPath])
+        try UpdatePackage.run("/bin/launchctl", ["asuser", String(uid), "/usr/bin/sudo", "-u", "#\(uid)", "/usr/bin/open", "-n", UpdatePackage.appPath], deadline: HelperChildDeadline.openApp)
     }
 
     private static func syncFile(_ path: String) throws {

@@ -8,6 +8,7 @@ import Security
 func runUpdateSelfTests() -> Bool {
     guard geteuid() == 0 else { fputs("Update self-test requires root.\n", stderr); return false }
     var failures = [String]()
+    var ran = 0
     func check(_ condition: @autoclosure () throws -> Bool, _ message: String) throws {
         guard try condition() else { throw HelperFailure.invalid(message) }
     }
@@ -17,6 +18,7 @@ func runUpdateSelfTests() -> Bool {
         try check(refused, "Expected refusal did not occur")
     }
     func test(_ name: String, _ body: (String) throws -> Void) {
+        ran += 1
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("tono-update-test-" + UUID().uuidString)
         do {
             try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
@@ -38,9 +40,11 @@ func runUpdateSelfTests() -> Bool {
     let owner = TonoAuthenticatedPeer(uid: 501, auditToken: Data("old-incarnation".utf8), bundleURL: URL(fileURLWithPath: UpdatePackage.appPath))
     let successor = TonoAuthenticatedPeer(uid: 501, auditToken: Data("new-incarnation".utf8), bundleURL: owner.bundleURL)
     func effects() -> UpdateTransaction.Effects {
-        .init(authenticate: { _ in }, installedFloor: { 5 }, installedComponents: { components },
+        var io = UpdateTransaction.Effects(authenticate: { _ in }, installedFloor: { 5 }, installedComponents: { components },
               stage: { _, _, _, _ in components }, observe: { .protectedOffline }, prepare: { _ in .protectedOffline },
               recovery: { _ in .protectedOffline }, disconnect: {}, launchExecutor: { _ in })
+        io.aiLayerAbsent = { true }
+        return io
     }
     func reserved(_ store: UpdateStorage, _ engine: UpdateTransaction) throws {
         try engine.reserve(peer: owner, manifest: manifest, manifestBytes: UpdateContractV1.canonical(manifest), signature: Data())
@@ -260,6 +264,133 @@ func runUpdateSelfTests() -> Bool {
         try refuses { try engine.gate(method: "POST", path: "/core/start", peer: successor) }
     }
 
+    // R8-F3: an update Disconnect whose cleanup really fails (preparation
+    // and the DNS restore throw, DNS and the AI layer read back unrestored)
+    // still releases PF, but is not recorded verified: the caller gets a
+    // coded partial result and retirement stays refused. Control: the same
+    // run with every component read back released is verified.
+    test("update-disconnect-unverified-cleanup-is-not-recorded-verified") { directory in
+        let store = try UpdateStorage(root: directory)
+        var disarms = 0
+        var readback = UpdateRuntime.DisconnectReadback(
+            pfReleased: true, coreStopped: true, tunnelAbsent: true,
+            dnsRestored: false, proxyRestored: true, aiRemoved: false)
+        let steps = UpdateRuntime.DisconnectSteps(
+            wanted: { true },
+            prepare: { _ in throw HelperFailure.invalid("DNS readback failed during preparation") },
+            stopCore: {},
+            restoreDNS: { throw HelperFailure.invalid("DNS restore failed") },
+            disarm: { _ in disarms += 1 },
+            readback: { readback })
+        var io = effects()
+        io.disconnect = { try UpdateRuntime.runDisconnect(preserveAIHold: false, steps: steps) }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        var code: String?
+        do { try engine.disconnect(peer: owner) } catch let failure as HelperFailure { code = failure.code }
+        let partial = try store.load().attempt
+        try check(disarms == 1, "A failed preparation kept PF up")
+        try check(code == "UPDATE_DISCONNECT_UNVERIFIED", "Unverified cleanup was not reported partial")
+        try check(partial?.disconnectRequested == true && partial?.disconnectVerified == false,
+                  "Unverified cleanup was recorded as a verified Disconnect")
+        try refuses { try engine.retireUnconsumed(peer: owner) }
+        readback.dnsRestored = true
+        readback.aiRemoved = true
+        try engine.disconnect(peer: owner)
+        try check(disarms == 2 && store.load().attempt?.disconnectVerified == true,
+                  "A fully read-back Disconnect was not verified")
+    }
+
+    // R9-F1: a PF query that failed, gave no answer or printed something
+    // unrecognised is no proof of a release: the Disconnect is reported
+    // UPDATE_DISCONNECT_UNVERIFIED and never recorded verified. Controls: PF
+    // disabled, or an anchor with no rule (ALTQ notices only), verifies; a
+    // rule left in the anchor does not.
+    test("update-disconnect-unknown-pf-query-is-not-verified") { directory in
+        struct NoAnswer: Error {}
+        let enabled = "Status: Enabled for 0 days 00:01:02           Debug: Urgent\n"
+        let notices = "No ALTQ support in kernel\nALTQ related functions disabled\n"
+        func answering(info: String?, rules: String?, throwing: Bool = false) -> ([String]) throws -> String? {
+            { arguments in
+                if throwing { throw NoAnswer() }
+                return arguments == ["-s", "info"] ? info : rules
+            }
+        }
+        let cases: [(String, ([String]) throws -> String?, Bool)] = [
+            ("query timed out", answering(info: enabled, rules: "", throwing: true), false),
+            ("pfctl failed", answering(info: nil, rules: ""), false),
+            ("info unparseable", answering(info: "pfctl: garbage", rules: ""), false),
+            ("anchor query failed", answering(info: enabled, rules: nil), false),
+            ("anchor unparseable", answering(info: enabled, rules: "something else\n"), false),
+            ("block left", answering(info: enabled, rules: notices + "block drop out quick all\n"), false),
+            ("pf disabled", answering(info: "Status: Disabled\n", rules: nil), true),
+            ("anchor empty", answering(info: enabled, rules: notices), true),
+        ]
+        for (index, (name, query, releases)) in cases.enumerated() {
+            let store = try UpdateStorage(root: directory + "/case-\(index)")
+            let block = KillSwitchManager.pfBlockReading(query: query)
+            let intentGone: [String: Any] = ["ok": true, "wantArmed": false, "armed": false, "live": false]
+            let steps = UpdateRuntime.DisconnectSteps(
+                wanted: { false }, prepare: { _ in }, stopCore: {}, restoreDNS: {}, disarm: { _ in },
+                readback: {
+                    UpdateRuntime.DisconnectReadback(
+                        pfReleased: UpdateRuntime.pfReadsReleased(status: intentGone, block: block),
+                        coreStopped: true, tunnelAbsent: true, dnsRestored: true, proxyRestored: true, aiRemoved: true)
+                })
+            var io = effects()
+            io.disconnect = { try UpdateRuntime.runDisconnect(preserveAIHold: false, steps: steps) }
+            let engine = UpdateTransaction(storage: store, effects: io)
+            try reserved(store, engine)
+            var code: String?
+            do { try engine.disconnect(peer: owner) } catch let failure as HelperFailure { code = failure.code }
+            let verified = try store.load().attempt?.disconnectVerified == true
+            try check(verified == releases && (code == nil) == releases
+                      && (releases || code == "UPDATE_DISCONNECT_UNVERIFIED"),
+                      "\(name): PF read \(block), verified \(verified), code \(code ?? "none")")
+        }
+    }
+
+    // R9-F2: an automatic release verified with the AI hold kept; the user's
+    // later release fails its AI cleanup. The older, weaker proof must not
+    // stand for it: the ledger and status say not verified, and retirement
+    // refuses, also on its own live AI proof. Control: the user's release
+    // verified with AI removed retires.
+    test("automatic-proof-does-not-verify-a-failed-explicit-release") { directory in
+        let store = try UpdateStorage(root: directory)
+        var readback = UpdateRuntime.DisconnectReadback(
+            pfReleased: true, coreStopped: true, tunnelAbsent: true,
+            dnsRestored: true, proxyRestored: true, aiRemoved: false)
+        let steps = UpdateRuntime.DisconnectSteps(
+            wanted: { true }, prepare: { _ in }, stopCore: {}, restoreDNS: {}, disarm: { _ in },
+            readback: { readback })
+        var aiAbsent = false
+        var observed: UpdateContractV1.Protection = .protectedOffline
+        var io = effects()
+        io.observe = { observed }
+        io.aiLayerAbsent = { aiAbsent }
+        io.disconnectPreservingAIHold = { try UpdateRuntime.runDisconnect(preserveAIHold: true, steps: steps) }
+        io.disconnect = { try UpdateRuntime.runDisconnect(preserveAIHold: false, steps: steps) }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        observed = .unprotected
+        try engine.disconnect(peer: owner, preserveAIHold: true)
+        try check(store.load().attempt?.disconnectVerified == true, "Automatic release was not verified")
+        var code: String?
+        do { try engine.disconnect(peer: owner) } catch let failure as HelperFailure { code = failure.code }
+        try check(code == "UPDATE_DISCONNECT_UNVERIFIED", "Failed AI cleanup was not reported partial")
+        try check(store.load().attempt?.disconnectVerified == false
+                  && (try engine.status())["disconnectVerified"] as? Bool == false,
+                  "The automatic proof stood for the failed explicit release")
+        try refuses { try engine.retireUnconsumed(peer: owner) }
+        readback.aiRemoved = true
+        try engine.disconnect(peer: owner)
+        try check(store.load().attempt?.disconnectVerified == true, "Explicit release with AI removed was not verified")
+        try refuses { try engine.retireUnconsumed(peer: owner) } // AI not proven absent now
+        aiAbsent = true
+        try engine.retireUnconsumed(peer: owner)
+        try check(store.load().attempt == nil, "Verified explicit release did not retire")
+    }
+
     test("automatic-update-release-preserves-ai-and-consumed-obligation") { directory in
         let store = try UpdateStorage(root: directory)
         var observed: UpdateContractV1.Protection = .connected
@@ -344,10 +475,15 @@ func runUpdateSelfTests() -> Bool {
         let path = directory + "/process"
         try FileManager.default.copyItem(atPath: "/bin/sleep", toPath: path)
         let child = Process()
-        child.executableURL = URL(fileURLWithPath: path)
-        child.arguments = ["20"]
-        try child.run()
-        defer { if child.isRunning { child.terminate() }; child.waitUntilExit() }
+        try KillSwitchManager.launchAdmitted(
+            child, executable: path, arguments: ["20"],
+            until: .now() + HelperChildDeadline.selfTestProbe, deadline: HelperChildDeadline.selfTestProbe
+        )
+        defer {
+            if child.isRunning { child.terminate() }
+            for _ in 0..<20 where child.isRunning { usleep(50_000) }
+            if child.isRunning { kill(child.processIdentifier, SIGKILL) }
+        }
         func identities() throws -> (SecCode, SecStaticCode) {
             var dynamic: SecCode?
             var installed: SecStaticCode?
@@ -374,7 +510,7 @@ func runUpdateSelfTests() -> Bool {
             helperShutdownRequested = 1
             defer { helperShutdownRequested = 0 }
             let clean = try UpdateExecutor.startup(storage: daemon, protectionWanted: { true },
-                                                   emergencyBlock: { armed += 1 })
+                                                   onFailure: { _ in armed += 1 })
             try check(clean, "A bootout while waiting behind the executor's lock is a clean stop")
         }
         try check(armed == 0, "Executor bootout during startup armed the emergency block")
@@ -385,7 +521,7 @@ func runUpdateSelfTests() -> Bool {
         var corrupted = 0
         try refuses {
             _ = try UpdateExecutor.startup(storage: corrupt, protectionWanted: { true },
-                                           emergencyBlock: { corrupted += 1 })
+                                           onFailure: { _ in corrupted += 1 })
         }
         try check(corrupted == 1, "Corrupt-ledger startup did not release a saved kill switch")
     }
@@ -403,7 +539,7 @@ func runUpdateSelfTests() -> Bool {
                 defer { if probe >= 0 { close(probe) } }
                 decidedUnderLock = probe >= 0 && flock(probe, LOCK_EX | LOCK_NB) != 0 && errno == EWOULDBLOCK
                 return false
-            }, emergencyBlock: { barriers += 1 })
+            }, onFailure: { _ in barriers += 1 })
         }
         try check(barriers == 0, "A startup failure without saved intent installed the emergency block")
         try check(decidedUnderLock == true, "The startup barrier was decided outside the update lock")
@@ -792,6 +928,184 @@ func runUpdateSelfTests() -> Bool {
                   "A mixed resolver list counted as Tono's")
         try check(ProtectedDNSManager.isStoppedTonoResolver(["127.0.0.1"]), "Tono's resolver list was not refused")
     }
-    print("Update production-bound tests: \(16 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
+    // #1504 review R5-F3: a protected update whose successor launch (or the
+    // daemon's bootstrap) runs out of time used to reach a catch that
+    // released the installed block and restored DNS unconditionally. Here the
+    // real bounded runner times out on a child that ignores SIGTERM; with no
+    // operator release, no Disconnect and protection saved, nothing releases.
+    test("protected-update-successor-timeout-keeps-block-and-dns") { _ in
+        var released = 0
+        var started = 0
+        var recovery = UpdateExecutor.FailureRecovery()
+        recovery.target = { .recorded(HelperTarget(mode: .secured, generation: 3)) }
+        recovery.disconnectRequested = { false }
+        recovery.protectionSaved = { true }
+        recovery.release = { released += 1 }
+        recovery.markBlocked = { false }
+        recovery.startDaemon = { started += 1 }
+        let outcome = UpdateExecutor.settle(recovery) {
+            try UpdatePackage.run("/bin/sh", ["-c", "trap '' TERM; exec /bin/sleep 30"], deadline: 0.5)
+            return true
+        }
+        try check(!outcome && released == 0 && started == 0,
+                  "A timed-out successor launch released a protected update's block or DNS")
+        try check(!UpdateExecutor.failureMayRelease(target: .unreadable("test"), disconnectRequested: nil,
+                                                    protectionSaved: nil),
+                  "An unknown reading released the network")
+        try check(UpdateExecutor.failureMayRelease(target: .recorded(HelperTarget(mode: .released, generation: 4)),
+                                                   disconnectRequested: false, protectionSaved: true),
+                  "An operator release did not release a failed update")
+    }
+    // #1504 review R6-F3: a protected helper start finds a consumed update and
+    // launches its executor; `launchctl bootstrap` and then `launchctl print`
+    // both run out of time (real bounded runner, children that ignore
+    // SIGTERM). The start fails, and with no operator release, no Disconnect
+    // and protection saved it keeps the block and DNS (the old
+    // `armEmergencyBlock` released both). Control: a `released` target does
+    // release.
+    test("protected-startup-launch-timeout-keeps-block-and-dns") { directory in
+        let store = try UpdateStorage(root: directory + "/store")
+        let engine = UpdateTransaction(storage: store, effects: effects())
+        try reserved(store, engine)
+        try engine.execute(peer: owner)
+        try check(store.load().attempt?.execution == .consumed, "No consumed attempt to launch")
+        let hung = ["-c", "trap '' TERM; exec /bin/sleep 30"]
+        func start(target: HelperTarget.Reading) throws -> (released: Int, calls: [String]) {
+            var released = 0
+            var calls: [String] = []
+            var recovery = UpdateExecutor.FailureRecovery()
+            recovery.target = { target }
+            recovery.disconnectRequested = { nil } // startup passes the attempt's own answer
+            recovery.protectionSaved = { true }
+            recovery.release = { released += 1 }
+            try refuses {
+                _ = try UpdateExecutor.startup(storage: store, protectionWanted: { true }, launchExecutor: { _, _ in
+                    // `launch`'s tail: bootstrap, then print, each bounded.
+                    do { calls.append("bootstrap"); try UpdatePackage.run("/bin/sh", hung, deadline: 0.3) }
+                    catch { calls.append("print"); try UpdatePackage.run("/bin/sh", hung, deadline: 0.3) }
+                }, onFailure: { UpdateExecutor.settleStartupFailure(disconnectRequested: $0, recovery: recovery) })
+            }
+            return (released, calls)
+        }
+        let secured = try start(target: .recorded(HelperTarget(mode: .secured, generation: 3)))
+        try check(secured.calls == ["bootstrap", "print"], "The launch did not time out twice: \(secured.calls)")
+        try check(secured.released == 0, "A timed-out startup launch released a protected block or DNS")
+        let unknown = try start(target: .unreadable("test"))
+        try check(unknown.released == 0, "A timed-out startup launch released under an unreadable target")
+        let released = try start(target: .recorded(HelperTarget(mode: .released, generation: 4)))
+        try check(released.released == 1, "An operator release did not release after a failed startup")
+    }
+    // Decision 092 acceptance (owner condition, 2026-10-11): a failed update
+    // keeps protection, but the user's explicit release always works and no
+    // late update or re-arm write undoes it. One test per branch the helper
+    // can drive here; the normal and startup branches are named in the PR.
+    //
+    // Prepare failure: the attempt is blocked (`preparationFailed`); the
+    // owner's explicit Disconnect still releases (it needs no unblocked or
+    // unexpired attempt, no sign-in, no tunnel), and afterwards neither the
+    // update (prepare, execute) nor a reconnect (arm, Core start, DNS enable,
+    // session) is admitted.
+    test("prepare-failure-explicit-release-is-not-undone") { directory in
+        let store = try UpdateStorage(root: directory)
+        var releases = 0
+        var io = effects()
+        io.prepare = { _ in throw HelperFailure.system("injected preparation failure") }
+        io.disconnect = { releases += 1 }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try engine.reserve(peer: owner, manifest: manifest, manifestBytes: UpdateContractV1.canonical(manifest), signature: Data())
+        var ledger = try store.load()
+        ledger.attempt?.execution = .staged
+        try store.save(ledger)
+        try refuses { try engine.prepare(peer: owner) }
+        try check(store.load().attempt?.receipt.blockedReason == .preparationFailed, "Prepare failure did not block")
+        try check(releases == 0, "Prepare failure released by itself")
+        try engine.disconnect(peer: owner)
+        try check(releases == 1 && store.load().attempt?.disconnectVerified == true,
+                  "The explicit release after a prepare failure did not run")
+        try refuses { try engine.prepare(peer: owner) }
+        try refuses { try engine.execute(peer: owner) }
+        for path in ["/killswitch/arm", "/core/start", "/core/sync", "/dns/enable", "/session/connect"] {
+            try refuses { try engine.gate(method: "POST", path: path, peer: owner) }
+        }
+        try check(releases == 1, "A late update write touched the released network")
+    }
+    // Execute failure: the consumed attempt's executor fails with protection
+    // saved and no release intent, so it keeps the block (092); the owner's
+    // explicit Disconnect then releases. A later executor rerun that fails
+    // again releases (never re-installs), a resumed execute is refused and so
+    // is every reconnect for either app incarnation.
+    test("execute-failure-explicit-release-is-not-undone") { directory in
+        let store = try UpdateStorage(root: directory)
+        var releases = 0
+        var io = effects()
+        io.disconnect = { releases += 1 }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        try engine.execute(peer: owner)
+        var recovery = UpdateExecutor.FailureRecovery()
+        recovery.target = { .recorded(HelperTarget(mode: .secured, generation: 3)) }
+        recovery.disconnectRequested = { try? store.load().attempt?.disconnectRequested }
+        recovery.protectionSaved = { true }
+        recovery.release = { releases += 1 }
+        recovery.markBlocked = { false }
+        recovery.startDaemon = {}
+        let failedRun = UpdateExecutor.settle(recovery) { throw HelperFailure.system("injected executor failure") }
+        try check(!failedRun && releases == 0, "An execute failure released without a release intent")
+        try engine.disconnect(peer: owner)
+        try check(releases == 1 && store.load().attempt?.disconnectVerified == true,
+                  "The explicit release after an execute failure did not run")
+        _ = UpdateExecutor.settle(recovery) { throw HelperFailure.system("injected late executor failure") }
+        try check(releases == 2, "A late executor failure after the release did not keep it released")
+        try refuses { try engine.execute(peer: owner) }
+        for peer in [owner, successor] {
+            for path in ["/killswitch/arm", "/core/start", "/dns/enable", "/session/connect"] {
+                try refuses { try engine.gate(method: "POST", path: path, peer: peer) }
+            }
+        }
+    }
+    // Helper restart after the explicit release of a consumed update: the
+    // restarted daemon's startup neither relaunches the executor nor runs a
+    // failure settlement, and with the intent gone its watchdog never
+    // supervises (re-arms) a block; it restores DNS.
+    test("helper-restart-after-explicit-release-does-not-relock") { directory in
+        let store = try UpdateStorage(root: directory)
+        var io = effects()
+        io.disconnect = {}
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        try engine.execute(peer: owner)
+        try engine.disconnect(peer: owner)
+        var launches = 0
+        var settlements = 0
+        let stopped = try UpdateExecutor.startup(storage: store, protectionWanted: { true },
+                                                 launchExecutor: { _, _ in launches += 1 },
+                                                 onFailure: { _ in settlements += 1 })
+        try check(!stopped && launches == 0 && settlements == 0,
+                  "A restarted helper relaunched update work after the explicit release")
+        let steps = SocketServer.watchdogSteps(rearmAllowed: true, coreRunning: false, stateFilePresent: false,
+                                               coreDownChecks: 1_000)
+        try check(!steps.contains(.supervise) && !steps.contains(.releaseBlock) && steps.contains(.recoverDNS),
+                  "A restarted helper's watchdog re-armed after the explicit release: \(steps)")
+        try refuses { try engine.gate(method: "POST", path: "/killswitch/arm", peer: owner) }
+    }
+    // #1504 review R5-F4: stopping the daemon before replacement counted any
+    // failed `launchctl print`, a timeout included, as "already absent". Both
+    // calls run out of time here: no answer, so the stop (and with it the
+    // replacement behind it) is refused. Only exit 113 is absent.
+    test("update-stop-without-launchctl-answer-refuses-replacement") { _ in
+        let hung = ["-c", "trap '' TERM; exec /bin/sleep 30"]
+        try refuses {
+            try UpdateExecutor.bootout(UpdateExecutor.daemonLabel) { _ in
+                try UpdatePackage.status("/bin/sh", hung, deadline: 0.3)
+            }
+        }
+        try refuses {
+            try UpdateExecutor.bootout(UpdateExecutor.daemonLabel) { $0[0] == "bootout" ? 3 : 1 }
+        }
+        try UpdateExecutor.bootout(UpdateExecutor.daemonLabel) {
+            $0[0] == "bootout" ? 3 : OperatorDaemonStop.launchctlNoSuchService
+        }
+    }
+    print("Update production-bound tests: \(ran - failures.count) of \(ran) passed, \(failures.count) failed; native-device acceptance NOT performed")
     return failures.isEmpty
 }

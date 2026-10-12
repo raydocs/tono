@@ -110,34 +110,128 @@ final class HelperCommandOutput: @unchecked Sendable {
     }
 }
 
+/// Where a bounded helper command's output goes. `.captured` (stdout and
+/// stderr into the result) is the pfctl shape; `.standardOutputOnly` drops
+/// stderr (a version probe whose runtime warnings must not corrupt its line);
+/// `.inherited` passes both through to this process (the install guard's
+/// script, whose output reaches the administrator prompt's caller).
+enum HelperCommandOutputMode {
+    case captured
+    case standardOutputOnly
+    case inherited
+}
+
 /// The launch of one bounded helper command, settled once: launched, failed,
 /// or abandoned because its deadline passed while `Process.run()` had not yet
 /// returned. A launch that returns after it was abandoned terminates its own
 /// child (#1542 review F1): nobody is waiting for it, and its exit status must
 /// never be read as the command's outcome.
+///
+/// Two phases (#1504 review R7-F1): the launch thread first `accept`s (from
+/// then on the caller can no longer abandon it), writes `go`, and only then
+/// `commit`s. The caller's `wait` returns `.launched` only after the commit,
+/// so everything the caller does once the launch returns (the Core's
+/// post-start check, the relaunch request's `started` kill) runs strictly
+/// after `go` was written, and a release that landed between `admit` and
+/// `go` is seen by it. Abandonment is possible only before `accept`, so an
+/// abandoned launch still gets end-of-file and never executes.
+///
+/// Writing `go` and the caller's commit timeout are one atomic decision
+/// (#1504 review R8-F1): the launch thread must `claimGo` before writing,
+/// and the caller's timeout revokes an accepted launch that has not claimed
+/// it. Exactly one side wins, so a launch the caller already failed can never
+/// receive `go` later and run after a newer owner released or armed.
 final class HelperCommandLaunch: @unchecked Sendable {
     enum Outcome { case launched, failed(any Error), abandoned }
+    private enum Phase { case pending, accepted, going, settled(Outcome) }
     private let lock = NSLock()
     private let settled = DispatchSemaphore(value: 0)
-    private var outcome: Outcome?
+    private let committed = DispatchSemaphore(value: 0)
+    private var phase = Phase.pending
+    /// How long the caller waits for `go` once accepted. Writing three bytes
+    /// to the gate's empty pipe never blocks; this only bounds a stuck thread.
+    static let commitBudget: TimeInterval = 5
+    private let budget: TimeInterval
 
-    /// The launch thread reports. False when the caller had already given up.
+    init(commitBudget: TimeInterval = HelperCommandLaunch.commitBudget) {
+        budget = commitBudget
+    }
+
+    /// A failure before acceptance. False when the caller had already given up.
     func report(_ result: Outcome) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        if case .abandoned = outcome { return false }
-        outcome = result
+        guard case .pending = phase else { return false }
+        phase = .settled(result)
         settled.signal()
         return true
     }
 
-    /// The caller waits until `end`; past it, the launch is abandoned unless it
-    /// settled in the meantime.
+    /// The launch is the caller's now: it can no longer be abandoned. False
+    /// when the caller had already given up (then: no `go`, end-of-file).
+    func accept() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard case .pending = phase else { return false }
+        phase = .accepted
+        settled.signal()
+        return true
+    }
+
+    /// The right to write `go`. False when the caller's commit timeout
+    /// already revoked the launch: then no `go`, end-of-file, never executed.
+    func claimGo() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard case .accepted = phase else { return false }
+        phase = .going
+        return true
+    }
+
+    /// After `go` was written (`.launched`) or could not be (`.failed`).
+    /// Only a claimed launch commits; the caller cannot revoke it any more.
+    func commit(_ result: Outcome) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard case .going = phase else { return false }
+        phase = .settled(result)
+        committed.signal()
+        return true
+    }
+
+    /// The caller waits until `end`; past it, a launch not yet accepted is
+    /// abandoned. An accepted one is waited on until its `go` was written
+    /// (bounded by `commitBudget`); past that budget an unclaimed launch is
+    /// revoked and never gets `go`. A claimed one is only writing three bytes
+    /// to an empty pipe, so its commit follows at once.
     func wait(until end: DispatchTime) -> Outcome {
         _ = settled.wait(timeout: end)
+        lock.lock()
+        switch phase {
+        case .settled(let outcome):
+            lock.unlock()
+            return outcome
+        case .pending:
+            phase = .settled(.abandoned)
+            lock.unlock()
+            return .abandoned
+        case .accepted, .going:
+            lock.unlock()
+        }
+        _ = committed.wait(timeout: .now() + budget)
+        lock.lock()
+        switch phase {
+        case .settled(let outcome):
+            lock.unlock()
+            return outcome
+        case .accepted, .pending:
+            let failure = HelperFailure.system("The admitted command did not receive its start signal in time.")
+            phase = .settled(.failed(failure))
+            lock.unlock()
+            return .failed(failure)
+        case .going:
+            lock.unlock()
+        }
+        committed.wait()
         lock.lock(); defer { lock.unlock() }
-        if let outcome { return outcome }
-        outcome = .abandoned
-        return .abandoned
+        if case .settled(let outcome) = phase { return outcome }
+        return .failed(HelperFailure.system("The admitted command's start was not recorded."))
     }
 }
 
@@ -238,10 +332,17 @@ final class KillSwitchManager {
         consecutiveCoreDownChecks >= coreDownRestoreThreshold
     }
 
+    /// `sessionGeneration` is the session an app arm belongs to (decision
+    /// 084). Every arm, the update path's included, is refused while the
+    /// persisted target is released by an operator or unreadable, and an arm
+    /// of an older session is refused once a newer Connect began; both are
+    /// checked before the network work and again at commit.
     func arm(
         _ object: [String: Any],
+        sessionGeneration: UInt64? = nil,
         commitAllowed: () -> Bool = { true }
     ) throws -> [String: Any] {
+        try HelperTarget.requireAdmission(sessionGeneration: sessionGeneration)
         // Name resolution and DERP refresh can block under packet loss. Read a
         // stable fallback snapshot under the manager lock, then perform all
         // network work unlocked so the power callback can close its gate
@@ -412,6 +513,9 @@ final class KillSwitchManager {
                     + "protection remains fail-closed."
             )
         }
+        // An operator release or a newer Connect that landed during the
+        // network work above wins over this arm.
+        try HelperTarget.requireAdmission(sessionGeneration: sessionGeneration)
         guard commitAllowed() else {
             throw HelperFailure.invalid(
                 "The machine began sleeping during Kill Switch preparation; "
@@ -463,6 +567,9 @@ final class KillSwitchManager {
         // measuring against a ruleset that was never fully live — which would
         // hide a withdrawn permit and leave its states passing.
         lastLoadedPassRules = nil
+        // The load reads the target right before and right after itself
+        // (`guardedBlockLoad`, decision 084): a release that landed while this
+        // arm stalled wins, and the catch below releases what this arm saved.
         try Self.ensureAnchorLoaded(disposal: disposal, loadOutcome: &load)
         lastLoadedPassRules = passRules
         lastCommittedLocalNetwork = !state.tunnelInterfaces.isEmpty && state.allowLocalNetworkDevices
@@ -503,6 +610,9 @@ final class KillSwitchManager {
             // already holds keeps the block, and a failed tightening enters
             // the protected fault (see `settleFailedArm`).
             lastCommittedLocalNetwork = nil
+            // An operator release that overtook this arm wins over all of
+            // these: the intent and rules it saved go too (#1504 review F1).
+            if let failure = releaseIfOvertakenLocked() { throw failure }
             let uid = self.allowedUID
             var faultHeld = localNetworkFaultLocked
             let failure = Self.failedArm(
@@ -832,6 +942,9 @@ final class KillSwitchManager {
     func withholdReviewedBundlePermit() throws {
         lock.lock()
         defer { lock.unlock() }
+        // Reloads the blocking anchor: never under an operator release
+        // (decision 084), read where it acts.
+        guard HelperTarget.automaticRearmAllowed(HelperTarget.read()) else { return }
         guard !reviewedBundleFileUnconfirmed else {
             throw Self.withholdFailure(
                 HelperFailure.system("An earlier withhold could not restore the PF rule file.")
@@ -861,10 +974,14 @@ final class KillSwitchManager {
             // An arm prepared against the ruleset being narrowed must not
             // commit it back while the tunnel is gone.
             stateGeneration &+= 1
+            try HelperTarget.requireNoRelease()
             do {
                 try Self.writeRuleText(rules)
                 try Self.ensureAnchorLoaded(disposal: disposal)
             } catch {
+                // A release overtook the reload (`guardedBlockLoad` refused or
+                // undid it): never put the block rules back on disk.
+                if let failure = releaseIfOvertakenLocked() { throw failure }
                 // The narrowed file must not outlive a load the kernel may
                 // not have taken: it reads as already withheld and no later
                 // call would retry.
@@ -882,7 +999,31 @@ final class KillSwitchManager {
                 }
                 throw Self.withholdFailure(error)
             }
+            try undoLoadIfReleased()
         }
+    }
+
+    /// Right after an automatic PF load: a release that landed while it ran
+    /// wins, so the block is released again (AI hold included) and the
+    /// caller stops with the refusal (decision 084). Caller holds `lock`.
+    private func undoLoadIfReleased() throws {
+        if let failure = releaseIfOvertakenLocked() { throw failure }
+    }
+
+    /// A PF mutation an operator release overtook, whether its load returned
+    /// or threw (#1504 review F1): what it saved or loaded is released, the
+    /// AI hold included, and the release's refusal is returned for the
+    /// caller to throw. nil while no release holds. Caller holds `lock`.
+    /// A target that became unreadable refuses the same way but releases
+    /// nothing (R6-F2): the block, its intent and an A29 protected fault
+    /// stay until a readable `released`, a Disconnect or a Restore.
+    private func releaseIfOvertakenLocked() -> HelperFailure? {
+        let reading = HelperTarget.read()
+        guard let failure = HelperTarget.releaseRefusal(reading: { reading }) else { return nil }
+        if HelperTarget.mayRelease(.operatorRelease, gate: HelperTarget.gate(reading)) {
+            _ = try? disarmLocked(preserveAIHold: false)
+        }
+        return failure
     }
 
     static func withholdFailure(_ error: Error) -> HelperFailure {
@@ -901,6 +1042,9 @@ final class KillSwitchManager {
     func secureForPowerTransition() -> Bool {
         lock.lock()
         defer { lock.unlock() }
+        // An operator release (or a target that cannot be read) installs no
+        // new block, not even the power barrier (decision 084).
+        guard HelperTarget.automaticRearmAllowed(HelperTarget.read()) else { return false }
 
         var load = KernelLoadOutcome.notIssued
         do {
@@ -914,6 +1058,7 @@ final class KillSwitchManager {
             let state = Self.emergencyState(preserving: previous)
             try Self.writeRules(state: state, allowedUID: allowedUID)
             try saveState(state)
+            // Gated on the target before and after (`guardedBlockLoad`).
             try Self.ensureAnchorLoaded(flushStates: true, loadOutcome: &load)
             // Stale /etc/hosts pins do not permit traffic through the all-block
             // PF state. Clean them best-effort after the kernel barrier commits.
@@ -921,6 +1066,8 @@ final class KillSwitchManager {
             return true
         } catch {
             stateGeneration &+= 1
+            // A release that overtook the barrier releases what it saved.
+            if releaseIfOvertakenLocked() != nil { return false }
             if Self.powerTransitionFailureReleases(load: load, protectedFault: localNetworkFaultLocked) {
                 Self.releaseInstalledBlock()
             }
@@ -1041,10 +1188,28 @@ final class KillSwitchManager {
     }
 
     /// Called only with the Core stopped. A retained record alone is enough
-    /// to finish an interrupted release; it never re-arms general PF.
+    /// to finish an interrupted release; it never re-arms general PF. Under an
+    /// operator release it removes the AI layer instead, every pass, until
+    /// the system proves it gone (decision 084).
     func reconcileSelectiveRecoveryIfReleased() {
         lock.lock()
         defer { lock.unlock() }
+        let gate = HelperTarget.gate(HelperTarget.read())
+        // An unreadable target changes no AI state either way (R6-F2).
+        if gate == .unknown {
+            selectiveRecoveryReconciled = false
+            return
+        }
+        guard gate == .allowed else {
+            selectiveRecoveryReconciled = false
+            Self.reconcileSelectiveRecoveryUnderTarget(
+                rearmAllowed: false,
+                generalIntentPresent: false,
+                disposition: nil,
+                removalPending: true
+            )
+            return
+        }
         guard !selectiveRecoveryReconciled, !Self.stateFileExists() else { return }
         // A failed removal stays unreconciled: the next 10 s pass retries it.
         selectiveRecoveryReconciled = Self.reconcileSelectiveRecovery(
@@ -1054,8 +1219,46 @@ final class KillSwitchManager {
         )
     }
 
+    /// `reconcileSelectiveRecovery` that consults the target first. Under an
+    /// operator release (or an unreadable target) the AI sinkholes and
+    /// blackhole routes are never reinstalled, whatever the saved
+    /// disposition says: their removal is recorded and retried until the
+    /// system reads them absent. False while they stay.
+    @discardableResult
+    static func reconcileSelectiveRecoveryUnderTarget(
+        rearmAllowed: Bool,
+        generalIntentPresent: Bool,
+        disposition: Bool?,
+        removalPending: Bool,
+        layerProvenAbsent: () -> Bool = { SelectiveFailOpenInstaller.layerProvenAbsent() },
+        markReleasing: () throws -> Void = { try saveSelectiveRecoveryDisposition(false) },
+        applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort,
+        removeSelectiveLayer: () -> Bool = SelectiveFailOpenInstaller.removeBestEffort,
+        completeRemoval: () throws -> Void = { try saveSelectiveRemovalCompleted() }
+    ) -> Bool {
+        guard !rearmAllowed else {
+            return reconcileSelectiveRecovery(
+                generalIntentPresent: generalIntentPresent,
+                disposition: disposition,
+                removalPending: removalPending,
+                applySelectiveLayer: applySelectiveLayer,
+                removeSelectiveLayer: removeSelectiveLayer,
+                completeRemoval: completeRemoval
+            )
+        }
+        if layerProvenAbsent() { return true }
+        try? markReleasing()
+        guard removeSelectiveLayer(), layerProvenAbsent() else { return false }
+        try? completeRemoval()
+        return true
+    }
+
+    /// An operator release is a full release: no automatic release keeps the
+    /// AI hold while it holds (decision 084). An unreadable target is no
+    /// release (R6-F2): the saved disposition stands.
     static func automaticReleasePreservesAIHold() -> Bool {
-        (try? selectiveRecoveryDisposition()) ?? true
+        guard HelperTarget.gate(HelperTarget.read()) != .released else { return false }
+        return (try? selectiveRecoveryDisposition()) ?? true
     }
 
     func disarm(preserveAIHold: Bool = false) throws -> [String: Any] {
@@ -1114,11 +1317,22 @@ final class KillSwitchManager {
     /// has already been removed. It never installs a general block.
     static func releasePersistedBlock() {
         guard stateFileExists() else {
-            reconcileSelectiveRecovery(
+            let gate = HelperTarget.gate(HelperTarget.read())
+            // An unreadable target neither installs nor removes AI (R6-F2).
+            guard gate != .unknown else { return }
+            reconcileSelectiveRecoveryUnderTarget(
+                rearmAllowed: gate == .allowed,
                 generalIntentPresent: false,
                 disposition: try? selectiveRecoveryDisposition(),
                 removalPending: selectiveRemovalPending()
             )
+            return
+        }
+        // A saved block is released only under an operator release (R7-F2);
+        // the caller also requires release authority, and an unreadable
+        // target is none.
+        guard HelperTarget.gate(HelperTarget.read()) != .unknown else {
+            FileHandle.standardError.write(Data("tono: target unreadable; saved kill switch kept\n".utf8))
             return
         }
         do {
@@ -1319,6 +1533,7 @@ final class KillSwitchManager {
         guard Self.stateFileExists() else { return }
         lock.lock()
         defer { lock.unlock() }
+        guard HelperTarget.automaticRearmAllowed(HelperTarget.read()) else { return }
         let live: Bool
         let referenced: Bool
         let held: PFEnableReference?
@@ -1378,10 +1593,16 @@ final class KillSwitchManager {
             // disarm clears it.
             lastLoadedPassRules = nil
             repairedSinceArm = true
+            try HelperTarget.requireNoRelease()
             try Self.writeRules(state: Self.restorableState(state), allowedUID: allowedUID)
             Self.pinHostsIfUsable(state: state)
             try Self.ensureAnchorLoaded(flushStates: true)
+            try undoLoadIfReleased()
         } catch {
+            // Refused or undone by `guardedBlockLoad` (a release overtook the
+            // repair, #1504 review F1), or a repair that threw after a partial
+            // commit: under a release, nothing it wrote stays.
+            _ = releaseIfOvertakenLocked()
             // A failed repair must not fall through to an all-block. The next
             // pass retries the saved rules while the Core is running. When the
             // Core is down, the idle loop releases instead.
@@ -1424,14 +1645,45 @@ final class KillSwitchManager {
                   let widened = Self.widenLANScope(
                     in: source, current: current, baseline: lastLoadedPassRules
                   ) else { return }
-            try Self.writeRuleText(widened)
-            var outcome = KernelLoadOutcome.notIssued
-            try Self.ensureAnchorLoaded(flushStates: false, loadOutcome: &outcome)
+            try Self.applyWidenedLANScope(widened)
         } catch {
+            _ = releaseIfOvertakenLocked()
             let detail = (error as? HelperFailure)?.message ?? String(describing: error)
             FileHandle.standardError.write(Data(
                 "tono: LAN DNS scope reload skipped: \(detail)\n".utf8
             ))
+        }
+    }
+
+    /// The reload half of the LAN widening (#1504 review F1). The widened
+    /// rules derive from the armed ones and may have been computed, then
+    /// stalled in the disk write, before an operator release. The load reads
+    /// the target before and after itself (`guardedBlockLoad`); a release
+    /// that overtook the write or the load also takes the rules just written
+    /// off the disk (`undo`, the same release `guardedBlockLoad` runs), so a
+    /// later main-ruleset load cannot read them back.
+    static func applyWidenedLANScope(
+        _ rules: String,
+        writeRules: (String) throws -> Void = { try KillSwitchManager.writeRuleText($0) },
+        undo: () -> Void = {
+            if let seam = KillSwitchManager.blockLoadSeam { seam.undo() } else {
+                KillSwitchManager.undoBlockLoadUnderRelease()
+            }
+        }
+    ) throws {
+        try HelperTarget.requireNoRelease()
+        do {
+            try writeRules(rules)
+            var outcome = KernelLoadOutcome.notIssued
+            try ensureAnchorLoaded(flushStates: false, loadOutcome: &outcome)
+        } catch {
+            let reading = HelperTarget.read()
+            if let failure = HelperTarget.releaseRefusal(reading: { reading }) {
+                // Unreadable refuses but is no release authority (R6-F2).
+                if HelperTarget.mayRelease(.operatorRelease, gate: HelperTarget.gate(reading)) { undo() }
+                throw failure
+            }
+            throw error
         }
     }
 

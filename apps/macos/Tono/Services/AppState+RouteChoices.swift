@@ -21,7 +21,7 @@ extension AppState {
 
     func routeRecommendation(owner: String, now: Date = Date()) -> RouteRecommendation? {
         guard owner == ManagedExitCatalogOwnership.currentAccount,
-              !isConnected, !isConnecting, !isDisconnecting, switchingNodeId == nil,
+              !isConnected, !isConnecting, !teardownInFlight, switchingNodeId == nil,
               connectionCoordinator.configReloadTask == nil,
               let digest = managedCatalogDigest else { return nil }
         let available = routeRecommendationNodes(owner: owner)
@@ -44,7 +44,7 @@ extension AppState {
     /// A confirmation left open while a healthy connection starts cannot switch it.
     @discardableResult
     func confirmRouteRecommendation(_ proposal: RouteRecommendation, now: Date = Date()) -> Bool {
-        guard !isConnected, !isConnecting, !isDisconnecting, switchingNodeId == nil,
+        guard !isConnected, !isConnecting, !teardownInFlight, switchingNodeId == nil,
               proposal.owner == ManagedExitCatalogOwnership.currentAccount,
               proposal.generation == connectionCoordinator.protectionOperationGeneration,
               proposal.catalogDigest == managedCatalogDigest,
@@ -70,7 +70,7 @@ extension AppState {
     ) {
         guard let owner, owner == ManagedExitCatalogOwnership.currentAccount,
               generation == connectionCoordinator.protectionOperationGeneration,
-              isConnected, !isDisconnecting, !isProxyDegraded,
+              isConnected, !teardownInFlight, !isProxyDegraded,
               currentProxySelectionTarget() == name,
               let catalogDigest, catalogDigest == managedCatalogDigest else { return }
         routePreferences.recordSuccess(name, owner: owner, catalog: managedCatalogNodes, digest: catalogDigest, now: now)

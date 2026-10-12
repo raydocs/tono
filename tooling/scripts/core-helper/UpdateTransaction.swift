@@ -24,6 +24,12 @@ final class UpdateTransaction {
         /// process. Re-adoption is allowed only when this is false (or the
         /// recorded boot session has ended).
         var successorAlive: (Data) -> Bool = UpdateExecutor.processExists
+        /// Decision 094: the user's explicit update Disconnect fences older
+        /// work before it releases (`HelperTarget.fenceUserRelease`).
+        var fenceUserRelease: () -> Void = {}
+        /// R9-F2: retirement's live AI proof. The recorded Disconnect may be
+        /// an automatic one that kept the AI hold, and `observe` omits AI.
+        var aiLayerAbsent: () -> Bool = { false }
     }
 
     let storage: UpdateStorage
@@ -57,7 +63,9 @@ final class UpdateTransaction {
             disconnect: runtime.disconnect,
             launchExecutor: { try UpdateExecutor.launch(storage: storage, attempt: $0) },
             disconnectPreservingAIHold: runtime.disconnectPreservingAIHold,
-            cleanupCommitted: UpdateExecutor.retire
+            cleanupCommitted: UpdateExecutor.retire,
+            fenceUserRelease: { _ = HelperTarget.fenceUserRelease() },
+            aiLayerAbsent: runtime.aiLayerAbsent
         ))
     }
 
@@ -316,8 +324,13 @@ final class UpdateTransaction {
         try effects.authenticate(peer)
         guard attempt.receipt.owner == Self.owner(peer) else { throw HelperFailure.invalid("Update Disconnect owner differs.") }
         attempt.disconnectRequested = true
+        // R9-F2: an earlier proof (an automatic release that kept the AI
+        // hold) does not stand for this request. It is withdrawn durably
+        // before anything runs and returns only if this request verifies.
+        attempt.disconnectVerified = false
         ledger.attempt = attempt
         try persist(ledger)
+        if !preserveAIHold { effects.fenceUserRelease() }
         if preserveAIHold {
             try effects.disconnectPreservingAIHold()
         } else {
@@ -339,7 +352,7 @@ final class UpdateTransaction {
               attempt.receipt.installedLocationSha256 == Self.location,
               attempt.originalComponents == (try effects.installedComponents()),
               attempt.disconnectRequested, attempt.disconnectVerified,
-              try effects.observe() == .unprotected else {
+              try effects.observe() == .unprotected, effects.aiLayerAbsent() else {
             throw HelperFailure.invalid("Only an unconsumed attempt with verified explicit Disconnect can be retired.")
         }
         // Expiry/blocked state does not prevent cleanup, but grants no new
@@ -390,7 +403,7 @@ final class UpdateTransaction {
               attempt.execution == .consumed || attempt.execution == .rolledBack || attempt.execution == .replaced,
               attempt.receipt.installedLocationSha256 == Self.location,
               attempt.disconnectRequested, attempt.disconnectVerified,
-              try effects.observe() == .unprotected else {
+              try effects.observe() == .unprotected, effects.aiLayerAbsent() else {
             throw HelperFailure.invalid("Only a resolved update attempt with verified explicit Disconnect can be retired.")
         }
         if attempt.execution == .replaced {
@@ -423,7 +436,7 @@ final class UpdateTransaction {
         let ledger = try storage.load()
         guard let attempt = ledger.attempt, attempt.receipt.phase != .committed else { return }
         if path == "/core/stop" || path == "/dns/restore" { return } // Tightening/cleanup only.
-        if ["/core/start", "/core/sync", "/killswitch/arm", "/dns/enable"].contains(path) {
+        if ["/core/start", "/core/sync", "/killswitch/arm", "/dns/enable", "/session/connect"].contains(path) {
             _ = try bound(ledger, peer: peer, initiating: false)
             guard attempt.receipt.requiredRecovery == .connected else { throw HelperFailure.invalid("Update does not authorize reconnect.") }
             return

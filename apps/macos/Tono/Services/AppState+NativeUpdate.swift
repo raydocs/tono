@@ -43,7 +43,8 @@ extension AppState {
         let tasks = [connectionCoordinator.coreMonitorTask, connectionCoordinator.nodeSwitchTask,
                      connectionCoordinator.protectedReconnectTask, connectionCoordinator.connectTask,
                      connectionCoordinator.configReloadTask, connectionCoordinator.networkEnvironmentTask,
-                     connectionCoordinator.wakeRecoveryTask, connectionCoordinator.sleepRestrictTask]
+                     connectionCoordinator.wakeRecoveryTask, connectionCoordinator.sleepRestrictTask,
+                     connectionCoordinator.unarmedReconnectTask]
             .compactMap { $0 }
         for task in tasks { task.cancel() }
         resumeProtectionAfterWake = false
@@ -87,8 +88,17 @@ extension AppState {
     func disconnectPendingNativeUpdate(preserveAIHold: Bool = false) {
         // An explicit Restore that joins a running automatic release keeps its
         // remove-AI intent; the running task issues it once it settles.
-        if !preserveAIHold { nativeUpdateExplicitReleaseRequested = true }
-        guard nativeUpdateDisconnectTask == nil else { return }
+        if !preserveAIHold {
+            nativeUpdateExplicitReleaseRequested = true
+            // Decision 094: the helper's update Disconnect fences older work;
+            // only the user's Connect arms again.
+            RuntimeCleanup.noteUserRelease()
+            autoConnectRequested = false
+        }
+        guard nativeUpdateDisconnectTask == nil else {
+            if !preserveAIHold { scheduleUpdateReleaseDeadline() }
+            return
+        }
         nativeUpdatePending = true
         RuntimeCleanup.nativeUpdateBlocksConnect = true
         nativeUpdateDisconnectTask = Task {
@@ -98,6 +108,15 @@ extension AppState {
                 let explicitJoined = dispatchedAutomatic && settled && nativeUpdateExplicitReleaseRequested
                 nativeUpdateExplicitReleaseRequested = false
                 nativeUpdateDisconnectTask = nil
+                // This task's interim "still finishing" ends with it. A result
+                // from a retired generation was not published above, so a
+                // newer owner's state stays; only the interim text is cleared,
+                // and not while an ordinary release still shows its own.
+                if connectionCoordinator.updateReleaseStillFinishing {
+                    connectionCoordinator.updateReleaseStillFinishing = false
+                    if !connectionCoordinator.releaseStillFinishing,
+                       errorMessage == Self.releaseStillFinishingMessage { errorMessage = nil }
+                }
                 // Routed again: still pending runs the plain update Disconnect,
                 // a committed update runs the ordinary explicit release.
                 if explicitJoined { disconnect(releaseKillSwitch: true) }
@@ -154,6 +173,27 @@ extension AppState {
                       connectionCoordinator.protectionOperationGeneration == generation else { return }
                 errorMessage = error.localizedDescription
             }
+        }
+        if !preserveAIHold { scheduleUpdateReleaseDeadline() }
+    }
+
+    /// The user's Restore during a pending update shares the explicit
+    /// release's 60 s UI deadline (decision 092; not a completion bound). The drain before
+    /// `/update/disconnect` has no bound of its own; past the deadline the UI
+    /// publishes "unknown, still finishing", nothing is released early, the
+    /// armed intent stays, and the running task still publishes its result.
+    private func scheduleUpdateReleaseDeadline() {
+        guard let release = nativeUpdateDisconnectTask else { return }
+        let deadline = connectionCoordinator.explicitReleaseDeadline
+        Task { [weak self] in
+            try? await Task.sleep(for: deadline)
+            guard let self, self.nativeUpdateDisconnectTask == release,
+                  !self.connectionCoordinator.updateReleaseStillFinishing else { return }
+            self.connectionCoordinator.updateReleaseStillFinishing = true
+            self.isProtectionBlocked = false
+            self.isProtectionUnconfirmed = true
+            self.errorMessage = Self.releaseStillFinishingMessage
+            LocalTrafficAudit.shared.recordEvent("update_release_overdue", details: [:])
         }
     }
 

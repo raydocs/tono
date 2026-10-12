@@ -264,16 +264,33 @@ enum UpdatePackage {
         try UpdateStorage.syncDirectory(URL(fileURLWithPath: destination).deletingLastPathComponent().path)
     }
 
-    static func run(_ executable: String, _ arguments: [String]) throws {
-        let child = Process()
-        child.executableURL = URL(fileURLWithPath: executable)
-        child.arguments = arguments
-        child.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/var/root"]
-        child.standardOutput = FileHandle.nullDevice
-        child.standardError = FileHandle.nullDevice
-        try child.run()
-        child.waitUntilExit()
-        guard child.terminationStatus == 0 else { throw HelperFailure.system("Native update operation failed: \(URL(fileURLWithPath: executable).lastPathComponent).") }
+    /// Set only by `--emergency-disarm`: every child this process starts
+    /// through `run` then ends by this deadline if it is shorter than the
+    /// call's own (MAC-EMERGENCY-UNBOUNDED-WAITS).
+    nonisolated(unsafe) static var operatorChildDeadline: TimeInterval?
+
+    /// The update executor's and the recovery paths' children (launchctl,
+    /// ditto, open). Through the helper's one bounded runner: the launch and
+    /// the run end by `deadline` (SIGTERM, then SIGKILL, then abandoned), so
+    /// a wedged child no longer holds the executor, the update lock it holds
+    /// across `perform`, or a recovery behind it (#1504, owner requirement).
+    /// A child past its deadline is a failed operation, never a success.
+    static func run(_ executable: String, _ arguments: [String], deadline: TimeInterval) throws {
+        guard try status(executable, arguments, deadline: deadline) == 0 else {
+            throw HelperFailure.system("Native update operation failed: \(URL(fileURLWithPath: executable).lastPathComponent).")
+        }
+    }
+
+    /// `run`'s child, its exit status returned rather than judged: for a
+    /// caller that must tell one definite answer (launchctl's "no such
+    /// service") from every other. Throws when there is no answer at all
+    /// (could not start, or ran out of time).
+    static func status(_ executable: String, _ arguments: [String], deadline: TimeInterval) throws -> Int32 {
+        let bound = operatorChildDeadline.map { min($0, deadline) } ?? deadline
+        return try KillSwitchManager.run(
+            executable, arguments, deadline: bound,
+            environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/var/root"]
+        ).status
     }
 
     static func secureTree(_ path: String) throws {
@@ -356,4 +373,31 @@ enum UpdateZIP {
         }
         guard cursor == directory.count else { throw HelperFailure.invalid("Update ZIP has trailing directory data.") }
     }
+}
+
+/// Deadlines for the helper's children outside `pfctl` and its kin (which use
+/// `KillSwitchManager.helperCommandDeadline`, 15 s). Generous on purpose:
+/// each is the longest the step can legitimately take on a slow Mac, so only
+/// a wedged child reaches it, and each is finite (#1504, owner requirement:
+/// every external process launch and wait in the helper is bounded).
+enum HelperChildDeadline {
+    /// `launchctl bootout` waits for the job to exit (launchd's ExitTimeOut
+    /// is 20 s before it sends SIGKILL); `bootstrap` and `print` are quicker.
+    static let launchctl: TimeInterval = 60
+    /// `ditto -x -k` expanding the signed app archive (hundreds of MB).
+    static let ditto: TimeInterval = 600
+    /// `launchctl asuser … open`: a request to the user's Launch Services,
+    /// not a wait for the app.
+    static let openApp: TimeInterval = 60
+    /// The administrator install script `--update-install-guard` runs under
+    /// the update lock (install, codesign, launchctl).
+    static let installScript: TimeInterval = 600
+    /// `sing-box check` of the runtime config (its earlier 5 s poll).
+    static let coreConfigCheck: TimeInterval = 5
+    /// `Process.run()` of the Core itself, which then runs supervised.
+    static let coreLaunch: TimeInterval = 10
+    /// A staged helper's `--version`.
+    static let versionProbe: TimeInterval = 10
+    /// `pgrep` / `pkill` in the lifecycle self-test.
+    static let selfTestProbe: TimeInterval = 10
 }

@@ -33,6 +33,7 @@ let killSwitchArmFields = Set([
     "allowSystemResolution",
     "bootstrapPins",
     "reviewedBundleDirect",
+    "sessionGeneration",
     "allowLocalNetworkDevices",
 ])
 
@@ -430,17 +431,13 @@ func runCoreLifecycleSelfTests() -> Bool {
     let configPath = "\(configDirectory)/config.json"
 
     // A core already running would own the DNS port this one needs.
-    let probe = Process()
-    probe.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
     // `-x` matches the process name, not the whole command line: with `-f` this
     // matched any shell whose arguments happened to mention the core, including
     // the one running this test.
-    probe.arguments = ["-x", "tono-sing-box"]
-    probe.standardOutput = FileHandle.nullDevice
-    probe.standardError = FileHandle.nullDevice
-    try? probe.run()
-    probe.waitUntilExit()
-    if probe.terminationStatus == 0 {
+    let probe = try? KillSwitchManager.run(
+        "/usr/bin/pgrep", ["-x", "tono-sing-box"], deadline: HelperChildDeadline.selfTestProbe
+    )
+    if probe?.status == 0 {
         FileHandle.standardError.write(Data(
             "a core is already running; disconnect before running this\n".utf8
         ))
@@ -510,13 +507,9 @@ func runCoreLifecycleSelfTests() -> Bool {
         // blocked every later run by holding the DNS port. Safe to be blunt
         // here: this test refuses to start when a core is already present, so
         // anything alive at this point was started by it.
-        let sweep = Process()
-        sweep.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        sweep.arguments = ["-x", "tono-sing-box"]
-        sweep.standardOutput = FileHandle.nullDevice
-        sweep.standardError = FileHandle.nullDevice
-        try? sweep.run()
-        sweep.waitUntilExit()
+        _ = try? KillSwitchManager.run(
+            "/usr/bin/pkill", ["-x", "tono-sing-box"], deadline: HelperChildDeadline.selfTestProbe
+        )
     }
 
     // A digest that does not match must be refused before anything is launched.
@@ -1148,11 +1141,20 @@ func requestHelperShutdown(_ signal: Int32) {
 /// deleted and `allowedGroup` refuses — and launchd's KeepAlive restarts
 /// would repeat that failure forever with the system resolver still on
 /// 127.0.0.1 and no listener left (MAC-STARTUP-FAIL-DNS). Never throws and
-/// never installs a block: this already is a failure path.
+/// never installs a block: this already is a failure path. Both the PF
+/// release and the DNS restore run only with release authority (#1504 review
+/// R7-F2, decision 092): an operator `released` on record, or no saved
+/// protection. A saved block beside a secured or unreadable target (an A29
+/// protected fault included) keeps its block and protected DNS.
 func secureFailedStartupRestoringDNS(
     releaseBlock: () -> Void,
-    restoreDNS: () throws -> Void
+    restoreDNS: () throws -> Void,
+    mayRelease: () -> Bool = { UpdateExecutor.startupFailureMayRelease() }
 ) {
+    guard mayRelease() else {
+        fputs("Tono helper startup failed; saved protection kept (no release authority)\n", stderr)
+        return
+    }
     releaseBlock()
     do {
         try restoreDNS()
@@ -1169,7 +1171,8 @@ func runStartupDNSRecoverySelfTest() -> Bool {
     func secure(_ restoreDNS: () throws -> Void) {
         secureFailedStartupRestoringDNS(
             releaseBlock: { events.append("pf") },
-            restoreDNS: restoreDNS
+            restoreDNS: restoreDNS,
+            mayRelease: { true }
         )
     }
     secure { events.append("dns") }
@@ -1185,6 +1188,47 @@ func runStartupDNSRecoverySelfTest() -> Bool {
     }
     guard events == ["pf", "dns"] else {
         FileHandle.standardError.write(Data("startup DNS recovery failure: \(events)\n".utf8))
+        return false
+    }
+    return true
+}
+
+/// #1504 review R7-F2: the daemon start fails after the update startup (the
+/// bound uid cannot be read, the server cannot be built) while protection is
+/// saved. A secured target (here beside an A29 protected fault) and an
+/// unreadable one keep the block and protected DNS; a recorded `released`
+/// still releases both, PF first; no saved protection releases as before.
+func runStartupFailureReleaseAuthoritySelfTest() -> Bool {
+    func settle(target: HelperTarget.Reading, protectionSaved: Bool?) -> [String] {
+        var events: [String] = []
+        var recovery = UpdateExecutor.FailureRecovery()
+        recovery.target = { target }
+        recovery.protectionSaved = { protectionSaved }
+        _ = startHelperDaemon(
+            readUID: { throw HelperFailure.invalid("injected: bound user unreadable") },
+            restoreProtection: { _ in () },
+            startServer: { _, _ in () },
+            secureFailedStartup: {
+                secureFailedStartupRestoringDNS(
+                    releaseBlock: { events.append("pf") },
+                    restoreDNS: { events.append("dns") },
+                    mayRelease: { UpdateExecutor.startupFailureMayRelease(recovery: recovery) }
+                )
+            },
+            stopRequested: { false }
+        )
+        return events
+    }
+    let secured = settle(target: .recorded(HelperTarget(mode: .secured, generation: 3)), protectionSaved: true)
+    let unknown = settle(target: .unreadable("injected"), protectionSaved: true)
+    let unanswered = settle(target: .recorded(HelperTarget(mode: .secured, generation: 3)), protectionSaved: nil)
+    let released = settle(target: .recorded(HelperTarget(mode: .released, generation: 4)), protectionSaved: true)
+    let disconnected = settle(target: .recorded(HelperTarget(mode: .secured, generation: 3)), protectionSaved: false)
+    guard secured.isEmpty, unknown.isEmpty, unanswered.isEmpty,
+          released == ["pf", "dns"], disconnected == ["pf", "dns"] else {
+        FileHandle.standardError.write(Data(
+            "startup failure release authority: \(secured) \(unknown) \(unanswered) \(released) \(disconnected)\n".utf8
+        ))
         return false
     }
     return true
@@ -1272,8 +1316,13 @@ func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool
 }
 
 /// `runEmergencyDisarm` with the DNS result kept apart, for the callers that
-/// remove the installation afterwards.
-func emergencyRelease(underLock suppliedStorage: UpdateStorage? = nil) -> EmergencyReleaseOutcome {
+/// remove the installation afterwards. `lockBudget` (only `--emergency-disarm`)
+/// bounds the wait for the update lock: past it the update cleanup is skipped
+/// and the network is released without the ledger, as for an unreadable one.
+func emergencyRelease(
+    underLock suppliedStorage: UpdateStorage? = nil,
+    lockBudget: TimeInterval? = nil
+) -> EmergencyReleaseOutcome {
     guard geteuid() == 0 else {
         fputs("Tono emergency recovery must be run with sudo.\n", stderr)
         return .refused
@@ -1385,7 +1434,9 @@ func emergencyRelease(underLock suppliedStorage: UpdateStorage? = nil) -> Emerge
         }
         return emergencyReleaseOutcome(dnsRestored: dnsRestored, coreSurvived: coreSurvived)
         }
-        return try suppliedStorage == nil ? storage.locked(disarm) : disarm()
+        if suppliedStorage != nil { return try disarm() }
+        if let lockBudget { return try storage.locked(within: lockBudget, disarm) }
+        return try storage.locked(disarm)
     } catch {
         fputs(
             "Tono emergency recovery could not use update evidence (\(error)). Releasing the network.\n",
@@ -1429,15 +1480,12 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
     // concurrent GUI arm between this tool's disarm and the removal below,
     // re-writing PF state that then survives with no helper left installed —
     // a fail-closed machine with no owner.
-    let bootout = Process()
-    bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-    bootout.arguments = ["bootout", "system/com.raydocs.tono.core-helper"]
-    bootout.standardOutput = FileHandle.nullDevice
-    bootout.standardError = FileHandle.nullDevice
     // A daemon that is not currently bootstrapped makes bootout fail; the
-    // reset continues either way.
-    try? bootout.run()
-    bootout.waitUntilExit()
+    // reset continues either way, as it does past the bounded wait.
+    _ = try? KillSwitchManager.run(
+        "/bin/launchctl", ["bootout", "system/com.raydocs.tono.core-helper"],
+        deadline: HelperChildDeadline.launchctl
+    )
 
     switch emergencyRelease(underLock: storage) {
     case .released, .coreStillRunning:
@@ -1472,16 +1520,11 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
 }
 
 private func bootstrapHelperDaemon() {
-    let restore = Process()
-    restore.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-    restore.arguments = [
-        "bootstrap", "system",
-        "/Library/LaunchDaemons/com.raydocs.tono.core-helper.plist",
-    ]
-    restore.standardOutput = FileHandle.nullDevice
-    restore.standardError = FileHandle.nullDevice
-    try? restore.run()
-    restore.waitUntilExit()
+    _ = try? KillSwitchManager.run(
+        "/bin/launchctl",
+        ["bootstrap", "system", "/Library/LaunchDaemons/com.raydocs.tono.core-helper.plist"],
+        deadline: HelperChildDeadline.launchctl
+    )
 }
 
 /// Removal after a verified release. Callers have released PF first.
@@ -1753,13 +1796,10 @@ func bootoutRemovedHelper() {
     // not happen, the plist and executable are already gone, so nothing loads
     // it at the next boot.
     signal(SIGTERM, SIG_DFL)
-    let bootout = Process()
-    bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-    bootout.arguments = ["bootout", "system/com.raydocs.tono.core-helper"]
-    bootout.standardOutput = FileHandle.nullDevice
-    bootout.standardError = FileHandle.nullDevice
-    try? bootout.run()
-    bootout.waitUntilExit()
+    _ = try? KillSwitchManager.run(
+        "/bin/launchctl", ["bootout", "system/com.raydocs.tono.core-helper"],
+        deadline: HelperChildDeadline.launchctl
+    )
 }
 
 func fileType(_ value: stat) -> mode_t {
@@ -1991,12 +2031,17 @@ if CommandLine.arguments.dropFirst() == ["--update-install-guard"] {
             guard UpdateExecutor.allowsOrdinaryInstall(attempt) else {
                 throw HelperFailure.invalid("Pending update prevents helper repair.")
             }
-            let installer = Process()
-            installer.executableURL = URL(fileURLWithPath: "/bin/sh")
-            installer.standardInput = FileHandle.standardInput
-            try installer.run()
-            installer.waitUntilExit()
-            return installer.terminationStatus
+            // Bounded like every helper child (#1504): a wedged script ends
+            // at the deadline (TERM, KILL) and the install fails, instead of
+            // holding the update lock forever. Its output still reaches the
+            // administrator prompt's caller.
+            return try KillSwitchManager.run(
+                "/bin/sh", [],
+                deadline: HelperChildDeadline.installScript,
+                environment: ProcessInfo.processInfo.environment,
+                standardInput: FileHandle.standardInput,
+                output: .inherited
+            ).status
         }
         exit(status)
     } catch { exit(1) }
@@ -2123,6 +2168,23 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && PowerTransitionGate.runSelfTests()
             && runStartupOrderSelfTest()
             && runStartupDNSRecoverySelfTest()
+            && runStartupFailureReleaseAuthoritySelfTest()
+            && runOperatorReleaseSelfTests()
+            && runLateLANWideningAfterReleaseSelfTest()
+            && runReleaseDuringPartialPFCommitSelfTest()
+            && ProtectedDNSManager.runPendingDNSWriteAfterReleaseSelfTest()
+            && ProtectedDNSManager.runDNSCommitThenApplyFailureSelfTest()
+            && runFailedTargetRepairKeepsRefusalSelfTest()
+            && runTargetRepairNeverMissingSelfTest()
+            && runOwnerRelaunchReleasedDuringSpawnSelfTest()
+            && runReleaseDuringAcceptedCoreLaunchSelfTest()
+            && runReleaseBetweenAcceptAndGoSelfTest()
+            && runStalledAcceptedLaunchNeverExecsSelfTest()
+            && runUserReleaseFencesOlderWorkSelfTest()
+            && runUserConnectAfterUserReleaseRearmsSelfTest()
+            && runLateReblockAfterUserReleaseSelfTest()
+            && runUnknownTargetKeepsFaultSelfTest()
+            && runUpdateChildBoundedSelfTest()
             && KillSwitchManager.runFailedCommitReleaseSelfTest()
             && KillSwitchManager.runLiveSessionReArmKeepsBlockSelfTest()
             && KillSwitchManager.runPreserveTeardownKeepsProtectedFaultSelfTest()
@@ -2146,7 +2208,7 @@ if CommandLine.arguments.dropFirst() == ["--network-self-test"] {
     exit(KillSwitchManager.runNetworkSelfTest() ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--emergency-disarm"] {
-    exit(runEmergencyDisarm() ? 0 : 1)
+    exit(runOperatorEmergencyDisarmCommand() ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--emergency-reset"] {
     exit(runEmergencyReset() ? 0 : 1)

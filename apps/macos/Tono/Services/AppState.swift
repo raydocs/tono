@@ -317,6 +317,9 @@ final class AppState {
     /// resume, the reconnect loop, wake recovery) connects. Lifted by the
     /// user's connect or Retry, or by a completed release.
     var automaticResumeHeldAfterRestart = false
+    /// Set by an explicit user Connect or Retry, consumed by the next connect
+    /// attempt's perform step (decision 084).
+    var userConnectIntent = UserConnectIntent()
     var managedCatalogRevision = -1
     var managedCatalogDigest: String?
     /// Freshness of the sibling routing document. The fleet-wide revision and
@@ -562,7 +565,7 @@ final class AppState {
     /// then inspect the committed primary service and root-owned DNS state
     /// once. PF remains the synchronous leak boundary while this runs.
     func handleSystemNetworkChange() {
-        if isConnecting || isDisconnecting {
+        if isConnecting || teardownInFlight {
             // The transition window cannot judge a network change yet: the
             // connect has not captured the baseline the reconciliation
             // compares against, and the coordinator's own arm/start/teardown
@@ -634,7 +637,7 @@ final class AppState {
             guard !Task.isCancelled, self.unarmedReconnectAwaitsNetwork,
                   let current = self.connectionCoordinator.unarmedReconnectOwner,
                   current.id == owner, !current.restarted,
-                  !self.isConnected, !self.isConnecting, !self.isDisconnecting else { return }
+                  !self.isConnected, !self.isConnecting, !self.teardownInFlight else { return }
             switch NetworkUplinkSnapshot.classify(from: self.unarmedUplinkBaseline, to: uplink) {
             case .stay:
                 return
@@ -690,7 +693,7 @@ final class AppState {
         connectionCoordinator.networkEnvironmentTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(750))
             guard let self, !Task.isCancelled, self.isConnected,
-                  !self.isConnecting, !self.isDisconnecting else { return }
+                  !self.isConnecting, !self.teardownInFlight else { return }
             let currentUplink = await self.protectionAudits.uplinkSnapshot()
             let dnsIntegrity = if let service = self.protectedDNSService {
                 await self.protectedDNSIntegrityConfirmingBroken(service: service)
@@ -786,7 +789,7 @@ final class AppState {
             || HelperManager.hasInstalledHelperArtifact
         let needsDisconnect = journal.keepKillSwitchArmed || coreRuntime.isRunning
             || AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
-            || isDisconnecting || connectionCoordinator.configReloadTask != nil
+            || teardownInFlight || connectionCoordinator.configReloadTask != nil
         let requestGeneration = connectionCoordinator.protectionOperationGeneration
         return try await UpdatePreparation.run(journal) {
             guard self.connectionCoordinator.protectionOperationGeneration == requestGeneration else {
@@ -1002,7 +1005,7 @@ final class AppState {
                     return
                 }
                 guard !self.isConnected, !self.isConnecting,
-                      !self.isDisconnecting else {
+                      !self.teardownInFlight else {
                     // A connect may already have started from another
                     // transport-ready callback. Do not leave a completed task
                     // handle that suppresses every later route-change kick.
@@ -1050,7 +1053,7 @@ final class AppState {
         cloudOnlyTransportReady = false
         guard descriptor != nil else {
             autoConnectRequested = false
-            if isDisconnecting {
+            if teardownInFlight {
                 await finishPendingDisconnect()
             } else if isConnected || isConnecting || coreRuntime.isRunning {
                 await disconnectAndWait(releaseKillSwitch: false)
@@ -1156,6 +1159,13 @@ final class AppState {
     }
 
     func attemptAutomaticConnect() {
+        // Decision 094: after the user's release only their Connect arms.
+        // Consume the automatic intent quietly: not connected, no error.
+        if RuntimeCleanup.connectAwaitsUser, autoConnectRequested {
+            autoConnectRequested = false
+            LocalTrafficAudit.shared.recordEvent("automatic_connect_awaits_user")
+            return
+        }
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect,
               !automaticResumeHeldAfterRestart,
               autoConnectRequested, initialDataLoaded, isTonoReady,
@@ -1164,7 +1174,7 @@ final class AppState {
         // connect() silently no-ops while a previous disconnect drains. The
         // intent flag must survive that window, or a crash-recovery launch
         // stays fail-closed at the dashboard with nothing scheduled.
-        if isDisconnecting {
+        if teardownInFlight {
             Task { [weak self] in
                 await self?.finishPendingDisconnect()
                 self?.attemptAutomaticConnect()
@@ -2029,7 +2039,7 @@ final class AppState {
     }
 
     func scheduleBackgroundOptionalPolicy() {
-        guard isConnected, !isDisconnecting else { return }
+        guard isConnected, !teardownInFlight else { return }
         let policy = managedTrafficPolicy
         let revision = managedTrafficPolicyRevision
         // A full accepted document supersedes pins derived from earlier
@@ -2103,7 +2113,7 @@ final class AppState {
     }
 
     private func applyOptionalDirectPolicyInBackground(policy: TonoTrafficPolicy, revision: Int) async {
-        guard isConnected, !isDisconnecting, !Task.isCancelled,
+        guard isConnected, !teardownInFlight, !Task.isCancelled,
               let api = coreController else { return }
         let generation = connectionCoordinator.protectionOperationGeneration
         let base = activeDirectPolicy
@@ -2244,7 +2254,7 @@ final class AppState {
                 error: error.localizedDescription,
                 generation: Int(generation)
             )
-            guard !Task.isCancelled, !isDisconnecting,
+            guard !Task.isCancelled, !teardownInFlight,
                   generation == connectionCoordinator.protectionOperationGeneration else { return }
             if Self.optionalPolicyFailureAction(replacementStarted: replacementStarted) == .keepSession {
                 do {
@@ -2261,7 +2271,7 @@ final class AppState {
                             helperPrepared: true,
                             reviewedBundleDirect: base?.requiresAddressFreeDirectPermit == true
                         )
-                        guard !Task.isCancelled, !isDisconnecting,
+                        guard !Task.isCancelled, !teardownInFlight,
                               generation == connectionCoordinator.protectionOperationGeneration else { return }
                     }
                     // The accepted document is still not the one in force.
@@ -2286,7 +2296,7 @@ final class AppState {
                     )
                 }
             }
-            guard !Task.isCancelled, !isDisconnecting,
+            guard !Task.isCancelled, !teardownInFlight,
                   generation == connectionCoordinator.protectionOperationGeneration else { return }
             // Replacement already touched Core, or restoring the previous PF
             // arm failed. macOS stores no `permanent` strict switch. The
@@ -3010,4 +3020,36 @@ private enum ConnectionByteFormat {
         formatter.allowsNonnumericFormatting = false
         return formatter
     }()
+}
+
+/// An explicit user Connect, remembered for the one connect attempt it
+/// started until that attempt's perform step. Single use, short-lived, and
+/// bound to its id: only the attempt that minted it may consume it, and an
+/// observed release or Restore Internet drops it (decision 084).
+nonisolated struct UserConnectIntent: Equatable, Sendable {
+    static let lifetime: TimeInterval = 10
+    private(set) var id: UUID?
+    private(set) var mintedAt: Date?
+
+    mutating func mint(now: Date = Date()) -> UUID {
+        let minted = UUID()
+        id = minted
+        mintedAt = now
+        return minted
+    }
+
+    /// True once, for the attempt holding the current id while it is fresh.
+    /// Another id (a server pick, an automatic reconnect: nil) consumes
+    /// nothing and leaves the intent in place.
+    mutating func consume(_ candidate: UUID?, now: Date = Date()) -> Bool {
+        guard let candidate, candidate == id, let mintedAt else { return false }
+        invalidate()
+        let age = now.timeIntervalSince(mintedAt)
+        return age >= 0 && age <= Self.lifetime
+    }
+
+    mutating func invalidate() {
+        id = nil
+        mintedAt = nil
+    }
 }

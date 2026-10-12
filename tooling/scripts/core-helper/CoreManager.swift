@@ -71,23 +71,25 @@ final class CoreManager {
     /// user-writable input. Do not expose raw parser output containing secrets.
     private func checkConfiguration() throws {
         _ = try secureMetadata(mihomoPath, type: mode_t(S_IFREG), owner: 0)
-        let checker = Process()
-        checker.executableURL = URL(fileURLWithPath: mihomoPath)
-        checker.arguments = ["check", "-D", runtimeDirectory, "-c", runtimeConfigPath]
-        checker.currentDirectoryURL = URL(fileURLWithPath: runtimeDirectory)
-        checker.environment = ["HOME": runtimeDirectory, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
-        checker.standardOutput = FileHandle.nullDevice
-        checker.standardError = FileHandle.nullDevice
-        try checker.run()
-        for _ in 0..<100 where checker.isRunning { usleep(50_000) }
-        if checker.isRunning {
-            checker.terminate()
-            for _ in 0..<10 where checker.isRunning { usleep(50_000) }
-            if checker.isRunning { kill(checker.processIdentifier, SIGKILL) }
-            checker.waitUntilExit()
+        // The helper's bounded runner: launch and run end by the deadline, and
+        // a checker that ignores SIGKILL's reaping is abandoned rather than
+        // waited on (its old `waitUntilExit` after the kill had no bound).
+        // The output is read and dropped, never exposed.
+        var launched = false
+        let result: HelperCommandResult
+        do {
+            result = try KillSwitchManager.run(
+                mihomoPath, ["check", "-D", runtimeDirectory, "-c", runtimeConfigPath],
+                deadline: HelperChildDeadline.coreConfigCheck,
+                environment: ["HOME": runtimeDirectory, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"],
+                currentDirectory: runtimeDirectory,
+                started: { _ in launched = true }
+            )
+        } catch {
+            guard launched else { throw error }
             throw HelperFailure.coded(code: "CORE_CONFIG_TIMEOUT", message: "sing-box check timed out.")
         }
-        guard checker.terminationStatus == 0 else {
+        guard result.status == 0 else {
             throw HelperFailure.coded(code: "CORE_CONFIG_REJECTED", message: "sing-box rejected the runtime configuration.")
         }
     }
@@ -95,7 +97,7 @@ final class CoreManager {
     func start(
         configDirectory: String,
         configSHA256: String,
-        startAllowed: () -> Bool = { true }
+        startAllowed: @escaping () -> Bool = { true }
     ) throws {
         lock.lock()
         defer { lock.unlock() }
@@ -106,7 +108,7 @@ final class CoreManager {
     private func startLocked(
         configDirectory: String,
         configSHA256: String,
-        startAllowed: () -> Bool
+        startAllowed: @escaping () -> Bool
     ) throws {
         if process?.isRunning == true {
             // Coded, because the app's recovery for it — stop the orphaned core,
@@ -126,12 +128,58 @@ final class CoreManager {
         try launchValidatedSnapshotLocked(configPath: configPath, startAllowed: startAllowed)
     }
 
-    private func launchValidatedSnapshotLocked(configPath: String, startAllowed: () -> Bool) throws {
+    /// The refusal a start the gate stopped returns: the operator release's
+    /// (or the unreadable target's) when that is the reason, else sleep.
+    static func startRefusal() -> HelperFailure {
+        HelperTarget.releaseRefusal()
+            ?? HelperFailure.invalid("The system is entering sleep; network protection remains fail-closed.")
+    }
+
+    /// Carries the caller's start gate into the launch thread's `admit`.
+    private final class StartGate: @unchecked Sendable {
+        let allowed: () -> Bool
+        init(_ allowed: @escaping () -> Bool) { self.allowed = allowed }
+    }
+
+    /// The Core's launch through the admission gate, with the start gate as
+    /// its `admit`, and the same gate asked again once `launchAdmitted` has
+    /// returned, which is strictly after `go` was written (R7-F1): a release
+    /// that landed between `admit` and `go` stops the Core here (TERM, then
+    /// KILL) and the start is refused. Static so the self-test drives the
+    /// very same launch; `afterAccept` is its seam between acceptance and
+    /// `go`.
+    static func launchCoreAdmitted(
+        _ child: Process,
+        executable: String,
+        arguments: [String],
+        deadline: TimeInterval = HelperChildDeadline.coreLaunch,
+        startAllowed: @escaping () -> Bool,
+        afterAccept: (@Sendable () -> Void)? = nil,
+        launch: @escaping @Sendable (Process) throws -> Void = { try $0.run() }
+    ) throws {
+        let gate = StartGate(startAllowed)
+        try KillSwitchManager.launchAdmitted(
+            child,
+            executable: executable,
+            arguments: arguments,
+            until: .now() + deadline,
+            deadline: deadline,
+            admit: { gate.allowed() ? nil : CoreManager.startRefusal() },
+            afterAccept: afterAccept,
+            launch: launch
+        )
+        guard startAllowed() else {
+            child.terminate()
+            for _ in 0..<20 where child.isRunning { usleep(50_000) }
+            if child.isRunning { kill(child.processIdentifier, SIGKILL) }
+            throw startRefusal()
+        }
+    }
+
+    private func launchValidatedSnapshotLocked(configPath: String, startAllowed: @escaping () -> Bool) throws {
         // Recheck the root-owned binary at launch, including after a sync stop.
         _ = try secureMetadata(mihomoPath, type: mode_t(S_IFREG), owner: 0)
         let child = Process()
-        child.executableURL = URL(fileURLWithPath: mihomoPath)
-        child.arguments = ["run", "-D", runtimeDirectory, "-c", configPath]
         child.currentDirectoryURL = URL(fileURLWithPath: runtimeDirectory, isDirectory: true)
         child.environment = [
             // Never give a root process a user-writable HOME. Mihomo receives
@@ -144,11 +192,21 @@ final class CoreManager {
         do {
             guard startAllowed() else {
                 stopDiagnosticCapture()
-                throw HelperFailure.invalid(
-                    "The system is entering sleep; network protection remains fail-closed."
-                )
+                throw Self.startRefusal()
             }
-            try child.run()
+            // Bounded and admitted like every helper child (#1504 review
+            // R5-F1): a launch still pending at the deadline fails the start,
+            // and its late child gets end-of-file at the admission gate, so
+            // an abandoned Core never starts; it is terminated as well. The
+            // gate is asked again once the launch returns, before `go`
+            // (R6-F1): an operator release that landed while `Process.run()`
+            // stalled refuses a launch accepted inside the deadline too.
+            try Self.launchCoreAdmitted(
+                child,
+                executable: mihomoPath,
+                arguments: ["run", "-D", runtimeDirectory, "-c", configPath],
+                startAllowed: startAllowed
+            )
         } catch {
             stopDiagnosticCapture()
             throw error
@@ -176,12 +234,18 @@ final class CoreManager {
             stopDiagnosticCapture()
             throw HelperFailure.system(failure)
         }
+        // A release between `admit` and `go` overtook this start: the Core
+        // is stopped and the start refused, never reported running (R6-F1).
+        guard startAllowed() else {
+            try? stopLocked()
+            throw Self.startRefusal()
+        }
     }
 
     /// Serialized protected replacement. The caller keeps PF and system DNS
     /// armed throughout; failure never restarts an older configuration.
     func sync(configDirectory: String, configSHA256: String,
-              startAllowed: () -> Bool = { true },
+              startAllowed: @escaping () -> Bool = { true },
               beforeStop: () throws -> Void = {}) throws -> String {
         lock.lock()
         defer { lock.unlock() }

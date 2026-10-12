@@ -53,6 +53,11 @@ actor PrivilegedRuntimeCoordinator {
         try HelperManager.installIfNeeded()
     }
 
+    /// Decision 084: the explicit user Connect's new helper session.
+    func beginConnectSession() throws {
+        try KillSwitchService.beginSession()
+    }
+
     /// Decision 086: re-read the helper's tunnel state after it armed on its
     /// own (native update preparation), so control-plane routing follows it.
     func reconcileKillSwitchTunnelState() {

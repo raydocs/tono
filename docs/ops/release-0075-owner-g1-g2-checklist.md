@@ -18,6 +18,49 @@
    之后断开再连正常，不残留 “unreadable run”（#117）。证据：前后截图或诊断导出。
 4. **macOS 连接/断开回归**：Mac 上连接 → 断开 → 再连接 → 睡眠 1 分钟唤醒 → 仍 Connected 或自动恢复；
    断开后网络正常。证据：截图 + 一份诊断导出。
+5. **macOS 决定 092 的手动恢复（仅当冻结候选包含 #1504，helper 4.52.50）**：更新失败会保持保护，但用户的显式断开 /
+   恢复上网必须始终可用、且之后不被任何自动路径重新锁上。每个分支的读回命令相同：
+   `sudo pfctl -a tono.killswitch -s rules`（释放后应为空；保持时应有 `block` 规则）、
+   `scutil --dns | grep nameserver`（释放后不是 `127.0.0.1`）、`networksetup -getdnsservers Wi-Fi`（释放后是原值）；
+   「不复锁」= 释放后等 2 分钟（看门狗 10 s 一轮）再读一次，仍为释放结果，App 也不自动重连。每步保存命令输出截图。
+   - a. **正常**：连接 → 断开 → 读回为已释放 → 2 分钟后仍已释放。
+   - b. **更新 Prepare 失败**：连接中开始原生更新，让准备失败（如准备前断开物理网络）→ 读回 PF 仍有 block、DNS 仍为
+     127.0.0.1（保护保持）→ 在 App 里断开 → 读回已释放 → 2 分钟后仍已释放，更新不再继续。
+   - c. **更新 Execute 失败**：连接中开始原生更新，在执行阶段让它失败（如执行器拉起时断网，或安装中断）→ 读回保护保持 →
+     断开 → 读回已释放 → 2 分钟后仍已释放，执行器重试也不重新锁上。
+   - d. **启动 / IPC 超时（helper 无响应）**：连接后 `sudo launchctl kill SIGSTOP system/com.raydocs.tono.core-helper` →
+     在 App 里断开：App 不得显示「已释放」（应为未知 / 失败并提示）→ 运行
+     `sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-disarm`，在 181.5 s 内结束、退出码 0，输出逐项
+     restored（任何 unknown 都不算成功）→ 读回已释放 → 2 分钟后仍已释放（helper 重启后拒绝自动重连）。
+   - e. **helper 重启**：断开后 `sudo launchctl kickstart -k system/com.raydocs.tono.core-helper` → 读回仍为已释放，
+     2 分钟后仍已释放，App 不自动重连。
+   - f. **App 侧 helper 替换被放弃（#1071）**：连接中触发 helper 升级并在管理员提示处点取消（或安装失败）→ 读回 PF 仍有
+     block、App 仍显示受保护 / 离线（不自动放行）→ 点 Restore internet → 读回已释放 → 2 分钟后仍已释放。
+   证据：每个分支的命令输出截图。任一分支读回不符，092 不能视为关闭。
+6. **macOS 一键放行（发布硬门槛，所有者 2026-10-11 裁定；对签名候选逐条做，未做不得勾 G1）**：一次用户操作（Restore internet，
+   至多一次风险确认）→ 本地有界恢复，不依赖账号、API、隧道或中继。每步读回：`sudo pfctl -a tono.killswitch -s rules`（空）、
+   `scutil --dns | grep nameserver`（不是 127.0.0.1）、`ls /etc/resolver`（无 Tono 的 AI sinkhole 文件）、
+   `netstat -rn | grep -i blackhole`（无 Tono 的 AI 黑洞路由）；随后打开一个普通网站**和**一个 AI 服务（如 chatgpt.com），
+   两者都能用才算放行——普通网站能用而 AI 仍被拦 = 失败。界面结果只能是「已放行 / 部分失败 / 未知」之一，不得假成功。
+   - a. 正常连接中点 Restore internet。
+   - b. 拔网线 / 关 Wi-Fi 后登录失效状态下点 Restore internet（不依赖账号、API、隧道）。
+   - c. 安装旧版候选（上一版 helper）后直接升级到本候选、在升级完成前点 Restore internet（旧 helper 路径）。
+   - d. `sudo launchctl kill SIGSTOP system/com.raydocs.tono.core-helper` 后点 Restore internet：界面最迟约 60 秒不再停在「正在断开…」，
+     改为显示「未知、仍在完成」并指向 Support 页的本地恢复命令（60 秒只是界面停止等待，**不是**恢复在 60 秒内完成）；
+     `SIGCONT` 后同一次放行完成，界面按真实读回更新为已放行 / 部分失败 / 未知；或在终端照做恢复命令
+     （App 卡死时同样可用）后读回已释放。
+   - h. 原生更新失败后（同第 5 步 b/c）点 Restore internet，并在放行进行中 `SIGSTOP` helper：同 d，最迟约 60 秒显示未知，
+     不显示已放行；`SIGCONT` 后按真实读回更新。
+   - e. 放行中 / 放行后合上盖子睡眠 1 分钟再唤醒：仍已释放，不自动重连。
+   - f. 放行后 `sudo launchctl kickstart -k system/com.raydocs.tono.core-helper`：仍已释放，2 分钟内不复锁。
+   - g. 连续快速点三次 Restore internet：最终一次结果、已释放，不复锁。
+   - i. **放行后不自动重连（决定 094）**：Restore internet 读回已释放后退出并重开 Tono（也试一次重启 Mac）：显示未连接、
+     无错误、不循环重试；`sudo pfctl -a tono.killswitch -s rules` 仍为空；点 Connect 才重新连接并受保护。
+   - j. **排空上限（决定 094）**：连接进行中（还在「正在连接…」）点 Restore internet：最迟约 10 s 后开始放行，
+     不等那次连接；读回已释放，之后 2 分钟内旧连接不复锁、DNS 不变回 127.0.0.1；界面结果按真实读回。
+   - k. **Support 页**：显示 `--emergency-disarm`，写明是最后手段、由管理员在终端运行；照做一次（helper `SIGSTOP` 时）
+     输出逐项 restored、退出码 0、Tono 仍已安装。
+   证据：每步命令输出 + 普通网站与 AI 服务都能打开的截图。
 
 ## G2（连不上时有下一手）
 1. **B0 日志默认口径写进发布说明**：已写（apps/windows/release-notes/0.0.75.md、apps/macos/release-notes/build75.md）。
