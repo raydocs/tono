@@ -223,6 +223,60 @@ final class AppStateSleepTests: XCTestCase {
         )
     }
 
+    /// MAC-AUTO-RELEASE-FAIL-NO-RETRY: the exhausted protected reconnect's
+    /// automatic release failed at the disarm and left PF armed. Unlike the
+    /// user's own Restore internet above, that is not an intent to keep: the
+    /// next network change must run the same automatic release again instead
+    /// of leaving the Mac offline until the user clicks.
+    func testFailedAutomaticReleaseIsRetriedByTheNextNetworkChange() async {
+        let app = AppState()
+        KillSwitchService.isArmed = true
+        app.proxyRegions = [
+            ProxyRegion(
+                id: AppState.managedCatalogRegionID,
+                name: "TONO CLOUD",
+                nodes: [Fixture.realityNode()]
+            )
+        ]
+        var releases = 0
+        let retried = expectation(description: "second automatic release")
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = {}
+        runtime.releaseAfterFailure = {
+            releases += 1
+            if releases == 2 { retried.fulfill() }
+            throw HelperIPCError.commandFailed("The helper could not release the Kill Switch.")
+        }
+        runtime.restrictToBootstrap = {}
+        runtime.refreshKillSwitchStatus = {
+            .confirmed(requiresProtectionRecovery: true)
+        }
+        app.networkProtection = runtime
+        defer {
+            app.connectionCoordinator.cancelReconnectTasks()
+            KillSwitchService.isArmed = false
+        }
+
+        app.disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
+        await app.connectionCoordinator.disconnectSequence?.value
+        XCTAssertEqual(releases, 1)
+        XCTAssertTrue(KillSwitchService.isArmed)
+        XCTAssertTrue(app.isProtectionBlocked)
+
+        app.handleSystemNetworkChange()
+        await fulfillment(of: [retried], timeout: 5)
+        await app.connectionCoordinator.disconnectSequence?.value
+        XCTAssertEqual(
+            releases, 2,
+            "a network change must retry an automatic release that left PF armed"
+        )
+    }
+
     /// MAC-WAKE-NO-SERVICE-RELEASE regression: wake connected as soon as PF
     /// was reasserted, before macOS named a primary service. That connect
     /// failed on "no network service" and the armed failure released.
