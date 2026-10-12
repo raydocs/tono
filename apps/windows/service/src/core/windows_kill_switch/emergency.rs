@@ -29,6 +29,7 @@ pub async fn emergency_disarm_windows_kill_switch_applying_narrow() -> Result<()
 }
 
 async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
+    let started = std::time::Instant::now();
     let _operation = WFP_OPERATION.lock().await;
     // This is still the fail-open escape hatch: WFP objects are removed even if protected DNS
     // cannot be restored. The DNS failure is nevertheless returned *after* WFP and intent
@@ -160,19 +161,33 @@ async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
     // armed. The saved servers stay on disk for a later exact restore, and the original DNS
     // error is still returned below. The uninstall ladder already did the same for itself.
     if dns_restore.is_err() && !uninstall_ladder_requested() {
-        match bounded_dns_call(
-            "emergency disarm adapter reset",
-            crate::core::dns::reset_redirected_adapters_after_failed_restore(),
-        )
-        .await
-        {
-            Ok(adapters) => tracing::warn!(
-                "emergency disarm: DNS restore could not be proven; {} adapter(s) on a Tono DNS                  target were set to automatic (DHCP) and the resolver policy was removed",
-                adapters.len()
-            ),
-            Err(error) => tracing::error!(
-                "emergency disarm: DNS restore could not be proven and the adapter reset or                  resolver-policy removal failed: {error:#}"
-            ),
+        // The release worker cancels the whole disarm at `EMERGENCY_DISARM_OUTER_BUDGET`, so this
+        // leg gets what is left of it after the restore and WFP removal, less the sweep below.
+        // A leg that is cut short leaves the sweep's NRPT removal to finish the resolver policy.
+        let budget = emergency_fallback_budget(started.elapsed(), NRPT_SWEEP_BUDGET);
+        if budget.is_zero() {
+            tracing::error!(
+                "emergency disarm: DNS restore could not be proven and no time is left in the \
+                 disarm budget for the adapter reset; the resolver-rule sweep still runs"
+            );
+        } else {
+            match bounded_dns_call_within(
+                budget,
+                "emergency disarm adapter reset",
+                crate::core::dns::reset_redirected_adapters_after_failed_restore(),
+            )
+            .await
+            {
+                Ok(adapters) => tracing::warn!(
+                    "emergency disarm: DNS restore could not be proven; {} adapter(s) on a Tono \
+                     DNS target were set to automatic (DHCP) and the resolver policy was removed",
+                    adapters.len()
+                ),
+                Err(error) => tracing::error!(
+                    "emergency disarm: DNS restore could not be proven and the adapter reset or \
+                     resolver-policy removal failed: {error:#}"
+                ),
+            }
         }
     }
     // BRICK-W4: Tono's NRPT catch-all sends every lookup to 198.18.0.2, which nothing answers

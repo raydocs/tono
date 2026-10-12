@@ -529,6 +529,27 @@ pub(super) const DNS_RESTORE_STALLED_PREFIX: &str = "TONO_DNS_RESTORE_STALLED";
 /// also stays under the IPC handler's 60 s budget, so the refusal still reaches the client.
 pub(super) const DNS_RESTORE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(40);
 
+/// What the release worker (`release::worker::CLEANUP_TIMEOUT`) gives one whole non-uninstall
+/// emergency disarm: DNS restore, WFP removal, the adapter reset and the resolver-policy sweep
+/// together. The worker takes this constant, so the fallback below cannot drift from it.
+pub const EMERGENCY_DISARM_OUTER_BUDGET: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// Longest the post-WFP adapter reset and resolver-policy removal may take on their own.
+pub(super) const EMERGENCY_FALLBACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// The budget left for that fallback leg `elapsed` into the disarm: what the worker's budget still
+/// has, less the `reserve` the final resolver-rule sweep needs, never more than
+/// [`EMERGENCY_FALLBACK_TIMEOUT`]. Zero means there is no time left for it.
+pub(super) fn emergency_fallback_budget(
+    elapsed: std::time::Duration,
+    reserve: std::time::Duration,
+) -> std::time::Duration {
+    EMERGENCY_DISARM_OUTER_BUDGET
+        .saturating_sub(elapsed)
+        .saturating_sub(reserve)
+        .min(EMERGENCY_FALLBACK_TIMEOUT)
+}
+
 /// SCM `StopPending` hint posted by the service. Stop is accepted before startup
 /// finishes, and startup can still be inside this DNS budget — twice, when an
 /// unverified barrier is retired. One post of the hint does not cover that.

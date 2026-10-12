@@ -335,19 +335,65 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
     }
 }
 
-/// The non-uninstall emergency disarm's answer to a restore it could not prove (Start-Menu
-/// "Restore Network", `--emergency-disarm`, the release service's clean-up). Runs only after the
-/// WFP objects are gone, never while the barrier is armed.
+/// Whether an adapter is still pointed at a Tono resolver that nothing will answer, so the
+/// emergency reset has to put it on automatic (DHCP).
+///
+/// `adapter` is the registry as it reads now, `recorded` the adapter's entry in the saved
+/// snapshot (the user's originals), `effective` the DNS Client's own resolver list for it when it
+/// could be read. The registry alone is not enough: the exact restore writes the user's
+/// registry values back even when its live apply failed, so an adapter can read as restored in
+/// the registry while it still resolves through `198.18.0.2`.
+///
+/// * The Tono-only endpoint (`198.18.0.2`) in either view is Tono's by itself: no user owns that
+///   address, whatever the adapter's saved original was.
+/// * A plain loopback (`127.0.0.1` / `::1`, what an older build wrote) is Tono's only for an
+///   adapter the snapshot recorded, and not while it is still the value the user had saved. On an
+///   adapter the snapshot never recorded it is the user's own local resolver (Pi-hole, Acrylic)
+///   and resetting it would destroy that setup.
+/// * An adapter whose registry and effective lists are both the user's is never touched.
+pub(super) fn adapter_needs_automatic_reset(
+    adapter: &AdapterDnsSnapshot,
+    recorded: Option<&AdapterDnsSnapshot>,
+    effective: Option<&[std::net::IpAddr]>,
+) -> bool {
+    let effective = effective.map(classify_effective_servers).unwrap_or_default();
+    if adapter_contains_current_protected_dns(adapter) || effective.endpoint {
+        return true;
+    }
+    let legacy_loopback = effective.tono_owned_family
+        || [
+            adapter.ipv4_name_server.as_deref(),
+            adapter.ipv4_profile_name_server.as_deref(),
+            adapter.ipv6_name_server.as_deref(),
+            adapter.ipv6_profile_name_server.as_deref(),
+        ]
+        .into_iter()
+        .any(is_tono_dns_value);
+    if !legacy_loopback {
+        return false;
+    }
+    let Some(saved) = recorded else {
+        return false;
+    };
+    !(saved_dns_was_loopback(saved) && registry_values_match(saved, adapter))
+}
+
+/// The non-uninstall emergency disarm's answer to a restore it could not prove (the release
+/// service's clean-up and the non-ladder update-executor recovery). Runs only after the WFP
+/// objects are gone, never while the barrier is armed. `--emergency-disarm` and the Start-Menu
+/// entry run the uninstall ladder instead and never reach this.
 ///
 /// Owner rule: a released machine resolves through the home broadband's DNS, never through a
 /// dead Tono resolver. So, like rung 2 of the uninstall ladder, the adapters that still read as a
 /// Tono target are put back on automatic (DHCP), and then the machine-wide resolver policy (the
 /// NRPT catch-all and the Encrypted DNS pin) is removed. Differences from the ladder, on purpose:
 ///
-/// * Only adapters that read as a Tono target *right now* are touched. The snapshot may list
-///   adapters an earlier partial restore already put back exactly; resetting those to DHCP would
-///   destroy the static servers the user chose. Adapters whose saved original was itself a
-///   loopback resolver are left alone too.
+/// * Only adapters that are on a Tono target *right now* are touched, by registry and by the
+///   DNS Client's effective list together ([`adapter_needs_automatic_reset`]). The snapshot may
+///   list adapters an earlier partial restore already put back exactly; resetting those to DHCP
+///   would destroy the static servers the user chose.
+/// * The reset is read back like the ladder's rung 2: it counts only when no reset adapter reads
+///   as a Tono target afterwards, whatever the apply reported.
 /// * The snapshot file is kept under its own name, so a later exact restore can still replay the
 ///   user's saved servers.
 ///
@@ -377,17 +423,30 @@ async fn reset_adapters_still_on_tono_dns() -> Result<Vec<String>> {
         Ok(bytes) => parse_snapshot(&bytes).ok(),
         Err(_) => None,
     };
-    let targets: Vec<String> = collect_dns_adapters()
-        .await?
+    let adapters = collect_dns_adapters().await?;
+    // An effective list that cannot be read must not hide the registry evidence; the read-back
+    // below fails the fallback if it cannot prove the machine off Tono either.
+    let effective = match engine_effective_dns(&adapters).await {
+        Ok(effective) => effective,
+        Err(error) => {
+            tracing::warn!("dns: the effective DNS of the adapters could not be read: {error:#}");
+            Vec::new()
+        }
+    };
+    let targets: Vec<String> = adapters
         .iter()
-        .filter(|adapter| adapter_reads_as_tono_dns(adapter))
         .filter(|adapter| {
-            !snapshot.as_ref().is_some_and(|snapshot| {
-                snapshot.adapters.iter().any(|saved| {
-                    saved.interface_guid.eq_ignore_ascii_case(&adapter.interface_guid)
-                        && saved_dns_was_loopback(saved)
-                })
-            })
+            let recorded = snapshot.as_ref().and_then(|snapshot| {
+                snapshot
+                    .adapters
+                    .iter()
+                    .find(|saved| same_adapter_guid(&saved.interface_guid, &adapter.interface_guid))
+            });
+            let live = effective
+                .iter()
+                .find(|(guid, _)| same_adapter_guid(guid, &adapter.interface_guid))
+                .map(|(_, servers)| servers.as_slice());
+            adapter_needs_automatic_reset(adapter, recorded, live)
         })
         .map(|adapter| adapter.interface_guid.clone())
         .collect();
@@ -409,10 +468,21 @@ async fn reset_adapters_still_on_tono_dns() -> Result<Vec<String>> {
     };
     let results = engine_apply_snapshot(&automatic).await?;
     if let Some((guid, _)) = results.iter().find(|(_, ok)| !*ok) {
-        bail!("the automatic (DHCP) DNS reset did not apply to adapter {guid}");
+        tracing::warn!("dns: the automatic (DHCP) DNS reset reported a failure for adapter {guid}");
     }
     if let Err(error) = engine_flush_cache().await {
         tracing::warn!("DNS cache flush after the DHCP reset failed: {error:#}");
     }
-    Ok(targets)
+    // The read-back, not the apply report, is the proof: the registry write and the live apply
+    // are independent, and a reset the DNS Client has not adopted leaves the machine on the dead
+    // resolver.
+    match engine_any_loopback(&automatic.adapters).await {
+        Ok(false) => Ok(targets),
+        Ok(true) => bail!(
+            "an adapter still resolves through Tono's DNS target after the automatic (DHCP) reset"
+        ),
+        Err(error) => bail!(
+            "the DNS state could not be read back after the automatic (DHCP) reset: {error:#}"
+        ),
+    }
 }

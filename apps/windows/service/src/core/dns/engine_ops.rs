@@ -396,6 +396,12 @@ pub(super) async fn engine_apply_snapshot(snapshot: &DnsSnapshot) -> Result<Vec<
             test_hooks::note_automatic_reset(snapshot);
             if !test_hooks::reset_does_not_land() {
                 test_hooks::set_live_dns_on_loopback(false);
+                let reset: Vec<String> = snapshot
+                    .adapters
+                    .iter()
+                    .map(|adapter| adapter.interface_guid.clone())
+                    .collect();
+                test_hooks::forget_effective_dns(&reset);
             }
         }
         Ok(snapshot
@@ -461,12 +467,51 @@ pub(super) async fn engine_any_loopback(adapters: &[AdapterDnsSnapshot]) -> Resu
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
-        let _ = adapters;
         // Without this hook the stub would always answer "not on loopback", which makes the
         // unproven-restore branch — the fail-closed half of the corrupt-snapshot contract —
         // unreachable in every test build. A test that cannot fail is worse than none.
-        Ok(test_hooks::live_dns_is_on_loopback())
+        let effective_on_tono = test_hooks::effective_dns().iter().any(|(guid, servers)| {
+            adapters
+                .iter()
+                .any(|adapter| adapter.interface_guid.eq_ignore_ascii_case(guid))
+                && {
+                    let found = classify_effective_servers(servers);
+                    found.endpoint || found.tono_owned_family
+                }
+        });
+        Ok(test_hooks::live_dns_is_on_loopback() || effective_on_tono)
     }
+}
+
+/// The effective resolver list (what the DNS Client resolves through, not the registry) of every
+/// active adapter among `adapters`. The registry alone cannot tell an adapter whose restore
+/// landed from one whose registry was written back while its live apply failed.
+pub(super) async fn engine_effective_dns(
+    adapters: &[AdapterDnsSnapshot],
+) -> Result<Vec<(String, Vec<std::net::IpAddr>)>> {
+    let guids = adapters
+        .iter()
+        .map(|adapter| adapter.interface_guid.clone())
+        .collect::<Vec<_>>();
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        return bounded_dns_call(DNS_CALL_TIMEOUT, "read effective DNS", move || {
+            engine::effective_dns_servers(&guids)
+        })
+        .await;
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        Ok(test_hooks::effective_dns()
+            .into_iter()
+            .filter(|(guid, _)| guid_listed(&guids, guid))
+            .collect())
+    }
+}
+
+#[cfg(not(all(windows, not(feature = "test"))))]
+fn guid_listed(guids: &[String], guid: &str) -> bool {
+    guids.iter().any(|listed| listed.eq_ignore_ascii_case(guid))
 }
 
 pub(super) async fn engine_flush_cache() -> Result<()> {

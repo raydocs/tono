@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 /// release already running or an admission that is about to give it back.
 const WORKER_LOCK_TIMEOUT: Duration = Duration::from_secs(3);
 /// The whole cleanup step, so a wedged WFP or DNS call still leaves time to read back.
-const CLEANUP_TIMEOUT: Duration = Duration::from_secs(45);
+const CLEANUP_TIMEOUT: Duration = crate::core::windows_kill_switch::EMERGENCY_DISARM_OUTER_BUDGET;
 const SETTLE_INTERVAL: Duration = Duration::from_secs(1);
 const TOOL_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long the restarted main Service gets to report Running, and then to finish its startup

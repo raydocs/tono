@@ -2237,6 +2237,19 @@ async fn emergency_disarm_with_unproven_dns_resets_the_redirected_adapter_and_dr
     Ok(())
 }
 
+/// The release worker cancels the whole disarm at its 45 s budget. The adapter reset and the
+/// policy removal after a failed restore get only what the restore and the WFP removal left of
+/// it, less the resolver-rule sweep, so they cannot run past the budget that would cut them.
+#[test]
+fn the_emergency_fallback_leg_fits_inside_the_release_workers_budget() {
+    let sweep = std::time::Duration::from_secs(10);
+    assert_eq!(
+        emergency_fallback_budget(std::time::Duration::from_secs(30), sweep),
+        std::time::Duration::from_secs(5)
+    );
+    assert!(emergency_fallback_budget(std::time::Duration::from_secs(40), sweep).is_zero());
+}
+
 // --- The uninstall-only escalation ladder ---
 
 /// Opts the *process* into `dns::restore_for_uninstall`, exactly as `uninstall_service.rs`

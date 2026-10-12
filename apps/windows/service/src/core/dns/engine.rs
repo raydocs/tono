@@ -1472,9 +1472,6 @@ pub(super) fn any_loopback(guids: &[String]) -> Result<bool> {
 /// that is not active has no running resolver to prove (the registry check above still covers
 /// it); an active one whose list was not read is an error, never an empty list.
 fn effective_lists_tono_dns(guids: &[String], active: &[ActiveAdapter]) -> Result<bool> {
-    let parse = |value: &str| value.parse::<std::net::IpAddr>().ok();
-    let current = parse(super::PROTECTED_DNS_V4);
-    let tono = [super::PROTECTED_DNS_V4, super::LOOPBACK_V4, super::LOOPBACK_V6].map(parse);
     for adapter in active
         .iter()
         .filter(|adapter| guids.iter().any(|guid| guid.eq_ignore_ascii_case(&adapter.guid)))
@@ -1482,20 +1479,30 @@ fn effective_lists_tono_dns(guids: &[String], active: &[ActiveAdapter]) -> Resul
         let servers = adapter.dns_servers.as_ref().with_context(|| {
             format!("effective DNS servers of {} were not read", adapter.guid)
         })?;
-        for ipv6 in [false, true] {
-            let family: Vec<_> = servers
-                .iter()
-                .filter(|server| server.is_ipv6() == ipv6)
-                .map(|server| Some(*server))
-                .collect();
-            if family.contains(&current)
-                || (!family.is_empty() && family.iter().all(|server| tono.contains(server)))
-            {
-                return Ok(true);
-            }
+        let found = super::classify_effective_servers(servers);
+        if found.endpoint || found.tono_owned_family {
+            return Ok(true);
         }
     }
     Ok(false)
+}
+
+/// The effective resolver list of every active adapter among `guids`, for the emergency reset's
+/// target selection. An active adapter whose list was not read is an error, never an empty list.
+pub(super) fn effective_dns_servers(
+    guids: &[String],
+) -> Result<Vec<(String, Vec<std::net::IpAddr>)>> {
+    active_adapters_read(true)?
+        .into_iter()
+        .filter(|adapter| guids.iter().any(|guid| guid.eq_ignore_ascii_case(&adapter.guid)))
+        .map(|adapter| {
+            let guid = adapter.guid;
+            let servers = adapter
+                .dns_servers
+                .with_context(|| format!("effective DNS servers of {guid} were not read"))?;
+            Ok((guid, servers))
+        })
+        .collect()
 }
 
 /// Whether every adapter is in the protected state. The two families do not answer the same

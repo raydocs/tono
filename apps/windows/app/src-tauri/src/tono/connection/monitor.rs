@@ -1442,14 +1442,20 @@ fn retry_session_owned(inner: &TonoInner, generation: u64) -> bool {
 
 /// The lifecycle writer for one retry of a refused health-failure release, or `None` when the
 /// session the retry was started for is gone.
+///
+/// The ownership check and the release must be one step. A user Connect holds the lifecycle
+/// reader while its admission bumps the generation, so the writer is granted only once no
+/// admission is mid-flight, and the session is validated again under the state lock *after*
+/// the wait. The caller hands this writer to the release, which keeps it until its worker has
+/// run, so no Connect can be admitted between this validation and the release reading the
+/// generation and release ticket it tears down: both are still `generation`'s.
 async fn claim_retry_release(
     state: &Arc<TonoState>,
     generation: u64,
 ) -> Option<tokio::sync::OwnedRwLockWriteGuard<()>> {
-    if !retry_session_owned(&*state.lock().await, generation) {
-        return None;
-    }
-    Some(state.begin_privileged_release().await)
+    let lifecycle = state.begin_privileged_release().await;
+    let inner = state.lock().await;
+    retry_session_owned(&inner, generation).then_some(lifecycle)
 }
 
 /// The connect generation whose DIRECT binding check got no answer from the uplink read, or
@@ -1698,10 +1704,9 @@ pub(super) async fn handle_network_change_inner(
                     None => Err("the session this release was retrying for is no longer the idle protected one".to_owned()),
                 }
             },
-            || async move {
-                let generation = state.lock().await.connect_generation;
-                super::unarmed_probe::spawn_after_release(state, app, generation);
-            },
+            // The probe belongs to the session that was validated, never to whichever
+            // generation is current by now: it checks its owner on every step.
+            || async move { super::unarmed_probe::spawn_after_release(state, app, generation) },
         ).await;
         return NetworkChangeOutcome::Handled;
     }
@@ -2058,6 +2063,11 @@ mod tests {
         assert!(
             !retry.await.unwrap(),
             "a retry for the replaced session must not take the writer to release the new Connect"
+        );
+        let current = state.lock().await.connect_generation;
+        assert!(
+            super::claim_retry_release(&state, current).await.is_some(),
+            "a retry for the session that is still the idle protected one gets the writer"
         );
     }
 

@@ -285,6 +285,22 @@ pub(crate) mod test_hooks {
     static EFFECTIVE_DNS: LazyLock<Mutex<Vec<(String, Vec<std::net::IpAddr>)>>> =
         LazyLock::new(|| Mutex::new(Vec::new()));
 
+    pub(crate) fn effective_dns() -> Vec<(String, Vec<std::net::IpAddr>)> {
+        EFFECTIVE_DNS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// An automatic (DHCP) reset that lands also takes these adapters' effective lists off
+    /// the Tono endpoint.
+    pub(crate) fn forget_effective_dns(guids: &[String]) {
+        EFFECTIVE_DNS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|(guid, _)| !guids.iter().any(|reset| reset.eq_ignore_ascii_case(guid)));
+    }
+
     /// What the DNS Client resolves through per active adapter right now (the effective list
     /// `GetAdaptersAddresses` reports), as opposed to the registry values `collected_adapters`
     /// stands for. The two differ exactly when a restore wrote the registry back but its live
