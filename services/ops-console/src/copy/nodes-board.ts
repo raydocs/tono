@@ -65,6 +65,56 @@ export const nodesBoardCopy = {
       quotaOf: (used: string, pct: string) => `${used} · ${pct}`,
       noQuota: '未设额度',
     },
+    /** The notice above the table when active machines lack a quota or an expiry date. */
+    factsGap: {
+      sentence: (noQuota: number, noExpiry: number) => [
+        noQuota > 0 ? `${noQuota} 台没登记额度` : null,
+        noExpiry > 0 ? `${noExpiry} 台没登记到期日` : null,
+      ].filter((part) => part !== null).join(' · '),
+      action: '批量登记',
+    },
+    /** The drawer behind that action: one set of facts, written to every machine picked. */
+    batch: {
+      title: '批量登记',
+      lead: '把同一份额度、账期和到期日一次写进选中的机器；留空的项不改。',
+      pickLabel: '登记哪几台',
+      pickAll: '全选',
+      pickMissing: '只选缺资料的',
+      pickedCount: (picked: number, total: number) => `已选 ${picked} / ${total} 台`,
+      rowMissing: { quota: '没登记额度', expiry: '没登记到期日' },
+      fields: {
+        quota: '每周期流量（GB）',
+        billing: '账期',
+        expires: '到期日',
+        price: '价格',
+        currency: '货币',
+      },
+      hints: {
+        quota: '按商家卖的数字填，单位 GB；填了就要选下面的翻页方式和方向',
+        price: '填了价格就要选账期',
+        currency: '三位字母，例如 USD',
+        overwrite: '已经登记过额度的机器会被这里的额度覆盖',
+      },
+      choose: '请选择',
+      billing: { none: '不改', month: '月付（30 天）', year: '年付（365 天）' },
+      problems: {
+        empty: '至少填一项',
+        none: '至少选一台机器',
+        quota: '额度要填大于 0 的数字',
+        quotaRules: '填了额度，就要选翻页方式和算哪个方向',
+        anchor: '每月第几天填 1 到 31 的整数',
+        expires: '到期日要选一个日期',
+        price: '价格要填不小于 0 的数字',
+        priceCycle: '填了价格，就要选账期',
+        currency: '货币写三位字母，例如 USD',
+      },
+      save: '登记',
+      saving: '正在登记…',
+      progress: (done: number, total: number) => `正在登记 ${done} / ${total} 台`,
+      result: (done: number, failed: number) => `已登记 ${done} 台 · 失败 ${failed} 台`,
+      failure: (name: string, reason: string) => `${name}：${reason}`,
+      close: '关闭',
+    },
   },
   /** The Tono-owned API relays clients fall back to when Cloudflare is unreachable. */
   apiRelays: {

@@ -25,3 +25,16 @@ test('the fleet is a three column table at 390 px, ahead of the charts', async (
   await settle(page);
   await expect(page).toHaveScreenshot('nodes.png');
 });
+
+/** The banner's action drops under its sentence and is a thumb tall, inside the screen. */
+test('the data-gap banner action is 44 px tall and inside the viewport at 390 px', async ({ page }) => {
+  await open(page, '/nodes');
+  const action = page.getByRole('button', { name: '批量登记' });
+  await expect(action).toBeVisible();
+  const box = await action.boundingBox();
+  expect(box!.height).toBeGreaterThanOrEqual(44);
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  const sentence = await page.getByText('台没登记额度').boundingBox();
+  expect(box!.y).toBeGreaterThan(sentence!.y);
+});
