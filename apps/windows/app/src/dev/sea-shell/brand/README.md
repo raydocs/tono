@@ -1,6 +1,6 @@
-# Tono 0.0.75 brand proposal — unapproved, unwired
+# Tono brand: sun on the horizon (approved 2026-10-12, wired)
 
-This directory is **dev-only**. It does not change the application/installer/tray icon, navbar or startup screen. Owner approval of the sheet is required before wiring. Native NSIS/WebView, DPI and installation are not verified by this artwork.
+The owner approved this sheet on 2026-10-12 ([decision 095](../../../../../../../docs/decisions/095-2026-10-12-sun-horizon-icons.md)). These files are the sources; `scripts/generate-tono-icons.py` writes every shipped raster from them (Windows bundle, tray and installer images, macOS app icon, mark and welcome hero). The PR7 tray glyph sheet below is still a draft and is not wired. Native NSIS/WebView, DPI and installation are not verified by this artwork.
 
 ## Review
 
