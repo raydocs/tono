@@ -52,9 +52,10 @@ export function phoneColumns<T>(columns: readonly DataColumn<T>[]): DataColumn<T
  * address cell, and the search box still matches it. That returns 66 px,
  * which go to the columns whose values were being cut: the failure column
  * takes 28 (142 px with 4 px of side air, so the longest sentence keeps 20 px
- * to the cell edge), the service column 20, and the follow-up column 2 (86 px
- * with 8 px of side air, still room for a whole `YYYY-MM-DD`). The node column
- * takes 16 (140 px): the site line, the part that tells two machines in a city
+ * to the cell edge), the service column 20, and the follow-up column 12 (96 px
+ * with 8 px of side air: a whole `YYYY-MM-DD` keeps 9.6 px of room on macOS, so
+ * the wider monospace face on Linux, 4 px more, still fits). The node column
+ * takes 6 (130 px): the site line, the part that tells two machines in a city
  * apart, is whole for every realistic site; the two deliberate stress names in
  * the fixtures (a 33-character Latin site and an eight-character one behind a
  * three-segment name) end in their own ellipsis with the whole name on the
@@ -121,7 +122,7 @@ export function customerColumns(
     {
       id: 'node',
       header: copy.customerColumns.node,
-      width: '140px',
+      width: '130px',
       sortValue: (row) => row.selectedServer ?? '',
       cell: (row) => <NodeCell name={row.selectedServer} />,
     },
@@ -150,7 +151,7 @@ export function customerColumns(
       {
         id: 'followup',
         header: copy.customerColumns.followup,
-        width: '86px',
+        width: '96px',
         className: 'px-2',
         sortValue: (row: CustomerSummaryDto) => followups.get(row.userId)?.dueAt ?? 0,
         cell: (row: CustomerSummaryDto) => <FollowupCell row={followups.get(row.userId)} />,
