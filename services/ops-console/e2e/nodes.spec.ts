@@ -59,7 +59,7 @@ test.describe('nodes page', () => {
 
   test('the customer-side leg is a column once any node has one', async ({ page }) => {
     await open(page, '/nodes');
-    await expect(page.getByText('客户去程数据尚未接入')).toHaveCount(0);
+    await expect(page.getByText('客户去程数据未接入')).toHaveCount(0);
     await expect(page.getByRole('columnheader', { name: '客户去程' })).toHaveCount(1);
   });
 

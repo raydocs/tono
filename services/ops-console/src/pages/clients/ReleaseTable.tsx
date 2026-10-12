@@ -8,7 +8,7 @@ import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
 import { opsApi } from '@/lib/api';
 import { compareVersions, publishBlockReason } from '@/lib/releases';
-import { formatBytesMeasured, formatDate } from '@/lib/display';
+import { formatBytesMeasured, formatDate, formatWhen } from '@/lib/display';
 import { useIsPhone } from '@/lib/use-phone';
 
 type Pending =
@@ -137,7 +137,7 @@ function verification(row: ReleaseDto, channel: UpdateChannelDto | null): string
 
 /**
  * On a phone the actions are the point of the row, and in the last column of
- * a 1048 px table they are off screen. The checks and notes columns go, and
+ * a 1104 px table they are off screen. The checks and notes columns go, and
  * the rest are reordered so the actions land inside the first 390 px; the
  * fixed widths then add up to the 592 px floor in clients.css.
  */
@@ -148,7 +148,7 @@ function releaseColumns(
   channel: UpdateChannelDto | null,
   phone: boolean,
 ): DataColumn<ReleaseDto>[] {
-  const all = allReleaseColumns(ask, channel);
+  const all = allReleaseColumns(ask, channel, phone);
   if (!phone) return all;
   return PHONE_ORDER.flatMap((id) => all.filter((column) => column.id === id)).map((column) => {
     if (column.id === 'channel') return { ...column, width: '56px' };
@@ -161,6 +161,7 @@ function releaseColumns(
 function allReleaseColumns(
   ask: (next: Pending) => void,
   channel: UpdateChannelDto | null,
+  phone: boolean,
 ): DataColumn<ReleaseDto>[] {
   return [
     {
@@ -187,12 +188,14 @@ function allReleaseColumns(
     {
       id: 'published',
       header: copy.releaseColumns.published,
-      width: '112px',
+      // Date and time like the catalog history; the phone's 592 px floor has
+      // 112 px for this column, so there it keeps the date alone.
+      width: phone ? '112px' : '168px',
       mono: true,
       sortValue: (row) => row.publishedAt ?? 0,
       cell: (row) => (
         <Value
-          value={row.publishedAt === null ? null : formatDate(row.publishedAt)}
+          value={row.publishedAt === null ? null : (phone ? formatDate : formatWhen)(row.publishedAt)}
           source={copy.sourceWord.catalog}
           tier="body"
           mono

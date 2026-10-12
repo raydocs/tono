@@ -11,7 +11,7 @@ test.describe('the header says which source is behind', () => {
   test('names a source nobody has wired up, in words, without an alarm', async ({ page }) => {
     await open(page, '/nodes');
     const pill = page.locator('.source-pill');
-    await expect(pill).toHaveText('任务 未接');
+    await expect(pill).toHaveText('任务 未接入');
     await expect(pill).toHaveClass(/tone-unk/);
   });
 

@@ -45,11 +45,11 @@ export const todayCopy = {
   todayGroupTitle: (label: string, machines: number) => `${machines} 台${label}`,
   todayGroupKinds: {
     'node-blocked': '疑似被墙，仍在客户目录',
-    'node-down': '整机失联',
-    'node-degraded': '连接质量下降',
+    'node-down': '失联',
+    'node-degraded': '劣化',
     'node-pressure': '负载偏高',
     'node-no-probe': '在售但没有探针',
-    'node-probe-unreachable': '探针连不上',
+    'node-probe-unreachable': '探测不通',
   } as Readonly<Record<string, string>>,
   todayGroupsNote: (members: number, label: string) => `其中 ${members} 个是同一件事：${label}`,
   incidentGroupEarliest: '最早',
@@ -296,7 +296,7 @@ export const todayCopy = {
   chore: {
     nodeRenew: (node: string, when: string) => `${node} ${when} 续费`,
     nodeQuota: (node: string, pct: string) => `${node} 本期流量已用 ${pct}`,
-    nodeProfile: (node: string) => `${node} 还没登记价格与续费日`,
+    nodeProfile: (node: string) => `${node} 没登记价格与续费日`,
     customerExpiry: (who: string, when: string) => `${who} ${when} 到期`,
     customerQuota: (who: string, pct: string) => `${who} 本期流量已用 ${pct}`,
     customerVersion: (who: string, version: string) => `${who} 还在跑 ${version}`,

@@ -71,14 +71,14 @@ export const shellCopy = {
    * it would teach the operator to ignore the pill.
    */
   sourceLate: (who: string, lasting: string) => `${who} 停了 ${lasting}`,
-  sourceGone: (who: string) => `${who} 未接`,
+  sourceGone: (who: string) => `${who} 未接入`,
   sourceBroken: (who: string) => `${who} 不通`,
   /** The hover list: every source, how it is doing, and when it last spoke. */
   sourceState: {
     ready: '正常',
     stale: '停了',
     error: '不通',
-    missing: '未接',
+    missing: '未接入',
   } as const,
   sourceLine: (who: string, state: string, when: string) => `${who} ${state} · ${when}`,
   sourceLineNever: (who: string, state: string) => `${who} ${state}`,
@@ -100,7 +100,7 @@ export const shellCopy = {
   sessionExpired: '登录已过期',
   sessionExpiredBody: '登录已过期，页面上的数据不会再更新。重新登录后继续。',
   reload: '重新登录',
-  pathNotWired: '客户去程数据尚未接入',
+  pathNotWired: '客户去程数据未接入',
   renew: '续费/到期',
   lastMeasured: '最后测量',
   missing: '—',
@@ -114,7 +114,7 @@ export const shellCopy = {
   inUse: '在用',
   loading: '载入中',
   loadError: '载入失败',
-  emptyList: '没有节点',
+  emptyList: '还没有节点',
   tableError: '表格没载入上来',
   retry: '重试',
   close: '关闭',

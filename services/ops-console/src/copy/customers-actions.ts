@@ -84,16 +84,16 @@ export const customerActionCopy = {
   batchExpiryBody: (n: number, date: string) => `选中的 ${n} 位客户，到期都改成 ${date}，原来有到期日的会被覆盖。到了这一天后几分钟内，名下设备和登录会被撤销，客户端取不到目录。若有客户的设备已因到期被撤销，改日期不会恢复它们，要请他们在这些设备上重新登录。`,
   batchExpiryConfirm: '都设成这一天',
   batchExpiryInvalid: '填一个今天之后的日期，没有保存。',
-  batchDone: (n: number) => `已处理 ${n} 位客户`,
+  batchDone: (n: number) => `已完成 ${n} 位客户`,
   batchPartly: (done: number, failed: number) => `${done} 位做成了，${failed} 位没做成`,
 
   /** The notice above the list when in-use customers have no expiry date entered. */
   customersBoard: {
     expiryGap: (n: number) => `${n} 位客户没登记到期`,
-    expiryGapAction: '批量设置到期',
+    expiryGapAction: '批量设到期日',
     /** The hover and accessible name of a dash, when the real reason is not "no data". */
     servicesMissing: '客户端没开日志上传，所以没有服务使用',
-    expiryMissing: '还没登记到期日 · 批量设置到期在表上方',
+    expiryMissing: '没登记到期日 · 批量设到期日在表上方',
   },
 
   /* ------------------------------------------------------ 客户 360 头 */
@@ -101,7 +101,7 @@ export const customerActionCopy = {
   customerHeadActions: {
     diagnose: '发起远程诊断',
     resend: '重发凭证',
-    changeExpiry: '改到期',
+    changeExpiry: '设到期日',
     suspend: '停用',
     restore: '恢复',
   } as const,
@@ -111,12 +111,12 @@ export const customerActionCopy = {
   diagnoseBody: (device: string) => `会给 ${device} 下发一次诊断快照，客户端下次上报时执行，最多等 5 分钟。不会断开正在用的连接。`,
   resendTitle: '重发凭证',
   resendBody: (devices: number) => `会给 ${devices} 台设备各下发一次刷新目录，客户端拿到新目录时凭证一起更新。不会断开正在用的连接。`,
-  expiryTitle: '改到期',
+  expiryTitle: '设到期日',
   expiryLead: '到期后几分钟内，名下所有设备和登录都会被撤销，客户端取不到目录；数据不删。已被撤销的设备，续期或取消到期都不会恢复，要请客户在这些设备上重新登录。',
   expiryField: '到期日',
   expiryRenew: '续 30 天',
   expiryClear: '取消到期',
-  expirySet: '设到期',
+  expirySet: '设到期日',
   expiryRenewBody: (email: string, date: string) => `${email} 的到期改成 ${date}。从今天和原到期日里靠后的那天算起。若有设备已因到期被撤销，续期不会恢复它们，要请客户在这些设备上重新登录。`,
   expirySetBody: (email: string, date: string) => `${email} 的到期改成 ${date}。到了这一天后几分钟内，名下设备和登录会被撤销，客户端取不到目录。若有设备已因到期被撤销，改日期不会恢复它们，要请客户在这些设备上重新登录。`,
   expiryClearBody: (email: string) => `${email} 从此不限到期，待办里也不会再提醒续费。若有设备已因到期被撤销，取消到期不会恢复它们，要请客户在这些设备上重新登录。`,

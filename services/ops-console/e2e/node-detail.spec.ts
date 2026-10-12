@@ -54,7 +54,7 @@ test.describe('node detail page', () => {
     }
 
     // The one registration nobody did is a chore, not an incident.
-    await expect(page.getByText('身份同步 还没登记')).toBeVisible();
+    await expect(page.getByText('身份同步 没登记')).toBeVisible();
 
     // The two directions disagree, and the page says both.
     await expect(page.getByRole('heading', { name: '客户连得上吗' })).toBeVisible();
