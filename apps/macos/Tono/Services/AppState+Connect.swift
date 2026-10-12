@@ -2670,8 +2670,6 @@ extension AppState {
             && !LocalNetworkDevicesSync.holdsProtectedFault
     }
 
-    static let automaticReleaseRetryCooldown: TimeInterval = 20
-
     /// Runs the same automatic release again (AI hold kept) after a network
     /// change or wake, with the recovery policy the original carried and no
     /// administrator prompt. The gates are read again when the task runs, so
@@ -2680,7 +2678,7 @@ extension AppState {
     func retryUnconfirmedAutomaticRelease(now: Date = Date()) {
         guard automaticReleaseRetryTask == nil, automaticReleaseRetryMayRun else { return }
         if let last = lastAutomaticReleaseRetryAt,
-           now.timeIntervalSince(last) < Self.automaticReleaseRetryCooldown { return }
+           now.timeIntervalSince(last) < automaticReleaseRetryCooldown { return }
         lastAutomaticReleaseRetryAt = now
         automaticReleaseRetryTask = Task { [weak self] in
             guard let self else { return }

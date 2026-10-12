@@ -248,6 +248,8 @@ final class AppStateSleepTests: XCTestCase {
         var repairError: Error?
         /// The non-prompting probe's answer for the retry.
         var repairRequired = false
+        /// Runs inside `restoreDNS`, like the notification the real restore causes.
+        var onDNSRestore: (() -> Void)?
     }
 
     private func hostWithFailedAutomaticRelease(
@@ -273,6 +275,7 @@ final class AppStateSleepTests: XCTestCase {
         runtime.coreStatus = { (false, true) }
         runtime.restoreDNS = {
             probe.dnsRestores += 1
+            probe.onDNSRestore?()
             if probe.dnsRestores >= probe.dnsFailsFrom {
                 throw HelperIPCError.commandFailed("Protected DNS could not be restored.")
             }
@@ -421,6 +424,84 @@ final class AppStateSleepTests: XCTestCase {
             "a refused administrator prompt waits for the user; a notification must not prompt again"
         )
         XCTAssertTrue(KillSwitchService.isArmed)
+        await finish(app)
+    }
+
+    private func waitUntilReleased(_ app: AppState) async {
+        for _ in 0..<80 where KillSwitchService.isArmed {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        await app.automaticReleaseRetryTask?.value
+        await app.connectionCoordinator.disconnectSequence?.value
+    }
+
+    func testNetworkEventInsideTheCooldownIsDeferredNotDropped() async {
+        let probe = ReleaseProbe()
+        probe.dnsFailsFrom = 2
+        probe.releaseSucceedsOn = 2
+        let app = await hostWithFailedAutomaticRelease(probe)
+        app.automaticReleaseRetryCooldown = 0.5
+        app.automaticReleaseRetryEchoSettle = 0
+
+        // t=0: the retry runs and the DNS restore fails transiently.
+        app.handleSystemNetworkChange()
+        await app.automaticReleaseRetryTask?.value
+        await app.connectionCoordinator.disconnectSequence?.value
+        XCTAssertTrue(KillSwitchService.isArmed)
+        // t=5: the network is back; this is the last notification there will be.
+        probe.dnsFailsFrom = .max
+        app.handleSystemNetworkChange()
+
+        await waitUntilReleased(app)
+        XCTAssertFalse(
+            KillSwitchService.isArmed,
+            "an event inside the cooldown must run the release once the cooldown ends"
+        )
+        XCTAssertEqual(probe.releases, 2)
+        await finish(app)
+    }
+
+    func testWakeInsideTheCooldownIsDeferredNotDropped() async {
+        let probe = ReleaseProbe()
+        probe.dnsFailsFrom = 2
+        probe.releaseSucceedsOn = 2
+        let app = await hostWithFailedAutomaticRelease(probe)
+        app.automaticReleaseRetryCooldown = 0.5
+        app.automaticReleaseRetryEchoSettle = 0
+
+        app.handleSystemNetworkChange()
+        await app.automaticReleaseRetryTask?.value
+        await app.connectionCoordinator.disconnectSequence?.value
+        probe.dnsFailsFrom = .max
+        app.resumeAfterSystemWake()
+
+        await waitUntilReleased(app)
+        XCTAssertFalse(KillSwitchService.isArmed, "a wake inside the cooldown must not be dropped")
+        await finish(app)
+    }
+
+    func testARetrysOwnNotificationsDoNotScheduleAnotherRetry() async {
+        let probe = ReleaseProbe()
+        probe.dnsFailsFrom = 2
+        let app = await hostWithFailedAutomaticRelease(probe)
+        app.automaticReleaseRetryCooldown = 0.2
+        // The DNS restore the retry performs makes macOS post a notification.
+        probe.onDNSRestore = { app.handleSystemNetworkChange() }
+
+        app.handleSystemNetworkChange()
+        await app.automaticReleaseRetryTask?.value
+        await app.connectionCoordinator.disconnectSequence?.value
+        // And the echo that lands just after the retry ended.
+        app.handleSystemNetworkChange()
+        try? await Task.sleep(for: .milliseconds(600))
+        await app.automaticReleaseRetryTask?.value
+        await app.connectionCoordinator.disconnectSequence?.value
+
+        XCTAssertEqual(
+            probe.dnsRestores, 2,
+            "a retry's own DNS / PF notifications must not re-trigger the retry"
+        )
+        XCTAssertNil(app.automaticReleaseDeferredRetry)
         await finish(app)
     }
 

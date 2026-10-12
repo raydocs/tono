@@ -101,6 +101,13 @@ final class AppState {
     @ObservationIgnored var unarmedNetworkKickTask: Task<Void, Never>?
     @ObservationIgnored var automaticReleaseRetryTask: Task<Void, Never>?
     @ObservationIgnored var lastAutomaticReleaseRetryAt: Date?
+    @ObservationIgnored var automaticReleaseRetryEndedAt: Date?
+    @ObservationIgnored var automaticReleaseDeferredRetry: Task<Void, Never>?
+    /// Minimum spacing between two automatic release attempts.
+    @ObservationIgnored var automaticReleaseRetryCooldown: TimeInterval = 20
+    /// How long after a retry ends a network notification is taken for the
+    /// echo of that retry's own DNS / PF changes rather than a new event.
+    @ObservationIgnored var automaticReleaseRetryEchoSettle: TimeInterval = 3
     /// Test seam. Nil uses a TCP connect that does not install PF.
     /// Not observed: an optional MainActor closure cannot be yielded by Observation.
     @ObservationIgnored
