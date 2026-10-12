@@ -61,8 +61,10 @@
    text, which is why the page-level overflow check never caught it. The
    floor (920 + 128 readable for notes) keeps the column on screen behind
    the DataTable's own inner scroll; the page itself never scrolls. */
-.clients-page .clients-release-table table {
-  min-width: 1048px;
+@media (min-width: 641px) {
+  .clients-page .clients-release-table table {
+    min-width: 1048px;
+  }
 }
 
 @media (max-width: 640px) {
@@ -78,5 +80,12 @@
     justify-content: flex-end;
     min-width: 44px;
     min-height: 44px;
+  }
+
+  /* The phone drops the checks and notes columns, so the fixed columns add up
+     to 592 px: channel, version and the actions come first and sit inside
+     the first 390 px, the dates scroll behind them in the table's own box. */
+  .clients-page .clients-release-table table {
+    min-width: 592px;
   }
 }
