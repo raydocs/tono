@@ -27,6 +27,12 @@ updates:
     groups:
       ops-console:
         patterns: ["*"]
+    ignore:
+      # typescript-eslint (latest 8.x and canary) supports TypeScript < 6.1 and
+      # throws on TS 7 at load; the major bump fails lint. Minor/patch still flow.
+      # Lift once typescript-eslint supports TS 7 (its issue #10940).
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /apps/windows/app
@@ -39,6 +45,12 @@ updates:
       windows-frontend:
         patterns: ["*"]
     labels: [dependencies, windows]
+    ignore:
+      # typescript-eslint (latest 8.x and canary) supports TypeScript < 6.1 and
+      # throws on TS 7 at load; the major bump fails lint. Minor/patch still flow.
+      # Lift once typescript-eslint supports TS 7 (its issue #10940).
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /apps/windows/crates/tono-plugin-core
