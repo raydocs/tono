@@ -33,7 +33,7 @@ it('prints one cluster as four cells with the machine code on hover and the seve
   root.innerHTML = renderToString(<ul><ClusterRow cluster={cluster} /></ul>);
   expect(cell(root, 'cluster-severity')).toBe(copy.severity.severe);
   expect(cell(root, 'cluster-sentence')).toBe(copy.codeWord.TONO_NODE_OR_CORE_UNREACHABLE);
-  expect(cell(root, 'cluster-detail')).toBe(`${clusterStage('verifyingTraffic')} · windows 0.0.75 · Los Angeles · Marina`);
+  expect(root.querySelector('.cluster-detail')?.getAttribute('title')).toBe(`${clusterStage('verifyingTraffic')} · windows 0.0.75 · Los Angeles · Marina`);
   expect(cell(root, 'cluster-counts')).toBe(copy.diagnosticsPanel.clusterReach(2, 1));
   expect(cell(root, 'cluster-status')).toBe(clusterStatus('quiet'));
   expect(root.querySelector('.cluster-status')?.classList.contains('ops-tag')).toBe(true);
@@ -51,15 +51,26 @@ it('keeps the severity cell for every row but leaves it empty unless the cluster
   expect(root.querySelector('.cluster-sentence')?.previousElementSibling).toBe(severity);
 });
 
-it('puts the full meta text on the cell title and splits it into three segments with hidden dots', () => {
+it('puts the full meta text on the cell title and splits it into three flex items with no dot text', () => {
   const root = document.createElement('div');
   root.innerHTML = renderToString(<ul><ClusterRow cluster={cluster} /></ul>);
   const meta = `${clusterStage('verifyingTraffic')} · windows 0.0.75 · Los Angeles · Marina`;
   expect(root.querySelector('.cluster-detail')?.getAttribute('title')).toBe(meta);
-  expect(cell(root, 'cluster-detail')).toBe(meta);
-  const segments = [...root.querySelectorAll('.cluster-seg')].map((node) => node.textContent);
+  const segments = [...root.querySelectorAll('.cluster-detail > .cluster-seg')].map((node) => node.textContent);
   expect(segments).toEqual([clusterStage('verifyingTraffic'), 'windows 0.0.75', 'Los Angeles · Marina']);
-  const dots = [...root.querySelectorAll('.cluster-dot')];
-  expect(dots).toHaveLength(2);
-  for (const dot of dots) expect(dot.getAttribute('aria-hidden')).toBe('true');
+  // The separators are CSS on items two and up, so no dot element or text is in the markup between them.
+  expect(root.querySelector('.cluster-dot')).toBeNull();
+  expect(root.querySelector('.cluster-detail')?.children).toHaveLength(3);
+  expect(root.querySelector('.cluster-node')?.textContent).toBe('Los Angeles · Marina');
+});
+
+it('marks a quiet row with is-quiet and leaves an open row without it', () => {
+  const quiet = document.createElement('div');
+  quiet.innerHTML = renderToString(<ul><ClusterRow cluster={cluster} /></ul>);
+  expect(quiet.querySelector('li')?.classList.contains('is-quiet')).toBe(true);
+  expect(quiet.querySelector('li')?.classList.contains('cluster-row')).toBe(true);
+  const open = document.createElement('div');
+  open.innerHTML = renderToString(<ul><ClusterRow cluster={{ ...cluster, status: 'open' }} /></ul>);
+  expect(open.querySelector('li')?.classList.contains('is-quiet')).toBe(false);
+  expect(cell(open, 'cluster-status')).toBe(clusterStatus('open'));
 });

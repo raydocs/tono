@@ -2,6 +2,7 @@ import { EmptyLine, ErrorLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { getJson } from '@/lib/api';
+import { sortClusters } from '@/lib/failure-clusters';
 import { useResource } from '@/lib/use-resource';
 import '@/styles/today-clusters.css';
 import { ClusterRow } from './ClusterRow';
@@ -41,7 +42,7 @@ export function FailureClusters() {
       }
     >
       <ul className="cluster-list">
-        {resource.data.clusters.map((cluster) => (
+        {sortClusters(resource.data.clusters).map((cluster) => (
           <ClusterRow key={cluster.id} cluster={cluster} />
         ))}
       </ul>

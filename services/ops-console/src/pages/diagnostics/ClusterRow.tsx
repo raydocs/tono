@@ -17,20 +17,18 @@ export function ClusterRow({ cluster }: { cluster: FailureCluster }) {
   const platform = `${cluster.platform} ${cluster.appVersion}`;
   const node = clusterNode(cluster.node);
   return (
-    <li className="cluster-row">
+    <li className={cluster.status === 'quiet' ? 'cluster-row is-quiet' : 'cluster-row'}>
       {/* Always rendered so the sentences share one x; empty unless p0. The
           label is the one the incident card puts before its subject. */}
       <span className="cluster-severity">{cluster.severity === 'p0' ? copy.severity.severe : null}</span>
       <span className="cluster-sentence" title={cluster.code}>{clusterCode(cluster.code)}</span>
-      {/* Three segments with visible dots between them on desktop; on a phone
-          the dots are hidden and the segments wrap as separate items, so no
-          line starts or ends on a dot. */}
+      {/* Three flex items; the dots between them are CSS (`::before` on items
+          two and up), hidden on a phone where the items wrap, so no line starts
+          or ends on a dot. Only the node can be long: it alone gives way. */}
       <span className="cluster-detail" title={`${stage} · ${platform} · ${node}`}>
-        <span className="cluster-seg">{stage}</span>
-        <span className="cluster-dot" aria-hidden="true"> · </span>
-        <span className="cluster-seg">{platform}</span>
-        <span className="cluster-dot" aria-hidden="true"> · </span>
-        <span className="cluster-seg">{node}</span>
+        <span className="cluster-seg cluster-stage">{stage}</span>
+        <span className="cluster-seg cluster-platform">{platform}</span>
+        <span className="cluster-seg cluster-node">{node}</span>
       </span>
       <span className="cluster-counts">{copy.diagnosticsPanel.clusterReach(cluster.users, cluster.devices)}</span>
       <span className="ops-tag cluster-status">{clusterStatus(cluster.status)}</span>

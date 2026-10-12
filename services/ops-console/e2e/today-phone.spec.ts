@@ -123,6 +123,11 @@ test('failure cluster meta lines never begin or end with a separator', async ({ 
     return rows.map((row) => row.text);
   }));
   expect(lines.length).toBeGreaterThan(0);
+  // The separators are CSS `::before` on items two and up; on a phone they are not rendered.
+  const separators = await details.evaluateAll((nodes) => nodes.flatMap((node) =>
+    [...node.querySelectorAll('.cluster-seg')].slice(1).map((seg) => getComputedStyle(seg, '::before').display)));
+  expect(separators.length).toBeGreaterThan(0);
+  for (const display of separators) expect(display).toBe('none');
   for (const rows of lines) {
     for (const text of rows) {
       expect(text.startsWith('·')).toBe(false);
