@@ -1,3 +1,4 @@
+import { Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type {
   AdoptionBucket,
@@ -199,9 +200,6 @@ export default function CustomersPage({
 
   return (
     <div ref={context.container} className="page-wrap customers-page customers-wide">
-      <label className="flex items-center gap-3 text-fine">{copy.traffic.search}
-        <input type="search" className="min-w-0 max-w-sm flex-1 rounded-md border border-[var(--hairline)] bg-[var(--surface)] px-3 py-2 text-body" value={query} onChange={(event) => context.change({ query: event.target.value })} />
-      </label>
       {privacy.privacy ? <p className="text-fine" role="status">{copy.privacyCustomerSearchNotice}</p> : null}
       <div className="page-head">
         <section className="customers-hero" aria-label={copy.pages.customers}>
@@ -247,7 +245,9 @@ export default function CustomersPage({
           ) : null}
         </section>
 
-        {/* All five platforms, always. The ones nothing has shipped for say so. */}
+        {/* All five platforms, always. The ones nothing has shipped for say so.
+            The search shares the row and is outside every status branch above,
+            so it is there while the list loads and after it fails too. */}
         <div className="toolbar-row">
           {PLATFORM_CHIPS.map((id) => {
             const live = released.has(id);
@@ -264,6 +264,16 @@ export default function CustomersPage({
               </Chip>
             );
           })}
+          <label className="ops-search ml-auto">
+            <Search size={13} aria-hidden />
+            <input
+              type="search"
+              aria-label={copy.traffic.search}
+              placeholder={copy.traffic.search}
+              value={query}
+              onChange={(event) => context.change({ query: event.target.value })}
+            />
+          </label>
         </div>
 
         {/* The version bands only mean something once a platform is chosen:

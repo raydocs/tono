@@ -19,26 +19,6 @@
     gap: 16px;
   }
 
-  .nodes-search {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    height: 30px;
-    padding: 0 10px;
-    border: 1px solid var(--hairline);
-    border-radius: 8px;
-    color: var(--muted-foreground);
-    background: var(--surface);
-  }
-  .nodes-search:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
-  .nodes-search input {
-    width: 168px;
-    background: transparent;
-    font-size: 13px;
-    color: var(--foreground);
-    outline: none;
-  }
-
   .nodes-filters {
     display: flex;
     flex-wrap: wrap;
@@ -89,7 +69,6 @@
   @media (max-width: 640px) {
     .nodes-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .nodes-load-grid { grid-template-columns: minmax(0, 1fr); }
-    .nodes-search input { width: 120px; }
     .nodes-name { width: auto; }
     .nodes-quota-col { width: auto; }
     .nodes-quota .meter { width: 32px; }

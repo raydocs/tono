@@ -114,7 +114,9 @@ export function FleetLoad({
           </Panel>
         </div>
       ) : (
-        <Panel title={words.title} {...panel} />
+        /* The section heading above already names this block; a failed read
+           must not answer it with a card carrying the same words. */
+        <Panel title={state === 'error' ? undefined : words.title} {...panel} />
       )}
     </section>
   );

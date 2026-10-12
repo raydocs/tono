@@ -12,65 +12,70 @@ import { cn } from '@/lib/utils';
  * The one thing this grid must never do is print a zero for a platform
  * nobody has shipped a client for: "0 on the latest" reads as a fleet that
  * refused to upgrade, when the truth is that there is nothing to upgrade to.
- * `released` on the matrix is the Worker's own answer to that, and every cell
- * of an unreleased row says so in words instead.
+ * `released` on the matrix is the Worker's own answer to that. Those platforms
+ * get no row at all (three rows of twelve identical "not released" cells were noise
+ * around the one fact); one sentence under the table names them instead, so an
+ * unreleased platform is still never dropped silently and never shown as 0.
  *
  * Every other cell is a link rather than a number, because the question after
  * "eleven are behind" is always "which eleven".
  */
 export function AdoptionMatrix({ matrix }: { matrix: AdoptionMatrixDto }) {
   const released = new Set(matrix.released);
+  const shipped = PLATFORMS.filter((platform) => released.has(platform));
+  const unshipped = PLATFORMS.filter((platform) => !released.has(platform));
   const byKey = new Map(matrix.cells.map((cell) => [`${cell.platform}:${cell.bucket}`, cell]));
-  if (matrix.cells.length === 0 && released.size === 0) {
+  /* Nothing shipped: a grid with no rows is a header over nothing, and the
+     sentence would list all five platforms right under the page's own
+     "no client released yet" headline. Say what is true of the grid instead. */
+  if (released.size === 0) {
     return <Empty message={copy.emptyAdoption} />;
   }
 
   return (
-    <div className="clients-matrix raised overflow-x-auto rounded-[10px] bg-[var(--surface)]">
-      <table className="w-full table-fixed border-collapse text-body">
-        <thead className="data-head bg-[var(--surface)]">
-          <tr className="data-row border-b border-[var(--hairline)]">
-            <th className="px-3 text-left text-micro font-medium text-[var(--muted-foreground)]">
-              {copy.deviceColumns.platform}
-            </th>
-            {ADOPTION_BUCKETS.map((bucket) => (
-              <th
-                key={bucket}
-                className="px-3 text-right text-micro font-medium text-[var(--muted-foreground)]"
-              >
-                {copy.bucket[bucket]}
+    <>
+      <div className="clients-matrix raised overflow-x-auto rounded-[10px] bg-[var(--surface)]">
+        <table className="w-full table-fixed border-collapse text-body">
+          <thead className="data-head bg-[var(--surface)]">
+            <tr className="data-row border-b border-[var(--hairline)]">
+              <th className="px-3 text-left text-micro font-medium text-[var(--muted-foreground)]">
+                {copy.deviceColumns.platform}
               </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {PLATFORMS.map((platform) => (
-            <tr key={platform} className="data-row border-b border-[var(--hairline)] last:border-b-0">
-              <td className="px-3 text-row">{copy.platform[platform]}</td>
               {ADOPTION_BUCKETS.map((bucket) => (
-                <td key={bucket} className="px-3 text-right">
-                  {released.has(platform) ? (
+                <th
+                  key={bucket}
+                  className="px-3 text-right text-micro font-medium text-[var(--muted-foreground)]"
+                >
+                  {copy.bucket[bucket]}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {shipped.map((platform) => (
+              <tr key={platform} className="data-row border-b border-[var(--hairline)] last:border-b-0">
+                <td className="px-3 text-row">{copy.platform[platform]}</td>
+                {ADOPTION_BUCKETS.map((bucket) => (
+                  <td key={bucket} className="px-3 text-right">
                     <Cell
                       platform={platform}
                       bucket={bucket}
                       users={byKey.get(`${platform}:${bucket}`)?.users ?? 0}
                       devices={byKey.get(`${platform}:${bucket}`)?.devices ?? 0}
                     />
-                  ) : (
-                    <span
-                      className="text-fine"
-                      title={copy.clientsUnreleasedTitle(copy.platform[platform])}
-                    >
-                      {copy.unreleased}
-                    </span>
-                  )}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {unshipped.length === 0 ? null : (
+        <p className="text-fine">
+          {copy.clientsUnreleasedRow(unshipped.map((platform) => copy.platform[platform]).join(' · '))}
+        </p>
+      )}
+    </>
   );
 }
 
