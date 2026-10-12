@@ -1393,6 +1393,7 @@ where
 /// tick) for as long as `still_owned` says this session is still the idle protected one; a user
 /// Disconnect, a new connect or a newer generation ends it. Every attempt goes through the
 /// Service's own gate, which keeps its refusals: this loop never releases anything by itself.
+/// `claim_owner` gives a single loop per generation the right to retry (`claim_health_retry`).
 async fn settle_health_release<OF, SF, RF, PF>(
     first: Result<(), String>,
     period: Duration,
@@ -1407,8 +1408,18 @@ where
     RF: std::future::Future<Output = Result<(), String>>,
     PF: std::future::Future<Output = ()>,
 {
-    let _ = claim_owner;
     let mut result = first;
+    // Held until this function returns or is aborted. Handlers that joined the same failed
+    // release all arrive here with the same error, and exactly one may retry it; the claim is
+    // taken before the first tick so the others return without creating an interval.
+    let _owner = if result.is_err() {
+        match claim_owner().await {
+            Some(token) => Some(token),
+            None => return,
+        }
+    } else {
+        None
+    };
     let mut interval = tokio::time::interval(period);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     // The first tick is immediate; the retry waits one full period after the refusal.

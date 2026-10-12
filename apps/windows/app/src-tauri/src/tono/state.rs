@@ -631,6 +631,9 @@ impl TonoInner {
     fn retire_connection_generation_as(&mut self, release_on_stale: bool, automatic: bool) {
         let retired = self.connect_generation;
         self.connect_generation = self.connect_generation.wrapping_add(1);
+        // The retry loop of the retired session is aborted or stops at its next ownership
+        // check; its right to retry must not outlive the session.
+        self.retry_owner = None;
         self.release_on_stale = release_on_stale;
         // A deferred policy change belongs to the attempt being retired (F5).
         self.pending_policy_change = None;
