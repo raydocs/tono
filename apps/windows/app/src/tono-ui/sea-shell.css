@@ -15,6 +15,18 @@
 .tono-sea-backdrop[data-visible="true"] {
   opacity: 1;
 }
+/* Inner pages: the paused home scene stays as a dim, blurred horizon under the
+   ground gradient, so leaving Home does not drop into a flat dark page. The
+   negative inset hides the blur's soft edge (a scale transform here made the
+   page text above it render soft); the scene is paused, so the blur is paid once. */
+.tono-root[data-sea-dimmed="true"] .tono-sea-backdrop {
+  inset: -24px;
+  opacity: 0.7;
+  filter: blur(14px) saturate(0.9) brightness(0.75);
+}
+.tono-root[data-sea-dimmed="true"] .tono-sea-ground {
+  opacity: 0.45;
+}
 .tono-root[data-sea-appearance="true"] .tono-home {
   background: transparent;
 }

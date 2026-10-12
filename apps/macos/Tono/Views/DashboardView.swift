@@ -420,7 +420,7 @@ struct DashboardView: View {
                 title: "Protection",
                 value: protectionValue,
                 detail: protectionDetail,
-                systemImage: appState.isConnected ? "checkmark.shield.fill" : "shield",
+                systemImage: appState.isConnected ? "sun.horizon.fill" : "sun.horizon",
                 tint: appState.isConnected ? TonoStatus.positive : TonoStatus.neutral
             )
 
@@ -790,7 +790,7 @@ private struct ConnectionProgressCard: View {
                         .controlSize(.small)
                         .tint(headerColor)
                 } else {
-                    Image(systemName: "exclamationmark.shield.fill")
+                    Image(systemName: "exclamationmark.circle.fill")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(headerColor)
                 }

@@ -46,7 +46,7 @@ export const SeaChrome = ({
       }}
     >
       <div className="tono-sea-lockup" data-tauri-drag-region="true">
-        <TonoLogo connected={false} size={26} />
+        <TonoLogo connected={false} size={26} variant="sun" />
         <span data-tauri-drag-region="true">Tono</span>
       </div>
       {!login && (

@@ -293,6 +293,20 @@
       "tlsIntercepted": "网络在拦截加密连接：这台电脑与 Tono 之间有设备或软件替换了 Tono 的证书，Tono 不会接受。如果这个网络有网页登录，请先在浏览器里完成；否则请关闭检查 HTTPS 的代理或安全软件，然后重试。",
       "serverError": "登录服务暂时不可用，请稍后重试。",
       "unknown": "这次操作未完成，请重试。"
+    },
+    "paths": {
+      "title": "已尝试的连接路径",
+      "system_dns": "系统 DNS",
+      "pinned": "固定地址",
+      "relay": "Tono 中继",
+      "kind": {
+        "dns": "域名解析失败",
+        "connect": "无法连接",
+        "tls": "安全连接失败",
+        "timeout": "超时",
+        "other": "失败"
+      },
+      "elapsed": "{{seconds}} 秒"
     }
   },
   "pill": {

@@ -1313,6 +1313,20 @@ export interface TranslationResources {
           description: string
           title: string
         }
+        paths: {
+          elapsed: string
+          kind: {
+            connect: string
+            dns: string
+            other: string
+            timeout: string
+            tls: string
+          }
+          pinned: string
+          relay: string
+          system_dns: string
+          title: string
+        }
         privacyDetails: string
         privacySummary: string
         recoveryEnded: string

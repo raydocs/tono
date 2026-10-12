@@ -9,7 +9,10 @@ type TonoNodeBadgeProps = {
   size?: number
   /** City name from the catalog display title; picks a landmark stroke. */
   city?: string | null
+  /** `sunrise` strokes with the sea look's warm gradient on a warm-tinted tile. */
+  tone?: 'brand' | 'sunrise'
 }
+const SUNRISE_STOPS = ['#FFE9C4', '#FFB877', '#FF9E63'] as const
 
 /**
  * The node identity mark: a neutral glass tile carrying the Tono route glyph
@@ -89,9 +92,17 @@ const cityGlyph = (city?: string | null) => {
   }
 }
 
-export const TonoNodeBadge = ({ size = 44, city }: TonoNodeBadgeProps) => {
+export const TonoNodeBadge = ({
+  size = 44,
+  city,
+  tone = 'brand',
+}: TonoNodeBadgeProps) => {
   const dark = useThemeMode() !== 'light'
   const gradientId = useId()
+  const sunrise = tone === 'sunrise'
+  const stops = sunrise
+    ? SUNRISE_STOPS
+    : [TONO_COLORS.accent, TONO_COLORS.accentSoft, TONO_COLORS.accentWarm]
 
   return (
     <span
@@ -104,8 +115,18 @@ export const TonoNodeBadge = ({ size = 44, city }: TonoNodeBadgeProps) => {
         height: size,
         flexShrink: 0,
         borderRadius: Math.round(size * 0.28),
-        background: dark ? 'rgba(255,255,255,0.07)' : 'rgba(56,72,108,0.055)',
-        border: `1px solid ${dark ? 'rgba(255,255,255,0.13)' : 'rgba(56,72,108,0.10)'}`,
+        background: sunrise
+          ? 'rgba(255,214,160,0.09)'
+          : dark
+            ? 'rgba(255,255,255,0.07)'
+            : 'rgba(56,72,108,0.055)',
+        border: `1px solid ${
+          sunrise
+            ? 'rgba(255,214,160,0.18)'
+            : dark
+              ? 'rgba(255,255,255,0.13)'
+              : 'rgba(56,72,108,0.10)'
+        }`,
         boxSizing: 'border-box',
       }}
     >
@@ -129,9 +150,9 @@ export const TonoNodeBadge = ({ size = 44, city }: TonoNodeBadgeProps) => {
             y2="1"
             gradientUnits="objectBoundingBox"
           >
-            <stop offset="0" stopColor={TONO_COLORS.accent} />
-            <stop offset="0.52" stopColor={TONO_COLORS.accentSoft} />
-            <stop offset="1" stopColor={TONO_COLORS.accentWarm} />
+            <stop offset="0" stopColor={stops[0]} />
+            <stop offset="0.52" stopColor={stops[1]} />
+            <stop offset="1" stopColor={stops[2]} />
           </linearGradient>
         </defs>
         {cityGlyph(city)}

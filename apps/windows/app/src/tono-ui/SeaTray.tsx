@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { nodeCityLabel } from '@/pages/tono/node-meta'
+import { nodeCityLabel, nodeCityParts } from '@/pages/tono/node-meta'
 import type { TonoServer } from '@/services/tono'
 
 import type { SeaPhase } from './SeaScene'
+import { TonoNodeBadge } from './TonoNodeBadge'
 import './sea-tray.css'
 
 export const SeaTray = ({
@@ -95,9 +96,16 @@ export const SeaTray = ({
               key={server.name}
               onClick={() => onSelect(server.name)}
             >
-              {t('tono.tray.useRoute', {
-                city: nodeCityLabel(server.name, t),
-              })}
+              <span className="sea-tray-quick-label">
+                <TonoNodeBadge
+                  size={20}
+                  city={nodeCityParts(server.name).city}
+                  tone="sunrise"
+                />
+                {t('tono.tray.useRoute', {
+                  city: nodeCityLabel(server.name, t),
+                })}
+              </span>
               <span aria-hidden="true">→</span>
             </button>
           ))}

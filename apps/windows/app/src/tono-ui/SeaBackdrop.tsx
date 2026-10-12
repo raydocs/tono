@@ -6,7 +6,9 @@ import { seaPresentation } from './sea-presentation'
 import { SeaScene } from './SeaScene'
 import { BackdropContext, type Presentation } from './use-shared-sea-backdrop'
 
-/** Only scenery survives navigation; hidden pages keep no handlers or subscriptions. */
+/** Only scenery survives navigation; hidden pages keep no handlers or subscriptions.
+ *  The scene keeps animating behind inner pages, where it shows dimmed; the
+ *  motion preference and the quality probe still decide whether it moves at all. */
 export const SeaBackdrop = ({
   enabled,
   active,
@@ -34,7 +36,6 @@ export const SeaBackdrop = ({
           progress={
             'progress' in presentation ? presentation.progress : undefined
           }
-          paused={!active}
         />
       </div>
       {children}

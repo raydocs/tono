@@ -313,6 +313,8 @@ struct MenuBarView: View {
                             }
                         } label: {
                             HStack(spacing: 8) {
+                                NodeRouteMark(size: 20, city: nodeCityParts(node.displayName).city,
+                                              gradient: SeaTheme.primaryGradient, warmTile: true)
                                 Text(nodeRouteTitle(node)).lineLimit(1)
                                 Spacer(minLength: 4)
                                 Image(systemName: "arrow.right").font(.system(size: 12))

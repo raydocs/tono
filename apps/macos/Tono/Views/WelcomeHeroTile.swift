@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Welcome v2 hero: the TO icon tile as a physical object. Corner radius is
+/// Welcome v2 hero: the sun-on-the-horizon icon tile as a physical object. Corner radius is
 /// 22% of the side; shadows and the light-theme ground-contact ellipse come
 /// from `docs/welcome-v2.md` §2. Rises 12 pt and fades in once over 400 ms.
 struct WelcomeHeroTile: View {
