@@ -51,11 +51,15 @@ export function phoneColumns<T>(columns: readonly DataColumn<T>[]): DataColumn<T
  * The WeChat id is no column of its own: it is the quiet second line of the
  * address cell, and the search box still matches it. That returns 66 px,
  * which go to the columns whose values were being cut: the failure column
- * takes 36 (150 px with 4 px of side air, so the longest sentence, 12
- * characters and 141 px, is whole), the service column 20, and the follow-up
- * column 10 (94 px with 8 px of side air, still room for a whole
- * `YYYY-MM-DD`). The address column keeps the 260 px the longest address with
- * its tag needs (the customers spec asserts none is clipped). Widths include
+ * takes 28 (142 px with 4 px of side air, so the longest sentence keeps 20 px
+ * to the cell edge), the service column 20, and the follow-up column 2 (86 px
+ * with 8 px of side air, still room for a whole `YYYY-MM-DD`). The node column
+ * is 148 px so the site line, the part that tells two machines in a city
+ * apart, is whole for every site up to eight characters of Chinese; the 8 px
+ * the failure column would otherwise have lost come from the version column
+ * (62 px, "0.0.66" still whole). The address column keeps the 260 px the
+ * longest address with its tag needs (the customers spec asserts none is
+ * clipped). Widths include
  * the cells' padding (border-box). Below the table floor in Customers.tsx the
  * container scrolls sideways rather than squeeze any column further.
  */
@@ -116,14 +120,14 @@ export function customerColumns(
     {
       id: 'node',
       header: copy.customerColumns.node,
-      width: '124px',
+      width: '148px',
       sortValue: (row) => row.selectedServer ?? '',
       cell: (row) => <NodeCell name={row.selectedServer} />,
     },
     {
       id: 'failure',
       header: copy.customerColumns.failure,
-      width: '150px',
+      width: '142px',
       className: 'px-1',
       sortValue: (row) => row.lastFailure?.at ?? 0,
       cell: (row) => <FailureCell failure={row.lastFailure} />,
@@ -145,7 +149,7 @@ export function customerColumns(
       {
         id: 'followup',
         header: copy.customerColumns.followup,
-        width: '94px',
+        width: '86px',
         className: 'px-2',
         sortValue: (row: CustomerSummaryDto) => followups.get(row.userId)?.dueAt ?? 0,
         cell: (row: CustomerSummaryDto) => <FollowupCell row={followups.get(row.userId)} />,
@@ -166,7 +170,7 @@ export function customerColumns(
       {
         id: 'version',
         header: copy.customerColumns.minVersion,
-        width: '70px',
+        width: '62px',
         className: 'px-2',
         mono: true,
         sortValue: (row: CustomerSummaryDto) => row.minAppVersion ?? '',

@@ -129,6 +129,11 @@ test.describe('customers page', () => {
         height: cell.getBoundingClientRect().height,
         first: cell.querySelector('span span')?.getBoundingClientRect().width ?? 0,
         firstNatural: (cell.querySelector('span span') as HTMLElement | null)?.scrollWidth ?? 0,
+        /** The lower line is the site, the part that tells two machines in one city apart. */
+        site: (() => {
+          const line = [...cell.querySelectorAll('span > span')].at(-1);
+          return line === undefined ? null : { text: (line.textContent ?? '').trim(), over: line.scrollWidth - line.clientWidth };
+        })(),
       });
       return {
         node: column('当前节点').map(read),
@@ -146,6 +151,22 @@ test.describe('customers page', () => {
       for (const line of cell.lines) {
         expect(line.endsWith('·'), line).toBe(false);
         expect(line, line).not.toContain('· …');
+      }
+    }
+    /*
+     * The site is what the operator reads the node by, so it is whole in every
+     * row. The one site that is not is the 33-character
+     * "Pacific-Coast-Highway-Backhaul-01", kept in the fixture on purpose as
+     * the longest production-shaped name: no column fits it, so it must end in
+     * its own ellipsis with the whole name on the hover.
+     */
+    const longest = 'Pacific-Coast-Highway-Backhaul-01';
+    for (const cell of named) {
+      if (cell.site!.text === longest) {
+        expect(cell.site!.over, cell.text).toBeGreaterThan(0);
+        expect(cell.title, cell.text).toContain(longest);
+      } else {
+        expect(cell.site!.over, cell.text).toBeLessThanOrEqual(0);
       }
     }
     // The upper line is only the first segment of the name, never the middle ones too.
@@ -240,6 +261,56 @@ test.describe('customers page', () => {
    * partial name or a trailing dot; the follow-up date is never cut; and the
    * longest failure sentence has the column it needs.
    */
+  test('the longest failure sentence keeps 20 px to its cell edge, and the follow-up date stays on one line', async ({ page }) => {
+    await open(page, '/customers', 'dense');
+    const found = await page.evaluate(() => {
+      const index = (name: string) => [...document.querySelectorAll('thead th')]
+        .findIndex((th) => th.textContent?.trim() === name);
+      const rows = [...document.querySelectorAll('tbody tr')];
+      const failureAt = index('最近失败');
+      const followupAt = index('跟进');
+      const slack = rows.flatMap((row) => {
+        const cell = row.querySelectorAll('td')[failureAt]!;
+        const sentence = [...cell.querySelectorAll('span')].at(-1)!;
+        if (cell.querySelectorAll('span').length < 2) return [];
+        const range = document.createRange();
+        range.selectNodeContents(sentence);
+        return [{ text: sentence.textContent ?? '', slack: cell.getBoundingClientRect().right - range.getBoundingClientRect().right }];
+      });
+      const dates = rows.flatMap((row) => {
+        const cell = row.querySelectorAll('td')[followupAt]!;
+        const date = [...cell.querySelectorAll('span')].at(-1);
+        if (date === undefined || !/^\d{4}-\d{2}-\d{2}$/.test((date.textContent ?? '').trim())) return [];
+        return [{ lines: Math.round(date.getBoundingClientRect().height / parseFloat(getComputedStyle(date).lineHeight)), over: date.scrollWidth - date.clientWidth }];
+      });
+      const versionAt = index('最低版本');
+      const versions = rows.flatMap((row) => {
+        const cell = row.querySelectorAll('td')[versionAt]!;
+        if (!/^\d+\.\d+\.\d+/.test((cell.textContent ?? '').trim())) return [];
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        const box = cell.getBoundingClientRect();
+        return [{ text: (cell.textContent ?? '').trim(), room: box.right - parseFloat(getComputedStyle(cell).paddingRight) - range.getBoundingClientRect().right }];
+      });
+      return { slack, dates, versions, scroll: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+    });
+    expect(found.slack.length).toBeGreaterThan(3);
+    const stale = found.slack.filter((entry) => entry.text === copy.codeWord.CATALOG_STALE);
+    expect(stale.length).toBeGreaterThan(0);
+    const longest = found.slack.reduce((a, b) => (b.slack < a.slack ? b : a));
+    expect(longest.slack, longest.text).toBeGreaterThanOrEqual(20);
+    for (const entry of stale) expect(entry.slack, entry.text).toBeGreaterThanOrEqual(20);
+    expect(found.dates.length).toBeGreaterThan(0);
+    for (const date of found.dates) {
+      expect(date.lines).toBe(1);
+      expect(date.over).toBeLessThanOrEqual(0);
+    }
+    // The minimum-version column gave 8 px to the failure sentences: its numbers still fit whole.
+    expect(found.versions.length).toBeGreaterThan(3);
+    for (const version of found.versions) expect(version.room, version.text).toBeGreaterThanOrEqual(0);
+    expect(found.scroll).toBeLessThanOrEqual(0);
+  });
+
   test('the service, follow-up and failure cells never show a cut value', async ({ page }) => {
     await open(page, '/customers');
     const cells = await page.evaluate(() => {
