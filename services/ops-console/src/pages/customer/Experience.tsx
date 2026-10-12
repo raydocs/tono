@@ -47,7 +47,7 @@ export function Experience({
         <div className="flex flex-col gap-3">
           <p className="text-body text-[var(--muted-foreground)]">{scope}</p>
           {slo.data.items.length === 0 ? <EmptyLine message={words.none} /> : null}
-          <div className="grid gap-4 border-y border-[var(--hairline)] py-4 sm:grid-cols-4">
+          <div className="metric-band grid gap-4 border-y border-[var(--hairline)] py-4 sm:grid-cols-4">
             <MetricCard
               label={words.successRate}
               value={measured(slo.data.summary.successRate, slo.data.updatedAt, copy.sourceWord.telemetry)}
