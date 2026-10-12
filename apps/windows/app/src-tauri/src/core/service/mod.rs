@@ -879,20 +879,35 @@ pub(crate) async fn prime_release_epoch() {
     }
 }
 
-/// An explicit Connect from the user claims the release epoch before its first wait, so every
-/// ticket taken before the click is out of date and a Restore internet clicked after it wins
-/// (Sol R3-F1 on PR #1569). The fence stays as it was until [`begin_user_connect`] has read the
-/// generation: an attempt that starts in between is still refused locally.
+/// Where the epoch stood when the user clicked Connect, read before the Connect waits for
+/// anything (Sol R4-F1 on PR #1569). It orders the click against a Restore internet that raises
+/// its fence without the state lock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ConnectStamp(u64);
+
+pub(crate) fn user_connect_stamp() -> ConnectStamp {
+    ConnectStamp(release_epoch().serial)
+}
+
+/// An explicit Connect from the user claims the release epoch, so every ticket taken before the
+/// click is out of date and a Restore internet clicked after it wins (Sol R3-F1, R4-F1). The
+/// claim is a compare-and-swap against `stamp`: a Connect that a Restore internet or another
+/// Connect overtook while it waited for the state lock gets `None` and no new identity. The
+/// fence stays as it was until [`begin_user_connect`] has read the generation: an attempt that
+/// starts in between is still refused locally.
 ///
 /// The caller holds the state lock and has checked that no Restore internet is under way.
-pub(crate) fn claim_user_connect() -> ReleaseTicket {
+pub(crate) fn claim_user_connect(stamp: ConnectStamp) -> Option<ReleaseTicket> {
     let mut epoch = release_epoch();
+    if epoch.serial != stamp.0 {
+        return None;
+    }
     epoch.serial += 1;
-    ReleaseTicket {
+    Some(ReleaseTicket {
         serial: epoch.serial,
         fenced: epoch.fenced,
         generation: epoch.generation,
-    }
+    })
 }
 
 /// The second half of the user's Connect: lift the fence and record `generation`, but only while

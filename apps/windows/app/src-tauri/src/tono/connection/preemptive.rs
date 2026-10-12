@@ -177,7 +177,8 @@ mod tests {
         let restore = crate::core::service::raise_release_fence();
         let mut inner = state.lock().await;
         // The newer Connect: claimed under the state lock, generation read, attempt admitted.
-        let claim = super::super::entry::claim_user_connect(&inner).unwrap();
+        let stamp = crate::core::service::user_connect_stamp();
+        let claim = super::super::entry::claim_user_connect(&inner, stamp).unwrap();
         assert!(crate::core::service::finish_user_connect(&claim, Some(0x5EED_0A01)));
         let current = inner.connect_generation;
         let (generation, cancellation, _) = super::super::begin_attempt(&mut inner, current).await.unwrap();
@@ -190,5 +191,52 @@ mod tests {
         assert!(!inner.fsm.status().is_disconnecting);
         assert_eq!(inner.release_ticket, ticket);
         assert!(crate::core::service::release_ticket_current(&ticket));
+    }
+
+    /// Sol R4-F1 on PR #1569: an older Connect queued on the state lock, then a newer Restore
+    /// raises its fence and queues behind it. The Connect gets the lock first but must not claim
+    /// a fresh identity; the Restore keeps its ticket and makes its first change.
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn a_connect_queued_before_a_newer_restore_does_not_take_its_ownership() {
+        let _epoch = crate::core::service::RELEASE_EPOCH_TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = Arc::new(TonoState::for_test());
+        // Something else holds the state lock; the FSM is not disconnecting.
+        let holder = state.lock().await;
+        // The older Connect is clicked and queues at its first wait.
+        let connect = tokio::spawn({
+            let state = Arc::clone(&state);
+            async move { super::super::entry::claim_for_click(&state).await }
+        });
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        assert!(!connect.is_finished(), "the Connect must be waiting for the state lock");
+        // The newer Restore is clicked: it takes its ticket before its own wait.
+        let restore = crate::core::service::raise_release_fence();
+        let restore_wait = tokio::spawn({
+            let state = Arc::clone(&state);
+            async move {
+                let mut inner = state.lock().await;
+                let began = begin_restore(&mut inner, &restore);
+                (began, inner.fsm.status().is_disconnecting)
+            }
+        });
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        let generation = holder.connect_generation;
+        drop(holder);
+        // The lock is fair, so the Connect resumes first.
+        let claimed = connect.await.unwrap();
+        assert!(claimed.is_err(), "an overtaken Connect must not claim the epoch");
+        let (began, disconnecting) = restore_wait.await.unwrap();
+        assert!(began, "the newer Restore keeps its ticket and makes its first change");
+        assert!(disconnecting);
+        assert!(crate::core::service::release_ticket_current(&restore));
+        assert!(crate::core::service::release_fenced(), "the fence stays up");
+        assert_ne!(state.lock().await.connect_generation, generation, "the Restore retired the old generation");
     }
 }

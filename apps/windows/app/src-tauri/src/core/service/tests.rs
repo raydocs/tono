@@ -1018,7 +1018,7 @@ fn an_older_connect_does_not_adopt_the_generation_a_newer_restore_released() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     const RELEASED: u64 = 0x5EED_0B02;
     // The older Connect claims the epoch, then waits for its generation read.
-    let connect = super::claim_user_connect();
+    let connect = super::claim_user_connect(super::user_connect_stamp()).unwrap();
     // A Restore internet begins meanwhile and releases the machine.
     let restore = super::raise_release_fence();
     // The read returns the released generation to the older Connect.
