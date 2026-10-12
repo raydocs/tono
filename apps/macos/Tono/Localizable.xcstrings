@@ -801,6 +801,16 @@
         }
       }
     },
+    "The helper needs an administrator repair that automatic retries do not ask for.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "网络助手需要管理员修复，自动重试不会弹出授权，请点击“恢复正常网络”并授权。"
+          }
+        }
+      }
+    },
     "The helper read back protected DNS settings. DNS resolution and browser Secure DNS were not tested.": {
       "localizations": {
         "zh-Hans": {
