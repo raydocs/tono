@@ -37,7 +37,7 @@ import {
 import { assertFunnel } from './funnel';
 import { assertIncident, assertIncidentDetail } from './incidents';
 import { assertJob } from './jobs';
-import { assertAdoptionMatrix, assertRelease, assertUpdateChannel } from './releases';
+import { assertAdoptionMatrix, assertRelease, assertReleaseObjectList, assertUpdateChannel } from './releases';
 import { assertAlertDelivery, assertAlertRule } from './alerts';
 import { assertDigest, assertFollowupList } from './followups';
 import {
@@ -117,6 +117,7 @@ export const NAMED_CHECKERS = {
   assertReleaseList,
   assertAdoptionMatrix,
   assertUpdateChannelList,
+  assertReleaseObjectList,
   assertDirectCandidateList,
   assertProviderAccountList,
   assertProviderAccount,
@@ -213,6 +214,7 @@ export const GET_ROUTE_TABLE: readonly GetRouteBinding[] = [
   // dept:d
   // append your entries inside your block
   { route: 'GET /api/v1/ops/releases/channels', checker: 'assertUpdateChannelList' },
+  { route: 'GET /api/v1/ops/releases/objects', checker: 'assertReleaseObjectList' },
 
   // dept:e
   // append your entries inside your block

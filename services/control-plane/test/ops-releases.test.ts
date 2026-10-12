@@ -15,6 +15,7 @@ import {
   utcDay,
   versionBucket,
 } from '../src/ops/releases';
+import { guessReleaseFromKey } from '../src/ops/releases-objects';
 
 const db = () => (env as unknown as { DB: D1Database }).DB;
 const bucket = () => (env as unknown as { RELEASES: R2Bucket }).RELEASES;
@@ -530,5 +531,17 @@ describe('release verification on publish', () => {
         code: 'RELEASE_UNVERIFIED',
         reason: 'sha256_mismatch',
       });
+  });
+});
+
+describe('guessReleaseFromKey', () => {
+  it('reads the two publish file names and nothing else', () => {
+    expect(guessReleaseFromKey('Tono-1.2.3-build45-arm64.zip'))
+      .toEqual({ platform: 'macos', channel: 'stable', version: '1.2.3', build: '45' });
+    expect(guessReleaseFromKey('releases/Tono-0.0.75-setup.exe'))
+      .toEqual({ platform: 'windows', channel: 'stable', version: '0.0.75', build: null });
+    expect(guessReleaseFromKey('Tono-1.2.3-arm64.zip')).toBeNull();
+    expect(guessReleaseFromKey('Tono-1.2.3-build45-x64.zip')).toBeNull();
+    expect(guessReleaseFromKey('latest.json')).toBeNull();
   });
 });

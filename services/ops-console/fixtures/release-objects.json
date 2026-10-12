@@ -1,0 +1,26 @@
+{
+  "clock": 1725000000,
+  "items": [
+    {
+      "key": "Tono-1.9.0-build1900-arm64.zip",
+      "sizeBytes": 50331648,
+      "uploadedAt": 1724990000,
+      "sha256": "6f1ed002ab5595859014ebf0951522d9a1d4f2b5d3f3b8f1c5f3f8d7e1c3a9b2",
+      "etag": "9b2cfa4d1e7a4a5e8c3f0b6d2a1e7c44"
+    },
+    {
+      "key": "clients/macos/1.8.1.zip",
+      "sizeBytes": 48131464,
+      "uploadedAt": 1724481000,
+      "sha256": "17900d9e207acad85cc340f54d41d272d7c6288c8da42cdd86961eb19970be6e",
+      "etag": "0c7a51d93f2b4e6a9d18e4b7f3a2c5d1"
+    },
+    {
+      "key": "Tono-1.8.3-setup.exe",
+      "sizeBytes": 71827456,
+      "uploadedAt": 1724400000,
+      "sha256": null,
+      "etag": "4e2d90b1a7c64f3d8b5a1e0c9f7d3a62"
+    }
+  ]
+}

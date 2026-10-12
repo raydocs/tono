@@ -2,8 +2,10 @@ import { body, rejectUnexpectedKeys } from '../../request';
 import {
   assertAdoptionMatrix,
   assertRelease,
+  assertReleaseObjectList,
   assertUpdateChannel,
   type AdoptionMatrixDto,
+  type ReleaseObjectListDto,
   type ReleaseDto,
 } from '../contract';
 import {
@@ -14,6 +16,9 @@ import {
   type ClientRelease,
 } from '../releases';
 import { listUpdateChannels } from '../releases-channels';
+import { listReleaseObjects } from '../releases-objects';
+import { ApiError } from '../../errors';
+import { listEnvelope } from '../http';
 import {
   Actor,
   Env,
@@ -22,8 +27,11 @@ import {
   decodeName,
   entityJson,
   jsonNoStore,
+  jsonWithEtag,
+  notModified,
   listJson,
   now,
+  parseLimit,
   parseRange,
   weakEtag,
 } from './common';
@@ -68,16 +76,25 @@ export async function getReleases(req: Request, e: Env): Promise<Response> {
   );
 }
 
+const REQUIRED_RELEASE_FIELDS = ['platform', 'channel', 'version', 'r2Key', 'sizeBytes', 'sha256'] as const;
+
 export async function postRelease(req: Request, e: Env, actor: Actor): Promise<Response> {
   const b = await body(req, 16 * 1024);
   rejectUnexpectedKeys(b, [
     'platform', 'channel', 'version', 'build', 'r2Key', 'sizeBytes', 'sha256',
     'signature', 'minOsVersion', 'notes', 'minSupportedVersion', 'publishedAt',
   ]);
+  // `String(undefined)` is "undefined": a missing field must be a 400, not a
+  // release called "undefined". These six are what makes a row verifiable.
+  for (const name of REQUIRED_RELEASE_FIELDS) {
+    if (b[name] === undefined || b[name] === null || b[name] === '') {
+      throw new ApiError(400, 'VALIDATION_ERROR', `Missing ${name}`);
+    }
+  }
   const created = await createRelease(e.DB, {
-    platform: String(b.platform),
-    channel: String(b.channel),
-    version: String(b.version),
+    platform: b.platform as string,
+    channel: b.channel as string,
+    version: b.version as string,
     build: b.build as string | null | undefined,
     r2Key: b.r2Key as string | null | undefined,
     sizeBytes: b.sizeBytes as number | null | undefined,
@@ -138,4 +155,23 @@ export async function getReleaseChannels(req: Request, e: Env): Promise<Response
     weakEtag(items.map((row) => `${row.platform}:${row.current?.version ?? ''}`)),
     assertUpdateChannel, items.length,
   );
+}
+
+/**
+ * The register-release picker: the newest objects in the release bucket, each with what
+ * the key guesses and whether a row already points at it.
+ */
+export async function getReleaseObjects(req: Request, e: Env): Promise<Response> {
+  const limit = parseLimit(new URL(req.url).searchParams.get('limit'), { default: 50, max: 200 });
+  const { items, truncated } = await listReleaseObjects(e.RELEASES, e.DB, limit);
+  const t = now();
+  const etag = weakEtag([
+    truncated ? 1 : 0,
+    ...items.map((row) => `${row.key}:${row.etag}:${row.registered ? 1 : 0}`),
+  ]);
+  const hit = notModified(req, etag);
+  if (hit) return hit;
+  const dto: ReleaseObjectListDto = { ...listEnvelope(items, null, t, items.length), truncated };
+  check(e, () => { assertReleaseObjectList(dto); });
+  return jsonWithEtag(dto, etag);
 }

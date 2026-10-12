@@ -15,6 +15,7 @@ import type {
   NodeSummaryDto,
   RangeKey,
   ReleaseDto,
+  ReleaseObjectListDto,
   ServiceUsageDto,
   SystemHealthDto,
   UpdateChannelDto,
@@ -26,6 +27,14 @@ export class SessionExpiredError extends Error {
   constructor() {
     super(copy.sessionExpired);
     this.name = 'SessionExpiredError';
+  }
+}
+
+/** A write the hub turned down, with the code a page may branch on. */
+export class ApiRefusal extends Error {
+  constructor(message: string, readonly code: string) {
+    super(message);
+    this.name = 'ApiRefusal';
   }
 }
 
@@ -181,13 +190,15 @@ async function writeJson<T>(
   if (response.status === 401 || response.status === 403) throw new SessionExpiredError();
   if (!response.ok) {
     let message: string = copy.actionFailed;
+    let code = '';
     try {
       const envelope = await response.json() as ErrorEnvelope;
       message = envelope.error?.message || message;
+      code = envelope.error?.code ?? '';
     } catch {
       // Keep the generic failure for non-JSON bodies.
     }
-    throw new Error(message);
+    throw new ApiRefusal(message, code);
   }
   // A delete that succeeded answers 204: there is nothing to parse, and
   // asking anyway turns a working write into "动作没做成".
@@ -201,6 +212,20 @@ export const patchJson = <T>(path: string, body: unknown, signal?: AbortSignal) 
   writeJson<T>('PATCH', path, body, signal);
 export const deleteJson = <T>(path: string, signal?: AbortSignal) =>
   writeJson<T>('DELETE', path, undefined, signal);
+
+/** What `POST releases` takes; the first six are required by the Worker. */
+export interface ReleaseCreateBody {
+  platform: string;
+  channel: string;
+  version: string;
+  r2Key: string;
+  sizeBytes: number;
+  sha256: string;
+  build?: string;
+  signature?: string;
+  minOsVersion?: string;
+  notes?: string;
+}
 
 const SNOOZE_SECONDS = 4 * 60 * 60;
 
@@ -270,12 +295,18 @@ export const opsApi = {
   releases: (signal?: AbortSignal) => getAllJson<ReleaseDto>('releases', signal),
   releaseAdoption: (signal?: AbortSignal) => getJson<AdoptionMatrixDto>('releases/adoption', signal),
   releaseChannels: (signal?: AbortSignal) => getAllJson<UpdateChannelDto>('releases/channels', signal),
+  /** The newest objects in the release bucket: what the register-release drawer offers. */
+  releaseObjects: (signal?: AbortSignal) =>
+    getJson<ReleaseObjectListDto>('releases/objects', signal, { limit: '50' }),
   /**
-   * All three of the 客户端 page's actions are edits to a release that already
-   * exists, so all three are the PATCH. `POST releases` creates a new row from
-   * a build, which is the release pipeline's job and not something the console
-   * has a form for; it is deliberately not wired up here.
+   * `POST releases` is wired for one caller: the register-release drawer, which starts from an
+   * object the publish tooling already put in R2 and pre-fills the row from
+   * it. The tooling writes R2 and GitHub, never D1, and the route accepts only
+   * the Access session, so registering from the console is the only way a
+   * build becomes a row at all. The other three actions below are edits to
+   * a row that exists, so they are the PATCH.
    */
+  createRelease: (body: ReleaseCreateBody) => postJson<ReleaseDto>('releases', body),
   publishRelease: (id: string) =>
     patchJson<ReleaseDto>(`releases/${encodeURIComponent(id)}`, { publish: true }),
   withdrawRelease: (id: string) =>
