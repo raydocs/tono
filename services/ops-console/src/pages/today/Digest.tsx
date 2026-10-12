@@ -202,12 +202,14 @@ function Jump({ onClick, children }: { onClick: () => void; children: React.Reac
  * rows that carry a due date, so every row has one to show — nothing dateless
  * is dressed up as due today.
  *
- * The subject and the date share the first line: the date is fixed-width and
- * never shrinks, the subject takes the rest and wraps instead of truncating —
- * a hover title is no substitute for a readable name. Kind and note share the
- * second line, and the note clamps at two lines rather than clipping to one,
- * so a long note stays readable while the dense morning read keeps its height
- * budget. Overdue follows the Worker's Shanghai calendar-day rule, not the current second.
+ * The subject owns the first line alone and wraps instead of truncating:
+ * sharing it with the date pushed a 20-character address onto two lines in
+ * the 260 px aux column, and a hover title is no substitute for a readable
+ * name. Kind, note and date share the second line — the note truncates on a
+ * desktop (its hover carries the full text) and wraps to two lines on a
+ * phone; the date never truncates — so a row stays two lines tall and the
+ * dense morning read keeps its height budget. Overdue follows the Worker's
+ * Shanghai calendar-day rule, not the current second.
  *
  * The list caps at a few rows with the rest one tap away in place: 200 owed
  * rows once stretched the morning read past 6600 px. Nothing is dropped and
@@ -253,13 +255,14 @@ function DueFollowups({
             title={`${subject} ${when}`}
             onClick={() => openFollowup(row)}
           >
-            <span className="flex min-w-0 items-baseline gap-2">
-              <span className="min-w-0 flex-1 text-body break-all">{subject}</span>
-              <span className="shrink-0 font-mono text-micro text-[var(--muted-foreground)]">{when}</span>
-            </span>
+            <span className="min-w-0 text-body break-all">{subject}</span>
             <span className="flex min-w-0 items-baseline gap-2">
               <span className="tone-rem ops-tag shrink-0">{copy.followupKind[row.kind]}</span>
-              <span className="min-w-0 flex-1 line-clamp-2 text-body underline-offset-4 hover:underline">{row.body}</span>
+              <span
+                className="min-w-0 flex-1 truncate max-[640px]:line-clamp-2 max-[640px]:whitespace-normal text-body underline-offset-4 hover:underline"
+                title={row.body}
+              >{row.body}</span>
+              <span className="shrink-0 font-mono text-micro text-[var(--muted-foreground)]">{when}</span>
             </span>
           </button>
         );
