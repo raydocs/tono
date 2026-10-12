@@ -607,17 +607,22 @@ const LoginPage = () => {
         </aside>
       )}
       <GlassCard
-        className="tono-welcome__form"
-        padding={newAppearance ? 0 : 'clamp(24px, 4vw, 48px)'}
+        className={
+          newAppearance
+            ? 'tono-welcome__form sea-login-card'
+            : 'tono-welcome__form'
+        }
+        padding={newAppearance ? 28 : 'clamp(24px, 4vw, 48px)'}
+        tint={newAppearance ? 'rgb(23 21 28 / 0.78)' : undefined}
         style={
           newAppearance
             ? {
                 position: 'relative',
-                background: 'none',
-                border: 'none',
-                boxShadow: 'none',
-                backdropFilter: 'none',
-                WebkitBackdropFilter: 'none',
+                border: '1px solid #ffffff14',
+                boxShadow:
+                  'inset 0 1px 0 #ffffff1f, 0 24px 60px -24px rgb(0 0 0 / 0.6)',
+                backdropFilter: 'blur(24px) saturate(1.2)',
+                WebkitBackdropFilter: 'blur(24px) saturate(1.2)',
               }
             : undefined
         }

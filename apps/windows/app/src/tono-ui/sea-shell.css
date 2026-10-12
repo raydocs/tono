@@ -1,9 +1,8 @@
 .tono-root[data-sea-appearance="true"] {
   background: #0b0a12;
   color: #f6f2ec;
-  --tono-sea-focus: #c9cfff;
-}
-.tono-root[data-sea-tone="warm"] {
+  /* Focus is a sunrise ring on every page; the cool tone keeps links and
+     selection only, so a focused field never looks like a different product. */
   --tono-sea-focus: #ffd9a0;
 }
 .tono-sea-backdrop {
@@ -119,6 +118,18 @@
   color: #f6f2ec;
   background: #ffffff29;
   box-shadow: inset 0 1px 0 #ffffff26;
+  transition: background 160ms ease-out;
+}
+/* Connected: the selected pill takes a sunrise tint, like the status dot. */
+.tono-root[data-sea-tone="warm"] .tono-sea-capsule a[aria-current="page"],
+.tono-root[data-sea-tone="warm"] .tono-sea-icon[aria-current="page"] {
+  background: #ffc87833;
+  box-shadow: inset 0 1px 0 #ffe9c43d;
+}
+.tono-sea-capsule a:not([aria-current="page"]):hover,
+.tono-sea-icon:not([aria-current="page"]):hover {
+  color: #f6f2ec;
+  background: #ffffff14;
 }
 .tono-sea-icon {
   display: grid;
