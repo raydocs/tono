@@ -418,9 +418,30 @@ pub(crate) mod test_hooks {
     #[cfg(test)]
     static AUTOMATIC_RESETS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
+    /// The adapters named by the last automatic (DHCP) reset, so a test can prove which ones the
+    /// reset touched and which it left alone.
     #[cfg(test)]
-    pub(crate) fn note_automatic_reset() {
+    static LAST_AUTOMATIC_RESET: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    #[cfg(test)]
+    pub(crate) fn note_automatic_reset(snapshot: &super::DnsSnapshot) {
         AUTOMATIC_RESETS.fetch_add(1, Ordering::Relaxed);
+        *LAST_AUTOMATIC_RESET
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot
+            .adapters
+            .iter()
+            .map(|adapter| adapter.interface_guid.clone())
+            .collect();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_last_automatic_reset() -> Vec<String> {
+        std::mem::take(
+            &mut *LAST_AUTOMATIC_RESET
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
     }
 
     #[cfg(test)]

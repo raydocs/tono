@@ -393,7 +393,7 @@ pub(super) async fn engine_apply_snapshot(snapshot: &DnsSnapshot) -> Result<Vec<
         // even though its live apply keeps failing.
         if ok && is_automatic_reset(snapshot) {
             #[cfg(test)]
-            test_hooks::note_automatic_reset();
+            test_hooks::note_automatic_reset(snapshot);
             test_hooks::set_live_dns_on_loopback(false);
         }
         Ok(snapshot
