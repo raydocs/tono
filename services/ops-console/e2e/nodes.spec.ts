@@ -121,6 +121,31 @@ test.describe('nodes page', () => {
     });
   });
 
+  /**
+   * 在报 counts every name the collector heard from, 在役 counts the node list:
+   * the sentence says which names are retired machines, which are not in the
+   * list, and which in-service machines said nothing. The default set already
+   * carries series for its retired machines; the read is edited here, in this
+   * page only, so the screenshots keep the default set's own numbers.
+   */
+  test('the reporting count says why it differs from the machines in service', async ({ page }) => {
+    await page.route(/\/api\/v1\/ops\/metrics\?(?!.*node=)/, async (route) => {
+      const response = await route.fetch();
+      const body = await response.json() as { metrics: { series: Record<string, unknown> } };
+      const { series } = body.metrics;
+      series['Ghost · Box'] = series['Tokyo · Neon'];
+      delete series['Tokyo · Fuji'];
+      await route.fulfill({ response, json: body });
+    });
+    await open(page, '/nodes');
+
+    const retired = Number((await page.getByRole('button', { name: /^已退役/ }).textContent())?.match(/\d+/)?.[0]);
+    expect(retired).toBeGreaterThan(0);
+    const lead = page.locator('.quality-head .text-fine');
+    await expect(lead).toContainText(`其中 ${retired} 台已退役、1 台不在名单，1 台没上报`);
+    await expect(lead.locator('.font-mono')).toHaveText(/^\s*\d+ 台在报$/);
+  });
+
   test('the ⌘K drawer still opens from ?node=', async ({ page }) => {
     await open(page, '/nodes?node=Tokyo%20%C2%B7%20Fuji');
     await expect(page.getByRole('dialog')).toBeVisible();

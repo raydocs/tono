@@ -4,7 +4,8 @@ import { Panel, type PanelState } from '@/components/ops/Panel';
 import { Segmented } from '@/components/ops/Segmented';
 import { copy } from '@/copy/copy';
 import { formatBytesMeasured, formatClock, formatDate, formatDay, formatLoadAverage, formatPercent } from '@/lib/display';
-import { foldFleetLoad, hasFleetLoad, type FleetLoad as Folded } from '@/lib/fleet-load';
+import type { NodeSummaryDto } from '@contract';
+import { foldFleetLoad, hasFleetLoad, reportingBreakdown, type FleetLoad as Folded } from '@/lib/fleet-load';
 import { NODE_LOAD_RANGES, type FleetLoadWindow, type LoadPoint, type NodeLoadRange } from '@/lib/node-legacy';
 import type { Resource } from '@/lib/use-resource';
 
@@ -21,15 +22,23 @@ const rate = (value: number) => words.rate(formatBytesMeasured(value));
  */
 export function FleetLoad({
   load,
+  nodes,
   range,
   onRange,
 }: {
   load: Resource<FleetLoadWindow> & { reload: () => void };
+  /** The node list, to say which of the reporting names are not in service; null until it has loaded. */
+  nodes: readonly NodeSummaryDto[] | null;
   range: NodeLoadRange;
   onRange: (range: NodeLoadRange) => void;
 }) {
   const headingId = useId();
   const folded = useMemo(() => (load.status === 'ready' ? foldFleetLoad(load.data) : null), [load]);
+  const gap = useMemo(() => {
+    if (!folded || !nodes) return '';
+    const split = reportingBreakdown(folded.perNode.keys(), nodes);
+    return words.reportingGap(split.retired, split.unknown, split.silent);
+  }, [folded, nodes]);
   const state: PanelState = load.status === 'loading'
     ? 'loading'
     : load.status === 'error' ? 'error' : folded && hasFleetLoad(folded) ? 'ready' : 'empty';
@@ -53,7 +62,12 @@ export function FleetLoad({
           <h2 id={headingId} className="text-section">{words.title}</h2>
           <p className="text-fine">
             {words.lead}
-            {folded && folded.reporting > 0 ? <span className="font-mono"> {words.reporting(folded.reporting)}</span> : null}
+            {folded && folded.reporting > 0 ? (
+              <>
+                <span className="font-mono"> {words.reporting(folded.reporting)}</span>
+                {gap}
+              </>
+            ) : null}
           </p>
         </div>
         <Segmented
