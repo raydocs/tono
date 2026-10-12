@@ -2237,17 +2237,83 @@ async fn emergency_disarm_with_unproven_dns_resets_the_redirected_adapter_and_dr
     Ok(())
 }
 
-/// The release worker cancels the whole disarm at its 45 s deadline. The exact restore may
-/// legitimately take its full budget, and a restore that fails slowly must not leave the adapter
-/// reset without time: the restore is bounded so the reset leg is never skipped.
+/// Once WFP has been removed the adapter reset is never skipped: the machine would be left on a
+/// dead resolver with the barrier already gone. The leg has a hard floor, whatever the caller's
+/// deadline has left, and keeps its cap. The release worker may overrun its 45 s for it.
 #[test]
-fn the_emergency_fallback_leg_fits_inside_the_release_workers_budget() {
+fn the_emergency_fallback_leg_has_a_hard_floor_once_wfp_is_gone() {
+    let floor = std::time::Duration::from_secs(10);
+    for left in [0, 1, 5, 9, 10, 11, 20, 25, 45] {
+        let budget = emergency_fallback_budget(Some(std::time::Duration::from_secs(left)));
+        assert!(budget >= floor, "{left}s left gave the reset leg only {budget:?}");
+        assert!(budget <= EMERGENCY_FALLBACK_TIMEOUT, "{left}s left gave {budget:?}");
+    }
+    assert_eq!(emergency_fallback_budget(Some(std::time::Duration::ZERO)), floor);
+}
+
+/// The restore on the emergency path fails after 20 s, the WFP cleanup that follows takes 16 s,
+/// and 9 s of the worker's 45 s remain. The old allocation took the sweep's 10 s from that and
+/// skipped the whole reset leg with WFP already gone and the adapter on a dead resolver.
+#[test]
+fn the_reset_leg_still_runs_after_a_slow_restore_and_a_slow_wfp_cleanup() {
     let deadline = EMERGENCY_DISARM_OUTER_BUDGET;
-    let restore = emergency_restore_budget(Some(deadline));
-    assert!(restore <= deadline - EMERGENCY_FALLBACK_TIMEOUT - EMERGENCY_SWEEP_RESERVE);
-    // The exact restore used its whole budget and failed.
-    let left = deadline.saturating_sub(restore);
-    assert!(!emergency_fallback_budget(Some(left)).is_zero());
+    let left = deadline
+        .saturating_sub(std::time::Duration::from_secs(20))
+        .saturating_sub(std::time::Duration::from_secs(16));
+    assert_eq!(left, std::time::Duration::from_secs(9));
+    assert!(emergency_fallback_budget(Some(left)) >= std::time::Duration::from_secs(10));
+}
+
+/// The up-front reservation covers the WFP cleanup between the restore and the reset (an engine
+/// call of up to 25 s plus a BFE probe) next to the reset (15 s) and the sweep (10 s).
+#[test]
+fn the_exact_restore_budget_reserves_the_wfp_cleanup_too() {
+    let secs = std::time::Duration::from_secs;
+    assert_eq!(emergency_restore_budget(Some(secs(120))), DNS_RESTORE_TIMEOUT);
+    assert_eq!(emergency_restore_budget(Some(secs(60))), secs(10));
+    assert_eq!(emergency_restore_budget(Some(secs(55))), secs(5));
+    assert_eq!(
+        emergency_restore_budget(Some(EMERGENCY_DISARM_OUTER_BUDGET)),
+        secs(5),
+        "the restore is never cut below its minimum"
+    );
+    assert_eq!(emergency_restore_budget(Some(std::time::Duration::ZERO)), secs(5));
+}
+
+/// End to end: the deadline is already spent when WFP has been removed (a slow restore and a
+/// slow cleanup ate it). The adapter still on a Tono target is nevertheless reset to automatic.
+#[tokio::test]
+#[serial]
+async fn emergency_disarm_resets_the_redirected_adapter_even_when_the_deadline_is_already_spent()
+-> Result<()> {
+    cleanup().await;
+    remove_superseded_snapshots().await;
+    arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+    atomic_write(
+        &dns_snapshot_path(),
+        &serde_json::to_vec_pretty(&redirected_snapshot())?,
+    )
+    .await?;
+    crate::core::dns::test_hooks::set_collected_adapters(vec![crate::core::dns::AdapterDnsSnapshot {
+        interface_guid: "{ETHERNET}".to_owned(),
+        ipv4_name_server: Some("198.18.0.2".to_owned()),
+        ..Default::default()
+    }]);
+    simulate_machine_still_on_loopback_dns();
+    crate::core::dns::test_hooks::take_automatic_resets();
+    crate::core::dns::test_hooks::take_last_automatic_reset();
+
+    let result = emergency_disarm_windows_kill_switch_until(std::time::Instant::now()).await;
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    let reset_adapters = crate::core::dns::test_hooks::take_last_automatic_reset();
+    crate::core::dns::test_hooks::set_collected_adapters(Vec::new());
+    assert!(ARMED.lock().unwrap().is_none(), "WFP is removed");
+    assert!(result.is_err(), "the original DNS error is still returned");
+    assert_eq!(resets, 1, "the reset leg is never skipped once WFP is gone");
+    assert_eq!(reset_adapters, vec!["{ETHERNET}".to_owned()]);
+
+    cleanup().await;
+    Ok(())
 }
 
 /// An update-executor caller has no outer timeout, so it keeps the full DNS budgets.

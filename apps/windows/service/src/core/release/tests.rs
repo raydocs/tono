@@ -304,3 +304,12 @@ fn a_final_read_back_that_disagrees_replaces_the_workers_and_withdraws_settled()
     );
     assert_ne!(ReleaseReport::outcome_of(&report.components, &report.stuck, true), "restored");
 }
+
+#[test]
+fn a_cleanup_that_overran_its_budget_is_noted_and_one_within_it_is_not() {
+    let budget = crate::core::windows_kill_switch::EMERGENCY_DISARM_OUTER_BUDGET;
+    assert_eq!(worker::cleanup_overrun_note(budget), None);
+    let note = worker::cleanup_overrun_note(budget + std::time::Duration::from_secs(7))
+        .expect("a cleanup past its budget must leave a note, so the outcome cannot be restored");
+    assert!(note.contains("45"), "{note}");
+}

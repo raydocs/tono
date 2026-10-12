@@ -270,6 +270,45 @@ pub(crate) mod test_hooks {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = adapters;
     }
 
+    /// Interfaces whose registry keys exist but that are not in the active enumeration
+    /// (disabled or unplugged adapters). Their registry values are what the machine will resolve
+    /// through the moment the adapter comes back.
+    static OFFLINE_REGISTRY: LazyLock<Mutex<Vec<AdapterDnsSnapshot>>> =
+        LazyLock::new(|| Mutex::new(Vec::new()));
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn offline_registry() -> Vec<AdapterDnsSnapshot> {
+        OFFLINE_REGISTRY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_offline_registry(adapters: Vec<AdapterDnsSnapshot>) {
+        *OFFLINE_REGISTRY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = adapters;
+    }
+
+    static OFFLINE_REGISTRY_UNREADABLE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn offline_registry_unreadable() -> Vec<String> {
+        OFFLINE_REGISTRY_UNREADABLE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Interfaces whose registry values cannot be read at all (access denied, a hung key).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_offline_registry_unreadable(guids: Vec<String>) {
+        *OFFLINE_REGISTRY_UNREADABLE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = guids;
+    }
+
     static LIVE_DNS_ON_LOOPBACK: AtomicBool = AtomicBool::new(false);
 
     pub(crate) fn live_dns_is_on_loopback() -> bool {
@@ -309,7 +348,10 @@ pub(crate) mod test_hooks {
             let mut collected = COLLECTED_ADAPTERS
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            for adapter in collected.iter_mut() {
+            let mut offline = OFFLINE_REGISTRY
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for adapter in collected.iter_mut().chain(offline.iter_mut()) {
                 let Some((_, v4, v6)) = resets
                     .iter()
                     .find(|(guid, _, _)| guid.eq_ignore_ascii_case(&adapter.interface_guid))

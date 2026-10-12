@@ -225,6 +225,55 @@
         Ok(())
     }
 
+    /// An adapter that is offline (disabled, unplugged) is absent from the active enumeration,
+    /// but its registry still holds the Tono endpoint the exact restore failed to replace, and
+    /// it resolves through it the moment it comes back, with the watchdog no longer looking.
+    /// The candidates are the snapshot's adapters and the active ones, not the active ones alone:
+    /// B (online) and A (offline) are both put back on automatic (DHCP).
+    #[tokio::test]
+    #[serial]
+    async fn the_emergency_reset_covers_a_snapshot_adapter_that_is_offline() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1")), adapter("{B}", Some("9.9.9.9"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{B}", Some("198.18.0.2"))]);
+        test_hooks::set_offline_registry(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_effective_dns(vec![("{B}".to_owned(), vec!["198.18.0.2".parse().unwrap()])]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_after_failed_restore().await;
+        let mut reset = test_hooks::take_last_automatic_reset();
+        reset.sort();
+        let offline = test_hooks::offline_registry();
+        let online = test_hooks::collected_adapters();
+        reset_dns_state().await;
+        assert_eq!(reset, vec!["{A}".to_owned(), "{B}".to_owned()]);
+        assert_eq!(offline[0].ipv4_name_server, None, "the offline adapter's registry is reset too");
+        assert_eq!(online[0].ipv4_name_server, None);
+        assert!(result.is_ok(), "{result:?}");
+        Ok(())
+    }
+
+    /// An offline snapshot adapter whose registry cannot be read is not evidence of a clean
+    /// machine: absence from the active enumeration is never "restored". B is still reset, and
+    /// the fallback is not proven.
+    #[tokio::test]
+    #[serial]
+    async fn the_emergency_reset_is_not_proven_while_an_offline_snapshot_adapters_registry_is_unreadable()
+    -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1")), adapter("{B}", Some("9.9.9.9"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{B}", Some("198.18.0.2"))]);
+        test_hooks::set_offline_registry(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_offline_registry_unreadable(vec!["{A}".to_owned()]);
+        test_hooks::set_effective_dns(vec![("{B}".to_owned(), vec!["198.18.0.2".parse().unwrap()])]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_after_failed_restore().await;
+        let reset = test_hooks::take_last_automatic_reset();
+        reset_dns_state().await;
+        assert_eq!(reset, vec!["{B}".to_owned()], "the readable adapter is still reset");
+        assert!(result.is_err(), "A's registry could not be read, so nothing proves it: {result:?}");
+        Ok(())
+    }
+
     /// A registry call behind a filter driver can block for ever. The NRPT sweep runs on its own
     /// thread, so the uninstall gives up after its budget instead of hanging with it.
     #[test]
@@ -1372,6 +1421,8 @@
         test_hooks::take_automatic_resets();
         test_hooks::take_encrypted_restores();
         test_hooks::set_collected_adapters(Vec::new());
+        test_hooks::set_offline_registry(Vec::new());
+        test_hooks::set_offline_registry_unreadable(Vec::new());
         test_hooks::set_effective_dns(Vec::new());
         test_hooks::set_reset_does_not_land(false);
         test_hooks::set_effective_dns_unreadable(Vec::new());
