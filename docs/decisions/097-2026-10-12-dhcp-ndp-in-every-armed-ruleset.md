@@ -21,4 +21,16 @@
   nothing the kill switch blocks for a leak becomes reachable. A hostile process on the same link
   could already send DHCP and NDP in the tunnel state this permit copies. The cost of leaving it
   out is a Mac that cannot get online until Tono is uninstalled. The owner may overturn this.
+  DNS: the permit has no port 53/853 pass, and the helper self-test asserts that for the no-tunnel
+  ruleset. A DNS query on a physical interface is dropped by the final block, as before (the
+  `tono-lan-dns` block exists only with a tunnel, and still does there). A lease obtained through
+  the new pass cannot change the resolver the Mac uses while protected DNS is pinned: the helper
+  writes `127.0.0.1` into the network service's Setup DNS `ServerAddresses`
+  (`ProtectedDNSManager.scSetDNS`, `tooling/scripts/core-helper/ProtectedDNSManager.swift` lines
+  1079–1105, the assignment at 1099, commit and apply at 1102–1103), and an explicit Setup list
+  takes precedence over DHCP-supplied servers (configd behavior, not verified on a device). The pin is written after the tunnel is up
+  (`AppState+Connect.swift` 446) and a preserve teardown on a network move does not restore it
+  (`restoreDNS` runs only when `releaseKillSwitch`, lines 1187–1203), so it holds through the
+  reconnect window. In a fresh connect's bootstrap window it is not yet written; there the lease's
+  DNS could be what the system picks, and only PF (no 53/853 pass) keeps a query off the wire.
 - Applied in: PR #1591 (`claude/wifi-switch-mac-pf-dhcp`), helper 4.52.52.

@@ -2449,13 +2449,15 @@ extension KillSwitchManager {
     /// DHCP passes and NDP render in a ruleset without a tunnel, ahead of the
     /// final block.
     static func runNoTunnelDHCPNDPSelfTest() -> Bool {
-        let state = KillSwitchState(
-            armed: true, tailscaleBootstrapEnabled: false, apiHosts: [], exitHints: [],
-            tunnelInterfaces: [], resolvedHosts: [:], pinnedHosts: [:], derpEndpoints: [],
-            cachedDERPEndpoints: [], proxyTargets: [], sessionDirectEndpoints: [],
-            reviewedBundleDirectEnabled: false, allowLocalNetworkDevices: false
-        )
-        let rules = renderRules(state: state, allowedUID: 501, physicalInterfaces: ["en0"])
+        func state(tunnel: [String]) -> KillSwitchState {
+            KillSwitchState(
+                armed: true, tailscaleBootstrapEnabled: false, apiHosts: [], exitHints: [],
+                tunnelInterfaces: tunnel, resolvedHosts: [:], pinnedHosts: [:], derpEndpoints: [],
+                cachedDERPEndpoints: [], proxyTargets: [], sessionDirectEndpoints: [],
+                reviewedBundleDirectEnabled: false, allowLocalNetworkDevices: false
+            )
+        }
+        let rules = renderRules(state: state(tunnel: []), allowedUID: 501, physicalInterfaces: ["en0"])
         let lines = rules.split(separator: "\n").map(String.init)
         let required = [
             "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\"",
@@ -2464,7 +2466,21 @@ extension KillSwitchManager {
             "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\"",
         ]
         let block = lines.firstIndex(of: "block drop out quick all label \"tono-block\"")
-        let holds = block != nil && required.allSatisfy { line in
+        // The permit is DHCP and NDP only: nothing on a DNS port may pass
+        // without a tunnel, so a lease cannot open a resolver path. Where the
+        // physical-interface DNS block renders (a tunnel is up), it still does.
+        let dnsPass = #"port (\{ )?([0-9]+, )*(53|853)\b"#
+        let noDNSPass = !lines.contains { line in
+            line.hasPrefix("pass") && line.range(of: dnsPass, options: .regularExpression) != nil
+        }
+        let tunneledLines = renderRules(
+            state: state(tunnel: ["utun199"]), allowedUID: 501, physicalInterfaces: ["en0"]
+        ).split(separator: "\n").map(String.init)
+        let dnsBlockKept = tunneledLines.contains {
+            $0.hasPrefix("block drop out quick on { en0 } inet proto { tcp, udp }")
+                && $0.hasSuffix("port { 53, 853 } label \"tono-lan-dns\"")
+        }
+        let holds = block != nil && noDNSPass && dnsBlockKept && required.allSatisfy { line in
             guard let at = lines.firstIndex(of: line), let block else { return false }
             return at < block
         }
