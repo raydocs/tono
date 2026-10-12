@@ -14,6 +14,8 @@ Run from any working directory; paths resolve from the monorepo root:
 from __future__ import annotations
 
 import io
+import json
+import math
 import struct
 from pathlib import Path
 
@@ -89,6 +91,77 @@ def draw_mark() -> Image.Image:
     draw.pieslice((6 * k, 7 * k, 26 * k, 27 * k), 180, 360, fill=(0xFF, 0xD5, 0x8E, 255))
     draw.rounded_rectangle((2 * k, 19 * k, 30 * k, 21 * k), radius=k, fill=(0xFF, 0xB8, 0x77, 255))
     draw.rounded_rectangle((9 * k, 24 * k, 23 * k, 25.5 * k), radius=0.75 * k, fill=(0xFF, 0xB8, 0x77, 255))
+    return canvas
+
+
+# Protection-state glyphs (macOS menu bar, Windows tray). An 18-unit grid: a half sun over a
+# horizon line and one reflection. Shape alone carries state, because the macOS status item is a
+# template image (no colour): only a verified connection gets the filled sun; every state that
+# makes no protection claim is an open arch; blocked adds a slash, a doubtful state a badge.
+STATES = ("connected", "connecting", "standby", "blocked", "degraded", "unconfirmed")
+
+
+def draw_state_glyph(state: str, side: int = SUPERSAMPLE, rgb: tuple[int, int, int] = (0, 0, 0)) -> Image.Image:
+    if state not in STATES:
+        raise ValueError(state)
+    u = side / 18
+    alpha = Image.new("L", (side, side), 0)
+    draw = ImageDraw.Draw(alpha)
+
+    def bar(x1: float, x2: float, y: float, height: float) -> None:
+        draw.rounded_rectangle((x1 * u, y * u, x2 * u, (y + height) * u), radius=height / 2 * u, fill=255)
+
+    def stroke(points: tuple[float, float, float, float], width: float, fill: int) -> None:
+        x1, y1, x2, y2 = (v * u for v in points)
+        draw.line((x1, y1, x2, y2), fill=fill, width=round(width * u))
+        for x, y in ((x1, y1), (x2, y2)):
+            r = width / 2 * u
+            draw.ellipse((x - r, y - r, x + r, y + r), fill=fill)
+
+    cx, cy, r = 9.0, 10.0, 6.2
+    sun_box = ((cx - r) * u, (cy - r) * u, (cx + r) * u, (cy + r) * u)
+    if state in ("connected", "degraded"):
+        draw.pieslice(sun_box, 180, 360, fill=255)
+    else:
+        width = round(1.5 * u)
+        # A pieslice outline would close the arch along the horizon; an arc keeps it open.
+        segments = ((180, 360),) if state != "connecting" else ((180, 222), (249, 291), (318, 360))
+        for start, end in segments:
+            draw.arc(sun_box, start, end, fill=255, width=width)
+            for angle in (start, end):
+                mid = r - 0.75
+                x = (cx + mid * math.cos(math.radians(angle))) * u
+                y = (cy + mid * math.sin(math.radians(angle))) * u
+                draw.ellipse((x - 0.75 * u, y - 0.75 * u, x + 0.75 * u, y + 0.75 * u), fill=255)
+    bar(1.5, 16.5, 11.2, 1.5)
+    bar(5.5, 12.5, 14.0, 1.3)
+
+    if state == "blocked":
+        stroke((2.6, 2.6, 15.4, 15.4), 3.4, 0)
+        stroke((2.6, 2.6, 15.4, 15.4), 1.5, 255)
+    if state in ("degraded", "unconfirmed"):
+        bx, by, br = 14.4, 3.6, 3.4
+        draw.ellipse(((bx - br - 1.1) * u, (by - br - 1.1) * u, (bx + br + 1.1) * u, (by + br + 1.1) * u), fill=0)
+        draw.ellipse(((bx - br) * u, (by - br) * u, (bx + br) * u, (by + br) * u), fill=255)
+        draw.rounded_rectangle(((bx - 0.6) * u, (by - 2.2) * u, (bx + 0.6) * u, (by + 0.6) * u), radius=0.6 * u, fill=0)
+        draw.ellipse(((bx - 0.65) * u, (by + 1.25) * u, (bx + 0.65) * u, (by + 2.55) * u), fill=0)
+
+    glyph = Image.new("RGBA", (side, side), (*rgb, 0))
+    glyph.putalpha(alpha)
+    return glyph
+
+
+def tray_tile(state: str, glyph_rgb: tuple[int, int, int]) -> Image.Image:
+    """Windows tray: the brand ground with the state glyph in place of the brand sun."""
+
+    k = SUPERSAMPLE / 256
+    canvas = Image.new("RGBA", (SUPERSAMPLE, SUPERSAMPLE), (0, 0, 0, 0))
+    mask = Image.new("L", canvas.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, SUPERSAMPLE - 1, SUPERSAMPLE - 1), radius=round(59 * k), fill=255)
+    paint(canvas, mask, (0, 0, SUPERSAMPLE, SUPERSAMPLE), GROUND)
+    inner = round(SUPERSAMPLE * 0.84)
+    glyph = resize_rgba(draw_state_glyph(state, rgb=glyph_rgb), inner)
+    canvas.alpha_composite(glyph, ((SUPERSAMPLE - inner) // 2, (SUPERSAMPLE - inner) // 2))
     return canvas
 
 
@@ -206,16 +279,16 @@ def main() -> None:
     mac_master.save(ICONS_DIR / "icon.icns", format="ICNS")
     print("wrote icon.icns")
 
-    # Tray: the tile with the existing state pip (grey idle, amber system proxy, green TUN).
-    for name, rgb in {
-        "tray-icon.ico": (142, 142, 147),
-        "tray-icon-sys.ico": (255, 159, 10),
-        "tray-icon-tun.ico": (46, 213, 115),
+    # Tray: the brand ground with the protection-state glyph (core/tray/mod.rs `tray_icon_kind`):
+    # Common = not connected or connecting (grey open arch), SysProxy = protected offline (amber
+    # arch with slash), Tun = connected (the warm filled sun).
+    for name, (state, rgb) in {
+        "tray-icon.ico": ("standby", (0xA9, 0xAA, 0xC4)),
+        "tray-icon-sys.ico": ("blocked", (0xFF, 0xB3, 0x47)),
+        "tray-icon-tun.ico": ("connected", (0xFF, 0xD5, 0x8E)),
     }.items():
-        save_ico(
-            [(size, png_bytes(with_status_dot(tuned_or_drawn(tile, size), rgb))) for size in TRAY_ICO_SIZES],
-            ICONS_DIR / name,
-        )
+        master = tray_tile(state, rgb)
+        save_ico([(size, png_bytes(resize_rgba(master, size))) for size in TRAY_ICO_SIZES], ICONS_DIR / name)
     # macOS-only template variants of the Windows app's tray (not in the Windows package).
     mono_tray = [(size, png_bytes(monochrome(resize_rgba(mark, size)))) for size in TRAY_ICO_SIZES]
     for name in (
@@ -242,6 +315,23 @@ def main() -> None:
     save_png(resize_rgba(tile, 1024), MAC_ASSETS / "TonoMark.imageset/tono-mark.png")
     save_png(resize_rgba(mark, 16), MAC_ASSETS / "MenuBarIcon.imageset/icon_16x16.png")
     save_png(resize_rgba(mark, 32), MAC_ASSETS / "MenuBarIcon.imageset/icon_16x16@2x.png")
+
+    # Menu-bar status item: one template image set per protection state (MenuBarProtectionStatus).
+    for state in STATES:
+        name = "MenuBarStatus" + state.capitalize()
+        folder = MAC_ASSETS / f"{name}.imageset"
+        master = draw_state_glyph(state)
+        save_png(resize_rgba(master, 18), folder / f"{state}.png")
+        save_png(resize_rgba(master, 36), folder / f"{state}@2x.png")
+        contents = {
+            "images": [
+                {"filename": f"{state}.png", "idiom": "mac", "scale": "1x"},
+                {"filename": f"{state}@2x.png", "idiom": "mac", "scale": "2x"},
+            ],
+            "info": {"author": "xcode", "version": 1},
+            "properties": {"template-rendering-intent": "template"},
+        }
+        (folder / "Contents.json").write_text(json.dumps(contents, indent=2) + "\n")
     save_png(resize_rgba(draw_tile(rounded=False), 1024).convert("RGB"), MAC_ASSETS / "WelcomeHero.imageset/welcome-hero-1024.png")
     print("DONE")
 

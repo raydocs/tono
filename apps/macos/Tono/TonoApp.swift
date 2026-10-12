@@ -231,8 +231,8 @@ struct TonoApp: App {
         } label: {
             // Status items must be template images so AppKit can tint them
             // for light/dark menu bars and the open-highlight state. Color
-            // via palette/foregroundStyle is flattened; the symbol shape
-            // carries protection state. An SF Symbol is inherently a template.
+            // via palette/foregroundStyle is flattened; the glyph shape
+            // carries protection state (MenuBarStatus* template image sets).
             MenuBarStatusItemLabel(appState: appState)
                 .environment(\.locale, appLocale)
         }
