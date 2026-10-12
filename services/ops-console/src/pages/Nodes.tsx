@@ -117,7 +117,7 @@ export default function NodesPage({
 
       <FleetBand nodes={nodes} inService={inService} slo={slo} month={ledger} />
 
-      {phone ? null : <FleetLoad load={load} range={range} onRange={setRange} />}
+      {phone ? null : <FleetLoad load={load} nodes={nodes.status === 'ready' ? all : null} range={range} onRange={setRange} />}
 
       {nodes.status === 'ready' && (gaps.noQuota.length > 0 || gaps.noExpiry.length > 0) ? (
         <DataGapBanner
@@ -142,7 +142,7 @@ export default function NodesPage({
       <ApiRelays relays={relays} />
 
       {/* On a phone the list is what the page is opened for, so the charts follow it. */}
-      {phone ? <FleetLoad load={load} range={range} onRange={setRange} /> : null}
+      {phone ? <FleetLoad load={load} nodes={nodes.status === 'ready' ? all : null} range={range} onRange={setRange} /> : null}
 
       <ApiPaths paths={apiPaths} />
 

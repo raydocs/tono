@@ -37,6 +37,14 @@ export const nodesBoardCopy = {
       out: '出',
       source: '节点探针',
       reporting: (count: number) => `${count} 台在报`,
+      /** What follows the count when it includes retired or unlisted names, or leaves out in-service machines. */
+      reportingGap: (retired: number, unknown: number, silent: number) => {
+        const extra = [
+          retired > 0 ? `${retired} 台已退役` : null,
+          unknown > 0 ? `${unknown} 台不在名单` : null,
+        ].filter((part) => part !== null).join('、');
+        return `${extra ? `，其中 ${extra}` : ''}${silent > 0 ? `，${silent} 台没上报` : ''}`;
+      },
       empty: '这段时间没有机器报过负载',
       chartLabel: (what: string, range: string) => `过去 ${range}全机队的${what}`,
       rate: (bytes: string) => `${bytes}/s`,

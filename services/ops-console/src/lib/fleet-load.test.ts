@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { foldFleetLoad } from './fleet-load';
+import { foldFleetLoad, reportingBreakdown } from './fleet-load';
 import type { FleetLoadWindow, LoadSample } from './node-legacy';
 
 const SPAN = 96 * 60;
@@ -30,5 +30,30 @@ describe('foldFleetLoad', () => {
       b: [sample(0, null, 90_000), sample(60, null, 96_000)],
     }));
     expect(load.netIn[1]?.v).toBe(200);
+  });
+});
+
+describe('reportingBreakdown', () => {
+  const node = (name: string, lifecycle: 'listed' | 'retired' = 'listed') => ({ name, lifecycle });
+  const nodes = [node('Tokyo · Fuji'), node('Seoul · Han'), node('Buffalo · Erie', 'retired')];
+
+  it('matches a key by exact name and reports zeros when every key is a machine in service', () => {
+    expect(reportingBreakdown(['Tokyo · Fuji', 'Seoul · Han'], nodes))
+      .toEqual({ reporting: 2, retired: 0, unknown: 0, matched: 2, silent: 0 });
+  });
+
+  it('matches a key carrying the hy2 suffix to its base machine, and no other suffix', () => {
+    const split = reportingBreakdown(['Tokyo · Fuji · hy2', 'Seoul · Han · other'], nodes);
+    expect(split.matched).toBe(1);
+    expect(split.unknown).toBe(1);
+  });
+
+  it('counts keys of retired machines and keys that match no machine apart', () => {
+    const split = reportingBreakdown(['Tokyo · Fuji', 'Buffalo · Erie', 'Ghost · Box'], nodes);
+    expect(split).toMatchObject({ reporting: 3, retired: 1, unknown: 1, matched: 2 });
+  });
+
+  it('counts in-service machines no key matches as silent, and not retired ones', () => {
+    expect(reportingBreakdown(['Tokyo · Fuji'], nodes).silent).toBe(1);
   });
 });
