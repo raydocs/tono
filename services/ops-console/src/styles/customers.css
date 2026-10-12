@@ -119,3 +119,12 @@
 @media (max-width: 640px) {
   .customers-page .customers-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* The funnel sentence is the table's caption: it belongs to the table under
+   it, not to the overview above. The page rhythm (24 px, 40 px from 960 px)
+   is pulled in so the text sits 24 px under the overview line's text and the
+   box 12 px above the table card. */
+.customers-page .customers-funnel { margin-top: -14px; margin-bottom: -12px; }
+@media (min-width: 960px) {
+  .customers-page .customers-funnel { margin-top: -30px; margin-bottom: -28px; }
+}

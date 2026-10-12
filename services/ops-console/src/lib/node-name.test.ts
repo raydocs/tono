@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { splitNodeName } from './node-name';
+import { splitNodeName, withoutRemark } from './node-name';
 
 describe('splitNodeName', () => {
   it('splits on the last separator outside full-width parentheses and trims', () => {
@@ -15,5 +15,20 @@ describe('splitNodeName', () => {
     });
     expect(splitNodeName('Catalog Only')).toEqual({ prefix: null, main: 'Catalog Only' });
     expect(splitNodeName('  Tokyo · Fuji  ')).toEqual({ prefix: 'Tokyo', main: 'Fuji' });
+  });
+});
+
+describe('withoutRemark', () => {
+  it('drops a trailing full-width parenthetical and keeps everything else', () => {
+    expect(withoutRemark('Harbour（remark · two）')).toBe('Harbour');
+    expect(withoutRemark('Harbour（a（b）c）')).toBe('Harbour');
+    expect(withoutRemark('Harbour （remark） ')).toBe('Harbour');
+    expect(withoutRemark('Harbour-01')).toBe('Harbour-01');
+    expect(withoutRemark('Mid（x）dle')).toBe('Mid（x）dle');
+  });
+
+  it('never leaves the line empty', () => {
+    expect(withoutRemark('（only a remark）')).toBe('（only a remark）');
+    expect(withoutRemark('remark）')).toBe('remark）');
   });
 });

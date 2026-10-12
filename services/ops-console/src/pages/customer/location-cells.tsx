@@ -3,7 +3,7 @@ import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
 import { codeSentence, stageWord } from '@/lib/codes';
 import { formatWhenAgo } from '@/lib/display';
-import { splitNodeName } from '@/lib/node-name';
+import { splitNodeName, withoutRemark } from '@/lib/node-name';
 
 /**
  * The node a customer is on: the city above, the site under it.
@@ -12,7 +12,8 @@ import { splitNodeName } from '@/lib/node-name';
  * a one-line cell clipped to "Los Angeles ·" — the half that says which
  * machine. The city and the site are two lines, each on one line: a site too
  * long for the column ends in an ellipsis rather than growing the row, and
- * the whole name is on the hover.
+ * the whole name is on the hover. A trailing full-width parenthetical is left
+ * off the site line (see `withoutRemark`); the hover keeps it.
  */
 export function NodeCell({ name }: { name: string | null }) {
   if (name === null) return <Value value={null} source={copy.sourceWord.catalog} />;
@@ -24,7 +25,7 @@ export function NodeCell({ name }: { name: string | null }) {
           {split.prefix}
         </span>
       )}
-      <span className="truncate text-row">{split.main}</span>
+      <span className="truncate text-row">{withoutRemark(split.main)}</span>
     </span>
   );
 }

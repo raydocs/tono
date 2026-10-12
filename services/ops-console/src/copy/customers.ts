@@ -90,7 +90,6 @@ export const customerCopy = {
   customerColumns: {
     status: '状态',
     customer: '客户',
-    wechat: '微信',
     devices: '设备',
     node: '当前节点',
     failure: '最近失败',

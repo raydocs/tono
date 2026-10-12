@@ -15,8 +15,9 @@ import { cn } from '@/lib/utils';
  * and a verb each, and a funnel drawn as trapezoids would spend a third of the
  * page saying the same five numbers less exactly.
  *
- * Only the last segment carries a tone, and it is the healthy one. The four
- * before it are prose: nothing is broken about a customer who has not started
+ * It is the table's caption, so the page's own rhythm is pulled in around it
+ * (`customers.css`). Only the last segment carries a tone, and it is the
+ * healthy one. The four before it are prose: nothing is broken about a customer who has not started
  * yet, and colouring them would put four alarms on a page where nothing has
  * failed.
  */
@@ -30,7 +31,7 @@ export function FunnelBar({
   onPick: (stage: FunnelStage | null) => void;
 }) {
   return (
-    <p className="text-body">
+    <p className="text-body customers-funnel">
       <DotJoined
         parts={FUNNEL_STAGES.map((id) => (
           <button

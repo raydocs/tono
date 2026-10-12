@@ -80,7 +80,7 @@ test.describe('customers page', () => {
   test('the addresses are not clipped, and the whole one is there to read', async ({ page }) => {
     await open(page, '/customers');
     // The first cell is the selection box; the address is the one after it.
-    await expect(page.locator('tbody tr').first().locator('td').nth(2).locator('div'))
+    await expect(page.locator('tbody tr').first().locator('td').nth(2).locator('div[title]'))
       .toHaveAttribute('title', /@/);
 
     const table = await page.evaluate(() => {
@@ -190,22 +190,82 @@ test.describe('customers page', () => {
   });
 
   /**
-   * The handle sits beside the address because the two answer the same
-   * question — which person is this row — and it hides as a group the way the
-   * last three columns do, so a fleet where nobody gave one keeps its width.
+   * The handle is the quiet second line of the customer cell, under the
+   * address: the two answer the same question, and a column of its own cost the
+   * failure sentence and the follow-up date the width they needed.
+   * The search box still matches it.
    */
-  test('微信号 has a column of its own, and the addresses still fit', async ({ page }) => {
+  test('the WeChat id is the second line of the customer cell, not a column', async ({ page }) => {
     await open(page, '/customers');
-    await expect(page.getByRole('columnheader', { name: '微信' })).toBeVisible();
-    await expect(page.locator('tbody tr').filter({ hasText: 'chen.jie@example.com' }))
-      .toContainText('wx_chen_jie');
+    await expect(page.getByRole('columnheader', { name: '微信' })).toHaveCount(0);
+    const first = page.locator('tbody tr').first().locator('td').nth(2);
+    await expect(first).toContainText('chen.jie@example.com');
+    await expect(first.locator('span[title="wx_chen_jie"]')).toBeVisible();
+    await expect(first.locator('span[title="wx_chen_jie"]')).toHaveText('wx_chen_jie');
 
-    const widest = await page.evaluate(() => {
+    const geometry = await page.evaluate(() => {
       const heads = [...document.querySelectorAll('thead th')]
         .map((th) => ({ head: th.textContent ?? '', width: th.getBoundingClientRect().width }));
-      return heads.reduce((a, b) => (b.width > a.width ? b : a)).head;
+      const ids = [...document.querySelectorAll('tbody tr td:nth-child(3) span[title^="wx_"]')]
+        .map((span) => span.scrollWidth - span.clientWidth);
+      return { widest: heads.reduce((a, b) => (b.width > a.width ? b : a)).head, ids };
     });
-    expect(widest).toBe('客户');
+    expect(geometry.widest).not.toBe('');
+    expect(geometry.ids.length).toBeGreaterThan(10);
+    // The whole id is there; the ellipsis is only a safety net.
+    for (const over of geometry.ids) expect(over).toBeLessThanOrEqual(0);
+
+    await page.getByRole('searchbox').fill('wx_wang_tao');
+    await settle(page);
+    await expect(page.locator('tbody tr')).toHaveCount(1);
+    await expect(page.locator('tbody tr')).toContainText('wang.tao@example.com');
+  });
+
+  /**
+   * A service list is the first name whole and a count of the rest, never a
+   * partial name or a trailing dot; the follow-up date is never cut; and the
+   * longest failure sentence has the column it needs.
+   */
+  test('the service, follow-up and failure cells never show a cut value', async ({ page }) => {
+    await open(page, '/customers');
+    const cells = await page.evaluate(() => {
+      const index = (name: string) => [...document.querySelectorAll('thead th')]
+        .findIndex((th) => th.textContent?.trim() === name);
+      const cell = (row: number, name: string) => document.querySelectorAll('tbody tr')[row]!
+        .querySelectorAll('td')[index(name)]!;
+      const text = [...document.querySelectorAll('tbody td')].map((td) => (td.textContent ?? '').trim());
+      /** How far the text itself reaches past the right edge of the cell's content box. */
+      const reach = (span: Element, td: Element) => {
+        const range = document.createRange();
+        range.selectNodeContents(span);
+        const style = getComputedStyle(td);
+        return range.getBoundingClientRect().right - (td.getBoundingClientRect().right - parseFloat(style.paddingRight));
+      };
+      const failure = cell(0, '最近失败');
+      const sentence = [...failure.querySelectorAll('span')].at(-1)!;
+      const followup = cell(3, '跟进');
+      const date = [...followup.querySelectorAll('span')].at(-1)!;
+      const services = cell(3, '服务使用');
+      return {
+        text,
+        services: { text: (services.textContent ?? '').trim(), title: services.querySelector('[title]')?.getAttribute('title') ?? '' },
+        sentence: { text: sentence.textContent, over: Math.max(sentence.scrollWidth - sentence.clientWidth, reach(sentence, failure)) },
+        date: { text: date.textContent, over: Math.max(date.scrollWidth - date.clientWidth, reach(date, followup)), nowrap: getComputedStyle(date).whiteSpace },
+      };
+    });
+    for (const text of cells.text) {
+      expect(text, text).not.toContain('· …');
+      expect(text.endsWith('·'), text).toBe(false);
+    }
+    // Row 4 uses four services: the first by name, the other three as a count, all four on the hover.
+    const named = cells.services.title.split(' · ');
+    expect(named).toHaveLength(4);
+    expect(cells.services.text).toBe(`${named[0]}+3`);
+    expect(cells.sentence.text).toBe(copy.codeWord.CATALOG_STALE);
+    expect(cells.sentence.over).toBeLessThanOrEqual(0.5);
+    expect(cells.date.text).toMatch(/\d{4}-\d{2}-\d{2}/);
+    expect(cells.date.nowrap).toBe('nowrap');
+    expect(cells.date.over).toBeLessThanOrEqual(0.5);
   });
 
   /**

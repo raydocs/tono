@@ -46,3 +46,11 @@ it('prints a failure code the map has no sentence for as it came', () => {
   expect(lines[1]).toBe('TONO_SOMETHING_NEW');
   expect(host.firstElementChild?.getAttribute('title')).toBe('TONO_SOMETHING_NEW');
 });
+
+it('shows the site line without its trailing parenthetical and keeps it on the hover', () => {
+  const name = 'Singapore · Harbour（remark · two）';
+  const host = mount(<NodeCell name={name} />);
+  const lines = [...host.querySelectorAll('span > span')].map((line) => line.textContent);
+  expect(lines).toEqual(['Singapore', 'Harbour']);
+  expect(host.firstElementChild?.getAttribute('title')).toBe(name);
+});

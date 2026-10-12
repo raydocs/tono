@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { linesEndingInDot, linesStartingInDot, open, settle } from './ops';
+import { copy } from '../src/copy/copy';
+import { linesEndingInDot, linesStartingInDot, open, phraseLines, settle } from './ops';
 
 test.use({ viewport: { width: 390, height: 844 } });
 
@@ -148,6 +149,24 @@ test('the page note drops its separator and stacks its two parts', async ({ page
   expect(filling!.x).toBe(stamp!.x);
   expect(filling!.y).toBeGreaterThan(stamp!.y);
 });
+
+/**
+ * "约 140 分钟后齐" is one phrase: a narrow line breaks after the comma that
+ * ends the progress, never between the number and the unit. The same note sits
+ * under the customers, today and clients heroes.
+ */
+for (const { name, hash } of [
+  { name: 'customers', hash: '/customers' },
+  { name: 'today', hash: '/today' },
+  { name: 'clients', hash: '/clients' },
+]) {
+  test(`the backfill estimate is on one line on ${name}`, async ({ page }) => {
+    await open(page, hash);
+    const note = 'p:has-text("正在回填")';
+    await expect(page.locator(note).first()).toBeVisible();
+    expect(await phraseLines(page, note, copy.backfillEta('140'))).toBe(1);
+  });
+}
 
 test('a release row keeps its actions on one or two lines, inside the viewport', async ({ page }) => {
   await open(page, '/clients');
