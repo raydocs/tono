@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { CustomerBillingDto } from '@contract';
 import { Action, ActionRow } from '@/components/ops/Action';
 import { DetailDrawer, Fact } from '@/components/ops/DetailDrawer';
-import { EmptyLine } from '@/components/ops/Empty';
+import { EmptyLine, ErrorLine } from '@/components/ops/Empty';
 import { FoldedSection } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { CLAUDE_PLAN, customerApi, type UserPatch } from '@/lib/api-customer-actions';
@@ -164,11 +164,8 @@ export function Billing({
 function LedgerFacts({ userId }: { userId: string }) {
   const month = monthOf(nowSec());
   const summary = useResource(`ledger-month-${month}`, (signal) => ledgerApi.month(month, signal));
-  if (summary.status !== 'ready') {
-    return (
-      <EmptyLine message={summary.status === 'error' ? summary.message : copy.loading} />
-    );
-  }
+  if (summary.status === 'error') return <ErrorLine message={summary.message} onRetry={summary.reload} />;
+  if (summary.status === 'loading') return <EmptyLine message={copy.loading} />;
   const row = customerRow(summary.data, userId);
   if (row === null) return <EmptyLine message={copy.ledger.customerNone} />;
   const at = summary.data.updatedAt;

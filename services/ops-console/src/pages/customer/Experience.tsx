@@ -1,5 +1,5 @@
 import type { CustomerDeviceDto, CustomerNowDto } from '@contract';
-import { EmptyLine } from '@/components/ops/Empty';
+import { EmptyLine, ErrorLine } from '@/components/ops/Empty';
 import { measured } from '@/components/ops/measured';
 import { MetricCard } from '@/components/ops/MetricCard';
 import { Section } from '@/components/ops/Section';
@@ -39,8 +39,10 @@ export function Experience({
     >
       {node === null ? (
         <EmptyLine message={words.noNode} />
-      ) : slo.status !== 'ready' ? (
-        <EmptyLine message={slo.status === 'error' ? slo.message : copy.loading} />
+      ) : slo.status === 'error' ? (
+        <ErrorLine message={slo.message} onRetry={slo.reload} />
+      ) : slo.status === 'loading' ? (
+        <EmptyLine message={copy.loading} />
       ) : (
         <div className="flex flex-col gap-3">
           <p className="text-body text-[var(--muted-foreground)]">{scope}</p>

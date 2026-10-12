@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Action } from '@/components/ops/Action';
+import { ErrorLine } from '@/components/ops/Empty';
 import { copy } from '@/copy/copy';
 import { followupApi, type FollowupDto } from '@/lib/api-followups';
 import { formatWhen, formatWhenAgo } from '@/lib/display';
@@ -75,7 +76,9 @@ export function FollowupLog({
 
   return (
     <div className="flex flex-col gap-2">
-      {items.length === 0 ? (
+      {rows.status === 'error' ? (
+        <ErrorLine message={rows.message} onRetry={rows.reload} />
+      ) : items.length === 0 ? (
         <p className="text-micro text-[var(--muted-foreground)]">
           {rows.status === 'ready' ? copy.followupNone : copy.loading}
         </p>

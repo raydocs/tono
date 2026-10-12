@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { open } from './ops';
 
 test('empty fleet says so instead of showing zero cards', async ({ page }) => {
@@ -62,4 +62,55 @@ test('the dense customer table truncates rather than reflows', async ({ page }) 
   expect(await page.locator('tbody tr').count()).toBeGreaterThan(40);
   await expect(page.locator('tbody tr').first()).toHaveCSS('height', '36px');
   await expect(page).toHaveScreenshot('customers-dense.png');
+});
+
+/**
+ * The four states a page can be in must be told apart. A failed read says so
+ * in a sentence and offers 重试 where a refetch exists; it never stays on the
+ * loading word, which would read as "wait" when the answer is "ask again".
+ */
+async function expectErrorWithRetry(page: Page): Promise<void> {
+  const main = page.getByRole('main');
+  await expect(main.getByRole('alert').first()).toBeVisible();
+  await expect(main.getByText('载入中')).toHaveCount(0);
+  const retry = main.getByRole('button', { name: '重试', exact: true }).first();
+  await expect(retry).toBeVisible();
+  await expect(retry).toBeEnabled();
+}
+
+const ERROR_PAGES: readonly { name: string; hash: string }[] = [
+  { name: 'clients', hash: '/clients' },
+  { name: 'traffic', hash: '/traffic' },
+  { name: 'customer detail', hash: '/customers/u-04' },
+  { name: 'providers', hash: '/settings/providers' },
+  { name: 'alerts', hash: '/settings/alerts' },
+  { name: 'ledger', hash: '/settings/ledger' },
+  { name: 'node detail', hash: `/nodes/${encodeURIComponent('Tokyo · Fuji')}` },
+];
+
+for (const { name, hash } of ERROR_PAGES) {
+  test(`${name}: a failing hub says so and offers 重试`, async ({ page }) => {
+    await open(page, hash, 'error');
+
+    await expectErrorWithRetry(page);
+  });
+}
+
+// The empty fixture set has no customer detail at all; u-06 is the default
+// set's customer who never reported, so its destination and service reads are
+// empty lists rather than failures.
+test('a customer with no traffic says so in words, not with the node table\'s empty line', async ({ page }) => {
+  await open(page, '/customers/u-06');
+
+  const main = page.getByRole('main');
+  await expect(main.getByText('这位客户这周还没有去过任何目的地')).toBeVisible();
+  await expect(main.getByText('这位客户这周还没有用过任何服务')).toBeVisible();
+  await expect(main.getByText('没有节点')).toHaveCount(0);
+});
+
+test('traffic with no customers on record says so', async ({ page }) => {
+  await open(page, '/traffic', 'empty');
+
+  await expect(page.getByRole('main').getByText('没有客户用量记录。')).toBeVisible();
+  await expect(page.getByRole('main').getByText('没有节点')).toHaveCount(0);
 });

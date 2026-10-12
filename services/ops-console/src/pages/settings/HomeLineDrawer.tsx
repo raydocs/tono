@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { HomeLineDto } from '@contract';
 import { BILLING_KINDS, METER_SOURCES } from '@contract';
 import { DetailDrawer, Fact } from '@/components/ops/DetailDrawer';
+import { ErrorLine } from '@/components/ops/Empty';
 import { copy } from '@/copy/copy';
 import { settingsApi, type HomeLineInput } from '@/lib/api-settings';
 import { formatBytesMeasured, formatDate, formatUtcDate } from '@/lib/display';
@@ -149,6 +150,8 @@ export function HomeLineDrawer({
           <UsageStrip
             days={usage.status === 'ready' ? usageDays(usage.data.items) : []}
             ready={usage.status === 'ready'}
+            error={usage.status === 'error' ? usage.message : undefined}
+            onRetry={usage.reload}
           />
         </>
       ) : null}
@@ -293,8 +296,20 @@ function UsageFacts({ line }: { line: HomeLineDto }) {
  * because the two are the same picture and only one of them is a reason to go
  * and look at the meter.
  */
-export function UsageStrip({ days, ready }: { days: UsageDay[]; ready: boolean }) {
+export function UsageStrip({
+  days,
+  ready,
+  error,
+  onRetry,
+}: {
+  days: UsageDay[];
+  ready: boolean;
+  /** The read failed: say so, instead of the loading word that never resolves. */
+  error?: string;
+  onRetry?: () => void;
+}) {
   const peak = days.reduce((max, day) => Math.max(max, day.bytes ?? 0), 0);
+  if (error !== undefined) return <ErrorLine message={error} onRetry={onRetry} />;
   if (!ready || peak === 0) {
     return (
       <p className="text-micro normal-case tracking-normal text-[var(--muted-foreground)]" role="status">

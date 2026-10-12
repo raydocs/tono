@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { Empty } from '@/components/ops/Empty';
+import { Empty, ErrorLine } from '@/components/ops/Empty';
 import { copy } from '@/copy/copy';
 import type { CustomerSummaryDto, JobDto } from '@contract';
 import { ledgerApi } from '@/lib/api-ledger';
@@ -80,7 +80,9 @@ export default function NodeDetailPage({ name, customers, fleet }: {
     return (
       <div className="page-wrap">
         <BackLink />
-        <Empty message={detail.status === 'loading' ? copy.loading : detail.message || copy.loadError} />
+        {detail.status === 'loading'
+          ? <Empty message={copy.loading} />
+          : <ErrorLine message={detail.message || copy.loadError} onRetry={detail.reload} />}
       </div>
     );
   }
@@ -118,7 +120,7 @@ export default function NodeDetailPage({ name, customers, fleet }: {
         }} />
       ))}
 
-      <NodeAcceptance sheet={acceptance} lifecycle={node.lifecycle} />
+      <NodeAcceptance sheet={acceptance} lifecycle={node.lifecycle} onRetry={acceptance.reload} />
 
       <NodeBand node={node} slo={week} month={ledger} onEdit={() => setEditing(true)} />
       <NodeLoad name={name} />
@@ -150,6 +152,7 @@ export default function NodeDetailPage({ name, customers, fleet }: {
             }}
             state={connections.status}
             message={connections.status === 'error' ? connections.message : undefined}
+            onRetry={connections.reload}
           />
 
           <NodeJobs
@@ -163,11 +166,13 @@ export default function NodeDetailPage({ name, customers, fleet }: {
             rows={history.status === 'ready' ? history.data.items : []}
             state={history.status}
             message={history.status === 'error' ? history.message : undefined}
+            onRetry={history.reload}
           />
           <NodeReceipts
             rows={receipts.status === 'ready' ? receipts.data.items : []}
             state={receipts.status}
             message={receipts.status === 'error' ? receipts.message : undefined}
+            onRetry={receipts.reload}
           />
           <NodeQualityText name={name} />
         </div>

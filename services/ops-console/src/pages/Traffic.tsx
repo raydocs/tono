@@ -21,7 +21,7 @@ function stateOf(resource: Resource<unknown>, empty: boolean): PanelState {
 
 export default function TrafficPage({ range: selected, customers }: {
   range: string | null;
-  customers: Resource<CustomerSummaryDto[]>;
+  customers: Resource<CustomerSummaryDto[]> & { reload: () => void };
 }) {
   const range = trafficRange(selected);
   const beat = useBeat(60);
@@ -82,7 +82,7 @@ export default function TrafficPage({ range: selected, customers }: {
           </span>
         </button>)}
       </Panel>
-      <Panel title={words.customer} description={words.customerLead} state={stateOf(customers, people.length === 0)} emptyText={words.customersEmpty}>
+      <Panel title={words.customer} description={words.customerLead} state={stateOf(customers, people.length === 0)} onRetry={customers.reload} emptyText={words.customersEmpty}>
         {people.map((person) => <button key={person.userId} type="button" onClick={() => openCustomer(person.userId)}
           className="flex w-full flex-wrap items-center justify-between gap-3 border-b border-[var(--hairline)] py-3 text-left">
           <span className="text-body">{privacy.email(person.email)}</span>

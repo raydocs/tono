@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Action, ActionRow } from '@/components/ops/Action';
-import { Empty } from '@/components/ops/Empty';
+import { Empty, ErrorLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { followupApi, FOLLOWUP_KINDS, type FollowupKind } from '@/lib/api-followups';
@@ -70,7 +70,9 @@ export function Followups({ userId, beat }: { userId: string; beat: number }) {
       </ActionRow>
       <WriteError message={write.error} />
 
-      {items.length === 0 ? (
+      {rows.status === 'error' ? (
+        <ErrorLine message={rows.message} onRetry={rows.reload} />
+      ) : items.length === 0 ? (
         <Empty message={rows.status === 'ready' ? copy.followupNone : copy.loading} />
       ) : (
         <div className="flex flex-col">

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { AlertRuleDto } from '@contract';
 import { Action } from '@/components/ops/Action';
 import { DataTable, type DataColumn, type TableState } from '@/components/ops/DataTable';
+import { ErrorLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
@@ -79,6 +80,7 @@ export function Alerts() {
           state={state}
           emptyMessage={words.empty}
           errorMessage={rules.status === 'error' ? rules.message : undefined}
+          onRetry={rules.reload}
           className="settings-rules-table"
         />
       </Section>
@@ -87,6 +89,8 @@ export function Alerts() {
         <Deliveries
           rows={deliveries.status === 'ready' ? recentDeliveries(deliveries.data.items) : []}
           state={deliveries.status}
+          message={deliveries.status === 'error' ? deliveries.message : undefined}
+          onRetry={deliveries.reload}
         />
       </Section>
 
@@ -219,16 +223,17 @@ function ruleColumns(onTest: (row: AlertRuleDto) => void): DataColumn<AlertRuleD
 function Deliveries({
   rows,
   state,
+  message,
+  onRetry,
 }: {
   rows: ReturnType<typeof recentDeliveries>;
   state: 'loading' | 'error' | 'ready';
+  message?: string;
+  onRetry: () => void;
 }) {
-  if (state !== 'ready') {
-    return (
-      <p className="text-body text-[var(--muted-foreground)]" role="status">
-        {state === 'loading' ? copy.loading : copy.loadError}
-      </p>
-    );
+  if (state === 'error') return <ErrorLine message={message || copy.loadError} onRetry={onRetry} />;
+  if (state === 'loading') {
+    return <p className="text-body text-[var(--muted-foreground)]" role="status">{copy.loading}</p>;
   }
   if (rows.length === 0) {
     return <p className="text-body text-[var(--muted-foreground)]" role="status">{words.deliveriesEmpty}</p>;

@@ -9,7 +9,7 @@ import type {
 import { PLATFORMS } from '@contract';
 import { Action } from '@/components/ops/Action';
 import { CountText } from '@/components/ops/CountText';
-import { Empty } from '@/components/ops/Empty';
+import { Empty, ErrorLine } from '@/components/ops/Empty';
 import { PageNote } from '@/components/ops/PageNote';
 import { Section } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
@@ -93,12 +93,10 @@ export default function ClientsPage({
       <Section title={copy.clientSections.adoption}>
         {adoption.status === 'ready' ? (
           <AdoptionMatrix matrix={adoption.data} />
+        ) : adoption.status === 'loading' ? (
+          <Empty message={copy.loading} />
         ) : (
-          <Empty
-            message={adoption.status === 'loading'
-              ? copy.loading
-              : adoption.message || copy.loadError}
-          />
+          <ErrorLine message={adoption.message || copy.loadError} onRetry={adoption.reload} />
         )}
       </Section>
 
@@ -106,10 +104,10 @@ export default function ClientsPage({
         title={copy.clientSections.releases}
         aside={<Action onClick={() => setRegistering(true)}>{copy.releaseRegister.open}</Action>}
       >
-        {releases.status !== 'ready' ? (
-          <Empty
-            message={releases.status === 'loading' ? copy.loading : releases.message || copy.loadError}
-          />
+        {releases.status === 'loading' ? (
+          <Empty message={copy.loading} />
+        ) : releases.status === 'error' ? (
+          <ErrorLine message={releases.message || copy.loadError} onRetry={onChanged} />
         ) : shipped.size === 0 ? (
           <Empty message={copy.noReleases} />
         ) : (

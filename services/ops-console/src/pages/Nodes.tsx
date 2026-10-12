@@ -139,12 +139,12 @@ export default function NodesPage({
         initialQuery={query}
       />
 
-      <ApiRelays relays={relays} />
+      <ApiRelays relays={relays} onRetry={relays.reload} />
 
       {/* On a phone the list is what the page is opened for, so the charts follow it. */}
       {phone ? <FleetLoad load={load} range={range} onRange={setRange} /> : null}
 
-      <ApiPaths paths={apiPaths} />
+      <ApiPaths paths={apiPaths} onRetry={apiPaths.reload} />
 
       <BatchProfileDrawer
         open={batching}

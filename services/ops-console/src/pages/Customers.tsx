@@ -352,6 +352,7 @@ export default function CustomersPage({
            page is an answer to a question nobody asked. */
         emptyMessage={copy.emptyCustomers}
         errorMessage={customers.status === 'error' ? customers.message : undefined}
+        onRetry={customers.reload}
       />
 
       {cohort.dialog}

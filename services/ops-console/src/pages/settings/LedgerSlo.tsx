@@ -1,7 +1,6 @@
 import { memo, useMemo, useState } from 'react';
 import { Action } from '@/components/ops/Action';
 import { DataTable, type DataColumn } from '@/components/ops/DataTable';
-import { EmptyLine } from '@/components/ops/Empty';
 import { measured } from '@/components/ops/measured';
 import { MetricCard } from '@/components/ops/MetricCard';
 import { Value } from '@/components/ops/Value';
@@ -181,8 +180,6 @@ export const LedgerSlo = memo(function LedgerSlo({
 
       {summary ? (
         <SloSummaryCards summary={summary} updatedAt={updatedAt} />
-      ) : resource.status === 'error' ? (
-        <EmptyLine message={resource.message} />
       ) : null}
 
       <DataTable
@@ -192,6 +189,7 @@ export const LedgerSlo = memo(function LedgerSlo({
         state={tableState}
         emptyMessage={words.sloNone}
         errorMessage={resource.status === 'error' ? resource.message : undefined}
+        onRetry={resource.reload}
         limit={all ? undefined : SLO_ROWS_SHOWN}
       />
       {tableState === 'ready' && items.length > SLO_ROWS_SHOWN ? (

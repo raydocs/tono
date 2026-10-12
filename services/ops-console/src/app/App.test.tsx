@@ -40,6 +40,7 @@ vi.mock('@/components/ops/Section', () => ({
 }));
 vi.mock('@/components/ops/Empty', () => ({
   Empty: ({message}: { message: string }) => <p>{message}</p>, EmptyLine: ({message}: { message: string }) => <p>{message}</p>,
+  ErrorLine: ({message}: { message: string }) => <p>{message}</p>,
 }));
 vi.mock('@/components/ops/HeatStrip', () => ({ HeatStrip: () => null }));
 vi.mock('@/components/ops/StatusWord', () => ({ StatusWord: () => null }));
