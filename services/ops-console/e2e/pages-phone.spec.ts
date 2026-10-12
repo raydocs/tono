@@ -94,3 +94,54 @@ test('the release actions are inside the first screen of the clients page', asyn
   expect(withdraw!.x + withdraw!.width).toBeLessThanOrEqual(390);
   await expectTapTargets(page);
 });
+
+test('the clients hero breaks only between its three segments', async ({ page }) => {
+  await open(page, '/clients');
+  const segments = page.locator('.clients-hero .text-verdict span.whitespace-nowrap');
+  await expect(segments).toHaveCount(3);
+  const measured = await segments.evaluateAll((nodes) => nodes.map((node) => {
+    const style = getComputedStyle(node);
+    return {
+      whiteSpace: style.whiteSpace,
+      lines: node.getClientRects().length,
+      height: node.getBoundingClientRect().height,
+      lineHeight: parseFloat(style.lineHeight),
+    };
+  }));
+  for (const segment of measured) {
+    expect(segment.whiteSpace).toBe('nowrap');
+    expect(segment.lines).toBe(1);
+    expect(segment.height).toBeLessThanOrEqual(segment.lineHeight * 1.5);
+  }
+  await expect(page.locator('.clients-hero .text-verdict')).toHaveText('11 位在最新版 · 10 位落后 · 2 位未上报');
+});
+
+test('the page note drops its separator and stacks its two parts', async ({ page }) => {
+  await open(page, '/clients');
+  const note = page.locator('.clients-hero p').filter({ hasText: '本页截至' });
+  await expect(note.locator('[aria-hidden]')).toBeHidden();
+  const stamp = await note.getByText(/^本页截至/).boundingBox();
+  const filling = await note.getByText(/^正在回填/).boundingBox();
+  expect(stamp).not.toBeNull();
+  expect(filling).not.toBeNull();
+  expect(filling!.x).toBe(stamp!.x);
+  expect(filling!.y).toBeGreaterThan(stamp!.y);
+});
+
+test('a release row keeps its actions on one or two lines, inside the viewport', async ({ page }) => {
+  await open(page, '/clients');
+  const row = page.locator('tbody tr').filter({ hasText: '1.9.0-rc1' }).first();
+  const cell = await row.locator('td').nth(2).boundingBox();
+  expect(cell!.height).toBeLessThan(110);
+  const publish = await row.getByRole('button', { name: '发布', exact: true }).boundingBox();
+  const setMin = await row.getByRole('button', { name: '设最低支持版本', exact: true }).boundingBox();
+  // The short button and the long one share a line; they used to stack.
+  expect(Math.abs(publish!.y - setMin!.y)).toBeLessThan(2);
+  for (const name of ['发布', '设最低支持版本']) {
+    const button = row.getByRole('button', { name, exact: true });
+    await expect(button).toBeVisible();
+    const box = await button.boundingBox();
+    expect(box!.x + box!.width, name).toBeLessThanOrEqual(390);
+    expect(box!.height, name).toBeGreaterThanOrEqual(44);
+  }
+});

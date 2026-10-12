@@ -1,4 +1,5 @@
 import { Action } from './Action';
+import { DOT_SEPARATOR, DotJoined } from './DotJoined';
 import { cn } from '@/lib/utils';
 
 /**
@@ -27,7 +28,7 @@ export function DataGapBanner({
         className,
       )}
     >
-      <p>{sentence}</p>
+      <p><DotJoined parts={sentence.split(DOT_SEPARATOR)} /></p>
       {action ? (
         <Action className="shrink-0 max-[640px]:justify-center" onClick={action.onClick}>
           {action.label}
