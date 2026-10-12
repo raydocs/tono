@@ -123,7 +123,7 @@ extension ProxiesView {
                 .disabled(isRefreshingCatalog || accountSession.state != .ready)
             }
 
-            // The amber shield and "last verified" title said only that a
+            // The amber icon and "last verified" title said only that a
             // refresh had failed. The reason was stored and never read, so
             // support had to ask for it, and the traffic policy — which pins
             // the WeChat direct route — had no line here at all.
@@ -239,8 +239,8 @@ extension ProxiesView {
 
     var catalogStatusIcon: String {
         accountSession.catalogFailureMessage == nil && appState.managedCatalogNodeCount > 0
-            ? "checkmark.shield.fill"
-            : "exclamationmark.shield"
+            ? "checkmark.circle.fill"
+            : "exclamationmark.circle"
     }
 
     var catalogStatusColor: Color {

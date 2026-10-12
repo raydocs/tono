@@ -21,11 +21,14 @@ enum GateProtectionNotice: Equatable {
         }
     }
 
-    var symbolName: String {
+    /// The menu bar's sun-on-the-horizon state glyphs, so the notice and the
+    /// status item say the same thing (template image sets, see
+    /// MenuBarProtectionStatus).
+    var imageName: String {
         switch self {
-        case .blocking: "shield.slash"
-        case .unconfirmed: "exclamationmark.shield"
-        case .selectiveRecovery: "shield.lefthalf.filled"
+        case .blocking: "MenuBarStatusBlocked"
+        case .unconfirmed: "MenuBarStatusUnconfirmed"
+        case .selectiveRecovery: "MenuBarStatusStandby"
         }
     }
 }
@@ -65,7 +68,8 @@ struct GateProtectionSection: View {
     var body: some View {
         if seaStandalone, let notice = appState.gateProtectionNotice {
             HStack(alignment: .center, spacing: 12) {
-                Image(systemName: notice.symbolName)
+                Image(notice.imageName)
+                    .renderingMode(.template)
                     .foregroundStyle(SeaTheme.attention)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
@@ -93,7 +97,7 @@ struct GateProtectionSection: View {
             }
         } else if !seaStandalone, let notice = appState.gateProtectionNotice {
             Divider().padding(.vertical, 4)
-            Label(notice.message, systemImage: notice.symbolName)
+            Label(notice.message, image: notice.imageName)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button("Restore internet (turn off protection)") {
