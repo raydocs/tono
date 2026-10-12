@@ -120,7 +120,7 @@ export default function NodeDetailPage({ name, customers, fleet }: {
 
       <NodeAcceptance sheet={acceptance} lifecycle={node.lifecycle} />
 
-      <NodeBand node={node} slo={week} month={ledger} />
+      <NodeBand node={node} slo={week} month={ledger} onEdit={() => setEditing(true)} />
       <NodeLoad name={name} />
       <NodeQualityBand slo={range === '7d' ? week : month30} range={range} onRange={setRange} />
       <NodePaths forward={node.forwardPath} back={node.returnPath} pings={pings} />
