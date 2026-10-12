@@ -24,6 +24,19 @@ export type FollowupIndex = Map<string, FollowupDto> | null;
 export type WechatMask = Mask | null;
 
 /**
+ * The four columns a 390 px phone keeps: the selection box, the health word,
+ * the address, and the expiry. The rest are one tap away on the customer 360.
+ * The column objects are the desktop ones, so widths, sorting and cells cannot
+ * drift between the two layouts; a column the fleet has not filled in (the
+ * expiry, while no plan is wired) is simply absent from both.
+ */
+const PHONE_COLUMN_IDS: ReadonlySet<string> = new Set(['pick', 'status', 'customer', 'expires']);
+
+export function phoneColumns<T>(columns: readonly DataColumn<T>[]): DataColumn<T>[] {
+  return columns.filter((column) => PHONE_COLUMN_IDS.has(column.id));
+}
+
+/**
  * The address is the row's name, so it gets the width nothing else claims.
  *
  * Every other column here is fixed, which makes this one the one that takes
