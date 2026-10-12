@@ -136,15 +136,14 @@ export function consoleBehind(fetchedAt: number | null): boolean {
 const WINDOWS_PER_RUN = 200;
 const RUN_MINUTES = 5;
 
-export function backfillLine(backfill: BackfillHealthDto | null): string | null {
+export function backfillLine(backfill: BackfillHealthDto | null): { progress: string; eta: string } | null {
   if (backfill === null) return null;
   const { windowsTotal, windowsProjected } = backfill;
   if (windowsTotal <= 0 || windowsProjected >= windowsTotal) return null;
   const left = windowsTotal - windowsProjected;
   const minutes = Math.ceil(left / WINDOWS_PER_RUN) * RUN_MINUTES;
-  return copy.backfilling(
-    formatCount(windowsProjected),
-    formatCount(windowsTotal),
-    formatCount(minutes),
-  );
+  return {
+    progress: copy.backfillProgress(formatCount(windowsProjected), formatCount(windowsTotal)),
+    eta: copy.backfillEta(formatCount(minutes)),
+  };
 }

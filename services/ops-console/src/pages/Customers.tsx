@@ -14,6 +14,7 @@ import { Action } from '@/components/ops/Action';
 import { Chip } from '@/components/ops/Chip';
 import { DataGapBanner } from '@/components/ops/DataGapBanner';
 import { CountText } from '@/components/ops/CountText';
+import { DotJoined } from '@/components/ops/DotJoined';
 import { PageNote } from '@/components/ops/PageNote';
 import { DataTable, type TableState } from '@/components/ops/DataTable';
 import { copy } from '@/copy/copy';
@@ -192,6 +193,19 @@ export default function CustomersPage({
     return withInvites(phone ? phoneColumns(full) : full, privacy.email, wechat);
   }, [cohort.column, privacy.email, wired, followups, wechat, phone]);
 
+  /** One count button per health word; the total comes first. */
+  const bits = (counts.all === 0 ? CUSTOMER_FILTERS.slice(0, 1) : CUSTOMER_FILTERS).map((id) => (
+    <button
+      key={id}
+      type="button"
+      aria-pressed={filter === id}
+      className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
+      onClick={() => context.change({ filter: filter === id ? null : id, top: 0, left: 0 })}
+    >
+      <CountText values={[counts[id] ?? 0]} render={(values) => copy.customerCount[id](values[0] ?? 0)} />
+    </button>
+  ));
+
   const state: TableState = customers.status === 'loading'
     ? 'loading'
     : customers.status === 'error'
@@ -210,19 +224,7 @@ export default function CustomersPage({
           <div className="customers-hero-row">
             {customers.status === 'ready' ? (
               <p className="text-verdict">
-                {(counts.all === 0 ? CUSTOMER_FILTERS.slice(0, 1) : CUSTOMER_FILTERS).map((id, index) => (
-                  <span key={id}>
-                    {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
-                    <button
-                      type="button"
-                      aria-pressed={filter === id}
-                      className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
-                      onClick={() => context.change({ filter: filter === id ? null : id, top: 0, left: 0 })}
-                    >
-                      <CountText values={[counts[id] ?? 0]} render={(values) => copy.customerCount[id](values[0] ?? 0)} />
-                    </button>
-                  </span>
-                ))}
+                <DotJoined parts={phone ? bits.slice(0, 1) : bits} />
               </p>
             ) : (
               <p className="text-verdict text-[var(--muted-foreground)]">
@@ -233,6 +235,14 @@ export default function CustomersPage({
               <Action primary onClick={() => setOnboarding(true)}>{copy.onboard}</Action>
             </div>
           </div>
+
+          {/* On a phone the total is the headline beside the button, and the
+              health words are the status line under them. */}
+          {phone && customers.status === 'ready' && bits.length > 1 ? (
+            <p className="text-body customers-hero-status">
+              <DotJoined parts={bits.slice(1)} />
+            </p>
+          ) : null}
 
           <PageNote
             className="customers-hero-note"

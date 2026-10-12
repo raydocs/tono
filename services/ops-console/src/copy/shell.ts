@@ -99,8 +99,10 @@ export const shellCopy = {
    * of telemetry are worked through. This says so, with how far along it is,
    * instead of letting the page look broken.
    */
-  backfilling: (done: string, total: string, minutes: string) =>
-    `正在回填 30 天遥测：已处理 ${done} / ${total}，约 ${minutes} 分钟后齐`,
+  backfillProgress: (done: string, total: string) =>
+    `正在回填 30 天遥测：已处理 ${done} / ${total}，`,
+  /** Its own part, so the page can keep number, unit and verb on one line. */
+  backfillEta: (minutes: string) => `约 ${minutes} 分钟后齐`,
   sessionExpired: '登录已过期',
   sessionExpiredBody: '登录已过期，页面上的数据不会再更新。重新登录后继续。',
   reload: '重新登录',

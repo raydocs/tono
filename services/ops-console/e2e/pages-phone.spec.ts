@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open, settle } from './ops';
+import { copy } from '../src/copy/copy';
+import { linesEndingInDot, linesStartingInDot, open, phraseLines, settle } from './ops';
 
 test.use({ viewport: { width: 390, height: 844 } });
 
@@ -132,7 +133,9 @@ test('the clients hero breaks only between its three segments', async ({ page })
     expect(segment.lines).toBe(1);
     expect(segment.height).toBeLessThanOrEqual(segment.lineHeight * 1.5);
   }
-  await expect(page.locator('.clients-hero .text-verdict')).toHaveText('11 位在最新版 · 10 位落后 · 2 位未上报');
+  // On a phone the dots are gone: the three segments are separated by a gap.
+  await expect(segments).toHaveText(['11 位在最新版', '10 位落后', '2 位未上报']);
+  await expect(page.locator('.clients-hero .text-verdict .dot-joined-sep').first()).toBeHidden();
 });
 
 test('the page note drops its separator and stacks its two parts', async ({ page }) => {
@@ -146,6 +149,24 @@ test('the page note drops its separator and stacks its two parts', async ({ page
   expect(filling!.x).toBe(stamp!.x);
   expect(filling!.y).toBeGreaterThan(stamp!.y);
 });
+
+/**
+ * "约 140 分钟后齐" is one phrase: a narrow line breaks after the comma that
+ * ends the progress, never between the number and the unit. The same note sits
+ * under the customers, today and clients heroes.
+ */
+for (const { name, hash } of [
+  { name: 'customers', hash: '/customers' },
+  { name: 'today', hash: '/today' },
+  { name: 'clients', hash: '/clients' },
+]) {
+  test(`the backfill estimate is on one line on ${name}`, async ({ page }) => {
+    await open(page, hash);
+    const note = 'p:has-text("正在回填")';
+    await expect(page.locator(note).first()).toBeVisible();
+    expect(await phraseLines(page, note, copy.backfillEta('140'))).toBe(1);
+  });
+}
 
 test('a release row keeps its actions on one or two lines, inside the viewport', async ({ page }) => {
   await open(page, '/clients');
@@ -163,4 +184,71 @@ test('a release row keeps its actions on one or two lines, inside the viewport',
     expect(box!.x + box!.width, name).toBeLessThanOrEqual(390);
     expect(box!.height, name).toBeGreaterThanOrEqual(44);
   }
+});
+
+/**
+ * 22 production customers broke the sentence "22 位客户 · 2 位正常 ·" after the
+ * dot, with the next count alone on the line below; the fix that kept the dot
+ * with the next count started lines with it. Chinese layout forbids both, so
+ * on a phone the segments are separated by a gap and carry no dots at all.
+ * The total is the headline beside the action; the health words and the
+ * funnel are the lines under it.
+ */
+test('the customers count sentences have no dot at either end of a line at 390 px', async ({ page }) => {
+  await open(page, '/customers');
+  const hero = '.customers-hero .text-verdict, .customers-hero-status';
+  const funnel = 'p.text-body:not(.customers-hero-status):has(button[aria-pressed])';
+  await expect(page.locator('.customers-hero-status')).toContainText('位连不上');
+  await expect(page.locator(funnel)).toContainText('位连上过');
+  for (const selector of [hero, funnel]) {
+    expect(await linesEndingInDot(page, selector), `${selector} ends a line in a dot`).toEqual([]);
+    expect(await linesStartingInDot(page, selector), `${selector} starts a line with a dot`).toEqual([]);
+  }
+  // Not one dot is visible on a phone, in the hero or the funnel.
+  await expect(page.locator('.customers-hero .dot-joined-sep, ' + funnel + ' .dot-joined-sep').first()).toBeHidden();
+
+  // The headline and the action share a row; the status line is beneath both.
+  const headline = await page.locator('.customers-hero .text-verdict').boundingBox();
+  const action = await page.locator('.customers-hero').getByRole('button', { name: '开通', exact: true }).boundingBox();
+  const status = await page.locator('.customers-hero-status').boundingBox();
+  expect(Math.abs((headline!.y + headline!.height / 2) - (action!.y + action!.height / 2))).toBeLessThan(headline!.height);
+  expect(action!.x).toBeGreaterThan(headline!.x + headline!.width - 1);
+  expect(status!.y).toBeGreaterThanOrEqual(Math.max(headline!.y + headline!.height, action!.y + action!.height) - 1);
+});
+
+/**
+ * The address is two lines on a phone, the local part and then "@domain", so
+ * no fixture address ends in an ellipsis in a 390 px column; and the bottom
+ * dock does not cover a row once the page is scrolled to its end.
+ */
+test('the customer cells show whole addresses at 390 px and the dock covers no row', async ({ page }) => {
+  await open(page, '/customers');
+  const rows = page.locator('.customer-list-table tbody tr');
+  expect(await rows.count()).toBeGreaterThanOrEqual(20);
+  const cells = await rows.evaluateAll((trs) => trs.slice(0, 20).map((tr) => {
+    const cell = tr.querySelectorAll('td')[1]!;
+    const lines = [...cell.querySelectorAll('span')];
+    return {
+      text: (cell.textContent ?? '').trim(),
+      cut: lines.filter((line) => line.scrollWidth > line.clientWidth + 1).map((line) => line.textContent),
+      domain: cell.querySelector('.address-domain')?.getBoundingClientRect().top ?? null,
+    };
+  }));
+  for (const cell of cells) {
+    expect(cell.text, cell.text).not.toContain('\u2026');
+    expect(cell.cut, cell.text).toEqual([]);
+    // "@domain" is a second line, under the local part.
+    expect(cell.domain, cell.text).not.toBeNull();
+  }
+
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const geometry = await page.evaluate(() => {
+    const dock = document.querySelector('.shell-dock')!.getBoundingClientRect();
+    const rows = [...document.querySelectorAll('.customer-list-table tbody tr')];
+    const last = rows.at(-1)!.getBoundingClientRect();
+    return { dockTop: dock.top, lastBottom: last.bottom, heights: rows.map((row) => row.getBoundingClientRect().height) };
+  });
+  expect(geometry.lastBottom).toBeLessThanOrEqual(geometry.dockTop + 0.5);
+  // Two lines (15 px and 11 px) in the same row the single line had.
+  expect(Math.max(...geometry.heights)).toBeLessThanOrEqual(44);
 });

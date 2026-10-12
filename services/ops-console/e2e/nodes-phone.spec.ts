@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { open, settle } from './ops';
+import { open, phraseLines, settle } from './ops';
 
 test.use({ viewport: { width: 390, height: 844 } });
 
@@ -66,4 +66,10 @@ test('two nodes in the same city show their site name in full at 390 px', async 
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(0);
+});
+
+/** "问题在前；点一行去节点页" left its last character alone on a line. */
+test('the fleet table subtitle keeps 点一行去节点页 on one line at 390 px', async ({ page }) => {
+  await open(page, '/nodes');
+  expect(await phraseLines(page, 'p.text-fine:has-text("点一行去节点页")', '点一行去节点页')).toBe(1);
 });

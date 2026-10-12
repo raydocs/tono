@@ -208,6 +208,13 @@ describe('the reply draft', () => {
     expect(text).toContain(copy.replyQuestion.CATALOG_STALE);
   });
 
+  it('words the stale catalog sentence in ten characters, without the filler 手里', () => {
+    const sentence = copy.codeWord.CATALOG_STALE;
+    expect([...sentence]).toHaveLength(10);
+    expect(sentence).not.toContain('\u624b\u91cc');
+    expect(explainCode('CATALOG_STALE')).toBe(sentence);
+  });
+
   it('explains the Windows handshake taxonomy instead of 客户端没说原因', () => {
     expect(explainCode('CORE_EXIT_UNREACHABLE')).toBe(copy.codeWord.CORE_EXIT_UNREACHABLE);
     expect(explainCode('TONO_NODE_OR_CORE_UNREACHABLE')).toBe(

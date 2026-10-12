@@ -41,10 +41,20 @@
   margin-top: 8px;
 }
 
+.customers-page .customers-hero-status {
+  margin-top: 8px;
+}
+
 @media (max-width: 640px) {
   .customers-page .customers-hero {
     padding: 18px 16px;
     border-radius: 18px;
+  }
+  /* The total and the action share one row; the health words sit beneath. */
+  .customers-page .customers-hero-row {
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: space-between;
   }
   .customers-page .ops-search { width: 100%; }
   .customers-page .ops-search input { width: 100%; }
@@ -108,4 +118,29 @@
 }
 @media (max-width: 640px) {
   .customers-page .customers-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* The funnel sentence is the table's caption: it belongs to the table under
+   it, not to the overview above. The page rhythm (24 px, 40 px from 960 px)
+   is pulled in so the text sits 24 px under the overview line's text and the
+   box 12 px above the table card. */
+.customers-page .customers-funnel { margin-top: -14px; margin-bottom: -12px; }
+@media (min-width: 960px) {
+  .customers-page .customers-funnel { margin-top: -30px; margin-bottom: -28px; }
+}
+
+/* On a phone the address is two lines: the local part, then "@domain" in the
+   same quiet 11 px as the WeChat line under it on desktop. On desktop the
+   span is plain inline text, so the address reads as one run. */
+@media (max-width: 640px) {
+  .address-domain {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.3;
+    color: var(--muted-foreground);
+  }
 }

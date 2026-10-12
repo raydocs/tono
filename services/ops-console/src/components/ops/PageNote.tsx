@@ -33,7 +33,7 @@ export function PageNote({
   if (fetchedAt === null && filling === null) return null;
   const behind = consoleBehind(fetchedAt);
   return (
-    <p className={cn('flex flex-wrap items-baseline gap-x-2 max-[640px]:block text-micro text-[var(--muted-foreground)]', className)}>
+    <p className={cn('flex flex-wrap items-baseline max-[640px]:block text-micro text-[var(--muted-foreground)]', className)}>
       {fetchedAt === null ? null : (
         <span className={cn('inline-block normal-case tracking-normal max-[640px]:block', behind && 'stamp-late')}>
           {behind ? copy.pageStale : copy.pageAsOf(formatWhenAgo(fetchedAt))}
@@ -41,8 +41,15 @@ export function PageNote({
       )}
       {filling === null ? null : (
         <>
-          {fetchedAt === null ? null : <span aria-hidden className="max-[640px]:hidden">·</span>}
-          <span className="inline-block normal-case tracking-normal max-[640px]:block">{filling}</span>
+          {fetchedAt === null ? null : (
+            <span aria-hidden className="mx-[.35em] max-[640px]:hidden">·</span>
+          )}
+          {/* The estimate is one unbreakable phrase, so a narrow line breaks
+              after the comma and never inside the number, unit and verb. */}
+          <span className="inline-block normal-case tracking-normal max-[640px]:block">
+            {filling.progress}
+            <span className="whitespace-nowrap">{filling.eta}</span>
+          </span>
         </>
       )}
     </p>
