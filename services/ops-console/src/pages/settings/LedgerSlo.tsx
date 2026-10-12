@@ -216,7 +216,7 @@ function SloSummaryCards({
   const coverageCell = measured<number | null>(summary.coverage, at, words.source);
 
   return (
-    <div className="grid gap-4 border-y border-[var(--hairline)] py-4 sm:grid-cols-5">
+    <div className="metric-band grid gap-4 border-y border-[var(--hairline)] py-4 sm:grid-cols-5">
       <MetricCard
         label={words.sloSuccessRate}
         value={rateCell}

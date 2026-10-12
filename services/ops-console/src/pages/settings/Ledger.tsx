@@ -299,7 +299,7 @@ function Totals({ summary }: { summary: MonthSummaryDto }) {
   const cell = (value: number) => measured<number | null>(value, at, words.source);
   const money = (value: number) => ({ number: formatCny(value) ?? copy.missing });
   return (
-    <div className="settings-ledger-totals grid gap-6 py-4 sm:grid-cols-3">
+    <div className="settings-ledger-totals metric-band grid gap-6 py-4 sm:grid-cols-3">
       <MetricCard label={words.revenue} value={cell(summary.revenueCnyMinor)} format={money} />
       <MetricCard label={words.cost} value={cell(summary.costCnyMinor)} format={money} />
       <MetricCard label={words.margin} value={cell(summary.marginCnyMinor)} format={money} />

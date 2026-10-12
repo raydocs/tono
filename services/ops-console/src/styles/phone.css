@@ -141,4 +141,11 @@
   /* The sheet's action bar sits on the bottom edge; three buttons across it,
      each a thumb tall, is the whole reason the drawer became a sheet. */
   .sheet-actions .ops-action { flex: 1 1 28%; min-height: 44px; justify-content: center; }
+
+  /* A band of plain measured numbers (a customer's month, the ledger's SLO and
+     totals) is two across on a phone, the node band's spacing, instead of one
+     small number per full-width row. An odd last number takes the whole row,
+     as it does in the quality band. */
+  .metric-band { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .metric-band > :last-child:nth-child(odd) { grid-column: 1 / -1; }
 }

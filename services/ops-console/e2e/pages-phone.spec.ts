@@ -66,6 +66,25 @@ for (const { name, hash } of PAGES) {
 }
 
 /**
+ * The month's four measures on the customer page sit two across, as the node
+ * page's band does, instead of one small number per full-width row.
+ */
+test('the customer month experience measures sit in two columns on a phone', async ({ page }) => {
+  await open(page, '/customers/u-04');
+  const labels = ['成功率', '连上用时中位数', '已验证中断', '缺测'];
+  const boxes = [];
+  for (const label of labels) {
+    const box = await page.getByText(label, { exact: true }).boundingBox();
+    expect(box, `${label} is on the page`).not.toBeNull();
+    boxes.push(box!);
+  }
+  expect(new Set(boxes.map((box) => Math.round(box.x))).size).toBe(2);
+  expect(new Set(boxes.map((box) => Math.round(box.y))).size).toBe(2);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
+/**
  * The fixture customers all have an expiry, so one is cleared first, through
  * the hub's own PATCH and into a store of its own, to make the notice appear.
  */
