@@ -130,6 +130,14 @@ no screenshot test. A failed nightly is red and opens or comments on the issue
 the whole XCTest target. `tooling/scripts/tests/screenshot-nightly-split.test.mjs`
 keeps the skip and nightly lists equal.
 
+**Re-recording ops-console baselines.** Record them on the nightly's own `macos-26`
+image, not on a laptop: `gh workflow run screenshots-nightly.yml --ref <branch> -f update_baselines=true`.
+Only the ops-console job runs. It re-records the baselines that differ, adds missing ones and
+uploads `e2e/__screenshots__` as `ops-console-baselines-<sha>`; check the images and commit them
+on that branch. A PR that touches `services/ops-console/src/**` without touching the baselines
+gets a warning from `ops-console-baseline-reminder.yml`. That workflow is not part of `ci-gate`
+and never fails.
+
 **Build caches.** The three Cargo jobs in `windows-ci.yml` restore a cache keyed
 on the runner's `rustc -vV`, the lockfiles and the pinned toolchain file, and
 write `Cargo cache (<job>): hit|miss` to the job summary and as a notice. Only
