@@ -1393,18 +1393,21 @@ where
 /// tick) for as long as `still_owned` says this session is still the idle protected one; a user
 /// Disconnect, a new connect or a newer generation ends it. Every attempt goes through the
 /// Service's own gate, which keeps its refusals: this loop never releases anything by itself.
-async fn settle_health_release<SF, RF, PF>(
+async fn settle_health_release<OF, SF, RF, PF>(
     first: Result<(), String>,
     period: Duration,
+    claim_owner: impl FnOnce() -> OF,
     mut still_owned: impl FnMut() -> SF,
     mut release: impl FnMut() -> RF,
     start_probe: impl FnOnce() -> PF,
 )
 where
+    OF: std::future::Future<Output = Option<Arc<()>>>,
     SF: std::future::Future<Output = bool>,
     RF: std::future::Future<Output = Result<(), String>>,
     PF: std::future::Future<Output = ()>,
 {
+    let _ = claim_owner;
     let mut result = first;
     let mut interval = tokio::time::interval(period);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -1695,6 +1698,7 @@ pub(super) async fn handle_network_change_inner(
         settle_health_release(
             result,
             NETWORK_MONITOR_INTERVAL,
+            || async move { state.lock().await.claim_health_retry(generation) },
             || async move { retry_session_owned(&*state.lock().await, generation) },
             || async move {
                 match claim_retry_release(state, generation).await {
@@ -2084,6 +2088,7 @@ mod tests {
         super::settle_health_release(
             Err("refused: DNS restore not proven".to_string()),
             std::time::Duration::from_millis(1),
+            || async { Some(Arc::new(())) },
             || async { true },
             || {
                 attempts.set(attempts.get() + 1);
@@ -2096,6 +2101,44 @@ mod tests {
         ).await;
         assert_eq!(attempts.get(), 2, "the refused release is attempted again on later ticks");
         assert_eq!(probes.get(), 1, "the probe starts once, after the retry succeeds");
+    }
+
+    /// Several health handlers (the network monitor, the pin refresh) can receive the result of
+    /// the same failed release. Only one of them may retry: a second loop would start a second
+    /// App release operation in the same session on the same tick.
+    #[tokio::test]
+    async fn two_callers_sharing_one_refused_release_start_one_retry() {
+        let state = Arc::new(TonoState::for_test());
+        let generation = state.lock().await.connect_generation;
+        let attempts = std::cell::Cell::new(0_u32);
+        let (state, attempts_ref) = (&state, &attempts);
+        let caller = move || super::settle_health_release(
+            Err("refused: DNS restore not proven".to_string()),
+            std::time::Duration::from_millis(20),
+            move || async move { state.lock().await.claim_health_retry(generation) },
+            || async { true },
+            move || {
+                attempts_ref.set(attempts_ref.get() + 1);
+                async { Ok(()) }
+            },
+            || async {},
+        );
+        futures::join!(caller(), caller());
+        assert_eq!(attempts.get(), 1, "exactly one loop retries the shared failed release");
+    }
+
+    /// The right to retry belongs to one generation's live loop and nothing else: a later
+    /// session, or the same one once its loop is gone, can take it.
+    #[tokio::test]
+    async fn the_retry_right_passes_to_a_later_generation_and_to_a_dead_loop() {
+        let state = Arc::new(TonoState::for_test());
+        let mut inner = state.lock().await;
+        let generation = inner.connect_generation;
+        let owner = inner.claim_health_retry(generation).expect("first claim");
+        assert!(inner.claim_health_retry(generation).is_none(), "a live loop is the only owner");
+        assert!(inner.claim_health_retry(generation + 1).is_some(), "a later generation can own");
+        drop(owner);
+        assert!(inner.claim_health_retry(generation).is_some(), "an aborted or finished loop frees it");
     }
 
     #[tokio::test]

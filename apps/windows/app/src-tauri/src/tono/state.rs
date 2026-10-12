@@ -292,6 +292,9 @@ pub struct TonoInner {
     /// switch bumps it; an in-flight attempt re-checks it at every stage
     /// boundary and exits without side effects when it moved.
     pub connect_generation: u64,
+    /// The one loop retrying a refused health-failure release, with the generation it retries
+    /// for. The token is held by the loop itself, so an aborted or finished loop frees it.
+    pub retry_owner: Option<(u64, std::sync::Weak<()>)>,
     /// Immediate cancellation signal for read-only/current-stage work. Privileged IPC mutations
     /// are deliberately detached and reconcile after commit, but the user-facing transaction no
     /// longer waits for them after Disconnect, node replacement, Quit, or its absolute deadline.
@@ -585,6 +588,20 @@ impl TonoInner {
     /// Retire the current connection generation and wake every stage waiting on its cancellation
     /// token. `release_on_stale` preserves the existing late-commit contract: releasing flows
     /// patch a late arm; protected reconnect/switch flows keep the barrier.
+    /// Take the sole right to retry a refused health-failure release for `generation`, or
+    /// `None` when another live loop already holds it (several health handlers can receive the
+    /// same failed release). The loop keeps the returned token for as long as it retries.
+    pub fn claim_health_retry(&mut self, generation: u64) -> Option<std::sync::Arc<()>> {
+        if let Some((owner, token)) = &self.retry_owner {
+            if *owner == generation && token.strong_count() > 0 {
+                return None;
+            }
+        }
+        let token = std::sync::Arc::new(());
+        self.retry_owner = Some((generation, std::sync::Arc::downgrade(&token)));
+        Some(token)
+    }
+
     pub fn invalidate_connection(&mut self, release_on_stale: bool) {
         // Decision 088: the aborts below drop an in-flight automatic hy2 attempt before it can
         // report Stale; settle that hop first.
@@ -811,6 +828,7 @@ impl TonoState {
                 controller_port: None,
                 controller_generation: 0,
                 connect_generation: 0,
+                retry_owner: None,
                 connect_cancellation: CancellationToken::new(),
                 release_ticket: Default::default(),
                 release_on_stale: false,
