@@ -24,7 +24,8 @@ struct ContentView: View {
                     failed: appState.lastConnectionFailure != nil),
                     motionEnabled: true,
                     progress: appState.isConnecting ? SeaSceneParameters.progress(for: appState.connectionStage) : nil,
-                    active: appState.selectedPage == .dashboard,
+                    // Keeps moving behind inner pages too, where it shows dimmed.
+                    active: true,
                     traffic: { [appState] in appState.seaTrafficSample })
                     .ignoresSafeArea()
                     .opacity(backdrop.sceneOpacity)

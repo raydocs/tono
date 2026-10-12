@@ -791,6 +791,21 @@ it('names a line once in the sea look when it has no separate city word', async 
   }
 })
 
+it('shows each line with its city mark in the sea look', async () => {
+  const { unmount } = renderSeaRoutes()
+  try {
+    const rows = (await screen.findAllByText('Buffalo · Niagara'))
+      .map((node) => node.closest('.sea-line-row'))
+      .filter((row) => row !== null)
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows)
+      expect(row.querySelector('svg title')?.textContent).toBe('Tono route')
+  } finally {
+    unmount()
+    setNewAppearance(false)
+  }
+})
+
 it('states the 24-hour record as a plain sentence without a count in the sea look', async () => {
   const { unmount } = renderSeaRoutes()
   try {

@@ -191,6 +191,7 @@ extension ProxiesView {
                 }
             } label: {
                 HStack(spacing: 10) {
+                    NodeRouteMark(size: 30, city: nodeCityParts(node.displayName).city)
                     Text(nodeRouteTitle(node)).font(.system(size: 15))
                         .foregroundStyle(SeaTheme.text).lineLimit(1)
                     Spacer(minLength: 8)

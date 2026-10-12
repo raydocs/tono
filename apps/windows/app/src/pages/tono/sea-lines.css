@@ -30,6 +30,11 @@
   align-items: center;
   gap: 20px;
 }
+/* The city mark sits left of the text block; the text keeps the free width. */
+.sea-lines-recommended > div {
+  flex: 1;
+  min-width: 0;
+}
 /* The explanation opener reads as a control, not as stray punctuation after the tag. */
 .sea-lines-recommended .sea-lines-help {
   min-height: 0;
