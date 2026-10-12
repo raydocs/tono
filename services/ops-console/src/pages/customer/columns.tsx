@@ -33,13 +33,14 @@ export type WechatMask = Mask | null;
  * it is the masked one: the privacy toggle must not be undone by a hover.
  *
  * Since the page took the 1280 px dashboard width, the address column at 1440
- * had about 340 px for addresses that need under 200, while the node, handle,
- * service and version columns clipped their values to a few letters and the
- * version header to three of its four characters. The 2026-10-12 cut moves
- * 124 px from the address to those four columns and the expiry's right air;
- * the address keeps about 216 px. Widths include the cells' 12 px padding
- * (border-box). Below the table floor in Customers.tsx the container scrolls
- * sideways rather than squeeze any column further.
+ * had about 80 px more than its longest entry plus a lifecycle tag, while the
+ * node, handle, service and version columns clipped their values to a few
+ * letters and the version header to three of its four characters. The
+ * 2026-10-12 cut gives 72 of those pixels to those four columns and the
+ * expiry's right air, keeping about ten over the longest address (the
+ * customers spec asserts none is clipped). Widths include the cells' 12 px
+ * padding (border-box). Below the table floor in Customers.tsx the container
+ * scrolls sideways rather than squeeze any column further.
  */
 export function customerColumns(
   mask: Mask,
@@ -89,7 +90,7 @@ export function customerColumns(
       {
         id: 'wechat',
         header: copy.customerColumns.wechat,
-        width: '96px',
+        width: '80px',
         sortValue: (row: CustomerSummaryDto) => row.wechatId ?? '',
         cell: (row: CustomerSummaryDto) => (
           <WechatCell id={row.wechatId} mask={wechat} duplicate={row.wechatDuplicate === true} />
@@ -108,7 +109,7 @@ export function customerColumns(
     {
       id: 'node',
       header: copy.customerColumns.node,
-      width: '124px',
+      width: '108px',
       sortValue: (row) => row.selectedServer ?? '',
       cell: (row) => <Value value={row.selectedServer} source={copy.sourceWord.catalog} />,
     },
@@ -144,7 +145,7 @@ export function customerColumns(
       {
         id: 'services',
         header: copy.customerColumns.services,
-        width: '92px',
+        width: '80px',
         cell: (row: CustomerSummaryDto) => (
           row.services.length === 0
             ? <Value value={null} source={copy.sourceWord.telemetry} />
@@ -154,7 +155,7 @@ export function customerColumns(
       {
         id: 'version',
         header: copy.customerColumns.minVersion,
-        width: '80px',
+        width: '76px',
         mono: true,
         sortValue: (row: CustomerSummaryDto) => row.minAppVersion ?? '',
         cell: (row: CustomerSummaryDto) => (
@@ -164,8 +165,8 @@ export function customerColumns(
       {
         id: 'expires',
         header: copy.customerColumns.expires,
-        width: '96px',
-        className: 'pl-1 pr-3',
+        width: '92px',
+        className: 'pl-1 pr-2',
         align: 'right' as const,
         mono: true,
         sortValue: (row: CustomerSummaryDto) => row.expiresAt ?? 0,
