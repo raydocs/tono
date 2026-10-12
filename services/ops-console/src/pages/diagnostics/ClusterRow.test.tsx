@@ -51,6 +51,14 @@ it('keeps the severity cell for every row but leaves it empty unless the cluster
   expect(root.querySelector('.cluster-sentence')?.previousElementSibling).toBe(severity);
 });
 
+it('renders no severity element at all when showSeverity is false, even for a p0 row', () => {
+  const root = document.createElement('div');
+  root.innerHTML = renderToString(<ul><ClusterRow cluster={{ ...cluster, severity: 'normal' }} showSeverity={false} /></ul>);
+  expect(root.querySelector('.cluster-severity')).toBeNull();
+  expect(root.querySelector('.cluster-sentence')?.previousElementSibling).toBeNull();
+  expect(cell(root, 'cluster-sentence')).toBe(copy.codeWord.TONO_NODE_OR_CORE_UNREACHABLE);
+});
+
 it('puts the full meta text on the cell title and splits it into three flex items with no dot text', () => {
   const root = document.createElement('div');
   root.innerHTML = renderToString(<ul><ClusterRow cluster={cluster} /></ul>);

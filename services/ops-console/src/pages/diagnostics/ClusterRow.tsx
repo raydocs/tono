@@ -13,16 +13,20 @@ import type { FailureCluster } from './types';
  * row carries no hover state or pointer on purpose. Do not add one until it
  * drills down.
  */
-export function ClusterRow({ cluster }: { cluster: FailureCluster }) {
+export function ClusterRow({ cluster, showSeverity = true }: { cluster: FailureCluster; showSeverity?: boolean }) {
   const stage = clusterStage(cluster.stage);
   const platform = `${cluster.platform} ${cluster.appVersion}`;
   const node = clusterNode(cluster.node);
   const { prefix: city, main: site } = splitNodeName(node);
   return (
     <li className={cluster.status === 'quiet' ? 'cluster-row is-quiet' : 'cluster-row'}>
-      {/* Always rendered so the sentences share one x; empty unless p0. The
+      {/* Rendered on every row while the list has any p0, so the sentences share
+          one x; empty unless this row is p0. A list with no p0 drops the cell
+          (and its column) so the sentences start at the heading's edge. The
           label is the one the incident card puts before its subject. */}
-      <span className="cluster-severity">{cluster.severity === 'p0' ? copy.severity.severe : null}</span>
+      {showSeverity ? (
+        <span className="cluster-severity">{cluster.severity === 'p0' ? copy.severity.severe : null}</span>
+      ) : null}
       <span className="cluster-sentence" title={cluster.code}>{clusterCode(cluster.code)}</span>
       {/* Three flex items; the dots between them are CSS (`::before` on items
           two and up), hidden on a phone where the items wrap, so no line starts

@@ -97,6 +97,40 @@ test.describe('today page', () => {
   });
 
   /**
+   * With no p0 the severity column is dropped, not just emptied: an empty `auto`
+   * track still leaves its 12 px column-gap, which would put the sentences 12 px
+   * right of the heading. The same read with every severity 'normal' is routed in.
+   */
+  test('with no p0 the sentences start at the heading edge, and the p0 list keeps its 严重 cell there', async ({ page }) => {
+    await open(page, '/today');
+    const block = page.locator('section').filter({ has: page.getByRole('heading', { name: '失败聚类' }) });
+    await expect(block.locator('.cluster-list')).toHaveAttribute('data-severity', 'some');
+    const headingX = (await block.getByRole('heading').boundingBox())!.x;
+    const label = (await block.locator('.cluster-severity').first().boundingBox())!.x;
+    const p0Sentence = (await block.locator('[title="TONO_FAIL_OPEN"]').boundingBox())!.x;
+    expect(label).toBeCloseTo(headingX, 0);
+    expect(p0Sentence).toBeGreaterThan(headingX + 12);
+
+    await page.route('**/api/v1/ops/failure-clusters*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json() as { clusters: { severity: string }[] };
+      body.clusters = body.clusters.map((cluster) => ({ ...cluster, severity: 'normal' }));
+      await route.fulfill({ response, json: body });
+    });
+    // Same URL, so a goto would not reload: reload to read the routed data.
+    await page.reload({ waitUntil: 'networkidle' });
+    await settle(page);
+    await expect(block.locator('li')).toHaveCount(3);
+    await expect(block.locator('.cluster-list')).toHaveAttribute('data-severity', 'none');
+    await expect(block.locator('.cluster-severity')).toHaveCount(0);
+    const heading = (await block.getByRole('heading').boundingBox())!.x;
+    const sentences = block.locator('[title^="TONO_"]');
+    for (let i = 0; i < 3; i += 1) {
+      expect(Math.abs((await sentences.nth(i).boundingBox())!.x - heading)).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  /**
    * Dense has nine clusters with the only p0 stored last and the only quiet one
    * eighth, with more people than four of the open ones. The list sorts them on
    * the client: p0 first, quiet last. The meta line gives way only inside the

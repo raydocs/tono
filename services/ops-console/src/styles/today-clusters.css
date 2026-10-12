@@ -10,6 +10,12 @@
   column-gap: 12px;
 }
 
+/* No p0 in the list: rows carry no severity cell, and the column goes with it
+ * so its gap does not push the sentences right of the heading's edge. */
+.cluster-list[data-severity="none"] {
+  grid-template-columns: fit-content(196px) minmax(0, 1fr) auto auto;
+}
+
 .cluster-row {
   display: grid;
   grid-column: 1 / -1;

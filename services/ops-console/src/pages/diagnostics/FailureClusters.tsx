@@ -31,6 +31,7 @@ export function FailureClusters() {
   if (resource.data.clusters.length === 0) {
     return <p className="text-fine" role="status">{copy.diagnosticsPanel.clustersNone}</p>;
   }
+  const hasSevere = resource.data.clusters.some((cluster) => cluster.severity === 'p0');
   return (
     <Section
       title={
@@ -41,9 +42,9 @@ export function FailureClusters() {
         </>
       }
     >
-      <ul className="cluster-list">
+      <ul className="cluster-list" data-severity={hasSevere ? 'some' : 'none'}>
         {sortClusters(resource.data.clusters).map((cluster) => (
-          <ClusterRow key={cluster.id} cluster={cluster} />
+          <ClusterRow key={cluster.id} cluster={cluster} showSeverity={hasSevere} />
         ))}
       </ul>
     </Section>
