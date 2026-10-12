@@ -2316,6 +2316,16 @@ async fn emergency_disarm_resets_the_redirected_adapter_even_when_the_deadline_i
     Ok(())
 }
 
+/// The release worker reports a disarm that ran past its budget honestly: a note, so the outcome
+/// cannot be "restored", and none for a disarm that finished inside it.
+#[test]
+fn a_disarm_that_overran_its_budget_leaves_a_note_and_one_within_it_does_not() {
+    assert_eq!(emergency_overrun_note(EMERGENCY_DISARM_OUTER_BUDGET), None);
+    let note = emergency_overrun_note(EMERGENCY_DISARM_OUTER_BUDGET + std::time::Duration::from_secs(7))
+        .expect("a disarm past its budget must leave a note, so the outcome cannot be restored");
+    assert!(note.contains("45"), "{note}");
+}
+
 /// An update-executor caller has no outer timeout, so it keeps the full DNS budgets.
 #[test]
 fn the_emergency_legs_keep_the_full_dns_budgets_without_a_caller_deadline() {

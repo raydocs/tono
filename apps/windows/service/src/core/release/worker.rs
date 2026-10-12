@@ -443,16 +443,10 @@ async fn clean_up() -> Option<String> {
             CLEANUP_TIMEOUT.as_secs()
         )),
     }
-    if let Some(note) = cleanup_overrun_note(started.elapsed()) {
+    if let Some(note) = crate::core::windows_kill_switch::emergency_overrun_note(started.elapsed()) {
         notes.push(note);
     }
     joined(&notes)
-}
-
-/// A cleanup that ran past its budget (the adapter reset leg is never skipped once WFP is gone,
-/// so it may) did not prove itself inside it: the note keeps the outcome from `restored`.
-pub(crate) fn cleanup_overrun_note(_elapsed: Duration) -> Option<String> {
-    None
 }
 
 pub(crate) type Reading = (&'static str, String, Option<String>);

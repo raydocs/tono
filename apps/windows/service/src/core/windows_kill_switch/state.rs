@@ -534,6 +534,14 @@ pub(super) const DNS_RESTORE_TIMEOUT: std::time::Duration = std::time::Duration:
 /// together. The worker takes this constant, so the fallback below cannot drift from it.
 pub const EMERGENCY_DISARM_OUTER_BUDGET: std::time::Duration = std::time::Duration::from_secs(45);
 
+/// The note a caller of the emergency disarm records when the disarm ran past
+/// [`EMERGENCY_DISARM_OUTER_BUDGET`] (the adapter reset leg is never skipped once WFP is gone, so
+/// it may): the cleanup did not prove itself inside its budget, which keeps a "restored" outcome
+/// from being claimed on its word.
+pub fn emergency_overrun_note(_elapsed: std::time::Duration) -> Option<String> {
+    None
+}
+
 /// Longest the post-WFP adapter reset and resolver-policy removal may take on their own.
 pub(super) const EMERGENCY_FALLBACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
