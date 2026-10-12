@@ -1386,11 +1386,18 @@ where
 }
 
 /// Settle the result of an automatic health-failure release. Success starts the unarmed probe.
+///
+/// The Service refuses the release when it cannot prove the DNS restore, which Wi-Fi adapter
+/// churn causes for a while. The session then idles in Protected Offline with WFP armed, and
+/// nothing else would ask again. So the same release is repeated every `period` (the monitor
+/// tick) for as long as `still_owned` says this session is still the idle protected one; a user
+/// Disconnect, a new connect or a newer generation ends it. Every attempt goes through the
+/// Service's own gate, which keeps its refusals: this loop never releases anything by itself.
 async fn settle_health_release<SF, RF, PF>(
     first: Result<(), String>,
-    _period: Duration,
-    _still_owned: impl FnMut() -> SF,
-    _release: impl FnMut() -> RF,
+    period: Duration,
+    mut still_owned: impl FnMut() -> SF,
+    mut release: impl FnMut() -> RF,
     start_probe: impl FnOnce() -> PF,
 )
 where
@@ -1398,16 +1405,33 @@ where
     RF: std::future::Future<Output = Result<(), String>>,
     PF: std::future::Future<Output = ()>,
 {
-    match first {
-        Ok(()) => start_probe().await,
-        Err(error) => {
+    let mut result = first;
+    let mut interval = tokio::time::interval(period);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // The first tick is immediate; the retry waits one full period after the refusal.
+    interval.tick().await;
+    let mut attempt = 0_u32;
+    while let Err(error) = result {
+        if attempt == 0 {
             logging!(
                 error,
                 Type::Service,
                 "Tono: health-failure release failed; not starting a tunnel: {error}"
             );
         }
+        interval.tick().await;
+        if !still_owned().await {
+            return;
+        }
+        attempt += 1;
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: retrying the refused health-failure release (attempt {attempt}) after: {error}"
+        );
+        result = release().await;
     }
+    start_probe().await;
 }
 
 /// The connect generation whose DIRECT binding check got no answer from the uplink read, or
