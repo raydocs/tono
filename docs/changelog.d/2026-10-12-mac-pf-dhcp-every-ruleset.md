@@ -13,3 +13,4 @@
   - F2（次要）：文档事实更正。(a) 有隧道时 DHCP/NDP 排在物理接口 DNS 阻断之后；(b) Windows 地板还放行 DHCPv4 单播续租和 DHCPv6，对齐说法改为“每个武装模式都有基础设施例外”，并删去“再加这些会超过 Windows”的说法；(c) mDNS/IGMP/Continuity 受隧道门控但不受“允许本地网络设备”控制，LAN/link-local/multicast/SSDP 才受该开关控制。已在本条目与决策 097 更正。
   - 验证：本轮红提交 `116b5aee4`（只改期望与自测并升版）与绿提交各由 `ci-gate` 判定，结果记在 PR #1591 正文「Codex review round 1」。未执行：真机测试。
   - F1 的连带修正（CI 暴露）：无隧道的 `no state` NDP 放行在 bootstrap → 隧道 arm 时被算作“撤销”，`withdrawnHosts` 认不出它的形状，于是每次隧道 arm 都退化成整机状态清空（`control relay self-test failed: tunnel-arm-kills-relay-states, exit-on-a-relay-node-is-spared`）。`stateDisposal` 现在不把 `no state` 的放行算作撤销（不留状态的规则被撤销时无状态可杀）；有状态的撤销判断不变。自测加断言：仅撤销无状态 NDP 放行为 `.keep`。这是 `stateDisposal` 语义的一处收窄，需要审查者看一眼。
+  - Codex 第 2 轮（头 `5811481812`）：PASS，F1、F2 已解决，接受 `stateDisposal` 的改动。审查记录了两条既有残余，已各记一条 open 发现，均待所有者决定、本 PR 未改：`MAC-EXIT-PORT-53-PERMIT`（出口端口可为 53/853）、`MAC-TUNNELED-NDP-KEEP-STATE`（有隧道的 NDP 仍 `keep state`）。
