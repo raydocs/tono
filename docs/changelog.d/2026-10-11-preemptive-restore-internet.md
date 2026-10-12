@@ -35,3 +35,4 @@
   - Mac 旧版系统代理模式的清除写明不在旧效果隔离的保证范围内。
   - 新增回归：两个交错（旧恢复在新 Connect 之后恢复执行；旧 Connect 拿到新恢复释放的代数）和一个报告折叠测试。Linux 上 `cargo test --lib release` 76 通过。App 和 Swift 由托管 CI 编译。
 - Sol 审查第 4 轮修复：用户点 Connect 时，先在等待状态锁之前记下纪元序号，拿到锁后比较交换认领。在 Connect 排队期间点下的“恢复正常网络”不再被这个更早的 Connect 夺走归属、悄悄跳过。新增排队顺序回归（真实状态锁）。
+- 测试包（2026-10-12，老板选测试候选分支）：从 `stability/restore-test-20261012`（`8905043`，产品代码同 `15d1ea0`）构建。Mac `Tono-0.0.75-build75-arm64.zip` 已签名公证，SHA-256 `298e0f0c…ff4e6b`（run 38192923562）；Windows `Tono_0.0.75_x64-setup.exe` SHA-256 `02f6b0e9…1f1719`，无 Authenticode、自动更新关闭（run 38192924877）。只给知情测试用户，未进更新通道，未发布。

@@ -4,9 +4,17 @@
 
 **所有项目都还没有在真机上跑过。** 每一项的结果都按真实情况记录：通过、失败，或现象不清（例如没复现出卡住）。没有复现出问题不等于证明没有问题，不能写成“全部通过”。
 
-## 0. 测试前
+## 0. 测试包（2026-10-12）
 
-- 安装同一版本号的测试包：Mac 一个，Windows 一个。包的版本、来源提交和 SHA-256 以发包消息为准。测试包不走自动更新通道。
+- 来源：分支 `stability/restore-test-20261012`，提交 `8905043ea5964475b30a54e74e8f3fe71ba1e470`。它的产品代码与 PR #1569 的 `15d1ea0` 相同（Sol 第 5 轮复审通过），只多改了一行 Mac 签名工作流的候选分支。
+- Mac：`Tono-0.0.75-build75-arm64.zip`，SHA-256 `298e0f0c396d5b0b800f2cb475ee451b1c99dc39ba71de028e5b270533ff4e6b`。已用 Developer ID 签名并公证（`source=Notarized Developer ID`，stapler 校验通过）。只支持 Apple 芯片。构建记录：https://github.com/raydocs/tono/actions/runs/38192923562 。
+- Windows：`Tono_0.0.75_x64-setup.exe`，SHA-256 `02f6b0e9fd1658e51aba74ab80b2bed49c407917cf07ec39b64b1448171f1719`，包含的 `tono-service.exe` SHA-256 `b6c5588cb8dad01a937e436d7ba7055627b90bc20b4b294b8e09e7f7842d2235`。没有 Authenticode 签名（现有发布流水线就没有这一步），SmartScreen 会提示，需要点“更多信息 → 仍要运行”。自动更新已关闭。构建记录：https://github.com/raydocs/tono/actions/runs/38192924877 。
+- 两个包的版本号都是 0.0.75（Mac build 75），与正式候选同号。测完要手动重装正式版，不能靠自动更新替换。
+- 不在本次保证范围内：Mac 旧版系统代理模式的清除（IMPLEMENTATION §4，Sol R3-M1）；手动紧急命令；降级到更早版本。
+
+## 0b. 测试前
+
+- 安装上面的两个测试包，先核对 SHA-256。
 - 先记一次基线：
   - Mac：`scutil --dns | head -20`、`sudo pfctl -a tono.killswitch -sr`（应为空）。
   - Windows：`Get-DnsClientServerAddress`、`Get-DnsClientNrptRule`。
