@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { NodeSummaryDto, SystemHealthDto } from '@contract';
+import { DataGapBanner } from '@/components/ops/DataGapBanner';
 import { DetailDrawer, Fact } from '@/components/ops/DetailDrawer';
 import { PageNote } from '@/components/ops/PageNote';
 import type { PanelState } from '@/components/ops/Panel';
@@ -12,6 +13,7 @@ import { nowSec } from '@/lib/clock';
 import { foldFleetLoad } from '@/lib/fleet-load';
 import { closeNode, openNodePage } from '@/lib/hash-route';
 import { monthOf } from '@/lib/ledger';
+import { nodeFactsGaps } from '@/lib/node-facts';
 import { nodeLegacyApi, type NodeLoadRange } from '@/lib/node-legacy';
 import { usePrivacy } from '@/lib/privacy';
 import { selectLifecycle } from '@/lib/selectors';
@@ -24,6 +26,7 @@ import '@/styles/nodes.css';
 import { toNodeView } from './node-metrics';
 import { ApiPaths } from './nodes/ApiPaths';
 import { ApiRelays } from './nodes/ApiRelays';
+import { BatchProfileDrawer } from './nodes/BatchProfileDrawer';
 import { FleetBand } from './nodes/FleetBand';
 import { FleetLoad } from './nodes/FleetLoad';
 import { FleetTable } from './nodes/FleetTable';
@@ -57,6 +60,7 @@ export default function NodesPage({
   const privacy = usePrivacy();
   const phone = useIsPhone();
   const [range, setRange] = useState<NodeLoadRange>('24h');
+  const [batching, setBatching] = useState(false);
   // The day window feeds both the charts and each row's CPU line; the week is
   // only fetched once somebody asks for it.
   const day = useResource('fleet-load-24h', (signal) => nodeLegacyApi.fleetLoad('24h', signal));
@@ -70,6 +74,7 @@ export default function NodesPage({
 
   const all = useMemo(() => (nodes.status === 'ready' ? nodes.data : []), [nodes]);
   const inService = useMemo(() => selectLifecycle(all, null), [all]);
+  const gaps = useMemo(() => nodeFactsGaps(all), [all]);
   const facts = useMemo(() => {
     const out = new Map<string, FleetNodeDto>();
     if (fleet.status !== 'ready') return out;
@@ -114,6 +119,13 @@ export default function NodesPage({
 
       {phone ? null : <FleetLoad load={load} range={range} onRange={setRange} />}
 
+      {nodes.status === 'ready' && (gaps.noQuota.length > 0 || gaps.noExpiry.length > 0) ? (
+        <DataGapBanner
+          sentence={copy.nodesBoard.factsGap.sentence(gaps.noQuota.length, gaps.noExpiry.length)}
+          action={{ label: copy.nodesBoard.factsGap.action, onClick: () => setBatching(true) }}
+        />
+      ) : null}
+
       <FleetTable
         nodes={all}
         state={tableState}
@@ -133,6 +145,13 @@ export default function NodesPage({
       {phone ? <FleetLoad load={load} range={range} onRange={setRange} /> : null}
 
       <ApiPaths paths={apiPaths} />
+
+      <BatchProfileDrawer
+        open={batching}
+        nodes={all}
+        onClose={() => setBatching(false)}
+        onChanged={nodes.reload}
+      />
 
       <DetailDrawer
         open={Boolean(selectedView)}
