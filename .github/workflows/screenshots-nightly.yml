@@ -18,11 +18,22 @@ name: Screenshots nightly
 #
 # A failure is a red run in the Actions tab, and a scheduled or dispatched run
 # on main opens (or comments on) one tracking issue so it is not missed.
+#
+# Re-recording: dispatch with update_baselines=true on the branch whose console
+# changed. Only the ops-console job runs; it re-records the Playwright baselines
+# on this same macos-26 image and uploads e2e/__screenshots__ as the artifact
+# ops-console-baselines-<sha> to commit after a visual check. The scheduled run
+# never re-records.
 
 on:
   schedule:
     - cron: '23 18 * * *' # 02:23 Asia/Shanghai
   workflow_dispatch:
+    inputs:
+      update_baselines:
+        description: Re-record the ops-console Playwright baselines instead of comparing them
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -33,6 +44,7 @@ concurrency:
 
 jobs:
   sing-box-input:
+    if: ${{ !inputs.update_baselines }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -48,6 +60,7 @@ jobs:
 
   macos-window-captures:
     needs: sing-box-input
+    if: ${{ !inputs.update_baselines }}
     runs-on: macos-26
     timeout-minutes: 60
     steps:
@@ -128,9 +141,27 @@ jobs:
         run: npx playwright install chromium
 
       - name: Screenshot baselines compared
+        if: ${{ !inputs.update_baselines }}
         # The same specs as the PR gate, without --ignore-snapshots, so every
         # toHaveScreenshot assertion compares against e2e/__screenshots__.
         run: npx playwright test
+
+      - name: Screenshot baselines re-recorded
+        if: ${{ inputs.update_baselines }}
+        # Re-records only the baselines that differ, and adds missing ones.
+        # 账目 ›「一个月的账，一页」(light) has hung here in Playwright's font
+        # wait while the compare run captured it stably (#1588); if it fails,
+        # take its baseline from a compare run's ledger-actual.png.
+        run: npx playwright test --update-snapshots=changed
+
+      - name: Upload re-recorded baselines
+        if: ${{ always() && inputs.update_baselines }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ops-console-baselines-${{ github.sha }}
+          path: services/ops-console/e2e/__screenshots__
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Preserve diffs
         if: failure()
@@ -143,7 +174,7 @@ jobs:
 
   report-failure:
     needs: [sing-box-input, macos-window-captures, ops-console-screenshots]
-    if: failure() && github.ref == 'refs/heads/main'
+    if: failure() && github.ref == 'refs/heads/main' && !inputs.update_baselines
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

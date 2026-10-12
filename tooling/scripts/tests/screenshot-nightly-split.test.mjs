@@ -27,3 +27,14 @@ test('every screenshot test the PR gate skips runs in the nightly, and only ther
   assert.ok(/^ {2}workflow_dispatch:/m.test(nightly), 'the nightly needs workflow_dispatch')
   assert.ok(!/^ {2}(pull_request|merge_group|workflow_call):/m.test(nightly), 'the nightly must stay out of the PR gate')
 })
+
+test('the nightly re-records baselines only when a dispatch asks for it', () => {
+  const nightly = workflow('screenshots-nightly.yml')
+
+  assert.ok(/^ {2}workflow_dispatch:\n {4}inputs:\n {6}update_baselines:\n(?: {8}.+\n)*? {8}default: false$/m.test(nightly),
+    'update_baselines must be a dispatch input that defaults to false')
+  const updates = [...nightly.matchAll(/^ {6}- name: .+\n {8}if: (.+)\n(?: {8}.*\n)*? {8}run: .*--update-snapshots.*$/gm)]
+  assert.equal(updates.length, 1, 'exactly one step re-records baselines')
+  assert.equal(updates[0][1], '${{ inputs.update_baselines }}')
+  assert.equal([...nightly.matchAll(/--update-snapshots/g)].length, 1, 'no other step may re-record')
+})
