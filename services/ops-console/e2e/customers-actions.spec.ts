@@ -155,6 +155,58 @@ test.describe('客户写动作', () => {
     await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 
+  /**
+   * No fixture customer is without an expiry, and that is the production
+   * shape this banner exists for. So the test makes it the way production got
+   * it: it clears four dates through the hub's own PATCH, then opens the page.
+   * u-06 and u-17 are in use, u-11 is suspended and u-20 has lapsed, so only
+   * the first two are asked for a date.
+   */
+  test('没登记到期的客户一键选中，设一个日期之后列表里就写着它', async ({ page }, testInfo) => {
+    const session = fresh('expiry-gap', testInfo);
+    for (const id of ['u-06', 'u-11', 'u-17', 'u-20']) {
+      const cleared = await page.request.patch(`/api/v1/ops/users/${id}?session=${session}`, {
+        data: { expiresAt: null },
+      });
+      expect(cleared.ok()).toBe(true);
+    }
+    await open(page, '/customers', 'default', session);
+
+    await expect(page.getByText('2 位客户没登记到期')).toBeVisible();
+    const sun = page.locator('tbody tr').filter({ hasText: 'sun.yan@example.com' });
+    const chen = page.locator('tbody tr').filter({ hasText: 'chen.lin@example.com' });
+    // The dash says why it is a dash, in the hover and the accessible name.
+    await expect(sun.getByLabel('还没登记到期日 · 批量设置到期在表上方')).toBeVisible();
+    await expect(sun.getByLabel('客户端没开日志上传，所以没有服务使用')).toBeVisible();
+
+    await page.getByRole('button', { name: '批量设置到期', exact: true }).click();
+    await expect(page.getByText('选中 2 位客户')).toBeVisible();
+
+    // The open dialog hides the table from role queries, so who is picked is
+    // read after it closes, below.
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('选中的 2 位客户，到期都改成同一天');
+    await dialog.getByRole('button', { name: '都设成这一天' }).click();
+    await expect(dialog).toContainText('填一个今天之后的日期');
+
+    await dialog.getByLabel('到期日').fill('2026-12-31');
+    await expect(dialog).toContainText('选中的 2 位客户，到期都改成 2026-12-31');
+    await dialog.getByRole('button', { name: '都设成这一天' }).click();
+
+    await settle(page);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(sun.getByRole('checkbox')).toBeChecked();
+    await expect(page.locator('tbody tr').filter({ hasText: 'ma.qiang@example.com' }).getByRole('checkbox')).toBeChecked();
+    await expect(chen.getByRole('checkbox')).not.toBeChecked();
+    await expect(page.locator('tbody input[type="checkbox"]:checked')).toHaveCount(2);
+    await expect(page.getByText('已核对 2 · 待回执 0 · 明确失败 0 · 结果未知 0')).toBeVisible();
+    // The list was read again: the two now show the date, the suspended one still does not.
+    await expect(sun).toContainText('2026-12-31');
+    await expect(page.locator('tbody tr').filter({ hasText: 'ma.qiang@example.com' })).toContainText('2026-12-31');
+    await expect(chen).not.toContainText('2026-12-31');
+    await expect(page.getByText('没登记到期')).toHaveCount(0);
+  });
+
   test('改账务也要先说清楚改的是哪几项', async ({ page }, testInfo) => {
     const session = fresh('billing', testInfo);
     await open(page, '/customers/u-04', 'default', session);

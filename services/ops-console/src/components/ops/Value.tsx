@@ -32,18 +32,21 @@ const TIER_CLASS: Record<Tier, string> = {
 export function Value({
   value,
   source,
+  reason,
   mono,
   tier = 'row',
   className,
 }: {
   value: string | null;
   source: string;
+  /** Replaces the hover and accessible name when "no data from X" is not the real reason. */
+  reason?: string;
   mono?: boolean;
   tier?: Tier;
   className?: string;
 }) {
   if (value === null) {
-    const label = copy.missingFrom(source);
+    const label = reason ?? copy.missingFrom(source);
     return (
       <span
         className={cn(TIER_CLASS[tier], 'text-[var(--muted-foreground)]', className)}

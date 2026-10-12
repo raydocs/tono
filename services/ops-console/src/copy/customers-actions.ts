@@ -78,8 +78,23 @@ export const customerActionCopy = {
   batchRenewTitle: '续 30 天',
   batchRenewBody: (n: number) => `选中的 ${n} 位客户，各自从今天和原到期日里靠后的那天起再加 30 天。不限到期的不会被改。若有客户的设备已因到期被撤销，续期不会恢复这些设备，要请他们在这些设备上重新登录。`,
   batchRenewNobody: '选中的客户都不限到期，续期改不动任何一位',
+  batchSetExpiry: '批量设到期日',
+  batchExpiryTitle: '批量设到期日',
+  batchExpiryLead: (n: number) => `选中的 ${n} 位客户，到期都改成同一天。选一个今天之后的日期。`,
+  batchExpiryBody: (n: number, date: string) => `选中的 ${n} 位客户，到期都改成 ${date}，原来有到期日的会被覆盖。到了这一天后几分钟内，名下设备和登录会被撤销，客户端取不到目录。若有客户的设备已因到期被撤销，改日期不会恢复它们，要请他们在这些设备上重新登录。`,
+  batchExpiryConfirm: '都设成这一天',
+  batchExpiryInvalid: '填一个今天之后的日期，没有保存。',
   batchDone: (n: number) => `已处理 ${n} 位客户`,
   batchPartly: (done: number, failed: number) => `${done} 位做成了，${failed} 位没做成`,
+
+  /** The notice above the list when in-use customers have no expiry date entered. */
+  customersBoard: {
+    expiryGap: (n: number) => `${n} 位客户没登记到期`,
+    expiryGapAction: '批量设置到期',
+    /** The hover and accessible name of a dash, when the real reason is not "no data". */
+    servicesMissing: '客户端没开日志上传，所以没有服务使用',
+    expiryMissing: '还没登记到期日 · 批量设置到期在表上方',
+  },
 
   /* ------------------------------------------------------ 客户 360 头 */
 
