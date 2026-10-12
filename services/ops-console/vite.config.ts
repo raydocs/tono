@@ -27,6 +27,9 @@ import nodesEmptyRaw from './fixtures/nodes.empty.json';
 import healthRaw from './fixtures/system-health.json';
 import healthDenseRaw from './fixtures/system-health.dense.json';
 import healthEmptyRaw from './fixtures/system-health.empty.json';
+import clustersRaw from './fixtures/failure-clusters.json';
+import clustersDenseRaw from './fixtures/failure-clusters.dense.json';
+import clustersEmptyRaw from './fixtures/failure-clusters.empty.json';
 import apiRelaysRaw from './fixtures/api-relays.json';
 import apiPathsRaw from './fixtures/api-paths.json';
 
@@ -37,9 +40,9 @@ import apiPathsRaw from './fixtures/api-paths.json';
  * ask for one.
  */
 const FIXTURE_SETS = {
-  default: { fleet: fleetRaw, live: liveRaw, nodes: nodesRaw, health: healthRaw },
-  dense: { fleet: fleetDenseRaw, live: liveDenseRaw, nodes: nodesDenseRaw, health: healthDenseRaw },
-  empty: { fleet: fleetEmptyRaw, live: liveRaw, nodes: nodesEmptyRaw, health: healthEmptyRaw },
+  default: { fleet: fleetRaw, live: liveRaw, nodes: nodesRaw, health: healthRaw, clusters: clustersRaw },
+  dense: { fleet: fleetDenseRaw, live: liveDenseRaw, nodes: nodesDenseRaw, health: healthDenseRaw, clusters: clustersDenseRaw },
+  empty: { fleet: fleetEmptyRaw, live: liveRaw, nodes: nodesEmptyRaw, health: healthEmptyRaw, clusters: clustersEmptyRaw },
 } as const;
 
 type FixtureSetName = keyof typeof FIXTURE_SETS;
@@ -425,6 +428,11 @@ function fixturesPlugin(): Plugin {
         // Which source is behind, and how far the backfill has left to go.
         if (route === 'system/health') {
           sendJson(res, materializeOps(chosen.health.health, chosen.health.clock));
+          return;
+        }
+        // Today failure clusters: open clusters per set; the error set never gets here.
+        if (route === 'failure-clusters') {
+          sendJson(res, materializeOps(chosen.clusters.body, chosen.clusters.clock));
           return;
         }
         // 节点 · API 中继: the same two relays in every set.

@@ -44,6 +44,25 @@ test.describe('today page', () => {
     await expect(page).toHaveScreenshot('list.png');
   });
 
+  /**
+   * The failure-clusters block reads its own endpoint. The fixture server once
+   * had no route for it, so every set showed the unavailable line with a retry.
+   */
+  test('the failure clusters block reads its fixture: empty sentence, then three lines', async ({ page }) => {
+    await open(page, '/today', 'empty');
+    await expect(page.getByText('这段时间没有打开的失败聚类。')).toBeVisible();
+    await expect(page.getByText('失败聚类还读不到。')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '重试' })).toHaveCount(0);
+
+    await open(page, '/today');
+    const block = page.locator('section').filter({ has: page.getByRole('heading', { name: '失败聚类' }) });
+    await expect(block.locator('li')).toHaveCount(3);
+    await expect(block).toContainText('TONO_TLS_TIMEOUT · handshake · windows 1.8.1 · Los Angeles · Mesa · 41');
+    await expect(block).toContainText('TONO_AUTH_DNS · securingDNS · macos 1.8.0 · Tokyo · Fuji · 17');
+    await expect(block).toContainText('TONO_NODE_OR_CORE_UNREACHABLE · connect · windows 1.7.9 · Hong Kong · Victoria · 23');
+    await expect(page.getByText('失败聚类还读不到。')).toHaveCount(0);
+  });
+
   test('the resolved tab is a different list, not a filter on the same one', async ({ page }) => {
     await open(page, '/today');
     await page.getByRole('tab', { name: /最近恢复/ }).click();
