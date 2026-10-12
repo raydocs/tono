@@ -65,6 +65,27 @@ for (const { name, hash } of PAGES) {
   });
 }
 
+/**
+ * The fixture customers all have an expiry, so one is cleared first, through
+ * the hub's own PATCH and into a store of its own, to make the notice appear.
+ */
+test('the customers expiry banner action is 44 px tall and inside the viewport', async ({ page }, testInfo) => {
+  const session = `customers-gap-${testInfo.project.name}-${String(testInfo.repeatEachIndex)}-${String(testInfo.retry)}`;
+  const cleared = await page.request.patch(`/api/v1/ops/users/u-06?session=${session}`, {
+    data: { expiresAt: null },
+  });
+  expect(cleared.ok()).toBe(true);
+  await open(page, '/customers', 'default', session);
+  const action = page.getByRole('button', { name: '批量设置到期', exact: true });
+  await expect(action).toBeVisible();
+  const box = await action.boundingBox();
+  expect(box!.height).toBeGreaterThanOrEqual(44);
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  const sentence = await page.getByText('位客户没登记到期').boundingBox();
+  expect(box!.y).toBeGreaterThan(sentence!.y);
+});
+
 test('the release actions are inside the first screen of the clients page', async ({ page }) => {
   await open(page, '/clients');
   const row = page.locator('tbody tr').filter({ hasText: '1.8.1' }).first();
