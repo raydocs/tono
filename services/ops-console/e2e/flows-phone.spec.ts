@@ -40,6 +40,18 @@ test('下架 on a phone: every press is a thumb tall and the confirm is on scree
   await expect(page.getByRole('button', { name: '上架', exact: true })).toBeEnabled();
 });
 
+test('a dialog opens at full size when motion is reduced', async ({ page }) => {
+  await open(page, `/nodes/${encodeURIComponent(NODE)}`, 'default', sessionFor('phone-dialog-motion'));
+  await page.getByRole('button', { name: '下架', exact: true }).click();
+  const content = page.locator('[data-slot="dialog-content"]');
+  await expect(content).toBeVisible();
+  const motion = await content.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return { animation: s.animationName, transition: s.transitionDuration };
+  });
+  expect(motion.animation, 'no enter animation under reduced motion').toBe('none');
+});
+
 test('新建商家账号 on a phone: every press is a thumb tall and 保存 is reachable', async ({ page }) => {
   await open(page, '/settings/providers', 'default', sessionFor('phone-provider'));
 
