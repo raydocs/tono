@@ -604,6 +604,10 @@ where
 /// C1). A failed release keeps the system armed and aborts the sign-out.
 #[tauri::command]
 pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHandle) -> Result<(), String> {
+    // Ask the Service now rather than trust what this process cached at startup: every startup
+    // path that could drop the report (a suspended restore, a sign-in racing the probe) is moot.
+    let reported = service_reports_ai_hold().await;
+    absorb_service_hold_report(&mut *state.inner().lock().await, reported);
     let release_app = app.clone();
     let resume_app = app.clone();
     close_account_with(state.inner().clone(), AccountCloseReason::User,
@@ -616,6 +620,25 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
         },
         move |inner| emit_status(&app, &status_of(inner)),
     ).await
+}
+
+/// The Service's answer to "is an AI hold left behind with no session?" (decision 125). `None`
+/// when it cannot be read or an older Service reports nothing: Sign Out then keeps today's
+/// behavior, which only releases for what this process knows.
+async fn service_reports_ai_hold() -> Option<bool> {
+    tokio::time::timeout(Duration::from_secs(3), crate::core::service::tono_service_status_snapshot())
+        .await
+        .ok()?
+        .ok()?
+        .ai_hold_retained
+}
+
+/// A reported hold makes an otherwise idle Sign Out a full release. Nothing else changes: an
+/// absent or negative report never clears what this process remembers.
+pub(super) fn absorb_service_hold_report(inner: &mut crate::tono::state::TonoInner, reported: Option<bool>) {
+    if reported == Some(true) {
+        inner.ai_hold_retained = true;
+    }
 }
 
 /// System boundaries only: admission, task retirement, and account/FSM commits remain here.
@@ -1076,6 +1099,37 @@ mod lifecycle_tests {
         ).await.unwrap();
         assert!(released.load(std::sync::atomic::Ordering::SeqCst),
             "Sign Out must remove the AI hold the replacement kept");
+    }
+
+    /// Codex review of #1648: however the startup restore lost the Service's report (a suspended
+    /// restore, a sign-in racing the probe), Sign Out asks the Service itself.
+    #[tokio::test]
+    async fn sign_out_runs_the_full_release_when_the_service_reports_a_hold_the_app_missed() {
+        for (reported, expect_release) in [(Some(true), true), (Some(false), false), (None, false)] {
+            let state = Arc::new(TonoState::for_test());
+            {
+                let mut inner = state.lock().await;
+                inner.account_state = AccountState::Ready;
+                absorb_service_hold_report(&mut inner, reported);
+            }
+            let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let ran = Arc::clone(&released);
+            close_account_with(Arc::clone(&state), AccountCloseReason::User,
+                move |_| async move { ran.store(true, std::sync::atomic::Ordering::SeqCst); Ok(()) },
+                |_| async { Ok(()) }, |_, _| async {}, |_| {},
+            ).await.unwrap();
+            assert_eq!(released.load(std::sync::atomic::Ordering::SeqCst), expect_release, "report {reported:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_negative_service_report_never_clears_what_the_app_remembers() {
+        let state = Arc::new(TonoState::for_test());
+        let mut inner = state.lock().await;
+        inner.ai_hold_retained = true;
+        absorb_service_hold_report(&mut inner, Some(false));
+        absorb_service_hold_report(&mut inner, None);
+        assert!(inner.ai_hold_retained);
     }
 
     #[tokio::test]

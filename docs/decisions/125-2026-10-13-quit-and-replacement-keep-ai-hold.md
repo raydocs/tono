@@ -37,8 +37,8 @@
 - Windows App gaps found by the Codex review of #1642, closed afterwards: (1) the Service now
   reports the retained hold in its status snapshot (`ai_hold_retained`; it is the secondary layer's
   last requested disposition, so a crash, Quit, replacement or failed update all show it, and a
-  re-arm or full release clears it). The App reads it on startup and keeps it, so an idle Sign Out
-  after the App is reopened still runs the full release; an older Service that sends no field leaves
+  re-arm or full release clears it). The App reads it at Sign Out (and keeps what startup restore
+  saw), so an idle Sign Out after the App is reopened still runs the full release; an older Service that sends no field leaves
   today's in-process behavior. (2) Restore internet always fences older narrow releases: when the
   release record is in `Released` mode (an explicit Restore, no Connect admitted since), a Quit or
   replacement narrow request is still accepted as a teardown but is released in full, whatever
