@@ -55,7 +55,8 @@ async fn probe_stored_protection(deadline: tokio::time::Instant) -> StoredProtec
             }
             Ok(Err(error)) => {
                 last_error = error.to_string();
-                let (service_stopped, clean_goodbye) = stopped_service_facts().await;
+                let (service_stopped, clean_goodbye) =
+                    within_restore_deadline(deadline, stopped_service_facts()).await;
                 let outcome = unanswered_probe_outcome(service_stopped, clean_goodbye, last_error.clone());
                 if matches!(outcome, StoredProtection::ProvenAbsent { .. }) {
                     logging!(
@@ -121,6 +122,16 @@ async fn stopped_service_facts() -> (Option<bool>, bool) {
     })
     .await
     .unwrap_or((None, false))
+}
+
+/// The registry and SCM fallback shares the restore budget of the IPC probe it follows. A read
+/// that does not finish in time proves nothing, so the probe stays Unknown and restore goes on
+/// (Codex re-review of #1624); the blocking task it leaves behind is read-only.
+async fn within_restore_deadline(
+    deadline: tokio::time::Instant,
+    facts: impl std::future::Future<Output = (Option<bool>, bool)>,
+) -> (Option<bool>, bool) {
+    tokio::time::timeout_at(deadline, facts).await.unwrap_or((None, false))
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -1062,6 +1073,19 @@ mod offline_admission_tests {
             || panic!("SCM must not be queried without a record"),
         );
         assert_eq!((stopped, recorded), (None, false));
+    }
+
+    /// Codex re-review of #1624: a stuck registry or SCM read must not hold restore past its budget.
+    #[tokio::test]
+    async fn a_fallback_that_does_not_finish_in_the_restore_budget_proves_nothing() {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(50);
+        let facts = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            within_restore_deadline(deadline, std::future::pending()),
+        )
+        .await
+        .expect("the fallback must be bounded by the restore deadline");
+        assert_eq!(facts, (None, false));
     }
 
     #[test]

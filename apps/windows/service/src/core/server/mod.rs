@@ -674,6 +674,24 @@ fn clean_goodbye_evidence(
     stop_cleanup_complete && !wanted && !live && residual_filters == Some(false)
 }
 
+/// The absolute deadline of the stop in progress, so the evidence check that follows the teardown
+/// spends only what the teardown left of the same budget and can never keep the process from
+/// reaching SCM Stopped (Codex re-review of #1624).
+#[cfg(any(windows, test))]
+static STOP_DEADLINE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// What is left of the stop budget for the residual-filter check. Without a recorded deadline
+/// (a stop that never went through the Windows teardown) a short fixed budget applies.
+#[cfg(any(windows, test))]
+fn residual_check_budget(
+    deadline: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> std::time::Duration {
+    deadline.map_or(std::time::Duration::from_secs(5), |deadline| {
+        deadline.saturating_duration_since(now)
+    })
+}
+
 /// An accepted owner goodbye has torn the IPC server down: leave the evidence the App needs to
 /// tell this clean stop from a crash (#1300). Nothing is recorded unless the goodbye was accepted
 /// and [`clean_goodbye_evidence`] holds; a failed write only costs the App the proof, so it never
@@ -683,21 +701,54 @@ async fn note_clean_goodbye_if_accepted() {
     if !OWNER_GOODBYE_PENDING.load(std::sync::atomic::Ordering::SeqCst) {
         return;
     }
-    let kill_switch = windows_kill_switch::status().await;
-    let residual_filters = match windows_kill_switch::residual_filters_present().await {
-        Ok(present) => Some(present),
-        Err(error) => {
+    let deadline = *STOP_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    note_clean_goodbye_with(
+        STOP_CLEANUP_COMPLETE.load(std::sync::atomic::Ordering::SeqCst),
+        windows_kill_switch::status().await,
+        windows_kill_switch::residual_filters_present,
+        residual_check_budget(deadline, std::time::Instant::now()),
+    )
+    .await;
+}
+
+/// The decision of [`note_clean_goodbye_if_accepted`] with its inputs made explicit. A teardown
+/// that did not complete, or a kill switch that is wanted or live, already settles it: the
+/// residual-filter query, which waits for the WFP lock a stuck cleanup may still hold, is not
+/// even started. When it is, it gets only `budget` and a query that does not answer in time is no
+/// evidence.
+#[cfg(any(windows, test))]
+async fn note_clean_goodbye_with<F>(
+    stop_cleanup_complete: bool,
+    kill_switch: crate::KillSwitchStatus,
+    residual_filters_present: impl FnOnce() -> F,
+    budget: std::time::Duration,
+) where
+    F: Future<Output = AnyResult<bool>>,
+{
+    if !clean_goodbye_evidence(
+        stop_cleanup_complete,
+        kill_switch.wanted,
+        kill_switch.live,
+        Some(false),
+    ) {
+        warn!("Owner goodbye stop: no proof that nothing is armed; no clean-goodbye record is written");
+        return;
+    }
+    let residual_filters = match tokio::time::timeout(budget, residual_filters_present()).await {
+        Ok(Ok(present)) => Some(present),
+        Ok(Err(error)) => {
             warn!("Owner goodbye stop: the residual filter check failed: {error:#}");
             None
         }
+        Err(_) => {
+            warn!("Owner goodbye stop: the residual filter check did not answer in time");
+            None
+        }
     };
-    if !clean_goodbye_evidence(
-        STOP_CLEANUP_COMPLETE.load(std::sync::atomic::Ordering::SeqCst),
-        kill_switch.wanted,
-        kill_switch.live,
-        residual_filters,
-    ) {
-        warn!("Owner goodbye stop: no proof that nothing is armed; no clean-goodbye record is written");
+    if !clean_goodbye_evidence(true, false, false, residual_filters) {
+        warn!("Owner goodbye stop: filters may remain; no clean-goodbye record is written");
         return;
     }
     match crate::clean_goodbye::record() {
@@ -759,9 +810,11 @@ pub async fn stop_ipc_server() -> Result<()> {
         // releasing protection so none can re-arm it between teardown and process exit.
         IPC_STOPPING.store(true, std::sync::atomic::Ordering::SeqCst);
         // Noted first, so it is never later than the timeout below; in-flight releases see it too.
-        windows_kill_switch::note_release_deadline(
-            std::time::Instant::now() + IPC_SERVICE_STOP_TIMEOUT,
-        );
+        let stop_deadline = std::time::Instant::now() + IPC_SERVICE_STOP_TIMEOUT;
+        *STOP_DEADLINE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(stop_deadline);
+        windows_kill_switch::note_release_deadline(stop_deadline);
         match tokio::time::timeout(IPC_SERVICE_STOP_TIMEOUT, stop_ipc_server_inner()).await {
             Ok(Ok(())) => STOP_CLEANUP_COMPLETE.store(true, std::sync::atomic::Ordering::SeqCst),
             Ok(Err(error)) => warn!("Service stop cleanup failed; continuing shutdown: {error:#}"),

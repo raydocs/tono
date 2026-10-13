@@ -92,6 +92,64 @@ async fn an_accepted_goodbye_whose_teardown_did_not_complete_leaves_no_record() 
     assert!(!recorded, "an unproven teardown is not a clean goodbye");
 }
 
+/// Codex re-review of #1624: the residual-filter query waits for the WFP lock, which a stuck
+/// cleanup may still hold. An incomplete teardown or an armed kill switch already settles the
+/// decision, so the query must not even start.
+#[tokio::test]
+#[serial]
+async fn the_residual_query_does_not_start_when_the_decision_is_already_made() {
+    use std::sync::atomic::AtomicBool;
+    crate::clean_goodbye::clear().expect("clear");
+    let idle = crate::core::windows_kill_switch::status().await;
+    let mut wanted = idle.clone();
+    wanted.wanted = true;
+    for (complete, status) in [(false, idle), (true, wanted)] {
+        let started = AtomicBool::new(false);
+        super::note_clean_goodbye_with(
+            complete,
+            status,
+            || async {
+                started.store(true, Ordering::SeqCst);
+                Ok(false)
+            },
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+        assert!(!started.load(Ordering::SeqCst), "the query must not start");
+        assert!(!crate::clean_goodbye::recorded());
+    }
+}
+
+/// A residual-filter query that never answers must not keep the stop from finishing, and a query
+/// that did not answer in time is no evidence.
+#[tokio::test]
+#[serial]
+async fn a_residual_query_that_never_answers_neither_hangs_the_stop_nor_records() {
+    crate::clean_goodbye::clear().expect("clear");
+    let idle = crate::core::windows_kill_switch::status().await;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        super::note_clean_goodbye_with(
+            true,
+            idle,
+            std::future::pending::<anyhow::Result<bool>>,
+            std::time::Duration::from_millis(50),
+        ),
+    )
+    .await
+    .expect("the stop must not wait on a residual query beyond its budget");
+    assert!(!crate::clean_goodbye::recorded());
+}
+
+#[test]
+fn the_residual_query_spends_only_what_the_stop_budget_has_left() {
+    use std::time::{Duration, Instant};
+    let now = Instant::now();
+    assert_eq!(super::residual_check_budget(Some(now + Duration::from_secs(40)), now), Duration::from_secs(40));
+    assert_eq!(super::residual_check_budget(Some(now), now + Duration::from_secs(3)), Duration::ZERO);
+    assert_eq!(super::residual_check_budget(None, now), Duration::from_secs(5));
+}
+
 /// The record needs every piece of evidence: a completed teardown, nothing wanted or live, and
 /// the WFP engine itself reporting no Tono filter. An unanswered residual check is no evidence.
 #[test]

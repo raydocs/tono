@@ -40,19 +40,22 @@ pub fn clear() -> io::Result<()> {
 #[cfg(feature = "standalone")]
 pub fn invalidate() -> io::Result<()> {
     let cleared = imp::clear();
-    if imp::recorded() {
-        return Err(cleared
-            .err()
-            .unwrap_or_else(|| io::Error::other("the clean-goodbye record is still present after it was cleared")));
+    // Only a confirmed absence counts. `recorded()` reads false for every failure to look, so a
+    // value that survives a failed delete behind a failed read would pass as gone.
+    match imp::inspect() {
+        Ok(false) => Ok(()),
+        Ok(true) => Err(cleared.err().unwrap_or_else(|| {
+            io::Error::other("the clean-goodbye record is still present after it was cleared")
+        })),
+        Err(error) => Err(error),
     }
-    Ok(())
 }
 
 #[cfg(all(windows, not(any(test, feature = "test"))))]
 #[cfg_attr(not(feature = "standalone"), allow(dead_code))]
 mod imp {
     use std::io;
-    use windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND;
+    use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND};
     use windows_sys::Win32::System::Registry::{
         HKEY, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_SET_VALUE, KEY_WOW64_64KEY,
         REG_OPTION_VOLATILE, REG_SZ, RegCloseKey, RegCreateKeyExW, RegDeleteKeyExW,
@@ -85,6 +88,48 @@ mod imp {
         } else {
             Err(io::Error::from_raw_os_error(status as i32))
         }
+    }
+
+    /// Whether any record value exists, or the reason that could not be established. Only the
+    /// two "not found" results are absence; every other failure is an error.
+    pub(super) fn inspect() -> io::Result<bool> {
+        let path = wide(&key_path());
+        let mut handle = std::ptr::null_mut();
+        // SAFETY: NUL-terminated key path under HKLM; `handle` is a valid out-pointer.
+        let status = unsafe {
+            RegOpenKeyExW(
+                HKEY_LOCAL_MACHINE,
+                path.as_ptr(),
+                0,
+                KEY_WOW64_64KEY | KEY_QUERY_VALUE,
+                &mut handle,
+            )
+        };
+        if status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND {
+            return Ok(false);
+        }
+        check(status)?;
+        let key = Key(handle);
+        let name = wide(VALUE_NAME);
+        let mut kind = 0_u32;
+        let mut size = 0_u32;
+        // SAFETY: valid key handle and NUL-terminated value name; only the type and size are
+        // requested, so no data buffer is passed.
+        let status = unsafe {
+            RegQueryValueExW(
+                key.0,
+                name.as_ptr(),
+                std::ptr::null(),
+                &mut kind,
+                std::ptr::null_mut(),
+                &mut size,
+            )
+        };
+        if status == ERROR_FILE_NOT_FOUND {
+            return Ok(false);
+        }
+        check(status)?;
+        Ok(true)
     }
 
     pub(super) fn recorded() -> bool {
@@ -211,9 +256,30 @@ mod imp {
     pub(super) static CLEAR_REPORTS_ERROR: AtomicBool = AtomicBool::new(false);
     #[cfg(test)]
     pub(super) static CLEAR_REMOVES_RECORD: AtomicBool = AtomicBool::new(true);
+    /// Test hook: every read of the record fails.
+    #[cfg(test)]
+    pub(super) static INSPECT_FAILS: AtomicBool = AtomicBool::new(false);
 
     pub(super) fn recorded() -> bool {
+        // Like the registry read: a failure to look reads as "no record".
+        #[cfg(test)]
+        {
+            if INSPECT_FAILS.load(Ordering::SeqCst) {
+                return false;
+            }
+        }
         RECORDED.load(Ordering::SeqCst)
+    }
+
+    #[cfg(feature = "standalone")]
+    pub(super) fn inspect() -> io::Result<bool> {
+        #[cfg(test)]
+        {
+            if INSPECT_FAILS.load(Ordering::SeqCst) {
+                return Err(io::Error::other("simulated registry read failure"));
+            }
+        }
+        Ok(RECORDED.load(Ordering::SeqCst))
     }
 
     #[cfg(feature = "standalone")]
@@ -251,6 +317,7 @@ mod tests {
     fn reset() {
         imp::CLEAR_REPORTS_ERROR.store(false, Ordering::SeqCst);
         imp::CLEAR_REMOVES_RECORD.store(true, Ordering::SeqCst);
+        imp::INSPECT_FAILS.store(false, Ordering::SeqCst);
         imp::clear().expect("clear");
     }
 
@@ -282,6 +349,24 @@ mod tests {
         assert!(invalidate().is_err(), "success without effect must still be refused");
 
         reset();
+    }
+
+    /// Codex re-review of #1624: a failed delete behind a failed read is not an absent record.
+    /// `recorded()` reads false for every failure to look, so it cannot certify invalidation.
+    #[test]
+    #[serial]
+    fn a_surviving_record_behind_a_failed_read_is_not_invalidated() {
+        let _reset = Reset;
+        reset();
+        record().unwrap();
+        imp::CLEAR_REPORTS_ERROR.store(true, Ordering::SeqCst);
+        imp::CLEAR_REMOVES_RECORD.store(false, Ordering::SeqCst);
+        imp::INSPECT_FAILS.store(true, Ordering::SeqCst);
+        assert!(!recorded(), "the App-facing read stays conservative on a read failure");
+        assert!(
+            invalidate().is_err(),
+            "an unreadable record cannot be certified as gone"
+        );
     }
 
     #[test]
