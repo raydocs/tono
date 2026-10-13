@@ -618,10 +618,14 @@ pub(super) fn armed_guard() -> std::sync::MutexGuard<'static, Option<Armed>> {
 
 pub(super) static STARTUP_RELEASE_RETRY_RUNNING: AtomicBool = AtomicBool::new(false);
 
-/// SHIM-ROUND1-TESTS-ONLY: a release path asked for the startup DNS fallback.
+/// A startup release path could not restore the DNS exactly and asked for the adapter fallback
+/// (`request_startup_dns_fallback`). It is only a request: the task starts at the Service
+/// binary's spawn point, after the DNS status cache and the watchdogs exist.
 pub(super) static STARTUP_DNS_FALLBACK_WANTED: AtomicBool = AtomicBool::new(false);
 
-/// SHIM-ROUND1-TESTS-ONLY: the Service reached the point where the fallback may start.
+/// The Service reached that spawn point (`spawn_startup_dns_fallback_if_wanted`). From then on a
+/// request starts the task itself, which is how the detached release retry (it runs on a timer,
+/// possibly long after startup) gets its fallback.
 pub(super) static STARTUP_DNS_FALLBACK_OPEN: AtomicBool = AtomicBool::new(false);
 
 /// Tests drive the startup residual-filter probe: `Some(Ok(present))` or `Some(Err(()))` (the

@@ -480,7 +480,9 @@
     async fn the_adapter_reset_reports_busy_when_the_offline_registry_read_is_refused() -> Result<()> {
         reset_dns_state().await;
         seed_snapshot(vec![adapter("{A}", Some("1.1.1.1")), adapter("{B}", Some("9.9.9.9"))]).await?;
-        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
+        // The active adapter is already back on the user's servers, so only the offline adapter's
+        // registry read can decide the attempt.
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("1.1.1.1"))]);
         test_hooks::set_offline_registry(vec![adapter("{B}", Some("198.18.0.2"))]);
         test_hooks::set_live_dns_on_loopback(true);
         test_hooks::park_claim_after("collect", 1);

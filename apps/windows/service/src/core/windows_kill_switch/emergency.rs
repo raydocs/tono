@@ -189,18 +189,11 @@ async fn emergency_disarm_with(
     // claim, no cleanup deadline) retries until it succeeds (`startup.rs`). The saved servers
     // stay on disk, and the original DNS error is still what this function returns.
     let fallback_note = if dns_restore.is_err() && !uninstall_ladder_requested() {
-        // Bounded so a wedged read cannot hold the WFP lock for longer than the exact restore
-        // itself may; a caller with its own outer timeout is cut by that first.
-        let attempt = tokio::time::timeout(
-            DNS_RESTORE_TIMEOUT,
-            crate::core::dns::reset_redirected_adapters_to_automatic(),
-        )
-        .await
-        .unwrap_or_else(|_| {
-            Err(anyhow::anyhow!(
-                "the adapter reset did not finish within {DNS_RESTORE_TIMEOUT:?}"
-            ))
-        });
+        // Runs under the `WFP_OPERATION` this function already holds (the shared function takes
+        // only the DNS lock, after it). Not wrapped in a timeout: every engine call inside is
+        // bounded and refused while an abandoned one holds the claim, and a dropped future would
+        // not stop a blocking writer, only leave it running unobserved.
+        let attempt = crate::core::dns::reset_redirected_adapters_to_automatic().await;
         Some(match attempt {
             Ok(adapters) => {
                 tracing::warn!(

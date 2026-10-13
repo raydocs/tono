@@ -39,8 +39,8 @@ pub(super) fn spawn_startup_release_retry() {
                 if intent.as_ref().is_none_or(|intent| intent.wanted) {
                     // Incomplete non-strict evidence needs its startup AI hold and retention.
                     // A newer valid or explicitly strict record was gated above.
-                    return release_general_traffic_unlocked(
-                        "startup incomplete-intent release retry", false,
+                    return release_general_traffic_requesting_dns_fallback(
+                        "startup incomplete-intent release retry", false, true,
                     )
                     .await;
                 }
@@ -71,10 +71,12 @@ pub(super) fn spawn_startup_release_retry() {
                     tracing::warn!(
                         "service start: leftover DNS snapshot could not be restored: {error:#}"
                     );
-                    // The exact restore failed. Put the adapters Tono left on its resolver back on automatic
-                    // (DHCP), detached: this path must not get longer (the release worker waits only
-                    // `SERVICE_ANSWER_TIMEOUT` for the pipe that opens after it).
-                    spawn_dns_fallback_after_failed_startup_restore();
+                    // The exact restore failed. Ask for the adapters Tono left on its resolver to be
+                    // put back on automatic (DHCP). This loop runs on a timer after the Service
+                    // restore, normally with IPC already up, so the request starts the detached
+                    // task at once when the Service has reached its spawn point and is held back
+                    // until it does otherwise.
+                    request_startup_dns_fallback();
                 }
                 if let Some(apply_narrow) = follow_up {
                     finish_release_follow_up(apply_narrow).await;
@@ -108,13 +110,41 @@ pub(super) fn spawn_startup_release_retry() {
     });
 }
 
-/// SHIM-ROUND1-TESTS-ONLY: inert.
-#[allow(dead_code)]
-pub fn spawn_startup_dns_fallback_if_wanted() {}
+/// A startup release path could not restore the DNS exactly: ask for the adapter fallback.
+///
+/// Only a request. The task is started at the Service binary's spawn point
+/// ([`spawn_startup_dns_fallback_if_wanted`]), after the DNS status cache is initialised and the
+/// watchdogs exist, so it never takes `DNS_OPERATION` ahead of `initialize_protected_dns_status`
+/// and delays the pipe that opens afterwards. A request made once the Service has passed that
+/// point (the release retry loop runs on a timer) starts the task at once. `SeqCst` on the four
+/// accesses makes sure that exactly one of the two sides sees the other's store.
+pub(super) fn request_startup_dns_fallback() {
+    STARTUP_DNS_FALLBACK_WANTED.store(true, Ordering::SeqCst);
+    if STARTUP_DNS_FALLBACK_OPEN.load(Ordering::SeqCst) {
+        start_requested_startup_dns_fallback();
+    }
+}
+
+/// The Service binary's spawn point for the startup DNS fallback: called once in each of the SCM
+/// and the standalone paths, after `initialize_protected_dns_status`, the watchdogs and the startup
+/// reconcile, right before the IPC supervisor serves. Starts the detached task if a startup release
+/// path requested it; a no-op otherwise, and for a second call. Must run inside the Service's
+/// Tokio runtime.
+pub fn spawn_startup_dns_fallback_if_wanted() {
+    STARTUP_DNS_FALLBACK_OPEN.store(true, Ordering::SeqCst);
+    start_requested_startup_dns_fallback();
+}
+
+fn start_requested_startup_dns_fallback() {
+    if STARTUP_DNS_FALLBACK_WANTED.swap(false, Ordering::SeqCst) {
+        // Dropping the handle detaches the task.
+        drop(spawn_dns_fallback_after_failed_startup_restore());
+    }
+}
 
 #[cfg(test)]
 pub(super) fn startup_dns_fallback_wanted() -> bool {
-    STARTUP_DNS_FALLBACK_WANTED.load(Ordering::Acquire)
+    STARTUP_DNS_FALLBACK_WANTED.load(Ordering::SeqCst)
 }
 
 /// How long the detached fallback below keeps retrying while the DNS engine is busy.
@@ -123,64 +153,91 @@ pub(super) const STARTUP_DNS_FALLBACK_BOUND: std::time::Duration = std::time::Du
 /// Pause between two attempts that were refused because the engine is busy.
 const STARTUP_DNS_FALLBACK_RETRY: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// The guarantee behind the emergency disarm's single adapter-reset attempt. The release worker
-/// always restarts the main Service after its cleanup, and this fresh process has a clean DNS
-/// engine claim and no cleanup deadline. When its startup exact restore fails, the adapters Tono
-/// left on its resolver are put back on automatic (DHCP) here, detached so startup does not get
-/// longer, retrying while the engine refuses as busy. The caller has already removed WFP (or there
-/// is none), so no lookup leaves a physical adapter while the barrier stands. Never spawned for a
-/// wanted (re-armed) intent: protection stays up and the DNS stays redirected on purpose.
+/// The follow-up to the emergency disarm's single adapter-reset attempt. The release worker
+/// restarts the main Service after its cleanup (an attempt, not a guarantee), and that fresh
+/// process has a clean DNS engine claim and no cleanup deadline. When its startup exact restore
+/// fails, the adapters Tono left on its resolver are put back on automatic (DHCP) by this
+/// detached task, retrying while the engine refuses as busy. The caller has already removed WFP
+/// (or there is none). Never requested for a wanted (re-armed) intent: protection stays up and
+/// the DNS stays redirected on purpose, and a Connect that arms while the task runs makes it stop
+/// (see [`spawn_dns_fallback_within`]).
 pub(super) fn spawn_dns_fallback_after_failed_startup_restore() -> tokio::task::JoinHandle<()> {
     spawn_dns_fallback_within(STARTUP_DNS_FALLBACK_BOUND, STARTUP_DNS_FALLBACK_RETRY)
 }
 
 /// [`spawn_dns_fallback_after_failed_startup_restore`] with its bound and retry pause injected,
 /// so a test models the 90 s bound in milliseconds.
+///
+/// Each attempt runs entirely under `WFP_OPERATION` (taken before the DNS lock, the same order as
+/// every other path): a Connect cannot arm in the middle of it, and an arm that came first is
+/// seen by the check under the lock. The bound is only checked between attempts. An attempt is
+/// never cut short by a timeout, because dropping its future would not stop a blocking engine
+/// writer, only hide it from the caller while it keeps going.
 pub(super) fn spawn_dns_fallback_within(
     bound: std::time::Duration,
     retry: std::time::Duration,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let attempts = async {
-            loop {
-                // A connect that arrived while the engine was busy re-armed protection, and
-                // its DNS redirect is on purpose from then on: not ours to undo.
-                if armed_guard().is_some() {
-                    tracing::info!(
-                        "service start: protection was armed again, so the DNS fallback stops"
-                    );
-                    return;
-                }
-                match crate::core::dns::reset_redirected_adapters_to_automatic().await {
-                    Ok(adapters) => {
-                        tracing::warn!(
-                            "service start: the exact DNS restore failed; {} adapter(s) on a Tono DNS \
-                             target were set to automatic (DHCP): {adapters:?}",
-                            adapters.len()
-                        );
-                        return;
-                    }
-                    Err(error) if crate::core::dns::is_engine_busy_refusal(&error) => {
-                        tracing::debug!("service start: DNS fallback waits for the busy DNS engine: {error:#}");
-                        tokio::time::sleep(retry).await;
-                    }
-                    Err(error) => {
+        let started = std::time::Instant::now();
+        loop {
+            match startup_dns_fallback_attempt().await {
+                StartupFallbackAttempt::Finished => return,
+                StartupFallbackAttempt::EngineBusy => {
+                    if started.elapsed() >= bound {
                         tracing::error!(
-                            "service start: the adapter reset to automatic (DHCP) after a failed DNS \
-                             restore did not complete: {error:#}"
+                            "service start: the DNS engine stayed busy for {bound:?}, so adapters left on \
+                             Tono's DNS target were not reset; the saved servers are kept for the next start"
                         );
                         return;
                     }
+                    tokio::time::sleep(retry).await;
                 }
             }
-        };
-        if tokio::time::timeout(bound, attempts).await.is_err() {
-            tracing::error!(
-                "service start: the DNS engine stayed busy for {bound:?}, so adapters left on Tono's \
-                 DNS target were not reset; the saved servers are kept for the next start"
-            );
         }
     })
+}
+
+enum StartupFallbackAttempt {
+    /// Done, superseded or failed for a reason that retrying does not change.
+    Finished,
+    /// The engine refused because an abandoned call still holds its claim: try again.
+    EngineBusy,
+}
+
+async fn startup_dns_fallback_attempt() -> StartupFallbackAttempt {
+    let _operation = WFP_OPERATION.lock().await;
+    // A connect that armed protection first owns the DNS redirect from then on: not ours to undo.
+    // Nothing can arm while this attempt holds the lock, and `PROTECTION_WANTED` is read again
+    // under the DNS lock for an enable that does not go through WFP.
+    if armed_guard().is_some() {
+        tracing::info!("service start: protection was armed again, so the DNS fallback stops");
+        return StartupFallbackAttempt::Finished;
+    }
+    match crate::core::dns::reset_redirected_adapters_to_automatic().await {
+        Ok(adapters) => {
+            tracing::warn!(
+                "service start: the exact DNS restore failed; {} adapter(s) on a Tono DNS \
+                 target were set to automatic (DHCP): {adapters:?}",
+                adapters.len()
+            );
+            StartupFallbackAttempt::Finished
+        }
+        Err(error) if crate::core::dns::is_engine_busy_refusal(&error) => {
+            tracing::debug!("service start: DNS fallback waits for the busy DNS engine: {error:#}");
+            StartupFallbackAttempt::EngineBusy
+        }
+        Err(error) if crate::core::dns::is_fallback_superseded(&error) => {
+            tracing::info!("service start: {error:#}");
+            StartupFallbackAttempt::Finished
+        }
+        Err(error) => {
+            tracing::error!(
+                "service start: the adapter reset to automatic (DHCP) after a failed DNS \
+                 restore did not complete: {error:#}"
+            );
+            StartupFallbackAttempt::Finished
+        }
+    }
 }
 
 /// Ownerless block used only when the on-disk record explicitly enabled the strict kill
@@ -207,6 +264,37 @@ fn emergency_armed() -> Armed {
         direct_endpoints: Vec::new(),
         reviewed_direct_ports: Vec::new(),
         direct_reload: None,
+    }
+}
+
+/// Whether provider-scoped WFP filters exist on a machine with no intent record. A probe that
+/// fails counts as "present": it cannot prove a clean machine. Only a real Windows build calls the
+/// probe; the stub engine has none, and the unit tests drive the answer through
+/// `TEST_RESIDUAL_PROBE` (no filters when unset).
+async fn residual_filters_at_startup() -> bool {
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        engine_call("residual filter check", crate::core::wfp::any_filters_exist)
+            .await
+            .unwrap_or(true)
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        #[cfg(test)]
+        {
+            match *TEST_RESIDUAL_PROBE
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+            {
+                Some(Ok(present)) => present,
+                Some(Err(())) => true,
+                None => false,
+            }
+        }
+        #[cfg(not(test))]
+        {
+            false
+        }
     }
 }
 
@@ -388,10 +476,12 @@ pub async fn restore_on_service_start() -> Result<()> {
                     tracing::warn!(
                         "service start: leftover DNS snapshot could not be restored: {error:#}"
                     );
-                    // The exact restore failed. Put the adapters Tono left on its resolver back on automatic
-                    // (DHCP), detached: this path must not get longer (the release worker waits only
-                    // `SERVICE_ANSWER_TIMEOUT` for the pipe that opens after it).
-                    spawn_dns_fallback_after_failed_startup_restore();
+                    // The exact restore failed. Request the fallback that puts the adapters Tono
+                    // left on its resolver back on automatic (DHCP). Only a request: the task starts
+                    // at the Service binary's spawn point, after the DNS cache and the watchdogs
+                    // exist, so it cannot take the DNS lock ahead of their initialisation and
+                    // delay the pipe the release worker waits for.
+                    request_startup_dns_fallback();
                 }
                 if let Some(apply_narrow) = follow_up {
                     finish_release_follow_up(apply_narrow).await;
@@ -428,11 +518,7 @@ pub async fn restore_on_service_start() -> Result<()> {
         },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             // No record can name an explicit strict kill switch. Residual filters are released.
-            #[cfg(all(windows, not(feature = "test")))]
-            if engine_call("residual filter check", crate::core::wfp::any_filters_exist)
-                .await
-                .unwrap_or(true)
-            {
+            if residual_filters_at_startup().await {
                 return release_general_traffic_on_startup_unlocked(
                     "residual WFP without a kill-switch intent",
                 )
@@ -453,10 +539,9 @@ pub async fn restore_on_service_start() -> Result<()> {
                 tracing::warn!(
                     "service start: leftover DNS snapshot could not be restored: {error:#}"
                 );
-                // The exact restore failed. Put the adapters Tono left on its resolver back on automatic
-                // (DHCP), detached: this path must not get longer (the release worker waits only
-                // `SERVICE_ANSWER_TIMEOUT` for the pipe that opens after it).
-                spawn_dns_fallback_after_failed_startup_restore();
+                // The exact restore failed. Request the adapter fallback (see the unwanted-intent
+                // branch above): the task starts at the Service binary's spawn point.
+                request_startup_dns_fallback();
             }
             Ok(())
         }

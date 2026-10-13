@@ -9,7 +9,7 @@ use tono_service_protocol::{
     note_core_replay_finished, reconcile_service_startup, restore_desired_state,
     restore_kill_switch, restore_windows_kill_switch, retire_unverified_windows_kill_switch,
     run_ipc_supervisor_until_shutdown, spawn_kill_switch_watchdog, spawn_protected_dns_watchdog,
-    spawn_windows_kill_switch_watchdog,
+    spawn_startup_dns_fallback_if_wanted, spawn_windows_kill_switch_watchdog,
 };
 use tracing::{Level, info, warn};
 use tracing_subscriber::FmtSubscriber;
@@ -594,6 +594,11 @@ fn run_service() -> platform_lib::Result<()> {
 
         reconcile_startup_and_restore().await;
 
+        // A startup release that could not restore the DNS exactly asked for the adapter fallback;
+        // it starts here, after the DNS status cache and the watchdogs exist, right before the pipe
+        // opens, so it cannot take the DNS lock ahead of their initialisation.
+        spawn_startup_dns_fallback_if_wanted();
+
         let result = run_ipc_supervisor_until_shutdown(async {
             tokio::select! {
                 // SCM Stop/Preshutdown, delivered through `begin_stop`.
@@ -967,6 +972,9 @@ async fn run_standalone() -> Result<()> {
     // 启动恢复只做 best-effort；即使失败也要启动 IPC，让 GUI 重连后重推配置自愈。
     // 否则失效的 desired-state 路径会导致进程退出并被 launchd 反复拉起。
     reconcile_startup_and_restore().await;
+
+    // Same spawn point as the SCM path: after the DNS cache, the watchdogs and the reconcile.
+    spawn_startup_dns_fallback_if_wanted();
 
     run_ipc_supervisor_until_shutdown(shutdown_signal()).await?;
 
