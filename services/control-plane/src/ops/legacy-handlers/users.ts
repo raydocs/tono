@@ -220,7 +220,7 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       if (user && parsedLine.password === String(home.socks5_password)) {
         await assertHomeExitBindable(e, String(user.id), String(home.id));
       }
-      if (user) assertPastedPasswordMatches(home, parsedLine.password);
+      assertPastedPasswordMatches(home, parsedLine.password);
     }
   }
   if (user && !parsedLine && b.homeExitId) {

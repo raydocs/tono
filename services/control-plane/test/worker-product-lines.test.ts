@@ -39,6 +39,25 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       "SELECT socks5_password FROM home_exits WHERE socks5_host = '198.51.100.77'",
     ).first()).toEqual({ socks5_password: 'secret-kept' });
 
+    // Onboarding an email that has not registered yet, onto an unbound line, is
+    // refused the same way, before the allowlist or the inventory is written.
+    await (env as unknown as { DB: D1Database }).DB.prepare(
+      `INSERT INTO home_exits(
+         id, proxy_name, display_name, kind, socks5_host, socks5_port, socks5_username, socks5_password,
+         status, created_at, updated_at
+       ) VALUES('h-stock', 'h-stock', 'stock', 'socks5', '198.51.100.78', 6886, 'alice', 'secret-kept', 'active', 1, 1)`,
+    ).run();
+    const onboard = await api('ops/users/onboard', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ email: 'not-registered-yet@example.com', line: '198.51.100.78:6886:alice:secret-pasted' }),
+    });
+    expect(onboard.status).toBe(409);
+    expect((await onboard.json() as any).error.code).toBe('HOME_PASSWORD_DIFFERS');
+    expect(await (env as unknown as { DB: D1Database }).DB.prepare(
+      "SELECT COUNT(*) AS c FROM signup_allowlist WHERE email = 'not-registered-yet@example.com'",
+    ).first()).toEqual({ c: 0 });
+
     // The same line again is still an idempotent re-save.
     expect((await assign('198.51.100.77:6886:alice:secret-kept')).status).toBe(200);
   });
