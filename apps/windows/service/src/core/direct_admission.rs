@@ -25,6 +25,9 @@ const WEB_DIRECT_GROUP_NAME: &str = "Tono-China-Web-Direct";
 /// sing-box's compiler takes these; the WFP permit takes `REVIEWED_DIRECT_PORTS`.
 /// A port in only one of them is still bounded by WFP.
 const SING_BOX_PROCESS_PORTS: [u16; 4] = [80, 443, 8080, 8443];
+/// Below any signed install path the compiler writes (drive, folders, executable), so a drive
+/// root or a one-folder prefix is refused.
+const MIN_PATH_REGEX_LITERALS: usize = 12;
 const MEDIA_PORTS: [u16; 2] = [443, 8000];
 const WEB_SUFFIX_PORTS: [u16; 2] = [80, 443];
 const MIHOMO_LOOPBACK_RULES: [&str; 2] = [
@@ -346,9 +349,16 @@ fn suffix_ok(suffix: &str, child_pinned: impl Fn(&str) -> bool) -> bool {
             .all(|child| child_pinned(*child))
 }
 
+/// A name with at least a registrable label and a TLD. A bare `com`, `cn` or an all-digit
+/// last label (an address) is a catch-all, never one reviewed host.
 fn host_ok(host: &str) -> bool {
     !host.is_empty()
         && host.len() <= 253
+        && host.contains('.')
+        && host
+            .rsplit('.')
+            .next()
+            .is_some_and(|tld| !tld.bytes().all(|b| b.is_ascii_digit()))
         && host.split('.').all(|label| {
             !label.is_empty()
                 && label.len() <= 63
@@ -388,8 +398,61 @@ fn in_range(address: Ipv4Addr, range: &str) -> bool {
     u32::from(address) & mask == u32::from(network) & mask
 }
 
+/// A process-path regex only in the form `tono-core` `config::windows_path_regex` writes:
+/// `^`, then literal path characters (case classes `[Xx]`, the separator class `[\\/]`,
+/// escaped specials), and at most a final `$`. A bare `^`, `^.*` or any short prefix is a
+/// catch-all for every process, so the literal part must be long enough to name one install.
 fn regex_ok(regex: &str) -> bool {
-    regex.starts_with('^') && payload_safe(regex)
+    regex
+        .strip_prefix('^')
+        .filter(|_| payload_safe(regex))
+        .and_then(path_regex_literals)
+        .is_some_and(|literals| literals >= MIN_PATH_REGEX_LITERALS)
+}
+
+/// The literal characters in `body`, or `None` for any metacharacter the compiler never writes.
+fn path_regex_literals(body: &str) -> Option<usize> {
+    let mut rest = body;
+    let mut literals = 0;
+    while !rest.is_empty() {
+        if rest == "$" {
+            return Some(literals);
+        }
+        let bytes = rest.as_bytes();
+        let width = if rest.starts_with(r"[\\/]") {
+            5
+        } else if bytes.len() >= 4
+            && bytes[0] == b'['
+            && bytes[3] == b']'
+            && bytes[1].is_ascii_uppercase()
+            && bytes[2] == bytes[1].to_ascii_lowercase()
+        {
+            4
+        } else if ["\\x2c", "\\x28", "\\x29"]
+            .iter()
+            .any(|escape| rest.starts_with(escape))
+        {
+            4
+        } else if rest.starts_with("\\\\") {
+            2
+        } else if bytes[0] == b'\\' {
+            match bytes.get(1) {
+                Some(
+                    b'.' | b'^' | b'$' | b'*' | b'+' | b'?' | b'{' | b'}' | b'[' | b']' | b'|',
+                ) => 2,
+                _ => return None,
+            }
+        } else {
+            let character = rest.chars().next()?;
+            if ".^$*+?{}[]|()".contains(character) {
+                return None;
+            }
+            character.len_utf8()
+        };
+        literals += 1;
+        rest = &rest[width..];
+    }
+    Some(literals)
 }
 
 /// `tono-core` `config::is_rule_payload_safe`: no separators mihomo would re-split.
@@ -445,4 +508,51 @@ fn as_port(value: &Value) -> Option<u16> {
 
 fn port_of(map: &Map<String, Value>) -> Option<u16> {
     map.get("port").and_then(as_port)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::{CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS, admit_sing_box_direct_rules};
+
+    fn admitted(rule: Value) -> Result<(), String> {
+        let outbounds =
+            [json!({"type":"direct","tag":"Tono-China-Direct","bind_interface":"Ethernet"})];
+        let rules = [
+            json!({"network":"tcp","domain_suffix":CLAUDE_HOME_DOMAINS.as_slice(),"action":"route","outbound":"Tono-Exit"}),
+            json!({"network":"tcp","ip_cidr":CLAUDE_HOME_IPV4_CIDRS.as_slice(),"action":"route","outbound":"Tono-Exit"}),
+            rule,
+        ];
+        admit_sing_box_direct_rules(&outbounds, &rules)
+    }
+
+    fn process_rule(regex: &str) -> Value {
+        json!({"network":"tcp","port":[443],"process_path_regex":[regex],
+            "action":"route","outbound":"Tono-China-Direct"})
+    }
+
+    /// #1280: with the assistant pins in place a bare `^` or `^.*` used to pass, sending every
+    /// process's reviewed-port traffic DIRECT. Only the compiler's path-regex form is admitted.
+    #[test]
+    fn a_catch_all_process_regex_is_not_a_compiler_shape() {
+        let signed_install =
+            r"^[Cc]:[\\/][Pp]rogram [Ff]iles[\\/][Tt]encent[\\/][Ww][Ee][Cc][Hh][Aa][Tt][\\/]";
+        assert_eq!(admitted(process_rule(signed_install)), Ok(()));
+        for catch_all in ["^", "^.*", "^.+", r"^[Cc]:[\\/]", "^(?s).*", r"^C:\\.*"] {
+            assert!(admitted(process_rule(catch_all)).is_err(), "{catch_all}");
+        }
+    }
+
+    /// #1280: a single-label name such as `com` is a catch-all domain, not one reviewed host.
+    #[test]
+    fn a_catch_all_domain_is_not_a_compiler_shape() {
+        let exact = |host: &str| {
+            json!({"type":"logical","mode":"and","rules":[
+                {"network":"tcp","port":443,"domain":[host]},{"ip_cidr":["101.1.2.3/32"]}],
+                "action":"route","outbound":"Tono-China-Direct"})
+        };
+        assert_eq!(admitted(exact("qq.com")), Ok(()));
+        assert!(admitted(exact("com")).is_err());
+    }
 }

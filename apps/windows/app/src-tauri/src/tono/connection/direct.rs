@@ -231,6 +231,10 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
 /// widening of the DIRECT set.
 pub(super) const WINDOWS_OPTIONAL_DIRECT_ENABLED: bool = true;
 
+/// The reviewed process ports `tono_core::sing_box::build_runtime` accepts. Not widened here:
+/// a plan for sing-box carries this set instead of `REVIEWED_DIRECT_PORTS` (#1247).
+const SING_BOX_REVIEWED_DIRECT_PORTS: [u16; 4] = [80, 443, 8080, 8443];
+
 /// Maximum resolved addresses kept per policy domain (Mac parity).
 pub(super) const MAX_ADDRESSES_PER_DOMAIN: usize = 8;
 
@@ -1766,6 +1770,18 @@ async fn replace_sing_box_for_direct(
         mixed_port,
         controller_port,
     };
+    // #1247: the compiler accepts reviewed process ports only inside its own set, and the plan
+    // the App builds carries the mihomo set (`REVIEWED_DIRECT_PORTS`, with 8000). Hand the
+    // compiler its set and ask the Service for no port outside it; the Service still keeps only
+    // what its own `REVIEWED_DIRECT_PORTS` sanctions, so no WFP permit is added.
+    let plan = &tono_core::config::DirectPlan {
+        reviewed_direct_ports: SING_BOX_REVIEWED_DIRECT_PORTS.to_vec(),
+        ..plan.clone()
+    };
+    let reviewed_direct_ports: Vec<u16> = reviewed_direct_ports
+        .into_iter()
+        .filter(|port| SING_BOX_REVIEWED_DIRECT_PORTS.contains(port))
+        .collect();
     let full_tunnel = super::core_select::sing_box_runtime_document(
         nodes,
         &node.name,
@@ -1776,7 +1792,9 @@ async fn replace_sing_box_for_direct(
         super::core_select::next_fake_ip_slot(state),
     )
     .map_err(StageFailure::error)?;
-    let direct_document = super::core_select::sing_box_runtime_document(
+    // The overlay is optional: a compiler refusal is a skip (the connection stays on the exit),
+    // never a stage error that fails or cuts the connection.
+    let compiled = super::core_select::sing_box_runtime_document(
         nodes,
         &node.name,
         &routing,
@@ -1785,8 +1803,19 @@ async fn replace_sing_box_for_direct(
         Some(plan),
         super::core_select::next_fake_ip_slot(state),
     )
-    .map_err(StageFailure::error)?;
-    let expected = expected_clash_api_rules(&direct_document).map_err(StageFailure::error)?;
+    .and_then(|document| expected_clash_api_rules(&document).map(|rules| (document, rules)));
+    let (direct_document, expected) = match compiled {
+        Ok(compiled) => compiled,
+        Err(error) => {
+            skip_optional_direct_policy(
+                state,
+                generation,
+                format!("sing-box compiler refused the optional DIRECT overlay: {error}"),
+            )
+            .await;
+            return Ok(None);
+        }
+    };
     if !sing_box_rules_keep_ai_blocked(&expected) {
         skip_optional_direct_policy(
             state,
@@ -2448,6 +2477,115 @@ mod cancellation_tests {
         assert!(inner.optional_direct_active, "a predecessor cannot disable the current overlay evidence");
         assert_eq!(inner.applied_direct_interface.as_deref(), Some("successor-uplink"));
         assert!(inner.optional_direct_skip.is_none(), "a stale failure must not be attributed to the successor");
+    }
+
+    async fn sing_box_replacement_fixture(
+        plan: &tono_core::config::DirectPlan,
+    ) -> (Arc<TonoState>, Result<Option<PendingDirectCommit>, StageFailure>) {
+        let reference: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../../../../docs/reports/sing-box-evaluation/migration-m0/reference.json"
+        ))
+        .unwrap();
+        let nodes: Vec<tono_core::node::ValidatedNode> = reference["input"]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|node| tono_core::node::admit_node(&serde_yaml_ng::to_value(node).unwrap()).unwrap())
+            .collect();
+        let state = Arc::new(TonoState::for_test());
+        let document = tono_core::policy::TonoTrafficPolicy {
+            version: 1,
+            domains: Vec::new(),
+            media_endpoints: Vec::new(),
+            web_domains: Vec::new(),
+            direct_suffixes: Vec::new(),
+        };
+        let policy = CapturedTrafficPolicy {
+            revision: 7,
+            digest: "digest".into(),
+            document: document.clone(),
+        };
+        {
+            let mut inner = state.lock().await;
+            inner.connect_generation = 12;
+            inner.selected_node = Some("Fixture Beta".into());
+            inner.policy_tracker = tono_core::policy::PolicyTracker::from_installed(7, "digest".into());
+            inner.traffic_policy = Some(document);
+        }
+        let session = OwnerSessionProof {
+            generation: 3,
+            token: "token".into(),
+        };
+        let node = nodes.iter().find(|node| node.name == "Fixture Beta").unwrap();
+        let result = replace_sing_box_for_direct(
+            &state,
+            node,
+            &nodes,
+            None,
+            None,
+            12,
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+            29191,
+            29190,
+            &policy,
+            &session,
+            plan,
+            Vec::new(),
+            tono_service_protocol::REVIEWED_DIRECT_PORTS.to_vec(),
+            plan.physical_interface.clone(),
+        )
+        .await;
+        (state, result)
+    }
+
+    fn sing_box_fixture_plan() -> tono_core::config::DirectPlan {
+        tono_core::config::DirectPlan {
+            physical_interface: "Ethernet".into(),
+            hosts: vec![("qq.com".into(), "101.1.2.3".into())],
+            tcp_wechat_rules: vec![("qq.com".into(), "101.1.2.3".parse().unwrap(), 443)],
+            tcp_web_rules: vec![],
+            web_suffix_rules: vec![],
+            udp_wechat_rules: vec![],
+            wechat_process_path_regexes: vec![r"^C:\\Program Files\\Tencent\\WeChat\\".into()],
+            // What `build_direct_plan` hands over: the mihomo set, with 8000.
+            reviewed_direct_ports: tono_service_protocol::REVIEWED_DIRECT_PORTS.to_vec(),
+        }
+    }
+
+    /// #1247: the sing-box compiler refuses a reviewed process port outside {80, 443, 8080,
+    /// 8443}. The App's plan carries 8000, so the compile used to be refused for every real
+    /// plan. The plan is now compiled with the compiler's own set and reaches the Service.
+    #[tokio::test]
+    async fn the_apps_reviewed_ports_reach_the_sing_box_compiler() {
+        let (state, result) = sing_box_replacement_fixture(&sing_box_fixture_plan()).await;
+        assert!(matches!(result, Ok(None)), "an unreachable Service is a skip");
+        let skip = state.lock().await.optional_direct_skip.clone().unwrap_or_default();
+        assert!(
+            skip.contains("process replacement did not keep the full tunnel"),
+            "the compiler must accept the plan and the stage must reach the Service: {skip}"
+        );
+    }
+
+    /// #1247: the DIRECT overlay is optional, so a compiler refusal leaves the connection on the
+    /// exit. It used to surface as a stage error that fails the connect.
+    #[tokio::test]
+    async fn a_sing_box_compile_refusal_skips_the_overlay_and_keeps_the_exit() {
+        let mut plan = sing_box_fixture_plan();
+        // The compiler refuses a web suffix when no signed-app path regex is present.
+        plan.web_suffix_rules = vec![("aliyuncs.com".into(), 443)];
+        plan.wechat_process_path_regexes = Vec::new();
+        let (state, result) = sing_box_replacement_fixture(&plan).await;
+        assert!(matches!(result, Ok(None)), "a refused overlay must not be a stage error");
+        let inner = state.lock().await;
+        assert!(!inner.optional_direct_active);
+        assert!(
+            inner
+                .optional_direct_skip
+                .as_deref()
+                .is_some_and(|reason| reason.contains("refused the optional DIRECT overlay")),
+            "{:?}",
+            inner.optional_direct_skip
+        );
     }
     use tokio::io::AsyncReadExt as _;
     use tokio::sync::oneshot;
