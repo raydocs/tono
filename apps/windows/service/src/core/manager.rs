@@ -1965,7 +1965,6 @@ mod restart_while_recovering_tests {
         // Judged before the spawn result: on the old code the Core had already finished its
         // work when the late Job assignment failed, and that is the defect being asserted.
         let ran_early = CORE_RAN_BEFORE_JOB.load(Ordering::SeqCst);
-        let _ = std::fs::remove_dir(&marker);
         assert!(!ran_early, "the Core ran before it joined the Job Object");
         let mut guard = started?;
 
