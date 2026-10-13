@@ -542,6 +542,9 @@ fn admit_install() -> Result<(tokio::sync::MutexGuard<'static, ()>, Cancellation
 /// is making progress. Long enough that a slow start under antivirus is not mistaken for a loss.
 const EXECUTOR_LAUNCH_GRACE: Duration = Duration::from_secs(120);
 const EXECUTOR_LAUNCH_POLL: Duration = Duration::from_secs(2);
+/// One Status look may not outlast this: a pipe that never answers is no evidence either way,
+/// and must not stretch the wait (and the `INSTALL` slot) past the grace.
+const EXECUTOR_LAUNCH_PROBE: Duration = Duration::from_secs(5);
 
 #[derive(Debug, PartialEq, Eq)]
 enum ExecutorLaunch {
@@ -558,7 +561,8 @@ enum ExecutorLaunch {
 /// receipt, changed staged components) left Core stopped and the bootstrap block armed with no
 /// automatic release. A Status that cannot be read is no evidence either way (the executor
 /// stops the Service for a real install), so only an answer that still says `Launching` at the
-/// deadline, or `Staged`, is a loss.
+/// deadline, or `Staged`, is a loss. A look is bounded by `EXECUTOR_LAUNCH_PROBE`, and one that
+/// times out counts as unreadable, so the whole wait ends within the grace plus one probe.
 async fn watch_executor_launch<Fut: std::future::Future<Output = Result<UpdateStatus>>>(
     mut status: impl FnMut() -> Fut,
     grace: Duration,
@@ -567,16 +571,20 @@ async fn watch_executor_launch<Fut: std::future::Future<Output = Result<UpdateSt
     let deadline = tokio::time::Instant::now() + grace;
     loop {
         let mut launching = false;
-        match status().await.as_ref().map(|status| status.execution.as_str()) {
-            Ok("Launching") => launching = true,
-            Ok("Reserved" | "Extracting" | "Staged") => return ExecutorLaunch::Lost,
-            Ok(_) => return ExecutorLaunch::Underway,
-            Err(_) => {}
+        match tokio::time::timeout(EXECUTOR_LAUNCH_PROBE, status()).await {
+            Ok(Ok(status)) => match status.execution.as_str() {
+                "Launching" => launching = true,
+                "Reserved" | "Extracting" | "Staged" => return ExecutorLaunch::Lost,
+                _ => return ExecutorLaunch::Underway,
+            },
+            // Unreadable or unanswered: no evidence either way.
+            Ok(Err(_)) | Err(_) => {}
         }
-        if tokio::time::Instant::now() >= deadline {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
             return if launching { ExecutorLaunch::Lost } else { ExecutorLaunch::Underway };
         }
-        tokio::time::sleep(poll).await;
+        tokio::time::sleep(poll.min(deadline - now)).await;
     }
 }
 
@@ -1487,6 +1495,7 @@ mod update_executor_tests {
     #[tokio::test(start_paused = true)]
     async fn an_executor_that_never_consumes_the_install_is_lost() {
         let polls = StdMutex::new(0_u32);
+        let started = tokio::time::Instant::now();
         let launch = watch_executor_launch(
             || {
                 *polls.lock().unwrap() += 1;
@@ -1498,6 +1507,29 @@ mod update_executor_tests {
         .await;
         assert_eq!(launch, ExecutorLaunch::Lost);
         assert!(*polls.lock().unwrap() > 1, "the executor is given the whole grace, not one look");
+        assert!(
+            started.elapsed() >= EXECUTOR_LAUNCH_GRACE,
+            "a record still Launching is not lost before the grace has run out"
+        );
+    }
+
+    /// A Status request that never answers is no evidence, and must not stretch the wait past
+    /// the grace (the `INSTALL` slot and the offline time are held for it).
+    #[tokio::test(start_paused = true)]
+    async fn a_status_that_never_answers_does_not_extend_the_wait() {
+        let started = tokio::time::Instant::now();
+        let launch = watch_executor_launch(
+            std::future::pending::<Result<UpdateStatus>>,
+            EXECUTOR_LAUNCH_GRACE,
+            EXECUTOR_LAUNCH_POLL,
+        )
+        .await;
+        assert_eq!(launch, ExecutorLaunch::Underway);
+        assert!(
+            started.elapsed() <= EXECUTOR_LAUNCH_GRACE + EXECUTOR_LAUNCH_PROBE,
+            "waited {:?}",
+            started.elapsed()
+        );
     }
 
     /// The release must not race a working executor: once the install is consumed, or the

@@ -6,4 +6,4 @@
 - 工程与测试：三条回归：`an_executor_that_never_consumes_the_install_is_lost`、`a_consumed_install_or_a_stopped_service_is_not_a_lost_executor`、`the_session_is_flushed_before_the_executor_starts`；红检查用旧行为桩（编译通过、断言失败），见 PR 正文。
 - 验证：见 PR 的 Verification。未在本机运行 cargo。
 - 候选/发布：仅源码，无新候选。
-- 剩余限制：无实机验证（AV 杀执行器等）。执行器极慢、超过 120 s 才消费时，更新仍会在已放开普通流量后继续。持续失败的 vault 写入仍会让轮换后的 token 随进程结束丢失（只是不再绕过重试）。`R3REGW-RECOVERY-PUBLICATION-FLOOR` 在 main 已修（afb98c5d）；`R3REGW-ROLLBACK-DOUBLE-HOLD` 属 AI hold 语义决策，未改。
+- 剩余限制：无实机验证（AV 杀执行器等）。执行器极慢、超过 120 s 才消费时，释放已先记录 disconnect，迟到的消费会被拒绝（更新失败而非在放开后继续）；执行器先取得事务锁时，释放要等它做完。持续失败的 vault 写入仍会让轮换后的 token 随进程结束丢失（只是不再绕过重试）。`R3REGW-RECOVERY-PUBLICATION-FLOOR` 在 main 已修（afb98c5d）；`R3REGW-ROLLBACK-DOUBLE-HOLD` 属 AI hold 语义决策，未改。

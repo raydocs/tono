@@ -23,8 +23,11 @@
 - Why stricter: nothing is loosened beyond what a failed update already does. The release is the
   automatic one decision 031 prescribes, it keeps the AI hold, it never overrides an explicit strict
   kill switch, and it runs only when the Service itself says the executor consumed nothing. The
-  cost is a wait of up to two minutes offline while the executor is slow or dead. A very slow executor
-  that consumes after the release can still install: the update then proceeds with general traffic
-  already released (the same as a user pressing Restore internet at that moment).
+  cost is a wait of about two minutes (plus one Status look of at most 5 s) offline while the executor
+  is slow or dead. A very slow executor that tries to consume after the release is refused: the
+  release records the disconnect on the attempt first, and an attempt with a recorded disconnect
+  grants no further authority (`Store::live_attempt`). An executor that holds the transaction lock
+  first finishes its work before the release can run, so the two never work in parallel. The
+  slow-executor case is therefore never worse than a user pressing Restore internet at that moment.
 - Applied in: the PR from `claude/win-update-executor-watch`; finding `R2UA-F2`
   (#1055).
