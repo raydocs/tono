@@ -84,6 +84,19 @@ fn clear_nrpt_observation() {
     state.verdict = None;
 }
 
+/// An install pass ended: only a fully applied hold gets an observation. Any failed pass drops
+/// the verdict and every read in flight, so a warning is never published for a hold whose
+/// install was reported as failed.
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+fn conclude_install(applied: bool, read: EffectiveNrptRead) -> bool {
+    if applied {
+        begin_nrpt_observation(read);
+    } else {
+        clear_nrpt_observation();
+    }
+    applied
+}
+
 type EffectiveNrptRead = fn() -> Result<Vec<super::dns::EffectiveNrptRule>, String>;
 
 /// Judge the effective NRPT after the suffix rules were written, on a thread of its own. Written
@@ -247,6 +260,10 @@ fn test_effective_nrpt_read() -> Result<Vec<super::dns::EffectiveNrptRule>, Stri
     Ok(rules)
 }
 
+/// Makes the stubbed install report failure, as a failed firewall rule does on a machine.
+#[cfg(test)]
+static TEST_APPLY_FAILS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[cfg(test)]
 static TEST_ACTIVE_HOLD_REMOVALS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
@@ -313,13 +330,10 @@ fn apply_blocking() -> bool {
     }
     if let Err(error) = super::dns::install_selective_nrpt() {
         tracing::warn!("selective fail-open: NRPT sinkhole was not installed: {error:#}");
-        clear_nrpt_observation();
         applied = false;
-    } else {
-        // Written is not in force: domain NRPT policy makes the DNS Client ignore the local store.
-        begin_nrpt_observation(super::dns::effective_nrpt_rules_now);
     }
-    applied
+    // Written is not in force: domain NRPT policy makes the DNS Client ignore the local store.
+    conclude_install(applied, super::dns::effective_nrpt_rules_now)
 }
 
 #[cfg(not(all(windows, not(feature = "test"))))]
@@ -339,16 +353,21 @@ fn remove_blocking() {
 
 #[cfg(not(all(windows, not(feature = "test"))))]
 fn apply_blocking() -> bool {
+    #[allow(unused_mut)]
+    let mut applied = true;
     #[cfg(test)]
     {
         let pause = tests::pause(&tests::APPLY_PAUSE);
         TEST_HOLD_ACTIVE.store(true, std::sync::atomic::Ordering::SeqCst);
-        begin_nrpt_observation(test_effective_nrpt_read);
+        applied = conclude_install(
+            !TEST_APPLY_FAILS.load(std::sync::atomic::Ordering::SeqCst),
+            test_effective_nrpt_read,
+        );
         if let Some(pause) = pause {
             pause.completed.notify_one();
         }
     }
-    true
+    applied
 }
 
 #[cfg(test)]
@@ -529,6 +548,37 @@ mod tests {
         assert!(removed.is_ok(), "a hung read does not block the removal");
         assert!(!held_after_remove, "the removal took effect");
         assert_eq!(revived, None, "a late result cannot revive a warning after remove()");
+    }
+
+    /// A later install pass that fails (a firewall rule that cannot be set) reports failure, so
+    /// the observation of the earlier pass must not publish a warning for it either.
+    #[tokio::test]
+    #[serial]
+    async fn a_failed_reinstall_drops_the_observation_of_the_earlier_install() {
+        remove().await;
+        observer_idle().await; // settle observers left by earlier tests
+        *TEST_EFFECTIVE_NRPT.lock().unwrap() = Some(vec![crate::core::dns::EffectiveNrptRule {
+            namespaces: vec![".corp.example".to_owned()],
+            generic_dns_servers: vec!["10.0.0.53".to_owned()],
+            tono_owned: false,
+        }]);
+        let hung = pause_next(&NRPT_READ_PAUSE);
+
+        assert!(finish_release(true).await, "the first install succeeds");
+        tokio::time::timeout(Duration::from_secs(1), hung.0.entered.notified())
+            .await
+            .expect("the observer is blocked in the read");
+        TEST_APPLY_FAILS.store(true, std::sync::atomic::Ordering::SeqCst);
+        let reinstalled = finish_release(true).await;
+        TEST_APPLY_FAILS.store(false, std::sync::atomic::Ordering::SeqCst);
+        hung.0.release();
+        observer_idle().await;
+        let published = warning().await;
+        *TEST_EFFECTIVE_NRPT.lock().unwrap() = None;
+        remove().await;
+
+        assert!(!reinstalled, "the failed pass is reported as failed");
+        assert_eq!(published, None, "a failed install has no degraded reason");
     }
 
     /// The observer may not even have started when the hold is removed: it must then read nothing
