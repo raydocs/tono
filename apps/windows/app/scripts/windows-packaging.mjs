@@ -170,11 +170,20 @@ export function validateNsisLegacyCleanup(source) {
     const guardAt = macro.indexOf(
       '${IfNot} ${FileExists} "$INSTDIR\\.update-repair-evidence"',
     )
-    for (const artifact of WINDOWS_RUNTIME_REPAIR_ARTIFACTS.filter((name) =>
-      /\.(rollback|restore|publish)$/.test(name) && !name.includes('.install-'),
-    )) {
+    const guardEnd = guardAt < 0 ? -1 : macro.indexOf('${EndIf}', guardAt)
+    const updateScratch = [
+      ...WINDOWS_RUNTIME_REPAIR_ARTIFACTS.filter(
+        (name) =>
+          /\.(rollback|restore|publish)$/.test(name) &&
+          !name.includes('.install-'),
+      ),
+      ...['rollback', 'restore', 'publish'].map(
+        (suffix) => '${MAINBINARYNAME}.exe.' + suffix,
+      ),
+    ]
+    for (const artifact of updateScratch) {
       const statementAt = macro.indexOf(`Delete /REBOOTOK "$INSTDIR\\${artifact}"`)
-      if (guardAt < 0 || statementAt < guardAt) {
+      if (guardEnd < 0 || statementAt < guardAt || statementAt > guardEnd) {
         return `installer.nsi deletes update recovery evidence outside the repair guard: ${artifact}`
       }
     }
