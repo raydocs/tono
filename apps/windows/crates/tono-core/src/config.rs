@@ -2034,6 +2034,33 @@ reality-opts:
         assert_eq!(rules, [RULES[0], RULES[1], "AND,((NETWORK,UDP)),REJECT", RULES[2]]);
     }
 
+    /// The Windows Service admits exactly these strings (`direct_admission` tests carry the same
+    /// literals): short installs and the drive-root regex the encoder also writes for `D:\`.
+    #[test]
+    fn windows_path_regex_for_short_installs_is_pinned() {
+        assert_eq!(
+            wechat_prefix_path_regex(r"D:\A\").as_deref(),
+            Some(r"^[Dd]:[\\/][Aa][\\/]")
+        );
+        assert_eq!(
+            wechat_prefix_path_regex(r"D:\飞书").as_deref(),
+            Some(r"^[Dd]:[\\/]飞书[\\/]")
+        );
+        assert_eq!(
+            wechat_file_path_regex(r"D:\A").as_deref(),
+            Some(r"^[Dd]:[\\/][Aa]$")
+        );
+        assert_eq!(
+            wechat_file_path_regex(r"D:\Lark.exe").as_deref(),
+            Some(r"^[Dd]:[\\/][Ll][Aa][Rr][Kk]\.[Ee][Xx][Ee]$")
+        );
+        // The encoder also writes the whole-drive regex; the Service refuses it.
+        assert_eq!(
+            wechat_prefix_path_regex(r"D:\").as_deref(),
+            Some(r"^[Dd]:[\\/]")
+        );
+    }
+
     #[test]
     fn windows_path_regex_is_case_insensitive_and_payload_safe() {
         let prefix = wechat_prefix_path_regex(r"C:\Users\foo\AppData\Local\Tencent\WeChat").unwrap();

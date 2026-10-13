@@ -42,6 +42,127 @@ fn worker_guard() -> MutexGuard<'static, WorkerState> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// #1145: the advisory verdict of the installed hold, and the bookkeeping that keeps a slow
+/// observation from ever touching the hold itself.
+struct NrptObservation {
+    /// Bumped by every install and every removal; a read result only lands if it is still current.
+    generation: u64,
+    /// True from an install until the hold is removed or its install failed.
+    wanted: bool,
+    /// At most one observer thread exists, so a hung registry read cannot pile up threads.
+    running: bool,
+    /// `Some` while the hold is installed but Windows is not applying Tono's local per-suffix
+    /// NRPT rules, because domain (Group Policy) NRPT policy exists.
+    verdict: Option<String>,
+}
+
+static NRPT_OBSERVATION: Mutex<NrptObservation> = Mutex::new(NrptObservation {
+    generation: 0,
+    wanted: false,
+    running: false,
+    verdict: None,
+});
+
+fn nrpt_observation() -> MutexGuard<'static, NrptObservation> {
+    NRPT_OBSERVATION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The degraded reason of the installed hold, for the DNS status: `Some` when the DNS Client
+/// ignores Tono's suffix rules. The firewall prefixes stay in force; the AI DNS hold for names
+/// outside them does not.
+pub(crate) fn nrpt_suppression() -> Option<String> {
+    nrpt_observation().verdict.clone()
+}
+
+/// The hold is gone or was not installed: no degraded reason, and any read still in flight is stale.
+fn clear_nrpt_observation() {
+    let mut state = nrpt_observation();
+    state.generation += 1;
+    state.wanted = false;
+    state.verdict = None;
+}
+
+/// An install pass ended: only a fully applied hold gets an observation. Any failed pass drops
+/// the verdict and every read in flight, so a warning is never published for a hold whose
+/// install was reported as failed.
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+fn conclude_install(applied: bool, read: EffectiveNrptRead) -> bool {
+    if applied {
+        begin_nrpt_observation(read);
+    } else {
+        clear_nrpt_observation();
+    }
+    applied
+}
+
+type EffectiveNrptRead = fn() -> Result<Vec<super::dns::EffectiveNrptRule>, String>;
+
+/// Judge the effective NRPT after the suffix rules were written, on a thread of its own. Written
+/// is not in force: domain NRPT policy makes the DNS Client ignore the local store. The read is
+/// advisory, so it never runs inside the hold worker's completion path: a slow or hung registry
+/// read cannot fail an install that succeeded or delay a later removal. Reports only; Tono never
+/// edits or removes enterprise policy and writes no catch-all to compensate.
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+fn begin_nrpt_observation(read: EffectiveNrptRead) {
+    {
+        let mut state = nrpt_observation();
+        state.generation += 1;
+        state.wanted = true;
+        state.verdict = None;
+        if state.running {
+            // The observer in flight sees the newer generation and reads again.
+            return;
+        }
+        state.running = true;
+    }
+    if let Err(error) = std::thread::Builder::new()
+        .name("tono-nrpt-observer".to_owned())
+        .spawn(move || observe_nrpt(read))
+    {
+        tracing::warn!("selective fail-open: NRPT observer could not start: {error}");
+        nrpt_observation().running = false;
+    }
+}
+
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+fn observe_nrpt(read: EffectiveNrptRead) {
+    loop {
+        #[cfg(test)]
+        let _before_snapshot = tests::pause(&tests::NRPT_OBSERVER_START_PAUSE);
+        // Snapshot and check `wanted` under one lock: a hold removed (or whose install failed)
+        // before this thread got going is not read at all.
+        let generation = {
+            let mut state = nrpt_observation();
+            if !state.wanted {
+                state.running = false;
+                return;
+            }
+            state.generation
+        };
+        let effective = std::panic::catch_unwind(read)
+            .unwrap_or_else(|_| Err("effective NRPT read panicked".to_owned()));
+        let verdict =
+            super::dns::selective_hold_suppression(effective.as_deref().map_err(String::as_str));
+        let mut state = nrpt_observation();
+        if !state.wanted {
+            // Removed or failed meanwhile: the result describes a hold that no longer exists.
+            state.running = false;
+            return;
+        }
+        if state.generation == generation {
+            if let Some(reason) = &verdict {
+                tracing::warn!("selective fail-open: {reason}");
+            }
+            state.verdict = verdict;
+            state.running = false;
+            return;
+        }
+        // A newer install while this read was in flight: read again for it.
+    }
+}
+
 /// True only when the requested state was reached natively within the wait budget.
 async fn request(apply_narrow: bool) -> bool {
     let (revision, mut completed, start) = {
@@ -113,6 +234,36 @@ fn reconcile_blocking() {
 #[cfg(test)]
 static TEST_HOLD_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// What the effective-NRPT read returns right after the stubbed install; `None` is an ordinary
+/// machine whose local store carries Tono's suffix rules.
+#[cfg(test)]
+static TEST_EFFECTIVE_NRPT: Mutex<Option<Vec<super::dns::EffectiveNrptRule>>> = Mutex::new(None);
+
+#[cfg(test)]
+#[allow(dead_code)]
+fn test_effective_nrpt_read() -> Result<Vec<super::dns::EffectiveNrptRule>, String> {
+    // A hung registry read: the observer blocks here until the test releases it.
+    let pause = tests::pause(&tests::NRPT_READ_PAUSE);
+    let rules = TEST_EFFECTIVE_NRPT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+        .unwrap_or_else(|| {
+            // The ordinary machine: only the local store, so the suffix rules are in force.
+            vec![super::dns::EffectiveNrptRule {
+                namespaces: vec!["anthropic.example".to_owned()],
+                generic_dns_servers: vec![selective_fail_open::SINKHOLE_DNS.to_owned()],
+                tono_owned: false,
+            }]
+        });
+    drop(pause);
+    Ok(rules)
+}
+
+/// Makes the stubbed install report failure, as a failed firewall rule does on a machine.
+#[cfg(test)]
+static TEST_APPLY_FAILS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[cfg(test)]
 static TEST_ACTIVE_HOLD_REMOVALS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
@@ -157,6 +308,7 @@ fn firewall_command(
 
 #[cfg(all(windows, not(feature = "test")))]
 fn remove_blocking() {
+    clear_nrpt_observation();
     run_commands(&selective_fail_open::firewall_delete_commands());
     if let Err(error) = super::dns::remove_selective_nrpt() {
         tracing::warn!("selective fail-open: NRPT sinkhole could not be removed: {error:#}");
@@ -180,11 +332,13 @@ fn apply_blocking() -> bool {
         tracing::warn!("selective fail-open: NRPT sinkhole was not installed: {error:#}");
         applied = false;
     }
-    applied
+    // Written is not in force: domain NRPT policy makes the DNS Client ignore the local store.
+    conclude_install(applied, super::dns::effective_nrpt_rules_now)
 }
 
 #[cfg(not(all(windows, not(feature = "test"))))]
 fn remove_blocking() {
+    clear_nrpt_observation();
     #[cfg(test)]
     {
         let pause = tests::pause(&tests::REMOVE_PAUSE);
@@ -199,15 +353,21 @@ fn remove_blocking() {
 
 #[cfg(not(all(windows, not(feature = "test"))))]
 fn apply_blocking() -> bool {
+    #[allow(unused_mut)]
+    let mut applied = true;
     #[cfg(test)]
     {
         let pause = tests::pause(&tests::APPLY_PAUSE);
         TEST_HOLD_ACTIVE.store(true, std::sync::atomic::Ordering::SeqCst);
+        applied = conclude_install(
+            !TEST_APPLY_FAILS.load(std::sync::atomic::Ordering::SeqCst),
+            test_effective_nrpt_read,
+        );
         if let Some(pause) = pause {
             pause.completed.notify_one();
         }
     }
-    true
+    applied
 }
 
 #[cfg(test)]
@@ -256,6 +416,10 @@ mod tests {
         Lazy::new(|| Mutex::new(None));
     pub(super) static APPLY_PAUSE: Lazy<Mutex<Option<Arc<PausedStep>>>> =
         Lazy::new(|| Mutex::new(None));
+    pub(super) static NRPT_READ_PAUSE: Lazy<Mutex<Option<Arc<PausedStep>>>> =
+        Lazy::new(|| Mutex::new(None));
+    pub(super) static NRPT_OBSERVER_START_PAUSE: Lazy<Mutex<Option<Arc<PausedStep>>>> =
+        Lazy::new(|| Mutex::new(None));
 
     fn pause_next(slot: &Mutex<Option<Arc<PausedStep>>>) -> PauseGuard {
         let step = Arc::new(PausedStep::default());
@@ -288,6 +452,160 @@ mod tests {
 
         assert!(held, "the requested AI hold must remain installed");
         assert_eq!(after, before, "reapplying the same hold must never delete it first");
+    }
+
+    /// The observer runs on its own thread. It marks itself idle in the same critical section
+    /// that publishes (or discards) its verdict, and `begin_nrpt_observation` marks it running
+    /// before the install returns, so idle after an install means that observation is settled.
+    async fn observer_idle() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while nrpt_observation().running {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the advisory observer settled");
+    }
+
+    async fn warning() -> Option<String> {
+        crate::core::dns::status().await.resolver_policy_warning
+    }
+
+    /// #1145: any domain NRPT policy, even for an unrelated namespace, makes the DNS Client ignore
+    /// the local store the hold writes to. The hold must say so in the DNS status instead of
+    /// reporting an install that has no effect, and must still change nothing else.
+    #[tokio::test]
+    #[serial]
+    async fn domain_nrpt_policy_over_the_ai_hold_is_reported_in_the_dns_status() {
+        remove().await;
+        observer_idle().await; // settle observers left by earlier tests
+        *TEST_EFFECTIVE_NRPT.lock().unwrap() = Some(vec![crate::core::dns::EffectiveNrptRule {
+            namespaces: vec![".corp.example".to_owned()],
+            generic_dns_servers: vec!["10.0.0.53".to_owned()],
+            tono_owned: false,
+        }]);
+        finish_release(true).await;
+        observer_idle().await;
+        let held = test_hold_active();
+        let suppressed = warning().await;
+        remove().await;
+        let after_remove = warning().await;
+        *TEST_EFFECTIVE_NRPT.lock().unwrap() = None;
+        finish_release(true).await;
+        observer_idle().await;
+        let ordinary = warning().await;
+        remove().await;
+
+        assert!(
+            held,
+            "the hold stays installed; the policy is reported, never fought"
+        );
+        assert!(
+            suppressed.is_some_and(
+                |text| text.contains(crate::core::dns::DNS_SELECTIVE_POLICY_SUPPRESSED_PREFIX)
+            ),
+            "an unrelated domain namespace suppresses the local suffix rules"
+        );
+        assert_eq!(after_remove, None, "no hold, no degraded reason");
+        assert_eq!(ordinary, None, "an ordinary machine reports nothing");
+    }
+
+    /// The advisory read must not be able to fail an install that succeeded, hold up the removal,
+    /// or bring a stale warning back after the hold is gone.
+    #[tokio::test]
+    #[serial]
+    async fn a_hung_nrpt_read_cannot_fail_the_install_block_the_removal_or_revive_a_warning() {
+        remove().await;
+        observer_idle().await; // settle observers left by earlier tests
+        *TEST_EFFECTIVE_NRPT.lock().unwrap() = Some(vec![crate::core::dns::EffectiveNrptRule {
+            namespaces: vec![".corp.example".to_owned()],
+            generic_dns_servers: vec!["10.0.0.53".to_owned()],
+            tono_owned: false,
+        }]);
+        let hung = pause_next(&NRPT_READ_PAUSE);
+
+        let installed = tokio::time::timeout(STEP_BUDGET * 2, finish_release(true))
+            .await
+            .expect("the install completes while the advisory read hangs");
+        tokio::time::timeout(Duration::from_secs(1), hung.0.entered.notified())
+            .await
+            .expect("the observer is blocked in the read");
+        let held = test_hold_active();
+        let removed = tokio::time::timeout(STEP_BUDGET * 2, async {
+            remove().await;
+        })
+        .await;
+        let held_after_remove = test_hold_active();
+
+        // The read finally returns the suppressing answer for the hold that no longer exists.
+        hung.0.release();
+        observer_idle().await;
+        let revived = warning().await;
+        *TEST_EFFECTIVE_NRPT.lock().unwrap() = None;
+
+        assert!(installed, "a successful install is not reported as failed");
+        assert!(held, "the hold is in place while the read hangs");
+        assert!(removed.is_ok(), "a hung read does not block the removal");
+        assert!(!held_after_remove, "the removal took effect");
+        assert_eq!(revived, None, "a late result cannot revive a warning after remove()");
+    }
+
+    /// A later install pass that fails (a firewall rule that cannot be set) reports failure, so
+    /// the observation of the earlier pass must not publish a warning for it either.
+    #[tokio::test]
+    #[serial]
+    async fn a_failed_reinstall_drops_the_observation_of_the_earlier_install() {
+        remove().await;
+        observer_idle().await; // settle observers left by earlier tests
+        *TEST_EFFECTIVE_NRPT.lock().unwrap() = Some(vec![crate::core::dns::EffectiveNrptRule {
+            namespaces: vec![".corp.example".to_owned()],
+            generic_dns_servers: vec!["10.0.0.53".to_owned()],
+            tono_owned: false,
+        }]);
+        let hung = pause_next(&NRPT_READ_PAUSE);
+
+        assert!(finish_release(true).await, "the first install succeeds");
+        tokio::time::timeout(Duration::from_secs(1), hung.0.entered.notified())
+            .await
+            .expect("the observer is blocked in the read");
+        TEST_APPLY_FAILS.store(true, std::sync::atomic::Ordering::SeqCst);
+        let reinstalled = finish_release(true).await;
+        TEST_APPLY_FAILS.store(false, std::sync::atomic::Ordering::SeqCst);
+        hung.0.release();
+        observer_idle().await;
+        let published = warning().await;
+        *TEST_EFFECTIVE_NRPT.lock().unwrap() = None;
+        remove().await;
+
+        assert!(!reinstalled, "the failed pass is reported as failed");
+        assert_eq!(published, None, "a failed install has no degraded reason");
+    }
+
+    /// The observer may not even have started when the hold is removed: it must then read nothing
+    /// and publish nothing, instead of judging the policy against a hold that is already gone.
+    #[tokio::test]
+    #[serial]
+    async fn an_observer_that_starts_after_the_removal_publishes_nothing() {
+        remove().await;
+        observer_idle().await; // settle observers left by earlier tests
+        *TEST_EFFECTIVE_NRPT.lock().unwrap() = Some(vec![crate::core::dns::EffectiveNrptRule {
+            namespaces: vec![".corp.example".to_owned()],
+            generic_dns_servers: vec!["10.0.0.53".to_owned()],
+            tono_owned: false,
+        }]);
+        let not_started = pause_next(&NRPT_OBSERVER_START_PAUSE);
+
+        assert!(finish_release(true).await, "the install does not wait for the observer");
+        tokio::time::timeout(Duration::from_secs(1), not_started.0.entered.notified())
+            .await
+            .expect("the observer is parked before its first snapshot");
+        remove().await;
+        not_started.0.release();
+        observer_idle().await;
+        let late = warning().await;
+        *TEST_EFFECTIVE_NRPT.lock().unwrap() = None;
+
+        assert_eq!(late, None, "an observer that starts after remove() must not warn");
     }
 
     #[tokio::test]

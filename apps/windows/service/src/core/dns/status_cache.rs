@@ -38,10 +38,16 @@ pub(super) const DNS_RECONCILE_MAX_BACKOFF: std::time::Duration = std::time::Dur
 
 pub(crate) async fn status() -> DnsProtectionStatus {
     // Status is the recovery/diagnosis path: do not turn a past panic into permanent silence.
-    DNS_STATUS_CACHE
+    let mut status = DNS_STATUS_CACHE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone()
+        .clone();
+    // #1145: the secondary AI hold lives while protection is released, when the cached
+    // observation carries no policy verdict. Its degraded reason rides in the same advisory.
+    if status.resolver_policy_warning.is_none() {
+        status.resolver_policy_warning = crate::core::selective_layer::nrpt_suppression();
+    }
+    status
 }
 
 pub(super) fn publish_status(status: &DnsProtectionStatus) {
