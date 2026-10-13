@@ -141,7 +141,7 @@ test.describe('today page', () => {
     const block = page.locator('section').filter({ has: page.getByRole('heading', { name: '失败聚类' }) });
     await block.scrollIntoViewIfNeeded();
     const rows = block.locator('li');
-    await expect(rows).toHaveCount(9);
+    await expect(rows).toHaveCount(10);
     await expect(rows.first().locator('.cluster-severity')).toHaveText('严重');
     await expect(rows.first().locator('.cluster-sentence')).toHaveText('保护期间客户断网了');
     await expect(rows.first().locator('.cluster-status')).toHaveText('进行中');
@@ -242,11 +242,29 @@ test.describe('today page', () => {
     // Dense row 1 holds the long name and is cut on purpose; rows 2-9 read whole.
     await open(page, '/today', 'dense');
     const dense = await nodeGeometry(page);
-    expect(dense).toHaveLength(9);
+    expect(dense).toHaveLength(10);
     for (const row of dense.slice(1)) {
       for (const part of row.parts) expect(part.wider, `dense: ${part.name}`).toBe(false);
     }
     expect(dense[0]!.parts.some((part) => part.wider)).toBe(true);
+  });
+
+  /**
+   * The row a real Windows client produces on production (stage verifyingTraffic,
+   * windows 0.0.75, Los Angeles · Marina) needs about 302 px of meta. The city and
+   * the site must both read whole at 1440, not just the shorter fixture rows.
+   */
+  test('the production-length row keeps both its city and its site whole at 1440', async ({ page }) => {
+    await open(page, '/today', 'dense');
+    const block = page.locator('section').filter({ has: page.getByRole('heading', { name: '失败聚类' }) });
+    await block.scrollIntoViewIfNeeded();
+    const row = block.locator('li').filter({ has: page.locator('.cluster-detail[title$="Los Angeles · Marina"]') });
+    await expect(row).toHaveCount(1);
+    await expect(row.locator('.cluster-detail')).toHaveAttribute('title', '验证流量 · windows 0.0.75 · Los Angeles · Marina');
+    const fit = await row.locator('.cluster-node-city, .cluster-node-site').evaluateAll((parts) =>
+      parts.map((part) => ({ name: part.className, text: part.textContent, scroll: part.scrollWidth, client: part.clientWidth })));
+    expect(fit.map((part) => part.text)).toEqual(['Los Angeles', 'Marina']);
+    for (const part of fit) expect(part.scroll, `${part.name} ${part.text} is whole`).toBeLessThanOrEqual(part.client);
   });
 
   test('the resolved tab is a different list, not a filter on the same one', async ({ page }) => {

@@ -7,7 +7,7 @@
 .cluster-list {
   display: grid;
   grid-template-columns: auto fit-content(196px) minmax(0, 1fr) auto auto;
-  column-gap: 12px;
+  column-gap: 10px;
 }
 
 /* No p0 in the list: rows carry no severity cell, and the column goes with it
@@ -64,7 +64,7 @@
 
 .cluster-seg + .cluster-seg::before {
   content: "·";
-  margin: 0 6px;
+  margin: 0 5px;
 }
 
 .cluster-stage,
@@ -93,7 +93,7 @@
 
 .cluster-node-site::before {
   content: "·";
-  margin: 0 6px;
+  margin: 0 5px;
 }
 
 .cluster-counts {

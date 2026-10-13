@@ -154,6 +154,23 @@
         "status": "open",
         "sample": "{\"carrier\":\"unicom\",\"channel\":\"release\"}",
         "detailPath": "/api/v1/diagnostics/clusters/fc-09"
+      },
+      {
+        "id": "fc-10",
+        "code": "TONO_NODE_OR_CORE_UNREACHABLE",
+        "stage": "verifyingTraffic",
+        "appVersion": "0.0.75",
+        "platform": "windows",
+        "node": "Los Angeles · Marina",
+        "severity": "normal",
+        "count": 2,
+        "users": 1,
+        "devices": 1,
+        "firstSeenMs": 1724880000000,
+        "lastSeenMs": 1724982000000,
+        "status": "open",
+        "sample": "{\"carrier\":\"telecom\",\"channel\":\"release\"}",
+        "detailPath": "/api/v1/diagnostics/clusters/fc-10"
       }
     ],
     "updatedAt": 1724999970
