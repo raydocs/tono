@@ -995,9 +995,9 @@ FunctionEnd
   Delete /REBOOTOK "$INSTDIR\verge-mihomo.exe.restore"
   Delete /REBOOTOK "$INSTDIR\verge-mihomo.exe.publish"
   Delete /REBOOTOK "$INSTDIR\${MAINBINARYNAME}.exe.next"
-  Delete /REBOOTOK "$INSTDIR\${MAINBINARYNAME}.exe.rollback"
-  Delete /REBOOTOK "$INSTDIR\${MAINBINARYNAME}.exe.restore"
-  Delete /REBOOTOK "$INSTDIR\${MAINBINARYNAME}.exe.publish"
+  Delete /REBOOTOK "$INSTDIR\${MAINBINARYNAME}.exe.install-rollback"
+  Delete /REBOOTOK "$INSTDIR\${MAINBINARYNAME}.exe.install-restore"
+  Delete /REBOOTOK "$INSTDIR\${MAINBINARYNAME}.exe.install-publish"
   Delete /REBOOTOK "$INSTDIR\resources\clash-verge-service"
   Delete /REBOOTOK "$INSTDIR\resources\clash-verge-service-install"
   Delete /REBOOTOK "$INSTDIR\resources\clash-verge-service-uninstall"
@@ -1011,17 +1011,34 @@ FunctionEnd
   Delete /REBOOTOK "$INSTDIR\resources\geosite.dat"
   Delete /REBOOTOK "$INSTDIR\resources\enableLoopback.exe"
   Delete /REBOOTOK "$INSTDIR\tono-core.exe.next"
-  Delete /REBOOTOK "$INSTDIR\tono-core.exe.rollback"
-  Delete /REBOOTOK "$INSTDIR\tono-core.exe.restore"
-  Delete /REBOOTOK "$INSTDIR\tono-core.exe.publish"
+  Delete /REBOOTOK "$INSTDIR\tono-core.exe.install-rollback"
+  Delete /REBOOTOK "$INSTDIR\tono-core.exe.install-restore"
+  Delete /REBOOTOK "$INSTDIR\tono-core.exe.install-publish"
   Delete /REBOOTOK "$INSTDIR\sing-box.exe.next"
-  Delete /REBOOTOK "$INSTDIR\sing-box.exe.rollback"
-  Delete /REBOOTOK "$INSTDIR\sing-box.exe.restore"
-  Delete /REBOOTOK "$INSTDIR\sing-box.exe.publish"
+  Delete /REBOOTOK "$INSTDIR\sing-box.exe.install-rollback"
+  Delete /REBOOTOK "$INSTDIR\sing-box.exe.install-restore"
+  Delete /REBOOTOK "$INSTDIR\sing-box.exe.install-publish"
   Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.next"
-  Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.rollback"
-  Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.restore"
-  Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.publish"
+  Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.install-rollback"
+  Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.install-restore"
+  Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.install-publish"
+  ; The failed update's rollback copies are the only evidence of its old generation while a repairing
+  ; install is unfinished: the Service helper leaves this marker beside the binaries, and
+  ; `--manual-update-finish` removes it, and the copies once the installed identity is proven (#1307).
+  ${IfNot} ${FileExists} "$INSTDIR\.update-repair-evidence"
+    Delete /REBOOTOK "$INSTDIR\${MAINBINARYNAME}.exe.rollback"
+    Delete /REBOOTOK "$INSTDIR\${MAINBINARYNAME}.exe.restore"
+    Delete /REBOOTOK "$INSTDIR\${MAINBINARYNAME}.exe.publish"
+    Delete /REBOOTOK "$INSTDIR\tono-core.exe.rollback"
+    Delete /REBOOTOK "$INSTDIR\tono-core.exe.restore"
+    Delete /REBOOTOK "$INSTDIR\tono-core.exe.publish"
+    Delete /REBOOTOK "$INSTDIR\sing-box.exe.rollback"
+    Delete /REBOOTOK "$INSTDIR\sing-box.exe.restore"
+    Delete /REBOOTOK "$INSTDIR\sing-box.exe.publish"
+    Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.rollback"
+    Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.restore"
+    Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.publish"
+  ${EndIf}
 !macroend
 
 Section CheckAndInstallVSRuntime
@@ -1673,6 +1690,8 @@ Section Uninstall
   ; in no generated list, and leaving it keeps the RMDir below from removing the product root.
   Delete "$INSTDIR\sing-box-sha256.txt"
 
+  ; An uninstall passes the gate only with no pending update record, so no evidence is left to keep.
+  Delete /REBOOTOK "$INSTDIR\.update-repair-evidence"
   ; These files came from older bundles and therefore never appear in the generated lists above.
   !insertmacro RemoveKnownLegacyPayload
 

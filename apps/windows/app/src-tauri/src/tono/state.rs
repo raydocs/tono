@@ -277,6 +277,9 @@ pub struct TonoInner {
     pub fsm: ConnectionFsm,
     /// Last observed kill switch aggregate.
     pub kill_switch: Option<KillSwitchStatus>,
+    /// The last completed release kept the secondary AI hold (Quit or a replacement sign-in,
+    /// decision 125). An idle App still owes the user a full release on an explicit Sign Out.
+    pub ai_hold_retained: bool,
     /// Last observed `network_events.counter` from the Service `/status` feed.
     pub network_events_counter: Option<u64>,
     /// Per-start controller secret of the running runtime (memory only, §5).
@@ -832,6 +835,7 @@ impl TonoState {
                 server_test_cancellation: None,
                 fsm: ConnectionFsm::new(),
                 kill_switch: None,
+                ai_hold_retained: false,
                 network_events_counter: None,
                 controller_secret: None,
                 controller_port: None,

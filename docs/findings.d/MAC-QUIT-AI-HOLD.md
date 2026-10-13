@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| MAC-QUIT-AI-HOLD | Normal macOS Quit fully releases the selective AI hold, requiring reconciliation with the current stop safety requirement | fixed(53676e913) | 修复 [#1445](https://github.com/raydocs/tono/pull/1445)；decision 073 provisional | 高·已确认（P1，代码路径） | 本轮普通 Quit 武装/retain-ai 保留窄层，显式 Disconnect/Restore 完全释放并优先于重叠 Quit；次启可观察/移除。已合 main 53676e913（#1445，经 merge queue 的 ci-gate、Jev PASSED）；原生 PF/DNS 实机留 G1/G2。 |
+| MAC-QUIT-AI-HOLD | Normal macOS Quit fully releases the selective AI hold, requiring reconciliation with the current stop safety requirement | fixed(53676e913) | 修复 [#1445](https://github.com/raydocs/tono/pull/1445)；decision 073 provisional，由 [decision 125](../decisions/125-2026-10-13-quit-and-replacement-keep-ai-hold.md)（所有者 2026-10-13 直接回答）确认；[#1052](https://github.com/raydocs/tono/issues/1052) | 高·已确认（P1，代码路径） | 本轮普通 Quit 武装/retain-ai 保留窄层，显式 Disconnect/Restore 完全释放并优先于重叠 Quit；次启可观察/移除。已合 main 53676e913（#1445，经 merge queue 的 ci-gate、Jev PASSED）；原生 PF/DNS 实机留 G1/G2。 |
 
 Reverified on `origin/main` **72a9c98db24f5b3f5ad30a1be7191ce17a0df0be**.
 Ownership: SHIP_PLAN §2 item 10. This is the previously reported M5/M7 finding,
@@ -72,3 +72,5 @@ Rejected hypotheses: the watchdog reinstates the AI hold after successful Quit
 uses an AI-preserving disposition (it passes `false`; automatic stop is separate).
 
 2026-10-07 续修：上述原始源码追踪保留为历史。当前实现依据 [decision 073](../decisions/073-2026-10-07-normal-quit-retains-ai-floor.md)，原 `Decision required` 已以 provisional 严格选择回应，并非 owner 实机验收。
+
+2026-10-13：所有者直接回答（决策 125）：退出和更换账户登录恢复普通网络但保留选择性 AI 拦截，直到 Tono 重新打开并连接，或用户明确选择「恢复网络」。macOS 退出代码不变（#1445 的 `/killswitch/quit` 已是这个语义，不需要新的助手协议，`HelperProtocolVersion.current` 不变；旧版助手在退出放行前按「恢复网络」同一路径先修复）。本次只更新退出相关的两条界面文案（它们原来写着退出会解除网络保护/断网保护），并在文档里记录决策。

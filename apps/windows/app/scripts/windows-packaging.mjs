@@ -82,15 +82,24 @@ export const WINDOWS_RUNTIME_REPAIR_ARTIFACTS = Object.freeze([
   'tono-core.exe.rollback',
   'tono-core.exe.restore',
   'tono-core.exe.publish',
+  'tono-core.exe.install-rollback',
+  'tono-core.exe.install-restore',
+  'tono-core.exe.install-publish',
   'sing-box.exe.next',
   'sing-box.exe.rollback',
   'sing-box.exe.restore',
   'sing-box.exe.publish',
+  'sing-box.exe.install-rollback',
+  'sing-box.exe.install-restore',
+  'sing-box.exe.install-publish',
   // The Service helper stages the root pin beside sing-box.exe as its own transaction member.
   'sing-box-sha256.txt.next',
   'sing-box-sha256.txt.rollback',
   'sing-box-sha256.txt.restore',
   'sing-box-sha256.txt.publish',
+  'sing-box-sha256.txt.install-rollback',
+  'sing-box-sha256.txt.install-restore',
+  'sing-box-sha256.txt.install-publish',
 ])
 
 // These inherited Clash Verge commands are not used by any route in the Tono
@@ -152,6 +161,31 @@ export function validateNsisLegacyCleanup(source) {
     const statement = `Delete /REBOOTOK "$INSTDIR\\${windowsPath}"`
     if (!text.includes(statement)) {
       return `installer.nsi does not remove legacy payload path: ${relative}`
+    }
+  }
+  const macroAt = text.indexOf('!macro RemoveKnownLegacyPayload')
+  if (macroAt >= 0) {
+    // The failed update's rollback copies stay while a repairing install is unfinished (#1307).
+    const macro = text.slice(macroAt, text.indexOf('!macroend', macroAt))
+    const guardAt = macro.indexOf(
+      '${IfNot} ${FileExists} "$INSTDIR\\.update-repair-evidence"',
+    )
+    const guardEnd = guardAt < 0 ? -1 : macro.indexOf('${EndIf}', guardAt)
+    const updateScratch = [
+      ...WINDOWS_RUNTIME_REPAIR_ARTIFACTS.filter(
+        (name) =>
+          /\.(rollback|restore|publish)$/.test(name) &&
+          !name.includes('.install-'),
+      ),
+      ...['rollback', 'restore', 'publish'].map(
+        (suffix) => '${MAINBINARYNAME}.exe.' + suffix,
+      ),
+    ]
+    for (const artifact of updateScratch) {
+      const statementAt = macro.indexOf(`Delete /REBOOTOK "$INSTDIR\\${artifact}"`)
+      if (guardEnd < 0 || statementAt < guardAt || statementAt > guardEnd) {
+        return `installer.nsi deletes update recovery evidence outside the repair guard: ${artifact}`
+      }
     }
   }
   const uses =

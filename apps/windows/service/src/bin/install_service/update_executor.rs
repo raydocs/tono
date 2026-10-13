@@ -519,6 +519,8 @@ fn execute(recovery: bool) -> Result<(), Error> {
             "staged components changed before consume"
         );
     }
+    // Built before consumption: past it, no `?` may leave `execute` ahead of the outcome path.
+    let runtime = tokio::runtime::Runtime::new()?;
     let launch = if recovery {
         Ok(None)
     } else {
@@ -551,19 +553,38 @@ fn execute(recovery: bool) -> Result<(), Error> {
             )
         })
     };
-    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
-    let service = manager.open_service(
-        tono_service_protocol::WINDOWS_SERVICE_NAME,
-        ServiceAccess::ALL_ACCESS,
-    )?;
-    suppress_windows_service_recovery(&service)?;
-    stop_windows_service(&service)?;
-    let runtime = tokio::runtime::Runtime::new()?;
+    // The attempt is consumed from here on. No step below may leave `execute` before the outcome
+    // path: it records Uncertain, releases the network and restores the SCM recovery actions
+    // (#1293). A Service that cannot be opened has nothing to restore.
+    let service = match ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+        .and_then(|manager| {
+            manager.open_service(
+                tono_service_protocol::WINDOWS_SERVICE_NAME,
+                ServiceAccess::ALL_ACCESS,
+            )
+        }) {
+        Ok(service) => service,
+        Err(error) => {
+            return Err(settle_unopenable_service(
+                &mut store,
+                recovery,
+                native::strict_kill_switch_intent_on_disk(),
+                Error::from(error),
+                release_stopped_network,
+            ));
+        }
+    };
+    // A refused suppress or stop is the outcome's error, not an early return: the Service may be
+    // half stopped and SCM recovery suppressed, which only the outcome path puts right.
+    let stopped = suppress_windows_service_recovery(&service)
+        .map_err(Error::from)
+        .and_then(|()| stop_windows_service(&service).map(drop));
     let outcome = (|| -> Result<_, Error> {
         let launch = launch?;
         // Registration still precedes Service stop and every publication. Its
         // refusal must reach the same selective failure finalizer as rollback.
         registration?;
+        stopped?;
         let _owner = runtime
             .block_on(tono_service_protocol::acquire_service_owner())?
             .context("Service replacement ownership unavailable")?;
@@ -727,7 +748,9 @@ fn execute(recovery: bool) -> Result<(), Error> {
         configure_windows_service_recovery(&service)?;
         drop(store);
         drop(repair);
-        service.start(&Vec::<&std::ffi::OsStr>::new())?;
+        // A refused suppress or stop can leave the Service running: that is not a start failure,
+        // and the failed-restart fallback would stop a Service that still works (#1293).
+        start_service_if_stopped(&service)?;
         wait_for_service_ready()
     };
     let (rollback_release, restart) = match finalizer {
@@ -846,6 +869,53 @@ fn execute(recovery: bool) -> Result<(), Error> {
         }
     }
     Ok(())
+}
+
+/// The stopped-Service network release shared by the early outcome paths: ordinary traffic with
+/// the AI hold, never over an explicit strict kill switch.
+fn release_stopped_network() -> Result<(), Error> {
+    shared::block_on_abandoning(async {
+        let _owner = tono_service_protocol::acquire_service_owner()
+            .await?
+            .context("Service still owns the update outcome")?;
+        if native::strict_kill_switch_intent_on_disk() {
+            return Ok(());
+        }
+        tono_service_protocol::emergency_disarm_windows_kill_switch_applying_narrow().await
+    })?
+}
+
+/// The Service handle could not be opened after consumption (#1293). Nothing was suppressed or
+/// stopped, so there are no SCM actions to restore, but the attempt is consumed: it must not stay
+/// `Consumed` with no outcome. Mark it Uncertain, try the release, and count a failed recovery
+/// run only once the network settled (released, or strict), as the main outcome path does.
+fn settle_unopenable_service(
+    store: &mut tx::Store,
+    recovery: bool,
+    strict: bool,
+    error: Error,
+    release: impl FnOnce() -> Result<(), Error>,
+) -> Error {
+    if matches!(
+        store.attempt().map(|a| a.execution),
+        Ok(tx::Execution::Consumed | tx::Execution::Replaced | tx::Execution::Uncertain)
+    ) {
+        // This marker cannot turn uncertain execution into another install grant.
+        let _ = store.execution(tx::Execution::Uncertain);
+    }
+    let released = if strict { Ok(()) } else { release() };
+    if recovery
+        && released.is_ok()
+        && let Err(count_error) = store.note_recovery_run()
+    {
+        eprintln!("failed update recovery could not be counted: {count_error:#}");
+    }
+    match released {
+        Ok(()) => error,
+        Err(release_error) => error.context(format!(
+            "network release after the failed Service open also failed: {release_error:#}"
+        )),
+    }
 }
 
 fn start_service_if_stopped(service: &platform_lib::service::Service) -> Result<(), Error> {
@@ -2358,5 +2428,83 @@ mod tests {
                 "Stopped", "start", "wait", "Pending", "wait", "Running", "wfp"
             ]
         );
+    }
+
+    /// #1293: past consumption, a Service that cannot even be opened used to end `execute`
+    /// through `?`, before the outcome path. The attempt stayed Consumed and the network was never
+    /// released. It is now marked Uncertain and released, and a failed recovery run is counted
+    /// only once the network settled.
+    #[test]
+    fn update_unopenable_service_after_consumption_marks_uncertain_and_releases() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-update-unopenable-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let mut store = tx::Store::open(&root).unwrap();
+        let manifest = ReleaseManifest::decode(include_bytes!(
+            "../../../../../../tooling/scripts/tests/fixtures/update-protocol-v1/manifest.json"
+        ))
+        .unwrap();
+        let mut receipt = Receipt::decode(include_bytes!("../../../../../../tooling/scripts/tests/fixtures/update-protocol-v1/windows-receipt.json"), &manifest).unwrap();
+        receipt.installed_location_sha256 = tx::location_digest(&root);
+        let peer = tx::Image {
+            pid: 11,
+            started_at: 10,
+            path: root.join("Tono.exe"),
+            sha256: "0".repeat(64),
+        };
+        let attempt_id = receipt.attempt_id.clone();
+        store
+            .save(tx::State {
+                consumed_sequence: manifest.release_sequence,
+                generation: 91,
+                manual_installer: None,
+                attempt: Some(tx::Attempt {
+                    old_components: tx::target(&manifest).components.clone(),
+                    manifest,
+                    receipt,
+                    initiating_image: peer,
+                    successor_image: None,
+                    install_root: root.clone(),
+                    execution: tx::Execution::Consumed,
+                    executor: None,
+                    disconnect: None,
+                    publication_clock: None,
+                }),
+            })
+            .unwrap();
+        std::fs::create_dir_all(root.join(&attempt_id)).unwrap();
+
+        // The release is refused: marked Uncertain, but no run is counted, so recovery is retried.
+        for _ in 0..tx::MAX_RECOVERY_RUNS {
+            let error = settle_unopenable_service(
+                &mut store,
+                true,
+                false,
+                anyhow::anyhow!("access denied"),
+                || Err(anyhow::anyhow!("Service still owns the update outcome")),
+            );
+            assert!(format!("{error:#}").contains("access denied"), "{error:#}");
+            assert!(format!("{error:#}").contains("also failed"), "{error:#}");
+        }
+        assert_eq!(store.attempt().unwrap().execution, tx::Execution::Uncertain);
+        assert!(!store.recovery_exhausted().unwrap(), "an unsettled network counted a run");
+
+        let released = std::cell::Cell::new(0);
+        for _ in 0..tx::MAX_RECOVERY_RUNS {
+            settle_unopenable_service(&mut store, true, false, anyhow::anyhow!("access denied"), || {
+                released.set(released.get() + 1);
+                Ok(())
+            });
+        }
+        assert_eq!(released.get(), tx::MAX_RECOVERY_RUNS);
+        assert!(store.recovery_exhausted().unwrap(), "released runs must be counted");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
