@@ -120,15 +120,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      # Cargo dependencies only (not workspace crates): restored on every run,
-      # saved only from a push to main, so a pull request cannot seed main's
-      # cache. Each Cargo job has its own shared-key. No second actions/cache
-      # on the same directories.
+      # Registry and workspace build artifacts: restored on every run, saved
+      # only from a push to main, so a pull request cannot seed main's cache.
+      # Workspace crates are included because a deps-only cache still recompiles
+      # the Tauri crate on every run. Each Cargo job has its own shared-key.
+      # No second actions/cache on the same directories.
       - name: Cache Cargo dependencies
         id: rust-cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: windows-core
+          cache-workspace-crates: "true"
           workspaces: |
             apps/windows
             apps/windows/vendor/kode-bridge
@@ -262,7 +264,10 @@ jobs:
           if (!yaml.includes(nextest)) throw new Error('tono-core suite is not nextest')
           const serviceTest = 'cargo test --locked --features standalone,client,' + 'test'
           if (!yaml.includes(serviceTest)) throw new Error('service suite must stay cargo test')
-          console.log('rust-cache: 3 jobs, save on main push only; nextest is tono-core only')
+          const workspace = 'cache-workspace-' + 'crates: "true"'
+          const crates = yaml.split('\n').filter((line) => line.includes(workspace))
+          if (crates.length !== 3) throw new Error('expected 3 workspace crate caches, got ' + crates.length)
+          console.log('rust-cache: 3 jobs cache workspace crates, save on main push only; nextest is tono-core only')
           NODE
 
       - name: Install pnpm as the project pins it
@@ -309,6 +314,7 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: windows-app-rust
+          cache-workspace-crates: "true"
           workspaces: |
             apps/windows/app
             apps/windows
@@ -423,6 +429,7 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: windows-service
+          cache-workspace-crates: "true"
           workspaces: apps/windows/service
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 

@@ -8,3 +8,7 @@
 - 验证：本地抽出守护脚本跑过。Windows `cargo test` / nextest 未在本机跑（无 Windows 工具链）。ci-gate 待本 PR。第一次 push 到 main 是冷缓存。
 - 候选/发布：无新包。
 - 剩余限制：本 PR 的 ci-gate 本身是冷缓存或仍吃 main 上旧的 `actions/cache` 键，量不到 rust-cache 命中后的墙钟。Tauri 376–644 秒的测试步骤没有改成 nextest。Service 不能用 nextest。
+
+## 2026-10-13 · 续记：把 workspace crate 放进 rust-cache
+
+- ci-gate [38475291612](https://github.com/raydocs/tono/actions/runs/38475291612)（`e950d127f`）`app-rust` 的 `cache-hit=false`。Tauri `cargo test` 11 分 10 秒，高于旧缓存命中时的 376 秒。只缓存依赖时，本仓库的 crate 每次都重编。三个作业改为 `cache-workspace-crates: "true"`，仍只在 push 到 `main` 时保存。这次 ci-gate 仍是冷的；命中后的墙钟要等 main 写下缓存之后的下一次跑。
