@@ -536,6 +536,74 @@ fn admit_install() -> Result<(tokio::sync::MutexGuard<'static, ()>, Cancellation
     Ok((install, cancel, slot))
 }
 
+/// How long the Service may report an install as `Launching` before the executor it spawned is
+/// counted lost. The executor consumes the install within seconds (a private-store wait of at
+/// most 15 s, then image checks), so a record still `Launching` after this has no executor that
+/// is making progress. Long enough that a slow start under antivirus is not mistaken for a loss.
+const EXECUTOR_LAUNCH_GRACE: Duration = Duration::from_secs(120);
+const EXECUTOR_LAUNCH_POLL: Duration = Duration::from_secs(2);
+/// One Status look may not outlast this: a pipe that never answers is no evidence either way,
+/// and must not stretch the wait (and the `INSTALL` slot) past the grace.
+const EXECUTOR_LAUNCH_PROBE: Duration = Duration::from_secs(5);
+
+#[derive(Debug, PartialEq, Eq)]
+enum ExecutorLaunch {
+    /// The executor consumed the install, or the Service cannot say. The executor and the
+    /// Service's own recovery own the update from here.
+    Underway,
+    /// The Service still holds the install as `Launching` (or has returned it to `Staged`):
+    /// the executor died or refused before it stopped the Service.
+    Lost,
+}
+
+/// R2UA-F2: Install records `Launching` and nothing else watched the executor. One that exits
+/// before it stops the Service (killed, a repair already running, a refused image binding or
+/// receipt, changed staged components) left Core stopped and the bootstrap block armed with no
+/// automatic release. A Status that cannot be read is no evidence either way (the executor
+/// stops the Service for a real install), so only an answer that still says `Launching` at the
+/// deadline, or `Staged`, is a loss. A look is bounded by `EXECUTOR_LAUNCH_PROBE`, and one that
+/// times out counts as unreadable, so the whole wait ends within the grace plus one probe.
+async fn watch_executor_launch<Fut: std::future::Future<Output = Result<UpdateStatus>>>(
+    mut status: impl FnMut() -> Fut,
+    grace: Duration,
+    poll: Duration,
+) -> ExecutorLaunch {
+    let deadline = tokio::time::Instant::now() + grace;
+    loop {
+        let mut launching = false;
+        match tokio::time::timeout(EXECUTOR_LAUNCH_PROBE, status()).await {
+            Ok(Ok(status)) => match status.execution.as_str() {
+                "Launching" => launching = true,
+                "Reserved" | "Extracting" | "Staged" => return ExecutorLaunch::Lost,
+                _ => return ExecutorLaunch::Underway,
+            },
+            // Unreadable or unanswered: no evidence either way.
+            Ok(Err(_)) | Err(_) => {}
+        }
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return if launching { ExecutorLaunch::Lost } else { ExecutorLaunch::Underway };
+        }
+        tokio::time::sleep(poll.min(deadline - now)).await;
+    }
+}
+
+/// WIN-UPDATE-TOKEN-FLUSH: the executor ends this process with TerminateProcess, so the exit
+/// flush (`flush_audit_for_exit`) never runs. A rotated refresh token whose vault write had
+/// failed was then lost with the process. Flush the session once more, retrying its writer,
+/// before the executor is started. A write that still fails does not block the update: the
+/// token stays in memory until this process ends, as it would after any other failed write.
+async fn install_after_session_flush<T>(
+    flush: impl std::future::Future<Output = bool>,
+    install: impl std::future::Future<Output = T>,
+) -> T {
+    if !flush.await {
+        logging!(warn, Type::Service,
+            "Tono: the session credential writer did not acknowledge before the update executor started");
+    }
+    install.await
+}
+
 #[tauri::command]
 pub async fn tono_install_update(
     app: AppHandle,
@@ -548,6 +616,8 @@ pub async fn tono_install_update(
     // only fold the attempt this update invalidated, never a live one.
     let mut invalidated = None;
     let mut preparation_complete = false;
+    // The Service launched the executor and it never took over (R2UA-F2).
+    let mut executor_lost = false;
     let outcome = async {
         let (manifest, signature, decoded) = OFFER.lock().await.clone().context("Check for updates again")?;
         ensure!(
@@ -628,9 +698,12 @@ pub async fn tono_install_update(
         );
         preparation_complete = true;
         let attempt_id = receipt.attempt_id;
-        if let Err(error) = request(UpdateRequest::Install {
+        let session = super::quit::flush_session_for_exit(async {
+            Arc::clone(&state.lock().await.credentials)
+        });
+        if let Err(error) = install_after_session_flush(session, request(UpdateRequest::Install {
             attempt_id: attempt_id.clone(),
-        })
+        }))
         .await
         {
             // Never retry execution after a lost acknowledgement. Query only.
@@ -639,6 +712,17 @@ pub async fn tono_install_update(
                 status.receipt.as_ref().is_some_and(|r| r.attempt_id == attempt_id)
                     && matches!(status.execution.as_str(), "Launching" | "Consumed" | "Replaced"),
                 "{error:#}"
+            );
+        }
+        // On success the executor ends this process; getting past that means it never did.
+        if watch_executor_launch(|| request(UpdateRequest::Status), EXECUTOR_LAUNCH_GRACE, EXECUTOR_LAUNCH_POLL)
+            .await
+            == ExecutorLaunch::Lost
+        {
+            executor_lost = true;
+            anyhow::bail!(
+                "the update executor did not take over within {} seconds",
+                EXECUTOR_LAUNCH_GRACE.as_secs()
             );
         }
         Ok::<_, anyhow::Error>(())
@@ -662,13 +746,16 @@ pub async fn tono_install_update(
         let current = inner.connect_generation;
         let release = quiesce_connection_after_update(&mut inner.fsm, core_running, prepare_failed, invalidated, current);
         super::emit_status(&app, &super::status_of(&inner));
-        release
+        // A lost executor never stopped the Service: Core is stopped and the bootstrap block is
+        // armed with nothing left to release it. Restore internet through the same
+        // update-aware release as a failed Prepare; an explicit strict switch stays blocked.
+        release || executor_lost
     };
     if release {
         if let Err(error) = connection::disconnect_for_generation(
             Arc::clone(state.inner()), app.clone(), invalidated,
         ).await {
-            logging!(warn, Type::Service, "Tono: failed update preparation could not restore internet: {error}");
+            logging!(warn, Type::Service, "Tono: failed update could not restore internet: {error}");
         }
     }
     super::quit::resync_after_cancelled_quit(app).await;
@@ -1384,5 +1471,106 @@ mod update_relay_tests {
             None
         );
         assert_eq!(preferred.relay(), 1, "the relay that answered stays preferred");
+    }
+}
+
+#[cfg(test)]
+mod update_executor_tests {
+    use super::*;
+    use std::sync::Mutex as StdMutex;
+
+    fn status(execution: &str) -> Result<UpdateStatus> {
+        Ok(UpdateStatus {
+            receipt: None,
+            execution: execution.into(),
+            offer: None,
+            needs_attention: None,
+            successor_relaunched: false,
+        })
+    }
+
+    /// R2UA-F2: an executor that exits before it stops the Service leaves the install
+    /// `Launching` for good. That must end as a lost executor so the caller restores internet,
+    /// not wait for a Service restart that never comes.
+    #[tokio::test(start_paused = true)]
+    async fn an_executor_that_never_consumes_the_install_is_lost() {
+        let polls = StdMutex::new(0_u32);
+        let started = tokio::time::Instant::now();
+        let launch = watch_executor_launch(
+            || {
+                *polls.lock().unwrap() += 1;
+                std::future::ready(status("Launching"))
+            },
+            EXECUTOR_LAUNCH_GRACE,
+            EXECUTOR_LAUNCH_POLL,
+        )
+        .await;
+        assert_eq!(launch, ExecutorLaunch::Lost);
+        assert!(*polls.lock().unwrap() > 1, "the executor is given the whole grace, not one look");
+        assert!(
+            started.elapsed() >= EXECUTOR_LAUNCH_GRACE,
+            "a record still Launching is not lost before the grace has run out"
+        );
+    }
+
+    /// A Status request that never answers is no evidence, and must not stretch the wait past
+    /// the grace (the `INSTALL` slot and the offline time are held for it).
+    #[tokio::test(start_paused = true)]
+    async fn a_status_that_never_answers_does_not_extend_the_wait() {
+        let started = tokio::time::Instant::now();
+        let launch = watch_executor_launch(
+            std::future::pending::<Result<UpdateStatus>>,
+            EXECUTOR_LAUNCH_GRACE,
+            EXECUTOR_LAUNCH_POLL,
+        )
+        .await;
+        assert_eq!(launch, ExecutorLaunch::Underway);
+        assert!(
+            started.elapsed() <= EXECUTOR_LAUNCH_GRACE + EXECUTOR_LAUNCH_PROBE,
+            "waited {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// The release must not race a working executor: once the install is consumed, or the
+    /// Service cannot answer because the executor stopped it, the executor owns the update.
+    #[tokio::test(start_paused = true)]
+    async fn a_consumed_install_or_a_stopped_service_is_not_a_lost_executor() {
+        let answers = StdMutex::new(vec![status("Consumed"), status("Launching")]);
+        let consumed = watch_executor_launch(
+            || std::future::ready(answers.lock().unwrap().pop().unwrap()),
+            EXECUTOR_LAUNCH_GRACE,
+            EXECUTOR_LAUNCH_POLL,
+        )
+        .await;
+        assert_eq!(consumed, ExecutorLaunch::Underway);
+
+        let stopped = watch_executor_launch(
+            || std::future::ready(Err(anyhow::anyhow!("Service is stopped"))),
+            EXECUTOR_LAUNCH_GRACE,
+            EXECUTOR_LAUNCH_POLL,
+        )
+        .await;
+        assert_eq!(stopped, ExecutorLaunch::Underway);
+    }
+
+    /// WIN-UPDATE-TOKEN-FLUSH: the session is flushed before the executor is started, and a
+    /// flush that fails does not stop the install.
+    #[tokio::test]
+    async fn the_session_is_flushed_before_the_executor_starts() {
+        let events = StdMutex::new(Vec::new());
+        let started = install_after_session_flush(
+            async {
+                events.lock().unwrap().push("flush");
+                false
+            },
+            async {
+                events.lock().unwrap().push("install");
+                7
+            },
+        )
+        .await;
+        assert_eq!(started, 7);
+        assert_eq!(*events.lock().unwrap(), ["flush", "install"]);
     }
 }
