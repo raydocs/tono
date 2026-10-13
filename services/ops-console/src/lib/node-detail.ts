@@ -7,6 +7,7 @@ import type {
   NodeBindingsDto,
   NodeErrorRowDto,
   NodeLifecycle,
+  NodeQuotaDto,
   NodeVerdict,
   Tone,
 } from '@contract';
@@ -328,6 +329,12 @@ export function anchorDayOf(cycleStart: number | null): string {
   // UTC (`quota.ts` `cycleBounds`). Local `getDate()` turns a UTC midnight into
   // the previous evening west of UTC, and saving the form then stores that day.
   return String(new Date(cycleStart * 1_000).getUTCDate());
+}
+
+/** The form's anchor day: the stored 1-31 day, else the cycle start's (a day-31 node starts February on the 28th). */
+export function anchorDayField(quota: Pick<NodeQuotaDto, 'cycleAnchorDay' | 'cycleStart'>): string {
+  const day = quota.cycleAnchorDay;
+  return day !== null && day >= 1 && day <= 31 ? String(day) : anchorDayOf(quota.cycleStart);
 }
 
 /** A token the engine wrote, not a sentence a person did: `carrier_loss`, `ok`. */

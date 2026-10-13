@@ -322,6 +322,20 @@ describe('ops v1 api', () => {
     expect(Number(rolled?.counter_in_last)).toBe(8_000_000_000);
   });
 
+  it('node detail quota carries the stored anchor day, null when unset', async () => {
+    await seedNode();
+    const enc = encodeURIComponent(NODE);
+    const before = assertNodeDetail(await (await ops(`nodes/${enc}`)).json());
+    expect(before.quota.value.cycleAnchorDay).toBeNull();
+    const set = await ops(`nodes/${enc}/profile`, json({
+      quota: { quotaBytes: 1_000_000_000, cycleKind: 'calendar_day', cycleAnchorDay: 31, counts: 'in_out' },
+    }, 'PATCH'));
+    expect(set.status).toBe(200);
+    expect(assertNodeDetail(await set.json()).quota.value.cycleAnchorDay).toBe(31);
+    const read = assertNodeDetail(await (await ops(`nodes/${enc}`)).json());
+    expect(read.quota.value.cycleAnchorDay).toBe(31);
+  });
+
   it('PATCH nodes/{name}/profile quota null clears the open cycle', async () => {
     await seedNode();
     const enc = encodeURIComponent(NODE);
