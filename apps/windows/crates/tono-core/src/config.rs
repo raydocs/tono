@@ -2054,6 +2054,15 @@ reality-opts:
             wechat_file_path_regex(r"D:\Lark.exe").as_deref(),
             Some(r"^[Dd]:[\\/][Ll][Aa][Rr][Kk]\.[Ee][Xx][Ee]$")
         );
+        // Signed-app discovery encodes a registry install on a UNC share without a drive check.
+        assert_eq!(
+            windows_path_regex(r"\\nas\apps\Lark.exe", WindowsPathRegexKind::ExactFile).as_deref(),
+            Some(r"^[\\/][\\/][Nn][Aa][Ss][\\/][Aa][Pp][Pp][Ss][\\/][Ll][Aa][Rr][Kk]\.[Ee][Xx][Ee]$")
+        );
+        assert_eq!(
+            windows_path_regex(r"\\nas\apps\Lark\", WindowsPathRegexKind::AnchoredPrefix).as_deref(),
+            Some(r"^[\\/][\\/][Nn][Aa][Ss][\\/][Aa][Pp][Pp][Ss][\\/][Ll][Aa][Rr][Kk][\\/]")
+        );
         // The encoder also writes the whole-drive regex; the Service refuses it.
         assert_eq!(
             wechat_prefix_path_regex(r"D:\").as_deref(),

@@ -397,27 +397,46 @@ fn in_range(address: Ipv4Addr, range: &str) -> bool {
 
 /// A process-path regex only in the form `tono-core` `config::windows_path_regex` writes:
 /// `^`, then literal path characters (case classes `[Xx]`, the separator class `[\\/]`,
-/// escaped specials), and at most a final `$`. The literal path must be a drive, a colon and a
-/// separator, then at least one real path component below the drive root, closed either by a
+/// escaped specials), and at most a final `$`. The literal path must be a drive (`D:\`) or a UNC
+/// share (`\\server\share\`, which signed-app discovery can write for a registry install
+/// location), then at least one real path component below that root, closed either by a
 /// directory separator (an install-directory prefix) or by the final `$` (one exact file). That
-/// is what `is_windows_path_shape` plus the compiler's prefix/file normalisation guarantee for
-/// every compiler input, whatever the length: `D:\A\` and `D:\Lark.exe` are admitted. A bare `^`,
-/// `^.*`, a drive root, an open-ended name prefix (`^D:\A`) or any other metacharacter is a
-/// catch-all for processes the signed-app discovery never named. The bound is the structure, not
-/// a length that happens to fit today's products.
+/// is what the compiler writes for every real install, whatever its length: `D:\A\`,
+/// `D:\Lark.exe` and `\\nas\apps\Lark.exe` are admitted. A bare `^`, `^.*`, a drive or share
+/// root, an open-ended name prefix (`^D:\A`) or any other metacharacter is a catch-all for
+/// processes the signed-app discovery never named. The bound is the structure, not a length that
+/// happens to fit today's products.
 fn regex_ok(regex: &str) -> bool {
     regex
         .strip_prefix('^')
         .filter(|_| payload_safe(regex))
         .and_then(path_regex_chars)
-        .is_some_and(|(path, exact_end)| match path.as_slice() {
-            [drive, ':', '\\', below_root @ ..] => {
-                drive.is_ascii_alphabetic()
-                    && below_root.iter().any(|character| *character != '\\')
+        .is_some_and(|(path, exact_end)| {
+            below_path_root(&path).is_some_and(|below_root| {
+                below_root.iter().any(|character| *character != '\\')
                     && (exact_end || below_root.last() == Some(&'\\'))
-            }
-            _ => false,
+            })
         })
+}
+
+/// The characters after the drive (`D:\`) or UNC share (`\\server\share\`) root, or `None`
+/// when the path starts with neither.
+fn below_path_root(path: &[char]) -> Option<&[char]> {
+    match path {
+        [drive, ':', '\\', below_root @ ..] if drive.is_ascii_alphabetic() => Some(below_root),
+        ['\\', '\\', unc @ ..] => {
+            let (server, after_server) = split_component(unc)?;
+            let (share, below_root) = split_component(after_server)?;
+            (!server.is_empty() && !share.is_empty()).then_some(below_root)
+        }
+        _ => None,
+    }
+}
+
+/// A component and the rest after its separator; `None` when no separator follows.
+fn split_component(path: &[char]) -> Option<(&[char], &[char])> {
+    let end = path.iter().position(|character| *character == '\\')?;
+    Some((&path[..end], &path[end + 1..]))
 }
 
 /// The path characters `body` matches and whether it ends with `$`, or `None` for any
@@ -551,13 +570,15 @@ mod tests {
     fn a_catch_all_process_regex_is_not_a_compiler_shape() {
         // What `windows_path_regex` writes (pinned by `tono-core`'s
         // `windows_path_regex_for_short_installs_is_pinned`) for a long install, one-letter and
-        // non-ASCII folders, and short files.
+        // non-ASCII folders, short files and UNC installs.
         for signed_install in [
             r"^[Cc]:[\\/][Pp]rogram [Ff]iles[\\/][Tt]encent[\\/][Ww][Ee][Cc][Hh][Aa][Tt][\\/]",
             r"^[Dd]:[\\/][Aa][\\/]",
             r"^[Dd]:[\\/]飞书[\\/]",
             r"^[Dd]:[\\/][Aa]$",
             r"^[Dd]:[\\/][Ll][Aa][Rr][Kk]\.[Ee][Xx][Ee]$",
+            r"^[\\/][\\/][Nn][Aa][Ss][\\/][Aa][Pp][Pp][Ss][\\/][Ll][Aa][Rr][Kk]\.[Ee][Xx][Ee]$",
+            r"^[\\/][\\/][Nn][Aa][Ss][\\/][Aa][Pp][Pp][Ss][\\/][Ll][Aa][Rr][Kk][\\/]",
         ] {
             assert_eq!(
                 admitted(process_rule(signed_install)),
@@ -572,6 +593,11 @@ mod tests {
             r"^[Cc]:[\\/]",
             r"^[Dd]:[\\/][Aa]",
             r"^[Dd]:[\\/]$",
+            r"^[\\/][\\/]",
+            r"^[\\/][\\/][Nn][Aa][Ss][\\/]",
+            r"^[\\/][\\/][Nn][Aa][Ss][\\/][Aa][Pp][Pp][Ss]",
+            r"^[\\/][\\/][Nn][Aa][Ss][\\/][Aa][Pp][Pp][Ss][\\/]",
+            r"^[\\/][\\/][Nn][Aa][Ss][\\/][Aa][Pp][Pp][Ss][\\/][Ll]",
             "^[Cc]:",
             "^(?s).*",
             r"^C:\\.*",
