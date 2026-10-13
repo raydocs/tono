@@ -190,10 +190,17 @@ async fn emergency_disarm_with(
     // stay on disk, and the original DNS error is still what this function returns.
     let fallback_note = if dns_restore.is_err() && !uninstall_ladder_requested() {
         // Runs under the `WFP_OPERATION` this function already holds (the shared function takes
-        // only the DNS lock, after it). Not wrapped in a timeout: every engine call inside is
-        // bounded and refused while an abandoned one holds the claim, and a dropped future would
-        // not stop a blocking writer, only leave it running unobserved.
-        let attempt = crate::core::dns::reset_redirected_adapters_to_automatic(None).await;
+        // only the DNS lock, after it), and marks itself in progress for its duration like the
+        // startup attempts do. Every engine call inside is bounded, refused while an abandoned one
+        // holds the claim, and cut to what is left of the attempt's budget; the future itself is
+        // never dropped, because that would not stop a blocking writer, only leave it running
+        // unobserved.
+        let marker = DnsFallbackMarker::set();
+        let attempt = crate::core::dns::reset_redirected_adapters_to_automatic(Some(
+            std::time::Instant::now() + crate::core::dns::DNS_FALLBACK_ATTEMPT_BUDGET,
+        ))
+        .await;
+        drop(marker);
         Some(match attempt {
             Ok(adapters) => {
                 tracing::warn!(

@@ -167,20 +167,40 @@ pub(super) fn spawn_dns_fallback_after_failed_startup_restore() -> tokio::task::
 
 /// [`spawn_dns_fallback_after_failed_startup_restore`] with its bound and retry pause injected,
 /// so a test models the 90 s bound in milliseconds.
-///
-/// Each attempt runs entirely under `WFP_OPERATION` (taken before the DNS lock, the same order as
-/// every other path): a Connect cannot arm in the middle of it, and an arm that came first is
-/// seen by the check under the lock. The bound is only checked between attempts. An attempt is
-/// never cut short by a timeout, because dropping its future would not stop a blocking engine
-/// writer, only hide it from the caller while it keeps going.
 pub(super) fn spawn_dns_fallback_within(
     bound: std::time::Duration,
     retry: std::time::Duration,
 ) -> tokio::task::JoinHandle<()> {
+    spawn_dns_fallback_with(
+        bound,
+        retry,
+        crate::core::dns::DNS_FALLBACK_ATTEMPT_BUDGET,
+        crate::core::dns::DNS_FALLBACK_FILE_READ_TIMEOUT,
+    )
+}
+
+/// [`spawn_dns_fallback_within`] with the budget of one attempt and the time one of its file
+/// reads may take injected as well.
+///
+/// The loop is bounded by `bound`, checked between attempts, and each attempt by `attempt_budget`
+/// (every engine call inside it is cut to what is left of it) plus two file reads of at most
+/// `file_timeout`: in production 90 s, and an attempt of at most 60 s + 10 s, so the task ends
+/// within about 160 s. An attempt marks itself in progress (see `startup_dns_fallback_attempt`)
+/// instead of holding `WFP_OPERATION`, so a Connect that arrives meanwhile is refused with
+/// `TONO_NETWORK_RESTORE_IN_PROGRESS` and never queues behind the DNS work. An attempt that ran out
+/// of its budget is retried like a busy engine; any other error ends the loop. The marker is
+/// cleared between attempts, and the writer an attempt abandoned at an engine deadline is fenced
+/// by the engine's claim until it returns.
+pub(super) fn spawn_dns_fallback_with(
+    bound: std::time::Duration,
+    retry: std::time::Duration,
+    attempt_budget: std::time::Duration,
+    file_timeout: std::time::Duration,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let started = std::time::Instant::now();
         loop {
-            match startup_dns_fallback_attempt().await {
+            match startup_dns_fallback_attempt(attempt_budget, file_timeout).await {
                 StartupFallbackAttempt::Finished => return,
                 StartupFallbackAttempt::EngineBusy => {
                     if started.elapsed() >= bound {
@@ -197,18 +217,6 @@ pub(super) fn spawn_dns_fallback_within(
     })
 }
 
-/// [`spawn_dns_fallback_within`] with the budget of one attempt and the time one of its file
-/// reads may take injected as well.
-pub(super) fn spawn_dns_fallback_with(
-    bound: std::time::Duration,
-    retry: std::time::Duration,
-    attempt_budget: std::time::Duration,
-    file_timeout: std::time::Duration,
-) -> tokio::task::JoinHandle<()> {
-    let _ = (attempt_budget, file_timeout);
-    spawn_dns_fallback_within(bound, retry)
-}
-
 enum StartupFallbackAttempt {
     /// Done, superseded or failed for a reason that retrying does not change.
     Finished,
@@ -216,16 +224,39 @@ enum StartupFallbackAttempt {
     EngineBusy,
 }
 
-async fn startup_dns_fallback_attempt() -> StartupFallbackAttempt {
-    let _operation = WFP_OPERATION.lock().await;
-    // A connect that armed protection first owns the DNS redirect from then on: not ours to undo.
-    // Nothing can arm while this attempt holds the lock, and `PROTECTION_WANTED` is read again
-    // under the DNS lock for an enable that does not go through WFP.
-    if armed_guard().is_some() {
-        tracing::info!("service start: protection was armed again, so the DNS fallback stops");
-        return StartupFallbackAttempt::Finished;
-    }
-    match crate::core::dns::reset_redirected_adapters_to_automatic(None).await {
+async fn startup_dns_fallback_attempt(
+    attempt_budget: std::time::Duration,
+    file_timeout: std::time::Duration,
+) -> StartupFallbackAttempt {
+    // `WFP_OPERATION` is held only for this check and for setting the marker, never across the
+    // attempt: the attempt can take as long as its budget, and a Connect queued behind it would
+    // wait that long. An arm takes the same lock to check the marker (`arm_bootstrap_waiting`), so
+    // either it armed first and is seen here, or the marker is up before it can arm and it is
+    // refused. `PROTECTION_WANTED` is read again under the DNS lock for an enable that does not go
+    // through WFP.
+    let marker = {
+        let _operation = WFP_OPERATION.lock().await;
+        // A connect that armed protection first owns the DNS redirect from then on: not ours to undo.
+        if armed_guard().is_some() {
+            tracing::info!("service start: protection was armed again, so the DNS fallback stops");
+            return StartupFallbackAttempt::Finished;
+        }
+        if crate::core::dns::protection_wanted() {
+            tracing::info!("service start: DNS protection is wanted again, so the DNS fallback stops");
+            return StartupFallbackAttempt::Finished;
+        }
+        DnsFallbackMarker::set()
+    };
+    let deadline = std::time::Instant::now() + attempt_budget;
+    let attempt = crate::core::dns::reset_redirected_adapters_to_automatic_with_file_timeout(
+        Some(deadline),
+        file_timeout,
+    )
+    .await;
+    // Cleared whatever the outcome. A writer abandoned at an engine deadline is not covered by the
+    // marker any more but by the engine's claim, which an arm checks as well.
+    drop(marker);
+    match attempt {
         Ok(adapters) => {
             tracing::warn!(
                 "service start: the exact DNS restore failed; {} adapter(s) on a Tono DNS \
@@ -241,6 +272,10 @@ async fn startup_dns_fallback_attempt() -> StartupFallbackAttempt {
         Err(error) if crate::core::dns::is_fallback_superseded(&error) => {
             tracing::info!("service start: {error:#}");
             StartupFallbackAttempt::Finished
+        }
+        Err(error) if crate::core::dns::is_fallback_timeout(&error) => {
+            tracing::warn!("service start: the DNS fallback attempt ran out of time: {error:#}");
+            StartupFallbackAttempt::EngineBusy
         }
         Err(error) => {
             tracing::error!(
@@ -720,7 +755,9 @@ pub async fn retire_unverified_on_service_start() -> Result<bool> {
             // or DNS proof failed, so open general traffic with the AI hold and best-effort DNS.
             // The error still reaches the caller, which then skips desired-Core restore.
             let reason = "stale unverified startup protection could not be retired cleanly";
-            if let Err(release_error) = release_general_traffic_unlocked(reason, true).await {
+            if let Err(release_error) =
+                release_general_traffic_requesting_dns_fallback(reason, true, true).await
+            {
                 // WFP is still armed: the watchdog's core window retries the release each tick.
                 *WANTED_CORE_DEADLINE
                     .lock()

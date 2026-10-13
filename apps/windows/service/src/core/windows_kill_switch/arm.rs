@@ -55,6 +55,38 @@ pub(super) fn admit_api_host_ips(hosts: &[String]) -> Vec<IpAddr> {
     wfp_model::sanitize_api_host_ips(literals)
 }
 
+/// Take `WFP_OPERATION` for an arm, but only when no network restore is still writing DNS.
+///
+/// A restore that overran an engine deadline leaves its blocking thread writing registry values and
+/// adapters with the DNS engine's single-writer claim; an adapter-fallback attempt marks itself
+/// in progress without holding the WFP lock. Arming over either would have the Connect's freshly
+/// redirected DNS reset or overwritten, so the check is made under the WFP lock (an attempt takes
+/// the same lock to check "nothing armed" and set its marker, so exactly one of the two comes
+/// first), and a Connect that finds the fence up lets go of the lock and polls every 100 ms for at
+/// most `wait` before it is refused. Lock order is unchanged (WFP, then DNS); the claim is only a
+/// `std` mutex read.
+async fn lock_wfp_once_no_network_restore_is_writing(
+    wait: std::time::Duration,
+) -> Result<tokio::sync::MutexGuard<'static, ()>> {
+    const POLL: std::time::Duration = std::time::Duration::from_millis(100);
+    let give_up_at = std::time::Instant::now() + wait;
+    loop {
+        let operation = WFP_OPERATION.lock().await;
+        if !DNS_FALLBACK_IN_PROGRESS.load(Ordering::Acquire) && !crate::core::dns::engine_claim_is_held() {
+            return Ok(operation);
+        }
+        drop(operation);
+        let left = give_up_at.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            bail!(
+                "{NETWORK_RESTORE_IN_PROGRESS_PREFIX}: a network restore is still writing DNS; \
+                 retry in a few seconds"
+            );
+        }
+        tokio::time::sleep(POLL.min(left)).await;
+    }
+}
+
 /// First phase of the two-phase arm: floor + session rules up, API channel open, tunnel not
 /// yet permitted. Called from `StartClash` before the core is started. `owner_key` is the
 /// authenticated owner's key (SHA256(SID)), recorded so only that owner can later release or
@@ -75,7 +107,6 @@ pub(crate) async fn arm_bootstrap_waiting(
     owner_key: &str,
     fence_wait: std::time::Duration,
 ) -> Result<()> {
-    let _ = fence_wait;
     ensure_supported()?;
     validate_config(config)?;
     if app_path.trim().is_empty() {
@@ -90,7 +121,7 @@ pub(crate) async fn arm_bootstrap_waiting(
         );
     }
     let api_host_ips = admit_api_host_ips(&config.bootstrap_api_hosts);
-    let _operation = WFP_OPERATION.lock().await;
+    let _operation = lock_wfp_once_no_network_restore_is_writing(fence_wait).await?;
     // Re-checked under the WFP lock: this is the write that records the new owner.
     authorize_takeover_for(owner_key).map_err(anyhow::Error::new)?;
     let inherited_verified = armed_guard().as_ref().is_some_and(|armed| {

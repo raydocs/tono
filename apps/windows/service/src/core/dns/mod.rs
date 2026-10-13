@@ -222,6 +222,12 @@ enum EnableTrigger {
 /// snapshot that survives a disarm does not resurrect the loopback redirect.
 static PROTECTION_WANTED: AtomicBool = AtomicBool::new(false);
 
+/// Whether DNS protection is wanted again in this process (see [`PROTECTION_WANTED`]); read by an
+/// adapter-fallback attempt before it marks itself in progress.
+pub(crate) fn protection_wanted() -> bool {
+    PROTECTION_WANTED.load(Ordering::Acquire)
+}
+
 static CONSECUTIVE_LIVE_FAILURES: AtomicU32 = AtomicU32::new(0);
 
 /// One enable/restore round's live-apply outcome; returns the current streak of failing rounds.
@@ -319,7 +325,7 @@ pub(crate) mod test_hooks {
             let _ = blocked.recv_timeout(std::time::Duration::from_secs(30));
             Ok(())
         };
-        let timed_out = super::bounded_dns_call(std::time::Duration::from_millis(50), "restore", wedged).await;
+        let timed_out = super::bounded_dns_call_exact(std::time::Duration::from_millis(50), "restore", wedged).await;
         assert!(timed_out.is_err(), "the parked call must time out and keep its claim");
         ParkedEngineCall { release }
     }

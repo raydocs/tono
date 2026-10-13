@@ -560,8 +560,9 @@ async fn read_dns_state(snapshot: Option<&DnsSnapshot>) -> Result<DnsState> {
 /// The adapter reset that answers a failed exact DNS restore, shared by its two callers: the
 /// non-uninstall emergency disarm (one attempt, after WFP is gone, under the `WFP_OPERATION` it
 /// already holds) and the freshly started main Service (which retries it while the engine is
-/// busy, each attempt under `WFP_OPERATION` too). `--emergency-disarm` and the Start-Menu entry
-/// run the uninstall ladder instead and never reach this.
+/// busy; an attempt holds `WFP_OPERATION` only to start, and is fenced against a Connect by the
+/// in-progress marker and the engine's claim instead). `--emergency-disarm` and the Start-Menu
+/// entry run the uninstall ladder instead and never reach this.
 ///
 /// Owner rule: a released machine resolves through the home broadband's DNS, never through a
 /// dead Tono resolver. So, like rung 2 of the uninstall ladder, the address families that still
@@ -586,17 +587,61 @@ async fn read_dns_state(snapshot: Option<&DnsSnapshot>) -> Result<DnsState> {
 /// every engine call is then refused at once; this function returns that refusal immediately
 /// (check it with [`is_engine_busy_refusal`]) and leaves it to the caller to try again later.
 ///
+/// It is also bounded in time. With a `deadline`, every engine call inside is given the smaller of
+/// its own budget and what is left of it, the wait for the DNS lock ends at it, and a call that
+/// cannot start in time is an error that [`is_fallback_timeout`] recognises (nothing is half done:
+/// the attempt is simply retried). Each of the two file reads (the snapshot and its retirement
+/// record) gets [`DNS_FALLBACK_FILE_READ_TIMEOUT`]; a read that does not return is an ordinary
+/// error, which ends the attempt. A call that overruns its own budget is abandoned on its blocking
+/// thread holding the engine's claim ([`engine_claim_is_held`]); the caller must keep a Connect
+/// from arming until that thread has returned.
+///
 /// The adapter reset and the policy restore are independent: a failure of one does not skip the
 /// other (unless the engine is busy, which refuses both), and the first error is returned. The
 /// strict `restore_protected` / `ensure_restored` / `disarm_unlocked` gate is untouched.
 pub(crate) async fn reset_redirected_adapters_to_automatic(
     deadline: Option<std::time::Instant>,
 ) -> Result<Vec<String>> {
-    let _ = deadline;
+    reset_redirected_adapters_to_automatic_with_file_timeout(deadline, DNS_FALLBACK_FILE_READ_TIMEOUT).await
+}
+
+/// [`reset_redirected_adapters_to_automatic`] with the time one file read may take injected, so a
+/// test models the 5 s in milliseconds.
+pub(crate) async fn reset_redirected_adapters_to_automatic_with_file_timeout(
+    deadline: Option<std::time::Instant>,
+    file_timeout: std::time::Duration,
+) -> Result<Vec<String>> {
+    match deadline {
+        // The deadline travels with the task so that every engine call below, however deep, is cut
+        // to what is left of it (`bounded_dns_call`).
+        Some(deadline) => {
+            DNS_ATTEMPT_DEADLINE
+                .scope(deadline, reset_adapters_within(Some(deadline), file_timeout))
+                .await
+        }
+        None => reset_adapters_within(None, file_timeout).await,
+    }
+}
+
+async fn reset_adapters_within(
+    deadline: Option<std::time::Instant>,
+    file_timeout: std::time::Duration,
+) -> Result<Vec<String>> {
     if !SUPPORTED {
         return Ok(Vec::new());
     }
-    let _operation = DNS_OPERATION.lock().await;
+    let _operation = match deadline {
+        Some(deadline) => tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), DNS_OPERATION.lock())
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "{DNS_FALLBACK_TIMEOUT_PREFIX}: the adapter fallback attempt used up its time \
+                     budget waiting for the DNS lock; nothing was changed and the next attempt \
+                     starts afresh"
+                )
+            })?,
+        None => DNS_OPERATION.lock().await,
+    };
     // Read again now that the lock is held: whoever waited for it may have been overtaken by an
     // enable. Protection that is wanted again owns the redirect, and neither the reset nor the
     // policy removal below may undo it. (A caller that must also keep WFP from being armed holds
@@ -607,7 +652,7 @@ pub(crate) async fn reset_redirected_adapters_to_automatic(
              reset could start, so the redirect is the new session's and was left alone"
         );
     }
-    let reset = reset_adapters_still_on_tono_dns().await;
+    let reset = reset_adapters_still_on_tono_dns(file_timeout).await;
     if let Err(error) = &reset {
         if is_engine_busy_refusal(error) {
             return reset;
@@ -651,7 +696,6 @@ pub(crate) const DNS_FALLBACK_FILE_READ_TIMEOUT: std::time::Duration = std::time
 pub(crate) const DNS_FALLBACK_TIMEOUT_PREFIX: &str = "TONO_DNS_FALLBACK_ATTEMPT_TIMEOUT";
 
 /// `true` for the error of an attempt that [`DNS_FALLBACK_TIMEOUT_PREFIX`] marks.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn is_fallback_timeout(error: &anyhow::Error) -> bool {
     format!("{error:#}").contains(DNS_FALLBACK_TIMEOUT_PREFIX)
 }
@@ -683,14 +727,41 @@ fn unresolved_adapters(state: &DnsState, snapshot: Option<&DnsSnapshot>) -> Vec<
     unresolved
 }
 
-async fn reset_adapters_still_on_tono_dns() -> Result<Vec<String>> {
-    #[cfg(test)]
-    test_hooks::file_read_gate("snapshot").await;
-    let (snapshot, retired) = match tokio::fs::read(snapshot_path()).await {
+/// One of the attempt's two file reads, bounded. These are plain reads: a read that never returns
+/// (a filter driver, a share) only keeps a blocking thread of the runtime's pool busy, it writes
+/// nothing, so giving up on it is safe where giving up on an engine writer is not. The error is
+/// an ordinary one on purpose: the attempt cannot say what the snapshot holds, so it ends
+/// without touching any adapter instead of being retried.
+async fn fallback_file_read<T>(
+    what: &str,
+    file_timeout: std::time::Duration,
+    read: impl std::future::Future<Output = T>,
+) -> Result<T> {
+    let limit = current_call_budget(file_timeout)?;
+    tokio::time::timeout(limit, read).await.map_err(|_| {
+        anyhow::anyhow!(
+            "reading the {what} did not return within {limit:?}; the adapter fallback ends without \
+             touching any adapter"
+        )
+    })
+}
+
+async fn reset_adapters_still_on_tono_dns(file_timeout: std::time::Duration) -> Result<Vec<String>> {
+    let read = fallback_file_read("DNS snapshot", file_timeout, async {
+        #[cfg(test)]
+        test_hooks::file_read_gate("snapshot").await;
+        tokio::fs::read(snapshot_path()).await
+    })
+    .await?;
+    let (snapshot, retired) = match read {
         Ok(bytes) => {
-            #[cfg(test)]
-            test_hooks::file_read_gate("retirement").await;
-            (parse_snapshot(&bytes).ok(), snapshot_was_restored(&bytes).await)
+            let retired = fallback_file_read("DNS snapshot retirement record", file_timeout, async {
+                #[cfg(test)]
+                test_hooks::file_read_gate("retirement").await;
+                snapshot_was_restored(&bytes).await
+            })
+            .await?;
+            (parse_snapshot(&bytes).ok(), retired)
         }
         Err(_) => (None, false),
     };

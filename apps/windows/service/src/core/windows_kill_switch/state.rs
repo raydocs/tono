@@ -636,6 +636,23 @@ pub(super) static STARTUP_DNS_FALLBACK_OPEN: AtomicBool = AtomicBool::new(false)
 /// deadline is fenced by the DNS engine's claim (`dns::engine_claim_is_held`) instead.
 pub(super) static DNS_FALLBACK_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
+/// Sets [`DNS_FALLBACK_IN_PROGRESS`] for as long as it lives; dropping it clears it, whatever way
+/// the attempt ended (an error, a panic, a cancelled task).
+pub(super) struct DnsFallbackMarker;
+
+impl DnsFallbackMarker {
+    pub(super) fn set() -> Self {
+        DNS_FALLBACK_IN_PROGRESS.store(true, Ordering::Release);
+        Self
+    }
+}
+
+impl Drop for DnsFallbackMarker {
+    fn drop(&mut self) {
+        DNS_FALLBACK_IN_PROGRESS.store(false, Ordering::Release);
+    }
+}
+
 /// Marks the error of an arm that was refused because a network restore is still writing DNS.
 /// The App keeps the raw text of an arm refusal (only BFE/WFP markers are rewritten), so the
 /// user sees it as the connect failure and retries by hand.

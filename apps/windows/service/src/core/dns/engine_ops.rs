@@ -101,17 +101,25 @@ tokio::task_local! {
 /// The budget an engine call may use: its own, or what is left of the attempt's deadline if that
 /// is less. An attempt whose deadline has passed starts no further call and returns an error that
 /// [`is_fallback_timeout`] recognises.
-#[cfg(any(all(windows, not(feature = "test")), test))]
 pub(super) fn call_budget(
     own: std::time::Duration,
     deadline: Option<std::time::Instant>,
 ) -> Result<std::time::Duration> {
-    let _ = deadline;
-    Ok(own)
+    let Some(deadline) = deadline else {
+        return Ok(own);
+    };
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    if remaining.is_zero() {
+        bail!(
+            "{DNS_FALLBACK_TIMEOUT_PREFIX}: the adapter fallback attempt used up its time budget \
+             ({DNS_FALLBACK_ATTEMPT_BUDGET:?}), so no further DNS engine call was started; nothing \
+             was left half done and the next attempt starts afresh"
+        );
+    }
+    Ok(own.min(remaining))
 }
 
 /// [`call_budget`] for the attempt running on this task.
-#[cfg(any(all(windows, not(feature = "test")), test))]
 pub(super) fn current_call_budget(own: std::time::Duration) -> Result<std::time::Duration> {
     call_budget(own, DNS_ATTEMPT_DEADLINE.try_with(|deadline| *deadline).ok())
 }
@@ -210,6 +218,19 @@ pub(super) fn dns_call_is_periodic(operation: &str) -> bool {
     operation == "collect" || operation == "verify protected DNS"
 }
 
+/// [`bounded_dns_call_exact`] with the budget cut to what is left of the adapter-fallback
+/// attempt's cumulative deadline, when the calling task runs one (see [`call_budget`]); an
+/// attempt that is out of time starts no call. Every other caller gets exactly `budget`.
+#[cfg(any(all(windows, not(feature = "test")), test))]
+pub(super) async fn bounded_dns_call<T: Send + 'static>(
+    budget: std::time::Duration,
+    operation: &'static str,
+    call: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    let budget = current_call_budget(budget)?;
+    bounded_dns_call_exact(budget, operation, call).await
+}
+
 /// Run one DNS engine operation on a blocking thread under a hard deadline, holding the
 /// single-writer claim described on [`DnsCallInFlight`].
 ///
@@ -235,7 +256,7 @@ pub(super) fn dns_call_is_periodic(operation: &str) -> bool {
 /// The machinery is compiled off Windows too, so those ownership rules stay unit-testable;
 /// only the closures handed to it are Windows-only.
 #[cfg(any(all(windows, not(feature = "test")), test))]
-pub(super) async fn bounded_dns_call<T: Send + 'static>(
+pub(super) async fn bounded_dns_call_exact<T: Send + 'static>(
     budget: std::time::Duration,
     operation: &'static str,
     call: impl FnOnce() -> Result<T> + Send + 'static,
