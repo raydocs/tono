@@ -534,8 +534,7 @@ pub fn build_owned_runtime_with_ports(
         secret,
         &route_exclusions,
         direct,
-        home_node,
-        home_socks5,
+        HomeRoute { node: home_node, socks5: home_socks5 },
         ports,
     ))
     .map_err(|err| ConfigError::Node(NodeRejection::Malformed(err.to_string())))?;
@@ -679,14 +678,21 @@ fn home_socks5_outbound(socks5: &CatalogHomeSocks5) -> Value {
     Value::Mapping(outbound)
 }
 
+/// The two ways Claude traffic can be routed to a home exit, passed together so
+/// `runtime_value` stays within clippy's argument limit.
+#[derive(Clone, Copy)]
+struct HomeRoute<'a> {
+    node: Option<&'a ValidatedNode>,
+    socks5: Option<&'a CatalogHomeSocks5>,
+}
+
 fn runtime_value(
     nodes: &[ValidatedNode],
     selected: &str,
     secret: &str,
     route_exclusions: &[String],
     direct: Option<&DirectPlan>,
-    home: Option<&ValidatedNode>,
-    home_socks5: Option<&CatalogHomeSocks5>,
+    home: HomeRoute<'_>,
     ports: RuntimePorts,
 ) -> Value {
     let mut root = Mapping::new();
@@ -848,7 +854,7 @@ fn runtime_value(
     put(&mut root, "tun", Value::Mapping(tun));
 
     let mut proxies: Vec<Value> = nodes.iter().map(proxy_mapping).collect();
-    if let Some(socks5) = home_socks5 {
+    if let Some(socks5) = home.socks5 {
         proxies.push(home_socks5_outbound(socks5));
     }
     if let Some(plan) = direct {
@@ -889,7 +895,7 @@ fn runtime_value(
         Value::Sequence(ordered.iter().map(|name| string(name)).collect()),
     );
     groups.push(Value::Mapping(group));
-    if home_socks5.is_some() {
+    if home.socks5.is_some() {
         // Claude split routing via the cloud-assigned residential exit: the
         // dedicated group holds exactly the chained SOCKS5 outbound.
         let mut home_group = Mapping::new();
@@ -901,7 +907,7 @@ fn runtime_value(
             Value::Sequence(vec![string(HOME_SOCKS5_OUTBOUND_NAME)]),
         );
         groups.push(Value::Mapping(home_group));
-    } else if let Some(home) = home {
+    } else if let Some(home_node) = home.node {
         // Claude split routing: a dedicated group holding exactly the bound
         // home-broadband node, so the Claude rules below cannot follow the
         // user's Tono-Exit selection.
@@ -911,7 +917,7 @@ fn runtime_value(
         put(
             &mut home_group,
             "proxies",
-            Value::Sequence(vec![string(&home.name)]),
+            Value::Sequence(vec![string(&home_node.name)]),
         );
         groups.push(Value::Mapping(home_group));
     }
@@ -922,7 +928,7 @@ fn runtime_value(
         .iter()
         .map(|rule| rule.to_string())
         .collect();
-    if home.is_some() || home_socks5.is_some() {
+    if home.node.is_some() || home.socks5.is_some() {
         // TCP-scoped on purpose: these pins sit ahead of the UDP REJECT rows,
         // and a network-agnostic Claude pin would swallow UDP into a group
         // that cannot carry it (Vision) — Mihomo's fallback for that is a
@@ -977,11 +983,11 @@ fn runtime_value(
                 "AND,((NETWORK,UDP),(PROCESS-PATH-REGEX,{regex})),REJECT"
             ));
         }
-    } else if let Some(plan) = direct {
-        if !plan.tcp_wechat_rules.is_empty()
+    } else if let Some(plan) = direct
+        && (!plan.tcp_wechat_rules.is_empty()
             || !plan.tcp_web_rules.is_empty()
             || !plan.web_suffix_rules.is_empty()
-            || !plan.udp_wechat_rules.is_empty()
+            || !plan.udp_wechat_rules.is_empty())
         {
             // The address-free signed-app rules below match every destination
             // on the reviewed ports, including an assistant site opened in
@@ -1012,7 +1018,6 @@ fn runtime_value(
                 ));
             }
         }
-    }
     if let Some(plan) = direct {
         // WeChat TCP is pinned per resolved endpoint, exactly like the web rules below.
         //
