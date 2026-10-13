@@ -70,9 +70,9 @@ puts "macOS candidate workflow: #{cases.length} branch cases and update-authorit
 # The signing utility is independent of the removed App runtime dependency.
 # Execute the actual workflow shell with corrupt downloaded bytes; extraction
 # and executable discovery must never run before the checksum succeeds.
-signer_step = appcast.fetch('steps').find { |step| step['name'] == 'Locate the pinned Sparkle 2.9.6 sign_update tool' }.fetch('run')
+signer_step = appcast.fetch('steps').find { |step| step['name'] == 'Locate the pinned Sparkle 2.10.0 sign_update tool' }.fetch('run')
 abort 'signer must not depend on the App package graph' if signer_step.include?('resolvePackageDependencies')
-abort 'signer archive pin must match Sparkle 2.9.6 Package.swift' unless signer_step.include?('8d5fb41d960b43f4a68aa14126bf62b098544ec8d191cdcc73eb14e63a8e7606')
+abort 'signer archive pin must match Sparkle 2.10.0 Package.swift' unless signer_step.include?('17e28312b8e18ab7cdbbe09a6fb28cc55a5479ec6c371dbc07cdecd2a14fd959')
 Dir.mktmpdir('tono-signer-pin-') do |directory|
   stub = <<~SH
     curl() {
