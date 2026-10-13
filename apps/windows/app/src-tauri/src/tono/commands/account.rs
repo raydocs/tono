@@ -321,7 +321,7 @@ pub async fn tono_sign_in_verify(
 
     let release_app = app.clone();
     let info = adopt_replacing_with(state.inner(), &client, generation, &challenge_id, &auth,
-        move |state| async move { connection::release_for_account(&state, &release_app).await },
+        move |state| async move { connection::release_for_account_replacement(&state, &release_app).await },
         |inner| emit_status(&app, &status_of(inner)),
     ).await?;
     state.audit().log(AuditEvent::SignInOk {

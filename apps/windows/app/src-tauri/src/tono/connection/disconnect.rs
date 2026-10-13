@@ -78,6 +78,36 @@ where
     start(guard, true).await
 }
 
+/// An internal release that is not the user's explicit Restore internet, Disconnect or Sign Out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum InternalRelease {
+    /// The user quits the App.
+    Quit,
+    /// A verified replacement sign-in retires the previous account's live runtime.
+    AccountReplacement,
+}
+
+/// Whether this internal release keeps the secondary AI hold after general traffic opens.
+pub(crate) const fn internal_release_applies_narrow(_kind: InternalRelease) -> bool {
+    false
+}
+
+/// Quit releases like [`release_explicit`], but with the disposition `Quit` owns.
+pub(crate) async fn release_for_quit(state: &Arc<TonoState>, app: &AppHandle) -> Result<(), String> {
+    let apply_narrow = internal_release_applies_narrow(InternalRelease::Quit);
+    let operation = start_explicit_release(state, app, None, false, apply_narrow).await;
+    wait_explicit_release(&operation).await
+}
+
+/// Replacement sign-in owns its release like [`release_for_account`], with its own disposition.
+pub(crate) async fn release_for_account_replacement(
+    state: &Arc<TonoState>, app: &AppHandle,
+) -> Result<(), String> {
+    let apply_narrow = internal_release_applies_narrow(InternalRelease::AccountReplacement);
+    let operation = start_explicit_release(state, app, None, false, apply_narrow).await;
+    complete_account_release(&operation).await
+}
+
 /// Account teardown must own the release, not just the UI's wait for it.
 pub(crate) async fn release_for_account(state: &Arc<TonoState>, app: &AppHandle) -> Result<(), String> {
     let operation = start_explicit_release(state, app, None, false, false).await;
@@ -654,6 +684,16 @@ mod tests {
         }).await;
         assert_eq!(result, Err("injected release refusal".to_string()));
         assert!(lifecycle.try_read().is_ok(), "the settled request relinquishes ownership");
+    }
+
+    #[test]
+    fn quit_release_keeps_the_ai_hold() {
+        assert!(internal_release_applies_narrow(InternalRelease::Quit));
+    }
+
+    #[test]
+    fn replacement_sign_in_retirement_keeps_the_ai_hold() {
+        assert!(internal_release_applies_narrow(InternalRelease::AccountReplacement));
     }
 
     #[tokio::test]

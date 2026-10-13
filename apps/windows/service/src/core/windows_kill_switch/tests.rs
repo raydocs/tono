@@ -2131,6 +2131,35 @@ async fn failed_update_emergency_release_keeps_the_secondary_ai_hold() -> Result
 
 #[tokio::test]
 #[serial]
+async fn failed_update_recovery_does_not_install_an_ai_hold_for_an_unprotected_user() -> Result<()> {
+    cleanup().await;
+    // Nothing armed, and the last release was the user's own Restore internet.
+    emergency_disarm_windows_kill_switch().await?;
+    emergency_disarm_windows_kill_switch_applying_narrow().await?;
+    let held = crate::core::selective_layer::test_hold_active();
+    cleanup().await;
+    assert!(!held, "an unprotected user or an explicit Restore owes no AI hold after a failed update");
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn a_second_failed_update_release_keeps_the_hold_the_first_installed() -> Result<()> {
+    cleanup().await;
+    arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+    emergency_disarm_windows_kill_switch_applying_narrow().await?;
+    let removals_before = crate::core::selective_layer::test_active_hold_removals();
+    emergency_disarm_windows_kill_switch_applying_narrow().await?;
+    let held = crate::core::selective_layer::test_hold_active();
+    let removals_after = crate::core::selective_layer::test_active_hold_removals();
+    cleanup().await;
+    assert!(held, "the rollback's AI hold must survive a second emergency release");
+    assert_eq!(removals_after, removals_before, "a second release must never delete the hold first");
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
 async fn emergency_disarm_removes_wfp_intent_but_reports_unrestored_dns() -> Result<()> {
     cleanup().await;
     arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
