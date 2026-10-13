@@ -1618,14 +1618,20 @@ fn refuse_pending_unless_repairable(store: &Store) -> Result<()> {
 /// and only the install may repair an exhausted record (#1307). Anything unknown is treated as
 /// the uninstaller, which keeps refusing.
 fn gate_is_install_copy() -> bool {
-    match (std::env::current_exe(), install_root()) {
+    // `current_exe()` keeps the launch path (`C:\Program Files\...`) while `install_root()` is
+    // canonical (`\\?\C:\...`): both are canonicalized here, and a failure keeps the strict side.
+    let exe = std::env::current_exe().and_then(|exe| exe.canonicalize());
+    match (exe, install_root().and_then(|root| Ok(root.canonicalize()?))) {
         (Ok(exe), Ok(root)) => !runs_from_install_root(&exe, &root),
         _ => false,
     }
 }
 
 fn runs_from_install_root(exe: &Path, root: &Path) -> bool {
-    let lower = |path: &Path| path.to_string_lossy().replace('/', "\\").to_ascii_lowercase();
+    let lower = |path: &Path| {
+        let text = path.to_string_lossy().replace('/', "\\").to_ascii_lowercase();
+        text.strip_prefix(r"\\?\").map(str::to_owned).unwrap_or(text)
+    };
     let root = lower(root);
     let root = root.trim_end_matches('\\');
     lower(exe).starts_with(&format!("{root}\\"))
@@ -2887,6 +2893,20 @@ mod tests {
             Path::new(r"C:\Users\a\AppData\Local\Temp\nsx1\tono-gate\resources\tono-service-install.exe"),
             root
         ));
+        assert!(
+            runs_from_install_root(
+                Path::new(r"C:\Program Files\Tono\resources\tono-service-install.exe"),
+                Path::new(r"\\?\C:\Program Files\Tono")
+            ),
+            "the canonical root and the launch-path executable are the same directory"
+        );
+        assert!(
+            runs_from_install_root(
+                Path::new(r"\\?\C:\Program Files\Tono\resources\tono-service-install.exe"),
+                root
+            ),
+            "the canonical executable under a plain root"
+        );
         assert!(
             !runs_from_install_root(Path::new(r"C:\Program Files\TonoEvil\x.exe"), root),
             "a sibling directory is not the install root"
