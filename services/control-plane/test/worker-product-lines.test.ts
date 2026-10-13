@@ -16,6 +16,33 @@ import {
 describe('Worker routes with D1 and mocked Tailscale', () => {
   useWorkerHarness();
 
+  it('refuses a pasted home line that carries a different password than the stored one', async () => {
+    // SOL-CP-HOME-PASTE-PASSWORD (decision 124): the stored password used to
+    // win silently, so the operator believed the pasted one was saved. It is
+    // neither replaced (it could be a newer shared secret) nor ignored.
+    const accessHeaders = {
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    };
+    const owner = await createAccount('paste-password');
+    const assign = (line: string) => api('ops/home-exits/assign', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ userId: owner.user.id, line, replace: true }),
+    });
+    expect((await assign('198.51.100.77:6886:alice:secret-kept')).status).toBe(201);
+
+    const differs = await assign('198.51.100.77:6886:alice:secret-pasted');
+    expect(differs.status).toBe(409);
+    expect((await differs.json() as any).error.code).toBe('HOME_PASSWORD_DIFFERS');
+    expect(await (env as unknown as { DB: D1Database }).DB.prepare(
+      "SELECT socks5_password FROM home_exits WHERE socks5_host = '198.51.100.77'",
+    ).first()).toEqual({ socks5_password: 'secret-kept' });
+
+    // The same line again is still an idempotent re-save.
+    expect((await assign('198.51.100.77:6886:alice:secret-kept')).status).toBe(200);
+  });
+
   it('assigns a pasted home line to a user and imports unused stock', async () => {
     const accessHeaders = {
       'content-type': 'application/json',

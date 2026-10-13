@@ -222,4 +222,23 @@ describe('ops roles', () => {
     expect(res.status).toBe(403);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe('ROLE_FORBIDDEN');
   });
+
+  it('an operator cannot create or change home inventory through onboarding a pasted line', async () => {
+    // SOL-CP-ONBOARD-ROLE (decision 124): onboarding calls home-exits/assign,
+    // which is settings.publish, so the line is owner-only here too.
+    await db().prepare(
+      `INSERT INTO users(id, email, password_hash, password_salt, status, usage_bytes, created_at, updated_at)
+       VALUES('usr-onboard-role', 'onboard-role@example.com', 'x', 'y', 'active', 0, ?, ?)`,
+    ).bind(NOW, NOW).run();
+    bindRole('operator');
+    const refused = await ops('users/onboard', json({
+      email: 'onboard-role@example.com', line: '198.51.100.88:6886:alice:secret-x',
+    }));
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { error: { code: string } }).error.code).toBe('ROLE_FORBIDDEN');
+    expect(await db().prepare('SELECT COUNT(*) AS c FROM home_exits').first()).toEqual({ c: 0 });
+    expect(await db().prepare('SELECT COUNT(*) AS c FROM signup_allowlist').first()).toEqual({ c: 0 });
+    // Without a pasted line an operator still onboards.
+    expect((await ops('users/onboard', json({ email: 'onboard-role@example.com' }))).status).toBeLessThan(300);
+  });
 });

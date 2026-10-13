@@ -320,6 +320,24 @@ describe('customer_activity_hours accrual', () => {
   });
 });
 
+describe('customer_activity_hours overlap', () => {
+  it('never books more than 60 minutes of one device in one hour', async () => {
+    // SOL-C4-ACTIVITY-OVERLAP: 22-minute windows every 20 minutes overlap, and
+    // each overlap was added again.
+    await seedUser();
+    for (const [index, startMinute] of [0, 20, 40].entries()) {
+      await accrueActivityHours(db(), windowInput({
+        id: `w-overlap-${index}`,
+        window_start_ms: (HOUR + startMinute * 60) * 1000,
+        window_end_ms: (HOUR + (startMinute + 22) * 60) * 1000,
+        payload: payload({ uiState: 'connected' }),
+      }), HOUR);
+    }
+    const rows = await activityHours(db(), USER, { fromSec: HOUR, toSec: HOUR + 3600 });
+    expect(rows[0]).toMatchObject({ hourAt: HOUR, onlineMinutes: 60, connectedMinutes: 60, windows: 3 });
+  });
+});
+
 describe('projectBacklog cursor', () => {
   it('applies status and hours in received_at order and resumes from the cursor', async () => {
     await seedUser();
