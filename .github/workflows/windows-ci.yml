@@ -72,8 +72,10 @@ jobs:
       # per-PR copies do not evict main's. The key is the runner's default
       # rustc build (`rustc -vV` outside any toolchain file), the lockfiles and
       # the pinned toolchain file; cargo still rebuilds whatever changed.
-      # The same three steps (key, restore, report) and the save at the end
-      # repeat in each Cargo job below.
+      # restore-keys drops only the lockfile hash, so a lockfile miss reuses
+      # crates built by the same rustc and cargo rebuilds what changed.
+      # cache-hit stays exact-key only: a fallback still saves the new key
+      # from a push to main. The same steps repeat in each Cargo job below.
       - name: Cargo cache key
         id: cargo-key
         shell: bash
@@ -81,12 +83,14 @@ jobs:
         run: |
           rustc_hash=$(rustc -vV | sha256sum | cut -c1-16)
           echo "key=cargo-v1-windows-core-${{ runner.os }}-$rustc_hash-${{ hashFiles('apps/windows/Cargo.lock', 'apps/windows/app/rust-toolchain.toml') }}" >> "$GITHUB_OUTPUT"
+          echo "restore_prefix=cargo-v1-windows-core-${{ runner.os }}-$rustc_hash-" >> "$GITHUB_OUTPUT"
 
       - name: Restore Cargo cache
         id: cargo-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           key: ${{ steps.cargo-key.outputs.key }}
+          restore-keys: ${{ steps.cargo-key.outputs.restore_prefix }}
           path: |
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
@@ -98,11 +102,18 @@ jobs:
         env:
           HIT: ${{ steps.cargo-cache.outputs.cache-hit }}
           KEY: ${{ steps.cargo-key.outputs.key }}
+          MATCHED: ${{ steps.cargo-cache.outputs.cache-matched-key }}
         run: |
-          result=miss
-          if [ "$HIT" = true ]; then result=hit; fi
+          if [ "$HIT" = true ]; then result=hit
+          elif [ -n "$MATCHED" ]; then result=fallback
+          else result=miss
+          fi
           echo "::notice title=Cargo cache (windows-core)::$result $KEY"
-          echo "Cargo cache (windows-core): **$result** \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$result" = fallback ]; then
+            echo "Cargo cache (windows-core): **fallback** \`$MATCHED\` → \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Cargo cache (windows-core): **$result** \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Verify desktop product versions agree
         run: |
@@ -198,6 +209,26 @@ jobs:
         with:
           node-version: 24
 
+      - name: Cargo caches restore within the same rustc
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs')
+          const yaml = fs.readFileSync('../../../.github/workflows/windows-ci.yml', 'utf8')
+          // Needles are split so this step's own source is not a match.
+          const prefixHead = 'restore_prefix=cargo-v1-'
+          for (const id of ['windows-core', 'windows-app-rust', 'windows-service']) {
+            if (!yaml.includes(prefixHead + id + '-')) throw new Error('missing prefix ' + id)
+          }
+          const restoreMarker = 'outputs.restore_' + 'prefix'
+          const restores = yaml.split('\n').filter((line) => line.includes(restoreMarker))
+          if (restores.length !== 3) throw new Error('expected 3 restore lines, got ' + restores.length)
+          const fallbackMarker = 'result=' + 'fallback'
+          const fallbacks = yaml.split(fallbackMarker).length - 1
+          if (fallbacks !== 3) throw new Error('expected 3 fallback lines, got ' + fallbacks)
+          console.log('cargo restore-keys: 3 jobs fall back inside the same rustc')
+          NODE
+
       - name: Install pnpm as the project pins it
         run: npm install --global pnpm@11.3.0
 
@@ -242,12 +273,14 @@ jobs:
         run: |
           rustc_hash=$(rustc -vV | sha256sum | cut -c1-16)
           echo "key=cargo-v1-windows-app-rust-${{ runner.os }}-$rustc_hash-${{ hashFiles('apps/windows/app/Cargo.lock', 'apps/windows/Cargo.lock', 'apps/windows/app/rust-toolchain.toml') }}" >> "$GITHUB_OUTPUT"
+          echo "restore_prefix=cargo-v1-windows-app-rust-${{ runner.os }}-$rustc_hash-" >> "$GITHUB_OUTPUT"
 
       - name: Restore Cargo cache
         id: cargo-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           key: ${{ steps.cargo-key.outputs.key }}
+          restore-keys: ${{ steps.cargo-key.outputs.restore_prefix }}
           path: |
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
@@ -260,11 +293,18 @@ jobs:
         env:
           HIT: ${{ steps.cargo-cache.outputs.cache-hit }}
           KEY: ${{ steps.cargo-key.outputs.key }}
+          MATCHED: ${{ steps.cargo-cache.outputs.cache-matched-key }}
         run: |
-          result=miss
-          if [ "$HIT" = true ]; then result=hit; fi
+          if [ "$HIT" = true ]; then result=hit
+          elif [ -n "$MATCHED" ]; then result=fallback
+          else result=miss
+          fi
           echo "::notice title=Cargo cache (windows-app-rust)::$result $KEY"
-          echo "Cargo cache (windows-app-rust): **$result** \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$result" = fallback ]; then
+            echo "Cargo cache (windows-app-rust): **fallback** \`$MATCHED\` → \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Cargo cache (windows-app-rust): **$result** \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -382,12 +422,14 @@ jobs:
         run: |
           rustc_hash=$(rustc -vV | sha256sum | cut -c1-16)
           echo "key=cargo-v1-windows-service-${{ runner.os }}-$rustc_hash-${{ hashFiles('apps/windows/service/Cargo.lock') }}" >> "$GITHUB_OUTPUT"
+          echo "restore_prefix=cargo-v1-windows-service-${{ runner.os }}-$rustc_hash-" >> "$GITHUB_OUTPUT"
 
       - name: Restore Cargo cache
         id: cargo-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           key: ${{ steps.cargo-key.outputs.key }}
+          restore-keys: ${{ steps.cargo-key.outputs.restore_prefix }}
           path: |
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
@@ -399,11 +441,18 @@ jobs:
         env:
           HIT: ${{ steps.cargo-cache.outputs.cache-hit }}
           KEY: ${{ steps.cargo-key.outputs.key }}
+          MATCHED: ${{ steps.cargo-cache.outputs.cache-matched-key }}
         run: |
-          result=miss
-          if [ "$HIT" = true ]; then result=hit; fi
+          if [ "$HIT" = true ]; then result=hit
+          elif [ -n "$MATCHED" ]; then result=fallback
+          else result=miss
+          fi
           echo "::notice title=Cargo cache (windows-service)::$result $KEY"
-          echo "Cargo cache (windows-service): **$result** \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$result" = fallback ]; then
+            echo "Cargo cache (windows-service): **fallback** \`$MATCHED\` → \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Cargo cache (windows-service): **$result** \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Validate fault targeting without stopping real processes
         shell: pwsh
