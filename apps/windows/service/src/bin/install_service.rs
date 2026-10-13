@@ -71,6 +71,42 @@ fn remove_ordinary_file_if_exists(path: &Path) -> Result<(), Error> {
     std::fs::remove_file(path).with_context(|| format!("failed to remove {path:?}"))
 }
 
+/// Copy `source` to `partial` and prove the copy. The caller removes `partial` when this fails.
+fn copy_verified(source: &Path, partial: &Path) -> Result<(), Error> {
+    let mut source_file = File::open(source)
+        .with_context(|| format!("failed to open service candidate {source:?}"))?;
+    let mut staged_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(partial)
+        .with_context(|| format!("failed to create staged service binary {partial:?}"))?;
+    std::io::copy(&mut source_file, &mut staged_file)
+        .with_context(|| format!("failed to stage service binary at {partial:?}"))?;
+    staged_file
+        .sync_all()
+        .with_context(|| format!("failed to sync staged service binary {partial:?}"))?;
+    drop(staged_file);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(partial, std::fs::Permissions::from_mode(0o550))
+            .with_context(|| format!("failed to secure staged service binary {partial:?}"))?;
+    }
+
+    if sha256(source)? != sha256(partial)? {
+        bail!("staged service binary hash does not match its bundled source");
+    }
+    Ok(())
+}
+
+/// Stage `source` beside `target` and return the staged path.
+///
+/// The staged name is the source of a rename that `publish_staged_binary` may have queued for the
+/// next reboot (W9-DEFERRED-PARTIAL-STAGE). A later repair must therefore never remove or write
+/// that file in place: a copy that failed half way would be published at boot as the Service. The
+/// copy is made and verified under a separate name, and only a complete, verified copy replaces
+/// the staged file, in one rename. Any failure leaves the earlier candidate as it was.
 fn stage_service_binary(source: &Path, target: &Path) -> Result<PathBuf, Error> {
     let parent = target
         .parent()
@@ -78,32 +114,30 @@ fn stage_service_binary(source: &Path, target: &Path) -> Result<PathBuf, Error> 
     std::fs::create_dir_all(parent)
         .with_context(|| format!("failed to create protected service directory {parent:?}"))?;
     let staged = target.with_extension(if cfg!(windows) { "exe.next" } else { "next" });
-    remove_ordinary_file_if_exists(&staged)?;
-
-    let mut source_file = File::open(source)
-        .with_context(|| format!("failed to open service candidate {source:?}"))?;
-    let mut staged_file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&staged)
-        .with_context(|| format!("failed to create staged service binary {staged:?}"))?;
-    std::io::copy(&mut source_file, &mut staged_file)
-        .with_context(|| format!("failed to stage service binary at {staged:?}"))?;
-    staged_file
-        .sync_all()
-        .with_context(|| format!("failed to sync staged service binary {staged:?}"))?;
-    drop(staged_file);
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o550))
-            .with_context(|| format!("failed to secure staged service binary {staged:?}"))?;
+    let partial = target.with_extension(if cfg!(windows) {
+        "exe.next.partial"
+    } else {
+        "next.partial"
+    });
+    match std::fs::symlink_metadata(&staged) {
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            bail!("refusing to replace non-file service entry {staged:?}");
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {staged:?}"));
+        }
     }
-
-    if sha256(source)? != sha256(&staged)? {
-        let _ = std::fs::remove_file(&staged);
-        bail!("staged service binary hash does not match its bundled source");
+    remove_ordinary_file_if_exists(&partial)?;
+    if let Err(error) = copy_verified(source, &partial) {
+        let _ = std::fs::remove_file(&partial);
+        return Err(error);
+    }
+    if let Err(error) = std::fs::rename(&partial, &staged) {
+        let _ = std::fs::remove_file(&partial);
+        return Err(error)
+            .with_context(|| format!("failed to replace staged service binary {staged:?}"));
     }
     Ok(staged)
 }

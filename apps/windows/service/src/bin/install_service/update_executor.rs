@@ -258,10 +258,27 @@ fn report_gate_panics(mode: &str, reason_file: Option<PathBuf>) {
     }));
 }
 
+/// Written to the reason file of a manual-update gate that PASSED by taking over a lease its
+/// previous holder never handed back. NSIS only tests that the file exists; a refusal writes its
+/// own text there. Every installer that ends normally hands its lease back (finish after a
+/// completed install, or a cancel before any file changed), so a lease still held by a dead
+/// holder is one that mutated files and failed or was killed (W9-RESOURCE-CANCEL-REPAIR).
+const LEASE_INHERITED: &str = "TONO_MANUAL_LEASE_INHERITED";
+
+/// Whether a lease is recorded before this gate takes it. A store that cannot be read counts as
+/// held: the cancelled wizard then keeps the lease instead of releasing evidence it cannot see.
+fn manual_lease_recorded() -> bool {
+    match native::open_store() {
+        Ok(store) => store.state.manual_installer.is_some(),
+        Err(_) => true,
+    }
+}
+
 pub(super) fn dispatch() -> Result<bool, Error> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if let Some((mode, reason_file)) = gate_invocation(&args) {
         report_gate_panics(&mode, reason_file.clone());
+        let inherits_lease = mode == "--manual-update-gate" && manual_lease_recorded();
         let outcome = match mode.as_str() {
             "--manual-update-gate" => manual_update_gate(bring_scm_bfe_up, || {
                 super::shared::block_on_abandoning(native::begin_manual())?
@@ -270,6 +287,9 @@ pub(super) fn dispatch() -> Result<bool, Error> {
             _ => native::begin_manual_uninstall().map(|()| None),
         };
         let report = native::GateReport::for_machine(reason_file);
+        if inherits_lease && outcome.is_ok() {
+            report.write_reason(LEASE_INHERITED, None);
+        }
         std::process::exit(finish_gate(&mode, &report, outcome));
     }
     match args.as_slice() {
