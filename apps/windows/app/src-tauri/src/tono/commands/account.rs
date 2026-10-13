@@ -625,15 +625,32 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
 /// when it cannot be read or an older Service reports nothing: Sign Out then keeps today's
 /// behavior, which only releases for what this process knows.
 async fn service_reports_ai_hold() -> Option<bool> {
+    static IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    service_reports_ai_hold_with(&IN_FLIGHT, Duration::from_secs(3), crate::core::service::tono_service_status_snapshot).await
+}
+
+/// Single flight: a probe whose synchronous credential read hangs keeps its slot after the
+/// timeout, so repeated Sign Outs cannot pile further hung probes onto the runtime workers.
+async fn service_reports_ai_hold_with<F, Fut, E>(
+    in_flight: &'static std::sync::atomic::AtomicBool, bound: Duration, snapshot: F,
+) -> Option<bool>
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<tono_service_protocol::ServiceStatusSnapshot, E>> + Send + 'static,
+    E: Send + 'static,
+{
+    use std::sync::atomic::Ordering;
+    if in_flight.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        return None;
+    }
     // Its own task: the snapshot call reads owner credentials synchronously before its first
     // await, which a timeout on this future alone could not interrupt.
-    let probe = tokio::spawn(crate::core::service::tono_service_status_snapshot());
-    tokio::time::timeout(Duration::from_secs(3), probe)
-        .await
-        .ok()?
-        .ok()?
-        .ok()?
-        .ai_hold_retained
+    let probe = tokio::spawn(async move {
+        let answer = snapshot().await;
+        in_flight.store(false, Ordering::SeqCst);
+        answer
+    });
+    tokio::time::timeout(bound, probe).await.ok()?.ok()?.ok()?.ai_hold_retained
 }
 
 /// A reported hold makes an otherwise idle Sign Out a full release. Nothing else changes: an
@@ -1176,6 +1193,31 @@ mod lifecycle_tests {
         assert!(state.lock().await.account_close.is_some(), "admission stays closed while the Service is slow");
         answer.send(Some(false)).unwrap();
         closing.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_probe_that_outlives_its_bound_keeps_its_slot_so_probes_cannot_pile_up() {
+        static SLOT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        let (release, held) = tokio::sync::oneshot::channel::<()>();
+        let hung = service_reports_ai_hold_with(&SLOT, Duration::from_millis(50), move || async move {
+            let _ = held.await;
+            Err::<tono_service_protocol::ServiceStatusSnapshot, String>("late".to_string())
+        }).await;
+        assert_eq!(hung, None);
+        static SECOND_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        let second = service_reports_ai_hold_with(&SLOT, Duration::from_millis(50), || {
+            SECOND_STARTED.store(true, std::sync::atomic::Ordering::SeqCst);
+            async { Err::<tono_service_protocol::ServiceStatusSnapshot, String>("unused".to_string()) }
+        }).await;
+        assert_eq!(second, None);
+        assert!(!SECOND_STARTED.load(std::sync::atomic::Ordering::SeqCst),
+            "a second probe must not start while the first is still running");
+        release.send(()).unwrap();
+        for _ in 0..100 {
+            if !SLOT.load(std::sync::atomic::Ordering::SeqCst) { break; }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!SLOT.load(std::sync::atomic::Ordering::SeqCst), "the slot frees once the probe finishes");
     }
 
     #[tokio::test]

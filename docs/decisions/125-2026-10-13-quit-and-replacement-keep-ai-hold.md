@@ -38,7 +38,7 @@
   reports the retained hold in its status snapshot (`ai_hold_retained`; it is the secondary layer's
   last requested disposition, so a crash, Quit, replacement or failed update all show it, and a
   re-arm or full release clears it). The App asks for it at Sign Out, inside the admitted close
-  (after the close slot is taken, bounded to 3 s, in its own task), and keeps what startup restore
+  (after the close slot is taken, bounded to 3 s, in its own single-flight task so a hung credential read cannot pile up), and keeps what startup restore
   saw, so an idle Sign Out after the App is reopened still runs the full release; an older Service that sends no field leaves
   today's in-process behavior. (2) Restore internet always fences older narrow releases: when the
   release record is in `Released` mode (an explicit Restore, no Connect admitted since), a Quit or
