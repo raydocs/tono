@@ -405,9 +405,10 @@ rules: []
     expect(rotated.status).toBe(200);
     const secondToken = String((await rotated.json() as any).token);
     expect(secondToken).not.toBe(firstToken);
+    // #1296: the superseded token earns the withdrawal answer, not a bare 401.
     expect((await api('home/exit-identities', {
       headers: { authorization: `Bearer ${firstToken}` },
-    })).status).toBe(401);
+    })).status).toBe(403);
     expect((await api('home/exit-identities', {
       headers: { authorization: `Bearer ${secondToken}` },
     })).status).toBe(200);
@@ -536,9 +537,30 @@ rules: []
     const withdrawn = await roster(deployed);
     expect(withdrawn.status).toBe(403);
     expect(await withdrawn.json()).toMatchObject({ error: { code: 'EXIT_NODE_DISABLED' } });
-    // Re-enabled, the rotated-away token authenticates nothing.
+    // Re-enabled, the rotated-away token authenticates nothing and is still
+    // told to withdraw: it was superseded (#1296).
     expect((await admin('exit-nodes/exit-a', { status: 'active' }, 'PATCH')).status).toBe(200);
-    expect((await roster(deployed)).status).toBe(401);
+    expect((await roster(deployed)).status).toBe(403);
+  });
+
+  it('tells an active node whose token was rotated to withdraw until the new token arrives', async () => {
+    // #1296 (decision 123): a token superseded on an active node used to get a
+    // bare 401, which the agent treats as "unreachable" and keeps serving its
+    // last roster, so revocations were not applied until the deployment.
+    const roster = (token: string) => api('home/exit-identities', {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const deployed = EXIT_NODE_TOKENS['exit-a'];
+    const rotated = await admin('exit-nodes/exit-a/token', {});
+    expect(rotated.status).toBe(200);
+    const fresh = String((await rotated.json() as any).token);
+    const superseded = await roster(deployed);
+    expect(superseded.status).toBe(403);
+    expect(await superseded.json()).toMatchObject({ error: { code: 'EXIT_NODE_DISABLED' } });
+    // It authenticates nothing: the current token is the only one that reads.
+    expect((await roster(fresh)).status).toBe(200);
+    // A token the control plane never issued stays a plain bad credential.
+    expect((await roster('unknown-exit-token-with-at-least-32-characters')).status).toBe(401);
   });
 
   it('enforces device-only rollout readiness at the database boundary', async () => {
