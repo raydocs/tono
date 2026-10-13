@@ -127,8 +127,35 @@ pub(crate) async fn arm_bootstrap(
 /// Returns whether the recorded owner changed. A recorded owner that is still signed in is
 /// refused exactly as `arm_bootstrap` refuses it; an ownerless, unwanted or already-own intent
 /// is left untouched.
-pub(crate) async fn adopt_departed_owner_before_core_stop(_caller_key: &str) -> Result<bool> {
-    Ok(false)
+pub(crate) async fn adopt_departed_owner_before_core_stop(caller_key: &str) -> Result<bool> {
+    if caller_key.is_empty() {
+        bail!("taking over armed protection requires the authenticated owner key");
+    }
+    let _operation = WFP_OPERATION.lock().await;
+    // The same rule and the same lock `arm_bootstrap` uses for the write that records a new
+    // owner: a recorded owner who still has a logon session refuses the caller here too.
+    authorize_takeover_for(caller_key).map_err(anyhow::Error::new)?;
+    let Some(mut armed) = armed_guard().clone() else {
+        return Ok(false);
+    };
+    if !armed.intent.wanted
+        || armed
+            .intent
+            .owner_key
+            .as_deref()
+            .is_none_or(|recorded| recorded == caller_key)
+    {
+        return Ok(false);
+    }
+    // Only the recorded owner changes. The filters, mode and Core window stay as they are:
+    // the barrier keeps protecting the machine until the caller's StartClash re-arms it or
+    // the caller's release lifts it. The departed owner's verification is not the caller's.
+    armed.intent.owner_key = Some(caller_key.to_owned());
+    armed.intent.verified = Some(false);
+    armed.intent.updated_at = now_unix();
+    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?).await?;
+    *armed_guard() = Some(armed);
+    Ok(true)
 }
 
 /// Commit the full app verification barrier for the active logical session.

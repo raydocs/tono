@@ -738,6 +738,22 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     "PrepareCoreStart refused: an explicit release or update takeover superseded this attempt",
                 ));
             }
+            // The Core stopped below may belong to a recorded owner who has signed out; the
+            // takeover is allowed, but the owner on record only changes at StartClash's
+            // `arm_bootstrap`. A connect failing in between releases as this caller, which
+            // `authorize_write_for` refuses while the departed owner is still recorded, and
+            // the machine stays Blocked (#1293 item 1). Record the caller as owner now, under
+            // the same takeover rule, before any Core is stopped; a refusal stops nothing.
+            if let Err(error) =
+                windows_kill_switch::adopt_departed_owner_before_core_stop(&owner.key).await
+            {
+                if let Some(refusal) = error.downcast_ref::<ServiceError>() {
+                    return service_error(refusal.clone());
+                }
+                return service_unavailable(format!(
+                    "Failed to take over the departed owner's protection: {error:#}"
+                ));
+            }
             // Decide under the lifecycle lock but before publishing this route's own operation:
             // the shared proof requires a quiescent snapshot. The lifecycle lock prevents
             // reconciliation from racing a start/stop; CoreManager preserves a supervised process

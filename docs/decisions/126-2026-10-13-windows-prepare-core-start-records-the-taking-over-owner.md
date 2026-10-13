@@ -1,0 +1,6 @@
+## 2026-10-13 · 用户 B 接管已注销用户 A 的屏障：Core 被停掉的那一刻，B 就成为记录的 owner
+- Status: provisional（所有者可推翻；只有所有者能写 `owner` 或 `reversed`）
+- Chosen: `PrepareCoreStart` 在停任何 Core 之前，调用 `windows_kill_switch::adopt_departed_owner_before_core_stop(owner.key)`：在 `WFP_OPERATION` 锁下用与 `arm_bootstrap` 相同的 `authorize_takeover_for` 重新检查（记录的 owner 仍有登录会话则同样拒绝，什么都不停）；通过后只改记录的 `owner_key`（和 `verified=false`，A 的验证不属于 B），先写盘再换内存。过滤器、模式、Core 窗口都不动，屏障继续保护机器。随后 B 的 `fail_connect` 释放以 B 的身份通过现有的 `authorize_write_for`，所以 B 的失败连接不会把机器留在 Blocked。`authorize_write_for` 与 `release::worker::owner_refusal` 一行没改。
+- Why stricter: 没有放宽任何释放权限。B 能成为 owner 的条件和 `arm_bootstrap` 里已有的完全一样（A 已无登录会话，或意图无 owner），B 本来就能在 `PrepareCoreStart` 停 A 的 Core、在 `StartClash` 写 owner；这里只是把“写 owner”提前到“停 Core”那一刻，两步之间失败的窗口因此消失。A 仍登录时被拒绝，且拒绝发生在停 Core 之前。
+- 偏离原话：协调者的措辞是“不要在新用户 `arm_bootstrap` 成功前停 A 的 Core”。没有这样做，因为 App 的 DNS 预检要绑定 loopback:53，A 的 Core 不停，B 就永远过不了预检（预检只对调用者自己已证明的运行时豁免）；而 `PrepareCoreStart` 没有 `arm_bootstrap` 需要的配置，在它里面武装需要改协议。取而代之的是让所有权转移与停 Core 同时发生，目标（失败的 B 连接不会让机器停在 Blocked）相同。
+- Applied in: 本 PR（`apps/windows/service/src/core/windows_kill_switch/arm.rs`、`core/server/handlers.rs`）
