@@ -28,9 +28,13 @@ export type AdoptionCell = {
   devices: number;
 };
 
+export type AdoptionPeople = { current: number; behind: number; unreported: number };
+
 export type AdoptionMatrix = {
   cells: AdoptionCell[];
   released: Platform[];
+  /** Each customer once, at the oldest version any of their released-platform devices reports. */
+  people: AdoptionPeople;
   latest: Record<Platform, string | null>;
 };
 
@@ -343,11 +347,21 @@ async function devicesInRange(
   return [...best.values()];
 }
 
+/** Oldest-wins order for `people`: a bucket that names a version beats "unreported". */
+const PERSON_RANK: Record<VersionBucket, number> = {
+  unreported: 0,
+  current: 1,
+  behind_one: 2,
+  behind_more: 3,
+};
+
 /**
  * Platform × version-bucket for a range, counting each device once at the last
  * version it reported inside the range. A customer with devices in two buckets
  * is counted in both cells: the cell answers "how many customers have at least
  * one device here", which is the question an upgrade nag is planned against.
+ * `people` answers the other question: each customer once, in the oldest bucket
+ * any of their devices on a released platform reports.
  */
 export async function adoptionMatrix(
   db: D1Database,
@@ -366,6 +380,7 @@ export async function adoptionMatrix(
   const published: Record<Platform, string[]> = {} as Record<Platform, string[]>;
   const users = new Map<string, Set<string>>();
   const devices = new Map<string, number>();
+  const worst = new Map<string, AdoptionBucket>();
   try {
     for (const platform of PLATFORMS) {
       const any = await db.prepare(
@@ -376,7 +391,12 @@ export async function adoptionMatrix(
       published[platform] = await publishedStableVersions(db, platform);
     }
     for (const device of await devicesInRange(db, { rangeStart, today, minSeenAt }, only)) {
-      const key = `${device.platform}:${versionBucket(device.version, published[device.platform] ?? [])}`;
+      const bucket = versionBucket(device.version, published[device.platform] ?? []);
+      const key = `${device.platform}:${bucket}`;
+      if (released.includes(device.platform)) {
+        const before = worst.get(device.userId);
+        if (before === undefined || PERSON_RANK[bucket] > PERSON_RANK[before]) worst.set(device.userId, bucket);
+      }
       devices.set(key, (devices.get(key) ?? 0) + 1);
       let seen = users.get(key);
       if (!seen) {
@@ -391,6 +411,13 @@ export async function adoptionMatrix(
     released.length = 0;
     devices.clear();
     users.clear();
+    worst.clear();
+  }
+  const people: AdoptionPeople = { current: 0, behind: 0, unreported: 0 };
+  for (const bucket of worst.values()) {
+    if (bucket === 'current') people.current += 1;
+    else if (bucket === 'unreported') people.unreported += 1;
+    else people.behind += 1;
   }
   const cells: AdoptionCell[] = [];
   for (const platform of wanted) {
@@ -404,7 +431,7 @@ export async function adoptionMatrix(
       });
     }
   }
-  return { cells, released, latest };
+  return { cells, released, people, latest };
 }
 
 /** Prunes both adoption rollups; returns the rows deleted across the two. */

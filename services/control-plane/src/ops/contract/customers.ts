@@ -134,6 +134,11 @@ export interface CustomerFailureDto {
   code: string | null;
 }
 
+export interface CustomerPlatformVersionDto {
+  platform: Platform;
+  version: string;
+}
+
 export interface CustomerSummaryDto {
   userId: string;
   email: string;
@@ -153,6 +158,12 @@ export interface CustomerSummaryDto {
   services: ServiceFamily[];
   /** The oldest version any of their devices runs — what drives 版本过旧. */
   minAppVersion: string | null;
+  /**
+   * The oldest version per platform inside the same 30 days as `minAppVersion`;
+   * a platform with nothing reported is absent. The adoption drilldown judges a
+   * customer on the platform it was clicked from with this, not `minAppVersion`.
+   */
+  versionByPlatform: CustomerPlatformVersionDto[];
   expiresAt: number | null;
   lastSeenAt: number | null;
   stage: FunnelStage;
@@ -326,9 +337,19 @@ export function assertCustomerFailure(value: unknown, path = 'lastFailure'): Cus
 const CUSTOMER_SUMMARY_KEYS = [
   'userId', 'email', 'wechatId', 'verdict', 'health', 'tone', 'reason', 'lifecycle', 'deviceCount',
   'platforms', 'selectedServer', 'connected', 'lastFailure', 'usageBytes', 'quotaBytes', 'services',
-  'minAppVersion', 'expiresAt', 'lastSeenAt', 'stage', 'stageSinceAt', 'firstConnectedAt', 'updatedAt',
+  'minAppVersion', 'versionByPlatform', 'expiresAt', 'lastSeenAt', 'stage', 'stageSinceAt', 'firstConnectedAt', 'updatedAt',
   'wechatDuplicate',
 ];
+
+const PLATFORM_VERSION_KEYS = ['platform', 'version'];
+
+function assertPlatformVersion(value: unknown, path: string): CustomerPlatformVersionDto {
+  const row = fields(value, path, PLATFORM_VERSION_KEYS);
+  return {
+    platform: oneOf<Platform>(row, path, 'platform', PLATFORMS),
+    version: text(row, path, 'version'),
+  };
+}
 
 export function assertCustomerSummary(value: unknown, path = 'customerSummary'): CustomerSummaryDto {
   const row = fields(value, path, CUSTOMER_SUMMARY_KEYS);
@@ -352,6 +373,7 @@ export function assertCustomerSummary(value: unknown, path = 'customerSummary'):
     quotaBytes: optInt(row, path, 'quotaBytes'),
     services: enumList<ServiceFamily>(row, path, 'services', SERVICE_FAMILIES),
     minAppVersion: optText(row, path, 'minAppVersion'),
+    versionByPlatform: arrayOf(row, path, 'versionByPlatform', assertPlatformVersion),
     expiresAt: optInt(row, path, 'expiresAt'),
     lastSeenAt: optInt(row, path, 'lastSeenAt'),
     stage: oneOf<FunnelStage>(row, path, 'stage', FUNNEL_STAGES),

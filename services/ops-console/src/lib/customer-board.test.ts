@@ -24,6 +24,7 @@ const customer = (patch: Partial<CustomerSummaryDto>): CustomerSummaryDto => ({
   quotaBytes: null,
   services: [],
   minAppVersion: null,
+  versionByPlatform: [],
   expiresAt: null,
   lastSeenAt: null,
   stage: 'connected',

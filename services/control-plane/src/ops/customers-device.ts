@@ -1,5 +1,7 @@
 // ops_device_status writes and the customer-row derivation from them.
 
+import { PLATFORMS, type Platform } from './contract';
+import { isPlatform, sniffPlatform } from './platform';
 import { compareVersions } from './releases';
 import { HEARTBEAT_FRESH_SECONDS } from './verdict-customers';
 
@@ -51,6 +53,27 @@ function minAppVersion(devices: Row[], nowSec: number): string | null {
     if (best === null || compareVersions(version, best) < 0) best = version;
   }
   return best;
+}
+
+/**
+ * The oldest version each platform's devices run inside the same window as
+ * `minAppVersion`. A platform with no reported version in the window is absent.
+ */
+export function versionByPlatform(devices: Row[], nowSec: number): { platform: Platform; version: string }[] {
+  const cutoff = nowSec - VERSION_WINDOW_SECONDS;
+  const best = new Map<Platform, string>();
+  for (const row of devices) {
+    const seen = finite(row.last_seen_at);
+    if (seen === null || seen < cutoff) continue;
+    const version = text(row.app_version);
+    if (!version) continue;
+    const named = text(row.platform);
+    const platform = named !== null && isPlatform(named) ? named : sniffPlatform(text(row.os_version));
+    if (platform === null) continue;
+    const current = best.get(platform);
+    if (current === undefined || compareVersions(version, current) < 0) best.set(platform, version);
+  }
+  return PLATFORMS.filter((platform) => best.has(platform)).map((platform) => ({ platform, version: best.get(platform)! }));
 }
 
 function representative(devices: Row[], nowSec: number): Row | null {

@@ -402,6 +402,31 @@ describe('ops v1 api', () => {
     expect(audits.results).toEqual([{ summary: 'window:d-expired key:- expired' }]);
   });
 
+  it('GET customers carries the oldest version per platform next to the all-platform minimum', async () => {
+    await seedUser();
+    const at = Math.floor(Date.now() / 1000);
+    await db().prepare(
+      `INSERT INTO ops_customer_status(user_id, device_id, platform, app_version, last_seen_at, updated_at)
+       VALUES('u-1', 'd-win', 'windows', '0.0.30', ?, ?)`,
+    ).bind(at, at).run();
+    await db().prepare(
+      `INSERT INTO ops_device_status(user_id, device_id, platform, app_version, os_version, last_seen_at, updated_at)
+       VALUES
+         ('u-1', 'd-win', 'windows', '0.0.34', 'Windows 11', ?, ?),
+         ('u-1', 'd-mac', 'macos', '0.0.30', 'macOS 15', ?, ?),
+         ('u-1', 'd-mac2', 'macos', '0.0.33', 'macOS 15', ?, ?),
+         ('u-1', 'd-old', 'linux', '0.0.10', 'Linux', ?, ?)`,
+    ).bind(at, at, at, at, at, at, at - 31 * 86_400, at).run();
+
+    const list = assertList(await (await ops('customers')).json(), assertCustomerSummary);
+    const row = list.items.find((item) => item.userId === 'u-1');
+    expect(row?.minAppVersion).toBe('0.0.30');
+    expect(row?.versionByPlatform).toEqual([
+      { platform: 'macos', version: '0.0.30' },
+      { platform: 'windows', version: '0.0.34' },
+    ]);
+  });
+
   it('GET customers/{id} exposes per-device live status and connections filter by deviceId', async () => {
     await seedUser();
     await db().prepare(
