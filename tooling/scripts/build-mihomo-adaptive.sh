@@ -124,10 +124,12 @@ install_adaptive() {
 
   (
     cd "$patched_tun"
-    # Only the patch's own test: sing-tun v0.4.27's TestMipsWindowsReadFailureExitsReadLoop
-    # (mipstack, which Tono never selects: stack is gvisor) panics on a nil stack,
-    # so the package-wide suite is red upstream and says nothing about this patch.
-    $go_binary test -count=1 -tags with_gvisor -run '^TestTonoAdaptiveGVisorTCPBuffers$' .
+    # The whole sing-tun suite runs, including the patch's TestTonoAdaptiveGVisorTCPBuffers.
+    # One upstream test is skipped: sing-tun v0.4.27's TestMipsWindowsReadFailureExitsReadLoop
+    # (mipstack, which Tono never selects: stack is gvisor) panics on a nil stack and takes
+    # the whole package run down. Drop this skip once upstream fixes that test.
+    $go_binary test -count=1 -tags with_gvisor \
+      -skip '^TestMipsWindowsReadFailureExitsReadLoop$' .
   )
   (
     cd "$source_dir"
