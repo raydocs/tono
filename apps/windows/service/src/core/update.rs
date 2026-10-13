@@ -1405,6 +1405,35 @@ pub fn maintenance_allowed() -> Result<()> {
     Ok(())
 }
 
+/// Left beside the installed binaries while a repairing full install is unfinished. The installer
+/// script keeps the failed update's rollback copies while it exists; [`finish_manual`] removes it.
+pub const REPAIR_EVIDENCE_MARKER: &str = ".update-repair-evidence";
+
+fn clear_repair_marker(root: &Path) {
+    match std::fs::remove_file(root.join(REPAIR_EVIDENCE_MARKER)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => tracing::warn!("could not remove the update repair marker: {error:#}"),
+    }
+}
+
+/// Whether this installer holds the manual lease beside an exhausted update attempt (#1307): the
+/// gate grants that lease only for such a record. The full install then keeps its own scratch
+/// names, so the failed update's recovery files stay untouched. A lock-free read; a different or
+/// absent holder, or no pending Consumed/Uncertain attempt, is `false`.
+pub fn repair_lease_held() -> Result<bool> {
+    Ok(repair_lease_in(&read_store_state()?, &parent_image()?))
+}
+
+fn repair_lease_in(state: &State, installer: &Image) -> bool {
+    state.manual_installer.as_ref() == Some(installer)
+        && state.pending()
+        && state
+            .attempt
+            .as_ref()
+            .is_some_and(|a| matches!(a.execution, Execution::Consumed | Execution::Uncertain))
+}
+
 pub async fn manual_gate() -> Result<()> {
     maintenance_allowed()?;
     ensure!(
@@ -1877,6 +1906,26 @@ pub async fn retire_orphaned_owner() -> Result<()> {
     desired::retire_legacy_active_owner().await
 }
 
+const RECOVERY_TASK_RETIRE_TRIES: u32 = 4;
+
+/// The archive ends the record the boot task recovers, and nothing retries a failed delete
+/// afterwards (the task would then fail at every boot): so a transient Task Scheduler refusal is
+/// tried again a few times before giving up (#1307).
+fn retire_recovery_task_retrying(
+    mut retire: impl FnMut() -> Result<()>,
+    pause: impl Fn(std::time::Duration),
+) -> Result<()> {
+    let mut result = retire();
+    for _ in 1..RECOVERY_TASK_RETIRE_TRIES {
+        if result.is_ok() {
+            break;
+        }
+        pause(std::time::Duration::from_millis(500));
+        result = retire();
+    }
+    result
+}
+
 pub fn finish_manual() -> Result<()> {
     let mut store = open_store()?;
     let installer = parent_image()?;
@@ -1884,13 +1933,16 @@ pub fn finish_manual() -> Result<()> {
         store.state.manual_installer.as_ref() == Some(&installer),
         "manual installer mismatch"
     );
+    let marker_root = store.state.attempt.as_ref().map(|a| a.install_root.clone());
     // A full install that left the exhausted attempt's original or target identity ends it
     // (#1307). It is repair, not part of the lease hand-back: an unproven install leaves the
     // record pending and still hands the lease back, or the installer would exit 76.
     match retire_repaired(&mut store, &installer, installed_components) {
         Ok(true) => {
             tracing::warn!("a full install repaired the exhausted update attempt; it is archived");
-            if let Err(error) = retire_recovery_task() {
+            if let Err(error) =
+                retire_recovery_task_retrying(retire_recovery_task, std::thread::sleep)
+            {
                 tracing::warn!("update recovery task was not retired after the repair: {error:#}");
             }
         }
@@ -1903,6 +1955,10 @@ pub fn finish_manual() -> Result<()> {
             drop(store);
             store = open_store()?;
         }
+    }
+    // The install is over, proven or not: from here the evidence is judged by the record alone.
+    if let Some(root) = marker_root {
+        clear_repair_marker(&root);
     }
     let mut next = store.state.clone();
     next.manual_installer = None;
@@ -3096,6 +3152,58 @@ mod tests {
         next.attempt.as_mut().unwrap().old_components.app_sha256 = "e".repeat(64);
         store.save(next).unwrap();
         (root, store, installer)
+    }
+
+    #[test]
+    fn update_repair_lease_is_held_only_by_the_holder_beside_a_pending_exhausted_attempt() {
+        let (root, store, installer) = leased_exhausted();
+        assert!(repair_lease_in(&store.state, &installer));
+        let other = Image { pid: 31, ..installer.clone() };
+        assert!(!repair_lease_in(&store.state, &other), "another process is not the lease holder");
+        let mut unleased = store.state.clone();
+        unleased.manual_installer = None;
+        assert!(!repair_lease_in(&unleased, &installer));
+        let mut retired = store.state.clone();
+        retired.attempt = None;
+        assert!(!repair_lease_in(&retired, &installer), "no attempt, no repair namespace");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_repair_marker_is_cleared_once_and_a_missing_one_is_fine() {
+        let root = std::env::temp_dir().join(format!("tono-repair-marker-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(REPAIR_EVIDENCE_MARKER), b"").unwrap();
+        clear_repair_marker(&root);
+        assert!(!root.join(REPAIR_EVIDENCE_MARKER).exists());
+        clear_repair_marker(&root);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_recovery_task_retire_is_retried_after_the_archive() {
+        let mut calls = 0;
+        retire_recovery_task_retrying(
+            || {
+                calls += 1;
+                anyhow::ensure!(calls >= 3, "scheduler busy");
+                Ok(())
+            },
+            |_| {},
+        )
+        .expect("a transient scheduler failure must not leave the boot task behind");
+        assert_eq!(calls, 3);
+        calls = 0;
+        retire_recovery_task_retrying(
+            || {
+                calls += 1;
+                anyhow::bail!("scheduler gone")
+            },
+            |_| {},
+        )
+        .unwrap_err();
+        assert_eq!(calls, RECOVERY_TASK_RETIRE_TRIES, "a permanent failure is bounded");
     }
 
     #[test]

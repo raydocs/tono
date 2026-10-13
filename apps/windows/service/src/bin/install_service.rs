@@ -737,6 +737,78 @@ const ROLLBACK_SUFFIX: &str = ".rollback";
 const RESTORE_SUFFIX: &str = ".restore";
 #[cfg(windows)]
 const PUBLISH_SUFFIX: &str = ".publish";
+/// #1307: a full install that repairs an exhausted update attempt keeps its own scratch names. The
+/// failed update's `.rollback`/`.restore`/`.publish` files may be the only copy of the old
+/// generation, so the repair neither reads, adopts nor deletes them; its own transaction still
+/// refuses a leftover of its own.
+#[cfg(windows)]
+const INSTALL_ROLLBACK_SUFFIX: &str = ".install-rollback";
+#[cfg(windows)]
+const INSTALL_RESTORE_SUFFIX: &str = ".install-restore";
+#[cfg(windows)]
+const INSTALL_PUBLISH_SUFFIX: &str = ".install-publish";
+
+#[cfg(windows)]
+thread_local! {
+    /// Set once on the install's main thread. The native update executor runs elsewhere and keeps
+    /// the update names.
+    static REPAIR_SCRATCH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(windows)]
+fn set_repair_scratch(on: bool) {
+    REPAIR_SCRATCH.with(|flag| flag.set(on));
+}
+
+/// Choose the scratch namespace from the durable state: the repair names apply only while this
+/// installer holds the manual lease beside an exhausted update attempt. Anything unreadable keeps
+/// the strict update names. A repair also leaves the marker the installer script checks before it
+/// deletes the failed update's rollback copies (they are the only evidence of its old generation
+/// until `--manual-update-finish` proves the installed identity and removes the marker).
+#[cfg(windows)]
+fn choose_scratch_namespace() -> Result<(), Error> {
+    let repair = tono_service_protocol::update_native::repair_lease_held().unwrap_or_else(|error| {
+        eprintln!("could not read the update lease; keeping the update scratch names: {error:#}");
+        false
+    });
+    if repair {
+        let marker = windows_program_files_directory()?
+            .join("Tono")
+            .join(tono_service_protocol::update_native::REPAIR_EVIDENCE_MARKER);
+        std::fs::write(&marker, b"")
+            .with_context(|| format!("failed to mark the update repair in {marker:?}"))?;
+    }
+    set_repair_scratch(repair);
+    Ok(())
+}
+
+#[cfg(windows)]
+fn scratch_with(target: &Path, update: &str, install: &str) -> PathBuf {
+    path_with_suffix(
+        target,
+        if REPAIR_SCRATCH.with(std::cell::Cell::get) { install } else { update },
+    )
+}
+
+#[cfg(windows)]
+fn rollback_scratch_path(target: &Path) -> PathBuf {
+    scratch_with(target, ROLLBACK_SUFFIX, INSTALL_ROLLBACK_SUFFIX)
+}
+
+#[cfg(windows)]
+fn restore_scratch_path(target: &Path) -> PathBuf {
+    scratch_with(target, RESTORE_SUFFIX, INSTALL_RESTORE_SUFFIX)
+}
+
+#[cfg(windows)]
+fn publish_scratch_path(target: &Path) -> PathBuf {
+    scratch_with(target, PUBLISH_SUFFIX, INSTALL_PUBLISH_SUFFIX)
+}
+
+#[cfg(windows)]
+fn scratch_paths(target: &Path) -> [PathBuf; 3] {
+    [rollback_scratch_path(target), restore_scratch_path(target), publish_scratch_path(target)]
+}
 #[cfg(windows)]
 const COMPILED_IN_CORE_SHA256: Option<&str> = option_env!("TONO_CORE_SHA256");
 #[cfg(windows)]
@@ -1000,9 +1072,11 @@ fn runtime_replacement_candidate(helper: &Path) -> Result<InstalledBinaryCandida
     let staged = path_with_suffix(&target, RUNTIME_STAGED_SUFFIX);
     ensure_ordinary_windows_entry(&target, false)?;
     ensure_ordinary_windows_entry(&staged, false)?;
-    adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, ROLLBACK_SUFFIX))?;
-    adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, RESTORE_SUFFIX))?;
-    adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, PUBLISH_SUFFIX))?;
+    // The authority checks above passed: only now read the durable lease (#1307).
+    choose_scratch_namespace()?;
+    adopt_or_refuse_update_scratch(&target, &rollback_scratch_path(&target))?;
+    adopt_or_refuse_update_scratch(&target, &restore_scratch_path(&target))?;
+    adopt_or_refuse_update_scratch(&target, &publish_scratch_path(&target))?;
 
     let expected_digest = decode_sha256(COMPILED_IN_CORE_SHA256.context(
         "this Service installer has no compiled Mihomo SHA-256 pin; use the release build script",
@@ -1086,12 +1160,12 @@ fn sing_box_replacement_candidates(app_root: &Path) -> Result<Vec<InstalledBinar
         }
     };
     if introduced {
-        for suffix in [ROLLBACK_SUFFIX, RESTORE_SUFFIX, PUBLISH_SUFFIX] {
-            ensure_update_scratch_absent(&path_with_suffix(&target, suffix))?;
+        for scratch in scratch_paths(&target) {
+            ensure_update_scratch_absent(&scratch)?;
         }
     } else {
-        for suffix in [ROLLBACK_SUFFIX, RESTORE_SUFFIX, PUBLISH_SUFFIX] {
-            adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, suffix))?;
+        for scratch in scratch_paths(&target) {
+            adopt_or_refuse_update_scratch(&target, &scratch)?;
         }
     }
     let pin_text = format!("{SING_BOX_ALPHA9_SHA256}\n");
@@ -1142,9 +1216,9 @@ fn app_replacement_candidate(
     let staged = path_with_suffix(&target, RUNTIME_STAGED_SUFFIX);
     ensure_ordinary_windows_entry(&target, false)?;
     ensure_ordinary_windows_entry(&staged, false)?;
-    adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, ROLLBACK_SUFFIX))?;
-    adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, RESTORE_SUFFIX))?;
-    adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, PUBLISH_SUFFIX))?;
+    adopt_or_refuse_update_scratch(&target, &rollback_scratch_path(&target))?;
+    adopt_or_refuse_update_scratch(&target, &restore_scratch_path(&target))?;
+    adopt_or_refuse_update_scratch(&target, &publish_scratch_path(&target))?;
 
     // Unlike Mihomo, the GUI hash is not compiled into the Service helper. Measure the candidate
     // only after the fixed Program Files authority checks above; `prepare` measures it again and
@@ -1216,9 +1290,9 @@ impl CoordinatedBinaryReplacement {
             bail!("staged executable {staged:?} changed after it was validated");
         }
         let old_digest = sha256(target)?;
-        let backup = path_with_suffix(target, ROLLBACK_SUFFIX);
-        let restore = path_with_suffix(target, RESTORE_SUFFIX);
-        let publish_scratch = path_with_suffix(target, PUBLISH_SUFFIX);
+        let backup = rollback_scratch_path(target);
+        let restore = restore_scratch_path(target);
+        let publish_scratch = publish_scratch_path(target);
         // The native update executor has no discovery pass: a retired rollback leaves copies
         // equal to the restored target, and only those are cleared. Any other bytes still refuse.
         adopt_or_refuse_update_scratch(target, &backup)?;
@@ -1277,9 +1351,9 @@ impl CoordinatedBinaryReplacement {
         if measured_new_digest != expected_new_digest {
             bail!("staged executable {staged:?} changed after it was validated");
         }
-        let backup = path_with_suffix(target, ROLLBACK_SUFFIX);
-        let restore = path_with_suffix(target, RESTORE_SUFFIX);
-        let publish_scratch = path_with_suffix(target, PUBLISH_SUFFIX);
+        let backup = rollback_scratch_path(target);
+        let restore = restore_scratch_path(target);
+        let publish_scratch = publish_scratch_path(target);
         ensure_update_scratch_absent(&backup)?;
         ensure_update_scratch_absent(&restore)?;
         ensure_update_scratch_absent(&publish_scratch)?;
@@ -2417,6 +2491,7 @@ fn main() -> anyhow::Result<()> {
     // Legacy user journals are diagnostics only. This entry has no v1 grant:
     // both runtime replacement and service-only repair require verified Disconnect.
     shared::block_on_abandoning(tono_service_protocol::update_native::manual_gate())??;
+    choose_scratch_namespace()?;
     let install_dir = tono_service_protocol::prepare_service_install_directory()?;
     publish_core_digest_pin(&install_dir)?;
     if install_mode != WindowsInstallMode::ReplaceRuntime
@@ -2436,9 +2511,9 @@ fn main() -> anyhow::Result<()> {
     if install_mode == WindowsInstallMode::ReplaceRuntime {
         // Discover stale recovery state before stopping a healthy Service. The coordinated
         // transaction never overwrites evidence from a prior interrupted rollback.
-        adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, ROLLBACK_SUFFIX))?;
-        adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, RESTORE_SUFFIX))?;
-        adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, PUBLISH_SUFFIX))?;
+        adopt_or_refuse_update_scratch(&target, &rollback_scratch_path(&target))?;
+        adopt_or_refuse_update_scratch(&target, &restore_scratch_path(&target))?;
+        adopt_or_refuse_update_scratch(&target, &publish_scratch_path(&target))?;
     }
     let staged = stage_service_binary(&source, &target)?;
 
@@ -3176,6 +3251,42 @@ mod tests {
         );
         replacement.cleanup();
         assert!(!staged.exists());
+    }
+
+    /// #1307: a repairing full install must not abort on the failed update's recovery files, nor
+    /// touch them: its own transaction uses its own names.
+    #[cfg(windows)]
+    #[test]
+    fn update_repair_install_keeps_stale_update_evidence_and_uses_its_own_scratch() {
+        let directory = TransactionTestDirectory::new("repair-scratch");
+        let target = directory.0.join("tono-core.exe");
+        let staged = path_with_suffix(&target, RUNTIME_STAGED_SUFFIX);
+        let backup = path_with_suffix(&target, ROLLBACK_SUFFIX);
+        let restore = path_with_suffix(&target, RESTORE_SUFFIX);
+        std::fs::write(&target, b"mixed-live-core").unwrap();
+        std::fs::write(&staged, b"new-core").unwrap();
+        std::fs::write(&backup, b"failed-update-old-generation").unwrap();
+        std::fs::write(&restore, b"failed-update-restore-copy").unwrap();
+        let expected = sha256(&staged).unwrap();
+
+        set_repair_scratch(true);
+        let prepared = CoordinatedBinaryReplacement::prepare(&staged, &target, expected);
+        set_repair_scratch(false);
+        let replacement = prepared
+            .map_err(|error| format!("{error:#}"))
+            .expect("the repair install aborted on the failed update's recovery files");
+
+        assert_eq!(std::fs::read(&backup).unwrap(), b"failed-update-old-generation");
+        assert_eq!(std::fs::read(&restore).unwrap(), b"failed-update-restore-copy");
+        assert_ne!(replacement.backup, backup, "the repair shares the update's backup name");
+        assert_eq!(std::fs::read(&replacement.backup).unwrap(), b"mixed-live-core");
+        replacement.cleanup();
+        assert_eq!(
+            std::fs::read(&backup).unwrap(),
+            b"failed-update-old-generation",
+            "the repair's cleanup removed the update evidence"
+        );
+        assert!(!replacement.backup.exists());
     }
 
     #[cfg(windows)]

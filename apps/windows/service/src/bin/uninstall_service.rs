@@ -876,6 +876,10 @@ const INSTALL_DIR_SWEEP: &[&str] = &[
     "tono-service.exe.rollback",
     "tono-service.exe.restore",
     "tono-service.exe.publish",
+    // The scratch a repairing full install used instead of the update names above (#1307).
+    "tono-service.exe.install-rollback",
+    "tono-service.exe.install-restore",
+    "tono-service.exe.install-publish",
     // The Service-only repair's copy of the executable it replaces (#815).
     "tono-service.exe.repair-previous",
     "tono-service.exe.repair-restore",
