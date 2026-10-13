@@ -28,6 +28,7 @@ import {
   insertSocks5HomeExit,
   upsertHomeBinding,
   assertHomeExitBindable,
+  assertPastedPasswordMatches,
 } from '../../home';
 import {
   writeOpsAudit,
@@ -175,6 +176,7 @@ export async function homeExitsResource(
       if (owner && String(owner.user_id) !== userId) {
         throw new ApiError(409, 'HOME_EXIT_IN_USE', 'This home line is already assigned to another user');
       }
+      assertPastedPasswordMatches(home, parsed.password);
       if (home.socks5_rotation_required_at != null && parsed.password !== String(home.socks5_password)) {
         // The pasted line carries a new upstream password: that is the rotation.
         await e.DB.prepare(

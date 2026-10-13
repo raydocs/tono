@@ -282,6 +282,19 @@ describe('ops v1 api', () => {
     expect(row?.catalog_name).toBe(onlyStatus);
   });
 
+  it('PATCH nodes/{name}/profile keeps the documented port, leaves it on other edits and clears it on null', async () => {
+    // SOL-CP-PROFILE-PORT: the port was validated and then dropped, so the
+    // console form showed it empty after every save.
+    await seedNode();
+    const path = `nodes/${encodeURIComponent(NODE)}/profile`;
+    const port = async (body: unknown) => assertNodeDetail(
+      await (await ops(path, json(body, 'PATCH'))).json(),
+    ).facts.port;
+    expect(await port({ port: 8443 })).toBe(8443);
+    expect(await port({ region: 'tyo' })).toBe(8443);
+    expect(await port({ port: null })).toBeNull();
+  });
+
   it('PATCH nodes/{name}/profile rejects an unknown key', async () => {
     await seedNode();
     const res = await ops(`nodes/${encodeURIComponent(NODE)}/profile`, json({ extra: true }, 'PATCH'));

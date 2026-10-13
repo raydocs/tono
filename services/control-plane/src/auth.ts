@@ -87,11 +87,22 @@ export async function authenticateExitNode(
   // A token that belongs to a disabled or retired node is a definite answer,
   // not a bad credential: the agent on that node must remove its clients
   // rather than keep serving its last roster. It still authenticates nothing.
-  const disabled = await e.DB.prepare(
-    `SELECT 1 FROM exit_nodes
-     WHERE status = 'disabled' AND (token_hash = ? OR revoked_token_hash = ?)`,
-  ).bind(tokenHash, tokenHash).first();
-  if (disabled) throw new ApiError(403, 'EXIT_NODE_DISABLED', 'Exit node is disabled');
+  // So is a token superseded by a rotation (#1296): a node whose token moved on
+  // while its agent still holds the old one is withdrawn until the new token is
+  // deployed, so a revocation is never skipped for the length of that gap.
+  const withdrawn = await e.DB.prepare(
+    `SELECT status FROM exit_nodes
+     WHERE (status = 'disabled' AND token_hash = ?) OR revoked_token_hash = ?`,
+  ).bind(tokenHash, tokenHash).first<Row>();
+  if (withdrawn) {
+    throw new ApiError(
+      403,
+      'EXIT_NODE_DISABLED',
+      withdrawn.status === 'disabled'
+        ? 'Exit node is disabled'
+        : 'Exit node token was superseded by a rotation',
+    );
+  }
   if (allowLegacyRead && await exitCredentialRolloutPhase(e) === 'dual') {
     await privileged(req, e.HOME_AGENT_TOKEN);
     return null;
