@@ -927,7 +927,13 @@ mod tests {
                 self.durable.get(key)
             }
             fn set(&self, key: CredentialKey, value: &str) -> Result<(), CredentialError> {
-                let _ = self.gate.lock().unwrap().recv_timeout(std::time::Duration::from_secs(20));
+                // Only the test's explicit release lets a write through; a timeout or a closed
+                // channel is a failed write, never a silent success.
+                self.gate
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(std::time::Duration::from_secs(120))
+                    .map_err(|_| CredentialError::Store("vault gate was never released".into()))?;
                 self.durable.set(key, value)
             }
             fn delete(&self, key: CredentialKey) -> Result<(), CredentialError> {
