@@ -8,6 +8,8 @@ pub(crate) use install::{
 };
 #[cfg(windows)]
 pub(crate) use install::tono_request_service_owner_goodbye;
+#[cfg(windows)]
+pub(crate) use install::registered_service_stopped;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::utils::dirs;

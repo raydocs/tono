@@ -11,6 +11,8 @@ pub mod update_contract;
 pub mod update_wire;
 #[cfg(any(feature = "client", feature = "standalone", feature = "test"))]
 pub mod release_wire;
+#[cfg(any(feature = "client", feature = "standalone"))]
+pub mod clean_goodbye;
 // The DIRECT admission lists, compiled from the same source as the compilers.
 #[cfg(any(feature = "client", feature = "standalone"))]
 #[path = "../../crates/tono-core/src/direct_domains.rs"]

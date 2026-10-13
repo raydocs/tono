@@ -625,10 +625,20 @@ fn schedule_owner_goodbye_shutdown() {
 fn owner_goodbye_verdict(
     kill_switch_wanted: bool,
     desired_running: Option<bool>,
+    another_user_signed_in: bool,
 ) -> std::result::Result<(), ServiceError> {
     if kill_switch_wanted {
         return Err(ServiceError::still_protected(
             "kill switch is armed; the service must stay alive to police the barrier",
+        ));
+    }
+    // The goodbye comes from one user's Quit. The Service is machine-wide: with another user
+    // signed in (even a disconnected session) an idle App of theirs would find it gone, and
+    // their next Connect would need a UAC prompt to start it again (#1293). Nothing is lost by
+    // leaving an idle daemon running, so the stricter side wins.
+    if another_user_signed_in {
+        return Err(ServiceError::still_protected(
+            "another user is signed in on this PC; the service stays alive for them",
         ));
     }
     match desired_running {
@@ -639,6 +649,26 @@ fn owner_goodbye_verdict(
         None => Err(ServiceError::still_protected(
             "the durable desired state could not be read",
         )),
+    }
+}
+
+/// An accepted owner goodbye has torn the IPC server down: leave the evidence the App needs to
+/// tell this clean stop from a crash (#1300). Nothing is recorded unless the goodbye was accepted
+/// and the kill switch is still neither wanted nor live; a failed write only costs the App the
+/// proof, so it never fails the stop.
+#[cfg(any(windows, test))]
+async fn note_clean_goodbye_if_accepted() {
+    if !OWNER_GOODBYE_PENDING.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let kill_switch = windows_kill_switch::status().await;
+    if kill_switch.wanted || kill_switch.live {
+        warn!("Owner goodbye stop: the kill switch is not idle; no clean-goodbye record is written");
+        return;
+    }
+    match crate::clean_goodbye::record() {
+        Ok(()) => info!("Owner goodbye stop: clean-goodbye record written (nothing armed)"),
+        Err(error) => warn!("Owner goodbye stop: clean-goodbye record could not be written: {error}"),
     }
 }
 
@@ -865,6 +895,8 @@ pub async fn run_ipc_supervisor_until_shutdown(
 
     stop_ipc_server().await?;
     server_handle.abort();
+    #[cfg(any(windows, test))]
+    note_clean_goodbye_if_accepted().await;
     Ok(())
 }
 

@@ -1,0 +1,5 @@
+## 2026-10-13 · 未连接退出后重开 App：Service 已停止时算不算“已证明无屏障”
+- Status: provisional（所有者可推翻；只有所有者能写 `owner` 或 `reversed`）
+- Chosen: 选 issue #1300 的方案 A。Service 在接受 owner-goodbye 并完成 IPC 拆除之后、退出之前，写一条“干净 goodbye、无任何拦截”的记录：`HKLM\SOFTWARE\<服务名>CleanGoodbye` 下的易失（volatile）键，值为写入时间。只有 goodbye 已被接受（`OWNER_GOODBYE_PENDING`）且此刻 `wanted` 与 `live` 都为 false 才写。每个 Service 实例获得 owner 锁之后、恢复或武装任何东西之前先删除它。App 在启动保护探测收不到应答时，如果记录存在且 SCM 报告 TonoService 为 Stopped，把它读成 `ProvenAbsent`（不显示 Protected Offline，下次退出也不再为了释放不存在的屏障而弹 UAC）。崩溃、SCM 停止、记录缺失或读不出、SCM 状态读不出，一律保持今天的 `Unknown→armed`。被否决的方案：B（启动时拉起已注册的 Service，每次启动一个 UAC 提示）；C（只在释放路径里跳过 `--start-registered`，界面仍显示“保护未知”）。记录不是 IPC 协议字段，所以不改 Service 协议版本；旧 Service 不写记录，新 App 对它的行为与今天一致。
+- Why stricter: 记录只有 SYSTEM 和管理员能写（HKLM），重启即消失，任何 Service 启动先删除，所以不能被普通用户伪造，也不能越过一次重启或一次重新启动。任何不确定都落回 Unknown→armed，不放宽 `Unknown` 的保守含义。代价：记录写入失败时用户多一次 UAC（与今天相同）。
+- Applied in: 本 PR（`apps/windows/service/src/clean_goodbye.rs`、`core/server/mod.rs`、`bin/service.rs`、`apps/windows/app/src-tauri/src/tono/commands/restore.rs`）

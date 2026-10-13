@@ -53,7 +53,19 @@ async fn probe_stored_protection(deadline: tokio::time::Instant) -> StoredProtec
                     },
                 };
             }
-            Ok(Err(error)) => last_error = error.to_string(),
+            Ok(Err(error)) => {
+                last_error = error.to_string();
+                let (service_stopped, clean_goodbye) = stopped_service_facts().await;
+                let outcome = unanswered_probe_outcome(service_stopped, clean_goodbye, last_error.clone());
+                if matches!(outcome, StoredProtection::ProvenAbsent { .. }) {
+                    logging!(
+                        info,
+                        Type::Service,
+                        "Tono: Service 已停止，且留有“干净 goodbye、无任何拦截”的记录，按“已证明无屏障”处理"
+                    );
+                    return outcome;
+                }
+            }
             Err(_elapsed) => {
                 last_error = format!("status probe exceeded the {RESTORE_TRANSACTION_TIMEOUT:?} restore budget");
                 break;
@@ -73,6 +85,42 @@ async fn probe_stored_protection(deadline: tokio::time::Instant) -> StoredProtec
         "Tono: 无法读取 Service 的保护状态，按“未知（仍可能已封锁）”处理: {last_error}"
     );
     StoredProtection::Unknown(last_error)
+}
+
+/// What a probe the Service did not answer proves (#1300, decision 114). A stopped Service is
+/// not evidence of an absent barrier on its own: a crash can leave persistent filters. It is
+/// when SCM reports it Stopped *and* it recorded a clean owner goodbye (accepted only with
+/// nothing armed, deleted by every Service start). Anything else stays unknown.
+fn unanswered_probe_outcome(
+    service_stopped: Option<bool>,
+    clean_goodbye_recorded: bool,
+    reason: String,
+) -> StoredProtection {
+    if service_stopped == Some(true) && clean_goodbye_recorded {
+        StoredProtection::ProvenAbsent {
+            reconnect_after_release: false,
+        }
+    } else {
+        StoredProtection::Unknown(reason)
+    }
+}
+
+/// `(SCM says Stopped, a clean goodbye is recorded)`. The record is read first, so a Service
+/// that starts in between is seen as not stopped, never as stopped-with-record.
+#[cfg(windows)]
+async fn stopped_service_facts() -> (Option<bool>, bool) {
+    tokio::task::spawn_blocking(|| {
+        let recorded = tono_service_protocol::clean_goodbye::recorded();
+        let stopped = if recorded { service::registered_service_stopped().ok() } else { None };
+        (stopped, recorded)
+    })
+    .await
+    .unwrap_or((None, false))
+}
+
+#[cfg(not(windows))]
+async fn stopped_service_facts() -> (Option<bool>, bool) {
+    (None, false)
 }
 
 /// Fold a protection reading into the FSM.
@@ -956,6 +1004,25 @@ mod offline_admission_tests {
         let (transaction, adopted) = reserve_restore_with_adoption(&state, Some(0), async { true }).await;
         assert!(adopted && transaction.is_none());
         assert_eq!(state.lock().await.sign_in_generation, user_generation);
+    }
+
+    /// #1300: a relaunch after an unprotected Quit finds the Service stopped by its own goodbye.
+    /// That proves nothing is armed; a crashed or merely stopped Service still proves nothing.
+    #[test]
+    fn a_stopped_service_with_a_clean_goodbye_record_proves_no_barrier() {
+        let reason = || "pipe not found".to_string();
+        assert!(matches!(
+            unanswered_probe_outcome(Some(true), true, reason()),
+            StoredProtection::ProvenAbsent { reconnect_after_release: false }
+        ));
+    }
+
+    #[test]
+    fn a_stopped_service_without_a_clean_goodbye_record_stays_unknown() {
+        assert!(matches!(
+            unanswered_probe_outcome(Some(true), false, "pipe not found".to_string()),
+            StoredProtection::Unknown(_)
+        ));
     }
 
     /// #582 T3: with the control plane unreachable, restore is Ready (offline) only on a positive

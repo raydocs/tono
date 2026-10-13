@@ -181,6 +181,21 @@ fn caller_session(_session_id: Option<u32>) -> CallerSession {
 /// place.
 #[cfg(all(windows, not(feature = "test")))]
 fn owner_signed_in(owner_key: &str) -> bool {
+    signed_in_user_matching(|key| key == owner_key)
+}
+
+/// Whether a user other than `caller_key` has a Windows logon session (same rules as
+/// [`owner_signed_in`], including that any unreadable session counts as signed in). An owner
+/// goodbye is refused while this is true (#1293).
+#[cfg(all(windows, not(feature = "test")))]
+pub(crate) fn another_user_signed_in(caller_key: &str) -> bool {
+    signed_in_user_matching(|key| key != caller_key)
+}
+
+/// Whether any Active, Connected or Disconnected logon session belongs to a user for whom
+/// `matches` holds.
+#[cfg(all(windows, not(feature = "test")))]
+fn signed_in_user_matching(matches: impl Fn(&str) -> bool) -> bool {
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
     use windows_sys::Win32::Foundation::{
         ERROR_CTX_WINSTATION_NOT_FOUND, ERROR_NO_TOKEN, GetLastError, LocalFree,
@@ -267,11 +282,17 @@ fn owner_signed_in(owner_key: &str) -> bool {
         }
         let token = unsafe { OwnedHandle::from_raw_handle(token) };
         match session_user_key(&token) {
-            Some(key) if key == owner_key => return true,
+            Some(key) if matches(&key) => return true,
             Some(_) => {}
             None => return true,
         }
     }
+    false
+}
+
+/// Off Windows, and in test builds, there is no logon session to find.
+#[cfg(not(all(windows, not(feature = "test"))))]
+pub(crate) fn another_user_signed_in(_caller_key: &str) -> bool {
     false
 }
 
