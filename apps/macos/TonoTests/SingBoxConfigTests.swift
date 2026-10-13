@@ -597,6 +597,44 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertLessThan(assistant, web)
     }
 
+    /// MAC-WEB-PINS-SUFFIX-STALE: a pin that a policy suffix covers kept being
+    /// resolved from its committed address, which a retired CDN answer left
+    /// dead, while the suffix rule beside it would have dialed the live one.
+    func testAWebPinThatAPolicySuffixCoversIsNotResolvedStatically() throws {
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta", claudeHomeNodeName: "Fixture Alpha")
+        let plan = ConfigPipeline.ManagedDirectRuntimePolicy(physicalInterface: "en0",
+            domainPins: [],
+            webDomainPins: [
+                .init(host: "static.example.cn", addresses: ["203.0.113.7"], ports: [443]),
+                .init(host: "img.example.org", addresses: ["203.0.113.8"], ports: [443]),
+            ],
+            webDomainSuffixes: [.init(host: "example.cn", ports: [80, 443])],
+            mediaEndpoints: [], trusted: true)
+        let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: nodes(), directPlan: plan)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        let servers = try XCTUnwrap((json["dns"] as? [String: Any])?["servers"] as? [[String: Any]])
+        let hosts = try XCTUnwrap(servers.first { $0["tag"] as? String == "Tono-Hosts" })
+        let predefined = try XCTUnwrap(hosts["predefined"] as? [String: Any])
+        XCTAssertEqual(predefined.keys.sorted(), ["img.example.org"])
+        let routeRules = try XCTUnwrap((json["route"] as? [String: Any])?["rules"] as? [[String: Any]])
+        let resolved = routeRules.filter { $0["action"] as? String == "resolve" }.flatMap { $0["domain"] as? [String] ?? [] }
+        XCTAssertEqual(resolved, ["img.example.org"])
+    }
+
+    func testAnUncoveredWebPinStaysLoadBearingWhileAPolicySuffixExists() {
+        let suffix = ConfigPipeline.DirectDomainSuffix(host: "example.cn", ports: [80, 443])
+        func plan(_ pins: [ConfigPipeline.DirectDomainPin]) -> ConfigPipeline.ManagedDirectRuntimePolicy {
+            ConfigPipeline.ManagedDirectRuntimePolicy(physicalInterface: "en0", domainPins: [],
+                webDomainPins: pins, webDomainSuffixes: [suffix], mediaEndpoints: [], trusted: true)
+        }
+        XCTAssertTrue(plan([.init(host: "img.example.org", addresses: ["203.0.113.8"], ports: [443])]).pinsAreLoadBearing)
+        XCTAssertTrue(plan([.init(host: "static.example.cn", addresses: ["203.0.113.7"], ports: [443, 8443])]).pinsAreLoadBearing,
+                      "a port the suffix does not route leaves the pin deciding that dial")
+        XCTAssertFalse(plan([.init(host: "static.example.cn", addresses: ["203.0.113.7"], ports: [443])]).pinsAreLoadBearing)
+    }
+
     /// #1258: a replacement Core starts with an empty fake-IP table and
     /// allocates from the start of its range. On the replaced process's range,
     /// a name an app still has cached resolves to another name.

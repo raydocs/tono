@@ -975,7 +975,7 @@ extension AppState {
             // gathers the inputs and carries out the verdict.
             let decision = ManagedDirectRefreshPolicy.decide(
                 .init(
-                    pinsAreLoadBearing: base.webDomainSuffixes.isEmpty,
+                    pinsAreLoadBearing: base.pinsAreLoadBearing,
                     routeUsedRecently: managedDirectRouteRecentlyUsed,
                     hasInFlightProxiedStream: hasInFlightProxiedStream,
                     deferralsSoFar: pinRefreshDeferralCount,
