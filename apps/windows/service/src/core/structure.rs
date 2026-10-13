@@ -143,6 +143,14 @@ impl ProtocolInfo {
             && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT
     }
 
+    /// Whether `ReplaceSingBoxRuntime` verifies the signed traffic policy a DIRECT document comes
+    /// from (#1280). An older Service admits the DIRECT shapes alone, so a new App skips the
+    /// optional overlay against it and keeps the full tunnel.
+    pub const fn supports_sing_box_direct_policy(&self) -> bool {
+        self.protocol.epoch == ProtocolVersion::current().epoch
+            && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT_POLICY
+    }
+
     /// Whether, armed without a tunnel, rule C permits the [`crate::API_RELAYS`] for the Tono
     /// app (decision 090), so the App may reach the control plane through them alone (091).
     pub const fn supports_api_relay_permit(&self) -> bool {
@@ -402,6 +410,33 @@ pub struct ReplaceSingBoxRuntimeRequest {
     /// rollback sets this false so failure cannot write DIRECT rules back.
     #[serde(default = "default_restore_previous")]
     pub restore_previous: bool,
+    /// Revision 22. The signed traffic policy the DIRECT rules in `runtime_json` come from. The
+    /// Service verifies it with the compiled-in policy key and admits only the DIRECT entries it
+    /// lists. A document with no DIRECT rule (the full-tunnel rollback) needs none; an older App
+    /// sends none, so a document with DIRECT rules is refused and the overlay is skipped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub traffic_policy: Option<SignedTrafficPolicy>,
+}
+
+/// Revision 22. The traffic policy exactly as the control plane served it: the signed JSON
+/// bytes, their detached Ed25519 signature (standard base64) over
+/// `tono-traffic-policy-v1\n` + `json`, and the envelope's revision, which must equal the
+/// revision embedded in the signed JSON when there is one.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignedTrafficPolicy {
+    pub revision: i64,
+    pub json: String,
+    pub signature: String,
+}
+
+impl std::fmt::Debug for SignedTrafficPolicy {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SignedTrafficPolicy")
+            .field("revision", &self.revision)
+            .field("json_len", &self.json.len())
+            .finish_non_exhaustive()
+    }
 }
 
 /// Revision 19. Permits for the rules the App already read back. No reload id:
@@ -959,6 +994,12 @@ pub struct ServiceStatusSnapshot {
     /// foreign. An older Service omits it and reads as false: the barrier is the caller's.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub kill_switch_held_by_another_user: bool,
+    /// The secondary AI hold is installed with no armed session behind it: a Quit, a replacement
+    /// sign-in, a crash or a failed update left it (decision 125). Only a full release removes
+    /// it, so an App that finds this set owes the user that release on Sign Out even when it is
+    /// idle. `None` from an older Service: unknown, and the App keeps its own in-process memory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_hold_retained: Option<bool>,
 }
 
 impl ServiceStatusSnapshot {
@@ -982,6 +1023,9 @@ impl ServiceStatusSnapshot {
                 last_error: None,
                 reconnect_after_release: false,
             };
+            // Another user's machine-wide barrier is armed, which a full release of ours could not
+            // remove: do not promise this caller a hold to release.
+            self.ai_hold_retained = self.ai_hold_retained.map(|_| false);
         }
         self
     }
@@ -1555,6 +1599,26 @@ mod tests {
         let status = seen.kill_switch.expect("the reading stays present");
         assert!(!status.wanted && !status.verified && !status.live);
         assert!(seen.kill_switch_held_by_another_user, "the flag still says who holds it");
+    }
+
+    /// Decision 125: another user's armed barrier is not a hold this caller could release.
+    #[test]
+    fn another_users_barrier_is_not_a_hold_the_caller_owes_a_release_for() {
+        let mut snapshot = snapshot_with_barrier(true);
+        snapshot.ai_hold_retained = Some(true);
+        assert_eq!(snapshot.seen_by_caller().ai_hold_retained, Some(false));
+        let mut own = snapshot_with_barrier(false);
+        own.ai_hold_retained = Some(true);
+        assert_eq!(own.seen_by_caller().ai_hold_retained, Some(true));
+    }
+
+    /// An older Service omits the field: unknown, never "no hold".
+    #[test]
+    fn a_snapshot_from_an_older_service_reports_no_hold_information() {
+        let snapshot = snapshot_with_barrier(false);
+        assert_eq!(snapshot.ai_hold_retained, None);
+        let json = serde_json::to_value(&snapshot).unwrap();
+        assert!(json.get("ai_hold_retained").is_none(), "an absent report is not serialized");
     }
 
     #[test]

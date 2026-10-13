@@ -133,6 +133,29 @@ fn an_old_teardown_cannot_reach_a_newer_session() {
 }
 
 #[test]
+fn a_narrow_release_queued_before_a_restore_cannot_reinstall_the_hold() {
+    // Restore internet released the machine and no Connect was admitted since: the older Quit or
+    // replacement release is still accepted as a teardown, but only as a full release.
+    for supplied in [None, Some(20), Some(21)] {
+        assert_eq!(narrow_release_verdict(&released(21), supplied), Some(false));
+    }
+}
+
+#[test]
+fn a_narrow_release_for_a_live_session_still_keeps_the_hold() {
+    let secured = Record {
+        generation: 22,
+        ..Record::default()
+    };
+    assert_eq!(narrow_release_verdict(&secured, Some(22)), Some(true));
+    assert_eq!(
+        narrow_release_verdict(&secured, Some(20)),
+        None,
+        "an older session's release is refused, as before"
+    );
+}
+
+#[test]
 fn a_live_worker_blocks_admission() {
     let live = Processes {
         alive: Box::new(|incarnation| Some(incarnation.pid == 4242)),

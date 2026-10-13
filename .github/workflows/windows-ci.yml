@@ -56,7 +56,61 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'merge_group' && github.event_name != 'workflow_call' }}
 
 jobs:
+  release-duplicate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Release-branch duplicate wiring
+        run: |
+          node <<'NODE'
+          const fs = require('fs')
+          const yaml = fs.readFileSync('.github/workflows/windows-ci.yml', 'utf8')
+          const jobs = ['core', 'core-coverage', 'app', 'app-rust', 'service']
+          const need = 'needs: release-' + 'duplicate'
+          const needs = yaml.split('\n').filter((line) => line.trim() === need)
+          if (needs.length !== jobs.length) throw new Error('expected ' + jobs.length + ' needs, got ' + needs.length)
+          const gate = "needs.release-" + "duplicate.result == 'success' && needs.release-" + "duplicate.outputs.skip != 'true'"
+          const gates = yaml.split('\n').filter((line) => line.includes(gate))
+          if (gates.length !== jobs.length) throw new Error('expected ' + jobs.length + ' gates, got ' + gates.length)
+          const call = 'macos-ci-skip-duplicate.mjs --' + 'event'
+          if (!yaml.includes(call)) throw new Error('missing release skip script')
+          if (yaml.includes('macos-ci-skip-duplicate.mjs --' + 'decide')) throw new Error('this workflow must not use the macOS main-push decider')
+          console.log('release duplicate skip gates ' + jobs.length + ' jobs')
+          NODE
+
+      - name: Skip a release-branch push whose commit is already on main
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          status=unknown
+          ahead=1
+          case "$EVENT_NAME:$REF_NAME" in
+            push:refs/heads/release/macos|push:refs/heads/release/windows)
+              if meta=$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${GITHUB_SHA}" --jq '{status:.status,ahead_by:.ahead_by}'); then
+                parsed=$(printf '%s' "$meta" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const j=JSON.parse(s);if(typeof j.status!=="string"||typeof j.ahead_by!=="number")process.exit(1);process.stdout.write(j.status+" "+j.ahead_by)})')
+                status=${parsed%% *}
+                ahead=${parsed##* }
+              else
+                echo "compare API failed; running the suite" >&2
+              fi
+              ;;
+          esac
+          skip=$(node tooling/scripts/macos-ci-skip-duplicate.mjs --event "$EVENT_NAME" --ref "$REF_NAME" --status "$status" --ahead-by "$ahead")
+          case "$skip" in true|false) ;; *) echo "bad skip token" >&2; exit 1 ;; esac
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          printf 'release duplicate skip=%s event=%s ref=%s sha=%s status=%s ahead=%s\n' "$skip" "$EVENT_NAME" "$REF_NAME" "$GITHUB_SHA" "$status" "$ahead" | tee -a "$GITHUB_STEP_SUMMARY"
+
   core:
+    needs: release-duplicate
+    if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     # Platform-independent, and verified passing outside Windows: 157 tests over
     # config, catalog, connection, auth, node, policy, and credentials. Running it
     # on Linux keeps the cheap half of the coverage fast and unconditional.
@@ -120,6 +174,8 @@ jobs:
           cargo "+$toolchain" clippy --locked -p tono-core --all-targets -- -D warnings
 
   core-coverage:
+    needs: release-duplicate
+    if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     name: tono-core coverage (report only)
     # Reports line coverage of tono-core in the run summary and enforces no
     # floor. It has no `needs`, so it runs beside the Windows jobs instead of
@@ -156,6 +212,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   app:
+    needs: release-duplicate
+    if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     # 17 test files, 110 tests, a typecheck, and nothing ran any of them: the
     # release workflow runs one subset of them and only from a tag, which is after
     # the point where a failure is cheap. Verified locally before being made a
@@ -233,6 +291,8 @@ jobs:
         run: pnpm test:dev-control
 
   app-rust:
+    needs: release-duplicate
+    if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     # The `app` job above type-checks and unit-tests the frontend. Nothing ran
     # the Tauri crate's own 357 Rust tests — not this workflow, not the release
     # one — so two of them had been failing unnoticed. On Windows because that is
@@ -350,6 +410,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Shared update contract failed' }
 
   service:
+    needs: release-duplicate
+    if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     runs-on: windows-2025
     env:
       CARGO_INCREMENTAL: "0"

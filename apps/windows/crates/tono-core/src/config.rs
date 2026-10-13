@@ -34,57 +34,8 @@ pub const DIRECT_GROUP_NAME: &str = "Tono-China-Direct";
 pub const WEB_DIRECT_GROUP_NAME: &str = "Tono-China-Web-Direct";
 pub use crate::direct_domains::{
     ADDRESS_FREE_WEB_SUFFIXES, CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS,
-    DEDICATED_MODEL_API_SUFFIXES, is_address_free_web_suffix,
+    ALWAYS_ADDRESS_FREE_WEB_SUFFIXES, DEDICATED_MODEL_API_SUFFIXES, is_address_free_web_suffix,
 };
-/// Always attached to a native-app DIRECT plan, even if the published policy
-/// omitted them. Unidentified helpers and browsers hit these trees.
-pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 45] = [
-    "qq.com",
-    "baidu.com",
-    "aliyuncs.com",
-    "edu.cn",
-    "weixinbridge.com",
-    "bilibili.com",
-    "taobao.com",
-    "tmall.com",
-    "alipay.com",
-    "alicdn.com",
-    "jd.com",
-    "douyin.com",
-    "163.com",
-    "netease.com",
-    "weibo.com",
-    "meituan.com",
-    "dianping.com",
-    "pinduoduo.com",
-    "amap.com",
-    "douyu.com",
-    "huya.com",
-    "kuaishou.com",
-    "yy.com",
-    "ixigua.com",
-    "iqiyi.com",
-    "youku.com",
-    "mgtv.com",
-    "xiaohongshu.com",
-    "wps.cn",
-    "kdocs.cn",
-    "yuque.com",
-    "voovmeeting.com",
-    "12306.cn",
-    "kugou.com",
-    "kuwo.cn",
-    "migu.cn",
-    "ximalaya.com",
-    "qingting.fm",
-    "xylink.com",
-    "zhumu.me",
-    "quanshi.com",
-    "zhihu.com",
-    "zhimg.com",
-    "goofish.com",
-    "1688.com",
-];
 
 /// Main and known helper executables for the three reviewed China-office
 /// clients. These names are used only alongside exact cloud-approved media

@@ -371,6 +371,10 @@ pub struct TonoInner {
     /// and safety checks (`managed-traffic-policy.json`).
     pub policy_tracker: tono_core::policy::PolicyTracker,
     pub traffic_policy: Option<tono_core::policy::TonoTrafficPolicy>,
+    /// The signed response `traffic_policy` was read from, exactly as the control plane served
+    /// it. The Service re-verifies the signature before it admits any sing-box DIRECT rule
+    /// (#1280), so these bytes are forwarded unchanged and never rebuilt from the document.
+    pub traffic_policy_response: Option<tono_core::policy::TonoTrafficPolicyResponse>,
     /// A policy *behavior change* that arrived while the FSM was Connecting
     /// (F5). `handle_network_change_inner` has nothing to act on mid-connect —
     /// no session exists to tear down — so the change is recorded here and the
@@ -865,6 +869,7 @@ impl TonoState {
                 hy2_switch: Default::default(),
                 policy_tracker: tono_core::policy::PolicyTracker::new(),
                 traffic_policy: None,
+                traffic_policy_response: None,
                 pending_policy_change: None,
                 applied_wechat_path_regexes: None,
                 optional_direct_active: false,
