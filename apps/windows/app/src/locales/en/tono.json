@@ -22,7 +22,7 @@
     "useRecommendation": "Select suggested route",
     "selectOnly": "Selects only. Use Connect when ready.",
     "selectedRecommendation": "Route selected. Use Connect when ready.",
-    "noRecommendation": "No fresh evidence for this region. Run Test All or choose a node yourself; TCP results are not tunnel verification.",
+    "noRecommendation": "No fresh evidence for this region. Run “Test all” or choose a node yourself; TCP results are not tunnel verification.",
     "keepsConnection": "Recommendations are available before connecting. Your active route stays unchanged.",
     "loadFailed": "Route preferences could not be read.",
     "saveFailed": "Could not save these preferences. The account or catalog may have changed; retry after refreshing.",
@@ -356,7 +356,7 @@
     "claudeHomeStandard": "Standard Cloud Protection (Data Center)",
     "claudeHomeHint": "Claude web, API, Claude Code, and verification use the dedicated residential exit. Tono routes every Chrome and Edge profile together; profile-level routing is unavailable.",
     "claudeStandardHint": "All traffic routed through selected cloud node",
-    "viewProtectedRules": "View Rules",
+    "viewProtectedRules": "View rules",
     "rulesTitle": "Claude / AI Residential Protection Scope",
     "rulesDescription": "The following traffic is transparently captured via TUN virtual adapter and forwarded through high-reputation residential broadband exits to prevent IP flagging:\n\n• Anthropic Core Services: *.anthropic.com, *.claude.ai\n• Cloudflare Turnstile Verification: challenges.cloudflare.com, cf-assets.www.cloudflare.com\n• Telemetry & Feature Flags: *.datadoghq.com, *.statsigapi.net, *.stripe.network\n• Local Developer Apps: Claude Code CLI, Claude Desktop\n\nZero terminal configuration required.",
     "secureDnsHint": "Claude Web requires Chrome and Edge Secure DNS to be Off or Automatic without a custom provider. Fully restart the browser, then reconnect Tono after changing it.",
@@ -400,11 +400,11 @@
       "coreUnpinned": "This copy of Tono is missing its integrity check. Install the latest Tono — reinstalling the same copy will not help.",
       "coreMismatch": "This copy of Tono does not match its core. Install the latest Tono.",
       "dnsPortBusy": "The connection didn't complete.",
-      "protectionReleaseFailed": "Leak protection is still on, so this PC stays blocked. Try Restore normal internet again.",
+      "protectionReleaseFailed": "Leak protection is still on, so this PC stays blocked. Try “Restore normal internet” again.",
       "encryptedDns": "The connection didn't complete.",
       "sendDiagnostics": "Send to support",
       "releaseInProgress": "Tono is restoring normal internet. Connect once it finishes, in a few seconds.",
-      "releaseUnfinished": "The last internet restore has not fully finished, so Tono cannot connect yet. Choose Restore Normal Internet again, or restart the PC and connect.",
+      "releaseUnfinished": "The last internet restore has not fully finished, so Tono cannot connect yet. Choose “Restore normal internet” again, or restart the PC and connect.",
       "releaseRecordCorrupt": "Tono cannot read the record of the last internet restore, so it will not connect. Restart the PC; if that does not help, contact support.",
       "staleGeneration": "This connection was started before the internet restore and was cancelled. Connect again."
     },
@@ -465,15 +465,15 @@
     "encryptedDnsTitle": "Windows Encrypted DNS is blocking the connection",
     "encryptedDnsBody": "Encrypted DNS blocked this connection.",
     "releasedFailureBody": "The connection didn't complete. The original network stays available.",
-    "protectionUnknownBody": "Tono cannot confirm network protection. Repair the service if prompted, or choose Restore Normal Internet.",
+    "protectionUnknownBody": "Tono cannot confirm network protection. Repair the service if prompted, or choose “Restore normal internet”.",
     "completedCount": "{{count}} completed",
     "technicalDetails": "Technical details",
     "switchRoute": "Choose another route",
     "tryBackupChannel": "Try backup channel",
     "retryIn": "Retry {{n}} in {{seconds}}s",
     "retrying": "Retrying…",
-    "retryNow": "Retry Now",
-    "restore": "Restore Normal Internet",
+    "retryNow": "Retry now",
+    "restore": "Restore normal internet",
     "restoreConfirmTitle": "Restore normal internet",
     "restoreConfirmMessage": "This will release network protection and restore normal Internet access.",
     "copyDetails": "Copy details",
@@ -518,8 +518,8 @@
       "checkingExit": "checking the exit",
       "verifyingTraffic": "verifying the connection"
     },
-    "restorePartial": "Internet is not fully restored: some of Tono's network settings are still in effect. Choose Restore Normal Internet again; if that does not help, restart the PC.",
-    "restoreUnknown": "Tono cannot confirm that the internet is restored. Choose Restore Normal Internet again; if that does not help, restart the PC.",
+    "restorePartial": "Internet is not fully restored: some of Tono's network settings are still in effect. Choose “Restore normal internet” again; if that does not help, restart the PC.",
+    "restoreUnknown": "Tono cannot confirm that the internet is restored. Choose “Restore normal internet” again; if that does not help, restart the PC.",
     "restoreBusy": "Restoring the internet. Wait a few seconds, then try again."
   },
   "nodes": {
@@ -530,9 +530,9 @@
     "readyToConnect": "Available",
     "untested": "Not tested",
     "catalogSynced": "Node list synced",
-    "testCurrent": "Test Current",
-    "testAll": "Test All",
-    "cancelTest": "Cancel Test",
+    "testCurrent": "Test current",
+    "testAll": "Test all",
+    "cancelTest": "Cancel test",
     "refresh": "Refresh",
     "refreshing": "Refreshing…",
     "refreshSuccess": "Cloud servers are up to date.",
@@ -553,7 +553,7 @@
     "catalogVerified": "catalog verified",
     "lastSynced": "Last synced: {{time}}",
     "waitingForSync": "Waiting for first sync",
-    "verifiedSyncHint": "Automatic sync runs every 5 minutes. Invalid updates never replace the last verified copy. Test All is available while disconnected.",
+    "verifiedSyncHint": "Automatic sync runs every 5 minutes. Invalid updates never replace the last verified copy. “Test all” is available while disconnected.",
     "catalogError": "Latest refresh failed: {{error}}",
     "protocol": {
       "backup": "Backup channel",
@@ -593,7 +593,7 @@
     "revoke": "Revoke",
     "revokeConfirmTitle": "Revoke device",
     "revokeConfirmMessage": "Revoke \"{{name}}\"? It will be signed out immediately.",
-    "signOut": "Sign Out",
+    "signOut": "Sign out",
     "signOutConfirmTitle": "Sign out",
     "signOutConfirmMessage": "Signing out will disconnect the VPN and remove this device from your account. Continue?"
   },
@@ -642,16 +642,16 @@
       "description": "Copy the current redacted report, or explicitly confirm an upload to receive a support reference code. Preview and upload use the same backend report builder."
     },
     "terminalEnv": {
-      "title": "Claude Code / Terminal Environment Diagnostics",
+      "title": "Claude Code / terminal environment check",
       "checking": "Checking…",
       "checkingDesc": "Inspecting system and process proxy environment variables…",
-      "checkFailed": "Check Failed",
+      "checkFailed": "Check failed",
       "checkFailedDesc": "Failed to inspect terminal environment variables. Please retry.",
-      "ready": "Environment Ready",
-      "conflictDetected": "Proxy Residue Detected",
+      "ready": "Environment ready",
+      "conflictDetected": "Proxy residue detected",
       "readyDesc": "System environment variables are clean. Terminal traffic is transparently routed via Tono TUN virtual adapter. Claude Code, git, npm, and pip work out-of-the-box without manual proxy configuration.",
       "conflictDesc": "Proxy variables were detected in a process or persistent terminal source. They can cause terminal tools to fail with ECONNREFUSED; follow each source-specific instruction.",
-      "clearAction": "Clear Safe User Environment Variables",
+      "clearAction": "Clear safe user environment variables",
       "clearing": "Clearing…",
       "clearSuccess": "Successfully cleared safe user proxy environment variables",
       "clearPartial": "Cleared safe user environment variables; manually fix the remaining sources",
@@ -687,7 +687,7 @@
       "effectHint": "Changes save automatically on this PC. They do not change your current connection.",
       "launchAtStartup": "Open at sign-in",
       "launchAtStartupHint": "Open Tono at your next Windows sign-in. Enabled after the first successful connection; you can change it here.",
-      "language": "Interface Language",
+      "language": "Interface language",
       "languageHint": "Applies to this window after saving. No reconnect or restart needed.",
       "readFailed": "Couldn't read the saved settings.",
       "saveFailed": "Couldn't confirm the change. Reload the saved choices before trying again.",
@@ -695,13 +695,13 @@
     },
     "appearance": {
       "title": "Appearance",
-      "themeMode": "Theme Mode",
+      "themeMode": "Theme mode",
       "theme": {
         "light": "Light",
         "dark": "Dark",
         "system": "System"
       },
-      "glass": "Glass Transparency",
+      "glass": "Glass transparency",
       "glassSubtitle": "How much of the ambient background shows through",
       "refined": "Refined materials",
       "refinedSubtitle": "Larger radii, hairlines, and heavier glass. Turn off to match the current shipped look."
@@ -810,10 +810,6 @@
       "unscheduled": "Direct traffic is blocked. No automatic retry is scheduled. Retry now or restore normal internet.",
       "scheduled": "Direct traffic is blocked. Retrying automatically in {{seconds}} seconds.",
       "now": "Direct traffic is blocked. Retrying automatically."
-    },
-    "recovery": {
-      "scheduled": "Automatic retry scheduled",
-      "unscheduled": "Automatic retry not scheduled"
     }
   },
   "seaLines": {
@@ -821,6 +817,7 @@
     "explanation": "Server preferences explained",
     "inUse": "In use",
     "all": "All servers · {{count}}",
+    "others": "Other servers · {{count}}",
     "evidence": "Connected and verified in the last 24 hours",
     "noEvidence": "No recent record",
     "selected": "Selected {{name}} · {{latency}}"

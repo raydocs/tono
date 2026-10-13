@@ -172,9 +172,12 @@ export const TrayPanel = () => {
   const { data: progress } = useQuery({
     queryKey: tonoConnectProgressQueryKey,
     queryFn: tonoConnectProgress,
+    // Not connected reads it once, so a released failure shows as on the home.
     enabled:
       newAppearance &&
-      (uiState === 'connecting' || uiState === 'protectedOffline'),
+      (uiState === 'connecting' ||
+        uiState === 'protectedOffline' ||
+        uiState === 'notConnected'),
     refetchInterval:
       newAppearance &&
       (uiState === 'connecting' || uiState === 'protectedOffline')
@@ -267,7 +270,9 @@ export const TrayPanel = () => {
   })
 
   if (newAppearance) {
-    const presentation = seaPresentation(status)
+    const releasedFailure =
+      uiState === 'notConnected' && progress?.error != null
+    const presentation = seaPresentation(status, releasedFailure)
     const subtitle =
       uiState === 'connecting'
         ? t(
@@ -296,7 +301,9 @@ export const TrayPanel = () => {
           action
             ? uiState === 'connecting'
               ? t('tono.dashboard.cancelConnecting')
-              : t(ACTION_LABEL[action])
+              : releasedFailure && action === 'connect'
+                ? t('tono.dashboard.errorRetry')
+                : t(ACTION_LABEL[action])
             : t(
                 uiState === 'disconnecting'
                   ? 'tono.tray.disconnecting'
@@ -312,7 +319,7 @@ export const TrayPanel = () => {
         onSelect={(name) => void pickServer(name)}
         traffic={
           connected && trafficLive
-            ? `↑ ${up} ${upUnit}/s · ↓ ${down} ${downUnit}/s`
+            ? `↓ ${down} ${downUnit}/s · ↑ ${up} ${upUnit}/s`
             : null
         }
         ai={connected && status?.claudeHomeActive === true}
