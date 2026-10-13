@@ -80,11 +80,13 @@ pub(super) async fn reconcile_direct_watchdog_invalidation_unlocked(
     let transition = transition_direct_to_blocked_unlocked(armed, current_core, next_lease).await;
     note_verify(transition.is_ok());
     if let Err(error) = transition {
-        if !release || !error.is::<DirectBlockedIntentPersistenceFailure>() {
+        // Exact Blocked WFP was proved when only the intent write failed; that still queues the
+        // release (a failed narrowing never does).
+        if !(release || incomplete_expiry) || !error.is::<DirectBlockedIntentPersistenceFailure>() {
             return Err(error);
         }
         tracing::warn!(
-            "wfp: {reason}; exact Blocked WFP was proved; releasing despite intent persistence failure: {error:#}"
+            "wfp: {reason}; exact Blocked WFP was proved; continuing despite intent persistence failure: {error:#}"
         );
     }
     if release {

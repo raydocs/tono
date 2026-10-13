@@ -298,6 +298,9 @@ pub(super) static FRESH_ARM_PROOF_PENDING: AtomicBool = AtomicBool::new(false);
 /// Committed DIRECT expiry must retire its Service-owned Core before opening general traffic.
 /// A late Lock/MarkVerified from the expired session cannot cancel that retirement.
 pub(super) static DIRECT_EXPIRY_RETIREMENT_PENDING: AtomicBool = AtomicBool::new(false);
+/// The pending wanted-Core window was queued by an expired incomplete DIRECT reload (decision 116)
+/// and may still be withdrawn by a live replacement lease; no other window is.
+pub(super) static INCOMPLETE_DIRECT_RECOVERY_PENDING: AtomicBool = AtomicBool::new(false);
 pub(super) static FRESH_ARM_EPOCH: AtomicU64 = AtomicU64::new(0);
 
 /// Bind a Core watchdog to the arm that admitted it. A successor arms before joining the
@@ -432,6 +435,7 @@ pub(super) fn core_still_expected(running: bool) -> bool {
 pub(super) fn clear_wanted_core_window() {
     UPDATE_RELEASE_LATCHED.store(false, Ordering::Release);
     DIRECT_EXPIRY_RETIREMENT_PENDING.store(false, Ordering::Release);
+    INCOMPLETE_DIRECT_RECOVERY_PENDING.store(false, Ordering::Release);
     FRESH_ARM_PROOF_PENDING.store(false, Ordering::Release);
     *WANTED_CORE_DEADLINE
         .lock()
@@ -462,8 +466,25 @@ pub(in crate::core) fn expired_fresh_arm_owner(epoch: u64) -> Option<String> {
     }
     armed_guard()
         .as_ref()
-        .filter(|armed| armed.intent.wanted && !armed.intent.strict_kill_switch)
+        .filter(|armed| {
+            armed.intent.wanted
+                && !armed.intent.strict_kill_switch
+                && !incomplete_recovery_superseded(armed)
+        })
         .and_then(|armed| armed.intent.owner_key.clone())
+}
+
+/// A window queued by an expired incomplete DIRECT reload is void once the App has put a live
+/// lease back (a finished reload commits and renews without another MarkVerified), so the old
+/// deadline must not retire the session the App just recovered.
+pub(super) fn incomplete_recovery_superseded(armed: &Armed) -> bool {
+    INCOMPLETE_DIRECT_RECOVERY_PENDING.load(Ordering::Acquire)
+        && armed.direct_reload.as_ref().is_some_and(|lease| {
+            lease.phase != DirectReloadPhase::Retracting
+                && lease
+                    .expires_at
+                    .is_some_and(|deadline| std::time::Instant::now() < deadline)
+        })
 }
 
 pub(in crate::core) async fn release_expired_fresh_arm(epoch: u64) -> Result<()> {
@@ -484,6 +505,7 @@ pub(super) fn queue_direct_expiry_retirement() -> bool {
         return false;
     }
     DIRECT_EXPIRY_RETIREMENT_PENDING.store(true, Ordering::Release);
+    INCOMPLETE_DIRECT_RECOVERY_PENDING.store(false, Ordering::Release);
     *WANTED_CORE_DEADLINE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
@@ -518,6 +540,7 @@ pub(super) fn queue_incomplete_direct_recovery_release() -> bool {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     *current = Some(current.map_or(deadline, |current| current.min(deadline)));
     drop(current);
+    INCOMPLETE_DIRECT_RECOVERY_PENDING.store(true, Ordering::Release);
     if owned {
         // An owned session has a Core to stop first; the lifecycle worker does that.
         FRESH_ARM_PROOF_PENDING.store(true, Ordering::Release);

@@ -3464,12 +3464,8 @@ async fn pending_direct_lease_expiry_reconciles_to_exact_blocked() -> Result<()>
     Ok(())
 }
 
-/// #1056 R3KS1-PENDING-EXPIRY (decision 116): an App that died mid-reload must not leave a
-/// healthy machine at Blocked forever. The expiry still narrows to exact Blocked at once, then
-/// the bounded recovery release retires the Core and opens general traffic with the AI hold.
-#[tokio::test]
-#[serial]
-async fn expired_pending_direct_reload_releases_a_non_strict_session_after_the_grace() -> Result<()> {
+/// An armed, verified, non-strict session whose Pending DIRECT lease has just expired.
+async fn expired_pending_direct_session() -> Result<(CoreInstance, Armed, std::time::Instant, String)> {
     cleanup().await;
     let core = locked_direct_test_session().await?;
     mark_verified("owner-alice").await?;
@@ -3485,30 +3481,115 @@ async fn expired_pending_direct_reload_releases_a_non_strict_session_after_the_g
     let pending = armed_guard().clone().expect("pending state");
     let now = std::time::Instant::now();
     let reason = direct_reload_invalidation_reason(&pending, Some(core), pending.tun_luid, now)
-        .expect("the expired pending set must invalidate DIRECT");
+        .expect("the expired pending set must invalidate DIRECT")
+        .to_owned();
+    Ok((core, pending, now, reason))
+}
 
-    reconcile_direct_watchdog_invalidation_unlocked(pending, Some(core), now, reason).await?;
+fn queued_wanted_core_deadline() -> Option<std::time::Instant> {
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// #1056 R3KS1-PENDING-EXPIRY (decision 116): an App that died mid-reload must not leave a
+/// healthy machine at Blocked forever. The expiry still narrows to exact Blocked at once, then
+/// the bounded recovery release retires the Core and opens general traffic with the AI hold.
+#[tokio::test]
+#[serial]
+async fn expired_pending_direct_reload_releases_a_non_strict_session_after_the_grace() -> Result<()> {
+    let (core, pending, now, reason) = expired_pending_direct_session().await?;
+
+    reconcile_direct_watchdog_invalidation_unlocked(pending, Some(core), now, &reason).await?;
 
     assert_eq!(
         armed_guard().as_ref().expect("still armed").intent.mode,
         KillSwitchStatusMode::Blocked,
         "the expiry itself stays fail-closed"
     );
-    let queued = *WANTED_CORE_DEADLINE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let queued = queued_wanted_core_deadline()
+        .expect("a non-strict session left at Blocked must be queued for the bounded recovery release");
     assert!(
-        queued.is_some_and(|deadline| deadline > now),
-        "a non-strict session left at Blocked must be queued for the bounded recovery release"
+        queued > now + INCOMPLETE_DIRECT_RECOVERY_GRACE - std::time::Duration::from_secs(5)
+            && queued <= std::time::Instant::now() + INCOMPLETE_DIRECT_RECOVERY_GRACE,
+        "the release waits the grace, not less and not more"
+    );
+    assert!(
+        expired_fresh_arm_owner(core_arm_epoch()).is_none(),
+        "nothing retires the session before the grace is over"
     );
     // The App does not come back within the grace.
     *WANTED_CORE_DEADLINE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) =
         Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+    assert!(expired_fresh_arm_owner(core_arm_epoch()).is_some());
     crate::core::server::retire_expired_fresh_arm(core_arm_epoch()).await?;
     assert!(armed_guard().is_none(), "the abandoned reload must release");
     assert!(crate::core::selective_layer::test_hold_active());
+    cleanup().await;
+    Ok(())
+}
+
+/// Decision 116: an App that finishes a new reload within the grace keeps its session; the old
+/// deadline must neither retire it nor leave the status unverified.
+#[tokio::test]
+#[serial]
+async fn a_live_replacement_lease_withdraws_the_incomplete_reload_release() -> Result<()> {
+    let (core, pending, now, reason) = expired_pending_direct_session().await?;
+    reconcile_direct_watchdog_invalidation_unlocked(pending, Some(core), now, &reason).await?;
+    assert!(queued_wanted_core_deadline().is_some());
+
+    let blocked = armed_guard().clone().expect("blocked state");
+    let recovered = DirectReloadLease {
+        owner_generation: 124,
+        reload_id: 9_124,
+        phase: DirectReloadPhase::Committed,
+        endpoint_digest: crate::direct_endpoint_digest(&blocked.direct_endpoints).unwrap(),
+        core_instance: Some(core),
+        tunnel_luid: blocked.tun_luid,
+        expires_at: Some(std::time::Instant::now() + std::time::Duration::from_secs(60)),
+    };
+    armed_guard().as_mut().expect("armed").direct_reload = Some(recovered);
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+
+    assert!(
+        expired_fresh_arm_owner(core_arm_epoch()).is_none(),
+        "a live lease must not be retired by the old deadline"
+    );
+    assert_eq!(
+        reconcile_wanted_core_window_unlocked().await?,
+        WantedCoreWindow::Keep
+    );
+    assert!(queued_wanted_core_deadline().is_none());
+    assert!(!FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire));
+    assert!(armed_guard().is_some(), "the recovered session stays armed");
+    cleanup().await;
+    Ok(())
+}
+
+/// Decision 116: the exact Blocked WFP was proved and only the intent write failed; the release
+/// is still queued (a failed narrowing never is).
+#[tokio::test]
+#[serial]
+async fn incomplete_expiry_queues_the_release_when_only_intent_persistence_fails() -> Result<()> {
+    let (core, pending, now, reason) = expired_pending_direct_session().await?;
+
+    let failures = SimulatedStateFailures::arm(true, false);
+    reconcile_direct_watchdog_invalidation_unlocked(pending, Some(core), now, &reason).await?;
+    drop(failures);
+
+    assert_eq!(
+        armed_guard().as_ref().expect("still armed").intent.mode,
+        KillSwitchStatusMode::Blocked
+    );
+    assert!(
+        queued_wanted_core_deadline().is_some(),
+        "a persistence failure after proved Blocked WFP must not strand the session"
+    );
     cleanup().await;
     Ok(())
 }
