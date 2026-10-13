@@ -298,6 +298,24 @@ pub(super) static FRESH_ARM_PROOF_PENDING: AtomicBool = AtomicBool::new(false);
 /// Committed DIRECT expiry must retire its Service-owned Core before opening general traffic.
 /// A late Lock/MarkVerified from the expired session cannot cancel that retirement.
 pub(super) static DIRECT_EXPIRY_RETIREMENT_PENDING: AtomicBool = AtomicBool::new(false);
+/// The pending wanted-Core window was queued by an expired incomplete DIRECT reload (decision 116)
+/// and may still be withdrawn by a live replacement lease; no other window is.
+pub(super) static INCOMPLETE_DIRECT_RECOVERY: Lazy<Mutex<Option<DisplacedWantedCoreWindow>>> =
+    Lazy::new(|| Mutex::new(None));
+
+/// What the incomplete-reload window replaced, so withdrawing it restores that window instead of
+/// clearing a fresh-Connect verification window it never owned.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct DisplacedWantedCoreWindow {
+    deadline: Option<std::time::Instant>,
+    fresh_arm_proof_pending: bool,
+}
+
+fn incomplete_recovery_slot() -> std::sync::MutexGuard<'static, Option<DisplacedWantedCoreWindow>> {
+    INCOMPLETE_DIRECT_RECOVERY
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 pub(super) static FRESH_ARM_EPOCH: AtomicU64 = AtomicU64::new(0);
 
 /// Bind a Core watchdog to the arm that admitted it. A successor arms before joining the
@@ -432,6 +450,7 @@ pub(super) fn core_still_expected(running: bool) -> bool {
 pub(super) fn clear_wanted_core_window() {
     UPDATE_RELEASE_LATCHED.store(false, Ordering::Release);
     DIRECT_EXPIRY_RETIREMENT_PENDING.store(false, Ordering::Release);
+    *incomplete_recovery_slot() = None;
     FRESH_ARM_PROOF_PENDING.store(false, Ordering::Release);
     *WANTED_CORE_DEADLINE
         .lock()
@@ -462,8 +481,25 @@ pub(in crate::core) fn expired_fresh_arm_owner(epoch: u64) -> Option<String> {
     }
     armed_guard()
         .as_ref()
-        .filter(|armed| armed.intent.wanted && !armed.intent.strict_kill_switch)
+        .filter(|armed| {
+            armed.intent.wanted
+                && !armed.intent.strict_kill_switch
+                && !incomplete_recovery_superseded(armed)
+        })
         .and_then(|armed| armed.intent.owner_key.clone())
+}
+
+/// A window queued by an expired incomplete DIRECT reload is void once the App has put a live
+/// lease back (a finished reload commits and renews without another MarkVerified), so the old
+/// deadline must not retire the session the App just recovered.
+pub(super) fn incomplete_recovery_superseded(armed: &Armed) -> bool {
+    incomplete_recovery_slot().is_some()
+        && armed.direct_reload.as_ref().is_some_and(|lease| {
+            lease.phase != DirectReloadPhase::Retracting
+                && lease
+                    .expires_at
+                    .is_some_and(|deadline| std::time::Instant::now() < deadline)
+        })
 }
 
 pub(in crate::core) async fn release_expired_fresh_arm(epoch: u64) -> Result<()> {
@@ -484,11 +520,68 @@ pub(super) fn queue_direct_expiry_retirement() -> bool {
         return false;
     }
     DIRECT_EXPIRY_RETIREMENT_PENDING.store(true, Ordering::Release);
+    *incomplete_recovery_slot() = None;
     *WANTED_CORE_DEADLINE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
     FRESH_ARM_PROOF_PENDING.store(true, Ordering::Release);
     true
+}
+
+/// How long an expired, never-committed DIRECT reload (Bracket or Pending) may leave a non-strict
+/// session at exact Blocked before the Service retires it (#1056 R3KS1-PENDING-EXPIRY, decision
+/// 116). The Pending lease is the same length: the App gets as long again to re-establish the
+/// session, then a session nobody re-verified is treated as App death, like a lost committed
+/// heartbeat, and opens general traffic with the AI hold.
+pub(super) const INCOMPLETE_DIRECT_RECOVERY_GRACE: std::time::Duration =
+    std::time::Duration::from_secs(90);
+
+/// An incomplete DIRECT reload expired and the Service narrowed to exact Blocked. A live App
+/// recovers through a fresh Connect (re-arm) or `mark_verified`, both of which clear the window;
+/// when neither comes, the existing epoch-fenced retirement stops the Core and releases. Unlike
+/// committed expiry this does not set `DIRECT_EXPIRY_RETIREMENT_PENDING`: Lock and MarkVerified
+/// stay admitted, because the App that owns an in-flight reload may still be alive. Caller holds
+/// WFP_OPERATION and has already proved exact Blocked. Strict sessions never queue.
+pub(super) fn queue_incomplete_direct_recovery_release() -> bool {
+    let Some(owned) = armed_guard().as_ref().and_then(|armed| {
+        (armed.intent.wanted && !armed.intent.strict_kill_switch)
+            .then_some(armed.intent.owner_key.is_some())
+    }) else {
+        return false;
+    };
+    let deadline = std::time::Instant::now() + INCOMPLETE_DIRECT_RECOVERY_GRACE;
+    let mut current = WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // An earlier window already owns the release; it stays untouched and nothing is withdrawn
+    // later. A later one is replaced for the grace and restored if the App recovers.
+    if current.is_some_and(|existing| existing <= deadline) {
+        return true;
+    }
+    *incomplete_recovery_slot() = Some(DisplacedWantedCoreWindow {
+        deadline: *current,
+        fresh_arm_proof_pending: FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire),
+    });
+    *current = Some(deadline);
+    drop(current);
+    if owned {
+        // An owned session has a Core to stop first; the lifecycle worker does that.
+        FRESH_ARM_PROOF_PENDING.store(true, Ordering::Release);
+    }
+    true
+}
+
+/// The App put a live lease back: give the window the incomplete-reload one replaced back.
+/// Caller holds `WFP_OPERATION`.
+pub(super) fn withdraw_incomplete_recovery_window() {
+    let mut deadline = WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(displaced) = incomplete_recovery_slot().take() else {
+        return;
+    };
+    *deadline = displaced.deadline;
+    FRESH_ARM_PROOF_PENDING.store(displaced.fresh_arm_proof_pending, Ordering::Release);
 }
 
 pub(super) fn note_wanted_core_window(intent: &IntentRecord) {

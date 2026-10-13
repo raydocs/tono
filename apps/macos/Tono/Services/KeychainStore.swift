@@ -115,6 +115,14 @@ nonisolated struct KeychainStore: Sendable {
         try writeRecoveryRecord(adoptionProof(for: refresh), adoptionURL)
     }
 
+    /// Forgets that any stored token was accepted, so a launch no longer
+    /// restores it. The last resort when sign-out can neither delete the
+    /// token nor record the tombstone.
+    func discardRefreshTokenAdoptionProof() throws {
+        do { try FileManager.default.removeItem(at: adoptionURL) }
+        catch let error as CocoaError where error.code == .fileNoSuchFile { return }
+    }
+
     func hasAcceptedRefreshToken(_ refresh: String) throws -> Bool {
         let descriptor = Darwin.open(adoptionURL.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
         guard descriptor >= 0 else {

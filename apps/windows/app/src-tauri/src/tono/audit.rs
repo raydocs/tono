@@ -441,20 +441,37 @@ struct RotatingWriter {
     path: PathBuf,
     written: u64,
     cap: u64,
+    /// The folder pinned at the audit's first open; rotation's reopen is bound to it too.
+    parent: Option<Arc<state::PinnedDirectory>>,
 }
 
 impl RotatingWriter {
     fn open(path: &Path, cap: u64) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+        Self::open_pinned(path, cap, None)
+    }
+
+    /// Open (or reopen after a crash) the log under a folder the caller pinned at first open.
+    /// The folder must still resolve to the pinned directory before and after the file is opened,
+    /// so a parent replaced by a junction or symlink cannot redirect the write (win2-F3).
+    fn open_pinned(path: &Path, cap: u64, parent: Option<&Arc<state::PinnedDirectory>>) -> Result<Self> {
+        if let Some(folder) = path.parent() {
+            match parent {
+                // A pinned folder already exists (Audit::new created it); verify, never create.
+                Some(parent) => parent.still_names(folder)?,
+                None => std::fs::create_dir_all(folder)?,
+            }
         }
         let file = state::open_private_append(path)?;
+        if let (Some(folder), Some(parent)) = (path.parent(), parent) {
+            parent.still_names(folder)?;
+        }
         let written = file.metadata()?.len();
         Ok(Self {
             file,
             path: path.to_path_buf(),
             written,
             cap,
+            parent: parent.cloned(),
         })
     }
 
@@ -490,6 +507,11 @@ impl RotatingWriter {
         use std::io::Write as _;
 
         self.file.flush()?;
+        let other = |err: anyhow::Error| std::io::Error::other(err.to_string());
+        // Nothing is deleted or renamed unless the folder still names the pinned directory.
+        if let (Some(folder), Some(parent)) = (self.path.parent(), self.parent.as_ref()) {
+            parent.still_names(folder).map_err(other)?;
+        }
         let current_missing = matches!(
             std::fs::symlink_metadata(&self.path),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound
@@ -503,7 +525,12 @@ impl RotatingWriter {
             }
             std::fs::rename(&self.path, &backup)?;
         }
-        self.file = state::open_private_append(&self.path).map_err(|err| std::io::Error::other(err.to_string()))?;
+        let next = state::open_private_append(&self.path).map_err(other)?;
+        // The new handle is only adopted once the folder is proved to be the pinned one again.
+        if let (Some(folder), Some(parent)) = (self.path.parent(), self.parent.as_ref()) {
+            parent.still_names(folder).map_err(other)?;
+        }
+        self.file = next;
         self.written = 0;
         Ok(())
     }
@@ -517,8 +544,12 @@ impl RotatingWriter {
 /// The blocking writer loop: drains the channel until every sender is gone
 /// (the quit path drops the last one to flush), then syncs once and exits.
 /// Live lines flush per write; drain-phase lines (channel closed) batch.
-fn writer_loop(mut receiver: tokio::sync::mpsc::Receiver<AuditRecord>, path: PathBuf) {
-    let mut writer = match RotatingWriter::open(&path, MAX_AUDIT_FILE_BYTES) {
+fn writer_loop(
+    mut receiver: tokio::sync::mpsc::Receiver<AuditRecord>,
+    path: PathBuf,
+    parent: Option<Arc<state::PinnedDirectory>>,
+) {
+    let mut writer = match RotatingWriter::open_pinned(&path, MAX_AUDIT_FILE_BYTES, parent.as_ref()) {
         Ok(writer) => writer,
         Err(_) => {
             // Drain anyway so senders never see a full channel with no
@@ -799,6 +830,8 @@ pub struct Audit {
     dropped: AtomicU64,
     settings_dir: PathBuf,
     log_path: PathBuf,
+    /// The log folder pinned when this audit was created; every writer (re)open is bound to it.
+    log_parent: Option<Arc<state::PinnedDirectory>>,
 }
 
 impl Audit {
@@ -806,6 +839,15 @@ impl Audit {
     /// and spawn the writer task.
     pub fn new(logs_dir: &Path, settings_dir: &Path) -> Arc<Self> {
         let settings = load_settings(settings_dir);
+        let log_parent = std::fs::create_dir_all(logs_dir)
+            .map_err(anyhow::Error::from)
+            .and_then(|()| state::PinnedDirectory::open(logs_dir))
+            .map(Arc::new)
+            .map_err(|error| {
+                tono_logging::logging!(warn, tono_logging::Type::Service,
+                    "Tono: the audit folder is not a plain directory; the traffic audit stays off: {error:#}");
+            })
+            .ok();
         let audit = Arc::new(Self {
             upload_owner: parking_lot::Mutex::new(UploadOwner::default()),
             sender: parking_lot::Mutex::new(None),
@@ -817,6 +859,7 @@ impl Audit {
             dropped: AtomicU64::new(0),
             settings_dir: settings_dir.to_path_buf(),
             log_path: logs_dir.join(AUDIT_FILE_NAME),
+            log_parent,
         });
         audit.ensure_writer();
         audit
@@ -838,6 +881,7 @@ impl Audit {
             dropped: AtomicU64::new(0),
             settings_dir: settings_dir.to_path_buf(),
             log_path: settings_dir.join(AUDIT_FILE_NAME),
+            log_parent: None,
         })
     }
 
@@ -845,7 +889,8 @@ impl Audit {
     /// and the handle was never closed. No-op while alive, after close, or
     /// without self-heal (tests).
     fn ensure_writer(&self) {
-        if self.closed.load(Ordering::Acquire) || !self.self_heal {
+        // No pinned folder means the folder cannot be trusted: no writer is ever started.
+        if self.closed.load(Ordering::Acquire) || !self.self_heal || self.log_parent.is_none() {
             return;
         }
         let mut writer = self.writer.lock();
@@ -856,8 +901,9 @@ impl Audit {
         let (sender, receiver) = tokio::sync::mpsc::channel(CHANNEL_CAPACITY);
         *self.sender.lock() = Some(sender);
         let path = self.log_path.clone();
+        let parent = self.log_parent.clone();
         *writer = Some(AsyncHandler::spawn_blocking(move || {
-            writer_loop(receiver, path);
+            writer_loop(receiver, path, parent);
         }));
     }
 
@@ -1104,7 +1150,9 @@ mod tests {
         periodic_telemetry_enabled_from_settings, redact, save_network_log_upload_enabled,
         save_periodic_telemetry_enabled,
     };
+    use crate::tono::state;
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
 
     struct TempDir(PathBuf);
     impl TempDir {
@@ -1353,6 +1401,105 @@ mod tests {
                 assert_eq!(std::fs::metadata(file).unwrap().permissions().mode() & 0o777, 0o600);
             }
         }
+    }
+
+    /// win2-F3: the recovery reopen is bound to the folder pinned at first open, so a log path
+    /// whose parent now names another directory (a re-pointed junction) is refused.
+    #[test]
+    fn a_reopen_refuses_a_folder_that_no_longer_names_the_pinned_directory() {
+        let pinned = TempDir::new("pinned");
+        let redirected = TempDir::new("redirected");
+        let pin = Arc::new(state::PinnedDirectory::open(pinned.path()).unwrap());
+
+        RotatingWriter::open_pinned(&log_path(&pinned), 512, Some(&pin)).expect("the pinned folder opens");
+        let refused = RotatingWriter::open_pinned(&log_path(&redirected), 512, Some(&pin))
+            .err()
+            .expect("another directory must not receive the audit log");
+
+        assert!(format!("{refused:#}").contains("no longer names"), "{refused:#}");
+    }
+
+    /// win2-F3: a folder that is itself a junction or symlink cannot be pinned at all.
+    #[test]
+    fn a_linked_folder_cannot_be_pinned() {
+        let target = TempDir::new("link-target");
+        let holder = TempDir::new("link-holder");
+        let link = holder.path().join("logs");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target.path(), &link).unwrap();
+        #[cfg(windows)]
+        {
+            // `mklink` does not take the verbatim `\\?\` prefix `canonicalize` adds.
+            let plain = |path: &Path| path.to_string_lossy().trim_start_matches(r"\\?\").to_owned();
+            assert!(
+                std::process::Command::new("cmd")
+                    .args(["/C", "mklink", "/J"])
+                    .arg(plain(&link))
+                    .arg(plain(target.path()))
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+
+        assert!(state::PinnedDirectory::open(&link).is_err(), "a re-pointed folder is not a plain directory");
+    }
+
+    /// win2-F3: a rotation whose folder was re-pointed must neither delete nor rename anything
+    /// in the other directory, nor write there.
+    #[test]
+    fn a_rotation_refuses_a_redirected_folder_and_leaves_it_untouched() {
+        let pinned = TempDir::new("rot-pinned");
+        let redirected = TempDir::new("rot-redirected");
+        let pin = Arc::new(state::PinnedDirectory::open(pinned.path()).unwrap());
+        let mut writer = RotatingWriter::open_pinned(&log_path(&pinned), 16, Some(&pin)).unwrap();
+        writer.write_line("first line, longer than the cap", true).unwrap();
+        // The log path now resolves to another directory that holds files of its own.
+        let foreign_current = log_path(&redirected);
+        let foreign_backup = redirected.path().join(super::AUDIT_BACKUP_FILE_NAME);
+        std::fs::write(&foreign_current, b"foreign current").unwrap();
+        std::fs::write(&foreign_backup, b"foreign backup").unwrap();
+        writer.path = foreign_current.clone();
+
+        let refused = writer.write_line("second line", true).expect_err("the rotation must refuse");
+
+        assert!(refused.to_string().contains("no longer names"), "{refused}");
+        assert_eq!(std::fs::read(&foreign_current).unwrap(), b"foreign current");
+        assert_eq!(std::fs::read(&foreign_backup).unwrap(), b"foreign backup");
+    }
+
+    /// win2-F3: a rotation under an intact pin still works (the pin must not get in its way).
+    #[test]
+    fn a_pinned_writer_still_rotates_normally() {
+        let dir = TempDir::new("rot-ok");
+        let pin = Arc::new(state::PinnedDirectory::open(dir.path()).unwrap());
+        let mut writer = RotatingWriter::open_pinned(&log_path(&dir), 16, Some(&pin)).unwrap();
+        writer.write_line("first line, longer than the cap", true).unwrap();
+        writer.write_line("second line", true).unwrap();
+
+        let backup = dir.path().join(super::AUDIT_BACKUP_FILE_NAME);
+        assert!(std::fs::read_to_string(&backup).unwrap().contains("first line"));
+        assert!(std::fs::read_to_string(log_path(&dir)).unwrap().contains("second line"));
+    }
+
+    /// win2-F3: the pin is only a lock if a rename of the folder fails while it is held.
+    #[cfg(windows)]
+    #[test]
+    fn a_pinned_folder_cannot_be_renamed_while_it_is_held() {
+        let dir = TempDir::new("pin-rename");
+        let moved = dir.path().with_file_name(format!(
+            "{}-moved",
+            dir.path().file_name().unwrap().to_string_lossy()
+        ));
+        let pin = state::PinnedDirectory::open(dir.path()).unwrap();
+
+        assert!(
+            std::fs::rename(dir.path(), &moved).is_err(),
+            "a held pin must keep the folder from being renamed"
+        );
+        drop(pin);
+        std::fs::rename(dir.path(), &moved).expect("the folder moves once the pin is dropped");
+        std::fs::rename(&moved, dir.path()).unwrap();
     }
 
     /// H18-C-F2: a rotation that renamed the current file but could not create the next one

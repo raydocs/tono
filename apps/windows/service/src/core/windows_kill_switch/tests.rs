@@ -1078,6 +1078,8 @@ async fn replacement_preserves_automatic_ai_recovery_disposition() -> Result<()>
 #[serial]
 async fn interrupted_update_emergency_release_replays_the_ai_hold() -> Result<()> {
     cleanup().await;
+    // A protected session: an update failure owes it the hold.
+    arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
     TEST_INTERRUPT_RELEASE_FOLLOW_UP.store(true, Ordering::SeqCst);
     emergency_disarm_windows_kill_switch_applying_narrow().await?;
     crate::core::selective_layer::remove().await; // The pre-release hold died with the process.
@@ -2134,6 +2136,100 @@ async fn failed_update_emergency_release_keeps_the_secondary_ai_hold() -> Result
     emergency_disarm_windows_kill_switch().await.unwrap_err();
     assert!(!crate::core::selective_layer::test_hold_active());
     cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn failed_update_recovery_does_not_install_an_ai_hold_for_an_unprotected_user() -> Result<()> {
+    cleanup().await;
+    // Nothing armed, and the last release was the user's own Restore internet.
+    emergency_disarm_windows_kill_switch().await?;
+    emergency_disarm_windows_kill_switch_applying_narrow().await?;
+    let held = crate::core::selective_layer::test_hold_active();
+    cleanup().await;
+    assert!(!held, "an unprotected user or an explicit Restore owes no AI hold after a failed update");
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn failed_update_recovery_keeps_the_hold_an_earlier_automatic_release_left() -> Result<()> {
+    cleanup().await;
+    release_applying_narrow().await?; // a crash-style release: durable AI disposition, nothing armed
+    emergency_disarm_windows_kill_switch_applying_narrow().await?;
+    let held = crate::core::selective_layer::test_hold_active();
+    cleanup().await;
+    assert!(held, "a retained automatic AI hold must survive a failed update's release");
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn a_second_failed_update_release_keeps_the_hold_the_first_installed() -> Result<()> {
+    cleanup().await;
+    arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+    emergency_disarm_windows_kill_switch_applying_narrow().await?;
+    let removals_before = crate::core::selective_layer::test_active_hold_removals();
+    emergency_disarm_windows_kill_switch_applying_narrow().await?;
+    let held = crate::core::selective_layer::test_hold_active();
+    let removals_after = crate::core::selective_layer::test_active_hold_removals();
+    cleanup().await;
+    assert!(held, "the rollback's AI hold must survive a second emergency release");
+    assert_eq!(removals_after, removals_before, "a second release must never delete the hold first");
+    Ok(())
+}
+
+/// Codex review of #1642: a narrow release whose tombstone could not be written leaves the AI hold
+/// installed and no evidence on disk. A later failed-update recovery that finds nothing owed must
+/// not "clean up" that hold; only an explicit Restore removes it.
+#[tokio::test]
+#[serial]
+async fn failed_update_recovery_keeps_a_hold_whose_tombstone_could_not_be_written() -> Result<()> {
+    cleanup().await;
+    arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+    let failures = SimulatedStateFailures::arm(true, false);
+    release_applying_narrow().await?;
+    drop(failures);
+    let hold_after_release = crate::core::selective_layer::test_hold_active();
+    let evidence_left = tokio::fs::metadata(intent_path()).await.is_ok();
+
+    emergency_disarm_windows_kill_switch_applying_narrow().await?;
+    let held_after_emergency = crate::core::selective_layer::test_hold_active();
+    release_applying_narrow_if_owed().await?;
+    let held_after_release = crate::core::selective_layer::test_hold_active();
+    emergency_disarm_windows_kill_switch().await?;
+    let held_after_restore = crate::core::selective_layer::test_hold_active();
+    cleanup().await;
+
+    assert!(hold_after_release, "the narrow release installed the hold");
+    assert!(!evidence_left, "the failed tombstone write left no evidence on disk");
+    assert!(held_after_emergency, "a failed update's emergency release must keep the hold");
+    assert!(held_after_release, "a failed update's Service release must keep the hold");
+    assert!(!held_after_restore, "an explicit Restore still removes the hold");
+    Ok(())
+}
+
+/// Codex review of #1642: a record with `reconnect_after_release` and no explicit disposition is
+/// a narrow recovery owed to the user, exactly as Service start reads it.
+#[tokio::test]
+#[serial]
+async fn failed_update_recovery_honors_a_legacy_crash_tombstone() -> Result<()> {
+    cleanup().await;
+    let mut legacy = serde_json::to_value(crash_recovery_tombstone(None))?;
+    legacy.as_object_mut().unwrap().remove("apply_narrow_after_release");
+    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&legacy)?).await?;
+    emergency_disarm_windows_kill_switch_applying_narrow().await?;
+    let held_after_emergency = crate::core::selective_layer::test_hold_active();
+    cleanup().await;
+
+    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&legacy)?).await?;
+    release_applying_narrow_if_owed().await?;
+    let held_after_release = crate::core::selective_layer::test_hold_active();
+    cleanup().await;
+
+    assert!(held_after_emergency, "a legacy crash tombstone owes the AI hold to the emergency release");
+    assert!(held_after_release, "a legacy crash tombstone owes the AI hold to the Service release");
     Ok(())
 }
 
@@ -3797,6 +3893,66 @@ async fn another_signed_in_user_cannot_take_over_armed_protection() -> Result<()
     Ok(())
 }
 
+/// #1290: the Service tells a second user's App that the armed barrier is another user's, with
+/// the rule a release applies. An intent whose owner record was lost (WIN-OWNER-RELEASE-NONE)
+/// is releasable by anyone, so it is never reported as foreign: its real owner must still fold it.
+#[tokio::test]
+#[serial]
+async fn only_a_recorded_other_owner_makes_the_barrier_foreign_to_the_caller() -> Result<()> {
+    cleanup().await;
+    arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+
+    let held_for = |caller: &str| status_for_with_holder_from(armed_guard().clone(), caller).1;
+    let seen_by_bob = held_for("owner-bob");
+    let seen_by_alice = held_for("owner-alice");
+    assert_eq!(
+        seen_by_bob,
+        authorize_write_for("owner-bob").is_err(),
+        "the flag must apply the rule a release applies"
+    );
+    armed_guard().as_mut().unwrap().intent.owner_key = None;
+    let seen_by_bob_after_owner_loss = held_for("owner-bob");
+    cleanup().await;
+
+    assert!(seen_by_bob, "Bob's App must not fold Alice's barrier as its own");
+    assert!(!seen_by_alice, "the owner folds its own barrier");
+    assert!(
+        !seen_by_bob_after_owner_loss,
+        "an ownerless barrier is anyone's to see and release"
+    );
+    Ok(())
+}
+
+/// Codex re-review of #1623: the status and the "another user's barrier" flag come from one copy
+/// of `ARMED`. Reading `ARMED` a second time for the flag let a release and a re-arm land between
+/// the reads. The flag must be a function of the very state the status reports.
+#[test]
+#[serial]
+fn the_foreign_flag_is_taken_from_the_state_the_status_was_built_from() {
+    let armed_by = |owner: &str, wanted: bool| Armed {
+        intent: IntentRecord {
+            owner_key: Some(owner.to_owned()),
+            ..valid_intent(KillSwitchStatusMode::Locked, wanted)
+        },
+        tun_luid: None,
+        core_instance: None,
+        direct_endpoints: Vec::new(),
+        reviewed_direct_ports: Vec::new(),
+        direct_reload: None,
+    };
+    // The shared ARMED is empty (as after a release): only the copy passed in counts.
+    *ARMED.lock().unwrap() = None;
+    let (status, held) = status_for_with_holder_from(Some(armed_by("owner-alice", true)), "owner-bob");
+    assert!(status.wanted && held, "a wanted barrier recorded to Alice is foreign to Bob");
+    let (_, held_by_owner) =
+        status_for_with_holder_from(Some(armed_by("owner-alice", true)), "owner-alice");
+    assert!(!held_by_owner);
+    let (status, held) = status_for_with_holder_from(Some(armed_by("owner-alice", false)), "owner-bob");
+    assert!(!status.wanted && !held, "an unwanted record is no barrier, so it is not foreign");
+    let (status, held) = status_for_with_holder_from(None, "owner-bob");
+    assert!(!status.wanted && !held);
+}
+
 /// TW-anthropic-1: a first connect from a Remote Desktop (or unreadable) session would arm a
 /// block that cuts that session and cannot be released remotely, so it is refused. The
 /// console may connect, and only the caller's own *verified* protection keeps its reconnect
@@ -4694,6 +4850,176 @@ async fn pending_direct_lease_expiry_reconciles_to_exact_blocked() -> Result<()>
     Ok(())
 }
 
+/// An armed, verified, non-strict session whose Pending DIRECT lease has just expired.
+async fn expired_pending_direct_session() -> Result<(CoreInstance, Armed, std::time::Instant, String)> {
+    cleanup().await;
+    let core = locked_direct_test_session().await?;
+    mark_verified("owner-alice").await?;
+    let begin = begin_direct_runtime_reload(124).await?;
+    lock(None).await?;
+    let endpoints = test_config_with_direct().direct_endpoints;
+    replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 124, begin.reload_id).await?;
+    armed_guard()
+        .as_mut()
+        .and_then(|armed| armed.direct_reload.as_mut())
+        .expect("pending lease")
+        .expires_at = Some(std::time::Instant::now());
+    let pending = armed_guard().clone().expect("pending state");
+    let now = std::time::Instant::now();
+    let reason = direct_reload_invalidation_reason(&pending, Some(core), pending.tun_luid, now)
+        .expect("the expired pending set must invalidate DIRECT")
+        .to_owned();
+    Ok((core, pending, now, reason))
+}
+
+fn queued_wanted_core_deadline() -> Option<std::time::Instant> {
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// #1056 R3KS1-PENDING-EXPIRY (decision 116): an App that died mid-reload must not leave a
+/// healthy machine at Blocked forever. The expiry still narrows to exact Blocked at once, then
+/// the bounded recovery release retires the Core and opens general traffic with the AI hold.
+#[tokio::test]
+#[serial]
+async fn expired_pending_direct_reload_releases_a_non_strict_session_after_the_grace() -> Result<()> {
+    let (core, pending, now, reason) = expired_pending_direct_session().await?;
+
+    reconcile_direct_watchdog_invalidation_unlocked(pending, Some(core), now, &reason).await?;
+
+    assert_eq!(
+        armed_guard().as_ref().expect("still armed").intent.mode,
+        KillSwitchStatusMode::Blocked,
+        "the expiry itself stays fail-closed"
+    );
+    let queued = queued_wanted_core_deadline()
+        .expect("a non-strict session left at Blocked must be queued for the bounded recovery release");
+    assert!(
+        queued > now + INCOMPLETE_DIRECT_RECOVERY_GRACE - std::time::Duration::from_secs(5)
+            && queued <= std::time::Instant::now() + INCOMPLETE_DIRECT_RECOVERY_GRACE,
+        "the release waits the grace, not less and not more"
+    );
+    assert!(
+        expired_fresh_arm_owner(core_arm_epoch()).is_none(),
+        "nothing retires the session before the grace is over"
+    );
+    // The App does not come back within the grace.
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+    assert!(expired_fresh_arm_owner(core_arm_epoch()).is_some());
+    crate::core::server::retire_expired_fresh_arm(core_arm_epoch()).await?;
+    assert!(armed_guard().is_none(), "the abandoned reload must release");
+    assert!(crate::core::selective_layer::test_hold_active());
+    cleanup().await;
+    Ok(())
+}
+
+/// Decision 116: an App that finishes a new reload within the grace keeps its session; the old
+/// deadline must neither retire it nor leave the status unverified.
+#[tokio::test]
+#[serial]
+async fn a_live_replacement_lease_withdraws_the_incomplete_reload_release() -> Result<()> {
+    let (core, pending, now, reason) = expired_pending_direct_session().await?;
+    reconcile_direct_watchdog_invalidation_unlocked(pending, Some(core), now, &reason).await?;
+    assert!(queued_wanted_core_deadline().is_some());
+
+    let blocked = armed_guard().clone().expect("blocked state");
+    let recovered = DirectReloadLease {
+        owner_generation: 124,
+        reload_id: 9_124,
+        phase: DirectReloadPhase::Committed,
+        endpoint_digest: crate::direct_endpoint_digest(&blocked.direct_endpoints).unwrap(),
+        core_instance: Some(core),
+        tunnel_luid: blocked.tun_luid,
+        expires_at: Some(std::time::Instant::now() + std::time::Duration::from_secs(60)),
+    };
+    armed_guard().as_mut().expect("armed").direct_reload = Some(recovered);
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+
+    assert!(
+        expired_fresh_arm_owner(core_arm_epoch()).is_none(),
+        "a live lease must not be retired by the old deadline"
+    );
+    assert_eq!(
+        reconcile_wanted_core_window_unlocked().await?,
+        WantedCoreWindow::Keep
+    );
+    assert!(queued_wanted_core_deadline().is_none());
+    assert!(!FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire));
+    assert!(armed_guard().is_some(), "the recovered session stays armed");
+    cleanup().await;
+    Ok(())
+}
+
+/// Decision 116: the incomplete-reload window may displace a longer fresh-Connect verification
+/// window; when the App recovers, that window comes back instead of being cleared.
+#[tokio::test]
+#[serial]
+async fn withdrawing_the_incomplete_reload_window_restores_the_one_it_displaced() -> Result<()> {
+    let (core, pending, now, reason) = expired_pending_direct_session().await?;
+    let longer = std::time::Instant::now() + std::time::Duration::from_secs(600);
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(longer);
+    FRESH_ARM_PROOF_PENDING.store(true, Ordering::Release);
+
+    reconcile_direct_watchdog_invalidation_unlocked(pending, Some(core), now, &reason).await?;
+    assert!(queued_wanted_core_deadline().is_some_and(|deadline| deadline < longer));
+
+    let blocked = armed_guard().clone().expect("blocked state");
+    armed_guard().as_mut().expect("armed").direct_reload = Some(DirectReloadLease {
+        owner_generation: 124,
+        reload_id: 9_124,
+        phase: DirectReloadPhase::Committed,
+        endpoint_digest: crate::direct_endpoint_digest(&blocked.direct_endpoints).unwrap(),
+        core_instance: Some(core),
+        tunnel_luid: blocked.tun_luid,
+        expires_at: Some(std::time::Instant::now() + std::time::Duration::from_secs(60)),
+    });
+    assert_eq!(reconcile_wanted_core_window_unlocked().await?, WantedCoreWindow::Keep);
+
+    assert_eq!(
+        queued_wanted_core_deadline(),
+        Some(longer),
+        "the fresh-Connect window the incomplete reload displaced must come back"
+    );
+    assert!(
+        FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire),
+        "inherited verification must still wait for this arm's own proof"
+    );
+    cleanup().await;
+    Ok(())
+}
+
+/// Decision 116: the exact Blocked WFP was proved and only the intent write failed; the release
+/// is still queued (a failed narrowing never is).
+#[tokio::test]
+#[serial]
+async fn incomplete_expiry_queues_the_release_when_only_intent_persistence_fails() -> Result<()> {
+    let (core, pending, now, reason) = expired_pending_direct_session().await?;
+
+    let failures = SimulatedStateFailures::arm(true, false);
+    reconcile_direct_watchdog_invalidation_unlocked(pending, Some(core), now, &reason).await?;
+    drop(failures);
+
+    assert_eq!(
+        armed_guard().as_ref().expect("still armed").intent.mode,
+        KillSwitchStatusMode::Blocked
+    );
+    assert!(
+        queued_wanted_core_deadline().is_some(),
+        "a persistence failure after proved Blocked WFP must not strand the session"
+    );
+    cleanup().await;
+    Ok(())
+}
+
 #[tokio::test]
 #[serial]
 async fn finalize_mismatch_revokes_the_pending_direct_set() -> Result<()> {
@@ -5315,6 +5641,40 @@ async fn a_healthy_engine_call_leaves_no_claim_behind() -> Result<()> {
     .expect_err("engine errors still propagate");
     assert!(format!("{error:#}").contains("engine said no"));
     assert!(engine_call_in_flight().is_none());
+    Ok(())
+}
+
+/// #1284: SCM Stop must not drop the runtime while a release in another task is still inside
+/// its WFP removal; the kernel call is a stand-in closure that returns after the Stop timeout.
+#[tokio::test]
+#[serial]
+async fn stop_waits_for_an_in_flight_wfp_removal_before_the_runtime_is_dropped() -> Result<()> {
+    let (release, blocked) = std::sync::mpsc::channel::<()>();
+    let removal = move || -> Result<()> {
+        let _ = blocked.recv_timeout(std::time::Duration::from_secs(30));
+        Ok(())
+    };
+    // The release's own caller already gave up on the answer; the kernel call keeps running.
+    bounded_engine_call(std::time::Duration::from_millis(50), "remove all filters", removal)
+        .await
+        .expect_err("the removal outlasts its caller's deadline");
+    assert!(engine_call_in_flight().is_some());
+
+    // The removal stays blocked until the test releases it, so no scheduling delay can let a
+    // Stop that does not wait look correct: it would have returned before the timeout.
+    let settle = settle_in_flight_wfp_removal(std::time::Duration::from_secs(10));
+    tokio::pin!(settle);
+    let early = tokio::time::timeout(std::time::Duration::from_millis(300), &mut settle).await;
+    assert!(
+        early.is_err(),
+        "Stop must not go on to drop the runtime while the removal is inside the engine"
+    );
+    release.send(()).expect("the removal thread is still waiting");
+
+    let settled = settle.await;
+
+    assert!(engine_call_in_flight().is_none());
+    assert!(settled);
     Ok(())
 }
 

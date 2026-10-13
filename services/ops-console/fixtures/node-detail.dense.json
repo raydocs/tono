@@ -231,6 +231,7 @@
         "cycleKind": "calendar_day",
         "cycleStart": 1722667200,
         "cycleEnd": 1725259200,
+        "cycleAnchorDay": 3,
         "counts": "in_out"
       },
       "asOfSec": 1724999460,

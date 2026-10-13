@@ -282,6 +282,19 @@ describe('ops v1 api', () => {
     expect(row?.catalog_name).toBe(onlyStatus);
   });
 
+  it('PATCH nodes/{name}/profile keeps the documented port, leaves it on other edits and clears it on null', async () => {
+    // SOL-CP-PROFILE-PORT: the port was validated and then dropped, so the
+    // console form showed it empty after every save.
+    await seedNode();
+    const path = `nodes/${encodeURIComponent(NODE)}/profile`;
+    const port = async (body: unknown) => assertNodeDetail(
+      await (await ops(path, json(body, 'PATCH'))).json(),
+    ).facts.port;
+    expect(await port({ port: 8443 })).toBe(8443);
+    expect(await port({ region: 'tyo' })).toBe(8443);
+    expect(await port({ port: null })).toBeNull();
+  });
+
   it('PATCH nodes/{name}/profile rejects an unknown key', async () => {
     await seedNode();
     const res = await ops(`nodes/${encodeURIComponent(NODE)}/profile`, json({ extra: true }, 'PATCH'));
@@ -320,6 +333,20 @@ describe('ops v1 api', () => {
     }, { in: 8_000_000_000, out: 2_000_000_000, at: NOW + 60 }, NOW + 60);
     expect(Number(rolled?.used_bytes)).toBe(0);
     expect(Number(rolled?.counter_in_last)).toBe(8_000_000_000);
+  });
+
+  it('node detail quota carries the stored anchor day, null when unset', async () => {
+    await seedNode();
+    const enc = encodeURIComponent(NODE);
+    const before = assertNodeDetail(await (await ops(`nodes/${enc}`)).json());
+    expect(before.quota.value.cycleAnchorDay).toBeNull();
+    const set = await ops(`nodes/${enc}/profile`, json({
+      quota: { quotaBytes: 1_000_000_000, cycleKind: 'calendar_day', cycleAnchorDay: 31, counts: 'in_out' },
+    }, 'PATCH'));
+    expect(set.status).toBe(200);
+    expect(assertNodeDetail(await set.json()).quota.value.cycleAnchorDay).toBe(31);
+    const read = assertNodeDetail(await (await ops(`nodes/${enc}`)).json());
+    expect(read.quota.value.cycleAnchorDay).toBe(31);
   });
 
   it('PATCH nodes/{name}/profile quota null clears the open cycle', async () => {
@@ -400,6 +427,31 @@ describe('ops v1 api', () => {
       "SELECT summary FROM ops_audit WHERE action = 'diagnostics.window.close' AND target_id = 'u-1'",
     ).all();
     expect(audits.results).toEqual([{ summary: 'window:d-expired key:- expired' }]);
+  });
+
+  it('GET customers carries the oldest version per platform next to the all-platform minimum', async () => {
+    await seedUser();
+    const at = Math.floor(Date.now() / 1000);
+    await db().prepare(
+      `INSERT INTO ops_customer_status(user_id, device_id, platform, app_version, last_seen_at, updated_at)
+       VALUES('u-1', 'd-win', 'windows', '0.0.30', ?, ?)`,
+    ).bind(at, at).run();
+    await db().prepare(
+      `INSERT INTO ops_device_status(user_id, device_id, platform, app_version, os_version, last_seen_at, updated_at)
+       VALUES
+         ('u-1', 'd-win', 'windows', '0.0.34', 'Windows 11', ?, ?),
+         ('u-1', 'd-mac', 'macos', '0.0.30', 'macOS 15', ?, ?),
+         ('u-1', 'd-mac2', 'macos', '0.0.33', 'macOS 15', ?, ?),
+         ('u-1', 'd-old', 'linux', '0.0.10', 'Linux', ?, ?)`,
+    ).bind(at, at, at, at, at, at, at - 31 * 86_400, at).run();
+
+    const list = assertList(await (await ops('customers')).json(), assertCustomerSummary);
+    const row = list.items.find((item) => item.userId === 'u-1');
+    expect(row?.minAppVersion).toBe('0.0.30');
+    expect(row?.versionByPlatform).toEqual([
+      { platform: 'macos', version: '0.0.30' },
+      { platform: 'windows', version: '0.0.34' },
+    ]);
   });
 
   it('GET customers/{id} exposes per-device live status and connections filter by deviceId', async () => {

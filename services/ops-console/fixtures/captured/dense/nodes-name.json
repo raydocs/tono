@@ -124,6 +124,7 @@
       "cycleKind": "manual",
       "cycleStart": null,
       "cycleEnd": null,
+      "cycleAnchorDay": null,
       "counts": "in_out"
     },
     "asOfSec": null,

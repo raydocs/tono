@@ -130,10 +130,11 @@ export default function CustomersPage({
     () => selectByPlatform(selectCustomers(all, filter), platform),
     [all, filter, platform],
   );
-  const perBucket = useMemo(() => bucketCounts(onPlatform, published), [onPlatform, published]);
+  const perBucket = useMemo(() => bucketCounts(onPlatform, published, platform),
+    [onPlatform, published, platform]);
   const rows = useMemo(
-    () => selectByBucket(onPlatform, published, bucket),
-    [onPlatform, published, bucket],
+    () => selectByBucket(onPlatform, published, bucket, platform),
+    [onPlatform, published, bucket, platform],
   );
   const invites = useMemo(
     () => invitesOf(funnel.status === 'ready' ? funnel.data : null),

@@ -6,7 +6,7 @@ import { copy } from '@/copy/copy';
 import { settingsApi } from '@/lib/api-settings';
 import { nodeApi, type NodeProfileInput } from '@/lib/api-node';
 import {
-  anchorDayOf,
+  anchorDayField,
   bytesToGb,
   gbToBytes,
   numberOrNull,
@@ -77,7 +77,7 @@ function formOf(node: NodeDetailDto): Form {
     quotaOn: quota.quota !== null,
     quotaGb: bytesToGb(quota.quota),
     cycleKind: quota.cycleKind,
-    cycleAnchorDay: anchorDayOf(quota.cycleStart),
+    cycleAnchorDay: anchorDayField(quota),
     counts: quota.counts,
   };
 }

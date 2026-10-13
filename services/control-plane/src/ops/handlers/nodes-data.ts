@@ -174,7 +174,7 @@ export async function quotaDto(e: Env, name: string, profile: Row | null): Promi
     dto: {
       quota: null, used: null, pct: null, projectedExhaustAt: null,
       level: 'ok' as QuotaLevel, cycleKind: 'manual' as QuotaCycleKind,
-      cycleStart: null, cycleEnd: null, counts: 'in_out' as QuotaCounts,
+      cycleStart: null, cycleEnd: null, cycleAnchorDay: null, counts: 'in_out' as QuotaCounts,
     },
   };
   try {
@@ -191,6 +191,7 @@ export async function quotaDto(e: Env, name: string, profile: Row | null): Promi
         cycleKind: asCycleKind(profile?.cycle_kind),
         cycleStart: summary.cycleStart,
         cycleEnd: summary.cycleEnd,
+        cycleAnchorDay: nullInt(profile?.cycle_anchor_day),
         counts: asCounts(profile?.quota_counts),
       },
     };

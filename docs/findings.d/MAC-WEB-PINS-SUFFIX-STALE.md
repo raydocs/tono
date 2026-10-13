@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| MAC-WEB-PINS-SUFFIX-STALE | macOS 策略包含任一显式网页后缀时停止刷新网页钉选，但生成运行时仍用旧钉选解析和拨号，CDN 退役旧地址后对应网站持续失败直到重连 | open | [#1016](https://github.com/raydocs/tono/pull/1016)（仅记录） | 中·推导 | P2；只影响相关网站，不声称全机断网。2026-10-07 在 main f2cb79522 再核实仍 open：现有 pins-only 提交仍经 /core/sync 重启 Core，并非单独热替换仍必要钉选；未证明可安全、不拆流地局部更新。须设计并验证按授权端口/后缀覆盖关系消除冗余静态解析或支持局部更新的接口；不恢复全量周期重载，不扩大 DIRECT，不伪报代码修好。 |
+| MAC-WEB-PINS-SUFFIX-STALE | macOS 策略包含任一显式网页后缀时停止刷新网页钉选，但生成运行时仍用旧钉选解析和拨号，CDN 退役旧地址后对应网站持续失败直到重连 | in-PR | [#1016](https://github.com/raydocs/tono/pull/1016)（仅记录），[#1057](https://github.com/raydocs/tono/issues/1057)（修复分支 `claude/dns-pins`） | 中·推导 | P2；只影响相关网站，不声称全机断网。2026-10-07 在 main f2cb79522 再核实仍 open：现有 pins-only 提交仍经 /core/sync 重启 Core，并非单独热替换仍必要钉选；未证明可安全、不拆流地局部更新。须设计并验证按授权端口/后缀覆盖关系消除冗余静态解析或支持局部更新的接口；不恢复全量周期重载，不扩大 DIRECT，不伪报代码修好。2026-10-13 源码修复（待合并，实机未验证）：见文末「2026-10-13 修复」；未被覆盖的钉选仍可能触发一次整会话重载。 |
 
 基线 `1fb29265`：`AppState+Connect.swift:1726–1729` 仅根据 `webDomainSuffixes.isEmpty` 调度刷新；`AppState+Catalog.swift:853` 用同一条件拒绝刷新。但产品发出器 `ConfigPipeline+SingBoxProduct.swift:185–190` 仍创建 `Tono-Hosts`，`:217–222` 在后缀直连之前为网页钉选执行 `resolve` 到 `Tono-Hosts` 并要求钉选 IP。
 
@@ -14,3 +14,10 @@
 - `AppState+Proxy.swift:526–638` 的 pinsOnlyRefresh 仍走实际 `/core/sync`；源码明确说明该调用重启 Core、等待 utun 并重新 arm。仅把刷新输入过滤成必要 pins，并不能证明现有流式连接不被重启切断。
 - 本次不修改运行时。下一步需以现有受保护域名/端口授权为边界验证局部替换接口，或证明某 pin 的所有授权端口均被后缀覆盖后移除其静态解析依赖；不把精确主机升为后缀、不自动回落出口、不削弱 PF。这里不声称架构永远不可实现，只说明本轮未有安全实现与证据。
 - MAC-WAKE-GATE-RACE、MAC-HELPER-HANG-WATCHDOG、MAC-CONTINUITY-ONLINK-PF 保持 open 且文件未改；G1/G2 真机验证不由记录审查代替。
+
+## 2026-10-13 修复（#1057，分支 `claude/dns-pins`）
+- 采用上面记录的第二条路：被策略后缀按**相同端口**覆盖的网页钉选（`DirectDomainSuffix.covers`：主机等于或属于该后缀，且钉选端口是后缀端口的子集）不再进入产品运行配置——不生成 `Tono-Hosts` 条目、不生成对它的 `resolve` 与钉选 IP 路由（`ManagedDirectRuntimePolicy.staticWebDomainPins`）。同主机由后缀规则放行，拨号时经中国 DNS 与直连出站的 `domain_resolver` 取当前地址，旧 CDN 地址退役不再卡住站点，也无需刷新、无需重载。
+- 刷新判据改为 `pinsAreLoadBearing`：无策略后缀（旧行为）或仍有未被覆盖的网页钉选时才刷新；两处调用点（健康周期调度与 `ManagedDirectRefreshPolicy` 输入）使用同一个属性。未被覆盖的钉选刷新沿用既有的在途流推迟策略，仍可能触发一次整会话重载（局部热替换需要 Core 接口，未做）。
+- 不变量：不扩大 DIRECT（后缀规则本来就放行这些主机与端口）；PF 的会话端点不变（仍含被覆盖钉选的旧地址，是多放行而非少放行，未收紧）；只改产品 sing-box 发出器，旧 YAML 运行配置路径未改。后缀只取策略自带的 `webDomainSuffixes`，不含始终开启的产品后缀（否则全部中国网页钉选都被认为已覆盖）。
+- 测试：`testAWebPinThatAPolicySuffixCoversIsNotResolvedStatically`、`testAnUncoveredWebPinStaysLoadBearingWhileAPolicySuffixExists`（`SingBoxConfigTests`）。
+- Codex 复核第 1 轮（minor，已改）：混合策略（既有被覆盖钉选又有未覆盖钉选）下，被覆盖钉选的答案轮换仍会让合并结果与当前不同，从而在未覆盖钉选保持刷新时触发整会话重载。`mergedManagedDirectPolicy` 现在对被当前策略后缀覆盖的网页钉选保持原值不合并；回归 `testCoveredWebPinRotationInAMixedPolicyIsNotAChange`（`ManagedDirectPinStabilityTests`）。另修正配置测试的夹具地址（验证器拒绝 203.0.113.0/24，原夹具会在目标断言前抛错）。

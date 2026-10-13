@@ -258,16 +258,65 @@ fn report_gate_panics(mode: &str, reason_file: Option<PathBuf>) {
     }));
 }
 
+/// Written to the reason file of a manual gate (update, orphan or uninstall) that PASSED by taking
+/// over a lease its previous holder never handed back. NSIS only tests that the file exists; a
+/// refusal writes its own text there. Every installer that ends normally hands its lease back
+/// (finish after a completed install, or a cancel before any file changed), so a lease still
+/// held by a dead holder is one that mutated files and failed or was killed
+/// (W9-RESOURCE-CANCEL-REPAIR).
+const LEASE_INHERITED: &str = "TONO_MANUAL_LEASE_INHERITED";
+
+/// Whether a lease is recorded before this gate takes it. The store may be busy for a moment
+/// (the Service or another helper), so it is waited for, as the executor does; a store that still
+/// cannot be read counts as held, and the gate then refuses on its own account.
+fn manual_lease_recorded() -> bool {
+    match open_waiting() {
+        Ok(store) => store.state.manual_installer.is_some(),
+        Err(_) => true,
+    }
+}
+
+/// The marker is a control signal, not a diagnostic: a gate that took over a lease but could not
+/// say so would let the cancelled wizard release it. Failing here refuses the gate and leaves
+/// the lease recorded, which the next installer inherits in turn.
+fn mark_lease_inherited(reason_file: Option<&Path>) -> Result<(), Error> {
+    use std::io::Write as _;
+    use std::os::windows::fs::OpenOptionsExt as _;
+    let Some(path) = reason_file else {
+        return Ok(());
+    };
+    let bytes: Vec<u8> = format!("{LEASE_INHERITED}\r\n")
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    // A fresh name in the installer's own plug-ins directory: never follow or reuse one.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+        .and_then(|mut file| file.write_all(&bytes))
+        .with_context(|| format!("could not record the inherited installer lease in {path:?}"))
+}
+
 pub(super) fn dispatch() -> Result<bool, Error> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if let Some((mode, reason_file)) = gate_invocation(&args) {
         report_gate_panics(&mode, reason_file.clone());
+        // Each gate mode takes the same lease.
+        let inherits_lease = manual_lease_recorded();
         let outcome = match mode.as_str() {
             "--manual-update-gate" => manual_update_gate(bring_scm_bfe_up, || {
                 super::shared::block_on_abandoning(native::begin_manual())?
             }),
             "--manual-orphan-gate" => native::begin_manual_orphan().map(|()| None),
             _ => native::begin_manual_uninstall().map(|()| None),
+        };
+        let outcome = match outcome {
+            Ok(note) if inherits_lease => {
+                mark_lease_inherited(reason_file.as_deref()).map(|()| note)
+            }
+            other => other,
         };
         let report = native::GateReport::for_machine(reason_file);
         std::process::exit(finish_gate(&mode, &report, outcome));
@@ -470,6 +519,8 @@ fn execute(recovery: bool) -> Result<(), Error> {
             "staged components changed before consume"
         );
     }
+    // Built before consumption: past it, no `?` may leave `execute` ahead of the outcome path.
+    let runtime = tokio::runtime::Runtime::new()?;
     let launch = if recovery {
         Ok(None)
     } else {
@@ -502,19 +553,38 @@ fn execute(recovery: bool) -> Result<(), Error> {
             )
         })
     };
-    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
-    let service = manager.open_service(
-        tono_service_protocol::WINDOWS_SERVICE_NAME,
-        ServiceAccess::ALL_ACCESS,
-    )?;
-    suppress_windows_service_recovery(&service)?;
-    stop_windows_service(&service)?;
-    let runtime = tokio::runtime::Runtime::new()?;
+    // The attempt is consumed from here on. No step below may leave `execute` before the outcome
+    // path: it records Uncertain, releases the network and restores the SCM recovery actions
+    // (#1293). A Service that cannot be opened has nothing to restore.
+    let service = match ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+        .and_then(|manager| {
+            manager.open_service(
+                tono_service_protocol::WINDOWS_SERVICE_NAME,
+                ServiceAccess::ALL_ACCESS,
+            )
+        }) {
+        Ok(service) => service,
+        Err(error) => {
+            return Err(settle_unopenable_service(
+                &mut store,
+                recovery,
+                native::strict_kill_switch_intent_on_disk(),
+                Error::from(error),
+                release_stopped_network,
+            ));
+        }
+    };
+    // A refused suppress or stop is the outcome's error, not an early return: the Service may be
+    // half stopped and SCM recovery suppressed, which only the outcome path puts right.
+    let stopped = suppress_windows_service_recovery(&service)
+        .map_err(Error::from)
+        .and_then(|()| stop_windows_service(&service).map(drop));
     let outcome = (|| -> Result<_, Error> {
         let launch = launch?;
         // Registration still precedes Service stop and every publication. Its
         // refusal must reach the same selective failure finalizer as rollback.
         registration?;
+        stopped?;
         let _owner = runtime
             .block_on(tono_service_protocol::acquire_service_owner())?
             .context("Service replacement ownership unavailable")?;
@@ -678,7 +748,9 @@ fn execute(recovery: bool) -> Result<(), Error> {
         configure_windows_service_recovery(&service)?;
         drop(store);
         drop(repair);
-        service.start(&Vec::<&std::ffi::OsStr>::new())?;
+        // A refused suppress or stop can leave the Service running: that is not a start failure,
+        // and the failed-restart fallback would stop a Service that still works (#1293).
+        start_service_if_stopped(&service)?;
         wait_for_service_ready()
     };
     let (rollback_release, restart) = match finalizer {
@@ -797,6 +869,53 @@ fn execute(recovery: bool) -> Result<(), Error> {
         }
     }
     Ok(())
+}
+
+/// The stopped-Service network release shared by the early outcome paths: ordinary traffic with
+/// the AI hold, never over an explicit strict kill switch.
+fn release_stopped_network() -> Result<(), Error> {
+    shared::block_on_abandoning(async {
+        let _owner = tono_service_protocol::acquire_service_owner()
+            .await?
+            .context("Service still owns the update outcome")?;
+        if native::strict_kill_switch_intent_on_disk() {
+            return Ok(());
+        }
+        tono_service_protocol::emergency_disarm_windows_kill_switch_applying_narrow().await
+    })?
+}
+
+/// The Service handle could not be opened after consumption (#1293). Nothing was suppressed or
+/// stopped, so there are no SCM actions to restore, but the attempt is consumed: it must not stay
+/// `Consumed` with no outcome. Mark it Uncertain, try the release, and count a failed recovery
+/// run only once the network settled (released, or strict), as the main outcome path does.
+fn settle_unopenable_service(
+    store: &mut tx::Store,
+    recovery: bool,
+    strict: bool,
+    error: Error,
+    release: impl FnOnce() -> Result<(), Error>,
+) -> Error {
+    if matches!(
+        store.attempt().map(|a| a.execution),
+        Ok(tx::Execution::Consumed | tx::Execution::Replaced | tx::Execution::Uncertain)
+    ) {
+        // This marker cannot turn uncertain execution into another install grant.
+        let _ = store.execution(tx::Execution::Uncertain);
+    }
+    let released = if strict { Ok(()) } else { release() };
+    if recovery
+        && released.is_ok()
+        && let Err(count_error) = store.note_recovery_run()
+    {
+        eprintln!("failed update recovery could not be counted: {count_error:#}");
+    }
+    match released {
+        Ok(()) => error,
+        Err(release_error) => error.context(format!(
+            "network release after the failed Service open also failed: {release_error:#}"
+        )),
+    }
 }
 
 fn start_service_if_stopped(service: &platform_lib::service::Service) -> Result<(), Error> {
@@ -2191,6 +2310,36 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
     }
 
+    /// W9-RESOURCE-CANCEL-REPAIR: the marker is the only way the cancelled wizard learns it holds
+    /// an inherited lease, so it is never best-effort: a name that already exists is refused.
+    #[test]
+    fn update_manual_gate_marks_an_inherited_lease_or_refuses() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-lease-marker-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let reason = root.join("reason.txt");
+        mark_lease_inherited(Some(&reason)).unwrap();
+        let written = std::fs::read(&reason).unwrap();
+        let written = String::from_utf16(
+            &written
+                .chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        assert!(written.starts_with(LEASE_INHERITED), "{written}");
+        assert!(
+            mark_lease_inherited(Some(&reason)).is_err(),
+            "an existing reason file is never reused"
+        );
+        assert!(mark_lease_inherited(None).is_ok());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
     /// Regression review a1d498c8 opus:F1: when the protected log could not be written, the
     /// elevated gate created and rotated `install-gate.log` under the user's TEMP, a directory
     /// that user's unelevated processes control. It writes no other log; the dialog's log line
@@ -2279,5 +2428,83 @@ mod tests {
                 "Stopped", "start", "wait", "Pending", "wait", "Running", "wfp"
             ]
         );
+    }
+
+    /// #1293: past consumption, a Service that cannot even be opened used to end `execute`
+    /// through `?`, before the outcome path. The attempt stayed Consumed and the network was never
+    /// released. It is now marked Uncertain and released, and a failed recovery run is counted
+    /// only once the network settled.
+    #[test]
+    fn update_unopenable_service_after_consumption_marks_uncertain_and_releases() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-update-unopenable-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let mut store = tx::Store::open(&root).unwrap();
+        let manifest = ReleaseManifest::decode(include_bytes!(
+            "../../../../../../tooling/scripts/tests/fixtures/update-protocol-v1/manifest.json"
+        ))
+        .unwrap();
+        let mut receipt = Receipt::decode(include_bytes!("../../../../../../tooling/scripts/tests/fixtures/update-protocol-v1/windows-receipt.json"), &manifest).unwrap();
+        receipt.installed_location_sha256 = tx::location_digest(&root);
+        let peer = tx::Image {
+            pid: 11,
+            started_at: 10,
+            path: root.join("Tono.exe"),
+            sha256: "0".repeat(64),
+        };
+        let attempt_id = receipt.attempt_id.clone();
+        store
+            .save(tx::State {
+                consumed_sequence: manifest.release_sequence,
+                generation: 91,
+                manual_installer: None,
+                attempt: Some(tx::Attempt {
+                    old_components: tx::target(&manifest).components.clone(),
+                    manifest,
+                    receipt,
+                    initiating_image: peer,
+                    successor_image: None,
+                    install_root: root.clone(),
+                    execution: tx::Execution::Consumed,
+                    executor: None,
+                    disconnect: None,
+                    publication_clock: None,
+                }),
+            })
+            .unwrap();
+        std::fs::create_dir_all(root.join(&attempt_id)).unwrap();
+
+        // The release is refused: marked Uncertain, but no run is counted, so recovery is retried.
+        for _ in 0..tx::MAX_RECOVERY_RUNS {
+            let error = settle_unopenable_service(
+                &mut store,
+                true,
+                false,
+                anyhow::anyhow!("access denied"),
+                || Err(anyhow::anyhow!("Service still owns the update outcome")),
+            );
+            assert!(format!("{error:#}").contains("access denied"), "{error:#}");
+            assert!(format!("{error:#}").contains("also failed"), "{error:#}");
+        }
+        assert_eq!(store.attempt().unwrap().execution, tx::Execution::Uncertain);
+        assert!(!store.recovery_exhausted().unwrap(), "an unsettled network counted a run");
+
+        let released = std::cell::Cell::new(0);
+        for _ in 0..tx::MAX_RECOVERY_RUNS {
+            settle_unopenable_service(&mut store, true, false, anyhow::anyhow!("access denied"), || {
+                released.set(released.get() + 1);
+                Ok(())
+            });
+        }
+        assert_eq!(released.get(), tx::MAX_RECOVERY_RUNS);
+        assert!(store.recovery_exhausted().unwrap(), "released runs must be counted");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

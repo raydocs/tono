@@ -144,6 +144,9 @@ pub(crate) fn ensure_owned_runtime_config_is_safe(yaml: &str) -> Result<(), Stri
     require(tun, "device", |v| v.as_str() == Some(TUN_DEVICE_NAME))?;
     require(tun, "auto-route", |v| v.as_bool() == Some(true))?;
     require(tun, "strict-route", |v| v.as_bool() == Some(true))?;
+    // mihomo 1.19.31+ defaults a tun with no `stack` to mips, which would drop Tono's
+    // gVisor buffer patch; the generators always write gvisor, so admit nothing else.
+    require(tun, "stack", |v| v.as_str() == Some("gvisor"))?;
 
     for proxy in sequence(root, "proxies")? {
         let kind = proxy.get("type").and_then(Value::as_str).unwrap_or("");
@@ -501,6 +504,20 @@ rules:
             assert!(
                 ensure_owned_runtime_config_is_safe(&changed).is_err(),
                 "accepted `{to}`"
+            );
+        }
+    }
+
+    /// mihomo 1.19.31+ defaults a tun with no `stack` to mips, which would drop Tono's
+    /// gVisor buffer patch, so the Service admits only the gVisor stack.
+    #[test]
+    fn the_service_refuses_a_tun_that_does_not_pin_the_gvisor_stack() {
+        for to in ["", "  stack: mips\n", "  stack: system\n", "  stack: mixed\n"] {
+            let changed = OWNED.replacen("  stack: gvisor\n", to, 1);
+            assert_ne!(changed, OWNED, "fixture edit did not apply");
+            assert!(
+                ensure_owned_runtime_config_is_safe(&changed).is_err(),
+                "accepted tun stack `{to}`"
             );
         }
     }

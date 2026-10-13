@@ -206,26 +206,36 @@ export function platformCounts(
  * from `releases.ts`. The figure a cell shows is users, which is what the
  * filtered list then holds.
  *
- * `minAppVersion` is the oldest version any of the customer's devices reports,
- * so a customer with one updated laptop and one forgotten desktop counts as
- * behind — which is the answer that matters when the question is "who will
- * break when the floor moves".
+ * With a platform selected, a customer is judged on the oldest version their
+ * devices on that platform report (`versionByPlatform`), because `published` is
+ * that platform's list; `minAppVersion` spans every platform and would file a
+ * current Windows customer under behind because of an old Mac. With no platform
+ * it is the all-platform `minAppVersion`.
  */
 export function selectByBucket(
   rows: readonly CustomerSummaryDto[],
   published: readonly string[],
   bucket: AdoptionBucket | null,
+  platform: Platform | null,
 ): CustomerSummaryDto[] {
   if (bucket === null) return [...rows];
-  return rows.filter((row) => bucketFor(row.minAppVersion, published) === bucket);
+  return rows.filter((row) => bucketFor(versionOn(row, platform), published) === bucket);
+}
+
+function versionOn(row: CustomerSummaryDto, platform: Platform | null): string | null {
+  if (platform === null) return row.minAppVersion;
+  return row.versionByPlatform.find((entry) => entry.platform === platform)?.version ?? null;
 }
 
 export function bucketCounts(
   rows: readonly CustomerSummaryDto[],
   published: readonly string[],
+  platform: Platform | null,
 ): Record<AdoptionBucket, number> {
   const out = {} as Record<AdoptionBucket, number>;
-  for (const bucket of ADOPTION_BUCKETS) out[bucket] = selectByBucket(rows, published, bucket).length;
+  for (const bucket of ADOPTION_BUCKETS) {
+    out[bucket] = selectByBucket(rows, published, bucket, platform).length;
+  }
   return out;
 }
 

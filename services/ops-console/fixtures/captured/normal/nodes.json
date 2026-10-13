@@ -25,6 +25,7 @@
           "cycleKind": "manual",
           "cycleStart": null,
           "cycleEnd": null,
+          "cycleAnchorDay": null,
           "counts": "in_out"
         },
         "asOfSec": null,
@@ -71,6 +72,7 @@
           "cycleKind": "manual",
           "cycleStart": 1723790348,
           "cycleEnd": 1726382348,
+          "cycleAnchorDay": 16,
           "counts": "in_out"
         },
         "asOfSec": 1725000000,
@@ -117,6 +119,7 @@
           "cycleKind": "manual",
           "cycleStart": 1723790348,
           "cycleEnd": 1726382348,
+          "cycleAnchorDay": 16,
           "counts": "in_out"
         },
         "asOfSec": 1725000000,

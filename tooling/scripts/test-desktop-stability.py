@@ -47,7 +47,7 @@ def main():
     if hasattr(os, "geteuid") and os.geteuid() == 0:
         parser.error("run as an ordinary user; privileged qualification must be isolated and explicit")
 
-    rust = ["cargo", "+1.98.1"]
+    rust = ["cargo", "+1.99.0"]
     checks = [
         ("version-tests", ROOT, [sys.executable, "tooling/scripts/tests/test_desktop_version.py"]),
         ("desktop-version", ROOT, [sys.executable, "tooling/scripts/verify-desktop-version.py", "--expected", args.expected_version]),

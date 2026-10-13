@@ -39,9 +39,35 @@ fn store_root() -> Result<(PathBuf, Vec<std::fs::File>)> {
     Ok((root, pins))
 }
 
+/// Whether the recorded executor may still run: only no process with that PID, or one created at
+/// another time, is conclusive. Any probe error counts as alive (#1293).
+#[cfg(windows)]
+pub(crate) fn executor_possibly_live(recorded: &Image) -> bool {
+    match super::process::process_started_at(recorded.pid) {
+        Ok(None) => false,
+        Ok(Some(started_at)) => started_at == recorded.started_at,
+        Err(_) => true,
+    }
+}
+
 pub fn pending() -> bool {
     // A locked/unreadable/corrupt store is uncertainty, not absence.
-    open_store().map(|s| s.pending()).unwrap_or(true)
+    open_store()
+        .map(|mut store| {
+            retire_inert(&mut store);
+            store.pending()
+        })
+        .unwrap_or(true)
+}
+
+/// Archive an attempt whose receipt expired before anything was consumed (#1293, decision 119).
+/// It can grant nothing, yet while recorded it fenced every other user's Connect, release and
+/// Disconnect with no exit. A failed archive leaves it pending: uncertainty is not absence.
+fn retire_inert(store: &mut Store) {
+    let Ok(at) = now() else { return };
+    if let Err(error) = store.retire_expired_inert(at) {
+        tracing::warn!("expired unconsumed update attempt could not be archived: {error:#}");
+    }
 }
 
 pub(crate) fn lifecycle_allowed(owner: &AuthenticatedOwner) -> Result<()> {
@@ -50,6 +76,7 @@ pub(crate) fn lifecycle_allowed(owner: &AuthenticatedOwner) -> Result<()> {
         store.state.manual_installer.is_none(),
         "manual installer owns the machine lifecycle"
     );
+    retire_inert(&mut store);
     if !store.pending() {
         return Ok(());
     }
@@ -69,7 +96,8 @@ pub(crate) fn lifecycle_allowed(owner: &AuthenticatedOwner) -> Result<()> {
 }
 
 pub(crate) fn release_allowed() -> Result<()> {
-    let store = open_store()?;
+    let mut store = open_store()?;
+    retire_inert(&mut store);
     ensure!(
         !store.pending() && store.state.manual_installer.is_none(),
         "update pending; release/quit cannot cancel the recorded recovery obligation"
@@ -138,8 +166,9 @@ fn release_admission_at(
     state: &State,
     live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
 ) -> Result<()> {
+    // Not clock-proof by design: an unreadable clock counts as not expired, so it keeps refusing.
     ensure!(
-        !state.pending(),
+        !state.blocks_at(now().unwrap_or(0)),
         "update pending; release/quit cannot cancel the recorded recovery obligation"
     );
     no_live_lease(state, live).context("manual installer owns the machine lifecycle")?;
@@ -166,19 +195,57 @@ fn release_admission_at(
 /// incomplete, never a missed attempt.
 pub(crate) fn attempt_pending_read_only() -> Option<bool> {
     let mut cached = PENDING_FOR_STATUS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    // A cached "pending" re-reads once its time bound passes, which may free an inert attempt. A
+    // cached "not pending" that rests on the receipt having expired is dropped unless the clock
+    // still confirms it (a failed or regressed clock must not keep an unproven answer).
+    if cached.is_some_and(|entry| status_cache_stale(entry, now().ok())) {
+        *cached = None;
+    }
     if cached.is_none() {
         *cached = match read_store_state() {
-            Ok(state) => Some(state.pending()),
+            Ok(state) => {
+                let at = now().ok();
+                let pending = state.blocks_at(at.unwrap_or(0));
+                // Only a never-consumed attempt can be freed by time; a live executor past the
+                // expiry is probed again shortly, as it may exit before consuming.
+                Some((pending, status_cache_bound(state.expiry_frees_attempt(), pending, at)))
+            }
             Err(error) => {
                 tracing::warn!("update state unreadable for status; reporting it as unknown: {error:#}");
                 None
             }
         };
     }
-    *cached
+    cached.map(|(pending, _)| pending)
 }
 
-static PENDING_FOR_STATUS: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
+/// Whether a cached answer must be read again at clock reading `at` (`None`: the clock failed).
+fn status_cache_stale((pending, bound): (bool, u64), at: Option<u64>) -> bool {
+    if pending {
+        at.is_some_and(|at| at >= bound)
+    } else {
+        bound != u64::MAX && !at.is_some_and(|at| at >= bound)
+    }
+}
+
+/// The time bound stored with a freshly read answer; `expires` is
+/// [`State::expiry_frees_attempt`]. Only a never-consumed attempt can be freed by time; a live
+/// executor past the expiry is probed again shortly, as it may exit before consuming.
+fn status_cache_bound(expires: Option<u64>, pending: bool, at: Option<u64>) -> u64 {
+    match expires {
+        Some(expires) if pending => match at {
+            Some(at) if at >= expires => at.saturating_add(30),
+            _ => expires,
+        },
+        Some(expires) => expires,
+        None => u64::MAX,
+    }
+}
+
+/// `(pending, time bound)`: a pending answer is re-read at the bound; a not-pending answer that
+/// rests on an expired receipt is valid only while the clock is at or past it. `u64::MAX` when
+/// time cannot change the answer.
+static PENDING_FOR_STATUS: std::sync::Mutex<Option<(bool, u64)>> = std::sync::Mutex::new(None);
 
 /// The manual installer lease check for update requests. Only `Status`, the read the App sends
 /// before its release, passes a conclusively dead holder (Service half of BRICK-W2); every other
@@ -404,7 +471,7 @@ async fn release_failed_preparation(
     let cleared = desired::clear_active_owner().await;
     // Automatic failure opens general traffic but retains the secondary AI hold.
     // Desired-state failures must not prevent the DNS/WFP release.
-    wfp::release_applying_narrow().await?;
+    wfp::release_applying_narrow_if_owed().await?;
     stopped?;
     persisted?;
     cleared?;
@@ -454,12 +521,14 @@ pub(crate) async fn request(
     let mut refresh = StatusCacheRefresh(None);
     let result = transact(owner, request).await;
     refresh.0 = result.as_ref().ok().map(|status| {
-        status.receipt.as_ref().is_some_and(|r| r.phase != Phase::Committed)
+        let pending = status.receipt.as_ref().is_some_and(|r| r.phase != Phase::Committed);
+        let expires = status.receipt.as_ref().filter(|_| pending).map_or(u64::MAX, |r| r.expires_at_unix);
+        (pending, expires)
     });
     result
 }
 
-struct StatusCacheRefresh(Option<bool>);
+struct StatusCacheRefresh(Option<(bool, u64)>);
 
 impl Drop for StatusCacheRefresh {
     fn drop(&mut self) {
@@ -476,6 +545,13 @@ async fn transact(
     update_lease_gate(&request, &store.state, super::process::process_identity)?;
     let _repair =
         crate::acquire_service_repair_gate()?.context("repair/uninstall already running")?;
+    // The owner's own Disconnect must release first: archiving an expired attempt under it would
+    // turn the release into a no-op status that the App takes for done (#1293).
+    let own_release = request.is_disconnect()
+        && store.state.attempt.as_ref().is_some_and(|a| a.receipt.owner == owner.key);
+    if !own_release {
+        retire_inert(&mut store);
+    }
     if let Some(a) = &store.state.attempt
         && store.pending()
     {
@@ -492,7 +568,13 @@ async fn transact(
         } => {
             let manifest = verify_manifest(manifest.as_bytes(), &signature)?;
             let mut result = status(&store)?;
-            ensure!(!store.pending(), "a prior update needs reconciliation");
+            if store.pending() {
+                // The App shows a Check refusal as its discovery error: name the repair (#1307).
+                if let Some(attention) = result.needs_attention.take() {
+                    anyhow::bail!("{attention}");
+                }
+                anyhow::bail!("a prior update needs reconciliation");
+            }
             if manifest.release_sequence > installed_floor()?.max(store.state.consumed_sequence) {
                 result.offer = Some(manifest);
             }
@@ -700,7 +782,7 @@ async fn transact(
                     if executor_spawn_failure_releases(wfp::strict_kill_switch_enabled()) {
                         let released = async {
                             begin_update_release(&mut store, owner, &peer)?;
-                            wfp::release_applying_narrow().await?;
+                            wfp::release_applying_narrow_if_owed().await?;
                             if let Err(clear_error) = desired::clear_active_owner().await {
                                 tracing::warn!(
                                     "executor did not start; general traffic was released, \
@@ -1003,6 +1085,55 @@ fn release_replaced_backups(plan_path: &Path, attempt_id: &str, roots: &[&Path])
     Ok(())
 }
 
+/// A full install (#1307) ended with the exhausted attempt's installed identity at its original
+/// or its signed target: archive the attempt, keeping its evidence and the consumed high-water.
+/// Every durable plan member must be on the same side as the three components, and the target
+/// side also releases the retained rollback copies. `Ok(false)` when the attempt is not
+/// repairable. Anything else, such as another release's bytes, errs and leaves it pending.
+fn retire_repaired(
+    store: &mut Store,
+    installer: &Image,
+    installed: impl Fn(&Path) -> Result<Components>,
+) -> Result<bool> {
+    if !store.repair_eligible()? {
+        return Ok(false);
+    }
+    let (attempt_id, root, side) = {
+        let a = store.attempt()?;
+        let current = installed(&a.install_root)?;
+        let side = if current == a.old_components {
+            PlanSide::Old
+        } else if current == target(&a.manifest).components {
+            PlanSide::New
+        } else {
+            anyhow::bail!(
+                "installed identity is neither the original nor the signed target of the \
+                 failed update; evidence cannot be retired"
+            )
+        };
+        (a.receipt.attempt_id.clone(), a.install_root.clone(), side)
+    };
+    let plan = store.attempt_dir()?.join("replacement.json");
+    let service_dir = crate::service_paths().install_dir();
+    let roots = [root.as_path(), service_dir.as_path()];
+    let planned = plan.try_exists()?;
+    if planned {
+        ensure!(
+            plan_members_at(&plan, &attempt_id, &roots, side)?,
+            "installed plan members are not all at the same side as the installed identity; \
+             evidence cannot be retired"
+        );
+    }
+    store.retire_repaired(installer, || {
+        if planned && side == PlanSide::New {
+            release_replaced_backups(&plan, &attempt_id, &roots)
+        } else {
+            Ok(())
+        }
+    })?;
+    Ok(true)
+}
+
 /// Update bookkeeping after an explicit Disconnect already released WFP:
 /// record the verified release, then archive a record whose installed
 /// identity proves it terminal.
@@ -1105,7 +1236,8 @@ fn status(store: &Store) -> Result<UpdateStatus> {
         needs_attention: store.recovery_exhausted().unwrap_or(false).then(|| {
             format!(
                 "automatic update recovery failed {MAX_RECOVERY_RUNS} times and stopped; \
-                 the installation needs manual repair"
+                 the installation needs manual repair: run the Tono installer again (the same \
+                 release as the failed update, or the previous one) to repair it"
             )
         }),
         successor_relaunched: false,
@@ -1257,8 +1389,11 @@ pub fn retire_recovery_task() -> Result<()> {
 /// corrupt or armed marker cannot be converted to permission by an installer.
 pub fn maintenance_allowed() -> Result<()> {
     let store = open_store()?;
+    // Only an exhausted recovery, and only under the lease `begin_manual` granted this
+    // installer, may pass (#1307). Without a lease every pending record still refuses.
     ensure!(
-        !store.pending(),
+        !store.pending()
+            || (store.state.manual_installer.is_some() && store.repair_eligible()?),
         "update evidence pending; manual replacement/uninstall refused"
     );
     if let Some(installer) = &store.state.manual_installer {
@@ -1268,6 +1403,35 @@ pub fn maintenance_allowed() -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Left beside the installed binaries while a repairing full install is unfinished. The installer
+/// script keeps the failed update's rollback copies while it exists; [`finish_manual`] removes it.
+pub const REPAIR_EVIDENCE_MARKER: &str = ".update-repair-evidence";
+
+fn clear_repair_marker(root: &Path) {
+    match std::fs::remove_file(root.join(REPAIR_EVIDENCE_MARKER)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => tracing::warn!("could not remove the update repair marker: {error:#}"),
+    }
+}
+
+/// Whether this installer holds the manual lease beside an exhausted update attempt (#1307): the
+/// gate grants that lease only for such a record. The full install then keeps its own scratch
+/// names, so the failed update's recovery files stay untouched. A lock-free read; a different or
+/// absent holder, or no pending Consumed/Uncertain attempt, is `false`.
+pub fn repair_lease_held() -> Result<bool> {
+    Ok(repair_lease_in(&read_store_state()?, &parent_image()?))
+}
+
+fn repair_lease_in(state: &State, installer: &Image) -> bool {
+    state.manual_installer.as_ref() == Some(installer)
+        && state.pending()
+        && state
+            .attempt
+            .as_ref()
+            .is_some_and(|a| matches!(a.execution, Execution::Consumed | Execution::Uncertain))
 }
 
 pub async fn manual_gate() -> Result<()> {
@@ -1533,6 +1697,40 @@ fn gate_store() -> Result<Store> {
     })
 }
 
+/// [`refuse_pending`] for the install chain only: an exhausted recovery that no live process owns
+/// is repaired by the full install itself (#1307, [`retire_repaired`]). Uninstall keeps
+/// [`refuse_pending`].
+fn refuse_pending_unless_repairable(store: &Store) -> Result<()> {
+    if store.repair_eligible().unwrap_or(false) {
+        return Ok(());
+    }
+    refuse_pending(store)
+}
+
+/// The install gate runs the helper from the installer's private plugins directory; the
+/// uninstaller runs the installed copy under the install root. Both call `--manual-update-gate`,
+/// and only the install may repair an exhausted record (#1307). Anything unknown is treated as
+/// the uninstaller, which keeps refusing.
+fn gate_is_install_copy() -> bool {
+    // `current_exe()` keeps the launch path (`C:\Program Files\...`) while `install_root()` is
+    // canonical (`\\?\C:\...`): both are canonicalized here, and a failure keeps the strict side.
+    let exe = std::env::current_exe().and_then(|exe| exe.canonicalize());
+    match (exe, install_root().and_then(|root| Ok(root.canonicalize()?))) {
+        (Ok(exe), Ok(root)) => !runs_from_install_root(&exe, &root),
+        _ => false,
+    }
+}
+
+fn runs_from_install_root(exe: &Path, root: &Path) -> bool {
+    let lower = |path: &Path| {
+        let text = path.to_string_lossy().replace('/', "\\").to_ascii_lowercase();
+        text.strip_prefix(r"\\?\").map(str::to_owned).unwrap_or(text)
+    };
+    let root = lower(root);
+    let root = root.trim_end_matches('\\');
+    lower(exe).starts_with(&format!("{root}\\"))
+}
+
 fn refuse_pending(store: &Store) -> Result<()> {
     match store.state.attempt.as_ref() {
         Some(a) if store.pending() => Err(refusal(
@@ -1591,7 +1789,11 @@ pub async fn begin_manual() -> Result<Option<String>> {
     let installer = gate_installer()?;
     let _repair = gate_repair_lock()?;
     let mut store = gate_store()?;
-    refuse_pending(&store)?;
+    if gate_is_install_copy() {
+        refuse_pending_unless_repairable(&store)?;
+    } else {
+        refuse_pending(&store)?;
+    }
     refuse_live_lease(&store, &installer, super::process::process_started_at)?;
     drop(store);
     // No stale manual lease may turn armed/unknown protection into permission.
@@ -1704,12 +1906,60 @@ pub async fn retire_orphaned_owner() -> Result<()> {
     desired::retire_legacy_active_owner().await
 }
 
+const RECOVERY_TASK_RETIRE_TRIES: u32 = 4;
+
+/// The archive ends the record the boot task recovers, and nothing retries a failed delete
+/// afterwards (the task would then fail at every boot): so a transient Task Scheduler refusal is
+/// tried again a few times before giving up (#1307).
+fn retire_recovery_task_retrying(
+    mut retire: impl FnMut() -> Result<()>,
+    pause: impl Fn(std::time::Duration),
+) -> Result<()> {
+    let mut result = retire();
+    for _ in 1..RECOVERY_TASK_RETIRE_TRIES {
+        if result.is_ok() {
+            break;
+        }
+        pause(std::time::Duration::from_millis(500));
+        result = retire();
+    }
+    result
+}
+
 pub fn finish_manual() -> Result<()> {
     let mut store = open_store()?;
+    let installer = parent_image()?;
     ensure!(
-        store.state.manual_installer.as_ref() == Some(&parent_image()?),
+        store.state.manual_installer.as_ref() == Some(&installer),
         "manual installer mismatch"
     );
+    let marker_root = store.state.attempt.as_ref().map(|a| a.install_root.clone());
+    // A full install that left the exhausted attempt's original or target identity ends it
+    // (#1307). It is repair, not part of the lease hand-back: an unproven install leaves the
+    // record pending and still hands the lease back, or the installer would exit 76.
+    match retire_repaired(&mut store, &installer, installed_components) {
+        Ok(true) => {
+            tracing::warn!("a full install repaired the exhausted update attempt; it is archived");
+            if let Err(error) =
+                retire_recovery_task_retrying(retire_recovery_task, std::thread::sleep)
+            {
+                tracing::warn!("update recovery task was not retired after the repair: {error:#}");
+            }
+        }
+        Ok(false) => {}
+        Err(error) => {
+            tracing::warn!("the exhausted update attempt stays pending after the install: {error:#}");
+            // A failed archive poisons this store; reopen it for the hand-back. The old handle
+            // must go first: it holds `transaction.lock`, and a second open would be refused as
+            // busy (the #1297 deadlock, exit 76).
+            drop(store);
+            store = open_store()?;
+        }
+    }
+    // The install is over, proven or not: from here the evidence is judged by the record alone.
+    if let Some(root) = marker_root {
+        clear_repair_marker(&root);
+    }
     let mut next = store.state.clone();
     next.manual_installer = None;
     store.save(next)
@@ -2307,6 +2557,44 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(feature = "test")]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn failed_prepare_does_not_install_an_ai_hold_for_an_unprotected_user() -> Result<()> {
+        use crate::update_transaction::tests::reserved;
+
+        // Nothing armed, and the last release was the user's own Restore internet.
+        wfp::emergency_disarm_windows_kill_switch().await?;
+        desired::clear_active_owner().await?;
+        let (root, mut store, peer, _) = reserved();
+        let owner = AuthenticatedOwner {
+            key: "failed-prepare-unprotected-fixture".to_owned(),
+            identity: crate::OwnerIdentity::Windows {
+                sid: "S-1-5-21-1-2-3-1001".to_owned(),
+            },
+            app_data_root: root.clone(),
+            peer_pid: None,
+            peer_session_id: None,
+        };
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().receipt.owner = owner.key.clone();
+        store.save(next)?;
+
+        release_failed_preparation(&mut store, &owner, &peer, true).await?;
+        let ai_held = super::super::selective_layer::test_hold_active();
+        super::super::selective_layer::remove().await;
+        drop(store);
+        std::fs::remove_dir_all(root)?;
+        let _ = std::fs::remove_file(
+            crate::service_paths()
+                .for_owner_key(&owner.key)
+                .desired_state_path(),
+        );
+
+        assert!(!ai_held, "a failed update must not newly apply the AI hold to an unprotected user");
+        Ok(())
+    }
+
     #[test]
     fn an_executor_that_never_starts_releases_unless_the_kill_switch_is_strict() {
         assert!(executor_spawn_failure_releases(false));
@@ -2749,6 +3037,201 @@ mod tests {
             "a killed lease holder still counted as alive"
         );
         drop(child);
+    }
+
+    #[test]
+    fn update_status_cache_never_keeps_an_unproven_expiry_answer() {
+        // Not pending only because the receipt expired: dropped when the clock fails or regresses.
+        assert!(status_cache_stale((false, 100), None));
+        assert!(status_cache_stale((false, 100), Some(99)));
+        assert!(!status_cache_stale((false, 100), Some(100)));
+        assert!(!status_cache_stale((false, u64::MAX), None));
+        // Pending: read again once the bound passes, never on a failed clock.
+        assert!(status_cache_stale((true, 100), Some(100)));
+        assert!(!status_cache_stale((true, 100), None));
+        // A live executor past the expiry is probed again shortly, not never.
+        assert_eq!(status_cache_bound(Some(100), true, Some(150)), 180);
+        assert_eq!(status_cache_bound(Some(100), true, Some(50)), 100);
+        assert_eq!(status_cache_bound(Some(100), false, Some(150)), 100);
+        assert_eq!(status_cache_bound(None, true, Some(150)), u64::MAX);
+    }
+
+    /// #1293: an attempt that expired before anything was consumed can never act, yet it fenced
+    /// every other user's release, Connect and Disconnect for good. It stops blocking at its
+    /// receipt expiry; a consumed attempt keeps its recovery obligation whatever the clock says.
+    #[test]
+    fn update_release_admission_frees_an_expired_unconsumed_attempt() {
+        let (root, store, _, _) = crate::update_transaction::tests::reserved();
+        let mut state = store.state.clone();
+        state.attempt.as_mut().unwrap().receipt.expires_at_unix = 1;
+        release_admission_at(&state, |_| Ok(None))
+            .expect("an expired attempt that consumed nothing kept fencing another user");
+        state.attempt.as_mut().unwrap().execution = Execution::Consumed;
+        state.consumed_sequence = state.attempt.as_ref().unwrap().manifest.release_sequence;
+        let consumed = release_admission_at(&state, |_| Ok(None)).unwrap_err();
+        assert!(format!("{consumed:#}").contains("update pending"), "{consumed:#}");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// #1307: only the install's helper copy may take the repair lease; the uninstaller runs the
+    /// installed copy and keeps refusing.
+    #[test]
+    fn update_only_the_install_gate_copy_may_repair() {
+        let root = Path::new(r"C:\Program Files\Tono");
+        assert!(runs_from_install_root(
+            Path::new(r"c:\program files\tono\resources\tono-service-install.exe"),
+            root
+        ));
+        assert!(!runs_from_install_root(
+            Path::new(r"C:\Users\a\AppData\Local\Temp\nsx1\tono-gate\resources\tono-service-install.exe"),
+            root
+        ));
+        assert!(
+            runs_from_install_root(
+                Path::new(r"C:\Program Files\Tono\resources\tono-service-install.exe"),
+                Path::new(r"\\?\C:\Program Files\Tono")
+            ),
+            "the canonical root and the launch-path executable are the same directory"
+        );
+        assert!(
+            runs_from_install_root(
+                Path::new(r"\\?\C:\Program Files\Tono\resources\tono-service-install.exe"),
+                root
+            ),
+            "the canonical executable under a plain root"
+        );
+        assert!(
+            !runs_from_install_root(Path::new(r"C:\Program Files\TonoEvil\x.exe"), root),
+            "a sibling directory is not the install root"
+        );
+    }
+
+    /// #1307: the install chain passes a pending attempt only once its recovery is exhausted;
+    /// uninstall never does.
+    #[test]
+    fn update_install_chain_passes_only_an_exhausted_pending_attempt() {
+        let (root, mut store, peer, executor) = crate::update_transaction::tests::reserved();
+        assert!(refuse_pending_unless_repairable(&store).is_err(), "a staged attempt can still be installed");
+        crate::update_transaction::tests::authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::Uncertain).unwrap();
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        assert!(
+            refuse_pending_unless_repairable(&store).is_err(),
+            "recovery can still run"
+        );
+        for _ in 0..MAX_RECOVERY_RUNS {
+            store.note_recovery_run().unwrap();
+        }
+        refuse_pending_unless_repairable(&store).unwrap();
+        assert!(refuse_pending(&store).is_err(), "uninstall keeps refusing a pending attempt");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An exhausted attempt beside an installer lease. The fixture's original and target
+    /// identities are equal; the original is changed so the two sides can be told apart.
+    fn leased_exhausted() -> (PathBuf, Store, Image) {
+        let (root, mut store, peer, executor) = crate::update_transaction::tests::reserved();
+        crate::update_transaction::tests::authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::Uncertain).unwrap();
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        for _ in 0..MAX_RECOVERY_RUNS {
+            store.note_recovery_run().unwrap();
+        }
+        let installer = Image {
+            pid: 30,
+            started_at: 300,
+            path: root.join("installer.exe"),
+            sha256: "1".repeat(64),
+        };
+        let mut next = store.state.clone();
+        next.manual_installer = Some(installer.clone());
+        next.attempt.as_mut().unwrap().old_components.app_sha256 = "e".repeat(64);
+        store.save(next).unwrap();
+        (root, store, installer)
+    }
+
+    #[test]
+    fn update_repair_lease_is_held_only_by_the_holder_beside_a_pending_exhausted_attempt() {
+        let (root, store, installer) = leased_exhausted();
+        assert!(repair_lease_in(&store.state, &installer));
+        let other = Image { pid: 31, ..installer.clone() };
+        assert!(!repair_lease_in(&store.state, &other), "another process is not the lease holder");
+        let mut unleased = store.state.clone();
+        unleased.manual_installer = None;
+        assert!(!repair_lease_in(&unleased, &installer));
+        let mut retired = store.state.clone();
+        retired.attempt = None;
+        assert!(!repair_lease_in(&retired, &installer), "no attempt, no repair namespace");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_repair_marker_is_cleared_once_and_a_missing_one_is_fine() {
+        let root = std::env::temp_dir().join(format!("tono-repair-marker-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(REPAIR_EVIDENCE_MARKER), b"").unwrap();
+        clear_repair_marker(&root);
+        assert!(!root.join(REPAIR_EVIDENCE_MARKER).exists());
+        clear_repair_marker(&root);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_recovery_task_retire_is_retried_after_the_archive() {
+        let mut calls = 0;
+        retire_recovery_task_retrying(
+            || {
+                calls += 1;
+                anyhow::ensure!(calls >= 3, "scheduler busy");
+                Ok(())
+            },
+            |_| {},
+        )
+        .expect("a transient scheduler failure must not leave the boot task behind");
+        assert_eq!(calls, 3);
+        calls = 0;
+        retire_recovery_task_retrying(
+            || {
+                calls += 1;
+                anyhow::bail!("scheduler gone")
+            },
+            |_| {},
+        )
+        .unwrap_err();
+        assert_eq!(calls, RECOVERY_TASK_RETIRE_TRIES, "a permanent failure is bounded");
+    }
+
+    #[test]
+    fn update_repair_refuses_an_identity_that_is_neither_original_nor_target() {
+        let (root, mut store, installer) = leased_exhausted();
+        let mut mixed = store.attempt().unwrap().old_components.clone();
+        mixed.app_sha256 = "f".repeat(64);
+        let error = retire_repaired(&mut store, &installer, |_| Ok(mixed.clone())).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("neither the original nor the signed target"),
+            "{error:#}"
+        );
+        assert!(store.pending(), "an unproven install must not end the record");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_repair_archives_the_attempt_once_the_installed_target_is_proven() {
+        let (root, mut store, installer) = leased_exhausted();
+        let target_components = target(&store.attempt().unwrap().manifest).components.clone();
+        let attempt_id = store.attempt().unwrap().receipt.attempt_id.clone();
+        assert!(retire_repaired(&mut store, &installer, |_| Ok(target_components.clone())).unwrap());
+        assert!(!store.pending());
+        assert_eq!(store.state.consumed_sequence, 74, "the high-water is kept");
+        assert!(root.join(format!("retired-{attempt_id}.json")).is_file());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// BRICK-W2 (Service half): after a restart the App's Disconnect sends `Status` first, and

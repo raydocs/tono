@@ -975,7 +975,7 @@ extension AppState {
             // gathers the inputs and carries out the verdict.
             let decision = ManagedDirectRefreshPolicy.decide(
                 .init(
-                    pinsAreLoadBearing: base.webDomainSuffixes.isEmpty,
+                    pinsAreLoadBearing: base.pinsAreLoadBearing,
                     routeUsedRecently: managedDirectRouteRecentlyUsed,
                     hasInFlightProxiedStream: hasInFlightProxiedStream,
                     deferralsSoFar: pinRefreshDeferralCount,
@@ -1036,14 +1036,17 @@ extension AppState {
     ) -> ConfigPipeline.ManagedDirectRuntimePolicy? {
         func mergePins(
             _ currentPins: [ConfigPipeline.DirectDomainPin],
-            _ resolvedPins: [ConfigPipeline.DirectDomainPin]
+            _ resolvedPins: [ConfigPipeline.DirectDomainPin],
+            frozen: (ConfigPipeline.DirectDomainPin) -> Bool = { _ in false }
         ) -> [ConfigPipeline.DirectDomainPin] {
             let resolvedByHost = Dictionary(
                 uniqueKeysWithValues: resolvedPins.map { ($0.host, $0) }
             )
             var currentHosts = Set(currentPins.map(\.host))
             var pins = currentPins.map { pin -> ConfigPipeline.DirectDomainPin in
-                guard let fresh = resolvedByHost[pin.host] else { return pin }
+                // A pin the runtime no longer resolves statically has nothing
+                // to keep fresh, and rewriting it would reload the session.
+                guard !frozen(pin), let fresh = resolvedByHost[pin.host] else { return pin }
                 let freshSet = Set(fresh.addresses)
                 let live = pin.addresses.filter { freshSet.contains($0) }
                 // Absence from one answer is not evidence that a committed
@@ -1066,7 +1069,9 @@ extension AppState {
                     ports: fresh.ports
                 )
             }
-            for fresh in resolvedPins where !currentHosts.contains(fresh.host) {
+            // A new host the policy suffixes cover is not adopted either: the
+            // runtime never emits it, so it could only cause a reload.
+            for fresh in resolvedPins where !currentHosts.contains(fresh.host) && !frozen(fresh) {
                 currentHosts.insert(fresh.host)
                 pins.append(fresh)
             }
@@ -1077,7 +1082,8 @@ extension AppState {
             domainPins: mergePins(current.domainPins, resolved.domainPins),
             webDomainPins: mergePins(
                 current.webDomainPins,
-                resolved.webDomainPins
+                resolved.webDomainPins,
+                frozen: { pin in current.webDomainSuffixes.contains { $0.covers(pin) } }
             ),
             webDomainSuffixes: current.webDomainSuffixes,
             mediaEndpoints: current.mediaEndpoints,

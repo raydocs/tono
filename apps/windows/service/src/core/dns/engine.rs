@@ -1904,7 +1904,7 @@ fn read_nrpt_store(root: &str) -> Result<Vec<super::EffectiveNrptRule>> {
     Ok(rules)
 }
 
-fn effective_nrpt_rules_blocking() -> Result<Vec<super::EffectiveNrptRule>> {
+pub(super) fn effective_nrpt_rules_blocking() -> Result<Vec<super::EffectiveNrptRule>> {
     let policy = read_nrpt_store(NRPT_POLICY_ROOT)?;
     if !policy.is_empty() {
         return Ok(policy);

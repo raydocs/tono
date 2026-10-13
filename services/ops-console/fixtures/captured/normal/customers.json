@@ -30,6 +30,12 @@
         "claude"
       ],
       "minAppVersion": "0.0.72",
+      "versionByPlatform": [
+        {
+          "platform": "macos",
+          "version": "0.0.72"
+        }
+      ],
       "stage": "connected",
       "stageSinceAt": 1724999918,
       "firstConnectedAt": 1724999918,
@@ -63,6 +69,7 @@
       "quotaBytes": 107374182400,
       "services": [],
       "minAppVersion": null,
+      "versionByPlatform": [],
       "stage": "registered",
       "stageSinceAt": 1724999928,
       "firstConnectedAt": null,
@@ -96,6 +103,7 @@
       "quotaBytes": null,
       "services": [],
       "minAppVersion": null,
+      "versionByPlatform": [],
       "stage": "registered",
       "stageSinceAt": 1724999938,
       "firstConnectedAt": null,

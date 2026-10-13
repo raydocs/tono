@@ -11,6 +11,16 @@ use super::*;
 /// cannot change group policy or a VPN profile, so re-running it would only spin.
 pub(crate) const DNS_RESOLVER_POLICY_CONFLICT_PREFIX: &str = "TONO_DNS_POLICY_CONFLICT";
 
+/// Stable marker for "the selective AI hold wrote its per-suffix NRPT rules, but the DNS Client is
+/// not applying them" (#1145): domain (Group Policy) NRPT policy exists, and while it holds any
+/// rule Windows ignores the local store where the hold lives, even for an unrelated namespace.
+/// Advisory like [`DNS_RESOLVER_POLICY_CONFLICT_PREFIX`], in `resolver_policy_warning`, never in
+/// `last_error`: ordinary internet and Anthropic's fixed firewall prefixes are unaffected, and
+/// no gate may close over enterprise policy Tono cannot change. Tono does not edit or remove that
+/// policy and adds no catch-all block to compensate.
+pub(crate) const DNS_SELECTIVE_POLICY_SUPPRESSED_PREFIX: &str =
+    "TONO_DNS_SELECTIVE_POLICY_SUPPRESSED";
+
 /// One NRPT rule from the store the DNS Client applies (X2-2).
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -75,6 +85,35 @@ pub(super) fn resolver_policy_conflict(
     }
     (!reasons.is_empty())
         .then(|| format!("{DNS_RESOLVER_POLICY_CONFLICT_PREFIX}: {}", reasons.join("; ")))
+}
+
+/// #1145: pure verdict over the effective NRPT read right after the selective suffix rules were
+/// written. The rules are in force only when an effective rule carries the hold's sinkhole
+/// resolver; when none does, the DNS Client is applying policy that replaces the local store. A
+/// read that failed proves nothing either way and makes no claim.
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+pub(crate) fn selective_hold_suppression(
+    effective: std::result::Result<&[EffectiveNrptRule], &str>,
+) -> Option<String> {
+    let rules = effective.ok()?;
+    let in_force = rules.iter().any(|rule| {
+        rule.generic_dns_servers
+            .iter()
+            .any(|server| server == crate::core::selective_fail_open::SINKHOLE_DNS)
+    });
+    (!in_force).then(|| {
+        format!(
+            "{DNS_SELECTIVE_POLICY_SUPPRESSED_PREFIX}: domain NRPT policy is in effect, so Windows \
+             ignores the AI DNS rules Tono wrote locally; AI names outside Anthropic's fixed \
+             address blocks resolve normally. Tono does not change enterprise DNS policy."
+        )
+    })
+}
+
+/// Synchronous read of the NRPT rules in force now, for the selective hold's own worker thread.
+#[cfg(all(windows, not(feature = "test")))]
+pub(crate) fn effective_nrpt_rules_now() -> std::result::Result<Vec<EffectiveNrptRule>, String> {
+    engine::effective_nrpt_rules_blocking().map_err(|error| format!("{error:#}"))
 }
 
 /// Re-read the effective resolver policy and repeat one cache-bypassing system lookup. Runs

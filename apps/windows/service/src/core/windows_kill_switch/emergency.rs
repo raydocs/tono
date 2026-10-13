@@ -41,6 +41,19 @@ async fn emergency_disarm_with(
     deadline: Option<std::time::Instant>,
 ) -> Result<()> {
     let _operation = WFP_OPERATION.lock().await;
+    // What the release does to the secondary AI hold. Failed-update recovery keeps a hold that is
+    // owed and never installs a new one (decision 125); when nothing is owed it also never
+    // removes one, because an earlier release whose tombstone write failed leaves a hold with
+    // no evidence. Only an explicit Restore (`apply_narrow == false`) removes it. Read before
+    // the tombstone below rewrites the disposition. A second release after the first installed
+    // the hold sees its tombstone and keeps it.
+    let follow_up = if !apply_narrow {
+        Some(false)
+    } else if ai_hold_owed().await {
+        Some(true)
+    } else {
+        None
+    };
     // This is still the fail-open escape hatch: WFP objects are removed even if protected DNS
     // cannot be restored. The DNS failure is nevertheless returned *after* WFP and intent
     // cleanup so an uninstaller cannot report success and delete the remaining recovery files.
@@ -112,7 +125,9 @@ async fn emergency_disarm_with(
     tombstone.wanted = false;
     tombstone.reconnect_after_release = false;
     tombstone.reconnect_owner_key = None;
-    tombstone.apply_narrow_after_release = Some(apply_narrow);
+    if follow_up.is_some() {
+        tombstone.apply_narrow_after_release = follow_up;
+    }
     tombstone.updated_at = now_unix();
     let tombstone_error =
         match atomic_write(&intent_path(), &serde_json::to_vec_pretty(&tombstone)?).await {
@@ -137,12 +152,14 @@ async fn emergency_disarm_with(
     // published *after* it. Publishing first would make `status()` report an unprotected
     // machine while the filters are demonstrably still installed — the exact inversion of what
     // the product promises. On engine failure the reported state therefore stays "armed".
-    hold_ai_before_release(apply_narrow).await;
+    hold_ai_before_release(follow_up == Some(true)).await;
     #[cfg(all(windows, not(feature = "test")))]
     engine_call("emergency disarm", crate::core::wfp::emergency_disarm).await?;
     // WFP is gone. Explicit Restore removes the secondary hold; automatic
     // failure recovery applies it. Neither may undo or refuse this release.
-    finish_release_follow_up(apply_narrow).await;
+    if let Some(apply_narrow) = follow_up {
+        finish_release_follow_up(apply_narrow).await;
+    }
     *armed_guard() = None;
     *last_verify_guard() = None;
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
@@ -160,7 +177,7 @@ async fn emergency_disarm_with(
     // on disk, so a leftover file cannot re-arm a block; refusing uninstall here recreated the
     // "result 3 forever" deadlock for Chinese test machines whose ProgramData ACLs deny the
     // final unlink under the elevated installer token.
-    if !apply_narrow {
+    if follow_up == Some(false) {
         match tokio::fs::remove_file(intent_path()).await {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}

@@ -64,6 +64,7 @@ const quota = () => ({
   cycleKind: 'calendar_day' as const,
   cycleStart: 1_756_684_800,
   cycleEnd: 1_759_276_800,
+  cycleAnchorDay: 1,
   counts: 'in_out' as const,
 });
 
@@ -198,6 +199,7 @@ const customerSummary = () => ({
   quotaBytes: null,
   services: ['claude' as const, 'meta' as const],
   minAppVersion: '0.0.70',
+  versionByPlatform: [{ platform: 'macos' as const, version: '0.0.70' }],
   expiresAt: 1_759_276_800,
   lastSeenAt: 1_757_000_000,
   stage: 'connected' as const,
@@ -523,6 +525,7 @@ const CASES: Array<[string, (value: unknown, path?: string) => unknown, () => Re
     range: '30d' as const,
     released: ['macos' as const, 'windows' as const],
     cells: [{ platform: 'macos' as const, bucket: 'current' as const, users: 4, devices: 5 }],
+    people: { current: 3, behind: 1, unreported: 0 },
     updatedAt: 1_757_000_000,
   })],
   ['alertRule', assertAlertRule, () => ({

@@ -865,6 +865,34 @@ test('all-profile app data is deleted only inside the repair gate, under the uni
   assert.ok(uninstall.indexOf('--manual-update-finish') > callAt)
 })
 
+test('NSIS keeps the failed update recovery copies while a repair install is unfinished', () => {
+  assert.equal(validateNsisLegacyCleanup(installerSource), null)
+  assert.match(
+    validateNsisLegacyCleanup(
+      installerSource.replace(
+        '${IfNot} ${FileExists} "$INSTDIR\\.update-repair-evidence"',
+        '${If} 1 = 1',
+      ),
+    ),
+    /outside the repair guard/,
+  )
+  // Closing the guard early, or moving a delete out of it, is rejected too.
+  const guard = /(\$\{IfNot\}[^\n]*\.update-repair-evidence[^\n]*)([\s\S]*?)  \$\{EndIf\}/
+  assert.match(
+    validateNsisLegacyCleanup(
+      installerSource.replace(guard, '$1\n  ${EndIf}$2'),
+    ),
+    /outside the repair guard/,
+  )
+  const gui = 'Delete /REBOOTOK "$INSTDIR\\${MAINBINARYNAME}.exe.rollback"\n'
+  assert.match(
+    validateNsisLegacyCleanup(
+      installerSource.replace(gui, '').replace('!macro RemoveKnownLegacyPayload\n', '!macro RemoveKnownLegacyPayload\n  ' + gui),
+    ),
+    /outside the repair guard: \$\{MAINBINARYNAME\}/,
+  )
+})
+
 test('NSIS removes every known old payload on upgrade and uninstall', () => {
   const cleanup = [
     ...KNOWN_LEGACY_WINDOWS_PAYLOAD,

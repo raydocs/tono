@@ -7,7 +7,7 @@ test.describe('clients page', () => {
 
     // 未上报 stopped being zero when the funnel arrived: two customers have a
     // macOS client that was installed and has never reported a version.
-    await expect(page.locator('.clients-hero .text-verdict')).toHaveText('11 位在最新版·10 位落后·2 位未上报');
+    await expect(page.locator('.clients-hero .text-verdict')).toHaveText('11 位在最新版·5 位落后·2 位未上报');
     // Three platforms have shipped nothing: they get no row of zeros to
     // misread, one sentence names them instead.
     await expect(page.getByText('Linux · Android · iOS 还没有发布过客户端')).toBeVisible();

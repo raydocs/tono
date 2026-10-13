@@ -625,10 +625,20 @@ fn schedule_owner_goodbye_shutdown() {
 fn owner_goodbye_verdict(
     kill_switch_wanted: bool,
     desired_running: Option<bool>,
+    another_user_signed_in: bool,
 ) -> std::result::Result<(), ServiceError> {
     if kill_switch_wanted {
         return Err(ServiceError::still_protected(
             "kill switch is armed; the service must stay alive to police the barrier",
+        ));
+    }
+    // The goodbye comes from one user's Quit. The Service is machine-wide: with another user
+    // signed in (even a disconnected session) an idle App of theirs would find it gone, and
+    // their next Connect would need a UAC prompt to start it again (#1293). Nothing is lost by
+    // leaving an idle daemon running, so the stricter side wins.
+    if another_user_signed_in {
+        return Err(ServiceError::still_protected(
+            "another user is signed in on this PC; the service stays alive for them",
         ));
     }
     match desired_running {
@@ -639,6 +649,113 @@ fn owner_goodbye_verdict(
         None => Err(ServiceError::still_protected(
             "the durable desired state could not be read",
         )),
+    }
+}
+
+/// Set by [`stop_ipc_server`] only when the whole teardown (Core, DNS, WFP release, IPC) ran to
+/// completion in time. `stop_ipc_server` itself swallows a failed or timed-out cleanup so the
+/// process can still exit, which means its success says nothing about the barrier.
+static STOP_CLEANUP_COMPLETE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the stop that follows an accepted owner goodbye proves that nothing is armed (#1300).
+///
+/// `wanted` and `live` both read false when nothing is recorded in memory, including after a
+/// startup cleanup failed and left Tono filters installed, so they are not evidence. The record
+/// is written only with every one of: a completed teardown, nothing wanted or live, and the WFP
+/// engine itself reporting no Tono filter. A residual-filter check that failed or could not run
+/// proves nothing and is `None`.
+#[cfg(any(windows, test))]
+fn clean_goodbye_evidence(
+    stop_cleanup_complete: bool,
+    wanted: bool,
+    live: bool,
+    residual_filters: Option<bool>,
+) -> bool {
+    stop_cleanup_complete && !wanted && !live && residual_filters == Some(false)
+}
+
+/// The absolute deadline of the stop in progress, so the evidence check that follows the teardown
+/// spends only what the teardown left of the same budget and can never keep the process from
+/// reaching SCM Stopped (Codex re-review of #1624).
+#[cfg(any(windows, test))]
+static STOP_DEADLINE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// What is left of the stop budget for the residual-filter check. Without a recorded deadline
+/// (a stop that never went through the Windows teardown) a short fixed budget applies.
+#[cfg(any(windows, test))]
+fn residual_check_budget(
+    deadline: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> std::time::Duration {
+    deadline.map_or(std::time::Duration::from_secs(5), |deadline| {
+        deadline.saturating_duration_since(now)
+    })
+}
+
+/// An accepted owner goodbye has torn the IPC server down: leave the evidence the App needs to
+/// tell this clean stop from a crash (#1300). Nothing is recorded unless the goodbye was accepted
+/// and [`clean_goodbye_evidence`] holds; a failed write only costs the App the proof, so it never
+/// fails the stop.
+#[cfg(any(windows, test))]
+async fn note_clean_goodbye_if_accepted() {
+    if !OWNER_GOODBYE_PENDING.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let deadline = *STOP_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    note_clean_goodbye_with(
+        STOP_CLEANUP_COMPLETE.load(std::sync::atomic::Ordering::SeqCst),
+        windows_kill_switch::status().await,
+        windows_kill_switch::residual_filters_present,
+        residual_check_budget(deadline, std::time::Instant::now()),
+    )
+    .await;
+}
+
+/// The decision of [`note_clean_goodbye_if_accepted`] with its inputs made explicit. A teardown
+/// that did not complete, or a kill switch that is wanted or live, already settles it: the
+/// residual-filter query, which waits for the WFP lock a stuck cleanup may still hold, is not
+/// even started. When it is, it gets only `budget` and a query that does not answer in time is no
+/// evidence.
+#[cfg(any(windows, test))]
+async fn note_clean_goodbye_with<F>(
+    stop_cleanup_complete: bool,
+    kill_switch: crate::KillSwitchStatus,
+    residual_filters_present: impl FnOnce() -> F,
+    budget: std::time::Duration,
+) where
+    F: Future<Output = AnyResult<bool>>,
+{
+    if !clean_goodbye_evidence(
+        stop_cleanup_complete,
+        kill_switch.wanted,
+        kill_switch.live,
+        Some(false),
+    ) {
+        warn!("Owner goodbye stop: no proof that nothing is armed; no clean-goodbye record is written");
+        return;
+    }
+    let started = std::time::Instant::now();
+    let residual_filters = match tokio::time::timeout(budget, residual_filters_present()).await {
+        Ok(Ok(present)) => Some(present),
+        Ok(Err(error)) => {
+            warn!("Owner goodbye stop: the residual filter check failed: {error:#}");
+            None
+        }
+        Err(_) => {
+            warn!("Owner goodbye stop: the residual filter check did not answer in time");
+            None
+        }
+    };
+    if !clean_goodbye_evidence(true, false, false, residual_filters) {
+        warn!("Owner goodbye stop: filters may remain; no clean-goodbye record is written");
+        return;
+    }
+    // The write shares the same stop budget as the query before it.
+    match crate::clean_goodbye::record_within(budget.saturating_sub(started.elapsed())).await {
+        Ok(()) => info!("Owner goodbye stop: clean-goodbye record written (nothing armed)"),
+        Err(error) => warn!("Owner goodbye stop: clean-goodbye record could not be written: {error}"),
     }
 }
 
@@ -688,24 +805,35 @@ pub async fn run_ipc_server() -> Result<JoinHandle<Result<()>>> {
 }
 
 pub async fn stop_ipc_server() -> Result<()> {
+    STOP_CLEANUP_COMPLETE.store(false, std::sync::atomic::Ordering::SeqCst);
     #[cfg(windows)]
     {
         // Connection handlers outlive the listener. Fence their queued mutations before
         // releasing protection so none can re-arm it between teardown and process exit.
         IPC_STOPPING.store(true, std::sync::atomic::Ordering::SeqCst);
         // Noted first, so it is never later than the timeout below; in-flight releases see it too.
-        windows_kill_switch::note_release_deadline(
-            std::time::Instant::now() + IPC_SERVICE_STOP_TIMEOUT,
-        );
+        let stop_deadline = std::time::Instant::now() + IPC_SERVICE_STOP_TIMEOUT;
+        *STOP_DEADLINE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(stop_deadline);
+        windows_kill_switch::note_release_deadline(stop_deadline);
         match tokio::time::timeout(IPC_SERVICE_STOP_TIMEOUT, stop_ipc_server_inner()).await {
-            Ok(Ok(())) => {}
+            Ok(Ok(())) => STOP_CLEANUP_COMPLETE.store(true, std::sync::atomic::Ordering::SeqCst),
             Ok(Err(error)) => warn!("Service stop cleanup failed; continuing shutdown: {error:#}"),
             Err(_) => warn!("Service stop cleanup timed out; continuing shutdown"),
         }
+        // A release running in another task may still be inside its WFP removal; dropping the
+        // runtime now would abort that transaction and leave the block behind (#1284).
+        windows_kill_switch::settle_in_flight_wfp_removal(windows_kill_switch::STOP_WFP_REMOVAL_GRACE)
+            .await;
         return Ok(());
     }
     #[cfg(not(windows))]
-    stop_ipc_server_inner().await
+    {
+        let stopped = stop_ipc_server_inner().await;
+        STOP_CLEANUP_COMPLETE.store(stopped.is_ok(), std::sync::atomic::Ordering::SeqCst);
+        stopped
+    }
 }
 
 /// H-IPC-2: only a gate another process holds means an installer owns the stop. An I/O error
@@ -865,6 +993,8 @@ pub async fn run_ipc_supervisor_until_shutdown(
 
     stop_ipc_server().await?;
     server_handle.abort();
+    #[cfg(any(windows, test))]
+    note_clean_goodbye_if_accepted().await;
     Ok(())
 }
 

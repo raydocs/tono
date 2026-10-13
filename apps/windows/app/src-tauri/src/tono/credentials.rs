@@ -688,11 +688,22 @@ pub struct SessionCredentialStore {
     memory: MemoryCredentialStore,
     vault: Option<Arc<dyn CredentialStore>>,
     writer: parking_lot::Mutex<Option<tokio::sync::mpsc::Sender<VaultCommand>>>,
+    /// The newest flush barrier when no mutation has been queued behind it. A flush that finds one
+    /// joins it instead of queueing another: a caller that gave up waiting leaves its barrier
+    /// queued, and a vault stall would otherwise fill the writer queue with them (WIN-GRANT-FLUSH-QUEUE).
+    /// Weak, so a barrier dropped with its queue (runtime gone) cannot leave callers waiting on it.
+    /// Only read or written under the `writer` lock, except for the worker's clear on completion.
+    flush_tail: Arc<parking_lot::Mutex<Option<std::sync::Weak<FlushBarrier>>>>,
+}
+
+/// One queued flush. Every caller that joined it observes the same acknowledgement.
+struct FlushBarrier {
+    done: tokio::sync::watch::Sender<Option<Result<(), CredentialError>>>,
 }
 
 enum VaultCommand {
     Write(CredentialKey, Option<String>),
-    Flush(tokio::sync::oneshot::Sender<Result<(), CredentialError>>),
+    Flush(Arc<FlushBarrier>),
 }
 
 async fn persist_vault_mutation(
@@ -712,6 +723,7 @@ impl SessionCredentialStore {
             memory: MemoryCredentialStore::new(),
             vault: Some(Arc::new(TonoCredentialStore)),
             writer: Default::default(),
+            flush_tail: Default::default(),
         }
     }
 
@@ -722,6 +734,7 @@ impl SessionCredentialStore {
             memory: MemoryCredentialStore::new(),
             vault: None,
             writer: Default::default(),
+            flush_tail: Default::default(),
         }
     }
 
@@ -747,6 +760,7 @@ impl SessionCredentialStore {
                 // At most 64 pending mutations and one OS operation, even if the vault stalls.
                 let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
                 *writer = Some(sender);
+                let flush_tail = Arc::clone(&self.flush_tail);
                 runtime.spawn(async move {
                     let mut failures = std::collections::HashMap::new();
                     while let Some(command) = receiver.recv().await {
@@ -762,7 +776,7 @@ impl SessionCredentialStore {
                                     }
                                 }
                             }
-                            VaultCommand::Flush(done) => {
+                            VaultCommand::Flush(barrier) => {
                                 // Retry only the latest failed mutation for each key, through the
                                 // same writer. A newer write/delete supersedes it above, so an old
                                 // token cannot be replayed after sign-out or account replacement.
@@ -772,7 +786,15 @@ impl SessionCredentialStore {
                                     }
                                 }
                                 let result = failures.values().next().map(|(_, error)| error.clone()).map_or(Ok(()), Err);
-                                let _ = done.send(result);
+                                // Retire the barrier before announcing it, so a later flush queues
+                                // a fresh one and retries what this pass could not persist.
+                                {
+                                    let mut tail = flush_tail.lock();
+                                    if tail.as_ref().is_some_and(|tail| tail.ptr_eq(&Arc::downgrade(&barrier))) {
+                                        *tail = None;
+                                    }
+                                }
+                                barrier.done.send_replace(Some(result));
                             }
                         }
                     }
@@ -780,6 +802,8 @@ impl SessionCredentialStore {
             }
             writer.as_ref().expect("writer initialized").try_send(VaultCommand::Write(key, value.clone()))
                 .map_err(|_| CredentialError::Store("credential persistence queue full or closed".into()))?;
+            // A flush after this write has to acknowledge it, so no earlier barrier may be joined.
+            *self.flush_tail.lock() = None;
         }
         match value {
             Some(value) => self.memory.set(key, &value),
@@ -790,13 +814,44 @@ impl SessionCredentialStore {
     /// Retry the latest failed mutations once, then acknowledge all mutations before this barrier.
     /// A caller's timeout must not
     /// cancel the owner waiting here; sign-out retains account admission until this settles.
+    /// At most one barrier waits behind any run of mutations: callers with no write between them
+    /// share it, so repeated timed-out flushes during a vault stall cannot fill the writer queue.
     pub async fn flush(&self) -> Result<(), CredentialError> {
-        let writer = self.writer.lock().clone();
-        let Some(writer) = writer else { return Ok(()); };
-        let (done, result) = tokio::sync::oneshot::channel();
-        writer.send(VaultCommand::Flush(done)).await
-            .map_err(|_| CredentialError::Store("credential writer stopped before acknowledgement".into()))?;
-        result.await.map_err(|_| CredentialError::Store("credential acknowledgement lost".into()))?
+        let sender = self.writer.lock().clone();
+        let Some(sender) = sender else { return Ok(()); };
+        let joined = {
+            let _writer = self.writer.lock();
+            let tail = self.flush_tail.lock();
+            tail.as_ref().and_then(std::sync::Weak::upgrade).map(|barrier| barrier.done.subscribe())
+        };
+        let mut acknowledged = match joined {
+            Some(acknowledged) => acknowledged,
+            None => {
+                // Waits for room like the unbounded-wait send it replaces; a caller that gives up
+                // here leaves nothing queued.
+                let permit = sender.reserve().await.map_err(|_| {
+                    CredentialError::Store("credential writer stopped before acknowledgement".into())
+                })?;
+                let _writer = self.writer.lock();
+                let mut tail = self.flush_tail.lock();
+                match tail.as_ref().and_then(std::sync::Weak::upgrade) {
+                    // Another flush queued its barrier while this one waited for room.
+                    Some(barrier) => barrier.done.subscribe(),
+                    None => {
+                        let (done, acknowledged) = tokio::sync::watch::channel(None);
+                        let barrier = Arc::new(FlushBarrier { done });
+                        *tail = Some(Arc::downgrade(&barrier));
+                        permit.send(VaultCommand::Flush(barrier));
+                        acknowledged
+                    }
+                }
+            }
+        };
+        let settled = acknowledged
+            .wait_for(Option::is_some)
+            .await
+            .map_err(|_| CredentialError::Store("credential acknowledgement lost".into()))?;
+        settled.clone().expect("a settled barrier holds its result")
     }
 }
 
@@ -854,6 +909,55 @@ mod tests {
 
         assert_eq!(vault.durable.refresh_token().unwrap().as_deref(), Some("new-session"));
         assert_eq!(vault.attempts.load(Ordering::SeqCst), 2);
+    }
+
+    /// WIN-GRANT-FLUSH-QUEUE: every catalog sync flushes under a 2 s timeout, and a timed-out
+    /// flush stays queued. During a long vault stall those barriers must not fill the 64-slot
+    /// writer queue, or the next token rotation is rejected and outlasts the recovery.
+    #[tokio::test]
+    async fn timed_out_flushes_do_not_fill_the_writer_queue_during_a_vault_stall() {
+        use std::sync::{Arc, Mutex};
+        use tono_core::credentials::{CredentialError, MemoryCredentialStore};
+        struct Vault {
+            durable: MemoryCredentialStore,
+            gate: Mutex<std::sync::mpsc::Receiver<()>>,
+        }
+        impl CredentialStore for Vault {
+            fn get(&self, key: CredentialKey) -> Result<Option<String>, CredentialError> {
+                self.durable.get(key)
+            }
+            fn set(&self, key: CredentialKey, value: &str) -> Result<(), CredentialError> {
+                // Only the test's explicit release lets a write through; a timeout or a closed
+                // channel is a failed write, never a silent success.
+                self.gate
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(std::time::Duration::from_secs(120))
+                    .map_err(|_| CredentialError::Store("vault gate was never released".into()))?;
+                self.durable.set(key, value)
+            }
+            fn delete(&self, key: CredentialKey) -> Result<(), CredentialError> {
+                self.durable.delete(key)
+            }
+        }
+        let (release, gate) = std::sync::mpsc::channel();
+        let vault = Arc::new(Vault { durable: MemoryCredentialStore::new(), gate: Mutex::new(gate) });
+        let store = SessionCredentialStore::with_test_vault(vault.clone());
+        store.set_refresh_token("session-1").unwrap();
+
+        for _ in 0..200 {
+            let stalled = tokio::time::timeout(std::time::Duration::from_millis(5), store.flush()).await;
+            assert!(stalled.is_err(), "a stalled vault cannot acknowledge");
+        }
+
+        store
+            .set_refresh_token("session-2")
+            .expect("a token rotation must not be rejected because timed-out flushes filled the queue");
+        release.send(()).unwrap();
+        release.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(10), store.flush())
+            .await.unwrap().unwrap();
+        assert_eq!(vault.durable.refresh_token().unwrap().as_deref(), Some("session-2"));
     }
 
     #[tokio::test]
