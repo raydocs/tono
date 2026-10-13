@@ -2565,3 +2565,78 @@
         assert_eq!(outside, own);
         assert!(inside <= std::time::Duration::from_secs(2), "{inside:?}");
     }
+
+    // --- Round 3 review of the adapter reset: the attempt deadline is retried like busy ---
+
+    /// The attempt's cumulative deadline runs out before the effective read: the registry is back
+    /// on the user's servers while the DNS Client still resolves through 198.18.0.2, so the only
+    /// evidence of the dead resolver is the read that was never started. That is the timeout
+    /// error, which the caller retries like busy, not an "unknown" effective list that ends the
+    /// attempt with an ordinary error and nothing reset.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_reports_the_timeout_when_the_deadline_is_spent_before_the_effective_read()
+    -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("1.1.1.1"))]);
+        test_hooks::set_effective_dns(vec![("{A}".to_owned(), vec!["198.18.0.2".parse().unwrap()])]);
+        test_hooks::set_live_dns_on_loopback(true);
+        test_hooks::set_spend_after("collect", 1, std::time::Duration::from_millis(300));
+        let result = reset_redirected_adapters_to_automatic(Some(
+            std::time::Instant::now() + std::time::Duration::from_millis(200),
+        ))
+        .await;
+        let resets = test_hooks::take_automatic_resets();
+        reset_dns_state().await;
+        let error = result.expect_err("the effective read never started");
+        assert!(is_fallback_timeout(&error), "the timeout must survive the read layer: {error:#}");
+        assert_eq!(resets, 0);
+        Ok(())
+    }
+
+    /// Same for the offline snapshot adapter's registry read.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_reports_the_timeout_when_the_deadline_is_spent_before_the_offline_registry_read()
+    -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1")), adapter("{B}", Some("9.9.9.9"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("1.1.1.1"))]);
+        test_hooks::set_offline_registry(vec![adapter("{B}", Some("198.18.0.2"))]);
+        test_hooks::set_live_dns_on_loopback(true);
+        test_hooks::set_spend_after("collect", 1, std::time::Duration::from_millis(300));
+        let result = reset_redirected_adapters_to_automatic(Some(
+            std::time::Instant::now() + std::time::Duration::from_millis(200),
+        ))
+        .await;
+        let resets = test_hooks::take_automatic_resets();
+        reset_dns_state().await;
+        let error = result.expect_err("the registry read never started");
+        assert!(is_fallback_timeout(&error), "the timeout must survive the registry read: {error:#}");
+        assert_eq!(resets, 0);
+        Ok(())
+    }
+
+    /// The adapter leg ends in an ordinary error (the reset did not land) and the deadline is then
+    /// spent before the policy leg: the attempt is the timeout, which is retried, whatever the
+    /// other leg ended with.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_reports_the_timeout_when_only_the_policy_leg_ran_out_of_time() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_effective_dns(vec![("{A}".to_owned(), vec!["198.18.0.2".parse().unwrap()])]);
+        test_hooks::set_live_dns_on_loopback(true);
+        test_hooks::set_reset_does_not_land(true);
+        test_hooks::set_spend_after("read effective DNS", 2, std::time::Duration::from_millis(300));
+        let result = reset_redirected_adapters_to_automatic(Some(
+            std::time::Instant::now() + std::time::Duration::from_millis(200),
+        ))
+        .await;
+        reset_dns_state().await;
+        let error = result.expect_err("the reset did not land");
+        assert!(is_fallback_timeout(&error), "the timed-out policy leg must surface as the timeout: {error:#}");
+        Ok(())
+    }

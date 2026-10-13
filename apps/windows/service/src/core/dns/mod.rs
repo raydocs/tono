@@ -379,9 +379,42 @@ pub(crate) mod test_hooks {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((operation, nth));
     }
 
+    #[cfg(test)]
+    static SPEND_AFTER: Mutex<Option<(&'static str, u32, std::time::Duration)>> = Mutex::new(None);
+
+    /// After the `nth` (1-based) successful stub engine call named `operation` the attempt spends
+    /// `time` before it makes its next call (a slow lock wait, a slow read): its cumulative
+    /// deadline runs down without any engine call overrunning its own budget.
+    #[cfg(test)]
+    pub(crate) fn set_spend_after(operation: &'static str, nth: u32, time: std::time::Duration) {
+        *SPEND_AFTER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((operation, nth, time));
+    }
+
     /// Called by a stub engine call that is about to return successfully.
     #[cfg(test)]
     pub(crate) async fn engine_call_returned(operation: &'static str) {
+        let spend = {
+            let mut pending = SPEND_AFTER
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match *pending {
+                Some((name, nth, time)) if name == operation => {
+                    if nth <= 1 {
+                        *pending = None;
+                        Some(time)
+                    } else {
+                        *pending = Some((name, nth - 1, time));
+                        None
+                    }
+                }
+                _ => None,
+            }
+        };
+        if let Some(time) = spend {
+            tokio::time::sleep(time).await;
+        }
         let fire = {
             let mut pending = PARK_CLAIM_AFTER
                 .lock()
@@ -529,6 +562,9 @@ pub(crate) mod test_hooks {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         set_file_read_hangs(None);
+        *SPEND_AFTER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         take_engine_call_budgets();
     }
 

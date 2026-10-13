@@ -642,6 +642,7 @@ async fn cleanup() {
     crate::core::dns::test_hooks::clear_fault_hooks();
     crate::core::dns::test_hooks::set_protection_wanted(false);
     DNS_FALLBACK_IN_PROGRESS.store(false, Ordering::Release);
+    STARTUP_RETIREMENT_OWES_DNS_FALLBACK.store(false, Ordering::Release);
     STARTUP_DNS_FALLBACK_WANTED.store(false, Ordering::Release);
     STARTUP_DNS_FALLBACK_OPEN.store(false, Ordering::Release);
     *TEST_RESIDUAL_PROBE.lock().unwrap() = None;
@@ -2612,6 +2613,7 @@ async fn the_startup_release_retry_requests_the_dns_fallback_when_it_releases_ge
 #[tokio::test]
 #[serial]
 async fn a_connect_is_refused_while_a_startup_fallback_attempt_waits_for_the_dns_lock() -> Result<()> {
+    let _fixture = FallbackFixture::new();
     unprovable_redirected_machine_without_wfp().await?;
     let dns_lock = crate::core::dns::test_hooks::hold_dns_operation().await;
 
@@ -2776,6 +2778,32 @@ fn the_service_binary_starts_the_startup_fallback_after_the_cache_and_watchdogs_
 
 // --- Round 2 review of the startup fallback: marker fence, liveness, retirement exit ---
 
+/// Panic-safe state for a fallback test: dropping it clears the in-progress marker, the startup
+/// request flags, the removal-failure seam, every stub engine hook (claims, faults, adapters,
+/// effective DNS) and the armed state, so an assertion that fails midway cannot leave a stub
+/// adapter on 198.18.0.2 or a parked claim for the tests that run after it. (The on-disk files
+/// are cleared by the next test's `cleanup()`.)
+struct FallbackFixture;
+
+impl FallbackFixture {
+    fn new() -> Self {
+        Self
+    }
+}
+
+impl Drop for FallbackFixture {
+    fn drop(&mut self) {
+        DNS_FALLBACK_IN_PROGRESS.store(false, Ordering::Release);
+        STARTUP_RETIREMENT_OWES_DNS_FALLBACK.store(false, Ordering::Release);
+        STARTUP_DNS_FALLBACK_WANTED.store(false, Ordering::Release);
+        STARTUP_DNS_FALLBACK_OPEN.store(false, Ordering::Release);
+        TEST_REMOVE_FAILURE.store(false, Ordering::Relaxed);
+        *TEST_RESIDUAL_PROBE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        *ARMED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        crate::core::dns::test_hooks::reset_fallback_hooks();
+    }
+}
+
 /// A Connect's arm with the time it waits for a network restore injected.
 async fn connect_waiting(wait: std::time::Duration) -> Result<()> {
     arm_bootstrap_waiting(&test_config(), "/opt/tono/mihomo", "owner-alice", wait).await
@@ -2800,6 +2828,7 @@ fn assert_refused_as_restore_in_progress(refused: Result<()>) {
 #[tokio::test]
 #[serial]
 async fn a_connect_is_refused_with_the_restore_in_progress_prefix_while_the_marker_is_set() -> Result<()> {
+    let _fixture = FallbackFixture::new();
     unprovable_redirected_machine_without_wfp().await?;
     DNS_FALLBACK_IN_PROGRESS.store(true, Ordering::Release);
 
@@ -2826,6 +2855,7 @@ async fn a_connect_is_refused_with_the_restore_in_progress_prefix_while_the_mark
 #[tokio::test]
 #[serial]
 async fn a_connect_waits_for_an_abandoned_engine_call_and_arms_once_it_returns() -> Result<()> {
+    let _fixture = FallbackFixture::new();
     unprovable_redirected_machine_without_wfp().await?;
     let claim = crate::core::dns::test_hooks::park_engine_call().await;
     let claim_held = crate::core::dns::engine_claim_is_held();
@@ -2856,6 +2886,7 @@ async fn a_connect_waits_for_an_abandoned_engine_call_and_arms_once_it_returns()
 #[tokio::test]
 #[serial]
 async fn a_connect_is_refused_while_an_abandoned_engine_call_still_holds_the_claim() -> Result<()> {
+    let _fixture = FallbackFixture::new();
     unprovable_redirected_machine_without_wfp().await?;
     let claim = crate::core::dns::test_hooks::park_engine_call().await;
 
@@ -2879,6 +2910,7 @@ async fn a_connect_is_refused_while_an_abandoned_engine_call_still_holds_the_cla
 #[serial]
 async fn an_attempt_whose_engine_call_times_out_returns_clears_the_marker_and_leaves_the_claim_as_the_fence()
 -> Result<()> {
+    let _fixture = FallbackFixture::new();
     unprovable_redirected_machine_without_wfp().await?;
     crate::core::dns::test_hooks::set_engine_call_times_out("reset families");
 
@@ -2935,6 +2967,7 @@ async fn an_attempt_whose_engine_call_times_out_returns_clears_the_marker_and_le
 /// timeout (5 s in production) with an ordinary error, so the loop stops instead of retrying, and
 /// it holds nothing: no marker, no WFP lock, no engine claim, no reset.
 async fn a_hung_file_read_ends_the_attempt_at_the_file_timeout(read: &'static str) -> Result<()> {
+    let _fixture = FallbackFixture::new();
     unprovable_redirected_machine_without_wfp().await?;
     crate::core::dns::test_hooks::set_file_read_hangs(Some(read));
 
@@ -2988,6 +3021,7 @@ async fn a_hung_retirement_marker_read_ends_the_attempt_at_the_file_timeout() ->
 #[tokio::test]
 #[serial]
 async fn the_engine_calls_of_one_attempt_share_one_cumulative_deadline() -> Result<()> {
+    let _fixture = FallbackFixture::new();
     unprovable_redirected_machine_without_wfp().await?;
     crate::core::dns::test_hooks::set_engine_call_delay(None, std::time::Duration::from_millis(150));
 
@@ -3030,6 +3064,7 @@ async fn the_engine_calls_of_one_attempt_share_one_cumulative_deadline() -> Resu
 #[tokio::test]
 #[serial]
 async fn an_attempt_that_is_out_of_time_starts_no_engine_call_and_is_retried_until_the_bound() -> Result<()> {
+    let _fixture = FallbackFixture::new();
     unprovable_redirected_machine_without_wfp().await?;
 
     let started = std::time::Instant::now();
@@ -3066,6 +3101,7 @@ async fn an_attempt_that_is_out_of_time_starts_no_engine_call_and_is_retried_unt
 #[tokio::test]
 #[serial]
 async fn the_emergency_attempt_sets_the_marker_and_clears_it() -> Result<()> {
+    let _fixture = FallbackFixture::new();
     arm_an_unprovable_redirected_machine().await?;
     crate::core::dns::test_hooks::set_engine_call_delay(Some("reset families"), std::time::Duration::from_millis(400));
 
@@ -3098,6 +3134,7 @@ async fn the_emergency_attempt_sets_the_marker_and_clears_it() -> Result<()> {
 #[tokio::test]
 #[serial]
 async fn startup_retirement_of_an_unverified_barrier_requests_the_dns_fallback_when_it_releases() -> Result<()> {
+    let _fixture = FallbackFixture::new();
     unprovable_redirected_machine_without_wfp().await?;
     let mut intent = valid_intent(KillSwitchStatusMode::Blocked, true);
     intent.verified = Some(false);
@@ -3119,6 +3156,156 @@ async fn startup_retirement_of_an_unverified_barrier_requests_the_dns_fallback_w
     assert!(wanted, "the retirement's release must request the adapter fallback");
     assert_eq!(resets, 1, "the spawn point starts the fallback, which resets the adapter once");
     assert_eq!(reset_adapters, vec!["{ETHERNET}".to_owned()]);
+
+    cleanup().await;
+    Ok(())
+}
+
+// --- Round 3 review of the startup fallback: retirement retry, deadline error, arm bound ---
+
+/// The startup retirement of an unverified barrier could not restore DNS exactly and its own WFP
+/// removal failed, so it returned before registering the request and left the core-window retry
+/// pending. The retry (`release_unproven_wanted_session_unlocked`, from the core-window reconcile)
+/// then removes WFP after another failed restore: the machine is released, so it owes the
+/// request, and the spawn point starts the fallback.
+#[tokio::test]
+#[serial]
+async fn the_core_window_retry_of_a_failed_startup_retirement_requests_the_dns_fallback() -> Result<()> {
+    let _fixture = FallbackFixture::new();
+    unprovable_redirected_machine_without_wfp().await?;
+    let mut intent = valid_intent(KillSwitchStatusMode::Blocked, true);
+    intent.verified = Some(false);
+    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+    restore_on_service_start().await?;
+
+    let failures = SimulatedStateFailures::arm_removal();
+    let first = retire_unverified_on_service_start().await;
+    let requested_after_first = startup_dns_fallback_wanted();
+    let armed_after_first = ARMED.lock().unwrap().is_some();
+    drop(failures);
+
+    let retry = {
+        let _operation = WFP_OPERATION.lock().await;
+        reconcile_wanted_core_window_unlocked().await
+    };
+    let released = ARMED.lock().unwrap().is_none();
+    let wanted = startup_dns_fallback_wanted();
+    let resets = resets_after_the_spawn_point().await;
+    let reset_adapters = crate::core::dns::test_hooks::take_last_automatic_reset();
+
+    assert!(first.is_err(), "the first removal failed, so the retirement reports it");
+    assert!(armed_after_first && !requested_after_first, "nothing was released or requested yet");
+    retry?;
+    assert!(released, "the retry removed WFP");
+    assert!(wanted, "the retry released the machine after a failed restore and must request the fallback");
+    assert_eq!(resets, 1, "the spawn point starts the fallback, which resets the adapter once");
+    assert_eq!(reset_adapters, vec!["{ETHERNET}".to_owned()]);
+
+    cleanup().await;
+    Ok(())
+}
+
+/// The runtime release of an unhealthy session (a session that never went through a startup
+/// retirement) still does not request the fallback.
+#[tokio::test]
+#[serial]
+async fn the_core_window_release_of_an_ordinary_wanted_session_requests_no_dns_fallback() -> Result<()> {
+    let _fixture = FallbackFixture::new();
+    arm_an_unprovable_redirected_machine().await?;
+    // Not a fresh Connect any more: its window ran out with no Core and nothing proven.
+    FRESH_ARM_PROOF_PENDING.store(false, Ordering::Release);
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+
+    let outcome = {
+        let _operation = WFP_OPERATION.lock().await;
+        reconcile_wanted_core_window_unlocked().await
+    };
+    let released = ARMED.lock().unwrap().is_none();
+    let wanted = startup_dns_fallback_wanted();
+
+    outcome?;
+    assert!(released);
+    assert!(!wanted, "only a startup retirement that still owes the fallback may request it");
+
+    cleanup().await;
+    Ok(())
+}
+
+/// The attempt's deadline runs out before the effective read, while the registry is already on the
+/// user's servers and the DNS Client still resolves through 198.18.0.2. The attempt is the timeout
+/// error, so the loop retries it (a fresh budget), and the next attempt resets the adapter.
+#[tokio::test]
+#[serial]
+async fn an_attempt_whose_deadline_is_spent_before_the_effective_read_is_retried_and_resets_next() -> Result<()> {
+    let _fixture = FallbackFixture::new();
+    cleanup().await;
+    remove_superseded_snapshots().await;
+    atomic_write(
+        &dns_snapshot_path(),
+        &serde_json::to_vec_pretty(&redirected_snapshot())?,
+    )
+    .await?;
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+    crate::core::dns::test_hooks::set_collected_adapters(redirected_snapshot().adapters);
+    crate::core::dns::test_hooks::set_effective_dns(vec![
+        ("{ETHERNET}".to_owned(), vec!["198.18.0.2".parse().unwrap()]),
+        ("{WIFI}".to_owned(), vec!["8.8.8.8".parse().unwrap()]),
+    ]);
+    simulate_machine_still_on_loopback_dns();
+    crate::core::dns::test_hooks::set_spend_after("collect", 1, std::time::Duration::from_millis(400));
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(8),
+        spawn_dns_fallback_with(
+            std::time::Duration::from_secs(10),
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_millis(300),
+            crate::core::dns::DNS_FALLBACK_FILE_READ_TIMEOUT,
+        ),
+    )
+    .await
+    .expect("the retried attempt finishes")
+    .unwrap();
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    let reset_adapters = crate::core::dns::test_hooks::take_last_automatic_reset();
+
+    assert_eq!(resets, 1, "the first attempt's timeout must be retried, and the second resets");
+    assert_eq!(reset_adapters, vec!["{ETHERNET}".to_owned()]);
+
+    cleanup().await;
+    Ok(())
+}
+
+/// The WFP lock is held by someone else for longer than the Connect's wait (a release in
+/// progress): the Connect is refused at the wait, with the same prefix, instead of queueing for as
+/// long as the holder takes; once the lock is free it arms.
+#[tokio::test]
+#[serial]
+async fn a_connect_is_refused_at_its_wait_when_the_wfp_lock_stays_held() -> Result<()> {
+    let _fixture = FallbackFixture::new();
+    unprovable_redirected_machine_without_wfp().await?;
+    let held = WFP_OPERATION.lock().await;
+
+    let started = std::time::Instant::now();
+    // Bounded by the test, so that the unbounded acquisition fails the assertion instead of hanging.
+    let refused = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        connect_waiting(std::time::Duration::from_millis(300)),
+    )
+    .await;
+    let waited = started.elapsed();
+    drop(held);
+    let armed_after = connect_waiting(std::time::Duration::from_millis(300)).await;
+
+    assert_refused_as_restore_in_progress(
+        refused.expect("a Connect must be refused at its wait, not queue behind the WFP lock holder"),
+    );
+    assert!(waited >= std::time::Duration::from_millis(250), "refused after only {waited:?}");
+    assert!(waited < std::time::Duration::from_secs(2), "waited {waited:?}");
+    armed_after?;
+    assert!(ARMED.lock().unwrap().is_some());
 
     cleanup().await;
     Ok(())

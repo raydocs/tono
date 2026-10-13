@@ -653,6 +653,14 @@ impl Drop for DnsFallbackMarker {
     }
 }
 
+/// The startup retirement of an unverified barrier could not restore the DNS exactly and has not
+/// yet registered the adapter fallback, because its WFP removal failed first: the machine is still
+/// blocked, and the retry (`release_unproven_wanted_session_unlocked`, from the core-window
+/// reconcile) owes the request once its own removal succeeds. Cleared when the request is
+/// registered, when a later restore proves, and by a fresh arm; no other release consults it.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) static STARTUP_RETIREMENT_OWES_DNS_FALLBACK: AtomicBool = AtomicBool::new(false);
+
 /// Marks the error of an arm that was refused because a network restore is still writing DNS.
 /// The App keeps the raw text of an arm refusal (only BFE/WFP markers are rewritten), so the
 /// user sees it as the connect failure and retries by hand.
