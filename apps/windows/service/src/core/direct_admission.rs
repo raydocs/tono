@@ -25,8 +25,6 @@ const WEB_DIRECT_GROUP_NAME: &str = "Tono-China-Web-Direct";
 /// sing-box's compiler takes these; the WFP permit takes `REVIEWED_DIRECT_PORTS`.
 /// A port in only one of them is still bounded by WFP.
 const SING_BOX_PROCESS_PORTS: [u16; 4] = [80, 443, 8080, 8443];
-/// Characters a process-path regex must name below the drive root (`D:\\飞书\\` has three).
-const MIN_BELOW_DRIVE_ROOT: usize = 3;
 const MEDIA_PORTS: [u16; 2] = [443, 8000];
 const WEB_SUFFIX_PORTS: [u16; 2] = [80, 443];
 const MIHOMO_LOOPBACK_RULES: [&str; 2] = [
@@ -400,29 +398,36 @@ fn in_range(address: Ipv4Addr, range: &str) -> bool {
 /// A process-path regex only in the form `tono-core` `config::windows_path_regex` writes:
 /// `^`, then literal path characters (case classes `[Xx]`, the separator class `[\\/]`,
 /// escaped specials), and at most a final `$`. The literal path must be a drive, a colon and a
-/// separator, then a few characters below the drive root, which is what `is_windows_path_shape`
-/// guarantees for every compiler input. A bare `^`, `^.*`, a drive root or any other
-/// metacharacter is a catch-all for processes the signed-app discovery never named. Short real
-/// installs (`D:\Lark.exe`, `D:\飞书\`) stay admitted: the bound is the structure, not a length
-/// that happens to fit today's products.
+/// separator, then at least one real path component below the drive root, closed either by a
+/// directory separator (an install-directory prefix) or by the final `$` (one exact file). That
+/// is what `is_windows_path_shape` plus the compiler's prefix/file normalisation guarantee for
+/// every compiler input, whatever the length: `D:\A\` and `D:\Lark.exe` are admitted. A bare `^`,
+/// `^.*`, a drive root, an open-ended name prefix (`^D:\A`) or any other metacharacter is a
+/// catch-all for processes the signed-app discovery never named. The bound is the structure, not
+/// a length that happens to fit today's products.
 fn regex_ok(regex: &str) -> bool {
     regex
         .strip_prefix('^')
         .filter(|_| payload_safe(regex))
         .and_then(path_regex_chars)
-        .is_some_and(|path| {
-            matches!(path.as_slice(), [drive, ':', '\\', below_root @ ..]
-                if drive.is_ascii_alphabetic() && below_root.len() >= MIN_BELOW_DRIVE_ROOT)
+        .is_some_and(|(path, exact_end)| match path.as_slice() {
+            [drive, ':', '\\', below_root @ ..] => {
+                drive.is_ascii_alphabetic()
+                    && below_root.iter().any(|character| *character != '\\')
+                    && (exact_end || below_root.last() == Some(&'\\'))
+            }
+            _ => false,
         })
 }
 
-/// The path characters `body` matches, or `None` for any metacharacter the compiler never writes.
-fn path_regex_chars(body: &str) -> Option<Vec<char>> {
+/// The path characters `body` matches and whether it ends with `$`, or `None` for any
+/// metacharacter the compiler never writes.
+fn path_regex_chars(body: &str) -> Option<(Vec<char>, bool)> {
     let mut rest = body;
     let mut path = Vec::new();
     while !rest.is_empty() {
         if rest == "$" {
-            return Some(path);
+            return Some((path, true));
         }
         let bytes = rest.as_bytes();
         let (character, width) = if rest.starts_with(r"[\\/]") {
@@ -460,7 +465,7 @@ fn path_regex_chars(body: &str) -> Option<Vec<char>> {
         path.push(character);
         rest = &rest[width..];
     }
-    Some(path)
+    Some((path, false))
 }
 
 /// `tono-core` `config::is_rule_payload_safe`: no separators mihomo would re-split.
@@ -544,10 +549,14 @@ mod tests {
     /// process's reviewed-port traffic DIRECT. Only the compiler's path-regex form is admitted.
     #[test]
     fn a_catch_all_process_regex_is_not_a_compiler_shape() {
-        // What `windows_path_regex` writes for a long install, a short folder and a short file.
+        // What `windows_path_regex` writes (pinned by `tono-core`'s
+        // `windows_path_regex_for_short_installs_is_pinned`) for a long install, one-letter and
+        // non-ASCII folders, and short files.
         for signed_install in [
             r"^[Cc]:[\\/][Pp]rogram [Ff]iles[\\/][Tt]encent[\\/][Ww][Ee][Cc][Hh][Aa][Tt][\\/]",
+            r"^[Dd]:[\\/][Aa][\\/]",
             r"^[Dd]:[\\/]飞书[\\/]",
+            r"^[Dd]:[\\/][Aa]$",
             r"^[Dd]:[\\/][Ll][Aa][Rr][Kk]\.[Ee][Xx][Ee]$",
         ] {
             assert_eq!(
@@ -561,6 +570,8 @@ mod tests {
             "^.*",
             "^.+",
             r"^[Cc]:[\\/]",
+            r"^[Dd]:[\\/][Aa]",
+            r"^[Dd]:[\\/]$",
             "^[Cc]:",
             "^(?s).*",
             r"^C:\\.*",
