@@ -105,17 +105,34 @@ fn unanswered_probe_outcome(
     }
 }
 
-/// `(SCM says Stopped, a clean goodbye is recorded)`. The record is read first, so a Service
-/// that starts in between is seen as not stopped, never as stopped-with-record.
+/// `(SCM says Stopped, a clean goodbye is recorded)`.
+///
+/// The record is read, then SCM, then the record again, and only a record present both times
+/// counts. A Service instance that starts in between deletes the record before it restores or
+/// arms anything, so the second read sees the start even when the instance has crashed again
+/// before SCM was asked, or is a standalone process that SCM never reports as running.
 #[cfg(windows)]
 async fn stopped_service_facts() -> (Option<bool>, bool) {
     tokio::task::spawn_blocking(|| {
-        let recorded = tono_service_protocol::clean_goodbye::recorded();
-        let stopped = if recorded { service::registered_service_stopped().ok() } else { None };
-        (stopped, recorded)
+        stopped_service_facts_with(
+            tono_service_protocol::clean_goodbye::recorded,
+            || service::registered_service_stopped().ok(),
+        )
     })
     .await
     .unwrap_or((None, false))
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn stopped_service_facts_with(
+    mut read_record: impl FnMut() -> bool,
+    scm_stopped: impl FnOnce() -> Option<bool>,
+) -> (Option<bool>, bool) {
+    if !read_record() {
+        return (None, false);
+    }
+    let stopped = scm_stopped();
+    (stopped, read_record())
 }
 
 #[cfg(not(windows))]
@@ -1015,6 +1032,36 @@ mod offline_admission_tests {
             unanswered_probe_outcome(Some(true), true, reason()),
             StoredProtection::ProvenAbsent { reconnect_after_release: false }
         ));
+    }
+
+    /// Codex block on #1624: a Service that starts (and arms) between reading the record and
+    /// asking SCM deletes the record first; reading it only once would still believe it, and a
+    /// standalone start leaves SCM reporting Stopped throughout.
+    #[test]
+    fn a_record_deleted_while_scm_was_being_asked_is_not_a_clean_goodbye() {
+        let mut reads = [true, false].into_iter();
+        let (stopped, recorded) =
+            stopped_service_facts_with(|| reads.next().unwrap(), || Some(true));
+        assert_eq!((stopped, recorded), (Some(true), false));
+        assert!(matches!(
+            unanswered_probe_outcome(stopped, recorded, "pipe not found".to_string()),
+            StoredProtection::Unknown(_)
+        ));
+
+        let mut reads = [true, true].into_iter();
+        let (stopped, recorded) =
+            stopped_service_facts_with(|| reads.next().unwrap(), || Some(true));
+        assert!(matches!(
+            unanswered_probe_outcome(stopped, recorded, String::new()),
+            StoredProtection::ProvenAbsent { .. }
+        ));
+
+        // No record at the first read: SCM is not even asked.
+        let (stopped, recorded) = stopped_service_facts_with(
+            || false,
+            || panic!("SCM must not be queried without a record"),
+        );
+        assert_eq!((stopped, recorded), (None, false));
     }
 
     #[test]

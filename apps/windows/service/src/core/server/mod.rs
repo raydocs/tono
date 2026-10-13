@@ -652,18 +652,52 @@ fn owner_goodbye_verdict(
     }
 }
 
+/// Set by [`stop_ipc_server`] only when the whole teardown (Core, DNS, WFP release, IPC) ran to
+/// completion in time. `stop_ipc_server` itself swallows a failed or timed-out cleanup so the
+/// process can still exit, which means its success says nothing about the barrier.
+static STOP_CLEANUP_COMPLETE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the stop that follows an accepted owner goodbye proves that nothing is armed (#1300).
+///
+/// `wanted` and `live` both read false when nothing is recorded in memory, including after a
+/// startup cleanup failed and left Tono filters installed, so they are not evidence. The record
+/// is written only with every one of: a completed teardown, nothing wanted or live, and the WFP
+/// engine itself reporting no Tono filter. A residual-filter check that failed or could not run
+/// proves nothing and is `None`.
+#[cfg(any(windows, test))]
+fn clean_goodbye_evidence(
+    stop_cleanup_complete: bool,
+    wanted: bool,
+    live: bool,
+    residual_filters: Option<bool>,
+) -> bool {
+    stop_cleanup_complete && !wanted && !live && residual_filters == Some(false)
+}
+
 /// An accepted owner goodbye has torn the IPC server down: leave the evidence the App needs to
 /// tell this clean stop from a crash (#1300). Nothing is recorded unless the goodbye was accepted
-/// and the kill switch is still neither wanted nor live; a failed write only costs the App the
-/// proof, so it never fails the stop.
+/// and [`clean_goodbye_evidence`] holds; a failed write only costs the App the proof, so it never
+/// fails the stop.
 #[cfg(any(windows, test))]
 async fn note_clean_goodbye_if_accepted() {
     if !OWNER_GOODBYE_PENDING.load(std::sync::atomic::Ordering::SeqCst) {
         return;
     }
     let kill_switch = windows_kill_switch::status().await;
-    if kill_switch.wanted || kill_switch.live {
-        warn!("Owner goodbye stop: the kill switch is not idle; no clean-goodbye record is written");
+    let residual_filters = match windows_kill_switch::residual_filters_present().await {
+        Ok(present) => Some(present),
+        Err(error) => {
+            warn!("Owner goodbye stop: the residual filter check failed: {error:#}");
+            None
+        }
+    };
+    if !clean_goodbye_evidence(
+        STOP_CLEANUP_COMPLETE.load(std::sync::atomic::Ordering::SeqCst),
+        kill_switch.wanted,
+        kill_switch.live,
+        residual_filters,
+    ) {
+        warn!("Owner goodbye stop: no proof that nothing is armed; no clean-goodbye record is written");
         return;
     }
     match crate::clean_goodbye::record() {
@@ -718,6 +752,7 @@ pub async fn run_ipc_server() -> Result<JoinHandle<Result<()>>> {
 }
 
 pub async fn stop_ipc_server() -> Result<()> {
+    STOP_CLEANUP_COMPLETE.store(false, std::sync::atomic::Ordering::SeqCst);
     #[cfg(windows)]
     {
         // Connection handlers outlive the listener. Fence their queued mutations before
@@ -728,14 +763,18 @@ pub async fn stop_ipc_server() -> Result<()> {
             std::time::Instant::now() + IPC_SERVICE_STOP_TIMEOUT,
         );
         match tokio::time::timeout(IPC_SERVICE_STOP_TIMEOUT, stop_ipc_server_inner()).await {
-            Ok(Ok(())) => {}
+            Ok(Ok(())) => STOP_CLEANUP_COMPLETE.store(true, std::sync::atomic::Ordering::SeqCst),
             Ok(Err(error)) => warn!("Service stop cleanup failed; continuing shutdown: {error:#}"),
             Err(_) => warn!("Service stop cleanup timed out; continuing shutdown"),
         }
         return Ok(());
     }
     #[cfg(not(windows))]
-    stop_ipc_server_inner().await
+    {
+        let stopped = stop_ipc_server_inner().await;
+        STOP_CLEANUP_COMPLETE.store(stopped.is_ok(), std::sync::atomic::Ordering::SeqCst);
+        stopped
+    }
 }
 
 /// H-IPC-2: only a gate another process holds means an installer owns the stop. An I/O error

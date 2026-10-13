@@ -67,11 +67,42 @@ fn goodbye_is_refused_while_another_user_is_signed_in() {
 async fn an_accepted_goodbye_leaves_the_clean_goodbye_record() {
     crate::clean_goodbye::clear().expect("clear");
     super::OWNER_GOODBYE_PENDING.store(true, Ordering::SeqCst);
+    super::STOP_CLEANUP_COMPLETE.store(true, Ordering::SeqCst);
+    super::note_clean_goodbye_if_accepted().await;
+    let recorded = crate::clean_goodbye::recorded();
+    super::OWNER_GOODBYE_PENDING.store(false, Ordering::SeqCst);
+    super::STOP_CLEANUP_COMPLETE.store(false, Ordering::SeqCst);
+    crate::clean_goodbye::clear().expect("clear");
+    assert!(recorded, "a clean owner-goodbye stop must be provable to the next App launch");
+}
+
+/// Codex block on #1624: `stop_ipc_server` swallows a failed or timed-out cleanup, and `wanted`
+/// and `live` read false when nothing is recorded in memory even while filters are installed. An
+/// accepted goodbye whose teardown did not complete must leave no record.
+#[tokio::test]
+#[serial]
+async fn an_accepted_goodbye_whose_teardown_did_not_complete_leaves_no_record() {
+    crate::clean_goodbye::clear().expect("clear");
+    super::OWNER_GOODBYE_PENDING.store(true, Ordering::SeqCst);
+    super::STOP_CLEANUP_COMPLETE.store(false, Ordering::SeqCst);
     super::note_clean_goodbye_if_accepted().await;
     let recorded = crate::clean_goodbye::recorded();
     super::OWNER_GOODBYE_PENDING.store(false, Ordering::SeqCst);
     crate::clean_goodbye::clear().expect("clear");
-    assert!(recorded, "a clean owner-goodbye stop must be provable to the next App launch");
+    assert!(!recorded, "an unproven teardown is not a clean goodbye");
+}
+
+/// The record needs every piece of evidence: a completed teardown, nothing wanted or live, and
+/// the WFP engine itself reporting no Tono filter. An unanswered residual check is no evidence.
+#[test]
+fn the_clean_goodbye_record_needs_every_piece_of_evidence() {
+    use super::clean_goodbye_evidence as evidence;
+    assert!(evidence(true, false, false, Some(false)));
+    assert!(!evidence(false, false, false, Some(false)), "teardown incomplete");
+    assert!(!evidence(true, true, false, Some(false)), "kill switch wanted");
+    assert!(!evidence(true, false, true, Some(false)), "filters live");
+    assert!(!evidence(true, false, false, Some(true)), "residual filters present");
+    assert!(!evidence(true, false, false, None), "residual check failed or could not run");
 }
 
 /// An SCM stop or a crash is not a goodbye: no record, so the App keeps treating the stopped

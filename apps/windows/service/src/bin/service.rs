@@ -577,8 +577,13 @@ fn run_service() -> platform_lib::Result<()> {
         };
 
         // This instance owns the machine now: a previous clean-goodbye record is stale before
-        // anything can be restored or armed (#1300).
-        forget_clean_goodbye();
+        // anything can be restored or armed (#1300). If it cannot be made unreadable this
+        // instance must not arm: a crash of it would then read as a clean stop with nothing
+        // armed. The filters already installed stay in place; SCM restarts us to retry.
+        if let Err(error) = forget_clean_goodbye() {
+            tracing::error!("Refusing to start: {error}");
+            return true;
+        }
 
         // Register or refresh the release service from this image, off the startup path.
         #[cfg(not(feature = "test"))]
@@ -941,13 +946,13 @@ async fn finish_core_replay() {
     }
 }
 
-/// Delete the previous instance's clean-goodbye record. If it cannot be deleted the record may
-/// outlive this run, so the failure is loud; the App also needs SCM to report Stopped before it
-/// believes the record.
-fn forget_clean_goodbye() {
-    if let Err(error) = tono_service_protocol::clean_goodbye::clear() {
-        tracing::warn!("The previous clean-goodbye record could not be cleared: {error}");
-    }
+/// Make the previous instance's clean-goodbye record unreadable, or fail. A record that outlives
+/// this start would let a later crash of this instance be read as a clean stop with nothing
+/// armed, so a failure here stops the start before anything is restored or armed.
+fn forget_clean_goodbye() -> std::result::Result<(), String> {
+    tono_service_protocol::clean_goodbye::invalidate().map_err(|error| {
+        format!("the previous clean-goodbye record could not be invalidated: {error}")
+    })
 }
 
 async fn run_standalone() -> Result<()> {
@@ -959,7 +964,7 @@ async fn run_standalone() -> Result<()> {
         return Ok(());
     };
 
-    forget_clean_goodbye();
+    forget_clean_goodbye().map_err(|error| anyhow::anyhow!("{error}"))?;
 
     // PF intent is restored before IPC exists, so no client can race a fail-open startup.
     restore_kill_switch().await?;

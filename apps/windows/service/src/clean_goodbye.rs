@@ -33,6 +33,21 @@ pub fn clear() -> io::Result<()> {
     imp::clear()
 }
 
+/// Make a previous record unreadable, and prove it. Every Service start calls this before it
+/// restores or arms anything, and refuses to go on if it fails: a record that outlives a start
+/// would let a crash of that instance be read as a clean stop with nothing armed. Success means
+/// the record no longer reads as present, whatever the delete itself reported.
+#[cfg(feature = "standalone")]
+pub fn invalidate() -> io::Result<()> {
+    let cleared = imp::clear();
+    if imp::recorded() {
+        return Err(cleared
+            .err()
+            .unwrap_or_else(|| io::Error::other("the clean-goodbye record is still present after it was cleared")));
+    }
+    Ok(())
+}
+
 #[cfg(all(windows, not(any(test, feature = "test"))))]
 #[cfg_attr(not(feature = "standalone"), allow(dead_code))]
 mod imp {
@@ -41,7 +56,7 @@ mod imp {
     use windows_sys::Win32::System::Registry::{
         HKEY, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_SET_VALUE, KEY_WOW64_64KEY,
         REG_OPTION_VOLATILE, REG_SZ, RegCloseKey, RegCreateKeyExW, RegDeleteKeyExW,
-        RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
+        RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
     };
 
     const VALUE_NAME: &str = "Goodbye";
@@ -151,10 +166,34 @@ mod imp {
         // SAFETY: NUL-terminated key path under HKLM.
         let status =
             unsafe { RegDeleteKeyExW(HKEY_LOCAL_MACHINE, path.as_ptr(), KEY_WOW64_64KEY, 0) };
-        if status == ERROR_FILE_NOT_FOUND {
+        if status == ERROR_FILE_NOT_FOUND || status == 0 {
             return Ok(());
         }
-        check(status)
+        // The key itself could not be deleted (a subkey, or no DELETE access). The record is
+        // the value, so removing just the value invalidates it.
+        let mut handle = std::ptr::null_mut();
+        // SAFETY: NUL-terminated key path under HKLM; `handle` is a valid out-pointer.
+        let opened = unsafe {
+            RegOpenKeyExW(
+                HKEY_LOCAL_MACHINE,
+                path.as_ptr(),
+                0,
+                KEY_WOW64_64KEY | KEY_SET_VALUE,
+                &mut handle,
+            )
+        };
+        if opened != 0 {
+            return check(status);
+        }
+        let key = Key(handle);
+        let name = wide(VALUE_NAME);
+        // SAFETY: valid key handle and NUL-terminated value name.
+        let removed = unsafe { RegDeleteValueW(key.0, name.as_ptr()) };
+        if removed == 0 || removed == ERROR_FILE_NOT_FOUND {
+            Ok(())
+        } else {
+            check(removed)
+        }
     }
 }
 
@@ -166,6 +205,12 @@ mod imp {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     static RECORDED: AtomicBool = AtomicBool::new(false);
+    /// Test hooks for a delete that fails: whether `clear` reports an error, and whether it
+    /// removes the record anyway.
+    #[cfg(test)]
+    pub(super) static CLEAR_REPORTS_ERROR: AtomicBool = AtomicBool::new(false);
+    #[cfg(test)]
+    pub(super) static CLEAR_REMOVES_RECORD: AtomicBool = AtomicBool::new(true);
 
     pub(super) fn recorded() -> bool {
         RECORDED.load(Ordering::SeqCst)
@@ -179,7 +224,67 @@ mod imp {
 
     #[cfg(feature = "standalone")]
     pub(super) fn clear() -> io::Result<()> {
-        RECORDED.store(false, Ordering::SeqCst);
-        Ok(())
+        #[cfg(test)]
+        {
+            if CLEAR_REMOVES_RECORD.load(Ordering::SeqCst) {
+                RECORDED.store(false, Ordering::SeqCst);
+            }
+            if CLEAR_REPORTS_ERROR.load(Ordering::SeqCst) {
+                return Err(io::Error::other("simulated registry failure"));
+            }
+            return Ok(());
+        }
+        #[cfg(not(test))]
+        {
+            RECORDED.store(false, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+}
+
+#[cfg(all(test, feature = "standalone"))]
+mod tests {
+    use super::{imp, invalidate, record, recorded};
+    use serial_test::serial;
+    use std::sync::atomic::Ordering;
+
+    fn reset() {
+        imp::CLEAR_REPORTS_ERROR.store(false, Ordering::SeqCst);
+        imp::CLEAR_REMOVES_RECORD.store(true, Ordering::SeqCst);
+        imp::clear().expect("clear");
+    }
+
+    /// Codex block on #1624: a delete that fails must never leave a record that a later crash
+    /// would be read through. Only "the record no longer reads" counts as invalidated.
+    #[test]
+    #[serial]
+    fn a_record_that_survives_the_delete_is_not_invalidated() {
+        reset();
+        record().unwrap();
+        imp::CLEAR_REPORTS_ERROR.store(true, Ordering::SeqCst);
+        imp::CLEAR_REMOVES_RECORD.store(false, Ordering::SeqCst);
+        assert!(invalidate().is_err(), "the delete failed and the record is still there");
+        assert!(recorded());
+
+        // A delete that claims success but leaves the record is not trusted either.
+        imp::CLEAR_REPORTS_ERROR.store(false, Ordering::SeqCst);
+        assert!(invalidate().is_err(), "success without effect must still be refused");
+
+        reset();
+    }
+
+    #[test]
+    #[serial]
+    fn a_record_gone_by_any_route_is_invalidated() {
+        reset();
+        record().unwrap();
+        // The key delete reported an error but the value fallback removed the record.
+        imp::CLEAR_REPORTS_ERROR.store(true, Ordering::SeqCst);
+        imp::CLEAR_REMOVES_RECORD.store(true, Ordering::SeqCst);
+        invalidate().expect("the record no longer reads, so it is invalidated");
+        assert!(!recorded());
+
+        reset();
+        invalidate().expect("nothing recorded is already invalidated");
     }
 }
