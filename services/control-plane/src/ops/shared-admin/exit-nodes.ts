@@ -92,8 +92,17 @@ export async function exitNodesResource(
   if (mt && m === 'POST') {
     const token = randomToken();
     const t = now();
+    // Rotating an active node keeps the hash the agent still holds as the
+    // withdrawal mark (#1296): that agent is told EXIT_NODE_DISABLED, removes
+    // its clients and waits for the new token, instead of a 401 that leaves it
+    // serving its last roster unreconciled. A disabled node already holds its
+    // deployed hash there (see the status PATCH below), so it is left alone.
     const updated = await e.DB.prepare(
-      `UPDATE exit_nodes SET token_hash = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE exit_nodes
+       SET revoked_token_hash = CASE WHEN status = 'active' THEN token_hash ELSE revoked_token_hash END,
+           token_hash = ?,
+           updated_at = ?
+       WHERE id = ?`,
     ).bind(await sha256(token), t, mt[1]).run();
     if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Exit node not found');
     await writeOpsAudit(e, actorEmail, 'exit-node.rotate-token', 'exit_node', mt[1], 'rotated token');
