@@ -612,10 +612,11 @@ extension AccountSession {
     }
 
     /// A sign-out whose credential removal could not be made durable still
-    /// signs this process out; the gate says a relaunch may restore the account.
+    /// signs this process out, but a relaunch may restore the account, so the
+    /// notice says that instead of claiming the sign-out is complete.
     func noteSignOutDurability(_ durable: Bool) {
         guard !durable else { return }
-        signInError = TonoAPIClient.APIError.credentialRecoveryRecord.errorDescription
+        signInError = String(localized: "Tono signed you out, but could not erase its saved sign-in on this Mac, so it may sign you back in after a restart. Check available disk space and Tono's Application Support folder permissions, then sign out again.")
     }
 
     func clearAccount() {

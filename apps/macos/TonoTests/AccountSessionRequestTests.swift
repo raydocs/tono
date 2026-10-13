@@ -2920,6 +2920,48 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertFalse(relaunchRestorable, "without a tombstone the adoption proof must go, or the account comes back")
     }
 
+    func testSignOutWithNoDurableRecordAtAllReportsItAndRefusesTheOldCredentialInProcess() async throws {
+        let (account, transport, host, requests) = fixture(
+            keychainDelete: { _ in errSecInteractionNotAllowed }
+        )
+        let directory = testSuppressionDirectory(host)
+        defer {
+            // Restore write access first so the cleanup below can remove it.
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try await adoptTestAccount(account)
+        // A directory nobody can write to refuses both the tombstone and the
+        // removal of the adoption proof, on top of the failing keychain delete.
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+        let logout = Task { await account.api.logout() }
+        let revoke = try await nextRequest(requests)
+        XCTAssertTrue(revoke.request.url?.path.hasSuffix("/auth/logout") == true)
+        revoke.respond(status: 204, body: "")
+        let durable = await logout.value
+
+        XCTAssertFalse(durable, "nothing durable was written, and the caller must be told")
+        XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "test-only-refresh", "the delete really failed")
+        let restorable = try await account.api.hasRestorableSession()
+        XCTAssertFalse(restorable, "this process must still refuse the old credential")
+
+        account.noteSignOutDurability(durable)
+        XCTAssertTrue(
+            account.signInError?.contains("sign you back in after a restart") == true,
+            "the notice must say a restart may restore the account"
+        )
+    }
+
+    func testDurableSignOutLeavesNoSignInNotice() {
+        let (account, transport, host, _) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        account.noteSignOutDurability(true)
+        XCTAssertNil(account.signInError)
+    }
+
     func testFailedSignInKeychainWriteAndDeleteSuppressesOldAccountAcrossClientRelaunch() async throws {
         let refusal = RefuseOneTokenWrite("new-refresh")
         var disarms = 0
