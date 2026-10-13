@@ -658,7 +658,10 @@ where
         inner.cancel_server_tests();
         let operation = Arc::new(crate::tono::state::LifecycleOperation::new(inner.sign_in_generation));
         inner.account_close = Some(Arc::clone(&operation));
+        // A replacement sign-in leaves the AI hold behind on an idle App; Sign Out is a full
+        // release and must remove it even though nothing is connected or armed (decision 125).
         let protected = !matches!(reason, AccountCloseReason::User)
+            || inner.ai_hold_retained
             || connection::sign_out_needs_release(inner.fsm.status(), inner.fsm.kill_switch_armed());
         (inner.client.clone(), inner.credentials.clone(), inner.sign_in_generation, protected, operation)
     };
@@ -1053,6 +1056,26 @@ mod lifecycle_tests {
         let inner = state.lock().await;
         assert_eq!(inner.account_state, AccountState::SignedOut);
         assert!(!inner.fsm.kill_switch_armed());
+    }
+
+    /// Codex review of #1642: a replacement sign-in leaves the AI hold behind and the FSM idle.
+    /// An explicit Sign Out immediately afterwards is still a full release.
+    #[tokio::test]
+    async fn sign_out_after_a_replacement_release_still_runs_the_full_release() {
+        let state = Arc::new(TonoState::for_test());
+        state.lock().await.account_state = AccountState::Ready;
+        let operation = connection::coordinate_narrow_release(&state, |_guard| async { Ok(()) }, || async {}).await;
+        connection::complete_account_release(&operation).await.unwrap();
+        assert!(!state.lock().await.fsm.kill_switch_armed(), "the App is idle after the replacement");
+
+        let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ran = Arc::clone(&released);
+        close_account_with(Arc::clone(&state), AccountCloseReason::User,
+            move |_| async move { ran.store(true, std::sync::atomic::Ordering::SeqCst); Ok(()) },
+            |_| async { Ok(()) }, |_, _| async {}, |_| {},
+        ).await.unwrap();
+        assert!(released.load(std::sync::atomic::Ordering::SeqCst),
+            "Sign Out must remove the AI hold the replacement kept");
     }
 
     #[tokio::test]

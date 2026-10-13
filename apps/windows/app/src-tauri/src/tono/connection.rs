@@ -153,6 +153,8 @@ pub(crate) use disconnect::{
 #[cfg(test)]
 pub(crate) use disconnect::{complete_account_release, coordinate_release};
 #[cfg(test)]
+pub(crate) use disconnect::coordinate_narrow_release;
+#[cfg(test)]
 use disconnect::{EXPLICIT_RELEASE_TIMEOUT, SERVICE_LIFECYCLE_TIMEOUT};
 pub use reconnect::{retry_reconnect_now, schedule_reconnect, schedule_startup_resume_if_proven};
 use reconnect::active_runtime_resume_status;

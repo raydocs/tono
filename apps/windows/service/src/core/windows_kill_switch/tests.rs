@@ -2172,6 +2172,59 @@ async fn a_second_failed_update_release_keeps_the_hold_the_first_installed() -> 
     Ok(())
 }
 
+/// Codex review of #1642: a narrow release whose tombstone could not be written leaves the AI hold
+/// installed and no evidence on disk. A later failed-update recovery that finds nothing owed must
+/// not "clean up" that hold; only an explicit Restore removes it.
+#[tokio::test]
+#[serial]
+async fn failed_update_recovery_keeps_a_hold_whose_tombstone_could_not_be_written() -> Result<()> {
+    cleanup().await;
+    arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+    let failures = SimulatedStateFailures::arm(true, false);
+    release_applying_narrow().await?;
+    drop(failures);
+    let hold_after_release = crate::core::selective_layer::test_hold_active();
+    let evidence_left = tokio::fs::metadata(intent_path()).await.is_ok();
+
+    emergency_disarm_windows_kill_switch_applying_narrow().await?;
+    let held_after_emergency = crate::core::selective_layer::test_hold_active();
+    release_applying_narrow_if_owed().await?;
+    let held_after_release = crate::core::selective_layer::test_hold_active();
+    emergency_disarm_windows_kill_switch().await?;
+    let held_after_restore = crate::core::selective_layer::test_hold_active();
+    cleanup().await;
+
+    assert!(hold_after_release, "the narrow release installed the hold");
+    assert!(!evidence_left, "the failed tombstone write left no evidence on disk");
+    assert!(held_after_emergency, "a failed update's emergency release must keep the hold");
+    assert!(held_after_release, "a failed update's Service release must keep the hold");
+    assert!(!held_after_restore, "an explicit Restore still removes the hold");
+    Ok(())
+}
+
+/// Codex review of #1642: a record with `reconnect_after_release` and no explicit disposition is
+/// a narrow recovery owed to the user, exactly as Service start reads it.
+#[tokio::test]
+#[serial]
+async fn failed_update_recovery_honors_a_legacy_crash_tombstone() -> Result<()> {
+    cleanup().await;
+    let mut legacy = serde_json::to_value(crash_recovery_tombstone(None))?;
+    legacy.as_object_mut().unwrap().remove("apply_narrow_after_release");
+    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&legacy)?).await?;
+    emergency_disarm_windows_kill_switch_applying_narrow().await?;
+    let held_after_emergency = crate::core::selective_layer::test_hold_active();
+    cleanup().await;
+
+    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&legacy)?).await?;
+    release_applying_narrow_if_owed().await?;
+    let held_after_release = crate::core::selective_layer::test_hold_active();
+    cleanup().await;
+
+    assert!(held_after_emergency, "a legacy crash tombstone owes the AI hold to the emergency release");
+    assert!(held_after_release, "a legacy crash tombstone owes the AI hold to the Service release");
+    Ok(())
+}
+
 #[tokio::test]
 #[serial]
 async fn emergency_disarm_removes_wfp_intent_but_reports_unrestored_dns() -> Result<()> {

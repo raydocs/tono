@@ -497,7 +497,9 @@ fn ai_hold_owed_by(armed_wanted: bool, intent: Option<std::io::Result<Vec<u8>>>)
         // Unreadable or corrupt evidence is kept conservatively, as startup keeps it.
         Some(Err(_)) => true,
         Some(Ok(bytes)) => match serde_json::from_slice::<IntentRecord>(&bytes) {
-            Ok(intent) => intent.wanted || intent.apply_narrow_after_release == Some(true),
+            // `release_follow_up` also reads the legacy crash record (`reconnect_after_release` with
+            // no explicit disposition) as a narrow recovery, exactly as Service start does.
+            Ok(intent) => intent.wanted || intent.release_follow_up() == Some(true),
             Err(_) => true,
         },
     }
@@ -514,13 +516,16 @@ pub(super) async fn ai_hold_owed() -> bool {
     ai_hold_owed_by(armed_wanted, intent)
 }
 
-/// Failed-update release: [`release_applying_narrow`] when an AI hold is owed, else [`release`].
+/// Failed-update release: [`release_applying_narrow`] when an AI hold is owed. Otherwise it
+/// installs no new hold and leaves whatever hold and disposition already exist untouched: an
+/// earlier release whose tombstone could not be written may have left a hold with no evidence,
+/// and removing it is only an explicit Restore's job (decision 125).
 pub(crate) async fn release_applying_narrow_if_owed() -> Result<KillSwitchStatus> {
     ensure_supported()?;
     {
         let _operation = WFP_OPERATION.lock().await;
         let owed = ai_hold_owed().await;
-        disarm_unlocked(owed).await?;
+        disarm_unlocked_with_narrow(owed.then_some(true)).await?;
         note_explicit_release();
     }
     Ok(status().await)

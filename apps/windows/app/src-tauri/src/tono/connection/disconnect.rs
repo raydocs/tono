@@ -192,6 +192,23 @@ where
     ).await
 }
 
+/// Test seam: a release that keeps the AI hold, as Quit and a replacement sign-in do.
+#[cfg(test)]
+pub(crate) async fn coordinate_narrow_release<F, C, S, SF>(
+    state: &Arc<TonoState>, sequence: C, settled: S,
+) -> Arc<LifecycleOperation>
+where
+    C: FnOnce(Arc<tokio::sync::OwnedRwLockWriteGuard<()>>) -> F + Send + 'static,
+    F: std::future::Future<Output = Result<(), String>> + Send + 'static,
+    S: FnOnce() -> SF + Send + 'static,
+    SF: std::future::Future<Output = ()> + Send + 'static,
+{
+    let mut sequence = Some(sequence);
+    coordinate_release_with_disposition(state, None, false, true,
+        move |guard, _, _| sequence.take().expect("narrow release runs once")(guard), settled,
+    ).await
+}
+
 async fn coordinate_release_with_disposition<F, C, S, SF>(
     state: &Arc<TonoState>, guard: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
     explicit_disconnect: bool, apply_narrow: bool, mut sequence: C, settled: S,
@@ -254,6 +271,8 @@ where
                 // The slot was sealed with inner held; this writer and inner still exclude
                 // admission until ALL metadata is finalized, once for the whole operation.
                 inner.fsm.sign_out_or_quit();
+                // A narrow release leaves the AI hold behind; only a full release removes it.
+                inner.ai_hold_retained = applied_narrow;
                 inner.controller_secret = None;
                 inner.controller_port = None;
                 inner.network_events_counter = None;
@@ -689,6 +708,17 @@ mod tests {
         }).await;
         assert_eq!(result, Err("injected release refusal".to_string()));
         assert!(lifecycle.try_read().is_ok(), "the settled request relinquishes ownership");
+    }
+
+    #[tokio::test]
+    async fn only_a_full_release_clears_the_retained_ai_hold_flag() {
+        let state = Arc::new(TonoState::for_test());
+        let narrow = coordinate_narrow_release(&state, |_guard| async { Ok(()) }, || async {}).await;
+        narrow.wait().await.unwrap();
+        assert!(state.lock().await.ai_hold_retained, "a narrow release leaves the AI hold behind");
+        let full = coordinate_release(&state, None, |_guard| async { Ok(()) }, || async {}).await;
+        full.wait().await.unwrap();
+        assert!(!state.lock().await.ai_hold_retained, "a full release removes it");
     }
 
     #[test]
