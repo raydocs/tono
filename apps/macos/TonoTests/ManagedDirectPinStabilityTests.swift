@@ -125,6 +125,33 @@ final class ManagedDirectPinStabilityTests: XCTestCase {
         )
     }
 
+    /// MAC-WEB-PINS-SUFFIX-STALE: a pin a policy suffix covers is no longer in
+    /// the runtime, so its CDN answer rotating must not reload the session just
+    /// because an uncovered pin keeps the refresh scheduled.
+    func testCoveredWebPinRotationInAMixedPolicyIsNotAChange() {
+        func mixed(covered: [String]) -> ConfigPipeline.ManagedDirectRuntimePolicy {
+            ConfigPipeline.ManagedDirectRuntimePolicy(
+                physicalInterface: "en0",
+                domainPins: [],
+                webDomainPins: [
+                    pin("static.example.cn", covered),
+                    pin("img.example.org", ["101.32.104.6"]),
+                ],
+                webDomainSuffixes: [.init(host: "example.cn", ports: [80, 443])],
+                mediaEndpoints: [],
+                tcpEndpoints: [],
+                directResolverHosts: []
+            )
+        }
+        XCTAssertNil(
+            AppState.mergedManagedDirectPolicy(
+                current: mixed(covered: ["101.32.104.5"]),
+                resolved: mixed(covered: ["101.32.104.9"])
+            ),
+            "only a pin the runtime still dials from may cause a reload"
+        )
+    }
+
     func testFullyRotatedPinIsReplaced() {
         let current = policy([pin("cdn.example.com", ["1.1.1.1", "2.2.2.2"])])
         let resolved = policy([pin("cdn.example.com", ["9.9.9.9", "8.8.8.8"])])

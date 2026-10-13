@@ -607,8 +607,8 @@ final class SingBoxConfigTests: XCTestCase {
         let plan = ConfigPipeline.ManagedDirectRuntimePolicy(physicalInterface: "en0",
             domainPins: [],
             webDomainPins: [
-                .init(host: "static.example.cn", addresses: ["203.0.113.7"], ports: [443]),
-                .init(host: "img.example.org", addresses: ["203.0.113.8"], ports: [443]),
+                .init(host: "static.example.cn", addresses: ["101.32.104.5"], ports: [443]),
+                .init(host: "img.example.org", addresses: ["101.32.104.6"], ports: [443]),
             ],
             webDomainSuffixes: [.init(host: "example.cn", ports: [80, 443])],
             mediaEndpoints: [], trusted: true)
@@ -629,10 +629,10 @@ final class SingBoxConfigTests: XCTestCase {
             ConfigPipeline.ManagedDirectRuntimePolicy(physicalInterface: "en0", domainPins: [],
                 webDomainPins: pins, webDomainSuffixes: [suffix], mediaEndpoints: [], trusted: true)
         }
-        XCTAssertTrue(plan([.init(host: "img.example.org", addresses: ["203.0.113.8"], ports: [443])]).pinsAreLoadBearing)
-        XCTAssertTrue(plan([.init(host: "static.example.cn", addresses: ["203.0.113.7"], ports: [443, 8443])]).pinsAreLoadBearing,
+        XCTAssertTrue(plan([.init(host: "img.example.org", addresses: ["101.32.104.6"], ports: [443])]).pinsAreLoadBearing)
+        XCTAssertTrue(plan([.init(host: "static.example.cn", addresses: ["101.32.104.5"], ports: [443, 8443])]).pinsAreLoadBearing,
                       "a port the suffix does not route leaves the pin deciding that dial")
-        XCTAssertFalse(plan([.init(host: "static.example.cn", addresses: ["203.0.113.7"], ports: [443])]).pinsAreLoadBearing)
+        XCTAssertFalse(plan([.init(host: "static.example.cn", addresses: ["101.32.104.5"], ports: [443])]).pinsAreLoadBearing)
     }
 
     /// #1258: a replacement Core starts with an empty fake-IP table and

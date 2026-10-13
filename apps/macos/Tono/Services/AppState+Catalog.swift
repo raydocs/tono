@@ -1036,14 +1036,17 @@ extension AppState {
     ) -> ConfigPipeline.ManagedDirectRuntimePolicy? {
         func mergePins(
             _ currentPins: [ConfigPipeline.DirectDomainPin],
-            _ resolvedPins: [ConfigPipeline.DirectDomainPin]
+            _ resolvedPins: [ConfigPipeline.DirectDomainPin],
+            frozen: (ConfigPipeline.DirectDomainPin) -> Bool = { _ in false }
         ) -> [ConfigPipeline.DirectDomainPin] {
             let resolvedByHost = Dictionary(
                 uniqueKeysWithValues: resolvedPins.map { ($0.host, $0) }
             )
             var currentHosts = Set(currentPins.map(\.host))
             var pins = currentPins.map { pin -> ConfigPipeline.DirectDomainPin in
-                guard let fresh = resolvedByHost[pin.host] else { return pin }
+                // A pin the runtime no longer resolves statically has nothing
+                // to keep fresh, and rewriting it would reload the session.
+                guard !frozen(pin), let fresh = resolvedByHost[pin.host] else { return pin }
                 let freshSet = Set(fresh.addresses)
                 let live = pin.addresses.filter { freshSet.contains($0) }
                 // Absence from one answer is not evidence that a committed
@@ -1077,7 +1080,8 @@ extension AppState {
             domainPins: mergePins(current.domainPins, resolved.domainPins),
             webDomainPins: mergePins(
                 current.webDomainPins,
-                resolved.webDomainPins
+                resolved.webDomainPins,
+                frozen: { pin in current.webDomainSuffixes.contains { $0.covers(pin) } }
             ),
             webDomainSuffixes: current.webDomainSuffixes,
             mediaEndpoints: current.mediaEndpoints,

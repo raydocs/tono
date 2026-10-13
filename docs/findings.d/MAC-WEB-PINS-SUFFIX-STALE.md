@@ -20,4 +20,4 @@
 - 刷新判据改为 `pinsAreLoadBearing`：无策略后缀（旧行为）或仍有未被覆盖的网页钉选时才刷新；两处调用点（健康周期调度与 `ManagedDirectRefreshPolicy` 输入）使用同一个属性。未被覆盖的钉选刷新沿用既有的在途流推迟策略，仍可能触发一次整会话重载（局部热替换需要 Core 接口，未做）。
 - 不变量：不扩大 DIRECT（后缀规则本来就放行这些主机与端口）；PF 的会话端点不变（仍含被覆盖钉选的旧地址，是多放行而非少放行，未收紧）；只改产品 sing-box 发出器，旧 YAML 运行配置路径未改。后缀只取策略自带的 `webDomainSuffixes`，不含始终开启的产品后缀（否则全部中国网页钉选都被认为已覆盖）。
 - 测试：`testAWebPinThatAPolicySuffixCoversIsNotResolvedStatically`、`testAnUncoveredWebPinStaysLoadBearingWhileAPolicySuffixExists`（`SingBoxConfigTests`）。
-
+- Codex 复核第 1 轮（minor，已改）：混合策略（既有被覆盖钉选又有未覆盖钉选）下，被覆盖钉选的答案轮换仍会让合并结果与当前不同，从而在未覆盖钉选保持刷新时触发整会话重载。`mergedManagedDirectPolicy` 现在对被当前策略后缀覆盖的网页钉选保持原值不合并；回归 `testCoveredWebPinRotationInAMixedPolicyIsNotAChange`（`ManagedDirectPinStabilityTests`）。另修正配置测试的夹具地址（验证器拒绝 203.0.113.0/24，原夹具会在目标断言前抛错）。
