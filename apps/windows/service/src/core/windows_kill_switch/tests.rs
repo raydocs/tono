@@ -2567,6 +2567,71 @@ async fn another_signed_in_user_cannot_take_over_armed_protection() -> Result<()
     Ok(())
 }
 
+/// #1293 item 1: user A signed out with the release failed, so the barrier stays armed under
+/// owner A. User B's Connect reaches PrepareCoreStart, which stops A's Core before B's
+/// `arm_bootstrap`. If B's attempt then fails, `fail_connect` releases as B; that release must
+/// pass `authorize_write_for` without any change to that rule, because B became the recorded
+/// owner when A's Core was stopped.
+#[tokio::test]
+#[serial]
+async fn prepare_core_start_makes_the_taking_over_user_the_owner_of_a_departed_owners_barrier()
+-> Result<()> {
+    cleanup().await;
+    arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+    crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1)))
+        .await;
+    lock(None).await?;
+    mark_verified("owner-alice").await?;
+    assert!(armed_guard().as_ref().unwrap().intent.is_verified());
+    TEST_OWNER_SIGNED_OUT.store(true, Ordering::Relaxed);
+    assert!(
+        authorize_write_for("owner-bob").is_err(),
+        "precondition: the departed owner still holds the recorded ownership"
+    );
+
+    let changed = adopt_departed_owner_before_core_stop("owner-bob").await?;
+
+    assert!(changed, "the recorded owner must move to the caller");
+    assert!(authorize_write_for("owner-bob").is_ok());
+    assert!(authorize_write_for("owner-alice").is_err());
+    let on_disk: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+    assert_eq!(on_disk.owner_key.as_deref(), Some("owner-bob"));
+    assert!(on_disk.wanted, "the barrier itself stays armed");
+    assert!(
+        !on_disk.is_verified(),
+        "the departed owner's verification must not carry over"
+    );
+    assert!(armed_guard().as_ref().unwrap().intent.owner_key.as_deref() == Some("owner-bob"));
+    cleanup().await;
+    Ok(())
+}
+
+/// The early ownership move is exactly the takeover `arm_bootstrap` allows: it must not happen
+/// while the recorded owner is signed in, for an ownerless intent, or for the owner itself.
+#[tokio::test]
+#[serial]
+async fn prepare_core_start_never_moves_ownership_from_a_signed_in_or_to_the_same_owner()
+-> Result<()> {
+    cleanup().await;
+    assert!(!adopt_departed_owner_before_core_stop("owner-bob").await?);
+
+    arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+    let error = adopt_departed_owner_before_core_stop("owner-bob")
+        .await
+        .expect_err("a signed-in owner's barrier must not be taken over");
+    assert_eq!(
+        error
+            .downcast_ref::<crate::core::auth::ServiceError>()
+            .map(|refusal| refusal.code),
+        Some(crate::ServiceErrorCode::ProtectionHeldByAnotherUser)
+    );
+    assert!(!adopt_departed_owner_before_core_stop("owner-alice").await?);
+    let on_disk: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+    assert_eq!(on_disk.owner_key.as_deref(), Some("owner-alice"));
+    cleanup().await;
+    Ok(())
+}
+
 /// TW-anthropic-1: a first connect from a Remote Desktop (or unreadable) session would arm a
 /// block that cuts that session and cannot be released remotely, so it is refused. The
 /// console may connect, and only the caller's own *verified* protection keeps its reconnect

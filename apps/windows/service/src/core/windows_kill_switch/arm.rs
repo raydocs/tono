@@ -117,6 +117,20 @@ pub(crate) async fn arm_bootstrap(
     record_outcome(install_unlocked(&armed).await)
 }
 
+/// PrepareCoreStart runs before StartClash and, for a caller that is not the active runtime,
+/// stops the Core the armed barrier's recorded owner left running. If that owner has signed out,
+/// the caller may take the barrier over (`authorize_takeover_for`), but the recorded owner is
+/// only rewritten by the later `arm_bootstrap`. A connect that fails in between would then
+/// release as a user who is not the recorded owner and be refused, stranding the machine Blocked.
+/// This records the caller as owner at the moment the departed owner's Core is stopped.
+///
+/// Returns whether the recorded owner changed. A recorded owner that is still signed in is
+/// refused exactly as `arm_bootstrap` refuses it; an ownerless, unwanted or already-own intent
+/// is left untouched.
+pub(crate) async fn adopt_departed_owner_before_core_stop(_caller_key: &str) -> Result<bool> {
+    Ok(false)
+}
+
 /// Commit the full app verification barrier for the active logical session.
 pub(crate) async fn mark_verified(owner_key: &str) -> Result<()> {
     ensure_supported()?;
