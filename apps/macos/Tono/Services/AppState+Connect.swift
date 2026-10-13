@@ -2003,7 +2003,7 @@ extension AppState {
         // on a stale /32. Pins are no longer that load-bearing: the
         // reviewed bundle routes direct by process path, and the web
         // hosts route direct by domain suffix with China DoH behind
-        // them. Neither reads a pin.
+        // them.
         //
         // What the refresh does still cost is exact and measured. It
         // rewrites the runtime config, and `api.reloadConfig` tears
@@ -2012,22 +2012,19 @@ extension AppState {
         // zero targets reachable directly. That is the customer-facing
         // "Connection closed mid-response" in AI tools and long
         // downloads, and it recurred for as long as a session stayed
-        // up. Address churn is normal CDN behaviour; severing every
-        // long-lived connection to chase it is not a trade worth
-        // making now that nothing depends on the result.
+        // up. So a pin that a policy suffix covers on the same ports is
+        // not in the runtime at all (`staticWebDomainPins`): the suffix
+        // rule dials the current address and nothing needs refreshing.
         //
-        // Pins therefore stay a connect-time snapshot and a redundant
-        // narrower match. A stale one costs a redundant rule, not a
-        // route: the suffix and process rules still resolve and dial
-        // the current address.
-        //
-        // A policy with no suffix routes has no such backstop, so the
-        // refresh stays available for it rather than being deleted.
-        // The same predicate the decision uses, so the schedule and the
-        // decision cannot drift apart into a refresh that is scheduled
-        // and then always declined, or worse the reverse.
+        // A pin no suffix covers still decides its dial, with a stale one
+        // stranding the host until reconnect (MAC-WEB-PINS-SUFFIX-STALE),
+        // so the refresh stays for it, through the same deferral policy
+        // that spares in-flight streams. The same predicate the decision
+        // uses, so the schedule and the decision cannot drift apart into a
+        // refresh that is scheduled and then always declined, or worse the
+        // reverse.
         let pinsAreLoadBearing =
-            self.activeDirectPolicy?.webDomainSuffixes.isEmpty ?? false
+            self.activeDirectPolicy?.pinsAreLoadBearing ?? false
         if pinsAreLoadBearing, state.healthCycle.isMultiple(of: 30) {
             await self.refreshManagedDirectPins()
             guard !Task.isCancelled, self.isConnected else { return .stopMonitoring }
