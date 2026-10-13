@@ -515,8 +515,7 @@ pub(crate) mod test_hooks {
         )
     }
 
-    /// Stub facade entries that were granted a budget. A call the attempt deadline refuses
-    /// before it starts is not recorded yet, so the offline-registry timeout test cannot see it.
+    /// Every stub facade entry, including a call the attempt deadline refused before it started.
     #[cfg(test)]
     static FACADE_CALLS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 

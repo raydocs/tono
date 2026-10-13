@@ -2912,13 +2912,6 @@ fn assert_restore_in_progress(refused: Result<()>) {
     assert!(ARMED.lock().unwrap().is_none(), "a refused Connect must arm nothing");
 }
 
-/// The refusal alone, for a test that checks what was armed itself.
-fn assert_refused_as_restore_in_progress(refused: Result<()>) {
-    let message = format!("{:#}", refused.expect_err("the Connect must be refused"));
-    assert!(message.contains(NETWORK_RESTORE_IN_PROGRESS_PREFIX), "{message}");
-    assert!(message.contains("retry in a few seconds"), "{message}");
-}
-
 /// The DNS fence (in-progress marker or an abandoned engine writer) is the only refusal that
 /// says a restore is still writing DNS. A wait that only ran out of time on the WFP lock is a
 /// different sentence.

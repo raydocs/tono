@@ -63,25 +63,34 @@ pub(super) fn admit_api_host_ips(hosts: &[String]) -> Vec<IpAddr> {
 /// redirected DNS reset or overwritten, so the check is made under the WFP lock (an attempt takes
 /// the same lock to check "nothing armed" and set its marker, so exactly one of the two comes
 /// first), and a Connect that finds the fence up lets go of the lock and polls every 100 ms for at
-/// most `wait` before it is refused. The whole thing is bounded by `wait`, queueing for the WFP lock
-/// included: a lock held longer than that (a long arm, release or fallback bookkeeping step ahead of
-/// this Connect) is refused with the same prefix instead of queueing without limit. Lock order is
+/// most `wait` before it is refused as still writing DNS. The whole thing is bounded by `wait`,
+/// queueing for the WFP lock included: a lock held longer than that (a long arm, release or
+/// fallback bookkeeping step ahead of this Connect) is refused with the same prefix, saying another
+/// network operation is still in progress, instead of queueing without limit. Lock order is
 /// unchanged (WFP, then DNS); the claim is only a `std` mutex read.
 async fn lock_wfp_once_no_network_restore_is_writing(
     wait: std::time::Duration,
 ) -> Result<tokio::sync::MutexGuard<'static, ()>> {
     const POLL: std::time::Duration = std::time::Duration::from_millis(100);
     let give_up_at = std::time::Instant::now() + wait;
-    let refused = || {
+    // The prefix is shared. Only the DNS fence (marker or an abandoned writer) is still writing
+    // DNS; running out of time while queued on the WFP lock is some other network operation.
+    let still_writing_dns = || {
         anyhow::anyhow!(
             "{NETWORK_RESTORE_IN_PROGRESS_PREFIX}: a network restore is still writing DNS; \
+             retry in a few seconds"
+        )
+    };
+    let operation_in_progress = || {
+        anyhow::anyhow!(
+            "{NETWORK_RESTORE_IN_PROGRESS_PREFIX}: another network operation is still in progress; \
              retry in a few seconds"
         )
     };
     loop {
         let to_lock = give_up_at.saturating_duration_since(std::time::Instant::now());
         let Ok(operation) = tokio::time::timeout(to_lock, WFP_OPERATION.lock()).await else {
-            return Err(refused());
+            return Err(operation_in_progress());
         };
         if !DNS_FALLBACK_IN_PROGRESS.load(Ordering::Acquire)
             && !crate::core::dns::engine_claim_is_held()
@@ -91,7 +100,7 @@ async fn lock_wfp_once_no_network_restore_is_writing(
         drop(operation);
         let left = give_up_at.saturating_duration_since(std::time::Instant::now());
         if left.is_zero() {
-            return Err(refused());
+            return Err(still_writing_dns());
         }
         tokio::time::sleep(POLL.min(left)).await;
     }
@@ -132,10 +141,10 @@ pub(crate) async fn arm_bootstrap_waiting(
     }
     let api_host_ips = admit_api_host_ips(&config.bootstrap_api_hosts);
     let _operation = lock_wfp_once_no_network_restore_is_writing(fence_wait).await?;
-    // A fresh arm replaces whatever a failed startup retirement left: that debt belonged to the
-    // barrier it was retiring, and this arm redirects DNS afresh.
-    STARTUP_RETIREMENT_OWES_DNS_FALLBACK.store(false, Ordering::Release);
     // Re-checked under the WFP lock: this is the write that records the new owner.
+    // The startup-retirement DNS debt stays until the commit below. Clearing it here would drop
+    // it when the intent write fails, and the core-window retry would then release WFP without
+    // registering the fallback.
     authorize_takeover_for(owner_key).map_err(anyhow::Error::new)?;
     let inherited_verified = armed_guard().as_ref().is_some_and(|armed| {
         armed.intent.owner_key.as_deref() == Some(owner_key) && armed.intent.is_verified()
@@ -169,6 +178,10 @@ pub(crate) async fn arm_bootstrap_waiting(
     CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
     publish_reconnect(false, None);
     *armed_guard() = Some(armed.clone());
+    // Commit point: the new intent is on disk and ARMED is this session. The debt belonged to
+    // the barrier this arm replaces. Any error before this store leaves the old session and the
+    // debt, so the core-window retry still registers the fallback.
+    STARTUP_RETIREMENT_OWES_DNS_FALLBACK.store(false, Ordering::Release);
     note_fresh_arm_core_window(&armed.intent);
     record_outcome(install_unlocked(&armed).await)
 }
