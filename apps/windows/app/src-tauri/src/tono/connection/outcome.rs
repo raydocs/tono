@@ -25,7 +25,7 @@ pub(super) async fn fail_connect(
     match cleanup::reconcile_failure(
         Arc::clone(state),
         generation,
-        async { service::tono_kill_switch_status().await.ok() },
+        async { service::tono_kill_switch_status_as_caller().await.ok() },
         move |observed, guard| async move {
             fail_connect_observed(&task_state, &task_app, generation, err, observed, guard, account_owner).await
         },

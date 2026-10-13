@@ -988,6 +988,38 @@ pub struct ServiceStatusSnapshot {
     /// refuses it. `None` when unreadable or from an older Service.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_generation: Option<u64>,
+    /// `kill_switch` describes an armed barrier that another signed-in Windows user owns, not
+    /// this caller (#1290). Computed with the rule `authorize_write_for` applies to a release, so
+    /// an intent whose owner record was lost (any caller may release it) is never reported as
+    /// foreign. An older Service omits it and reads as false: the barrier is the caller's.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub kill_switch_held_by_another_user: bool,
+}
+
+impl ServiceStatusSnapshot {
+    /// The snapshot as the calling App must read it. Another user's machine-wide barrier is not
+    /// this caller's protection: the App must not fold it into its own state (Protected Offline,
+    /// a refused Restore internet, a refused Quit). It reads the caller's own view, "no barrier
+    /// of mine", while the flag itself stays set for anything that wants to say who holds it.
+    #[must_use]
+    pub fn seen_by_caller(mut self) -> Self {
+        if self.kill_switch_held_by_another_user
+            && let Some(status) = self.kill_switch.as_mut()
+        {
+            *status = KillSwitchStatus {
+                wanted: false,
+                verified: false,
+                live: false,
+                mode: KillSwitchStatusMode::Blocked,
+                tunnel_permit_rendered: false,
+                endpoints: Vec::new(),
+                direct_endpoint_digest: direct_endpoint_digest(&[]).unwrap_or_default(),
+                last_error: None,
+                reconnect_after_release: false,
+            };
+        }
+        self
+    }
 }
 
 /// Whether an already-running Windows Core is safe to preserve until `StartClash` replaces it.
@@ -1075,8 +1107,8 @@ impl<T> JsonConvert for T where T: Serialize + for<'de> Deserialize<'de> {}
 mod tests {
     use super::{
         MacosProxyConfig, OwnerIdentity, ProtocolInfo, ProtocolVersion, ReleaseKillSwitchBody,
-        RuntimeBundle, ServiceErrorCode, StartClashRequest, StopClashPayload, core_launch_args,
-        is_sing_box_core_path, owner_key,
+        RuntimeBundle, ServiceErrorCode, ServiceStatusSnapshot, StartClashRequest,
+        StopClashPayload, core_launch_args, is_sing_box_core_path, owner_key,
     };
 
     #[test]
@@ -1522,5 +1554,48 @@ mod tests {
         assert!(!info.supports_sing_box_core());
         info.protocol.revision = 18;
         assert!(info.supports_sing_box_core());
+    }
+    /// A `/status` payload whose Windows barrier is armed, verified and live.
+    fn snapshot_with_barrier(held_by_another_user: bool) -> ServiceStatusSnapshot {
+        let mut snapshot = serde_json::from_value::<ServiceStatusSnapshot>(serde_json::json!({
+            "is_active": false,
+            "active_generation": null,
+            "service_state": "Running",
+            "core_pid": null,
+            "core_started_at": null,
+            "last_core_exit_reason": null,
+            "restart_count": 0,
+            "last_recovery_at": null,
+            "desired_core_should_be_running": false,
+            "desired_generation": 0,
+            "desired_updated_at": 0,
+            "kill_switch": {
+                "wanted": true,
+                "verified": true,
+                "live": true,
+                "mode": "locked",
+                "endpoints": [],
+            },
+        }))
+        .expect("status payload parses");
+        snapshot.kill_switch_held_by_another_user = held_by_another_user;
+        snapshot
+    }
+
+    /// #1290: a second user's App reads another user's machine-wide barrier as "none of mine",
+    /// so it neither shows Protected Offline nor asks a Quit to release what it cannot release.
+    #[test]
+    fn another_users_barrier_reads_as_no_barrier_of_the_callers() {
+        let seen = snapshot_with_barrier(true).seen_by_caller();
+        let status = seen.kill_switch.expect("the reading stays present");
+        assert!(!status.wanted && !status.verified && !status.live);
+        assert!(seen.kill_switch_held_by_another_user, "the flag still says who holds it");
+    }
+
+    #[test]
+    fn the_callers_own_barrier_is_read_unchanged() {
+        let seen = snapshot_with_barrier(false).seen_by_caller();
+        let status = seen.kill_switch.expect("the reading stays present");
+        assert!(status.wanted && status.verified && status.live);
     }
 }

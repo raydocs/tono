@@ -67,25 +67,29 @@ struct GateProtectionSection: View {
 
     var body: some View {
         if seaStandalone, let notice = appState.gateProtectionNotice {
-            HStack(alignment: .center, spacing: 12) {
-                Image(notice.imageName)
-                    .renderingMode(.template)
-                    .foregroundStyle(SeaTheme.attention)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(notice.message)
-                    Text("Restoring internet turns protection off.")
+            // The sentence gets the full row; beside the button it wrapped to five lines.
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(notice.imageName)
+                        .renderingMode(.template)
+                        .foregroundStyle(SeaTheme.attention)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(notice.message)
+                        Text("Restoring internet turns protection off.")
+                    }
+                        .font(.system(size: 12))
+                        .foregroundStyle(SeaTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
                 }
-                    .font(.system(size: 12))
-                    .foregroundStyle(SeaTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
                 Button("Restore internet") {
                     Task { await session.restoreDirectInternet() }
                 }
                 .disabled(disabled)
                 .buttonStyle(SeaButtonStyle(variant: .quiet, size: .row))
                 .fixedSize()
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
             .background(display.reduceTransparency || display.contrast == .increased

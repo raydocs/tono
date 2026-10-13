@@ -58,8 +58,8 @@ class LocalReleaseSignerTests(unittest.TestCase):
         project = (ROOT / 'apps/macos/Tono.xcodeproj/project.pbxproj').read_text()
         self.assertNotIn('XCRemoteSwiftPackageReference', project)
         source = (ROOT / 'tooling/scripts/release-macos.sh').read_text()
-        block = source.split('sparkle_version=2.9.6', 1)[1].split('named="$out/$archive_name"', 1)[0]
-        block = 'sparkle_version=2.9.6' + block
+        block = source.split('sparkle_version=2.10.0', 1)[1].split('named="$out/$archive_name"', 1)[0]
+        block = 'sparkle_version=2.10.0' + block
         # Replace platform commands with offline adapters. The real finder and
         # production shell selection run; no build/release entry point runs.
         for name in ('xcodebuild', 'curl', 'shasum', 'ditto', 'codesign'):
@@ -81,7 +81,7 @@ curl() {
 shasum() {
   [ "$*" = '-a 256 -c -' ] || return 1
   IFS= read -r receipt
-  [ "$receipt" = "8d5fb41d960b43f4a68aa14126bf62b098544ec8d191cdcc73eb14e63a8e7606  $sparkle_archive" ] || return 1
+  [ "$receipt" = "17e28312b8e18ab7cdbbe09a6fb28cc55a5479ec6c371dbc07cdecd2a14fd959  $sparkle_archive" ] || return 1
   touch "$out/checked-archive-pin"
 }
 ditto() {
@@ -111,7 +111,7 @@ codesign() {
             self.assertFalse(Path(directory, 'used-app-package-graph').exists())
             self.assertTrue(Path(directory, 'verified-signer').exists())
             arguments = Path(directory, 'download-arguments').read_text().splitlines()
-            self.assertIn('https://github.com/sparkle-project/Sparkle/releases/download/2.9.6/Sparkle-for-Swift-Package-Manager.zip', arguments)
+            self.assertIn('https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-for-Swift-Package-Manager.zip', arguments)
 
 
 if __name__ == '__main__':

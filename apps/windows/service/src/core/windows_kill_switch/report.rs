@@ -6,7 +6,11 @@ pub(crate) async fn status() -> KillSwitchStatus {
     // Never join the WFP writer queue. The watchdog refreshes `LAST_VERIFY`; mutations publish
     // `ARMED` only at their commit boundary, so a concurrent read gets the previous committed
     // state rather than blocking behind an RPC that may itself be the thing under diagnosis.
-    let armed = { armed_guard().clone() };
+    status_from(armed_guard().clone())
+}
+
+/// [`status`] of an already-copied `ARMED`, so one reading can feed more than one answer.
+fn status_from(armed: Option<Armed>) -> KillSwitchStatus {
     let Some(armed) = armed else {
         return KillSwitchStatus {
             wanted: false,
@@ -58,6 +62,34 @@ pub(crate) async fn status_for(caller_key: &str) -> KillSwitchStatus {
     status
 }
 
+/// Whether the barrier in `armed` belongs to another user than `caller_key` (#1290). The rule is
+/// `authorize_write_for`'s: only a wanted barrier with a recorded owner who is not the caller
+/// counts, so an intent whose owner record was lost (WIN-OWNER-RELEASE-NONE) stays the caller's
+/// to see and release. It is taken from the copy of `ARMED` the status was built from: reading
+/// `ARMED` again for the flag let a release and a re-arm by the other user land between the two
+/// reads, so the caller saw A's new barrier as its own (Codex re-review of #1623).
+fn held_by_another_user_in(armed: Option<&Armed>, caller_key: &str) -> bool {
+    armed.is_some_and(|armed| {
+        armed.intent.wanted
+            && armed
+                .intent
+                .owner_key
+                .as_deref()
+                .is_some_and(|recorded| recorded != caller_key)
+    })
+}
+
+/// One reading of `ARMED` for both the caller's [`status_for`] view and whether that barrier is
+/// another user's. The flag is true only for a barrier the returned status reports as wanted.
+pub(super) fn status_for_with_holder_from(armed: Option<Armed>, caller_key: &str) -> (KillSwitchStatus, bool) {
+    let held = held_by_another_user_in(armed.as_ref(), caller_key);
+    let mut status = status_from(armed);
+    if status.reconnect_after_release && !reconnect_owed_to(caller_key) {
+        status.reconnect_after_release = false;
+    }
+    (status, held)
+}
+
 /// Whether the reported reconnect flag is owed to `caller_key`. An ownerless flag (a legacy
 /// tombstone, or the release of an intent that recorded no owner) is owed to nobody: the first
 /// caller it would have been reported to clears it, and the clear is logged.
@@ -88,17 +120,21 @@ fn reconnect_owed_to(caller_key: &str) -> bool {
 pub(crate) async fn release_for_update_disconnect(apply_narrow: bool) -> Result<KillSwitchStatus> {
     if apply_narrow {
         anyhow::ensure!(!strict_kill_switch_enabled(), "automatic update cleanup cannot release explicit strict protection");
-        release_applying_narrow().await
+        release_applying_narrow_if_owed().await
     } else {
         release().await
     }
 }
 
 /// `/status` aggregate: present only where the WFP backend exists; the macOS fields stay the
-/// source of truth there.
-pub(crate) async fn status_snapshot(caller_key: &str) -> Option<KillSwitchStatus> {
+/// source of truth there. Also whether the barrier it reports is another user's (#1290), both
+/// from one reading of `ARMED`.
+pub(crate) async fn status_snapshot_with_holder(
+    caller_key: &str,
+) -> Option<(KillSwitchStatus, bool)> {
     if cfg!(windows) {
-        Some(status_for(caller_key).await)
+        let armed = { armed_guard().clone() };
+        Some(status_for_with_holder_from(armed, caller_key))
     } else {
         None
     }

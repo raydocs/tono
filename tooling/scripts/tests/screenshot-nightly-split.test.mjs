@@ -21,7 +21,10 @@ test('every screenshot test the PR gate skips runs in the nightly, and only ther
 
   assert.ok(/^ {8}run: npx playwright test --shard=.+ --ignore-snapshots$/m.test(services),
     'services-ci.yml (PR gate) must keep --ignore-snapshots on the Playwright shards')
-  assert.ok(/^ {8}run: npx playwright test$/m.test(nightly), 'the nightly must compare the screenshot baselines')
+  assert.ok(/^ {8}run: npx playwright test --shard=\$\{\{ matrix\.shard \}\}\/4$/m.test(nightly),
+    'the nightly must shard the pixel comparison the same way as the PR gate')
+  assert.equal([...nightly.matchAll(/^ {8}run:.*--ignore-snapshots/gm)].length, 0, 'the nightly must compare pixels')
+  assert.ok(nightly.includes('shard: [1, 2, 3, 4]'), 'the nightly uses the PR gate shard count')
 
   assert.ok(/^on:\n {2}schedule:\n {4}- cron: /m.test(nightly), 'the nightly needs a schedule')
   assert.ok(/^ {2}workflow_dispatch:/m.test(nightly), 'the nightly needs workflow_dispatch')

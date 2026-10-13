@@ -8,6 +8,8 @@ pub(crate) use install::{
 };
 #[cfg(windows)]
 pub(crate) use install::tono_request_service_owner_goodbye;
+#[cfg(windows)]
+pub(crate) use install::registered_service_stopped;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::utils::dirs;
@@ -1684,6 +1686,13 @@ pub(crate) async fn tono_restore_protected_dns(release_generation: Option<u64>) 
 
 /// `GET /status`: the full Service snapshot (kill switch aggregate + network event feed).
 pub(crate) async fn tono_service_status_snapshot() -> Result<ServiceStatusSnapshot> {
+    // Another user's machine-wide barrier is not this App's protection (#1290).
+    tono_service_status_snapshot_raw()
+        .await
+        .map(ServiceStatusSnapshot::seen_by_caller)
+}
+
+async fn tono_service_status_snapshot_raw() -> Result<ServiceStatusSnapshot> {
     let credentials = current_owner_credentials()?;
     let response = tono_service_protocol::get_status(&credentials)
         .await
@@ -1692,6 +1701,21 @@ pub(crate) async fn tono_service_status_snapshot() -> Result<ServiceStatusSnapsh
         bail!(response.message);
     }
     response.data.context("Tono Service 未返回状态快照")
+}
+
+/// The kill-switch reading a failed Connect must act on: the caller's own view of the barrier.
+/// `/kill-switch/status` reports the machine-wide state, so a failure handler reading it would
+/// see another user's barrier as its own, plan a release the Service refuses, and fold the
+/// refusal back into Protected Offline (#1290). The aggregate carries who holds the barrier, so
+/// the same fold the status reader applies is applied here.
+pub(crate) fn caller_kill_switch_view(snapshot: ServiceStatusSnapshot) -> Option<KillSwitchStatus> {
+    snapshot.seen_by_caller().kill_switch
+}
+
+/// `/status` read as [`caller_kill_switch_view`]: the failure handler's observation of the barrier.
+pub(crate) async fn tono_kill_switch_status_as_caller() -> Result<KillSwitchStatus> {
+    caller_kill_switch_view(tono_service_status_snapshot_raw().await?)
+        .context("Tono Service 未返回 Kill Switch 状态")
 }
 
 /// A release that got no reading from the Tono Service: the owner credentials could not be read,

@@ -15,6 +15,10 @@ on:
   # already covered by ci-gate; keeping push on that branch runs these jobs
   # twice, because the push ref and the pull_request ref do not share a
   # concurrency group.
+  # release/macos and release/windows still trigger, so a commit that exists
+  # only on a release line is tested. sing-box-input skips the macos-26 jobs
+  # when that push's SHA is already on main (a fast-forward of a tree main
+  # already ran). The jobs' `if` is false, so they are not queued.
   push:
     branches:
       - main
@@ -38,11 +42,41 @@ jobs:
   sing-box-input:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Release-branch duplicate skip
+        run: node --test tooling/scripts/tests/macos-ci-skip-duplicate.test.mjs
+      - name: Skip a release-branch push whose commit is already on main
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          status=unknown
+          ahead=1
+          case "$EVENT_NAME:$REF_NAME" in
+            push:refs/heads/release/macos|push:refs/heads/release/windows)
+              if meta=$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${GITHUB_SHA}" --jq '{status:.status,ahead_by:.ahead_by}'); then
+                parsed=$(printf '%s' "$meta" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const j=JSON.parse(s);if(typeof j.status!=="string"||typeof j.ahead_by!=="number")process.exit(1);process.stdout.write(j.status+" "+j.ahead_by)})')
+                status=${parsed%% *}
+                ahead=${parsed##* }
+              else
+                echo "compare API failed; running the macOS suite" >&2
+              fi
+              ;;
+          esac
+          skip=$(node tooling/scripts/macos-ci-skip-duplicate.mjs --event "$EVENT_NAME" --ref "$REF_NAME" --status "$status" --ahead-by "$ahead")
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          printf 'macos-ci duplicate skip=%s event=%s ref=%s sha=%s status=%s ahead=%s\n' "$skip" "$EVENT_NAME" "$REF_NAME" "$GITHUB_SHA" "$status" "$ahead" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Build and verify fixed darwin-arm64 input
+        if: steps.decide.outputs.skip != 'true'
         run: sh tooling/scripts/prepare-macos-sing-box.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: steps.decide.outputs.skip != 'true'
         with:
           name: sing-box-darwin-arm64
           path: apps/macos/Tono/Resources/sing-box
@@ -51,6 +85,7 @@ jobs:
 
   build:
     needs: sing-box-input
+    if: needs.sing-box-input.result == 'success' && needs.sing-box-input.outputs.skip != 'true'
     # The app uses macOS 26 APIs — `glassEffect` among them — so a macos-15 image
     # cannot compile it. On that runner every job that builds the app failed with
     # "value of type 'some View' has no member 'glassEffect'", which reads like a
@@ -137,6 +172,7 @@ jobs:
     # macOS critical path is one compile, not two in a row. The Release product
     # and its candidate artifact are built exactly as before in `build`.
     needs: sing-box-input
+    if: needs.sing-box-input.result == 'success' && needs.sing-box-input.outputs.skip != 'true'
     runs-on: macos-26
     env:
       TONO_UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
@@ -214,6 +250,7 @@ jobs:
 
   policy-tests:
     needs: sing-box-input
+    if: needs.sing-box-input.result == 'success' && needs.sing-box-input.outputs.skip != 'true'
     runs-on: macos-26
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -307,6 +344,7 @@ jobs:
   # shipped, in consecutive builds. On a runner they run every time.
   privileged-tests:
     needs: sing-box-input
+    if: needs.sing-box-input.result == 'success' && needs.sing-box-input.outputs.skip != 'true'
     runs-on: macos-26
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

@@ -77,7 +77,7 @@ describe('useReleaseProtection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open restore' }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(
-      within(dialog).getByRole('button', { name: 'Restore Normal Internet' }),
+      within(dialog).getByRole('button', { name: 'Restore normal internet' }),
     )
     await waitFor(() => expect(tonoRestoreInternetMock).toHaveBeenCalledTimes(1))
     // Restore goes through the release service, never the ordinary Disconnect.
@@ -95,7 +95,7 @@ describe('useReleaseProtection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open restore' }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(
-      within(dialog).getByRole('button', { name: 'Restore Normal Internet' }),
+      within(dialog).getByRole('button', { name: 'Restore normal internet' }),
     )
     await screen.findByText(
       'Something went wrong. Details are below; copy them for support.',

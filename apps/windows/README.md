@@ -309,7 +309,9 @@ Mirrors the macOS transaction; the service performs the privileged steps:
 Any failure after step 3 stops Mihomo where possible and **retains WFP
 blocking** (`Protected Offline`); automatic reconnect runs behind the
 barrier with 2/5/10/20/30 s backoff. Only an explicit Disconnect, Sign Out,
-or Quit releases the kill switch. Node switches swap the WFP endpoint
+or Quit releases the kill switch. Quit (and a replacement sign-in) restores ordinary
+internet but keeps the selective AI-service hold until Tono reconnects or the user
+chooses Restore internet ([decision 125](../../docs/decisions/125-2026-10-13-quit-and-replacement-keep-ai-hold.md)). Node switches swap the WFP endpoint
 permit *before* moving the selector, and never fall back to direct.
 
 ## Kill switch (WFP)

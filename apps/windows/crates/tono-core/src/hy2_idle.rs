@@ -9,8 +9,8 @@
 //! outbound that already exists. It does not add a hysteria2 proxy, and it
 //! does not set `idle_timeout` or `disable_chrome_parrot`.
 //!
-//! Pinned mihomo v1.19.30 has no keepalive field on `Hysteria2Option`.
-//! metacubex sing-quic `38b0e9295f51` applies `DefaultKeepAlivePeriod` (10s)
+//! Pinned mihomo v1.19.32 has no keepalive field on `Hysteria2Option`.
+//! metacubex sing-quic `1c242664697a` applies `DefaultKeepAlivePeriod` (10s)
 //! and `DefaultMaxIdleTimeout` (30s) when those values are left at 0. The
 //! YAML decoder ignores unknown proxy keys, so a invented `keep-alive-period`
 //! would not change the core. Mihomo emitters must not write one, and must

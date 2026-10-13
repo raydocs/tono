@@ -146,9 +146,14 @@ pub use preemptive::restore_internet;
 pub(crate) use disconnect::disconnect_for_generation;
 #[cfg(windows)]
 use disconnect::disconnect_for_restore;
-pub(crate) use disconnect::release_for_account;
+pub(crate) use disconnect::{
+    InternalRelease, internal_release_applies_narrow, release_for_account, release_for_account_replacement,
+    release_for_quit,
+};
 #[cfg(test)]
 pub(crate) use disconnect::{complete_account_release, coordinate_release};
+#[cfg(test)]
+pub(crate) use disconnect::coordinate_narrow_release;
 #[cfg(test)]
 use disconnect::{EXPLICIT_RELEASE_TIMEOUT, SERVICE_LIFECYCLE_TIMEOUT};
 pub use reconnect::{retry_reconnect_now, schedule_reconnect, schedule_startup_resume_if_proven};

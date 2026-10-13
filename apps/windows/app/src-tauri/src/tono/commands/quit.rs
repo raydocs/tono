@@ -308,8 +308,13 @@ pub async fn quit_release(app: AppHandle) -> Result<(), String> {
             // only owner credentials; keep release and owned proxy cleanup running even if the
             // interactive Quit waiter expires.
             return tauri::async_runtime::spawn(async {
-                let status = service::tono_release_kill_switch(service::teardown_release_generation(None).await).await
-                    .map_err(|error| format!("Quit release without product state failed: {error:#}"))?;
+                let generation = service::teardown_release_generation(None).await;
+                let status = if connection::internal_release_applies_narrow(connection::InternalRelease::Quit) {
+                    service::tono_release_kill_switch_applying_narrow(generation).await
+                } else {
+                    service::tono_release_kill_switch(generation).await
+                }
+                .map_err(|error| format!("Quit release without product state failed: {error:#}"))?;
                 if status.wanted || status.live {
                     return Err("Quit release without product state returned an armed kill switch".into());
                 }
@@ -330,7 +335,7 @@ pub async fn quit_release(app: AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     let protected = quit_needs_release(protected).await;
     let result = if protected {
-        connection::release_explicit(&state, &app).await
+        connection::release_for_quit(&state, &app).await
     } else {
         Ok(())
     };
@@ -548,6 +553,7 @@ mod quit_tests {
             network_events: Default::default(),
             update_attempt_pending: None,
             release_generation: None,
+            kill_switch_held_by_another_user: false,
         };
         assert!(
             !quit_needs_service_release(false, Some(&snapshot)),
