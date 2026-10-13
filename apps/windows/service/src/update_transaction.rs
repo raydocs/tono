@@ -99,19 +99,29 @@ impl State {
     /// already refuses it, so it grants no authority and fences nothing. A consumed attempt is
     /// never inert: its recovery obligation outlives the receipt.
     pub fn inert_at(&self, now: u64) -> bool {
-        self.attempt.as_ref().is_some_and(|a| {
-            a.receipt.phase != Phase::Committed
-                && now >= a.receipt.expires_at_unix
-                && matches!(
-                    a.execution,
-                    Execution::Reserved
-                        | Execution::Extracting
-                        | Execution::Staged
-                        | Execution::Launching
-                )
-                && self.consumed_sequence < a.manifest.release_sequence
-                && a.executor.as_ref().is_none_or(|e| !incarnation_possibly_live(e))
-        })
+        self.expiry_frees_attempt().is_some_and(|expires| now >= expires)
+            && self.attempt.as_ref().is_some_and(|a| {
+                a.executor.as_ref().is_none_or(|e| !incarnation_possibly_live(e))
+            })
+    }
+
+    /// The receipt expiry after which the attempt may stop blocking ([`Self::inert_at`] also
+    /// needs its executor gone): only a never-consumed, uncommitted attempt has one.
+    pub fn expiry_frees_attempt(&self) -> Option<u64> {
+        self.attempt
+            .as_ref()
+            .filter(|a| {
+                a.receipt.phase != Phase::Committed
+                    && matches!(
+                        a.execution,
+                        Execution::Reserved
+                            | Execution::Extracting
+                            | Execution::Staged
+                            | Execution::Launching
+                    )
+                    && self.consumed_sequence < a.manifest.release_sequence
+            })
+            .map(|a| a.receipt.expires_at_unix)
     }
 
     /// [`Self::pending`] for admission: an [`Self::inert_at`] attempt no longer blocks anyone.

@@ -195,21 +195,20 @@ fn release_admission_at(
 /// incomplete, never a missed attempt.
 pub(crate) fn attempt_pending_read_only() -> Option<bool> {
     let mut cached = PENDING_FOR_STATUS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    // A cached "pending" re-reads once its receipt expires, which may free an inert attempt.
-    if cached.is_some_and(|(pending, expires)| pending && now().is_ok_and(|at| at >= expires)) {
+    // A cached "pending" re-reads once its time bound passes, which may free an inert attempt. A
+    // cached "not pending" that rests on the receipt having expired is dropped unless the clock
+    // still confirms it (a failed or regressed clock must not keep an unproven answer).
+    if cached.is_some_and(|entry| status_cache_stale(entry, now().ok())) {
         *cached = None;
     }
     if cached.is_none() {
         *cached = match read_store_state() {
             Ok(state) => {
-                let pending = state.blocks_at(now().unwrap_or(0));
-                // Past this re-read the record is consumed or live: the expiry no longer matters.
-                let expires = state
-                    .attempt
-                    .as_ref()
-                    .filter(|a| pending && state.inert_at(a.receipt.expires_at_unix))
-                    .map_or(u64::MAX, |a| a.receipt.expires_at_unix);
-                Some((pending, expires))
+                let at = now().ok();
+                let pending = state.blocks_at(at.unwrap_or(0));
+                // Only a never-consumed attempt can be freed by time; a live executor past the
+                // expiry is probed again shortly, as it may exit before consuming.
+                Some((pending, status_cache_bound(state.expiry_frees_attempt(), pending, at)))
             }
             Err(error) => {
                 tracing::warn!("update state unreadable for status; reporting it as unknown: {error:#}");
@@ -220,7 +219,32 @@ pub(crate) fn attempt_pending_read_only() -> Option<bool> {
     cached.map(|(pending, _)| pending)
 }
 
-/// `(pending, receipt expiry that can free it)`; `u64::MAX` when time cannot change the answer.
+/// Whether a cached answer must be read again at clock reading `at` (`None`: the clock failed).
+fn status_cache_stale((pending, bound): (bool, u64), at: Option<u64>) -> bool {
+    if pending {
+        at.is_some_and(|at| at >= bound)
+    } else {
+        bound != u64::MAX && !at.is_some_and(|at| at >= bound)
+    }
+}
+
+/// The time bound stored with a freshly read answer; `expires` is
+/// [`State::expiry_frees_attempt`]. Only a never-consumed attempt can be freed by time; a live
+/// executor past the expiry is probed again shortly, as it may exit before consuming.
+fn status_cache_bound(expires: Option<u64>, pending: bool, at: Option<u64>) -> u64 {
+    match expires {
+        Some(expires) if pending => match at {
+            Some(at) if at >= expires => at.saturating_add(30),
+            _ => expires,
+        },
+        Some(expires) => expires,
+        None => u64::MAX,
+    }
+}
+
+/// `(pending, time bound)`: a pending answer is re-read at the bound; a not-pending answer that
+/// rests on an expired receipt is valid only while the clock is at or past it. `u64::MAX` when
+/// time cannot change the answer.
 static PENDING_FOR_STATUS: std::sync::Mutex<Option<(bool, u64)>> = std::sync::Mutex::new(None);
 
 /// The manual installer lease check for update requests. Only `Status`, the read the App sends
@@ -498,7 +522,7 @@ pub(crate) async fn request(
     let result = transact(owner, request).await;
     refresh.0 = result.as_ref().ok().map(|status| {
         let pending = status.receipt.as_ref().is_some_and(|r| r.phase != Phase::Committed);
-        let expires = status.receipt.as_ref().map_or(u64::MAX, |r| r.expires_at_unix);
+        let expires = status.receipt.as_ref().filter(|_| pending).map_or(u64::MAX, |r| r.expires_at_unix);
         (pending, expires)
     });
     result
@@ -2806,6 +2830,23 @@ mod tests {
     /// #1293: an attempt that expired before anything was consumed can never act, yet it fenced
     /// every other user's release, Connect and Disconnect for good. It stops blocking at its
     /// receipt expiry; a consumed attempt keeps its recovery obligation whatever the clock says.
+    #[test]
+    fn update_status_cache_never_keeps_an_unproven_expiry_answer() {
+        // Not pending only because the receipt expired: dropped when the clock fails or regresses.
+        assert!(status_cache_stale((false, 100), None));
+        assert!(status_cache_stale((false, 100), Some(99)));
+        assert!(!status_cache_stale((false, 100), Some(100)));
+        assert!(!status_cache_stale((false, u64::MAX), None));
+        // Pending: read again once the bound passes, never on a failed clock.
+        assert!(status_cache_stale((true, 100), Some(100)));
+        assert!(!status_cache_stale((true, 100), None));
+        // A live executor past the expiry is probed again shortly, not never.
+        assert_eq!(status_cache_bound(Some(100), true, Some(150)), 180);
+        assert_eq!(status_cache_bound(Some(100), true, Some(50)), 100);
+        assert_eq!(status_cache_bound(Some(100), false, Some(150)), 100);
+        assert_eq!(status_cache_bound(None, true, Some(150)), u64::MAX);
+    }
+
     #[test]
     fn update_release_admission_frees_an_expired_unconsumed_attempt() {
         let (root, store, _, _) = crate::update_transaction::tests::reserved();
