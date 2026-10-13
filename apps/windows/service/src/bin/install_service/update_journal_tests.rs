@@ -217,3 +217,21 @@ fn journal_gate_refusal_is_non_retryable_in_the_nsis_caller() {
     assert!(rejection.contains("Abort "));
     assert!(!rejection.contains("Goto serviceInstallAttempt"));
 }
+
+#[test]
+fn a_cancelled_retry_wizard_does_not_release_a_lease_it_inherited() {
+    // Contract check on the NSIS template, not a claim that a wizard ran on this host.
+    let template = include_str!("../../../../app/src-tauri/packages/windows/installer.nsi");
+    let on_gui_end = template
+        .split("Function .onGUIEnd")
+        .nth(1)
+        .and_then(|rest| rest.split("FunctionEnd").next())
+        .expect("the installer must end its GUI through .onGUIEnd");
+    let release = on_gui_end
+        .find("--manual-update-finish")
+        .expect("a cancelled wizard that changed nothing still hands its own lease back");
+    assert!(
+        on_gui_end[..release].contains("$TonoLeaseInherited"),
+        "a lease taken over from a failed installer must survive this wizard's cancel"
+    );
+}

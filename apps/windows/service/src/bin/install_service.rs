@@ -2729,6 +2729,38 @@ mod tests {
         );
     }
 
+    /// W9-DEFERRED-PARTIAL-STAGE: the staged file can be a candidate queued for the next reboot.
+    /// A later repair whose staging fails must leave that complete candidate as it was.
+    #[test]
+    fn failed_restaging_keeps_the_candidate_already_queued_for_reboot() {
+        let directory = std::env::temp_dir().join(format!(
+            "tono-restage-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let target = directory.join(if cfg!(windows) {
+            "tono-service.exe"
+        } else {
+            "tono-service"
+        });
+        let queued = target.with_extension(if cfg!(windows) { "exe.next" } else { "next" });
+        std::fs::write(&queued, b"complete-candidate").unwrap();
+        // A directory is not a service binary: opening it, or reading it, fails.
+        let unreadable = directory.join("source-is-a-directory");
+        std::fs::create_dir(&unreadable).unwrap();
+
+        assert!(stage_service_binary(&unreadable, &target).is_err());
+
+        assert_eq!(
+            std::fs::read(&queued).ok().as_deref(),
+            Some(&b"complete-candidate"[..]),
+            "a failed staging replaced the queued candidate"
+        );
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
+
     #[test]
     fn missing_launchd_service_skips_bootout() {
         let plan = classify_launchd_service_probe(
