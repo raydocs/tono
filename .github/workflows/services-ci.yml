@@ -296,6 +296,12 @@ jobs:
         working-directory: services/ops-console
         run: npm run typecheck
 
+      - name: Console unit tests
+        # 30 vitest files (api paging, customer board, facts, copy) existed and
+        # nothing in CI ran them; Playwright covers page flows, not these.
+        working-directory: services/ops-console
+        run: npm test
+
       - name: Build the console
         # npm run build ends in check-budgets.mjs, so a bundle that blows the
         # gzip or line budget fails here, before the report is written.
