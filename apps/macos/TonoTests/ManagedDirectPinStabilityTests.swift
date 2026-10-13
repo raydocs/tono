@@ -134,8 +134,8 @@ final class ManagedDirectPinStabilityTests: XCTestCase {
                 physicalInterface: "en0",
                 domainPins: [],
                 webDomainPins: [
-                    pin("static.example.cn", covered),
                     pin("img.example.org", ["101.32.104.6"]),
+                    pin("static.example.cn", covered),
                 ],
                 webDomainSuffixes: [.init(host: "example.cn", ports: [80, 443])],
                 mediaEndpoints: [],
