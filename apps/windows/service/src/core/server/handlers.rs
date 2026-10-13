@@ -259,13 +259,17 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 &owner.identity,
                 &request.payload.runtime_json,
                 request.payload.restore_previous,
+                request.payload.traffic_policy.as_ref(),
             )
             .await
             {
                 Ok(()) => ok_empty("sing-box runtime replaced and the full tunnel was locked"),
-                Err(error) => service_unavailable(format!(
-                    "Failed to replace sing-box runtime: {error:#}"
-                )),
+                Err(error) => {
+                    warn!("sing-box runtime replacement refused or failed: {error:#}");
+                    service_unavailable(format!(
+                        "Failed to replace sing-box runtime: {error:#}"
+                    ))
+                }
             }
         })
         .post(IpcCommand::CommitSingBoxDirect.as_ref(), |ctx| async move {
@@ -798,7 +802,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 let admitted = if crate::core::structure::is_sing_box_core_path(
                     &start_request.runtime.core_path,
                 ) {
-                    crate::core::sing_box_runtime::admit_owned_runtime(&start_request.runtime.yaml)
+                    crate::core::sing_box_runtime::admit_new_runtime(&start_request.runtime.yaml)
                 } else {
                     crate::core::runtime_generation::ensure_owned_runtime_config_is_safe(
                         &start_request.runtime.yaml,
@@ -1101,7 +1105,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 let admitted = if crate::core::structure::is_sing_box_core_path(
                     &request.payload.core_path,
                 ) {
-                    crate::core::sing_box_runtime::admit_owned_runtime(&request.payload.yaml)
+                    crate::core::sing_box_runtime::admit_new_runtime(&request.payload.yaml)
                 } else {
                     crate::core::runtime_generation::ensure_owned_runtime_config_is_safe(
                         &request.payload.yaml,

@@ -15,6 +15,7 @@ use std::net::Ipv4Addr;
 
 use serde_json::{Map, Value};
 
+use crate::core::direct_policy::DirectPolicy;
 use crate::direct_domains::{
     CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS, direct_suffix_overlaps_protected,
     is_address_free_web_suffix, is_protected_from_direct,
@@ -32,8 +33,24 @@ const MIHOMO_LOOPBACK_RULES: [&str; 2] = [
     "IP-CIDR6,::1/128,DIRECT,no-resolve",
 ];
 
+/// What, beyond the compilers' shapes, a sing-box DIRECT rule must match (#1280).
+#[derive(Clone, Copy)]
+pub(crate) enum DirectBinding<'a> {
+    /// Shape only: a document an earlier admission already approved (the watchdog respawn) and
+    /// the mihomo runtime, whose binding is not part of this revision.
+    ShapeOnly,
+    /// The request carried no verified policy (an older App): no DIRECT rule is admitted.
+    NoPolicy,
+    /// Only the entries the verified signed policy lists.
+    Policy(&'a DirectPolicy),
+}
+
 /// sing-box: `outbounds` and `route.rules` of an admitted-so-far document.
-pub fn admit_sing_box_direct_rules(outbounds: &[Value], rules: &[Value]) -> Result<(), String> {
+pub(crate) fn admit_sing_box_direct_rules(
+    outbounds: &[Value],
+    rules: &[Value],
+    binding: DirectBinding<'_>,
+) -> Result<(), String> {
     let mut direct = Vec::new();
     for outbound in outbounds {
         if outbound.get("type").and_then(Value::as_str) == Some("direct") {
@@ -67,13 +84,68 @@ pub fn admit_sing_box_direct_rules(outbounds: &[Value], rules: &[Value]) -> Resu
         }
     }
     for (index, rule) in rules.iter().enumerate() {
-        if json_names(rule, &direct) && !sing_box_direct_shape(rule, &rules[..index], &direct) {
+        if !json_names(rule, &direct) {
+            continue;
+        }
+        if !sing_box_direct_shape(rule, &rules[..index], &direct) {
             return Err(format!(
                 "a rule to `{DIRECT_GROUP_NAME}` is not a compiler shape"
             ));
         }
+        match binding {
+            DirectBinding::ShapeOnly => {}
+            DirectBinding::NoPolicy => {
+                return Err(format!(
+                    "a rule to `{DIRECT_GROUP_NAME}` needs the signed traffic policy"
+                ));
+            }
+            DirectBinding::Policy(policy) => {
+                if !listed_by_policy(rule, policy) {
+                    return Err(format!(
+                        "a rule to `{DIRECT_GROUP_NAME}` is not listed by the signed traffic policy"
+                    ));
+                }
+            }
+        }
     }
     Ok(())
+}
+
+/// Whether the verified policy lists the entry an already shape-checked DIRECT rule routes.
+/// Each shape maps to the policy list the compilers derive it from.
+fn listed_by_policy(rule: &Value, policy: &DirectPolicy) -> bool {
+    let Some(rule) = rule.as_object() else {
+        return false;
+    };
+    if str_of(rule, "type") == Some("logical") {
+        // Exact host + /32 pin: the host and port come from `domains` or `webDomains`.
+        let Some(destination) = rule
+            .get("rules")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(Value::as_object)
+        else {
+            return false;
+        };
+        return one_str(destination, "domain")
+            .zip(port_of(destination))
+            .is_some_and(|(host, port)| policy.lists_exact_host(&host.to_ascii_lowercase(), port));
+    }
+    match str_of(rule, "network") {
+        // A signed-app process rule has no destination of its own; the policy authorises
+        // native-app DIRECT by listing native hosts.
+        Some("tcp") if rule.contains_key("process_path_regex") => policy.lists_native_apps(),
+        Some("tcp") => one_str(rule, "domain_suffix")
+            .zip(port_of(rule))
+            .is_some_and(|(suffix, port)| policy.lists_suffix(suffix, port)),
+        // A process-bound media pin: the /32 and the port come from `mediaEndpoints`.
+        Some("udp") => one_str(rule, "ip_cidr")
+            .and_then(|cidr| cidr.strip_suffix("/32"))
+            .and_then(|address| address.parse::<Ipv4Addr>().ok())
+            .zip(port_of(rule))
+            .is_some_and(|(address, port)| policy.lists_media(address, port)),
+        _ => false,
+    }
 }
 
 /// mihomo: the rule strings, every proxy as (name, type), every group as (name, members).
@@ -527,9 +599,17 @@ fn port_of(map: &Map<String, Value>) -> Option<u16> {
 mod tests {
     use serde_json::{Value, json};
 
-    use super::{CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS, admit_sing_box_direct_rules};
+    use super::{
+        CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS, DirectBinding, DirectPolicy,
+        admit_sing_box_direct_rules,
+    };
+    use crate::core::direct_policy::tests::{POLICY_JSON, key, sign};
 
     fn admitted(rule: Value) -> Result<(), String> {
+        admitted_by(rule, DirectBinding::ShapeOnly)
+    }
+
+    fn admitted_by(rule: Value, binding: DirectBinding<'_>) -> Result<(), String> {
         let outbounds =
             [json!({"type":"direct","tag":"Tono-China-Direct","bind_interface":"Ethernet"})];
         let rules = [
@@ -537,7 +617,84 @@ mod tests {
             json!({"network":"tcp","ip_cidr":CLAUDE_HOME_IPV4_CIDRS.as_slice(),"action":"route","outbound":"Tono-Exit"}),
             rule,
         ];
-        admit_sing_box_direct_rules(&outbounds, &rules)
+        admit_sing_box_direct_rules(&outbounds, &rules, binding)
+    }
+
+    /// The policy `direct_policy::tests::POLICY_JSON` signs, read after it verified.
+    fn listed() -> DirectPolicy {
+        let (signing, public) = key(1);
+        DirectPolicy::verify_with_key(&sign(&signing, POLICY_JSON, 7), &public).unwrap()
+    }
+
+    fn exact_host_rule(host: &str, port: u16) -> Value {
+        json!({"type":"logical","mode":"and","rules":[
+            {"network":"tcp","port":port,"domain":[host]},{"ip_cidr":["203.0.113.50/32"]}],
+            "action":"route","outbound":"Tono-China-Direct"})
+    }
+
+    fn media_rule(address: &str, port: u16) -> Value {
+        json!({"network":"udp","ip_cidr":[format!("{address}/32")],"port":port,
+            "process_name":["Lark.exe"],"action":"route","outbound":"Tono-China-Direct"})
+    }
+
+    fn suffix_rule(suffix: &str, port: u16) -> Value {
+        json!({"network":"tcp","port":port,"domain_suffix":[suffix],
+            "action":"route","outbound":"Tono-China-Direct"})
+    }
+
+    /// #1280: a request that passes the App identity gate could name any host the shape allows.
+    /// With the signed policy bound, only the hosts and ports it lists leave the tunnel.
+    #[test]
+    fn a_direct_host_the_signed_policy_does_not_list_is_refused() {
+        let policy = listed();
+        let by = DirectBinding::Policy(&policy);
+        assert_eq!(admitted_by(exact_host_rule("szextshort.weixin.qq.com", 443), by), Ok(()));
+        assert_eq!(admitted_by(exact_host_rule("res.wx.qq.com", 443), by), Ok(()));
+        assert!(admitted_by(exact_host_rule("evil.example.com", 443), by).is_err());
+        assert!(
+            admitted_by(exact_host_rule("szextshort.weixin.qq.com", 8080), by).is_err(),
+            "a listed host on a port the policy does not list"
+        );
+    }
+
+    /// An older App sends no policy: no DIRECT rule is admitted, but a document without one is.
+    #[test]
+    fn a_direct_rule_without_a_policy_is_refused_and_a_full_tunnel_needs_none() {
+        let direct = exact_host_rule("szextshort.weixin.qq.com", 443);
+        assert!(admitted_by(direct, DirectBinding::NoPolicy).is_err());
+        let to_exit = json!({"network":"tcp","domain_suffix":["example.org"],
+            "action":"route","outbound":"Tono-Exit"});
+        assert_eq!(admitted_by(to_exit, DirectBinding::NoPolicy), Ok(()));
+    }
+
+    #[test]
+    fn a_media_address_the_signed_policy_does_not_list_is_refused() {
+        let policy = listed();
+        let by = DirectBinding::Policy(&policy);
+        assert_eq!(admitted_by(media_rule("203.0.113.9", 8000), by), Ok(()));
+        assert!(admitted_by(media_rule("203.0.113.10", 8000), by).is_err());
+        assert!(admitted_by(media_rule("203.0.113.9", 443), by).is_ok());
+    }
+
+    /// An unlisted suffix is refused; the product suffixes the App always adds ride on the policy
+    /// authorising native apps.
+    #[test]
+    fn a_direct_suffix_follows_the_signed_policy() {
+        let policy = listed();
+        let by = DirectBinding::Policy(&policy);
+        assert_eq!(admitted_by(suffix_rule("bilibili.com", 443), by), Ok(()));
+        assert_eq!(admitted_by(suffix_rule("taobao.com", 80), by), Ok(()));
+        let no_native = DirectPolicy::from_json(r#"{"version":3,"domains":[]}"#, 1).unwrap();
+        assert!(admitted_by(suffix_rule("taobao.com", 80), DirectBinding::Policy(&no_native)).is_err());
+    }
+
+    #[test]
+    fn a_process_rule_needs_native_app_entries_in_the_signed_policy() {
+        let rule = || process_rule(r"^[Dd]:[\\/][Ll][Aa][Rr][Kk][\\/]");
+        let policy = listed();
+        assert_eq!(admitted_by(rule(), DirectBinding::Policy(&policy)), Ok(()));
+        let no_native = DirectPolicy::from_json(r#"{"version":3,"domains":[]}"#, 1).unwrap();
+        assert!(admitted_by(rule(), DirectBinding::Policy(&no_native)).is_err());
     }
 
     fn process_rule(regex: &str) -> Value {

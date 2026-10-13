@@ -15,17 +15,37 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
 
+use crate::SignedTrafficPolicy;
+use crate::core::direct_admission::DirectBinding;
+use crate::core::direct_policy::DirectPolicy;
 use crate::core::manager::CORE_MANAGER;
+use crate::core::sing_box_runtime::admit_owned_runtime_bound;
 use crate::core::structure::{ClashConfig, OwnerIdentity, is_sing_box_core_path};
 use crate::core::windows_kill_switch;
 
+fn admit_replacement(
+    document: &str,
+    traffic_policy: Option<&SignedTrafficPolicy>,
+) -> Result<(), String> {
+    let policy = traffic_policy.map(DirectPolicy::verify).transpose()?;
+    let binding = match &policy {
+        Some(policy) => DirectBinding::Policy(policy),
+        None => DirectBinding::NoPolicy,
+    };
+    admit_owned_runtime_bound(document, binding)
+}
+
+/// `traffic_policy` is the signed policy the DIRECT rules in `document` come from (#1280). It is
+/// verified here, with the policy key compiled into the Service, before anything is written. A
+/// document with DIRECT rules and no policy (an older App) is refused; so is one whose policy
+/// does not verify or does not list a rule's entry. A refusal only skips the optional overlay.
 pub(crate) async fn replace_running_sing_box_document(
     owner: &OwnerIdentity,
     document: &str,
     restore_previous: bool,
+    traffic_policy: Option<&SignedTrafficPolicy>,
 ) -> Result<()> {
-    crate::core::sing_box_runtime::admit_owned_runtime(document)
-        .map_err(|error| anyhow::anyhow!(error))?;
+    admit_replacement(document, traffic_policy).map_err(|error| anyhow::anyhow!(error))?;
     windows_kill_switch::sing_box_full_tunnel_is_locked()?;
     let config = {
         let manager = CORE_MANAGER.lock().await;
