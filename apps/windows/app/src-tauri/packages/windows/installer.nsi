@@ -1840,15 +1840,14 @@ FunctionEnd
 ; At most three tries a second apart, and only exit 0 counts. If every try fails the lease stays
 ; exactly as an abort left it before.
 Function un.HandBackManualLease
-  ${If} $TonoLeaseInherited = 1
-    Return
-  ${EndIf}
   Push $0
   Push $1
   StrCpy $0 ""
   StrCpy $1 0
   handBackAttempt:
+  ; A lease an earlier failed installer left behind stays held until an install completes.
   ${If} $TonoLeaseReleased != 1
+  ${AndIf} $TonoLeaseInherited != 1
   ${AndIf} $1 < 3
     IntOp $1 $1 + 1
     nsExec::ExecToLog '"$PLUGINSDIR\tono-gate.exe" --manual-update-finish'
@@ -1861,6 +1860,7 @@ Function un.HandBackManualLease
     Goto handBackAttempt
   ${EndIf}
   ${If} $TonoLeaseReleased != 1
+  ${AndIf} $TonoLeaseInherited != 1
     DetailPrint "The installer lease could not be handed back (result $0); the next ${PRODUCTNAME} installer or uninstaller replaces it."
   ${EndIf}
   Pop $1
