@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-CORE-JOB-SPAWN-WINDOW | Service 在 Core 创建与 Job 绑定之间崩溃可留下未被 Job 监督的运行 Core | in-PR | [#1056](https://github.com/raydocs/tono/issues/1056) · 本 PR | 低·推导（P2） | 修复为 CREATE_SUSPENDED → 加入 Job → 恢复（与 DNS 辅助进程同序）：崩溃间隙只留下永不运行的挂起进程，不再是未监管的运行 Core；native crash 实验未做（待实机）；SCM 重启后的 installed-image sweep 仍回收孤儿 |
+| WIN-CORE-JOB-SPAWN-WINDOW | Service 在 Core 创建与 Job 绑定之间崩溃可留下未被 Job 监督的运行 Core | fixed(a0a859eb2) | [#1056](https://github.com/raydocs/tono/issues/1056) · [#1628](https://github.com/raydocs/tono/pull/1628) | 低·推导（P2） | 修复为 CREATE_SUSPENDED → 加入 Job → 恢复（与 DNS 辅助进程同序）：崩溃间隙只留下永不运行的挂起进程，不再是未监管的运行 Core；native crash 实验未做（待实机）；SCM 重启后的 installed-image sweep 仍回收孤儿 |
 
 在审计基线 ad53abb6，apps/windows/service/src/core/manager.rs:1190 先普通 unsuspended spawn，:1217 初始化 job:None，:1225 才 WindowsCoreJob::attach；实际 AssignProcessToJobObject 在 :137。没有 Service-wide Job assignment、自动父进程生存期 watcher、creation-time Job list 或其他覆盖此窗口的生产 guard。fatal Service crash 在这个短区间绕过 Rust Drop，可留下一个未 containment 的 Core；只是毫秒级 P2。
 
