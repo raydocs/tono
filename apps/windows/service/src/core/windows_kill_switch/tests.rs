@@ -2567,6 +2567,66 @@ async fn another_signed_in_user_cannot_take_over_armed_protection() -> Result<()
     Ok(())
 }
 
+/// #1290: the Service tells a second user's App that the armed barrier is another user's, with
+/// the rule a release applies. An intent whose owner record was lost (WIN-OWNER-RELEASE-NONE)
+/// is releasable by anyone, so it is never reported as foreign: its real owner must still fold it.
+#[tokio::test]
+#[serial]
+async fn only_a_recorded_other_owner_makes_the_barrier_foreign_to_the_caller() -> Result<()> {
+    cleanup().await;
+    arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+
+    let held_for = |caller: &str| status_for_with_holder_from(armed_guard().clone(), caller).1;
+    let seen_by_bob = held_for("owner-bob");
+    let seen_by_alice = held_for("owner-alice");
+    assert_eq!(
+        seen_by_bob,
+        authorize_write_for("owner-bob").is_err(),
+        "the flag must apply the rule a release applies"
+    );
+    armed_guard().as_mut().unwrap().intent.owner_key = None;
+    let seen_by_bob_after_owner_loss = held_for("owner-bob");
+    cleanup().await;
+
+    assert!(seen_by_bob, "Bob's App must not fold Alice's barrier as its own");
+    assert!(!seen_by_alice, "the owner folds its own barrier");
+    assert!(
+        !seen_by_bob_after_owner_loss,
+        "an ownerless barrier is anyone's to see and release"
+    );
+    Ok(())
+}
+
+/// Codex re-review of #1623: the status and the "another user's barrier" flag come from one copy
+/// of `ARMED`. Reading `ARMED` a second time for the flag let a release and a re-arm land between
+/// the reads. The flag must be a function of the very state the status reports.
+#[test]
+#[serial]
+fn the_foreign_flag_is_taken_from_the_state_the_status_was_built_from() {
+    let armed_by = |owner: &str, wanted: bool| Armed {
+        intent: IntentRecord {
+            owner_key: Some(owner.to_owned()),
+            ..valid_intent(KillSwitchStatusMode::Locked, wanted)
+        },
+        tun_luid: None,
+        core_instance: None,
+        direct_endpoints: Vec::new(),
+        reviewed_direct_ports: Vec::new(),
+        direct_reload: None,
+    };
+    // The shared ARMED is empty (as after a release): only the copy passed in counts.
+    *ARMED.lock().unwrap() = None;
+    let (status, held) = status_for_with_holder_from(Some(armed_by("owner-alice", true)), "owner-bob");
+    assert!(status.wanted && held, "a wanted barrier recorded to Alice is foreign to Bob");
+    let (_, held_by_owner) =
+        status_for_with_holder_from(Some(armed_by("owner-alice", true)), "owner-alice");
+    assert!(!held_by_owner);
+    let (status, held) = status_for_with_holder_from(Some(armed_by("owner-alice", false)), "owner-bob");
+    assert!(!status.wanted && !held, "an unwanted record is no barrier, so it is not foreign");
+    let (status, held) = status_for_with_holder_from(None, "owner-bob");
+    assert!(!status.wanted && !held);
+}
+
 /// TW-anthropic-1: a first connect from a Remote Desktop (or unreadable) session would arm a
 /// block that cuts that session and cannot be released remotely, so it is refused. The
 /// console may connect, and only the caller's own *verified* protection keeps its reconnect
