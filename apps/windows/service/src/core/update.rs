@@ -415,7 +415,7 @@ async fn release_failed_preparation(
     let cleared = desired::clear_active_owner().await;
     // Automatic failure opens general traffic but retains the secondary AI hold.
     // Desired-state failures must not prevent the DNS/WFP release.
-    wfp::release_applying_narrow().await?;
+    wfp::release_applying_narrow_if_owed().await?;
     stopped?;
     persisted?;
     cleared?;
@@ -717,7 +717,7 @@ async fn transact(
                     if executor_spawn_failure_releases(wfp::strict_kill_switch_enabled()) {
                         let released = async {
                             begin_update_release(&mut store, owner, &peer)?;
-                            wfp::release_applying_narrow().await?;
+                            wfp::release_applying_narrow_if_owed().await?;
                             if let Err(clear_error) = desired::clear_active_owner().await {
                                 tracing::warn!(
                                     "executor did not start; general traffic was released, \
@@ -2433,6 +2433,44 @@ mod tests {
         assert!(ai_held, "automatic failure cleanup must apply the AI hold");
         assert!(recorded, "release must retain the original recovery obligation");
         assert!(restored, "explicit Restore must remove the AI hold");
+        Ok(())
+    }
+
+    #[cfg(feature = "test")]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn failed_prepare_does_not_install_an_ai_hold_for_an_unprotected_user() -> Result<()> {
+        use crate::update_transaction::tests::reserved;
+
+        // Nothing armed, and the last release was the user's own Restore internet.
+        wfp::emergency_disarm_windows_kill_switch().await?;
+        desired::clear_active_owner().await?;
+        let (root, mut store, peer, _) = reserved();
+        let owner = AuthenticatedOwner {
+            key: "failed-prepare-unprotected-fixture".to_owned(),
+            identity: crate::OwnerIdentity::Windows {
+                sid: "S-1-5-21-1-2-3-1001".to_owned(),
+            },
+            app_data_root: root.clone(),
+            peer_pid: None,
+            peer_session_id: None,
+        };
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().receipt.owner = owner.key.clone();
+        store.save(next)?;
+
+        release_failed_preparation(&mut store, &owner, &peer, true).await?;
+        let ai_held = super::super::selective_layer::test_hold_active();
+        super::super::selective_layer::remove().await;
+        drop(store);
+        std::fs::remove_dir_all(root)?;
+        let _ = std::fs::remove_file(
+            crate::service_paths()
+                .for_owner_key(&owner.key)
+                .desired_state_path(),
+        );
+
+        assert!(!ai_held, "a failed update must not newly apply the AI hold to an unprotected user");
         Ok(())
     }
 

@@ -120,7 +120,7 @@ fn reconnect_owed_to(caller_key: &str) -> bool {
 pub(crate) async fn release_for_update_disconnect(apply_narrow: bool) -> Result<KillSwitchStatus> {
     if apply_narrow {
         anyhow::ensure!(!strict_kill_switch_enabled(), "automatic update cleanup cannot release explicit strict protection");
-        release_applying_narrow().await
+        release_applying_narrow_if_owed().await
     } else {
         release().await
     }
