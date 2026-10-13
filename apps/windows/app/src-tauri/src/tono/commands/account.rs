@@ -604,13 +604,11 @@ where
 /// C1). A failed release keeps the system armed and aborts the sign-out.
 #[tauri::command]
 pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHandle) -> Result<(), String> {
-    // Ask the Service now rather than trust what this process cached at startup: every startup
-    // path that could drop the report (a suspended restore, a sign-in racing the probe) is moot.
-    let reported = service_reports_ai_hold().await;
-    absorb_service_hold_report(&mut *state.inner().lock().await, reported);
     let release_app = app.clone();
     let resume_app = app.clone();
-    close_account_with(state.inner().clone(), AccountCloseReason::User,
+    // The Service is asked inside the admitted close (see `close_account_with_probe`), not
+    // trusted from what this process cached at startup.
+    close_account_with_probe(state.inner().clone(), AccountCloseReason::User,
         move |state| async move { connection::release_for_account(&state, &release_app).await },
         |client| async move { client.logout().await.map_err(|error| error.to_string()) },
         move |state, generation| async move {
@@ -619,6 +617,7 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
             crate::tono::log_upload::spawn_periodic_for_auth_generation(&state, &resume_app, generation).await;
         },
         move |inner| emit_status(&app, &status_of(inner)),
+        service_reports_ai_hold,
     ).await
 }
 
@@ -626,8 +625,12 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
 /// when it cannot be read or an older Service reports nothing: Sign Out then keeps today's
 /// behavior, which only releases for what this process knows.
 async fn service_reports_ai_hold() -> Option<bool> {
-    tokio::time::timeout(Duration::from_secs(3), crate::core::service::tono_service_status_snapshot())
+    // Its own task: the snapshot call reads owner credentials synchronously before its first
+    // await, which a timeout on this future alone could not interrupt.
+    let probe = tokio::spawn(crate::core::service::tono_service_status_snapshot());
+    tokio::time::timeout(Duration::from_secs(3), probe)
         .await
+        .ok()?
         .ok()?
         .ok()?
         .ai_hold_retained
@@ -653,6 +656,30 @@ pub(super) async fn close_account_with<R, RF, L, LF, S, SF, E>(
     state: Arc<TonoState>, reason: AccountCloseReason, release: R, logout: L, resume: S, emit: E,
 ) -> Result<(), String>
 where
+    R: FnOnce(Arc<TonoState>) -> RF + Send + 'static,
+    RF: std::future::Future<Output = Result<(), String>> + Send + 'static,
+    L: FnOnce(Arc<crate::tono::state::TonoApiClient>) -> LF + Send + 'static,
+    LF: std::future::Future<Output = Result<(), String>> + Send + 'static,
+    S: FnOnce(Arc<TonoState>, u64) -> SF + Send + 'static,
+    SF: std::future::Future<Output = ()> + Send + 'static,
+    E: Fn(&TonoInner) + Send + Sync + 'static,
+{
+    close_account_with_probe(state, reason, release, logout, resume, emit, || async { None }).await
+}
+
+/// [`close_account_with`] that, for an explicit Sign Out of an otherwise idle App, first asks
+/// `hold_probe` whether the Service reports an AI hold left behind (decision 125). The probe runs
+/// inside the admitted close, after the account-close slot and the auth generation are taken, so
+/// a late Sign Out cannot close an account that signed in meanwhile and a Connect or replacement
+/// cannot be admitted while it waits.
+#[allow(clippy::too_many_arguments, reason = "system I/O is injected one boundary at a time")]
+pub(super) async fn close_account_with_probe<R, RF, L, LF, S, SF, E, P, PF>(
+    state: Arc<TonoState>, reason: AccountCloseReason, release: R, logout: L, resume: S, emit: E,
+    hold_probe: P,
+) -> Result<(), String>
+where
+    P: FnOnce() -> PF + Send + 'static,
+    PF: std::future::Future<Output = Option<bool>> + Send + 'static,
     R: FnOnce(Arc<TonoState>) -> RF + Send + 'static,
     RF: std::future::Future<Output = Result<(), String>> + Send + 'static,
     L: FnOnce(Arc<crate::tono::state::TonoApiClient>) -> LF + Send + 'static,
@@ -695,6 +722,12 @@ where
         let mut resume_account = false;
         let mut finalized = false;
         let result = std::panic::AssertUnwindSafe(async {
+            let protected = protected
+                || (matches!(reason, AccountCloseReason::User) && {
+                    let reported = hold_probe().await;
+                    absorb_service_hold_report(&mut *state.lock().await, reported);
+                    reported == Some(true)
+                });
             let release_result = if protected { release(Arc::clone(&state)).await } else { Ok(()) };
             if release_result.is_err() {
                 resume_account = matches!(reason, AccountCloseReason::User);
@@ -1107,19 +1140,42 @@ mod lifecycle_tests {
     async fn sign_out_runs_the_full_release_when_the_service_reports_a_hold_the_app_missed() {
         for (reported, expect_release) in [(Some(true), true), (Some(false), false), (None, false)] {
             let state = Arc::new(TonoState::for_test());
-            {
-                let mut inner = state.lock().await;
-                inner.account_state = AccountState::Ready;
-                absorb_service_hold_report(&mut inner, reported);
-            }
+            state.lock().await.account_state = AccountState::Ready;
             let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let ran = Arc::clone(&released);
-            close_account_with(Arc::clone(&state), AccountCloseReason::User,
+            close_account_with_probe(Arc::clone(&state), AccountCloseReason::User,
                 move |_| async move { ran.store(true, std::sync::atomic::Ordering::SeqCst); Ok(()) },
                 |_| async { Ok(()) }, |_, _| async {}, |_| {},
+                move || async move { reported },
             ).await.unwrap();
             assert_eq!(released.load(std::sync::atomic::Ordering::SeqCst), expect_release, "report {reported:?}");
+            assert_eq!(state.lock().await.ai_hold_retained, expect_release, "report {reported:?}");
         }
+    }
+
+    /// Codex review of #1648 round 3: the Service is asked only once Sign Out owns admission, so
+    /// a slow Service cannot leave a window in which a Connect or replacement is admitted and the
+    /// close then runs against the wrong account.
+    #[tokio::test]
+    async fn the_hold_probe_runs_only_after_sign_out_owns_admission() {
+        let state = Arc::new(TonoState::for_test());
+        state.lock().await.account_state = AccountState::Ready;
+        let (asked, asked_rx) = tokio::sync::oneshot::channel::<()>();
+        let (answer, answer_rx) = tokio::sync::oneshot::channel::<Option<bool>>();
+        let observed = Arc::clone(&state);
+        let closing = tokio::spawn(close_account_with_probe(Arc::clone(&state), AccountCloseReason::User,
+            |_| async { Ok(()) }, |_| async { Ok(()) }, |_, _| async {}, |_| {},
+            move || async move {
+                let owned = observed.lock().await.account_close.is_some();
+                asked.send(()).unwrap();
+                assert!(owned, "the probe must run after the account-close slot is taken");
+                answer_rx.await.unwrap_or(None)
+            },
+        ));
+        asked_rx.await.unwrap();
+        assert!(state.lock().await.account_close.is_some(), "admission stays closed while the Service is slow");
+        answer.send(Some(false)).unwrap();
+        closing.await.unwrap().unwrap();
     }
 
     #[tokio::test]
