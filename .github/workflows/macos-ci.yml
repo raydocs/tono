@@ -295,6 +295,10 @@ jobs:
         # -only-testing list; an edit to either runs this check.
         run: node --test tooling/scripts/tests/screenshot-nightly-split.test.mjs
 
+      - name: Aggregate reports a suite's own skip and its required inputs
+        # test-macos-all.sh is zsh; the Linux services job skips this file.
+        run: node --test tooling/scripts/tests/macos-all-aggregate.test.mjs
+
   # Split out because these need root. Locally the helper's own self-test prints
   # `PF syntax check skipped (needs root)` and the lifecycle test refuses
   # outright, so the checks that matter most — does pfctl actually accept this
