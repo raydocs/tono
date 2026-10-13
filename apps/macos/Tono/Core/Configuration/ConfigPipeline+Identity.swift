@@ -264,7 +264,8 @@ nonisolated extension ConfigPipeline {
     /// `com.electron.lark`, team XY6NLV7YTS (Beijing Feishu Technology Co.,
     /// Ltd.); Lark 8.1.22 (arm64 DMG, 2026-10-13) signs as
     /// `com.larksuite.larkApp`, team JBRN9C6V7T (LARK TECHNOLOGIES PTE. LTD.).
-    /// Mac App Store builds are not captured here and stay on the tunnel.
+    /// Mac App Store builds were not checked: a store build that signs with
+    /// the same identifier and team would also pass `isSigned`.
     nonisolated static let reviewedDirectTeamIdentifiers = [
         "com.alibaba.DingTalk": "XN6U3EV979",
         "com.alibaba.DingTalkMac": "XN6U3EV979",

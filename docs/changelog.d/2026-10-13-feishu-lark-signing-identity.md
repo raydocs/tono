@@ -9,4 +9,4 @@
 - 新增/优化：无。
 - 验证：未运行 xcodebuild（本机不运行）；PR 的 ci-gate。
 - 候选/发布：仅源码，无新候选。
-- 剩余限制：Mac App Store 版本未捕获（不能这样下载），仍走隧道，状态「未运行」；Intel 构建未单独读取（同一团队签名，但未验证）；未知旧 Identifier（`com.bytedance.*` 等）仍无 Team，保持失败即关；Lark 包内名为 `LarkSuite.app`，不在 `reviewedDirectBundleNames` 里，标准路径依赖 Launch Services 按 Identifier 发现，未改名单。
+- 剩余限制：Mac App Store 版本未捕获（不能这样下载），状态「未运行」；商店版若使用相同 Identifier 与 Team，同样会通过既有签名检查（商店证书分支不要求 leaf OU，Codex 第 1 轮 P3），不能说它必定走隧道；Intel 构建未单独读取（同一团队签名，但未验证）；未知旧 Identifier（`com.bytedance.*` 等）仍无 Team，保持失败即关；Lark 包内名为 `LarkSuite.app`，不在 `reviewedDirectBundleNames` 里，标准路径依赖 Launch Services 按 Identifier 发现，未改名单。
