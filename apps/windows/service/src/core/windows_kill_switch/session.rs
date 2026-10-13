@@ -181,7 +181,7 @@ fn caller_session(_session_id: Option<u32>) -> CallerSession {
 /// place.
 #[cfg(all(windows, not(feature = "test")))]
 fn owner_signed_in(owner_key: &str) -> bool {
-    signed_in_user_matching(|key| key == owner_key)
+    signed_in_user_matching(false, |key| key == owner_key)
 }
 
 /// Whether a user other than `caller_key` has a Windows logon session (same rules as
@@ -189,13 +189,15 @@ fn owner_signed_in(owner_key: &str) -> bool {
 /// goodbye is refused while this is true (#1293).
 #[cfg(all(windows, not(feature = "test")))]
 pub(crate) fn another_user_signed_in(caller_key: &str) -> bool {
-    signed_in_user_matching(|key| key != caller_key)
+    signed_in_user_matching(true, |key| key != caller_key)
 }
 
 /// Whether any Active, Connected or Disconnected logon session belongs to a user for whom
-/// `matches` holds.
+/// `matches` holds. `skip_services_session` leaves out session 0, the non-interactive services
+/// session: a goodbye must not stay refused forever because that session answers with some
+/// other error than "no user".
 #[cfg(all(windows, not(feature = "test")))]
-fn signed_in_user_matching(matches: impl Fn(&str) -> bool) -> bool {
+fn signed_in_user_matching(skip_services_session: bool, matches: impl Fn(&str) -> bool) -> bool {
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
     use windows_sys::Win32::Foundation::{
         ERROR_CTX_WINSTATION_NOT_FOUND, ERROR_NO_TOKEN, GetLastError, LocalFree,
@@ -262,6 +264,7 @@ fn signed_in_user_matching(matches: impl Fn(&str) -> bool) -> bool {
         .iter()
         .filter(|session| matches!(session.State, WTSActive | WTSConnected | WTSDisconnected))
         .map(|session| session.SessionId)
+        .filter(|session_id| !(skip_services_session && *session_id == 0))
         .collect::<Vec<_>>();
     unsafe { WTSFreeMemory(sessions.cast()) };
     for session_id in listed {
