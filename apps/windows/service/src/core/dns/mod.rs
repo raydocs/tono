@@ -515,6 +515,28 @@ pub(crate) mod test_hooks {
         )
     }
 
+    /// Stub facade entries that were granted a budget. A call the attempt deadline refuses
+    /// before it starts is not recorded yet, so the offline-registry timeout test cannot see it.
+    #[cfg(test)]
+    static FACADE_CALLS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+
+    #[cfg(test)]
+    pub(crate) fn record_facade_call(operation: &'static str) {
+        FACADE_CALLS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(operation);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_facade_calls() -> Vec<&'static str> {
+        std::mem::take(
+            &mut *FACADE_CALLS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+
     #[cfg(test)]
     static FILE_READ_HANGS: Mutex<Option<&'static str>> = Mutex::new(None);
 
@@ -566,6 +588,7 @@ pub(crate) mod test_hooks {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         take_engine_call_budgets();
+        take_facade_calls();
     }
 
     /// Clear every hook the adapter fallback tests set.

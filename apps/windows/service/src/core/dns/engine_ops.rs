@@ -137,6 +137,7 @@ const STUB_CALL_BUDGET: std::time::Duration = std::time::Duration::from_secs(25)
 async fn stub_engine_call(operation: &'static str) -> Result<()> {
     refuse_while_claimed(operation)?;
     let budget = current_call_budget(STUB_CALL_BUDGET)?;
+    test_hooks::record_facade_call(operation);
     test_hooks::record_engine_call_budget(operation, budget);
     let delay = test_hooks::engine_call_delay(operation);
     let stuck = test_hooks::engine_call_times_out(operation) || delay.is_some_and(|delay| delay >= budget);

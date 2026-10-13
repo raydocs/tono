@@ -2648,7 +2648,7 @@ async fn a_connect_is_refused_while_a_startup_fallback_attempt_waits_for_the_dns
         wfp_free_while_waiting,
         "the attempt must not hold the WFP lock while it waits: the fence is the marker"
     );
-    assert_refused_as_restore_in_progress(
+    assert_refused_while_dns_is_still_being_written(
         refused.expect("a Connect must be refused by the marker, not queue behind the attempt"),
     );
     assert!(!armed_while_waiting, "the Connect armed in the middle of the attempt");
@@ -2812,7 +2812,7 @@ async fn connect_waiting(wait: std::time::Duration) -> Result<()> {
 /// The arm was refused because a network restore is still writing DNS, with the stable prefix the
 /// App keeps in its connect failure, and armed nothing.
 fn assert_restore_in_progress(refused: Result<()>) {
-    assert_refused_as_restore_in_progress(refused);
+    assert_refused_while_dns_is_still_being_written(refused);
     assert!(ARMED.lock().unwrap().is_none(), "a refused Connect must arm nothing");
 }
 
@@ -2820,6 +2820,16 @@ fn assert_restore_in_progress(refused: Result<()>) {
 fn assert_refused_as_restore_in_progress(refused: Result<()>) {
     let message = format!("{:#}", refused.expect_err("the Connect must be refused"));
     assert!(message.contains(NETWORK_RESTORE_IN_PROGRESS_PREFIX), "{message}");
+    assert!(message.contains("retry in a few seconds"), "{message}");
+}
+
+/// The DNS fence (in-progress marker or an abandoned engine writer) is the only refusal that
+/// says a restore is still writing DNS. A wait that only ran out of time on the WFP lock is a
+/// different sentence.
+fn assert_refused_while_dns_is_still_being_written(refused: Result<()>) {
+    let message = format!("{:#}", refused.expect_err("the Connect must be refused"));
+    assert!(message.contains(NETWORK_RESTORE_IN_PROGRESS_PREFIX), "{message}");
+    assert!(message.contains("still writing DNS"), "{message}");
     assert!(message.contains("retry in a few seconds"), "{message}");
 }
 
@@ -3233,6 +3243,68 @@ async fn the_core_window_release_of_an_ordinary_wanted_session_requests_no_dns_f
     Ok(())
 }
 
+// --- Round 4 review: the retirement debt outlives a Connect that never commits ---
+
+/// The startup retirement's first WFP removal failed, so the debt is set and the core window is
+/// waiting to retry. A Connect then passes the fence and fails while persisting the new intent
+/// (the persistent-state fault hook). The old session and the expired window stay. The debt must
+/// stay too: the retry that finally removes WFP still registers the fallback. Clearing the debt
+/// before that write commits releases the machine onto a dead resolver.
+#[tokio::test]
+#[serial]
+async fn a_failed_connect_persist_keeps_the_retirement_debt_for_the_release_retry() -> Result<()> {
+    let _fixture = FallbackFixture::new();
+    unprovable_redirected_machine_without_wfp().await?;
+    let mut intent = valid_intent(KillSwitchStatusMode::Blocked, true);
+    intent.verified = Some(false);
+    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+    restore_on_service_start().await?;
+
+    let removal = SimulatedStateFailures::arm_removal();
+    let first = retire_unverified_on_service_start().await;
+    let owes_after_first = STARTUP_RETIREMENT_OWES_DNS_FALLBACK.load(Ordering::Acquire);
+    let armed_after_first = ARMED.lock().unwrap().is_some();
+    drop(removal);
+
+    let persist = SimulatedStateFailures::arm(true, false);
+    let connect = connect_waiting(std::time::Duration::from_millis(300)).await;
+    drop(persist);
+    let owes_after_connect = STARTUP_RETIREMENT_OWES_DNS_FALLBACK.load(Ordering::Acquire);
+    let still_old_session = ARMED.lock().unwrap().is_some();
+
+    let retry = {
+        let _operation = WFP_OPERATION.lock().await;
+        reconcile_wanted_core_window_unlocked().await
+    };
+    let released = ARMED.lock().unwrap().is_none();
+    let wanted = startup_dns_fallback_wanted();
+
+    assert!(first.is_err(), "the first removal failed, so the retirement reports it");
+    assert!(
+        armed_after_first && owes_after_first,
+        "the failed retirement leaves the old session and the DNS debt"
+    );
+    let connect_message = format!("{:#}", connect.expect_err("the Connect's intent write failed"));
+    assert!(
+        connect_message.contains("simulated persistent-state write failure"),
+        "{connect_message}"
+    );
+    assert!(still_old_session, "a failed persist leaves the old session armed");
+    assert!(
+        owes_after_connect,
+        "the debt stays until the new intent is committed and ARMED is the new session"
+    );
+    retry?;
+    assert!(released, "the retry removed WFP");
+    assert!(
+        wanted,
+        "the retry released the machine after a failed restore and must still request the fallback"
+    );
+
+    cleanup().await;
+    Ok(())
+}
+
 /// The attempt's deadline runs out before the effective read, while the registry is already on the
 /// user's servers and the DNS Client still resolves through 198.18.0.2. The attempt is the timeout
 /// error, so the loop retries it (a fresh budget), and the next attempt resets the adapter.
@@ -3279,8 +3351,9 @@ async fn an_attempt_whose_deadline_is_spent_before_the_effective_read_is_retried
 }
 
 /// The WFP lock is held by someone else for longer than the Connect's wait (a release in
-/// progress): the Connect is refused at the wait, with the same prefix, instead of queueing for as
-/// long as the holder takes; once the lock is free it arms.
+/// progress): the Connect is refused at the wait, keeping the prefix but saying another network
+/// operation is still in progress, instead of queueing for as long as the holder takes or claiming
+/// a DNS writer is still going. Once the lock is free it arms.
 #[tokio::test]
 #[serial]
 async fn a_connect_is_refused_at_its_wait_when_the_wfp_lock_stays_held() -> Result<()> {
@@ -3299,9 +3372,22 @@ async fn a_connect_is_refused_at_its_wait_when_the_wfp_lock_stays_held() -> Resu
     drop(held);
     let armed_after = connect_waiting(std::time::Duration::from_millis(300)).await;
 
-    assert_refused_as_restore_in_progress(
-        refused.expect("a Connect must be refused at its wait, not queue behind the WFP lock holder"),
+    let message = format!(
+        "{:#}",
+        refused
+            .expect("a Connect must be refused at its wait, not queue behind the WFP lock holder")
+            .expect_err("the Connect must be refused")
     );
+    assert!(message.contains(NETWORK_RESTORE_IN_PROGRESS_PREFIX), "{message}");
+    assert!(
+        message.contains("another network operation is still in progress"),
+        "{message}"
+    );
+    assert!(
+        !message.contains("still writing DNS"),
+        "a WFP lock wait is not a DNS writer: {message}"
+    );
+    assert!(message.contains("retry in a few seconds"), "{message}");
     assert!(waited >= std::time::Duration::from_millis(250), "refused after only {waited:?}");
     assert!(waited < std::time::Duration::from_secs(2), "waited {waited:?}");
     armed_after?;

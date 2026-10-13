@@ -2610,11 +2610,23 @@
             std::time::Instant::now() + std::time::Duration::from_millis(200),
         ))
         .await;
+        let calls = test_hooks::take_facade_calls();
         let resets = test_hooks::take_automatic_resets();
         reset_dns_state().await;
         let error = result.expect_err("the registry read never started");
         assert!(is_fallback_timeout(&error), "the timeout must survive the registry read: {error:#}");
         assert_eq!(resets, 0);
+        let registry_at = calls.iter().position(|call| *call == "read registry adapters");
+        assert!(
+            registry_at.is_some(),
+            "the stub facade must record the offline registry read the deadline refuses: {calls:?}"
+        );
+        assert!(
+            calls[registry_at.expect("registry call") + 1..]
+                .iter()
+                .all(|call| *call != "read effective DNS"),
+            "no effective DNS read follows the registry timeout: {calls:?}"
+        );
         Ok(())
     }
 
