@@ -3464,6 +3464,55 @@ async fn pending_direct_lease_expiry_reconciles_to_exact_blocked() -> Result<()>
     Ok(())
 }
 
+/// #1056 R3KS1-PENDING-EXPIRY (decision 116): an App that died mid-reload must not leave a
+/// healthy machine at Blocked forever. The expiry still narrows to exact Blocked at once, then
+/// the bounded recovery release retires the Core and opens general traffic with the AI hold.
+#[tokio::test]
+#[serial]
+async fn expired_pending_direct_reload_releases_a_non_strict_session_after_the_grace() -> Result<()> {
+    cleanup().await;
+    let core = locked_direct_test_session().await?;
+    mark_verified("owner-alice").await?;
+    let begin = begin_direct_runtime_reload(124).await?;
+    lock(None).await?;
+    let endpoints = test_config_with_direct().direct_endpoints;
+    replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 124, begin.reload_id).await?;
+    armed_guard()
+        .as_mut()
+        .and_then(|armed| armed.direct_reload.as_mut())
+        .expect("pending lease")
+        .expires_at = Some(std::time::Instant::now());
+    let pending = armed_guard().clone().expect("pending state");
+    let now = std::time::Instant::now();
+    let reason = direct_reload_invalidation_reason(&pending, Some(core), pending.tun_luid, now)
+        .expect("the expired pending set must invalidate DIRECT");
+
+    reconcile_direct_watchdog_invalidation_unlocked(pending, Some(core), now, reason).await?;
+
+    assert_eq!(
+        armed_guard().as_ref().expect("still armed").intent.mode,
+        KillSwitchStatusMode::Blocked,
+        "the expiry itself stays fail-closed"
+    );
+    let queued = *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    assert!(
+        queued.is_some_and(|deadline| deadline > now),
+        "a non-strict session left at Blocked must be queued for the bounded recovery release"
+    );
+    // The App does not come back within the grace.
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+    crate::core::server::retire_expired_fresh_arm(core_arm_epoch()).await?;
+    assert!(armed_guard().is_none(), "the abandoned reload must release");
+    assert!(crate::core::selective_layer::test_hold_active());
+    cleanup().await;
+    Ok(())
+}
+
 #[tokio::test]
 #[serial]
 async fn finalize_mismatch_revokes_the_pending_direct_set() -> Result<()> {

@@ -52,6 +52,14 @@ pub(super) async fn reconcile_direct_watchdog_invalidation_unlocked(
             lease.phase == DirectReloadPhase::Committed
                 && lease.expires_at.is_none_or(|deadline| now >= deadline)
         });
+    // An expired Bracket/Pending reload narrows to Blocked below and, for a non-strict session,
+    // queues the bounded recovery release afterwards (decision 116).
+    let incomplete_expiry = !release
+        && !armed.intent.strict_kill_switch
+        && armed.direct_reload.as_ref().is_some_and(|lease| {
+            matches!(lease.phase, DirectReloadPhase::Bracket | DirectReloadPhase::Pending)
+                && lease.expires_at.is_none_or(|deadline| now >= deadline)
+        });
     // Narrowing failure poisons the deadline. Keep ownership-change retries distinct from
     // App death, even if the heartbeat deadline passes while the failed install is awaited.
     if !release {
@@ -88,6 +96,11 @@ pub(super) async fn reconcile_direct_watchdog_invalidation_unlocked(
         release_unhealthy_session_unlocked(&message).await?;
         Ok(())
     } else {
+        if incomplete_expiry && queue_incomplete_direct_recovery_release() {
+            tracing::warn!(
+                "wfp: {reason}; releasing the non-strict session if the App does not recover it within {INCOMPLETE_DIRECT_RECOVERY_GRACE:?}"
+            );
+        }
         let message =
             format!("{reason}; exact DIRECT permits were retracted and traffic is Blocked");
         *last_error_guard() = Some(message.clone());

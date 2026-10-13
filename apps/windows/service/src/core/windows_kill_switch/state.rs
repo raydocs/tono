@@ -491,6 +491,40 @@ pub(super) fn queue_direct_expiry_retirement() -> bool {
     true
 }
 
+/// How long an expired, never-committed DIRECT reload (Bracket or Pending) may leave a non-strict
+/// session at exact Blocked before the Service retires it (#1056 R3KS1-PENDING-EXPIRY, decision
+/// 116). The Pending lease is the same length: the App gets as long again to re-establish the
+/// session, then a session nobody re-verified is treated as App death, like a lost committed
+/// heartbeat, and opens general traffic with the AI hold.
+pub(super) const INCOMPLETE_DIRECT_RECOVERY_GRACE: std::time::Duration =
+    std::time::Duration::from_secs(90);
+
+/// An incomplete DIRECT reload expired and the Service narrowed to exact Blocked. A live App
+/// recovers through a fresh Connect (re-arm) or `mark_verified`, both of which clear the window;
+/// when neither comes, the existing epoch-fenced retirement stops the Core and releases. Unlike
+/// committed expiry this does not set `DIRECT_EXPIRY_RETIREMENT_PENDING`: Lock and MarkVerified
+/// stay admitted, because the App that owns an in-flight reload may still be alive. Caller holds
+/// WFP_OPERATION and has already proved exact Blocked. Strict sessions never queue.
+pub(super) fn queue_incomplete_direct_recovery_release() -> bool {
+    let Some(owned) = armed_guard().as_ref().and_then(|armed| {
+        (armed.intent.wanted && !armed.intent.strict_kill_switch)
+            .then_some(armed.intent.owner_key.is_some())
+    }) else {
+        return false;
+    };
+    let deadline = std::time::Instant::now() + INCOMPLETE_DIRECT_RECOVERY_GRACE;
+    let mut current = WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *current = Some(current.map_or(deadline, |current| current.min(deadline)));
+    drop(current);
+    if owned {
+        // An owned session has a Core to stop first; the lifecycle worker does that.
+        FRESH_ARM_PROOF_PENDING.store(true, Ordering::Release);
+    }
+    true
+}
+
 pub(super) fn note_wanted_core_window(intent: &IntentRecord) {
     let mut deadline = WANTED_CORE_DEADLINE
         .lock()
