@@ -110,7 +110,7 @@ impl State {
                         | Execution::Launching
                 )
                 && self.consumed_sequence < a.manifest.release_sequence
-                && a.executor.as_ref().is_none_or(|e| !incarnation_live(e))
+                && a.executor.as_ref().is_none_or(|e| !incarnation_possibly_live(e))
         })
     }
 
@@ -970,6 +970,20 @@ fn incarnation_live(recorded: &Image) -> bool {
 
 #[cfg(not(windows))]
 fn incarnation_live(recorded: &Image) -> bool {
+    let _ = recorded;
+    false
+}
+
+/// [`incarnation_live`] for decisions that free a fence: only a conclusive answer says the
+/// executor is gone (no such PID, or one created at another time). A refused probe, such as a
+/// sharing violation on its image, counts as alive.
+#[cfg(windows)]
+fn incarnation_possibly_live(recorded: &Image) -> bool {
+    crate::core::update::executor_possibly_live(recorded)
+}
+
+#[cfg(not(windows))]
+fn incarnation_possibly_live(recorded: &Image) -> bool {
     let _ = recorded;
     false
 }

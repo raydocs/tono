@@ -39,6 +39,17 @@ fn store_root() -> Result<(PathBuf, Vec<std::fs::File>)> {
     Ok((root, pins))
 }
 
+/// Whether the recorded executor may still run: only no process with that PID, or one created at
+/// another time, is conclusive. Any probe error counts as alive (#1293).
+#[cfg(windows)]
+pub(crate) fn executor_possibly_live(recorded: &Image) -> bool {
+    match super::process::process_started_at(recorded.pid) {
+        Ok(None) => false,
+        Ok(Some(started_at)) => started_at == recorded.started_at,
+        Err(_) => true,
+    }
+}
+
 pub fn pending() -> bool {
     // A locked/unreadable/corrupt store is uncertainty, not absence.
     open_store()
@@ -184,19 +195,33 @@ fn release_admission_at(
 /// incomplete, never a missed attempt.
 pub(crate) fn attempt_pending_read_only() -> Option<bool> {
     let mut cached = PENDING_FOR_STATUS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    // A cached "pending" re-reads once its receipt expires, which may free an inert attempt.
+    if cached.is_some_and(|(pending, expires)| pending && now().is_ok_and(|at| at >= expires)) {
+        *cached = None;
+    }
     if cached.is_none() {
         *cached = match read_store_state() {
-            Ok(state) => Some(state.blocks_at(now().unwrap_or(0))),
+            Ok(state) => {
+                let pending = state.blocks_at(now().unwrap_or(0));
+                // Past this re-read the record is consumed or live: the expiry no longer matters.
+                let expires = state
+                    .attempt
+                    .as_ref()
+                    .filter(|a| pending && state.inert_at(a.receipt.expires_at_unix))
+                    .map_or(u64::MAX, |a| a.receipt.expires_at_unix);
+                Some((pending, expires))
+            }
             Err(error) => {
                 tracing::warn!("update state unreadable for status; reporting it as unknown: {error:#}");
                 None
             }
         };
     }
-    *cached
+    cached.map(|(pending, _)| pending)
 }
 
-static PENDING_FOR_STATUS: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
+/// `(pending, receipt expiry that can free it)`; `u64::MAX` when time cannot change the answer.
+static PENDING_FOR_STATUS: std::sync::Mutex<Option<(bool, u64)>> = std::sync::Mutex::new(None);
 
 /// The manual installer lease check for update requests. Only `Status`, the read the App sends
 /// before its release, passes a conclusively dead holder (Service half of BRICK-W2); every other
@@ -472,12 +497,14 @@ pub(crate) async fn request(
     let mut refresh = StatusCacheRefresh(None);
     let result = transact(owner, request).await;
     refresh.0 = result.as_ref().ok().map(|status| {
-        status.receipt.as_ref().is_some_and(|r| r.phase != Phase::Committed)
+        let pending = status.receipt.as_ref().is_some_and(|r| r.phase != Phase::Committed);
+        let expires = status.receipt.as_ref().map_or(u64::MAX, |r| r.expires_at_unix);
+        (pending, expires)
     });
     result
 }
 
-struct StatusCacheRefresh(Option<bool>);
+struct StatusCacheRefresh(Option<(bool, u64)>);
 
 impl Drop for StatusCacheRefresh {
     fn drop(&mut self) {
@@ -494,7 +521,13 @@ async fn transact(
     update_lease_gate(&request, &store.state, super::process::process_identity)?;
     let _repair =
         crate::acquire_service_repair_gate()?.context("repair/uninstall already running")?;
-    retire_inert(&mut store);
+    // The owner's own Disconnect must release first: archiving an expired attempt under it would
+    // turn the release into a no-op status that the App takes for done (#1293).
+    let own_release = request.is_disconnect()
+        && store.state.attempt.as_ref().is_some_and(|a| a.receipt.owner == owner.key);
+    if !own_release {
+        retire_inert(&mut store);
+    }
     if let Some(a) = &store.state.attempt
         && store.pending()
     {

@@ -470,6 +470,8 @@ fn execute(recovery: bool) -> Result<(), Error> {
             "staged components changed before consume"
         );
     }
+    // Built before consumption: past it, no `?` may leave `execute` ahead of the outcome path.
+    let runtime = tokio::runtime::Runtime::new()?;
     let launch = if recovery {
         Ok(None)
     } else {
@@ -528,7 +530,6 @@ fn execute(recovery: bool) -> Result<(), Error> {
     let stopped = suppress_windows_service_recovery(&service)
         .map_err(Error::from)
         .and_then(|()| stop_windows_service(&service).map(drop));
-    let runtime = tokio::runtime::Runtime::new()?;
     let outcome = (|| -> Result<_, Error> {
         let launch = launch?;
         // Registration still precedes Service stop and every publication. Its
@@ -698,7 +699,9 @@ fn execute(recovery: bool) -> Result<(), Error> {
         configure_windows_service_recovery(&service)?;
         drop(store);
         drop(repair);
-        service.start(&Vec::<&std::ffi::OsStr>::new())?;
+        // A refused suppress or stop can leave the Service running: that is not a start failure,
+        // and the failed-restart fallback would stop a Service that still works (#1293).
+        start_service_if_stopped(&service)?;
         wait_for_service_ready()
     };
     let (rollback_release, restart) = match finalizer {
