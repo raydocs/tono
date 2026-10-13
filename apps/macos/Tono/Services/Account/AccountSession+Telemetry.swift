@@ -576,7 +576,8 @@ extension AccountSession {
         if accountLost {
             await sidecar.stop()
             let resumeProtection = shouldResumeProtection
-            await api.logout(); clearAccount(); state = .signedOut
+            let durable = await api.logout(); clearAccount(); state = .signedOut
+            noteSignOutDurability(durable)
             shouldResumeProtection = resumeProtection
         } else {
             guard entitlementRefusals == refusals else { return }
@@ -608,6 +609,13 @@ extension AccountSession {
         appRoutingResearchTask?.cancel()
         appRoutingResearchTask = nil
         appRoutingResearchActivationConsumer()
+    }
+
+    /// A sign-out whose credential removal could not be made durable still
+    /// signs this process out; the gate says a relaunch may restore the account.
+    func noteSignOutDurability(_ durable: Bool) {
+        guard !durable else { return }
+        signInError = TonoAPIClient.APIError.credentialRecoveryRecord.errorDescription
     }
 
     func clearAccount() {
@@ -643,6 +651,7 @@ extension AccountSession {
         lastCatalogFailureMessage = nil
         lastTrafficPolicyFailureMessage = nil
         lastConnectFailureAt = nil
+        lastPeriodicTelemetryAt = nil
         // An offline admission described the account just cleared (#582),
         // and so did Tono's acceptance of its session (R612-O5).
         api.offlineGate.leaveOffline()
