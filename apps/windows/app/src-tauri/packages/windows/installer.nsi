@@ -81,6 +81,10 @@ Var PassiveMode
 Var UpdateMode
 Var TonoPrivateUnpack
 Var TonoManualMutated
+; 1 when the manual gate passed by taking over a lease its previous holder never handed back: an
+; installer that mutated files and failed or was killed. A wizard that is then cancelled before
+; its own Sections changed nothing and must not release it (W9-RESOURCE-CANCEL-REPAIR).
+Var TonoLeaseInherited
 ; 1 once the uninstaller handed its manual lease back at the end of its section.
 Var TonoLeaseReleased
 Var NoShortcutMode
@@ -208,6 +212,9 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 ; A Quit from .onInit never reaches .onGUIEnd. Once the manual gate granted its lease, such an
 ; exit must hand it back, or the Service keeps refusing Connect until another installer finishes.
 Function ReleaseManualLease
+  ${If} $TonoLeaseInherited = 1
+    Return
+  ${EndIf}
   nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-update-finish'
   Pop $0
 FunctionEnd
@@ -712,6 +719,11 @@ Function .onInit
     ${EndIf}
     SetErrorLevel 76
     Abort "Disconnect and resolve any pending protected update before manual installation. No installed files have been changed."
+  ${EndIf}
+  ; The helper leaves its reason file behind on a passing gate only when it took over a lease an
+  ; earlier installer never handed back (a mutated, failed or killed run). It was deleted above.
+  ${If} ${FileExists} "$PLUGINSDIR\tono-gate-reason.txt"
+    StrCpy $TonoLeaseInherited 1
   ${EndIf}
   ${GetOptions} $CMDLINE "/P" $PassiveMode
   ${IfNot} ${Errors}
@@ -1485,8 +1497,12 @@ FunctionEnd
 Function .onGUIEnd
   ; A cancelled wizard before Section execution made no installed mutation.
   ; Failed/interrupted mutation retains its lease until a verified manual retry.
+  ; A lease inherited from an earlier installer that already replaced files stays: this wizard
+  ; wrote nothing, so releasing it would let an App repair run the newer resources that earlier
+  ; run left behind against the rolled-back Service. Only a completed install hands it back.
   ${If} $TonoPrivateUnpack = 0
   ${AndIf} $TonoManualMutated != 1
+  ${AndIf} $TonoLeaseInherited != 1
     nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-update-finish'
     Pop $0
   ${EndIf}
@@ -1572,6 +1588,11 @@ Function un.onInit
     ${EndIf}
     SetErrorLevel 76
     Abort "Disconnect and resolve any pending protected update before uninstalling."
+  ${EndIf}
+  ; As in .onInit: a passing gate leaves its reason file only for a lease it took over from an
+  ; earlier installer that never handed it back. Cancelling this uninstaller must not release it.
+  ${If} ${FileExists} "$PLUGINSDIR\tono-gate-reason.txt"
+    StrCpy $TonoLeaseInherited 1
   ${EndIf}
   CopyFiles /SILENT "$INSTDIR\resources\tono-service-install.exe" "$PLUGINSDIR\tono-gate.exe"
   !insertmacro SetContext
@@ -1824,7 +1845,9 @@ Function un.HandBackManualLease
   StrCpy $0 ""
   StrCpy $1 0
   handBackAttempt:
+  ; A lease an earlier failed installer left behind stays held until an install completes.
   ${If} $TonoLeaseReleased != 1
+  ${AndIf} $TonoLeaseInherited != 1
   ${AndIf} $1 < 3
     IntOp $1 $1 + 1
     nsExec::ExecToLog '"$PLUGINSDIR\tono-gate.exe" --manual-update-finish'
@@ -1837,6 +1860,7 @@ Function un.HandBackManualLease
     Goto handBackAttempt
   ${EndIf}
   ${If} $TonoLeaseReleased != 1
+  ${AndIf} $TonoLeaseInherited != 1
     DetailPrint "The installer lease could not be handed back (result $0); the next ${PRODUCTNAME} installer or uninstaller replaces it."
   ${EndIf}
   Pop $1

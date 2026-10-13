@@ -259,14 +259,13 @@ pub fn note_health(session: &mut Session, name: &str, ok: bool, now_ms: u64) {
 
 /// Apply a remembered dial once the barrier is down. No effect while armed.
 pub fn note_protection(session: &mut Session, armed_and_verified: bool, now_ms: u64) {
-    if session.protection_armed && !armed_and_verified {
-        if let Some(next) = session.pending_dial.take() {
+    if session.protection_armed && !armed_and_verified
+        && let Some(next) = session.pending_dial.take() {
             session.dial = next;
             if session.dial != session.preferred {
                 session.backup_since_ms.get_or_insert(now_ms);
             }
         }
-    }
     session.protection_armed = armed_and_verified;
 }
 
