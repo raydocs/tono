@@ -548,6 +548,7 @@ mod quit_tests {
             network_events: Default::default(),
             update_attempt_pending: None,
             release_generation: None,
+            kill_switch_held_by_another_user: false,
         };
         assert!(
             !quit_needs_service_release(false, Some(&snapshot)),

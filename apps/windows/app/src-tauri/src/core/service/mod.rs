@@ -1687,7 +1687,11 @@ pub(crate) async fn tono_service_status_snapshot() -> Result<ServiceStatusSnapsh
     if response.code > 0 {
         bail!(response.message);
     }
-    response.data.context("Tono Service 未返回状态快照")
+    // Another user's machine-wide barrier is not this App's protection (#1290).
+    response
+        .data
+        .map(ServiceStatusSnapshot::seen_by_caller)
+        .context("Tono Service 未返回状态快照")
 }
 
 /// A release that got no reading from the Tono Service: the owner credentials could not be read,

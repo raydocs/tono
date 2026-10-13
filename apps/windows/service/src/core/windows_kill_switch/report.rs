@@ -58,6 +58,14 @@ pub(crate) async fn status_for(caller_key: &str) -> KillSwitchStatus {
     status
 }
 
+/// Whether the armed protection belongs to another user than `caller_key` (#1290). The rule is
+/// `authorize_write_for`'s: only a recorded owner who is not the caller counts, so an intent
+/// whose owner record was lost (WIN-OWNER-RELEASE-NONE) stays the caller's to see and release.
+pub(crate) fn barrier_held_by_another_user(caller_key: &str) -> bool {
+    let wanted = armed_guard().as_ref().is_some_and(|armed| armed.intent.wanted);
+    wanted && authorize_write_for(caller_key).is_err()
+}
+
 /// Whether the reported reconnect flag is owed to `caller_key`. An ownerless flag (a legacy
 /// tombstone, or the release of an intent that recorded no owner) is owed to nobody: the first
 /// caller it would have been reported to clears it, and the clear is logged.
