@@ -1245,6 +1245,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     .await
                     .map(|desired| desired.core_should_be_running)
                     .ok(),
+                windows_kill_switch::another_user_signed_in(&owner.key),
             );
             match verdict {
                 Ok(()) => {
