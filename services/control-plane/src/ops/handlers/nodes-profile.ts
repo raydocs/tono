@@ -27,7 +27,7 @@ export const PROFILE_KEYS = [
 type QuotaPatch = { quotaBytes: number; cycleKind: string; cycleAnchorDay: number; counts: string };
 type ProfilePatch = {
   provider?: string | null; providerAccountId?: string | null; region?: string | null;
-  lineTags?: string[] | null; price?: number | null; currency?: string | null;
+  lineTags?: string[] | null; port?: number | null; price?: number | null; currency?: string | null;
   billingCycle?: number | null; renewsAt?: number | null; expiresAt?: number | null;
   notes?: string | null; quota?: QuotaPatch | null;
   capacityUsers?: number | null; displayName?: string | null;
@@ -105,12 +105,12 @@ function parseQuotaPatch(value: unknown): QuotaPatch | null | undefined {
 }
 
 function parseProfilePatch(b: Row): ProfilePatch {
-  optionalInt(b.port, 'port', 1, 65_535);
   return {
     provider: optionalText(b.provider, 'provider', 80),
     providerAccountId: optionalText(b.providerAccountId, 'providerAccountId', 100),
     region: optionalText(b.region, 'region', 80),
     lineTags: optionalLineTags(b.lineTags),
+    port: optionalInt(b.port, 'port', 1, 65_535),
     price: optionalPrice(b.price),
     currency: optionalCurrency3(b.currency),
     billingCycle: optionalInt(b.billingCycle, 'billingCycle', 1, 3660),
@@ -167,6 +167,7 @@ export async function applyNodeProfilePatch(e: Env, name: string, body: Row): Pr
   const provider = pick(patch.provider, nullText(existing?.provider));
   const providerAccountId = pick(patch.providerAccountId, nullText(existing?.provider_account_id));
   const region = pick(patch.region, nullText(existing?.region));
+  const port = pick(patch.port, nullInt(existing?.port));
   const price = pick(patch.price, nullNum(existing?.price));
   const currency = pick(patch.currency, nullText(existing?.currency));
   const billingCycle = pick(patch.billingCycle, nullInt(existing?.billing_cycle));
@@ -182,13 +183,13 @@ export async function applyNodeProfilePatch(e: Env, name: string, body: Row): Pr
          id, catalog_name, status, created_at, updated_at,
          provider, provider_account_id, region, line_tags_json, price, currency, billing_cycle,
          renews_at, expires_at, notes, traffic_quota_bytes, quota_counts, cycle_kind, cycle_anchor_day,
-         capacity_users, failure_domain, replaces
-       ) VALUES(?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         capacity_users, failure_domain, replaces, port
+       ) VALUES(?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       id(), name, t, t,
       provider, providerAccountId, region, tagsJson, price, currency, billingCycle,
       renewsAt, expiresAt, notes, quotaBytes, quotaCounts, cycleKind, cycleAnchorDay,
-      capacityUsers, failureDomain, replaces,
+      capacityUsers, failureDomain, replaces, port,
     ).run();
   } else {
     await e.DB.prepare(
@@ -196,13 +197,13 @@ export async function applyNodeProfilePatch(e: Env, name: string, body: Row): Pr
          provider = ?, provider_account_id = ?, region = ?, line_tags_json = ?,
          price = ?, currency = ?, billing_cycle = ?, renews_at = ?, expires_at = ?, notes = ?,
          traffic_quota_bytes = ?, quota_counts = ?, cycle_kind = ?, cycle_anchor_day = ?,
-         capacity_users = ?, failure_domain = ?, replaces = ?, updated_at = ?
+         capacity_users = ?, failure_domain = ?, replaces = ?, port = ?, updated_at = ?
        WHERE catalog_name = ?`,
     ).bind(
       provider, providerAccountId, region, tagsJson,
       price, currency, billingCycle, renewsAt, expiresAt, notes,
       quotaBytes, quotaCounts, cycleKind, cycleAnchorDay,
-      capacityUsers, failureDomain, replaces, t, name,
+      capacityUsers, failureDomain, replaces, port, t, name,
     ).run();
   }
   await upsertNodeIdentity(e, name, t, patch.displayName);
