@@ -2225,6 +2225,25 @@ async fn failed_update_recovery_honors_a_legacy_crash_tombstone() -> Result<()> 
     Ok(())
 }
 
+/// Decision 125: the Service reports the hold a narrow release leaves behind, and only a full
+/// release or a re-arm retires it.
+#[tokio::test]
+#[serial]
+async fn the_service_reports_the_hold_a_narrow_release_left() -> Result<()> {
+    cleanup().await;
+    let before = crate::core::selective_layer::ai_hold_retained();
+    arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+    release_applying_narrow().await?;
+    let after_narrow = crate::core::selective_layer::ai_hold_retained();
+    release().await?;
+    let after_full = crate::core::selective_layer::ai_hold_retained();
+    cleanup().await;
+    assert!(!before, "a fresh machine reports no hold");
+    assert!(after_narrow, "a narrow release leaves a hold the App must be able to learn about");
+    assert!(!after_full, "a full release retires it");
+    Ok(())
+}
+
 #[tokio::test]
 #[serial]
 async fn emergency_disarm_removes_wfp_intent_but_reports_unrestored_dns() -> Result<()> {

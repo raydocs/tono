@@ -959,6 +959,12 @@ pub struct ServiceStatusSnapshot {
     /// foreign. An older Service omits it and reads as false: the barrier is the caller's.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub kill_switch_held_by_another_user: bool,
+    /// The secondary AI hold is installed with no armed session behind it: a Quit, a replacement
+    /// sign-in, a crash or a failed update left it (decision 125). Only a full release removes
+    /// it, so an App that finds this set owes the user that release on Sign Out even when it is
+    /// idle. `None` from an older Service: unknown, and the App keeps its own in-process memory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_hold_retained: Option<bool>,
 }
 
 impl ServiceStatusSnapshot {
@@ -982,6 +988,9 @@ impl ServiceStatusSnapshot {
                 last_error: None,
                 reconnect_after_release: false,
             };
+            // Another user's machine-wide barrier is armed, which a full release of ours could not
+            // remove: do not promise this caller a hold to release.
+            self.ai_hold_retained = self.ai_hold_retained.map(|_| false);
         }
         self
     }
@@ -1555,6 +1564,26 @@ mod tests {
         let status = seen.kill_switch.expect("the reading stays present");
         assert!(!status.wanted && !status.verified && !status.live);
         assert!(seen.kill_switch_held_by_another_user, "the flag still says who holds it");
+    }
+
+    /// Decision 125: another user's armed barrier is not a hold this caller could release.
+    #[test]
+    fn another_users_barrier_is_not_a_hold_the_caller_owes_a_release_for() {
+        let mut snapshot = snapshot_with_barrier(true);
+        snapshot.ai_hold_retained = Some(true);
+        assert_eq!(snapshot.seen_by_caller().ai_hold_retained, Some(false));
+        let mut own = snapshot_with_barrier(false);
+        own.ai_hold_retained = Some(true);
+        assert_eq!(own.seen_by_caller().ai_hold_retained, Some(true));
+    }
+
+    /// An older Service omits the field: unknown, never "no hold".
+    #[test]
+    fn a_snapshot_from_an_older_service_reports_no_hold_information() {
+        let snapshot = snapshot_with_barrier(false);
+        assert_eq!(snapshot.ai_hold_retained, None);
+        let json = serde_json::to_value(&snapshot).unwrap();
+        assert!(json.get("ai_hold_retained").is_none(), "an absent report is not serialized");
     }
 
     #[test]

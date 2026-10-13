@@ -534,11 +534,16 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             // Same owner is not same session (Sol R-F4): a teardown for a session a restore or a
             // newer Connect has replaced is refused before it touches DNS, the Core or WFP.
             // Checked under the lifecycle lock, which StartClash admission also holds.
-            if let Err(refusal) =
-                crate::core::release::check_release_generation(request.payload.release_generation()).await
+            // Restore internet is always the full release (decision 125): a Quit or replacement
+            // release that was queued before it must not reinstall the AI hold it removed.
+            let hold_allowed = match crate::core::release::check_narrow_release(
+                request.payload.release_generation(),
+            )
+            .await
             {
-                return service_error(release_admission_error(&refusal));
-            }
+                Ok(allowed) => allowed,
+                Err(refusal) => return service_error(release_admission_error(&refusal)),
+            };
             let _operation_guard = OperationGuard::begin(
                 ServiceOperationKind::ReleaseKillSwitch,
                 IPC_HANDLER_TIMEOUT,
@@ -597,7 +602,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     }
                 }
             }
-            release_kill_switch_for_platform(request.payload.apply_narrow_layer()).await
+            release_kill_switch_for_platform(request.payload.apply_narrow_layer() && hold_allowed).await
         })
         .post(IpcCommand::EnableProtectedDns.as_ref(), |ctx| async move {
             trace!("Received EnableProtectedDns command");

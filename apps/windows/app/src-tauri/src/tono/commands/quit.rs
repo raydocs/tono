@@ -554,6 +554,7 @@ mod quit_tests {
             update_attempt_pending: None,
             release_generation: None,
             kill_switch_held_by_another_user: false,
+            ai_hold_retained: None,
         };
         assert!(
             !quit_needs_service_release(false, Some(&snapshot)),

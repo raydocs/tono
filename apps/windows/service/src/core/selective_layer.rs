@@ -278,6 +278,15 @@ pub(super) fn test_active_hold_removals() -> usize {
     TEST_ACTIVE_HOLD_REMOVALS.load(std::sync::atomic::Ordering::SeqCst)
 }
 
+/// Whether the latest disposition requested of the secondary layer is the AI hold. Quit, a
+/// replacement sign-in, a crash and a failed update leave it behind with no session (decision
+/// 125); only a full release or a re-arm requests its removal. A fresh Service process starts at
+/// `false` and learns the hold from the startup replay of the durable tombstone.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn ai_hold_retained() -> bool {
+    worker_guard().apply_narrow
+}
+
 pub async fn remove() {
     request(false).await;
 }
