@@ -1069,7 +1069,9 @@ extension AppState {
                     ports: fresh.ports
                 )
             }
-            for fresh in resolvedPins where !currentHosts.contains(fresh.host) {
+            // A new host the policy suffixes cover is not adopted either: the
+            // runtime never emits it, so it could only cause a reload.
+            for fresh in resolvedPins where !currentHosts.contains(fresh.host) && !frozen(fresh) {
                 currentHosts.insert(fresh.host)
                 pins.append(fresh)
             }
