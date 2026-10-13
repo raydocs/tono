@@ -3,8 +3,14 @@ import type { TonoStatus } from '@/services/tono'
 import { hasLiveProtection } from './protection-evidence'
 import type { SeaPhase } from './SeaScene'
 
-/** Presentation only: live native evidence wins over a connected FSM label. */
-export const seaPresentation = (status?: TonoStatus) => {
+/**
+ * Presentation only: live native evidence wins over a connected FSM label.
+ * `releasedFailure` is a not-connected attempt that ended with an error.
+ */
+export const seaPresentation = (
+  status?: TonoStatus,
+  releasedFailure = false,
+) => {
   const state = status?.uiState ?? 'notConnected'
   const unconfirmed =
     (state === 'connected' || state === 'protectedOffline') &&
@@ -14,13 +20,17 @@ export const seaPresentation = (status?: TonoStatus) => {
       ? 'connected'
       : state === 'connecting'
         ? 'connecting'
-        : state === 'protectedOffline' || unconfirmed
+        : state === 'protectedOffline' ||
+            unconfirmed ||
+            (state === 'notConnected' && releasedFailure)
           ? 'failed'
           : 'idle'
   const titleKey = unconfirmed
     ? 'tono.pill.title.protectionUnknown'
     : state === 'notConnected'
-      ? 'tono.home.title.idle'
+      ? releasedFailure
+        ? 'tono.home.title.failed'
+        : 'tono.home.title.idle'
       : state === 'connecting'
         ? 'tono.home.title.connecting'
         : state === 'disconnecting'

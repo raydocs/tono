@@ -12,18 +12,20 @@ name: Screenshots nightly
 #   they assert native labels, identifiers and opacity, not pixels.
 #   macos-release.yml still runs the whole target, these captures included.
 # - Ops console: Playwright pixel comparisons (`toHaveScreenshot`). The PR gate
-#   runs the same specs with --ignore-snapshots on Linux; the baselines were
-#   captured on macOS at DPR 2, so they are compared here on macOS.
+#   runs the same specs with --ignore-snapshots on Linux, in four shards; the
+#   baselines were captured on macOS at DPR 2, so they are compared here on
+#   macOS in the same four shards (no --ignore-snapshots). One serial
+#   `npx playwright test` was the whole nightly's wall clock.
 # - Windows: the PR gate has no screenshot test, so nothing moved.
 #
 # A failure is a red run in the Actions tab, and a scheduled or dispatched run
 # on main opens (or comments on) one tracking issue so it is not missed.
 #
 # Re-recording: dispatch with update_baselines=true on the branch whose console
-# changed. Only the ops-console job runs; it re-records the Playwright baselines
+# changed. Only ops-console-rerecord runs; it re-records the Playwright baselines
 # on this same macos-26 image and uploads e2e/__screenshots__ as the artifact
 # ops-console-baselines-<sha> to commit after a visual check. The scheduled run
-# never re-records.
+# never re-records. Re-recording stays one job so the artifact is one tree.
 
 on:
   schedule:
@@ -122,6 +124,46 @@ jobs:
           retention-days: 7
 
   ops-console-screenshots:
+    if: ${{ !inputs.update_baselines }}
+    runs-on: macos-26
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    defaults:
+      run:
+        working-directory: services/ops-console
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+
+      - name: Install exactly what the lockfile pins
+        run: npm ci
+
+      - name: Install Playwright's Chromium
+        run: npx playwright install chromium
+
+      - name: Screenshot baselines compared
+        # The same specs and the same four-way split as the PR gate, without
+        # --ignore-snapshots, so every toHaveScreenshot assertion compares
+        # against e2e/__screenshots__.
+        run: npx playwright test --shard=${{ matrix.shard }}/4
+
+      - name: Preserve diffs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ops-console-screenshot-diffs-${{ github.sha }}-${{ matrix.shard }}
+          path: services/ops-console/test-results
+          if-no-files-found: warn
+          retention-days: 7
+
+  ops-console-rerecord:
+    if: ${{ inputs.update_baselines }}
     runs-on: macos-26
     timeout-minutes: 60
     defaults:
@@ -140,12 +182,6 @@ jobs:
       - name: Install Playwright's Chromium
         run: npx playwright install chromium
 
-      - name: Screenshot baselines compared
-        if: ${{ !inputs.update_baselines }}
-        # The same specs as the PR gate, without --ignore-snapshots, so every
-        # toHaveScreenshot assertion compares against e2e/__screenshots__.
-        run: npx playwright test
-
       - name: Screenshot baselines re-recorded
         if: ${{ inputs.update_baselines }}
         # Re-records only the baselines that differ, and adds missing ones.
@@ -163,17 +199,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Preserve diffs
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: ops-console-screenshot-diffs-${{ github.sha }}
-          path: services/ops-console/test-results
-          if-no-files-found: warn
-          retention-days: 7
-
   report-failure:
-    needs: [sing-box-input, macos-window-captures, ops-console-screenshots]
+    needs: [sing-box-input, macos-window-captures, ops-console-screenshots, ops-console-rerecord]
     if: failure() && github.ref == 'refs/heads/main' && !inputs.update_baselines
     runs-on: ubuntu-24.04
     timeout-minutes: 10

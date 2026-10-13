@@ -395,13 +395,15 @@ export const ConnectProgressCard = ({
       )}
 
       {highlightedSteps.map((step) => {
-        // A failed step is no longer "in progress…"; name it plainly.
-        const stepLabel = t(
+        // A failed step is no longer "in progress…"; name it plainly. Stage
+        // names are written for mid-sentence use, so a row starts them upper case.
+        const rawLabel = t(
           (step.state === 'failed'
             ? CONNECT_STAGE_NAME_KEYS[step.key]
             : CONNECT_STAGE_LABEL_KEYS[step.key]) ??
             'tono.progress.unknownStage',
         )
+        const stepLabel = rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1)
         return (
           <div
             key={step.key}
@@ -524,8 +526,9 @@ export const ConnectProgressCard = ({
         </div>
       )}
 
+      {/* The home sentence already states the retry schedule while protected offline. */}
       {progress &&
-        (uiState === 'protectedOffline' ||
+        ((uiState === 'protectedOffline' && !homePresentation) ||
           (uiState === 'connecting' && progress.retryAttempt > 0)) && (
           <div
             role="status"
@@ -538,15 +541,7 @@ export const ConnectProgressCard = ({
             }}
           >
             <strong style={{ display: 'block', color: text.primary }}>
-              {t(
-                homePresentation
-                  ? uiState === 'connecting'
-                    ? 'tono.experience.recoveryTitle'
-                    : nextRetryAtMs != null
-                      ? 'tono.home.recovery.scheduled'
-                      : 'tono.home.recovery.unscheduled'
-                  : 'tono.experience.recoveryTitle',
-              )}
+              {t('tono.experience.recoveryTitle')}
             </strong>
             {t(
               uiState === 'connecting'

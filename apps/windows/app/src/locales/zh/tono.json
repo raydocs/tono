@@ -810,10 +810,6 @@
       "unscheduled": "已拦住直连。没有安排自动重试，可以立即重试或恢复正常网络。",
       "scheduled": "已拦住直连，{{seconds}} 秒后自动重试。",
       "now": "已拦住直连，正在自动重试。"
-    },
-    "recovery": {
-      "scheduled": "已安排自动重试",
-      "unscheduled": "未安排自动重试"
     }
   },
   "seaLines": {
@@ -821,6 +817,7 @@
     "explanation": "线路偏好说明",
     "inUse": "正在使用",
     "all": "全部线路 · {{count}}",
+    "others": "其他线路 · {{count}}",
     "evidence": "近 24 小时内连上过，已通过验证",
     "noEvidence": "暂无近期记录",
     "selected": "已选 {{name}} · {{latency}}"

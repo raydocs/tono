@@ -165,7 +165,7 @@ describe('login paused screen', () => {
     expect(screen.getByText('Previous connection still running')).toBeDefined()
     expect(screen.queryByText('Internet is blocked')).toBeNull()
     await act(async () =>
-      fireEvent.click(screen.getByRole('button', { name: 'Sign Out' })),
+      fireEvent.click(screen.getByRole('button', { name: 'Sign out' })),
     )
     expect(mocks.signOut).toHaveBeenCalledTimes(1)
     expect(mocks.disconnect).not.toHaveBeenCalled()

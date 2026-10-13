@@ -32,8 +32,8 @@ format and the release script passes and verifies the exact source commit.
 
 ## Current source and published state
 
-Source versions in this tree are **macOS 0.0.75 (build 75)** and **Windows
-0.0.75**. That is not a claim that either candidate is notarised, signed for
+Source versions in this tree are **macOS 0.0.75 (build 76)** and **Windows
+0.0.75**. Marketing version stays 0.0.75; only the macOS `CFBundleVersion` moved. That is not a claim that either candidate is notarised, signed for
 customers, or present on a live update feed. Publication and channel
 promotion are separate gated operations; see
 `apps/macos/release-notes/build75.md` and

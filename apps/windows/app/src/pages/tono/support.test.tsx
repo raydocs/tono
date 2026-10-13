@@ -481,12 +481,12 @@ describe('support terminal environment diagnostic card', () => {
   it('renders ready badge when environment has no proxy conflict', async () => {
     renderPage()
     expect(
-      await screen.findByText('Claude Code / Terminal Environment Diagnostics'),
+      await screen.findByText('Claude Code / terminal environment check'),
     ).toBeDefined()
-    expect(await screen.findByText('Environment Ready')).toBeDefined()
+    expect(await screen.findByText('Environment ready')).toBeDefined()
     expect(
       screen.queryByRole('button', {
-        name: 'Clear Safe User Environment Variables',
+        name: 'Clear safe user environment variables',
       }),
     ).toBeNull()
   })
@@ -508,11 +508,11 @@ describe('support terminal environment diagnostic card', () => {
     })
     renderPage()
 
-    expect(await screen.findByText('Proxy Residue Detected')).toBeDefined()
+    expect(await screen.findByText('Proxy residue detected')).toBeDefined()
     expect(screen.getByText('HTTP_PROXY=http://127.0.0.1:7890')).toBeDefined()
 
     const clearBtn = screen.getByRole('button', {
-      name: 'Clear Safe User Environment Variables',
+      name: 'Clear safe user environment variables',
     })
     fireEvent.click(clearBtn)
 
@@ -543,7 +543,7 @@ describe('support terminal environment diagnostic card', () => {
     })
     renderPage()
 
-    expect(await screen.findByText('Proxy Residue Detected')).toBeDefined()
+    expect(await screen.findByText('Proxy residue detected')).toBeDefined()
     expect(
       screen.getByText(
         'Remove the key from terminal.integrated.env.windows and restart VS Code.',
@@ -556,17 +556,17 @@ describe('support terminal environment diagnostic card', () => {
     ).toBeDefined()
     expect(
       screen.queryByRole('button', {
-        name: 'Clear Safe User Environment Variables',
+        name: 'Clear safe user environment variables',
       }),
     ).toBeNull()
-    expect(screen.queryByText('Environment Ready')).toBeNull()
+    expect(screen.queryByText('Environment ready')).toBeNull()
   })
 
   it('renders checking state while query is pending', () => {
     checkTerminalEnvMock.mockReturnValueOnce(new Promise(() => {}))
     renderPage()
     expect(screen.getByText('Checking…')).toBeDefined()
-    expect(screen.queryByText('Environment Ready')).toBeNull()
+    expect(screen.queryByText('Environment ready')).toBeNull()
   })
 
   it('renders check failed state when query rejects rather than falsely showing ready', async () => {
@@ -574,8 +574,8 @@ describe('support terminal environment diagnostic card', () => {
       new Error('Registry access denied'),
     )
     renderPage()
-    expect(await screen.findByText('Check Failed')).toBeDefined()
-    expect(screen.queryByText('Environment Ready')).toBeNull()
+    expect(await screen.findByText('Check failed')).toBeDefined()
+    expect(screen.queryByText('Environment ready')).toBeNull()
   })
 })
 

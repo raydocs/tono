@@ -50,7 +50,7 @@ struct MenuBarView: View {
             if seaAppearance { SeaSecondaryScene() }
         }
         .modifier(SeaPageAppearance())
-        .environment(\.seaAccent, SeaPresentationPhase.resolve(status: status.kind, disconnecting: appState.isDisconnecting, failed: appState.lastConnectionFailure != nil) == .day ? SeaTheme.warm : SeaTheme.cool)
+        .environment(\.seaAccent, seaPhase == .day ? SeaTheme.warm : SeaTheme.cool)
         .confirmationDialog(String(localized: "Connect using this route?"), isPresented: $showingRouteConfirmation, titleVisibility: .visible) {
             Button("Connect") {
                 guard let routeProposal, routeProposal.owner == accountSession.user?.id,
@@ -84,9 +84,14 @@ struct MenuBarView: View {
         MenuBarProtectionStatus(appState)
     }
 
+    private var seaPhase: SeaPresentationPhase {
+        SeaPresentationPhase.resolve(status: status.kind, disconnecting: appState.isDisconnecting,
+                                     failed: appState.lastConnectionFailure != nil)
+    }
+
     private var statusDot: some View {
         Circle()
-            .fill(seaAppearance && status.kind == .connecting ? SeaTheme.cool : status.color)
+            .fill(status.color)
             .frame(width: 8, height: 8)
             .shadow(color: appState.isConnected ? TonoStatus.connected.opacity(0.6) : .clear, radius: 3)
     }
@@ -114,7 +119,7 @@ struct MenuBarView: View {
                 }
             }
             Spacer(minLength: 0)
-            if seaAppearance { statusDot.alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 6 } }
+            if seaAppearance { SeaStatusMark(phase: seaPhase).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 7 } }
         }
         .padding(.horizontal, 16)
         .padding(.top, seaAppearance ? 16 : 12)
@@ -130,7 +135,7 @@ struct MenuBarView: View {
                 if appState.isConnected, appState.trafficFeedLive || appState.isClaudeHomeActive {
                     HStack(spacing: 6) {
                         if appState.trafficFeedLive {
-                            Text(verbatim: "↑ \(TonoByteFormat.bytes(appState.trafficStats.uploadSpeed))/s · ↓ \(TonoByteFormat.bytes(appState.trafficStats.downloadSpeed))/s")
+                            Text(verbatim: "↓ \(TonoByteFormat.bytes(appState.trafficStats.downloadSpeed))/s · ↑ \(TonoByteFormat.bytes(appState.trafficStats.uploadSpeed))/s")
                                 .monospacedDigit()
                         }
                         if appState.isClaudeHomeActive {
@@ -417,5 +422,39 @@ struct MenuBarView: View {
             openWindow(id: "main")
         }
         NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+/// The drawn mark the Windows tray uses: a sun while connecting or connected,
+/// a crescent moon while idle, a red sun when something needs attention.
+private struct SeaStatusMark: View {
+    let phase: SeaPresentationPhase
+
+    var body: some View {
+        switch phase {
+        case .night:
+            Circle()
+                .fill(Color(hex: "F4EEE2"))
+                .mask {
+                    Rectangle()
+                        .overlay(Circle().offset(x: -6, y: 3).blendMode(.destinationOut))
+                        .compositingGroup()
+                }
+                .rotationEffect(.degrees(-18))
+                .frame(width: 16, height: 16)
+                .shadow(color: Color(hex: "F4EEE2").opacity(0.2), radius: 6)
+        case .dusk, .blocked:
+            disc([Color(hex: "FFB08A"), Color(hex: "E85A44")], glow: Color(hex: "E85A44").opacity(0.33))
+        case .dawn, .day:
+            disc([Color(hex: "FFF6DE"), Color(hex: "FFD58E"), Color(hex: "FF9E63")],
+                 glow: Color(hex: "FFB877").opacity(0.4))
+        }
+    }
+
+    private func disc(_ colors: [Color], glow: Color) -> some View {
+        Circle()
+            .fill(RadialGradient(colors: colors, center: UnitPoint(x: 0.5, y: 0.35), startRadius: 0, endRadius: 9))
+            .frame(width: 14, height: 14)
+            .shadow(color: glow, radius: 6)
     }
 }

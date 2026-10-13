@@ -19,10 +19,16 @@
   when the helper runs from the installer's private plugins directory (the install). The
   uninstaller runs the installed copy under the install root, so a helper under the install root,
   or one whose path or install root cannot be read, keeps the strict refusal.
-- Known limits, recorded rather than fixed here: a non-redundant `.rollback`/`.restore` file in a
-  mixed tree still stops `--replace-runtime` before the repair can finish (the install aborts
-  closed, nothing is relaxed); a recovery-task deletion that fails after the archive has no
-  durable retry.
+- The repairing install keeps its own scratch names (`.install-rollback`, `.install-restore`,
+  `.install-publish`) while it holds the lease beside an exhausted Consumed or Uncertain attempt
+  (`repair_lease_held`). The failed update's `.rollback`/`.restore`/`.publish` files, which may be
+  the only copy of the old generation, are neither read, adopted nor deleted by that install, so a
+  mixed tree no longer aborts `--replace-runtime`. A leftover of the install's own names still
+  refuses the next repair, and the uninstall sweeps them. While the repair is unfinished the helper
+  leaves a marker (`.update-repair-evidence`) beside the binaries; the installer script then keeps the
+  failed update's rollback copies instead of purging them, and `--manual-update-finish` removes the
+  marker (and, once the installed identity is proven, the copies). The recovery-task delete after the
+  archive is tried four times; if the scheduler keeps refusing, the task stays and fails at boot.
 - Why stricter: nothing is released or relaxed. Protection, the fail-closed filters and the DNS and
   Core-absent checks of the install gate are unchanged; only the update-record refusal is lifted
   for a record no process can still advance. The archive keeps the evidence and the high-water.

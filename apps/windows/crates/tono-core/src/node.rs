@@ -136,13 +136,13 @@ impl ValidatedNode {
         );
         match self.protocol {
             NodeProtocol::Hysteria2 => {
-                // Pinned mihomo v1.19.30 already dials with QUIC early-data
+                // Pinned mihomo v1.19.32 already dials with QUIC early-data
                 // (`Early: true`) and defaults ALPN to h3 inside one core
                 // process. Do not emit `handshake-timeout`: a positive value
                 // makes sing-quic detach the handshake from the caller, so a
                 // cancelled connect keeps dialing in the background. Do not
                 // emit `skip-cert-verify`. Do not emit a keepalive key either:
-                // `Hysteria2Option` has none, and sing-quic `38b0e9295f51`
+                // `Hysteria2Option` has none, and sing-quic `1c242664697a`
                 // already applies a 10s keepalive and a 30s idle timeout when
                 // those fields are left at 0. An unknown YAML key is ignored.
                 put("type", Value::String("hysteria2".to_string()));

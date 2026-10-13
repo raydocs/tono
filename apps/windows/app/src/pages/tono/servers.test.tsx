@@ -527,7 +527,7 @@ it('ages batch TCP evidence from admission so a slow test cannot create a fresh 
     )
     renderPage()
     await screen.findByText('No verified successful connections yet.')
-    fireEvent.click(screen.getByRole('button', { name: 'Test All' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Test all' }))
     await waitFor(() => expect(testServersMock).toHaveBeenCalledTimes(1))
     clock += 120_000
     await act(async () => finish([{ name: 'Buffalo · Niagara', latencyMs: 5 }]))
@@ -728,13 +728,14 @@ it('selects without connecting in the sea look, then the selection capsule conne
   }
 })
 
-const renderSeaRoutes = (servers = routeServers) => {
+const renderSeaRoutes = (servers = routeServers, favorites: string[] = []) => {
   scopeMock.mockReturnValue('account-a:7')
   serversMock.mockResolvedValue(
     servers.map((server, index) => ({ ...server, selected: index === 0 })),
   )
   preferencesMock.mockResolvedValue({
     ...routeFixture(),
+    favorites,
     recent: [
       {
         name: 'Buffalo · Niagara',
@@ -770,6 +771,26 @@ it('reads latency in milliseconds in the sea look, as the home chip does', async
     unmount()
     setNewAppearance(false)
     cached.mockRestore()
+  }
+})
+
+it('counts only the lines listed under favorites in the sea look', async () => {
+  const { unmount } = renderSeaRoutes(
+    [
+      ...routeServers,
+      ...routeServers.slice(0, 1).map((server) => ({
+        ...server,
+        name: 'Singapore · Harbor',
+      })),
+    ],
+    ['Buffalo · Niagara'],
+  )
+  try {
+    expect(await screen.findByText('Other servers · 1')).toBeDefined()
+    expect(screen.queryByText(/^All servers ·/)).toBeNull()
+  } finally {
+    unmount()
+    setNewAppearance(false)
   }
 })
 

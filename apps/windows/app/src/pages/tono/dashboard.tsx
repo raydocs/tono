@@ -847,15 +847,18 @@ const DashboardPage = () => {
         <p style={{ margin: '0 0 8px' }}>
           {t('tono.dashboard.updateIncomplete')}
         </p>
-        <button
-          type="button"
-          className="tono-button tono-action"
-          onClick={requestRelease}
-          disabled={uiState === 'disconnecting'}
-          style={{ minHeight: 32, padding: '6px 12px', fontSize: 12 }}
-        >
-          {t('tono.tray.disconnect')}
-        </button>
+        {/* The sea home already offers a release control unless idle. */}
+        {(!newAppearance || uiState === 'notConnected') && (
+          <button
+            type="button"
+            className="tono-button tono-action"
+            onClick={requestRelease}
+            disabled={uiState === 'disconnecting'}
+            style={{ minHeight: 32, padding: '6px 12px', fontSize: 12 }}
+          >
+            {t('tono.tray.disconnect')}
+          </button>
+        )}
       </div>
     </div>
   )
