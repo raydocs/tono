@@ -1,0 +1,12 @@
+## 2026-10-13 · 飞书 / Lark 的代码签名身份（#422）
+- 归属：`docs/SHIP_PLAN.md` §2 item 10（G4 冻结期内的数据补录；`nativeAppDirect` 打开时飞书/Lark 全部走隧道的回退，冻结期合并由主会话决定）；macOS `Core/Configuration/ConfigPipeline+Identity.swift`。
+- 来源：基线 origin/main 20266ba2f；分支 `claude/feishu-identity`；PR 见 #422 的链接；尚未合 main。
+- 缺陷修复：无新增代码路径。把官方安装包里读到的 Identifier / TeamIdentifier 加入 `reviewedDirectBundleIdentifiers` 与 `reviewedDirectTeamIdentifiers`：飞书 `com.electron.lark` / `XY6NLV7YTS`，Lark `com.larksuite.larkApp` / `JBRN9C6V7T`。既有的签名身份检查（Apple 锚、精确 Identifier、Team）自动覆盖，没有按名称或路径放宽。
+- 数据来源（机器、日期、版本）：本机（macOS 26，Apple 芯片，未安装、未运行），2026-10-13，从官方下载接口（`feishu.cn/api/downloads`、`larksuite.com/api/downloads`）给出的 arm64 DMG 直接下载，MD5 与接口给出的值一致后挂载只读，仅读 `codesign -dvv`：
+  - 飞书 8.1.17 `Feishu-darwin_arm64-8.1.17-signed.dmg`（包内 `Lark.app`，`CFBundleName` = Feishu）：`Identifier=com.electron.lark`，`TeamIdentifier=XY6NLV7YTS`，`Authority=Developer ID Application: Beijing Feishu Technology Co., Ltd. (XY6NLV7YTS)` → Developer ID Certification Authority → Apple Root CA。SHA-256 `a4e006a2…c7ef`。
+  - Lark 8.1.22 `Lark-darwin_arm64-8.1.22-signed.dmg`（包内 `LarkSuite.app`）：`Identifier=com.larksuite.larkApp`，`TeamIdentifier=JBRN9C6V7T`，`Authority=Developer ID Application: LARK TECHNOLOGIES PTE. LTD. (JBRN9C6V7T)` → Developer ID Certification Authority → Apple Root CA。SHA-256 `4aaa5bde…01ccd`。
+  - `Info.plist` 的 `CFBundleShortVersionString` 是 Chromium 版本 147.0.7727.149，应用版本取自下载文件名与接口版本号。
+- 新增/优化：无。
+- 验证：未运行 xcodebuild（本机不运行）；PR 的 ci-gate。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：Mac App Store 版本未捕获（不能这样下载），仍走隧道，状态「未运行」；Intel 构建未单独读取（同一团队签名，但未验证）；未知旧 Identifier（`com.bytedance.*` 等）仍无 Team，保持失败即关；Lark 包内名为 `LarkSuite.app`，不在 `reviewedDirectBundleNames` 里，标准路径依赖 Launch Services 按 Identifier 发现，未改名单。

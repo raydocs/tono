@@ -252,17 +252,27 @@ nonisolated extension ConfigPipeline {
         "com.larksuite.Feishu",
         "com.larksuite.Lark",
         "com.feishu.Feishu",
+        "com.electron.lark",
+        "com.larksuite.larkApp",
     ]
 
-    /// Team identity captured from the official DingTalk macOS distribution.
-    /// Feishu/Lark stay fail-closed, including at the standard `/Applications`
-    /// paths, until a real signed bundle is inspected on a target Mac.
+    /// Team identity captured from the official DingTalk, Feishu and Lark
+    /// macOS distributions (Developer ID builds). The other Feishu/Lark
+    /// identifiers above were never checked against a real bundle and have no
+    /// team, so they stay fail-closed, including at the standard
+    /// `/Applications` paths. Feishu 8.1.17 (arm64 DMG, 2026-10-13) signs as
+    /// `com.electron.lark`, team XY6NLV7YTS (Beijing Feishu Technology Co.,
+    /// Ltd.); Lark 8.1.22 (arm64 DMG, 2026-10-13) signs as
+    /// `com.larksuite.larkApp`, team JBRN9C6V7T (LARK TECHNOLOGIES PTE. LTD.).
+    /// Mac App Store builds are not captured here and stay on the tunnel.
     nonisolated static let reviewedDirectTeamIdentifiers = [
         "com.alibaba.DingTalk": "XN6U3EV979",
         "com.alibaba.DingTalkMac": "XN6U3EV979",
         "com.alibaba.dingtalk": "XN6U3EV979",
         "com.dingtalk.DingTalk": "XN6U3EV979",
         "com.dingtalk.DingTalkMac": "XN6U3EV979",
+        "com.electron.lark": "XY6NLV7YTS",
+        "com.larksuite.larkApp": "JBRN9C6V7T",
     ]
 
     private static func applicationURLs(forBundleIdentifier identifier: String) -> [URL] {
