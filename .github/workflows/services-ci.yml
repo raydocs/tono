@@ -71,6 +71,12 @@ on:
       - tooling/scripts/windows-package-components.mjs
       - tooling/scripts/prune-merged-branches.mjs
       - tooling/scripts/tests/*.test.mjs
+      # The suite-registration guard reads these; a new or renamed suite must run it.
+      - tooling/scripts/test-*.sh
+      - tooling/scripts/tests/test_*.py
+      - tooling/scripts/tests/*.test.rb
+      - tooling/scripts/check-node-in-fleet.py
+      - tooling/scripts/analyze-mac-sea-polish.py
       - tooling/scripts/publish-managed-catalog.rb
       - tooling/scripts/write-dedirock-hy2-catalog-sources.rb
       - tooling/scripts/tests/publish-managed-catalog.test.rb
@@ -185,6 +191,18 @@ jobs:
       - name: Home usage reporter
         run: python3 services/home-agent/test_report_example.py
 
+      - name: Fleet audit
+        # A substring match audits a different node than the one asked about.
+        run: python3 tooling/scripts/tests/test_check_node_in_fleet.py
+
+      - name: Mac sea polish metrics
+        # The analyzer imports Pillow at module level and the runner image does
+        # not ship it.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends python3-pil
+          python3 tooling/scripts/tests/test_mac_sea_polish_metrics.py
+
       - name: Node restart verification fixtures
         run: python3 tooling/scripts/remote/test_node_verification.py
 
@@ -265,12 +283,24 @@ jobs:
         # without editing this step.
         run: node --test "tooling/scripts/tests/*.test.mjs"
 
+      - name: Test suite registration
+        # Every test-*.sh, test_*.py, *.test.rb and *.test.mjs under
+        # tooling/scripts must be run by a workflow (a wildcard invocation counts)
+        # or by test-macos-all.sh, or a suite can sit unrun and stay green.
+        run: tooling/scripts/test-suite-reachability.sh
+
       - name: Catalog publisher tests
         run: ruby tooling/scripts/tests/publish-managed-catalog.test.rb
 
       - name: Type-check the ops console
         working-directory: services/ops-console
         run: npm run typecheck
+
+      - name: Console unit tests
+        # 30 vitest files (api paging, customer board, facts, copy) existed and
+        # nothing in CI ran them; Playwright covers page flows, not these.
+        working-directory: services/ops-console
+        run: npm test
 
       - name: Build the console
         # npm run build ends in check-budgets.mjs, so a bundle that blows the

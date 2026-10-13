@@ -94,6 +94,8 @@ function windowBoundsMs(window: TelemetryWindowInput, payload: Row): { startMs: 
  *   milliseconds / 60_000). connected_minutes gets the same overlap when
  *   uiState === 'connected', else 0. windows += 1 per overlapped hour.
  *   node / app_version / platform take the latest window (excluded.*).
+ *   Windows of one device may overlap (22 minutes every 20), so a device's
+ *   minutes in one hour are capped at 60 rather than summed past the hour.
  */
 /** Directional event bytes win. A route total with no split is stored as download so the sum matches the ledger once. */
 export function windowByteTotals(payload: Row): { up: number; down: number } {
@@ -175,8 +177,8 @@ export async function accrueActivityHours(
        SELECT 1 FROM customer_activity_windows WHERE window_id = ? AND claim = ?
      )
      ON CONFLICT(user_id, device_id, hour_at) DO UPDATE SET
-       online_minutes = customer_activity_hours.online_minutes + excluded.online_minutes,
-       connected_minutes = customer_activity_hours.connected_minutes + excluded.connected_minutes,
+       online_minutes = MIN(60, customer_activity_hours.online_minutes + excluded.online_minutes),
+       connected_minutes = MIN(60, customer_activity_hours.connected_minutes + excluded.connected_minutes),
        bytes_up = customer_activity_hours.bytes_up + excluded.bytes_up,
        bytes_down = customer_activity_hours.bytes_down + excluded.bytes_down,
        node = excluded.node,

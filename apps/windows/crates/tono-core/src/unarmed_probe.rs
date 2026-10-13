@@ -174,14 +174,13 @@ fn ordered_tcp_names(
     down: &BTreeSet<String>,
 ) -> Vec<String> {
     let mut names = Vec::new();
-    if let Some(preferred_target) = targets.iter().find(|target| target.name == preferred) {
-        if preferred_target.tcp
+    if let Some(preferred_target) = targets.iter().find(|target| target.name == preferred)
+        && preferred_target.tcp
             && preferred_target.region == region
             && !down.contains(&preferred_target.name)
         {
             names.push(preferred_target.name.clone());
         }
-    }
     let mut rest: Vec<&ProbeTarget> = targets
         .iter()
         .filter(|target| target.tcp && target.region == region && target.name != preferred)

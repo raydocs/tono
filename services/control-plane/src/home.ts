@@ -359,6 +359,21 @@ export async function assertHomeExitBindable(e: Env, userId: string, homeExitId:
   }
 }
 
+// A pasted line for a home that is already stored carries its own password.
+// Only a line flagged for rotation takes the pasted one (the rotation). For any
+// other line the stored password is kept, but never silently: the pasted one may
+// be stale, or the stored one may be a newer shared secret, so the paste is
+// refused and the operator changes it on purpose (PATCH home-exits/{id}).
+export function assertPastedPasswordMatches(home: Row, pastedPassword: string) {
+  if (home.socks5_rotation_required_at == null && pastedPassword !== String(home.socks5_password)) {
+    throw new ApiError(
+      409,
+      'HOME_PASSWORD_DIFFERS',
+      'This home line is already stored with a different password; update it on the home exit first, or paste the stored one',
+    );
+  }
+}
+
 // Fleet removal and its retired profile commit in one batch. Alongside the
 // retirement write's binding check, this fences either commit order without
 // refusing a newly provisioned home that has no fleet profile yet.
