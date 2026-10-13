@@ -125,11 +125,10 @@ pub(super) fn write_atomic(path: &Path, journal: &UpdateHandoffJournal) -> io::R
     published?;
     // Best-effort directory fsync so the rename itself is durable after a crash
     // during update handoff. Failure here must not undo a successful write.
-    if let Some(parent) = path.parent() {
-        if let Ok(dir_handle) = fs::File::open(parent) {
+    if let Some(parent) = path.parent()
+        && let Ok(dir_handle) = fs::File::open(parent) {
             let _ = dir_handle.sync_all();
         }
-    }
     Ok(())
 }
 
