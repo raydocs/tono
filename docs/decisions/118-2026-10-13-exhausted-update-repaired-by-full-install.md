@@ -15,6 +15,14 @@
   archives after any successful install (a newer release's bytes are unproven against this
   record), and a repair for uninstall or for a Replaced attempt (a live successor may still adopt
   it; uninstall removes everything and keeps its refusal).
+- The install and the uninstall both call `--manual-update-gate`; the repair lease is given only
+  when the helper runs from the installer's private plugins directory (the install). The
+  uninstaller runs the installed copy under the install root, so a helper under the install root,
+  or one whose path or install root cannot be read, keeps the strict refusal.
+- Known limits, recorded rather than fixed here: a non-redundant `.rollback`/`.restore` file in a
+  mixed tree still stops `--replace-runtime` before the repair can finish (the install aborts
+  closed, nothing is relaxed); a recovery-task deletion that fails after the archive has no
+  durable retry.
 - Why stricter: nothing is released or relaxed. Protection, the fail-closed filters and the DNS and
   Core-absent checks of the install gate are unchanged; only the update-record refusal is lifted
   for a record no process can still advance. The archive keeps the evidence and the high-water.

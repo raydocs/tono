@@ -5,4 +5,4 @@
 - 工程与测试：`update_exhausted_attempt_accepts_the_installer_lease`（旧代码红）、`update_exhausted_attempt_is_repaired_only_by_the_lease_holder_and_keeps_its_evidence`、`update_install_chain_passes_only_an_exhausted_pending_attempt`、`update_repair_refuses_an_identity_that_is_neither_original_nor_target`、`update_repair_archives_the_attempt_once_the_installed_target_is_proven`（后四个针对新增函数，旧代码无法编译，不是红）。未在本机运行 cargo。
 - 验证：见 PR 正文；高风险（特权路径/生命周期/发布信任），合并前需要独立 Codex 审查。
 - 候选/发布：仅源码，无新候选。
-- 剩余限制：无实机验证（耗尽记录 + 混杂安装树上跑完整安装）；「更新到更新的签名版本」这条路未做：更新版本的完整安装能过闸但不会归档旧记录，须安装原版本或目标版本；卸载与 Replaced 记录仍被拒；NSIS 的 UpdatePending 对话框文案未改（另一位同事在改 installer.nsi）。
+- 剩余限制：无实机验证（耗尽记录 + 混杂安装树上跑完整安装）；「更新到更新的签名版本」这条路未做：更新版本的完整安装能过闸但不会归档旧记录，须安装原版本或目标版本；卸载与 Replaced 记录仍被拒（修复锁只给安装器私有目录里运行的 gate 副本，卸载器运行安装目录里的副本，路径不可读也按卸载处理）；混杂树上存在与 live 文件不同的 `.rollback`/`.restore` 时 `--replace-runtime` 仍会拒绝并中止安装（Codex F3，记在 R4-WIN-UPDATE-REPAIR-SCRATCH）；归档后恢复任务删除失败没有持久重试（Codex F4，记在同一条）；NSIS 的 UpdatePending 对话框文案未改（另一位同事在改 installer.nsi）。

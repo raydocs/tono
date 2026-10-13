@@ -1613,6 +1613,24 @@ fn refuse_pending_unless_repairable(store: &Store) -> Result<()> {
     refuse_pending(store)
 }
 
+/// The install gate runs the helper from the installer's private plugins directory; the
+/// uninstaller runs the installed copy under the install root. Both call `--manual-update-gate`,
+/// and only the install may repair an exhausted record (#1307). Anything unknown is treated as
+/// the uninstaller, which keeps refusing.
+fn gate_is_install_copy() -> bool {
+    match (std::env::current_exe(), install_root()) {
+        (Ok(exe), Ok(root)) => !runs_from_install_root(&exe, &root),
+        _ => false,
+    }
+}
+
+fn runs_from_install_root(exe: &Path, root: &Path) -> bool {
+    let lower = |path: &Path| path.to_string_lossy().replace('/', "\\").to_ascii_lowercase();
+    let root = lower(root);
+    let root = root.trim_end_matches('\\');
+    lower(exe).starts_with(&format!("{root}\\"))
+}
+
 fn refuse_pending(store: &Store) -> Result<()> {
     match store.state.attempt.as_ref() {
         Some(a) if store.pending() => Err(refusal(
@@ -1671,7 +1689,11 @@ pub async fn begin_manual() -> Result<Option<String>> {
     let installer = gate_installer()?;
     let _repair = gate_repair_lock()?;
     let mut store = gate_store()?;
-    refuse_pending_unless_repairable(&store)?;
+    if gate_is_install_copy() {
+        refuse_pending_unless_repairable(&store)?;
+    } else {
+        refuse_pending(&store)?;
+    }
     refuse_live_lease(&store, &installer, super::process::process_started_at)?;
     drop(store);
     // No stale manual lease may turn armed/unknown protection into permission.
@@ -2850,6 +2872,25 @@ mod tests {
             "a killed lease holder still counted as alive"
         );
         drop(child);
+    }
+
+    /// #1307: only the install's helper copy may take the repair lease; the uninstaller runs the
+    /// installed copy and keeps refusing.
+    #[test]
+    fn update_only_the_install_gate_copy_may_repair() {
+        let root = Path::new(r"C:\Program Files\Tono");
+        assert!(runs_from_install_root(
+            Path::new(r"c:\program files\tono\resources\tono-service-install.exe"),
+            root
+        ));
+        assert!(!runs_from_install_root(
+            Path::new(r"C:\Users\a\AppData\Local\Temp\nsx1\tono-gate\resources\tono-service-install.exe"),
+            root
+        ));
+        assert!(
+            !runs_from_install_root(Path::new(r"C:\Program Files\TonoEvil\x.exe"), root),
+            "a sibling directory is not the install root"
+        );
     }
 
     /// #1307: the install chain passes a pending attempt only once its recovery is exhausted;
