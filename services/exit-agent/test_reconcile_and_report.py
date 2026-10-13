@@ -1582,6 +1582,33 @@ class Hy2RosterAuthorization(unittest.TestCase):
         self.assertEqual(state_path.read_bytes(), original)
         self.assertIn(agent.hashlib.sha256(identity.encode()).hexdigest(), self.path.read_text())
 
+    def test_hy2_only_mode_and_a_failed_withdrawal_still_say_the_token_was_superseded(self):
+        # #1296 review: the reason was printed only when the withdrawal succeeded.
+        reason = "Exit node token was superseded by a rotation"
+        env = {
+            "TONO_API_BASE": "https://api.example.com",
+            "TONO_HOME_AGENT_TOKEN": "old-node-token",
+            "TONO_SOURCE_ID": "los-angeles-marina",
+        }
+        with patch.dict(agent.os.environ, env), patch.object(
+            agent, "fetch_roster", side_effect=agent.NodeDisabled("disabled", reason),
+        ):
+            with self.assertRaisesRegex(agent.Refusal, f"hy2 allowlist emptied; control plane said: {reason}"):
+                agent.run_hy2_roster_once()
+        state_path = self.path.parent / "state.json"
+        state_path.write_text(json.dumps({**fresh_state(), "sourceId": "los-angeles-marina"}), encoding="utf-8")
+        with patch.dict(agent.os.environ, env, clear=True), \
+                patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+                patch.object(agent, "require_commands", return_value={
+                    "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+                }), \
+                patch.object(agent, "fetch_roster", side_effect=agent.NodeDisabled("disabled", reason)), \
+                patch.object(agent, "withdraw_disabled_node", side_effect=agent.Refusal("xray unreachable")), \
+                patch.object(agent, "reconcile_and_read_stable", side_effect=agent.Refusal("no xray")), \
+                patch.object(agent, "api_base", return_value="https://api.example.com"):
+            with self.assertRaisesRegex(agent.Refusal, f"xray unreachable.*control plane said: {reason}"):
+                agent.run_once(state_path)
+
     def test_hy2_only_mode_refuses_another_nodes_roster_before_changing_auth(self):
         original = self.path.read_bytes()
         with patch.dict(agent.os.environ, {

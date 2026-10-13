@@ -1669,6 +1669,12 @@ def withdraw_disabled_node(binary: Path, commands: dict[str, str], address: str,
     return removed, remaining if inventory is not None else None
 
 
+def control_plane_said(disabled: NodeDisabled) -> str:
+    """The control plane's own reason as a refusal suffix: a disabled node and a
+    token superseded by a rotation (#1296) share the code but not the cure."""
+    return f"; control plane said: {disabled.reason}" if disabled.reason else ""
+
+
 def run_hy2_roster_once() -> None:
     """Enforce hy2 only; never opt a VLESS node into a metering migration.
 
@@ -1682,9 +1688,12 @@ def run_hy2_roster_once() -> None:
         raise Refusal("hy2-only sync requires an explicit valid TONO_SOURCE_ID")
     try:
         node_id, observed_at, roster, _, _ = fetch_roster(base, token)
-    except NodeDisabled:
+    except NodeDisabled as disabled:
         sync_hy2_roster([])
-        raise Refusal("the control plane reports this exit node disabled; hy2 allowlist emptied")
+        raise Refusal(
+            "the control plane reports this exit node disabled; hy2 allowlist emptied"
+            + control_plane_said(disabled)
+        )
     if node_id != expected:
         raise Refusal("hy2 roster node identity does not match TONO_SOURCE_ID")
     if not sync_hy2_roster(roster):
@@ -1855,7 +1864,8 @@ def run_once(path: Path) -> None:
                      " (the restart restores shared-legacy)")
         if withdrawal_error is not None:
             raise Refusal(
-                f"{withdrawal_error}{procedure}{cache_note}{metering_note}"
+                f"{withdrawal_error}{procedure}{control_plane_said(disabled)}"
+                f"{cache_note}{metering_note}"
             ) from withdrawal_error
         # Never a success: the node is out of service and an operator should
         # stop tono-xray. Usage and acknowledgements are not sent.
@@ -1864,7 +1874,7 @@ def run_once(path: Path) -> None:
             " and emptied hy2"
             + ("" if remaining is not None else "; the client inventory is unknown")
             + procedure
-            + (f"; control plane said: {disabled.reason}" if disabled.reason else "")
+            + control_plane_said(disabled)
             + cache_note
             + metering_note
         )
