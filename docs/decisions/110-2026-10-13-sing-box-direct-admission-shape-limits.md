@@ -44,9 +44,16 @@
   DIRECT rule needs no policy, so the full-tunnel rollback sends none. The App also skips the overlay
   when the Service reports a revision below 22 (it would admit on shape alone) or when it holds no
   signed response matching the captured revision and digest. A refusal is logged at warn level.
-- Unchanged on purpose: the watchdog respawn and `StartClash` re-admit an already admitted document
-  through `admit_owned_runtime`, which stays shape-only (no policy is at hand, and the document was
-  bound when it was first replaced). mihomo DIRECT (`admit_mihomo_direct_rules`) stays shape-only.
+- The other ways a sing-box document reaches the running core (Codex round 1, major): `StartClash`
+  and `StageRuntime` bring a new document and carry no policy, so for sing-box they now refuse any
+  rule that routes to `Tono-China-Direct` (`admit_new_runtime`, `DirectBinding::NoPolicy`). The App
+  launches sing-box with no DIRECT plan and adds the overlay only through `ReplaceSingBoxRuntime`,
+  so nothing legitimate is lost, and a shape-only DIRECT document can no longer be staged and then
+  become the `previous` a failed replacement restores.
+- Unchanged on purpose: the watchdog respawn re-admits the document already on disk through
+  `admit_owned_runtime` (shape-only; that document was admitted by `StartClash`/`StageRuntime`
+  without DIRECT rules, or bound when `ReplaceSingBoxRuntime` wrote it). mihomo DIRECT
+  (`admit_mihomo_direct_rules`, `StartClash`/`StageRuntime` on a mihomo core) stays shape-only.
   No WFP permit, port or destination is added.
 - Residual limits (recorded in the finding): the policy names no process, so a process-path rule is
   bound to "native apps are authorised" plus the regex shape, not to a listed executable; a validly
