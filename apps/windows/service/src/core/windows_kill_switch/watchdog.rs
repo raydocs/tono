@@ -52,6 +52,14 @@ pub(super) async fn reconcile_direct_watchdog_invalidation_unlocked(
             lease.phase == DirectReloadPhase::Committed
                 && lease.expires_at.is_none_or(|deadline| now >= deadline)
         });
+    // An expired Bracket/Pending reload narrows to Blocked below and, for a non-strict session,
+    // queues the bounded recovery release afterwards (decision 116).
+    let incomplete_expiry = !release
+        && !armed.intent.strict_kill_switch
+        && armed.direct_reload.as_ref().is_some_and(|lease| {
+            matches!(lease.phase, DirectReloadPhase::Bracket | DirectReloadPhase::Pending)
+                && lease.expires_at.is_none_or(|deadline| now >= deadline)
+        });
     // Narrowing failure poisons the deadline. Keep ownership-change retries distinct from
     // App death, even if the heartbeat deadline passes while the failed install is awaited.
     if !release {
@@ -72,11 +80,13 @@ pub(super) async fn reconcile_direct_watchdog_invalidation_unlocked(
     let transition = transition_direct_to_blocked_unlocked(armed, current_core, next_lease).await;
     note_verify(transition.is_ok());
     if let Err(error) = transition {
-        if !release || !error.is::<DirectBlockedIntentPersistenceFailure>() {
+        // Exact Blocked WFP was proved when only the intent write failed; that still queues the
+        // release (a failed narrowing never does).
+        if !(release || incomplete_expiry) || !error.is::<DirectBlockedIntentPersistenceFailure>() {
             return Err(error);
         }
         tracing::warn!(
-            "wfp: {reason}; exact Blocked WFP was proved; releasing despite intent persistence failure: {error:#}"
+            "wfp: {reason}; exact Blocked WFP was proved; continuing despite intent persistence failure: {error:#}"
         );
     }
     if release {
@@ -88,6 +98,11 @@ pub(super) async fn reconcile_direct_watchdog_invalidation_unlocked(
         release_unhealthy_session_unlocked(&message).await?;
         Ok(())
     } else {
+        if incomplete_expiry && queue_incomplete_direct_recovery_release() {
+            tracing::warn!(
+                "wfp: {reason}; releasing the non-strict session if the App does not recover it within {INCOMPLETE_DIRECT_RECOVERY_GRACE:?}"
+            );
+        }
         let message =
             format!("{reason}; exact DIRECT permits were retracted and traffic is Blocked");
         *last_error_guard() = Some(message.clone());
