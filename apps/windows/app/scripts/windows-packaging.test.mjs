@@ -884,10 +884,12 @@ test('NSIS keeps the failed update recovery copies while a repair install is unf
     ),
     /outside the repair guard/,
   )
-  const gui = 'Delete /REBOOTOK "$INSTDIR\\${MAINBINARYNAME}.exe.rollback"\n'
+  // A Windows checkout (core.autocrlf=true) gives installer.nsi CRLF line endings.
+  const eol = installerSource.includes('\r\n') ? '\r\n' : '\n'
+  const gui = 'Delete /REBOOTOK "$INSTDIR\\${MAINBINARYNAME}.exe.rollback"' + eol
   assert.match(
     validateNsisLegacyCleanup(
-      installerSource.replace(gui, '').replace('!macro RemoveKnownLegacyPayload\n', '!macro RemoveKnownLegacyPayload\n  ' + gui),
+      installerSource.replace(gui, '').replace('!macro RemoveKnownLegacyPayload' + eol, '!macro RemoveKnownLegacyPayload' + eol + '  ' + gui),
     ),
     /outside the repair guard: \$\{MAINBINARYNAME\}/,
   )
