@@ -27,6 +27,58 @@ pub fn record() -> io::Result<()> {
     imp::record()
 }
 
+/// Write the record, but give up after `budget`. The registry call cannot be cancelled and a
+/// filter driver can hold it indefinitely, so it runs on its own thread; the caller stops
+/// waiting, the stop goes on, and [`write_abandoned`] tells the process not to release the owner
+/// lock before it exits. A later instance can only take that lock once this process is gone, and
+/// a write cannot outlive its process, so an abandoned write can never land after the next
+/// instance has invalidated the record.
+#[cfg(feature = "standalone")]
+pub async fn record_within(budget: std::time::Duration) -> io::Result<()> {
+    record_within_using(budget, record).await
+}
+
+#[cfg(feature = "standalone")]
+async fn record_within_using(
+    budget: std::time::Duration,
+    write: impl FnOnce() -> io::Result<()> + Send + 'static,
+) -> io::Result<()> {
+    if budget.is_zero() {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "no stop budget is left to write the clean-goodbye record",
+        ));
+    }
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .name("clean-goodbye-record".into())
+        .spawn(move || {
+            let _ = sender.send(write());
+        })?;
+    match tokio::time::timeout(budget, receiver).await {
+        Ok(Ok(written)) => written,
+        Ok(Err(_)) => Err(io::Error::other("the clean-goodbye writer ended without a result")),
+        Err(_) => {
+            WRITE_ABANDONED.store(true, std::sync::atomic::Ordering::SeqCst);
+            Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the clean-goodbye record write did not finish in the stop budget",
+            ))
+        }
+    }
+}
+
+/// Set when a record write was abandoned while still running. The process then keeps its
+/// service-owner lock until it exits.
+#[cfg(feature = "standalone")]
+static WRITE_ABANDONED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether a record write was abandoned while it may still be running.
+#[cfg(feature = "standalone")]
+pub fn write_abandoned() -> bool {
+    WRITE_ABANDONED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Forget a recorded goodbye. Every Service start calls this before it restores or arms anything.
 #[cfg(feature = "standalone")]
 pub fn clear() -> io::Result<()> {
@@ -367,6 +419,39 @@ mod tests {
             invalidate().is_err(),
             "an unreadable record cannot be certified as gone"
         );
+    }
+
+    /// Codex round 3 on #1624: a registry write that never returns must not keep the stop from
+    /// finishing, and the process must then hold its owner lock until it exits.
+    #[tokio::test]
+    #[serial]
+    async fn a_record_write_that_does_not_finish_in_the_budget_is_abandoned_not_waited_for() {
+        let _reset = Reset;
+        reset();
+        super::WRITE_ABANDONED.store(false, Ordering::SeqCst);
+        let started = std::time::Instant::now();
+        let result = super::record_within_using(std::time::Duration::from_millis(50), || {
+            std::thread::sleep(std::time::Duration::from_millis(600));
+            Ok(())
+        })
+        .await;
+        assert_eq!(
+            result.expect_err("the write did not finish in time").kind(),
+            std::io::ErrorKind::TimedOut
+        );
+        assert!(started.elapsed() < std::time::Duration::from_millis(400), "must not wait for the writer");
+        assert!(super::write_abandoned(), "the owner lock must be kept until exit");
+        super::WRITE_ABANDONED.store(false, Ordering::SeqCst);
+
+        // A write that finishes in time is reported as it is, and abandons nothing.
+        super::record_within_using(std::time::Duration::from_secs(5), || Ok(()))
+            .await
+            .expect("an in-time write succeeds");
+        assert!(!super::write_abandoned());
+        // With no budget left nothing is started at all.
+        assert!(super::record_within_using(std::time::Duration::ZERO, || panic!("must not run"))
+            .await
+            .is_err());
     }
 
     #[test]

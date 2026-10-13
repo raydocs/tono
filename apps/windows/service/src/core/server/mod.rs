@@ -736,6 +736,7 @@ async fn note_clean_goodbye_with<F>(
         warn!("Owner goodbye stop: no proof that nothing is armed; no clean-goodbye record is written");
         return;
     }
+    let started = std::time::Instant::now();
     let residual_filters = match tokio::time::timeout(budget, residual_filters_present()).await {
         Ok(Ok(present)) => Some(present),
         Ok(Err(error)) => {
@@ -751,7 +752,8 @@ async fn note_clean_goodbye_with<F>(
         warn!("Owner goodbye stop: filters may remain; no clean-goodbye record is written");
         return;
     }
-    match crate::clean_goodbye::record() {
+    // The write shares the same stop budget as the query before it.
+    match crate::clean_goodbye::record_within(budget.saturating_sub(started.elapsed())).await {
         Ok(()) => info!("Owner goodbye stop: clean-goodbye record written (nothing armed)"),
         Err(error) => warn!("Owner goodbye stop: clean-goodbye record could not be written: {error}"),
     }

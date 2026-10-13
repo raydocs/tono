@@ -617,11 +617,11 @@ fn run_service() -> platform_lib::Result<()> {
         .await;
         if let Err(error) = result {
             tracing::warn!("IPC supervisor failed: {}", error);
-            drop(owner_guard);
+            release_owner_guard(owner_guard);
             return true;
         }
 
-        drop(owner_guard);
+        release_owner_guard(owner_guard);
         false
     });
     // A timed-out DNS/WFP call can leave spawn_blocking work behind. A normal runtime drop
@@ -946,6 +946,18 @@ async fn finish_core_replay() {
     }
 }
 
+/// Release the service-owner lock at the end of a run. A clean-goodbye record write that was
+/// abandoned may still be running; the lock is then kept until the process exits, so no later
+/// instance can invalidate the record and then see this one write it.
+fn release_owner_guard<T>(owner_guard: T) {
+    if tono_service_protocol::clean_goodbye::write_abandoned() {
+        tracing::warn!("A clean-goodbye record write is still running; keeping the owner lock until exit");
+        std::mem::forget(owner_guard);
+    } else {
+        drop(owner_guard);
+    }
+}
+
 /// Make the previous instance's clean-goodbye record unreadable, or fail. A record that outlives
 /// this start would let a later crash of this instance be read as a clean stop with nothing
 /// armed, so a failure here stops the start before anything is restored or armed.
@@ -960,7 +972,7 @@ async fn run_standalone() -> Result<()> {
     info!("Tono Service - Standalone Mode");
     info!("Current process PID: {}", pid);
 
-    let Some(_owner_guard) = acquire_service_owner().await? else {
+    let Some(owner_guard) = acquire_service_owner().await? else {
         return Ok(());
     };
 
@@ -988,7 +1000,9 @@ async fn run_standalone() -> Result<()> {
     // 否则失效的 desired-state 路径会导致进程退出并被 launchd 反复拉起。
     reconcile_startup_and_restore().await;
 
-    run_ipc_supervisor_until_shutdown(shutdown_signal()).await?;
+    let supervised = run_ipc_supervisor_until_shutdown(shutdown_signal()).await;
+    release_owner_guard(owner_guard);
+    supervised?;
 
     info!("Service shutdown complete.");
     Ok(())
