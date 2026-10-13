@@ -44,8 +44,11 @@ pub async fn service_status_snapshot(owner: &AuthenticatedOwner) -> Result<Servi
 
     let (kill_switch_wanted, kill_switch_live, kill_switch_mode) =
         crate::core::macos_kill_switch::status().await;
-    let mut windows_kill_switch =
-        crate::core::windows_kill_switch::status_snapshot(&owner.key).await;
+    let (mut windows_kill_switch, barrier_is_another_users) =
+        match crate::core::windows_kill_switch::status_snapshot_with_holder(&owner.key).await {
+            Some((status, held)) => (Some(status), held),
+            None => (None, false),
+        };
     // The endpoint list names the exit node the active owner selected. Every other owner-specific
     // detail in this aggregate is already withheld from a non-active owner; this one was not.
     if !is_active && let Some(status) = windows_kill_switch.as_mut() {
@@ -53,9 +56,7 @@ pub async fn service_status_snapshot(owner: &AuthenticatedOwner) -> Result<Servi
     }
     // Another user's machine-wide barrier is reported as theirs (#1290). An active owner is never
     // told so: its own Core is running, so the barrier is the one it armed.
-    let kill_switch_held_by_another_user = !is_active
-        && windows_kill_switch.is_some()
-        && crate::core::windows_kill_switch::barrier_held_by_another_user(&owner.key);
+    let kill_switch_held_by_another_user = !is_active && barrier_is_another_users;
     #[cfg(windows)]
     let network_events = crate::core::netmon::status();
     #[cfg(not(windows))]
