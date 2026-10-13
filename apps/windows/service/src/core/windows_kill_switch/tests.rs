@@ -3571,6 +3571,46 @@ async fn a_live_replacement_lease_withdraws_the_incomplete_reload_release() -> R
     Ok(())
 }
 
+/// Decision 116: the incomplete-reload window may displace a longer fresh-Connect verification
+/// window; when the App recovers, that window comes back instead of being cleared.
+#[tokio::test]
+#[serial]
+async fn withdrawing_the_incomplete_reload_window_restores_the_one_it_displaced() -> Result<()> {
+    let (core, pending, now, reason) = expired_pending_direct_session().await?;
+    let longer = std::time::Instant::now() + std::time::Duration::from_secs(600);
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(longer);
+    FRESH_ARM_PROOF_PENDING.store(true, Ordering::Release);
+
+    reconcile_direct_watchdog_invalidation_unlocked(pending, Some(core), now, &reason).await?;
+    assert!(queued_wanted_core_deadline().is_some_and(|deadline| deadline < longer));
+
+    let blocked = armed_guard().clone().expect("blocked state");
+    armed_guard().as_mut().expect("armed").direct_reload = Some(DirectReloadLease {
+        owner_generation: 124,
+        reload_id: 9_124,
+        phase: DirectReloadPhase::Committed,
+        endpoint_digest: crate::direct_endpoint_digest(&blocked.direct_endpoints).unwrap(),
+        core_instance: Some(core),
+        tunnel_luid: blocked.tun_luid,
+        expires_at: Some(std::time::Instant::now() + std::time::Duration::from_secs(60)),
+    });
+    assert_eq!(reconcile_wanted_core_window_unlocked().await?, WantedCoreWindow::Keep);
+
+    assert_eq!(
+        queued_wanted_core_deadline(),
+        Some(longer),
+        "the fresh-Connect window the incomplete reload displaced must come back"
+    );
+    assert!(
+        FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire),
+        "inherited verification must still wait for this arm's own proof"
+    );
+    cleanup().await;
+    Ok(())
+}
+
 /// Decision 116: the exact Blocked WFP was proved and only the intent write failed; the release
 /// is still queued (a failed narrowing never is).
 #[tokio::test]
