@@ -2646,7 +2646,7 @@ async fn a_connect_is_refused_while_a_startup_fallback_attempt_waits_for_the_dns
         wfp_free_while_waiting,
         "the attempt must not hold the WFP lock while it waits: the fence is the marker"
     );
-    assert_restore_in_progress(
+    assert_refused_as_restore_in_progress(
         refused.expect("a Connect must be refused by the marker, not queue behind the attempt"),
     );
     assert!(!armed_while_waiting, "the Connect armed in the middle of the attempt");
@@ -2784,10 +2784,15 @@ async fn connect_waiting(wait: std::time::Duration) -> Result<()> {
 /// The arm was refused because a network restore is still writing DNS, with the stable prefix the
 /// App keeps in its connect failure, and armed nothing.
 fn assert_restore_in_progress(refused: Result<()>) {
+    assert_refused_as_restore_in_progress(refused);
+    assert!(ARMED.lock().unwrap().is_none(), "a refused Connect must arm nothing");
+}
+
+/// The refusal alone, for a test that checks what was armed itself.
+fn assert_refused_as_restore_in_progress(refused: Result<()>) {
     let message = format!("{:#}", refused.expect_err("the Connect must be refused"));
     assert!(message.contains(NETWORK_RESTORE_IN_PROGRESS_PREFIX), "{message}");
     assert!(message.contains("retry in a few seconds"), "{message}");
-    assert!(ARMED.lock().unwrap().is_none(), "a refused Connect must arm nothing");
 }
 
 /// A Connect is refused while the in-progress marker is set, after waiting for it, and arms as
