@@ -7,7 +7,7 @@
   retires the old account's runtime (#1120).
   - macOS Quit: unchanged in code. Decision 073 / #1445 already sends `POST /killswitch/quit`, which
     keeps an armed or retained hold, never installs one for an idle Mac, and yields to an explicit
-    Restore. No helper protocol change, so `HelperProtocolVersion.current` stays 4.52.53. An older
+    Restore. No helper protocol change, so `HelperProtocolVersion.current` is unchanged. An older
     installed helper is repaired before the Quit release, exactly as for Restore internet, so the
     Quit path never needs the old full disarm.
   - Windows Quit (connected, and the no-product-state path): releases with the Service's narrow
@@ -34,5 +34,12 @@
 - Applied in: the macOS Quit copy and this decision (PR for #1052 macOS), the Windows Quit,
   replacement and update-failure code (PR for #1052 Windows, #1120, #1293 item 4, #1055 row).
   #1071 / #1504 (A13) is paused with another agent; it follows this decision when A13 resumes.
+- Known gaps in the Windows App (Codex review of #1642, recorded, not fixed here): the App's
+  memory that the last release kept the hold lives in the running process, so after the App is
+  reopened an idle Sign Out before the first Connect does not run the full release (the same is
+  already true after a crash hold), and a Restore internet that completes while a Quit or
+  replacement narrow release is still queued does not stop that older release from reinstalling
+  the hold. Restore internet afterwards removes it. Fixing both needs the Service to report the
+  retained hold in its status.
 - Limits: the hold is best effort and does not promise that all AI traffic is blocked (see
   `selective-fail-open.md`). Native PF, WFP and NRPT behavior needs real hardware.
