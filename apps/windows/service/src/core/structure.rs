@@ -1072,8 +1072,8 @@ impl<T> JsonConvert for T where T: Serialize + for<'de> Deserialize<'de> {}
 mod tests {
     use super::{
         MacosProxyConfig, OwnerIdentity, ProtocolInfo, ProtocolVersion, ReleaseKillSwitchBody,
-        RuntimeBundle, ServiceErrorCode, StartClashRequest, StopClashPayload, core_launch_args,
-        is_sing_box_core_path, owner_key,
+        RuntimeBundle, ServiceErrorCode, ServiceStatusSnapshot, StartClashRequest,
+        StopClashPayload, core_launch_args, is_sing_box_core_path, owner_key,
     };
 
     #[test]
