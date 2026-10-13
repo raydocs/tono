@@ -536,6 +536,32 @@ fn admit_install() -> Result<(tokio::sync::MutexGuard<'static, ()>, Cancellation
     Ok((install, cancel, slot))
 }
 
+/// RED-CHECK STUBS: the behavior before the fix. The install is started without flushing the
+/// session, and nothing watches the executor after Install.
+const EXECUTOR_LAUNCH_GRACE: Duration = Duration::from_secs(120);
+const EXECUTOR_LAUNCH_POLL: Duration = Duration::from_secs(2);
+
+#[derive(Debug, PartialEq, Eq)]
+enum ExecutorLaunch {
+    Underway,
+    Lost,
+}
+
+async fn watch_executor_launch<Fut: std::future::Future<Output = Result<UpdateStatus>>>(
+    _status: impl FnMut() -> Fut,
+    _grace: Duration,
+    _poll: Duration,
+) -> ExecutorLaunch {
+    ExecutorLaunch::Underway
+}
+
+async fn install_after_session_flush<T>(
+    _flush: impl std::future::Future<Output = bool>,
+    install: impl std::future::Future<Output = T>,
+) -> T {
+    install.await
+}
+
 #[tauri::command]
 pub async fn tono_install_update(
     app: AppHandle,
@@ -1384,5 +1410,82 @@ mod update_relay_tests {
             None
         );
         assert_eq!(preferred.relay(), 1, "the relay that answered stays preferred");
+    }
+}
+
+#[cfg(test)]
+mod update_executor_tests {
+    use super::*;
+    use std::sync::Mutex as StdMutex;
+
+    fn status(execution: &str) -> Result<UpdateStatus> {
+        Ok(UpdateStatus {
+            receipt: None,
+            execution: execution.into(),
+            offer: None,
+            needs_attention: None,
+            successor_relaunched: false,
+        })
+    }
+
+    /// R2UA-F2: an executor that exits before it stops the Service leaves the install
+    /// `Launching` for good. That must end as a lost executor so the caller restores internet,
+    /// not wait for a Service restart that never comes.
+    #[tokio::test(start_paused = true)]
+    async fn an_executor_that_never_consumes_the_install_is_lost() {
+        let polls = StdMutex::new(0_u32);
+        let launch = watch_executor_launch(
+            || {
+                *polls.lock().unwrap() += 1;
+                std::future::ready(status("Launching"))
+            },
+            EXECUTOR_LAUNCH_GRACE,
+            EXECUTOR_LAUNCH_POLL,
+        )
+        .await;
+        assert_eq!(launch, ExecutorLaunch::Lost);
+        assert!(*polls.lock().unwrap() > 1, "the executor is given the whole grace, not one look");
+    }
+
+    /// The release must not race a working executor: once the install is consumed, or the
+    /// Service cannot answer because the executor stopped it, the executor owns the update.
+    #[tokio::test(start_paused = true)]
+    async fn a_consumed_install_or_a_stopped_service_is_not_a_lost_executor() {
+        let answers = StdMutex::new(vec![status("Consumed"), status("Launching")]);
+        let consumed = watch_executor_launch(
+            || std::future::ready(answers.lock().unwrap().pop().unwrap()),
+            EXECUTOR_LAUNCH_GRACE,
+            EXECUTOR_LAUNCH_POLL,
+        )
+        .await;
+        assert_eq!(consumed, ExecutorLaunch::Underway);
+
+        let stopped = watch_executor_launch(
+            || std::future::ready(Err(anyhow::anyhow!("Service is stopped"))),
+            EXECUTOR_LAUNCH_GRACE,
+            EXECUTOR_LAUNCH_POLL,
+        )
+        .await;
+        assert_eq!(stopped, ExecutorLaunch::Underway);
+    }
+
+    /// WIN-UPDATE-TOKEN-FLUSH: the session is flushed before the executor is started, and a
+    /// flush that fails does not stop the install.
+    #[tokio::test]
+    async fn the_session_is_flushed_before_the_executor_starts() {
+        let events = StdMutex::new(Vec::new());
+        let started = install_after_session_flush(
+            async {
+                events.lock().unwrap().push("flush");
+                false
+            },
+            async {
+                events.lock().unwrap().push("install");
+                7
+            },
+        )
+        .await;
+        assert_eq!(started, 7);
+        assert_eq!(*events.lock().unwrap(), ["flush", "install"]);
     }
 }
