@@ -39,6 +39,10 @@ pub(crate) fn persisted_intent_owner() -> std::io::Result<Option<String>> {
 static INTENT_WRITE_SEQ: AtomicU64 = AtomicU64::new(1);
 #[cfg(test)]
 pub(super) static TEST_INTENT_VERIFY_CORRUPT: AtomicBool = AtomicBool::new(false);
+/// Fail once after the new bytes are committed and verified: the shape of a rename that landed
+/// but whose caller was told it timed out.
+#[cfg(test)]
+pub(super) static TEST_COMMIT_THEN_ERROR: AtomicBool = AtomicBool::new(false);
 
 pub(super) async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     #[cfg(test)]
@@ -79,6 +83,10 @@ pub(super) async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         .with_context(|| format!("failed to verify state at {path:?}"))?;
     if committed != bytes {
         anyhow::bail!("intent write did not commit: destination differs after replace");
+    }
+    #[cfg(test)]
+    if TEST_COMMIT_THEN_ERROR.swap(false, Ordering::Relaxed) {
+        anyhow::bail!("simulated: the replace reported a timeout after the rename landed");
     }
     Ok(())
 }

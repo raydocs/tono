@@ -634,6 +634,7 @@ async fn cleanup() {
     TEST_INSTALL_FAILURE.store(false, Ordering::Relaxed);
     TEST_AMBIGUOUS_INSTALL_FAILURE.store(false, Ordering::Relaxed);
     TEST_INTENT_VERIFY_CORRUPT.store(false, Ordering::Relaxed);
+    TEST_COMMIT_THEN_ERROR.store(false, Ordering::Relaxed);
     TEST_PERSIST_ATTEMPTS.store(0, Ordering::Relaxed);
     TEST_INSTALL_ATTEMPTS.store(0, Ordering::Relaxed);
     TEST_OWNER_SIGNED_OUT.store(false, Ordering::Relaxed);
@@ -2567,69 +2568,363 @@ async fn another_signed_in_user_cannot_take_over_armed_protection() -> Result<()
     Ok(())
 }
 
-/// #1293 item 1: user A signed out with the release failed, so the barrier stays armed under
-/// owner A. User B's Connect reaches PrepareCoreStart, which stops A's Core before B's
-/// `arm_bootstrap`. If B's attempt then fails, `fail_connect` releases as B; that release must
-/// pass `authorize_write_for` without any change to that rule, because B became the recorded
-/// owner when A's Core was stopped.
-#[tokio::test]
-#[serial]
-async fn prepare_core_start_makes_the_taking_over_user_the_owner_of_a_departed_owners_barrier()
--> Result<()> {
-    cleanup().await;
-    arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
-    crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1)))
-        .await;
-    lock(None).await?;
-    mark_verified("owner-alice").await?;
-    assert!(armed_guard().as_ref().unwrap().intent.is_verified());
-    TEST_OWNER_SIGNED_OUT.store(true, Ordering::Relaxed);
-    assert!(
-        authorize_write_for("owner-bob").is_err(),
-        "precondition: the departed owner still holds the recorded ownership"
-    );
+// ---- #1293 item 1: PrepareCoreStart hands a departed owner's barrier to the next user ----
+//
+// User A signed out with the release failed, so the barrier stays armed under owner A with A's
+// Core running and A's connection on record. User B's Connect reaches PrepareCoreStart, which
+// stops A's Core before B's `arm_bootstrap`. If B's attempt then fails, `fail_connect` releases
+// as B: that must pass `authorize_write_for` and the release worker's `owner_refusal`, neither
+// of which changes. The takeover is one transaction under the release authority's lock.
 
-    let changed = adopt_departed_owner_before_core_stop("owner-bob").await?;
+mod takeover_scenarios {
+    use super::*;
+    use serial_test::serial;
+    use crate::core::release::{
+        AdmissionRefusal, Authority, BootStamp, Incarnation, Mode, Processes, Record,
+    };
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
 
-    assert!(changed, "the recorded owner must move to the caller");
-    assert!(authorize_write_for("owner-bob").is_ok());
-    assert!(authorize_write_for("owner-alice").is_err());
-    let on_disk: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
-    assert_eq!(on_disk.owner_key.as_deref(), Some("owner-bob"));
-    assert!(on_disk.wanted, "the barrier itself stays armed");
-    assert!(
-        !on_disk.is_verified(),
-        "the departed owner's verification must not carry over"
-    );
-    assert!(armed_guard().as_ref().unwrap().intent.owner_key.as_deref() == Some("owner-bob"));
-    cleanup().await;
-    Ok(())
-}
+    fn scratch_dir() -> PathBuf {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let directory = std::env::temp_dir().join(format!(
+            "tono-takeover-test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::SeqCst)
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        directory
+    }
 
-/// The early ownership move is exactly the takeover `arm_bootstrap` allows: it must not happen
-/// while the recorded owner is signed in, for an ownerless intent, or for the owner itself.
-#[tokio::test]
-#[serial]
-async fn prepare_core_start_never_moves_ownership_from_a_signed_in_or_to_the_same_owner()
--> Result<()> {
-    cleanup().await;
-    assert!(!adopt_departed_owner_before_core_stop("owner-bob").await?);
+    fn processes(alive: bool) -> Arc<Processes> {
+        Arc::new(Processes {
+            alive: Box::new(move |_| Some(alive)),
+            boot: Box::new(|| BootStamp {
+                marker: Some("boot".into()),
+                booted_at: None,
+                uptime_ms: None,
+            }),
+            broker: Box::new(|| Ok(Vec::new())),
+        })
+    }
 
-    arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
-    let error = adopt_departed_owner_before_core_stop("owner-bob")
+    fn owner(key: &str) -> crate::core::auth::AuthenticatedOwner {
+        crate::core::auth::AuthenticatedOwner {
+            key: key.to_owned(),
+            identity: crate::OwnerIdentity::Unix {
+                uid: 91_100,
+                gid: 20,
+            },
+            app_data_root: std::env::temp_dir(),
+            peer_pid: None,
+            peer_session_id: None,
+        }
+    }
+
+    /// Alice's barrier armed and verified, her Core running and recorded as the active
+    /// connection, and Alice signed out.
+    async fn alice_departs() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1)))
+            .await;
+        lock(None).await?;
+        mark_verified("owner-alice").await?;
+        let alice = owner("owner-alice");
+        let config = crate::ClashConfig {
+            core_config: crate::CoreConfig {
+                core_path: "/tmp/alice-core".to_owned(),
+                ..Default::default()
+            },
+            log_config: Default::default(),
+        };
+        crate::core::desired::persist_owner_core_started(&alice, &config).await?;
+        crate::core::desired::persist_active_owner(&alice).await?;
+        TEST_OWNER_SIGNED_OUT.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
+    fn recorded_owner() -> Option<String> {
+        armed_guard()
+            .as_ref()
+            .and_then(|armed| armed.intent.owner_key.clone())
+    }
+
+    async fn disk_intent() -> Result<IntentRecord> {
+        Ok(serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?)
+    }
+
+    /// The same two reads `release::worker::owner_refusal` makes under C. That function is
+    /// compiled out of the `test` feature build, so the inputs are read here directly.
+    async fn release_worker_refuses(caller_key: &str) -> Result<bool> {
+        let intent_owner = disk_intent().await?.owner_key;
+        if intent_owner.as_deref().is_some_and(|owner| owner != caller_key) {
+            return Ok(true);
+        }
+        Ok(crate::core::desired::load_active_owner()
+            .await?
+            .is_some_and(|active| active.owner_key != caller_key))
+    }
+
+    async fn run(
+        caller: &str,
+        authority: Authority,
+        processes: Arc<Processes>,
+        stops: &Arc<AtomicUsize>,
+    ) -> std::result::Result<u8, TakeoverError> {
+        let stops = stops.clone();
+        stop_core_for_start(caller, authority, processes, move || async move {
+            stops.fetch_add(1, Ordering::SeqCst);
+            Ok(7u8)
+        })
         .await
-        .expect_err("a signed-in owner's barrier must not be taken over");
-    assert_eq!(
-        error
-            .downcast_ref::<crate::core::auth::ServiceError>()
-            .map(|refusal| refusal.code),
-        Some(crate::ServiceErrorCode::ProtectionHeldByAnotherUser)
-    );
-    assert!(!adopt_departed_owner_before_core_stop("owner-alice").await?);
-    let on_disk: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
-    assert_eq!(on_disk.owner_key.as_deref(), Some("owner-alice"));
-    cleanup().await;
-    Ok(())
+    }
+
+    async fn assert_alice_untouched() -> Result<()> {
+        assert_eq!(recorded_owner().as_deref(), Some("owner-alice"));
+        assert_eq!(disk_intent().await?.owner_key.as_deref(), Some("owner-alice"));
+        assert!(
+            crate::core::desired::load_owner_desired_state("owner-alice")
+                .await?
+                .core_should_be_running,
+            "a refused takeover must not retire the departed owner's connection"
+        );
+        assert!(authorize_write_for("owner-alice").is_ok());
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn the_taking_over_user_becomes_the_owner_before_the_old_core_is_stopped() -> Result<()> {
+        alice_departs().await?;
+        assert!(
+            authorize_write_for("owner-bob").is_err(),
+            "precondition: the departed owner still holds the recorded ownership"
+        );
+        let stops = Arc::new(AtomicUsize::new(0));
+
+        let stopped = run("owner-bob", Authority::new(scratch_dir()), processes(false), &stops)
+            .await
+            .map_err(|error| anyhow::anyhow!("takeover refused: {error:?}"))?;
+
+        assert_eq!(stopped, 7, "the stop's result is the transaction's result");
+        assert_eq!(stops.load(Ordering::SeqCst), 1);
+        assert!(authorize_write_for("owner-bob").is_ok());
+        assert!(authorize_write_for("owner-alice").is_err());
+        let on_disk = disk_intent().await?;
+        assert_eq!(on_disk.owner_key.as_deref(), Some("owner-bob"));
+        assert!(on_disk.wanted, "the barrier itself stays armed");
+        assert!(
+            !on_disk.is_verified(),
+            "the departed owner's verification must not carry over"
+        );
+        assert_eq!(recorded_owner().as_deref(), Some("owner-bob"));
+        cleanup().await;
+        Ok(())
+    }
+
+    /// Codex major 1: the move must be serialised with the release worker. A release holding C
+    /// (or a worker or survivor of the last release still running) refuses the takeover with a
+    /// retryable error, and nothing changes, not even the Core.
+    #[tokio::test]
+    #[serial]
+    async fn a_release_in_flight_refuses_the_takeover_and_changes_nothing() -> Result<()> {
+        alice_departs().await?;
+        let directory = scratch_dir();
+        let stops = Arc::new(AtomicUsize::new(0));
+        {
+            let _release = Authority::new(&directory)
+                .lock(std::time::Duration::from_secs(1))?
+                .expect("the test takes C first");
+            let refusal = run("owner-bob", Authority::new(&directory), processes(false), &stops).await;
+            assert!(
+                matches!(refusal, Err(TakeoverError::Release(AdmissionRefusal::InProgress))),
+                "C held by a release must refuse the takeover as in progress, got {refusal:?}"
+            );
+        }
+        assert_eq!(stops.load(Ordering::SeqCst), 0, "no Core is stopped under a release");
+        assert_alice_untouched().await?;
+
+        let authority = Authority::new(&directory);
+        authority.save(&Record {
+            mode: Mode::Released,
+            generation: 3,
+            worker: Some(Incarnation {
+                pid: 7,
+                started_at: 1,
+            }),
+            ..Record::default()
+        })?;
+        let refusal = run("owner-bob", Authority::new(&directory), processes(true), &stops).await;
+        assert!(
+            matches!(refusal, Err(TakeoverError::Release(AdmissionRefusal::Unfinished(_)))),
+            "a live release worker must refuse the takeover, got {refusal:?}"
+        );
+        assert_eq!(stops.load(Ordering::SeqCst), 0);
+        assert_alice_untouched().await?;
+
+        // The same record with its worker gone does not block: the refusal is retryable.
+        run("owner-bob", Authority::new(&directory), processes(false), &stops)
+            .await
+            .map_err(|error| anyhow::anyhow!("takeover refused: {error:?}"))?;
+        assert_eq!(stops.load(Ordering::SeqCst), 1);
+        assert_eq!(recorded_owner().as_deref(), Some("owner-bob"));
+        cleanup().await;
+        Ok(())
+    }
+
+    /// Codex major 2: moving only the intent owner left the departed owner's active-owner record
+    /// behind, and the release worker's `owner_refusal` reads that record too, so the taking-over
+    /// user's failed-connect release was still refused. The departed owner's connection and
+    /// desired run state retire in the same transaction.
+    #[tokio::test]
+    #[serial]
+    async fn the_takeover_retires_the_departed_owners_connection_so_the_release_worker_admits_the_new_owner()
+    -> Result<()> {
+        alice_departs().await?;
+        assert!(
+            release_worker_refuses("owner-bob").await?,
+            "precondition: the release worker refuses Bob while Alice is on record"
+        );
+        let stops = Arc::new(AtomicUsize::new(0));
+
+        run("owner-bob", Authority::new(scratch_dir()), processes(false), &stops)
+            .await
+            .map_err(|error| anyhow::anyhow!("takeover refused: {error:?}"))?;
+
+        assert!(
+            crate::core::desired::load_active_owner().await?.is_none(),
+            "the departed owner must not stay the active connection"
+        );
+        assert!(
+            !crate::core::desired::load_owner_desired_state("owner-alice")
+                .await?
+                .core_should_be_running,
+            "the departed owner's Core must not be resurrected by a Service restart"
+        );
+        assert!(
+            !release_worker_refuses("owner-bob").await?,
+            "the release worker must admit the taking-over user's release"
+        );
+        assert!(release_worker_refuses("owner-alice").await?);
+        cleanup().await;
+        Ok(())
+    }
+
+    /// Codex major 3, case 1: the rename landed but `atomic_write` reported an error. Memory
+    /// must follow the disk, or the next release is judged against the departed owner.
+    #[tokio::test]
+    #[serial]
+    async fn an_error_after_the_rename_landed_is_resolved_from_the_disk() -> Result<()> {
+        alice_departs().await?;
+        TEST_COMMIT_THEN_ERROR.store(true, Ordering::Relaxed);
+        let stops = Arc::new(AtomicUsize::new(0));
+
+        run("owner-bob", Authority::new(scratch_dir()), processes(false), &stops)
+            .await
+            .map_err(|error| anyhow::anyhow!("a landed write must not fail the takeover: {error:?}"))?;
+
+        assert_eq!(disk_intent().await?.owner_key.as_deref(), Some("owner-bob"));
+        assert_eq!(recorded_owner().as_deref(), Some("owner-bob"));
+        assert!(authorize_write_for("owner-bob").is_ok());
+        assert_eq!(stops.load(Ordering::SeqCst), 1);
+        cleanup().await;
+        Ok(())
+    }
+
+    /// Codex major 3, case 2: a write that never reached the disk changes nothing in memory
+    /// and the Core keeps running.
+    #[tokio::test]
+    #[serial]
+    async fn a_write_that_never_landed_changes_neither_memory_nor_the_core() -> Result<()> {
+        alice_departs().await?;
+        TEST_PERSIST_FAILURE.store(true, Ordering::Relaxed);
+        let stops = Arc::new(AtomicUsize::new(0));
+
+        let failure = run("owner-bob", Authority::new(scratch_dir()), processes(false), &stops).await;
+
+        TEST_PERSIST_FAILURE.store(false, Ordering::Relaxed);
+        assert!(matches!(failure, Err(TakeoverError::State(_))), "got {failure:?}");
+        assert_eq!(stops.load(Ordering::SeqCst), 0);
+        assert_eq!(recorded_owner().as_deref(), Some("owner-alice"));
+        assert_eq!(disk_intent().await?.owner_key.as_deref(), Some("owner-alice"));
+        cleanup().await;
+        Ok(())
+    }
+
+    /// Codex major 3, case 3: a stale or half-written file after the error is neither the old
+    /// nor the new record. It is repaired by writing the old record back, never left for the next
+    /// restart to find, and memory stays on the old owner.
+    #[tokio::test]
+    #[serial]
+    async fn an_unreadable_intent_after_an_error_is_written_back_not_left() -> Result<()> {
+        alice_departs().await?;
+        TEST_INTENT_VERIFY_CORRUPT.store(true, Ordering::Relaxed);
+        let stops = Arc::new(AtomicUsize::new(0));
+
+        let failure = run("owner-bob", Authority::new(scratch_dir()), processes(false), &stops).await;
+
+        assert!(matches!(failure, Err(TakeoverError::State(_))), "got {failure:?}");
+        assert_eq!(stops.load(Ordering::SeqCst), 0);
+        assert_eq!(recorded_owner().as_deref(), Some("owner-alice"));
+        let on_disk = disk_intent()
+            .await
+            .map_err(|error| anyhow::anyhow!("the intent file was left unreadable: {error:#}"))?;
+        assert_eq!(on_disk.owner_key.as_deref(), Some("owner-alice"));
+        assert!(on_disk.wanted);
+        cleanup().await;
+        Ok(())
+    }
+
+    /// The takeover is exactly the one `arm_bootstrap` allows: a recorded owner who is still
+    /// signed in is refused, and nothing is retired, moved or stopped.
+    #[tokio::test]
+    #[serial]
+    async fn a_signed_in_owner_is_never_taken_over() -> Result<()> {
+        alice_departs().await?;
+        TEST_OWNER_SIGNED_OUT.store(false, Ordering::Relaxed);
+        let stops = Arc::new(AtomicUsize::new(0));
+
+        let refusal = run("owner-bob", Authority::new(scratch_dir()), processes(false), &stops).await;
+
+        match refusal {
+            Err(TakeoverError::Refused(error)) => {
+                assert_eq!(error.code, crate::ServiceErrorCode::ProtectionHeldByAnotherUser);
+            }
+            other => panic!("a signed-in owner must be refused, got {other:?}"),
+        }
+        assert_eq!(stops.load(Ordering::SeqCst), 0);
+        assert_alice_untouched().await?;
+        cleanup().await;
+        Ok(())
+    }
+
+    /// Nothing to hand over (no armed protection, or the caller already owns it): the stop runs
+    /// as before and does not wait for C, even while a release holds it.
+    #[tokio::test]
+    #[serial]
+    async fn without_a_departed_owner_the_stop_runs_without_taking_c() -> Result<()> {
+        cleanup().await;
+        let directory = scratch_dir();
+        let _release = Authority::new(&directory)
+            .lock(std::time::Duration::from_secs(1))?
+            .expect("the test takes C first");
+        let stops = Arc::new(AtomicUsize::new(0));
+        run("owner-bob", Authority::new(&directory), processes(false), &stops)
+            .await
+            .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+        assert_eq!(stops.load(Ordering::SeqCst), 1);
+
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-bob").await?;
+        run("owner-bob", Authority::new(&directory), processes(false), &stops)
+            .await
+            .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+        assert_eq!(stops.load(Ordering::SeqCst), 2);
+        assert_eq!(recorded_owner().as_deref(), Some("owner-bob"));
+        cleanup().await;
+        Ok(())
+    }
 }
 
 /// TW-anthropic-1: a first connect from a Remote Desktop (or unreadable) session would arm a

@@ -117,47 +117,6 @@ pub(crate) async fn arm_bootstrap(
     record_outcome(install_unlocked(&armed).await)
 }
 
-/// PrepareCoreStart runs before StartClash and, for a caller that is not the active runtime,
-/// stops the Core the armed barrier's recorded owner left running. If that owner has signed out,
-/// the caller may take the barrier over (`authorize_takeover_for`), but the recorded owner is
-/// only rewritten by the later `arm_bootstrap`. A connect that fails in between would then
-/// release as a user who is not the recorded owner and be refused, stranding the machine Blocked.
-/// This records the caller as owner at the moment the departed owner's Core is stopped.
-///
-/// Returns whether the recorded owner changed. A recorded owner that is still signed in is
-/// refused exactly as `arm_bootstrap` refuses it; an ownerless, unwanted or already-own intent
-/// is left untouched.
-pub(crate) async fn adopt_departed_owner_before_core_stop(caller_key: &str) -> Result<bool> {
-    if caller_key.is_empty() {
-        bail!("taking over armed protection requires the authenticated owner key");
-    }
-    let _operation = WFP_OPERATION.lock().await;
-    // The same rule and the same lock `arm_bootstrap` uses for the write that records a new
-    // owner: a recorded owner who still has a logon session refuses the caller here too.
-    authorize_takeover_for(caller_key).map_err(anyhow::Error::new)?;
-    let Some(mut armed) = armed_guard().clone() else {
-        return Ok(false);
-    };
-    if !armed.intent.wanted
-        || armed
-            .intent
-            .owner_key
-            .as_deref()
-            .is_none_or(|recorded| recorded == caller_key)
-    {
-        return Ok(false);
-    }
-    // Only the recorded owner changes. The filters, mode and Core window stay as they are:
-    // the barrier keeps protecting the machine until the caller's StartClash re-arms it or
-    // the caller's release lifts it. The departed owner's verification is not the caller's.
-    armed.intent.owner_key = Some(caller_key.to_owned());
-    armed.intent.verified = Some(false);
-    armed.intent.updated_at = now_unix();
-    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?).await?;
-    *armed_guard() = Some(armed);
-    Ok(true)
-}
-
 /// Commit the full app verification barrier for the active logical session.
 pub(crate) async fn mark_verified(owner_key: &str) -> Result<()> {
     ensure_supported()?;

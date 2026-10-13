@@ -738,22 +738,6 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     "PrepareCoreStart refused: an explicit release or update takeover superseded this attempt",
                 ));
             }
-            // The Core stopped below may belong to a recorded owner who has signed out; the
-            // takeover is allowed, but the owner on record only changes at StartClash's
-            // `arm_bootstrap`. A connect failing in between releases as this caller, which
-            // `authorize_write_for` refuses while the departed owner is still recorded, and
-            // the machine stays Blocked (#1293 item 1). Record the caller as owner now, under
-            // the same takeover rule, before any Core is stopped; a refusal stops nothing.
-            if let Err(error) =
-                windows_kill_switch::adopt_departed_owner_before_core_stop(&owner.key).await
-            {
-                if let Some(refusal) = error.downcast_ref::<ServiceError>() {
-                    return service_error(refusal.clone());
-                }
-                return service_unavailable(format!(
-                    "Failed to take over the departed owner's protection: {error:#}"
-                ));
-            }
             // Decide under the lifecycle lock but before publishing this route's own operation:
             // the shared proof requires a quiescent snapshot. The lifecycle lock prevents
             // reconciliation from racing a start/stop; CoreManager preserves a supervised process
@@ -776,14 +760,38 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 ServiceOperationKind::PrepareCoreStart,
                 IPC_HANDLER_TIMEOUT,
             );
-            match CORE_MANAGER
-                .lock()
-                .await
-                .prepare_start(preserve_supervised_core)
-                .await
+            // The Core stopped here may belong to a recorded owner who has signed out. The
+            // takeover is allowed, but the owner on record used to change only at StartClash's
+            // `arm_bootstrap`; a connect failing in between released as this caller, which
+            // `authorize_write_for` refuses while the departed owner is still recorded, and the
+            // machine stayed Blocked (#1293 item 1). So the move of the recorded owner, the
+            // retirement of the departed owner's connection and the Core stop are one
+            // transaction under the release authority's lock, refused while a release is in
+            // flight. A recorded owner who is still signed in is refused as `arm_bootstrap`
+            // refuses it, and nothing is stopped.
+            match windows_kill_switch::stop_core_for_start(
+                &owner.key,
+                crate::core::release::Authority::live(),
+                std::sync::Arc::new(crate::core::release::Processes::live()),
+                || async {
+                    CORE_MANAGER
+                        .lock()
+                        .await
+                        .prepare_start(preserve_supervised_core)
+                        .await
+                },
+            )
+            .await
             {
                 Ok(terminated) => ok_json(terminated),
-                Err(error) => service_unavailable(format!(
+                Err(windows_kill_switch::TakeoverError::Refused(refusal)) => service_error(refusal),
+                Err(windows_kill_switch::TakeoverError::Release(refusal)) => {
+                    service_error(release_admission_error(&refusal))
+                }
+                Err(windows_kill_switch::TakeoverError::State(error)) => service_unavailable(format!(
+                    "Failed to take over the departed owner's protection: {error:#}"
+                )),
+                Err(windows_kill_switch::TakeoverError::Stop(error)) => service_unavailable(format!(
                     "Failed to reconcile Tono Core before DNS preflight: {error:#}"
                 )),
             }
