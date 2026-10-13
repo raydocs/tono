@@ -755,6 +755,9 @@ pub async fn retire_unverified_on_service_start() -> Result<bool> {
             // or DNS proof failed, so open general traffic with the AI hold and best-effort DNS.
             // The error still reaches the caller, which then skips desired-Core restore.
             let reason = "stale unverified startup protection could not be retired cleanly";
+            // If the removal below fails, the watchdog's core window retries the release through
+            // `release_unproven_wanted_session_unlocked`, which must then register the request.
+            STARTUP_RETIREMENT_OWES_DNS_FALLBACK.store(true, Ordering::Release);
             if let Err(release_error) =
                 release_general_traffic_requesting_dns_fallback(reason, true, true).await
             {
@@ -768,6 +771,8 @@ pub async fn retire_unverified_on_service_start() -> Result<bool> {
                 ));
                 return Err(error.context("general traffic release is pending a watchdog retry"));
             }
+            // Settled by the wrapper: it registered the request or its restore proved.
+            STARTUP_RETIREMENT_OWES_DNS_FALLBACK.store(false, Ordering::Release);
             let ai = release_ai_hold_note().map_or_else(
                 || " with the AI hold".to_owned(),
                 |note| format!("; {note}"),

@@ -519,9 +519,10 @@ async fn read_dns_state(snapshot: Option<&DnsSnapshot>) -> Result<DnsState> {
                         }
                     }
                 }
-                // A refused call is "the engine is busy", which the caller retries; it is not
-                // evidence about these adapters and must not end up as "registry unreadable".
-                Err(error) if is_engine_busy_refusal(&error) => return Err(error),
+                // A refused call is "the engine is busy" and a spent attempt deadline is "out of
+                // time"; the caller retries both. Neither is evidence about these adapters and
+                // must not end up as "registry unreadable".
+                Err(error) if is_fallback_retryable(&error) => return Err(error),
                 Err(error) => {
                     tracing::warn!("dns: the registry DNS values of the inactive snapshot adapters could not be read: {error:#}");
                     unreadable = absent;
@@ -529,9 +530,10 @@ async fn read_dns_state(snapshot: Option<&DnsSnapshot>) -> Result<DnsState> {
             }
         }
     }
-    // Same for the effective list: a busy engine is returned as busy, not read as "unknown".
+    // Same for the effective list: a busy engine, or a spent deadline, is returned as such, not
+    // read as "unknown".
     let effective = match engine_effective_dns(&adapters).await {
-        Err(error) if is_engine_busy_refusal(&error) => return Err(error),
+        Err(error) if is_fallback_retryable(&error) => return Err(error),
         other => other,
     };
     if let Err(error) = &effective {
@@ -654,7 +656,7 @@ async fn reset_adapters_within(
     }
     let reset = reset_adapters_still_on_tono_dns(file_timeout).await;
     if let Err(error) = &reset {
-        if is_engine_busy_refusal(error) {
+        if is_fallback_retryable(error) {
             return reset;
         }
     }
@@ -667,9 +669,10 @@ async fn reset_adapters_within(
     }
     match (reset, policy) {
         (Ok(adapters), Ok(_)) => Ok(adapters),
-        // A refused policy leg makes the attempt "busy" whatever the adapter leg ended with: the
-        // caller retries on busy, and an ordinary error from the other leg must not hide that.
-        (_, Err(error)) if is_engine_busy_refusal(&error) => Err(error),
+        // A refused or out-of-time policy leg makes the attempt "busy" (or the timeout) whatever
+        // the adapter leg ended with: the caller retries on both, and an ordinary error from the
+        // other leg must not hide that.
+        (_, Err(error)) if is_fallback_retryable(&error) => Err(error),
         (Err(error), _) => Err(error),
         (Ok(_), Err(error)) => Err(error),
     }
@@ -682,6 +685,14 @@ pub(crate) const DNS_FALLBACK_SUPERSEDED_PREFIX: &str = "TONO_DNS_FALLBACK_SUPER
 /// `true` for the error of an attempt that [`DNS_FALLBACK_SUPERSEDED_PREFIX`] marks.
 pub(crate) fn is_fallback_superseded(error: &anyhow::Error) -> bool {
     format!("{error:#}").contains(DNS_FALLBACK_SUPERSEDED_PREFIX)
+}
+
+/// `true` for an error the fallback's caller retries: the engine refused because an abandoned
+/// call holds its claim ([`is_engine_busy_refusal`]), or the attempt used up its deadline
+/// ([`is_fallback_timeout`]). Every place that preserves "busy" through a read or a merge
+/// preserves both, or the loop would take the other for an answer and stop.
+pub(crate) fn is_fallback_retryable(error: &anyhow::Error) -> bool {
+    is_engine_busy_refusal(error) || is_fallback_timeout(error)
 }
 
 /// How long one fallback attempt may take in all: every engine call inside it is bounded by what

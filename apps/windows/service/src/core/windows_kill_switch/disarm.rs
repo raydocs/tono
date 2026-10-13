@@ -276,12 +276,14 @@ async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
 pub(super) async fn release_unproven_wanted_session_unlocked() -> Result<()> {
     // Held until WFP removal commits: no update writer can start under this release (#1292).
     let update_fence = update_release_fence()?;
+    let mut dns_restore_failed = false;
     if let Err(error) = bounded_dns_call(
         "wanted session core window",
         crate::core::dns::ensure_restored(),
     )
     .await
     {
+        dns_restore_failed = true;
         tracing::warn!(
             "wanted-session core window: DNS restore could not be proven; still removing WFP: {error:#}"
         );
@@ -294,6 +296,13 @@ pub(super) async fn release_unproven_wanted_session_unlocked() -> Result<()> {
         "wanted-session core window could not remove WFP; the block stays until the next tick",
     )?;
     clear_wanted_core_window();
+    // The startup retirement of an unverified barrier failed its own removal after a failed DNS
+    // restore and left this retry to finish it: the machine is released now, so the adapter
+    // fallback it owes is requested. Any other session released here is a runtime release and
+    // requests nothing. The debt is settled either way: a restore that proves needs no fallback.
+    if STARTUP_RETIREMENT_OWES_DNS_FALLBACK.swap(false, Ordering::AcqRel) && dns_restore_failed {
+        request_startup_dns_fallback();
+    }
     // The reconnect is owed to the owner of the released session only (#1291).
     let released_owner = armed_guard()
         .take()

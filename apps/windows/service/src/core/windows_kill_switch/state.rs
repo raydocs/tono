@@ -658,7 +658,6 @@ impl Drop for DnsFallbackMarker {
 /// blocked, and the retry (`release_unproven_wanted_session_unlocked`, from the core-window
 /// reconcile) owes the request once its own removal succeeds. Cleared when the request is
 /// registered, when a later restore proves, and by a fresh arm; no other release consults it.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(super) static STARTUP_RETIREMENT_OWES_DNS_FALLBACK: AtomicBool = AtomicBool::new(false);
 
 /// Marks the error of an arm that was refused because a network restore is still writing DNS.
