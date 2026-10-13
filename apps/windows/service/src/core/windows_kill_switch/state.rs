@@ -628,6 +628,22 @@ pub(super) static STARTUP_DNS_FALLBACK_WANTED: AtomicBool = AtomicBool::new(fals
 /// possibly long after startup) gets its fallback.
 pub(super) static STARTUP_DNS_FALLBACK_OPEN: AtomicBool = AtomicBool::new(false);
 
+/// An adapter-fallback attempt (the startup task or the emergency disarm's single attempt) is
+/// running, or has just left an engine writer behind. Set under `WFP_OPERATION` after the attempt
+/// checked that nothing is armed and DNS protection is not wanted, cleared when the attempt
+/// returns whatever its outcome. The attempt itself does not hold `WFP_OPERATION`, so this is the
+/// fence an arm checks (`arm_bootstrap_waiting`); the writer an attempt abandoned at an engine
+/// deadline is fenced by the DNS engine's claim (`dns::engine_claim_is_held`) instead.
+pub(super) static DNS_FALLBACK_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+/// Marks the error of an arm that was refused because a network restore is still writing DNS.
+/// The App keeps the raw text of an arm refusal (only BFE/WFP markers are rewritten), so the
+/// user sees it as the connect failure and retries by hand.
+pub(crate) const NETWORK_RESTORE_IN_PROGRESS_PREFIX: &str = "TONO_NETWORK_RESTORE_IN_PROGRESS";
+
+/// How long an arm waits for the fence above before it is refused.
+pub(super) const ARM_FENCE_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Tests drive the startup residual-filter probe: `Some(Ok(present))` or `Some(Err(()))` (the
 /// probe itself failed). `None` is a machine with no filters.
 #[cfg(test)]

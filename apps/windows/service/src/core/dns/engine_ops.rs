@@ -76,6 +76,78 @@ pub(super) fn refuse_while_claimed(operation: &'static str) -> Result<()> {
     }
 }
 
+/// `true` while a DNS engine call holds the single-writer claim: in flight, or abandoned by a
+/// caller that gave up on it and still running on its blocking thread. Compiled on every target
+/// (it is `false` where there is no engine claim) because the kill-switch arm checks it.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn engine_claim_is_held() -> bool {
+    #[cfg(any(all(windows, not(feature = "test")), test))]
+    {
+        dns_call_slot().is_some()
+    }
+    #[cfg(not(any(all(windows, not(feature = "test")), test)))]
+    {
+        false
+    }
+}
+
+tokio::task_local! {
+    /// The cumulative deadline of the adapter-fallback attempt running on this task, if any.
+    /// Every engine call made under it is bounded by what is left of it, not only by its own
+    /// budget (see [`call_budget`]).
+    pub(super) static DNS_ATTEMPT_DEADLINE: std::time::Instant;
+}
+
+/// The budget an engine call may use: its own, or what is left of the attempt's deadline if that
+/// is less. An attempt whose deadline has passed starts no further call and returns an error that
+/// [`is_fallback_timeout`] recognises.
+#[cfg(any(all(windows, not(feature = "test")), test))]
+pub(super) fn call_budget(
+    own: std::time::Duration,
+    deadline: Option<std::time::Instant>,
+) -> Result<std::time::Duration> {
+    let _ = deadline;
+    Ok(own)
+}
+
+/// [`call_budget`] for the attempt running on this task.
+#[cfg(any(all(windows, not(feature = "test")), test))]
+pub(super) fn current_call_budget(own: std::time::Duration) -> Result<std::time::Duration> {
+    call_budget(own, DNS_ATTEMPT_DEADLINE.try_with(|deadline| *deadline).ok())
+}
+
+/// The budget the stub engine gives one call, standing in for the real `DNS_*_TIMEOUT`s.
+#[cfg(test)]
+const STUB_CALL_BUDGET: std::time::Duration = std::time::Duration::from_secs(25);
+
+/// What `bounded_dns_call` does around a real engine call, for the stub engine: refuse while the
+/// claim is held, take the budget the attempt's deadline leaves, and model a call that is slow
+/// (`set_engine_call_delay`) or that never returns in time (`set_engine_call_times_out`) — the
+/// latter leaves an abandoned call holding the claim and reports the busy error, as the real
+/// timeout does.
+#[cfg(test)]
+async fn stub_engine_call(operation: &'static str) -> Result<()> {
+    refuse_while_claimed(operation)?;
+    let budget = current_call_budget(STUB_CALL_BUDGET)?;
+    test_hooks::record_engine_call_budget(operation, budget);
+    let delay = test_hooks::engine_call_delay(operation);
+    let stuck = test_hooks::engine_call_times_out(operation) || delay.is_some_and(|delay| delay >= budget);
+    if stuck {
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay.min(budget)).await;
+        }
+        test_hooks::park_claim_now().await;
+        return Err(wedged_dns_error(
+            operation,
+            dns_call_in_flight().expect("the parked call holds the claim"),
+        ));
+    }
+    if let Some(delay) = delay {
+        tokio::time::sleep(delay).await;
+    }
+    Ok(())
+}
+
 /// Refusal for a caller that wants to start an engine call while an earlier one is still
 /// inside the loader/registry/Dnscache. Fail-closed: nothing is applied, nothing is restored,
 /// nothing is deleted, and the machine keeps whatever the last completed call left behind —
@@ -255,7 +327,7 @@ pub(super) async fn engine_collect() -> Result<Vec<AdapterDnsSnapshot>> {
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
         #[cfg(test)]
-        refuse_while_claimed("collect")?;
+        stub_engine_call("collect").await?;
         let collected = test_hooks::collected_adapters();
         #[cfg(test)]
         test_hooks::engine_call_returned("collect").await;
@@ -306,7 +378,7 @@ pub(super) async fn engine_read_registry_adapters(
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
         #[cfg(test)]
-        refuse_while_claimed("read registry adapters")?;
+        stub_engine_call("read registry adapters").await?;
         let unreadable = test_hooks::offline_registry_unreadable();
         let offline = test_hooks::offline_registry();
         let active = test_hooks::collected_adapters();
@@ -569,7 +641,7 @@ pub(super) async fn engine_effective_dns(
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
         #[cfg(test)]
-        refuse_while_claimed("read effective DNS")?;
+        stub_engine_call("read effective DNS").await?;
         if test_hooks::effective_dns_fails() {
             bail!("the effective DNS of the adapters could not be read");
         }
@@ -632,7 +704,7 @@ pub(super) async fn engine_reset_families(
         // The stub models "the reset lands completely or not at all", per family: the registry
         // values and the effective list of the reset families stop reading as Tono's.
         #[cfg(test)]
-        refuse_while_claimed("reset families")?;
+        stub_engine_call("reset families").await?;
         let _self_write = SelfWriteWindow::open();
         let ok = !test_hooks::live_apply_fails();
         if ok {
@@ -662,6 +734,8 @@ pub(super) async fn engine_flush_cache() -> Result<()> {
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
+        #[cfg(test)]
+        stub_engine_call("flush").await?;
         Ok(())
     }
 }
@@ -697,7 +771,7 @@ pub(super) async fn engine_restore_encrypted_dns() -> Result<bool> {
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
         #[cfg(test)]
-        refuse_while_claimed("restore encrypted DNS")?;
+        stub_engine_call("restore encrypted DNS").await?;
         #[cfg(test)]
         test_hooks::note_encrypted_restore();
         if test_hooks::encrypted_restore_fails() {

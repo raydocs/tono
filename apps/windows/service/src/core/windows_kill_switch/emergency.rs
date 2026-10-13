@@ -193,7 +193,7 @@ async fn emergency_disarm_with(
         // only the DNS lock, after it). Not wrapped in a timeout: every engine call inside is
         // bounded and refused while an abandoned one holds the claim, and a dropped future would
         // not stop a blocking writer, only leave it running unobserved.
-        let attempt = crate::core::dns::reset_redirected_adapters_to_automatic().await;
+        let attempt = crate::core::dns::reset_redirected_adapters_to_automatic(None).await;
         Some(match attempt {
             Ok(adapters) => {
                 tracing::warn!(

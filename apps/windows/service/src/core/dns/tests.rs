@@ -99,7 +99,7 @@
             ("{B}".to_owned(), vec!["9.9.9.9".parse().unwrap()]),
         ]);
         test_hooks::set_live_dns_on_loopback(true);
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         let reset = test_hooks::take_last_automatic_reset();
         reset_dns_state().await;
         assert_eq!(reset, vec!["{A}".to_owned()]);
@@ -117,7 +117,7 @@
         test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
         test_hooks::set_live_dns_on_loopback(true);
         test_hooks::set_reset_does_not_land(true);
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         reset_dns_state().await;
         assert!(result.is_err(), "the read-back still shows Tono's resolver: {result:?}");
         Ok(())
@@ -133,7 +133,7 @@
         seed_snapshot(vec![adapter("{A}", Some("127.0.0.1"))]).await?;
         test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
         test_hooks::set_live_dns_on_loopback(true);
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         let reset = test_hooks::take_last_automatic_reset();
         reset_dns_state().await;
         assert_eq!(reset, vec!["{A}".to_owned()]);
@@ -153,7 +153,7 @@
             adapter("{B}", Some("127.0.0.1")),
         ]);
         test_hooks::set_live_dns_on_loopback(true);
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         let reset = test_hooks::take_last_automatic_reset();
         reset_dns_state().await;
         assert_eq!(reset, vec!["{A}".to_owned()]);
@@ -170,7 +170,7 @@
         seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
         test_hooks::set_effective_dns_fails(true);
         test_hooks::set_live_dns_on_loopback(true);
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         reset_dns_state().await;
         assert!(result.is_err(), "the machine was not proven off Tono: {result:?}");
         Ok(())
@@ -189,7 +189,7 @@
         ]);
         test_hooks::set_effective_dns_unreadable(vec!["{B}".to_owned()]);
         test_hooks::set_live_dns_on_loopback(true);
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         let reset = test_hooks::take_last_automatic_reset();
         reset_dns_state().await;
         assert_eq!(reset, vec!["{A}".to_owned()], "the readable adapter is still reset");
@@ -216,7 +216,7 @@
             vec!["127.0.0.1".parse().unwrap(), "::1".parse().unwrap()],
         )]);
         test_hooks::set_live_dns_on_loopback(true);
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         let after = test_hooks::collected_adapters();
         reset_dns_state().await;
         assert_eq!(result?, vec!["{A}".to_owned()]);
@@ -239,7 +239,7 @@
         test_hooks::set_offline_registry(vec![adapter("{A}", Some("198.18.0.2"))]);
         test_hooks::set_effective_dns(vec![("{B}".to_owned(), vec!["198.18.0.2".parse().unwrap()])]);
         test_hooks::set_live_dns_on_loopback(true);
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         let mut reset = test_hooks::take_last_automatic_reset();
         reset.sort();
         let offline = test_hooks::offline_registry();
@@ -266,7 +266,7 @@
         test_hooks::set_offline_registry_unreadable(vec!["{A}".to_owned()]);
         test_hooks::set_effective_dns(vec![("{B}".to_owned(), vec!["198.18.0.2".parse().unwrap()])]);
         test_hooks::set_live_dns_on_loopback(true);
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         let reset = test_hooks::take_last_automatic_reset();
         reset_dns_state().await;
         assert_eq!(reset, vec!["{B}".to_owned()], "the readable adapter is still reset");
@@ -288,7 +288,7 @@
         ]);
         test_hooks::set_live_dns_on_loopback(true);
         test_hooks::take_encrypted_restores();
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         let reset = test_hooks::take_last_automatic_reset();
         let policy_restores = test_hooks::take_encrypted_restores();
         let kept = read_snapshot().await;
@@ -311,7 +311,7 @@
         reset_dns_state().await;
         seed_snapshot(vec![adapter("{A}", Some("127.0.0.1"))]).await?;
         test_hooks::set_effective_dns(vec![("{A}".to_owned(), vec!["127.0.0.1".parse().unwrap()])]);
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         let resets = test_hooks::take_automatic_resets();
         reset_dns_state().await;
         assert_eq!(result?, Vec::<String>::new());
@@ -332,7 +332,7 @@
         test_hooks::take_encrypted_restores();
         let claim = test_hooks::park_engine_call().await;
         let started = std::time::Instant::now();
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         let elapsed = started.elapsed();
         let resets = test_hooks::take_automatic_resets();
         let policy_restores = test_hooks::take_encrypted_restores();
@@ -367,7 +367,7 @@
         test_hooks::set_live_dns_on_loopback(true);
         test_hooks::take_encrypted_restores();
         let lock = test_hooks::hold_dns_operation().await;
-        let attempt = tokio::spawn(reset_redirected_adapters_to_automatic());
+        let attempt = tokio::spawn(reset_redirected_adapters_to_automatic(None));
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let waited = !attempt.is_finished();
         test_hooks::set_protection_wanted(true);
@@ -398,7 +398,7 @@
         test_hooks::set_collected_adapters(vec![adapter("{A}", Some("127.0.0.1"))]);
         test_hooks::set_live_dns_on_loopback(true);
         test_hooks::set_encrypted_restore_fails(true);
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         let resets = test_hooks::take_automatic_resets();
         let untouched = test_hooks::collected_adapters();
         reset_dns_state().await;
@@ -418,7 +418,7 @@
         retire_the_seeded_snapshot().await?;
         test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
         test_hooks::set_live_dns_on_loopback(true);
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         let reset = test_hooks::take_last_automatic_reset();
         reset_dns_state().await;
         assert_eq!(reset, vec!["{A}".to_owned()]);
@@ -435,7 +435,7 @@
         seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
         test_hooks::set_collected_adapters(vec![adapter("{A}", Some("127.0.0.1"))]);
         test_hooks::set_live_dns_on_loopback(true);
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         let reset = test_hooks::take_last_automatic_reset();
         reset_dns_state().await;
         assert_eq!(reset, vec!["{A}".to_owned()]);
@@ -457,11 +457,11 @@
         test_hooks::set_live_dns_on_loopback(true);
         test_hooks::take_encrypted_restores();
         test_hooks::park_claim_after("collect", 1);
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         let resets = test_hooks::take_automatic_resets();
         let policy_restores = test_hooks::take_encrypted_restores();
         test_hooks::release_parked_claim();
-        let again = reset_redirected_adapters_to_automatic().await;
+        let again = reset_redirected_adapters_to_automatic(None).await;
         let reset_after_release = test_hooks::take_last_automatic_reset();
         reset_dns_state().await;
         let error = result.expect_err("the effective read was refused");
@@ -486,7 +486,7 @@
         test_hooks::set_offline_registry(vec![adapter("{B}", Some("198.18.0.2"))]);
         test_hooks::set_live_dns_on_loopback(true);
         test_hooks::park_claim_after("collect", 1);
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         let resets = test_hooks::take_automatic_resets();
         test_hooks::release_parked_claim();
         reset_dns_state().await;
@@ -509,7 +509,7 @@
         test_hooks::set_live_dns_on_loopback(true);
         test_hooks::set_reset_does_not_land(true);
         test_hooks::park_claim_after("read effective DNS", 2);
-        let result = reset_redirected_adapters_to_automatic().await;
+        let result = reset_redirected_adapters_to_automatic(None).await;
         test_hooks::release_parked_claim();
         reset_dns_state().await;
         let error = result.expect_err("the reset did not land");
@@ -2507,4 +2507,61 @@
         }
         reset_dns_state().await;
         Ok(())
+    }
+
+    // --- Round 2 review of the adapter reset: one cumulative deadline per attempt ---
+
+    /// An engine call is given its own budget, or what is left of the attempt's deadline if that
+    /// is less; an attempt that is out of time starts no call and says so with its own marker.
+    #[test]
+    fn a_call_budget_is_the_smaller_of_its_own_and_what_the_deadline_leaves() {
+        let own = std::time::Duration::from_secs(25);
+        let now = std::time::Instant::now();
+
+        assert_eq!(call_budget(own, None).unwrap(), own);
+        assert_eq!(
+            call_budget(own, Some(now + std::time::Duration::from_secs(600))).unwrap(),
+            own
+        );
+        let shrunk = call_budget(own, Some(now + std::time::Duration::from_secs(10))).unwrap();
+        assert!(
+            shrunk <= std::time::Duration::from_secs(10) && shrunk > std::time::Duration::from_secs(5),
+            "{shrunk:?}"
+        );
+    }
+
+    #[test]
+    fn a_call_budget_past_the_deadline_is_a_fallback_timeout_error() {
+        let own = std::time::Duration::from_secs(25);
+        let past = std::time::Instant::now();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        let error = call_budget(own, Some(past)).expect_err("no call may start past the deadline");
+
+        assert!(is_fallback_timeout(&error), "{error:#}");
+        assert!(!is_engine_busy_refusal(&error), "an exhausted budget is not a claim refusal");
+    }
+
+    /// The numbers the fallback is documented with.
+    #[test]
+    fn the_fallback_attempt_limits_are_sixty_seconds_and_five_seconds_per_file_read() {
+        assert_eq!(DNS_FALLBACK_ATTEMPT_BUDGET, std::time::Duration::from_secs(60));
+        assert_eq!(DNS_FALLBACK_FILE_READ_TIMEOUT, std::time::Duration::from_secs(5));
+    }
+
+    /// The deadline reaches the engine calls through the task the attempt runs on, and only
+    /// there: a task outside any attempt keeps every call's own budget.
+    #[tokio::test]
+    async fn the_attempt_deadline_is_visible_to_engine_calls_on_its_task_only() {
+        let own = std::time::Duration::from_secs(25);
+        let outside = current_call_budget(own).unwrap();
+        let inside = DNS_ATTEMPT_DEADLINE
+            .scope(
+                std::time::Instant::now() + std::time::Duration::from_secs(2),
+                async { current_call_budget(own).unwrap() },
+            )
+            .await;
+
+        assert_eq!(outside, own);
+        assert!(inside <= std::time::Duration::from_secs(2), "{inside:?}");
     }

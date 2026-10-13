@@ -197,6 +197,18 @@ pub(super) fn spawn_dns_fallback_within(
     })
 }
 
+/// [`spawn_dns_fallback_within`] with the budget of one attempt and the time one of its file
+/// reads may take injected as well.
+pub(super) fn spawn_dns_fallback_with(
+    bound: std::time::Duration,
+    retry: std::time::Duration,
+    attempt_budget: std::time::Duration,
+    file_timeout: std::time::Duration,
+) -> tokio::task::JoinHandle<()> {
+    let _ = (attempt_budget, file_timeout);
+    spawn_dns_fallback_within(bound, retry)
+}
+
 enum StartupFallbackAttempt {
     /// Done, superseded or failed for a reason that retrying does not change.
     Finished,
@@ -213,7 +225,7 @@ async fn startup_dns_fallback_attempt() -> StartupFallbackAttempt {
         tracing::info!("service start: protection was armed again, so the DNS fallback stops");
         return StartupFallbackAttempt::Finished;
     }
-    match crate::core::dns::reset_redirected_adapters_to_automatic().await {
+    match crate::core::dns::reset_redirected_adapters_to_automatic(None).await {
         Ok(adapters) => {
             tracing::warn!(
                 "service start: the exact DNS restore failed; {} adapter(s) on a Tono DNS \

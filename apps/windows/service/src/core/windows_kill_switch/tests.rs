@@ -639,7 +639,9 @@ async fn cleanup() {
     TEST_OWNER_SIGNED_OUT.store(false, Ordering::Relaxed);
     crate::core::dns::test_hooks::set_live_dns_on_loopback(false);
     crate::core::dns::test_hooks::release_parked_claim();
+    crate::core::dns::test_hooks::clear_fault_hooks();
     crate::core::dns::test_hooks::set_protection_wanted(false);
+    DNS_FALLBACK_IN_PROGRESS.store(false, Ordering::Release);
     STARTUP_DNS_FALLBACK_WANTED.store(false, Ordering::Release);
     STARTUP_DNS_FALLBACK_OPEN.store(false, Ordering::Release);
     *TEST_RESIDUAL_PROBE.lock().unwrap() = None;
@@ -2602,12 +2604,14 @@ async fn the_startup_release_retry_requests_the_dns_fallback_when_it_releases_ge
     Ok(())
 }
 
-/// A Connect arms through `WFP_OPERATION`. While a fallback attempt waits for the DNS lock it
-/// already holds `WFP_OPERATION`, so the Connect waits behind the whole attempt instead of arming
-/// in the middle of it and having its freshly redirected DNS reset.
+/// A Connect arms through `WFP_OPERATION`, but an attempt does not hold it (it is held only for the
+/// check that starts the attempt), so the fence is the in-progress marker: while an attempt waits
+/// for the DNS lock a Connect that cannot get through the fence in its wait is refused, instead of
+/// arming in the middle of the attempt and having its freshly redirected DNS reset, or queueing
+/// behind it for as long as the attempt takes.
 #[tokio::test]
 #[serial]
-async fn a_connect_cannot_arm_while_a_startup_fallback_attempt_waits_for_the_dns_lock() -> Result<()> {
+async fn a_connect_is_refused_while_a_startup_fallback_attempt_waits_for_the_dns_lock() -> Result<()> {
     unprovable_redirected_machine_without_wfp().await?;
     let dns_lock = crate::core::dns::test_hooks::hold_dns_operation().await;
 
@@ -2615,11 +2619,9 @@ async fn a_connect_cannot_arm_while_a_startup_fallback_attempt_waits_for_the_dns
         std::time::Duration::from_secs(10),
         std::time::Duration::from_millis(20),
     );
-    let holds_wfp = eventually(|| WFP_OPERATION.try_lock().is_err()).await;
-    let connect = tokio::spawn(async {
-        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await
-    });
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let marked = eventually(|| DNS_FALLBACK_IN_PROGRESS.load(Ordering::Acquire)).await;
+    let wfp_free_while_waiting = WFP_OPERATION.try_lock().is_ok();
+    let refused = connect_waiting(std::time::Duration::from_millis(300)).await;
     let armed_while_waiting = ARMED.lock().unwrap().is_some();
     let resets_while_waiting = crate::core::dns::test_hooks::take_automatic_resets();
     drop(dns_lock);
@@ -2627,19 +2629,24 @@ async fn a_connect_cannot_arm_while_a_startup_fallback_attempt_waits_for_the_dns
         .await
         .expect("the attempt finishes once the DNS lock is free")
         .unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(5), connect)
-        .await
-        .expect("the Connect arms once the attempt is over")
-        .unwrap()?;
     let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    let marker_after = DNS_FALLBACK_IN_PROGRESS.load(Ordering::Acquire);
+    let connect_after = connect_waiting(std::time::Duration::from_millis(300)).await;
     let armed_after = ARMED.lock().unwrap().is_some();
     crate::core::dns::test_hooks::reset_fallback_hooks();
 
-    assert!(holds_wfp, "an attempt waiting for the DNS lock must already hold the WFP lock");
+    assert!(marked, "an attempt waiting for the DNS lock must have set the in-progress marker");
+    assert!(
+        wfp_free_while_waiting,
+        "the attempt must not hold the WFP lock while it waits: the fence is the marker"
+    );
+    assert_restore_in_progress(refused);
     assert!(!armed_while_waiting, "the Connect armed in the middle of the attempt");
     assert_eq!(resets_while_waiting, 0);
-    assert_eq!(resets, 1, "the attempt ran in full before the Connect armed");
-    assert!(armed_after);
+    assert_eq!(resets, 1, "the attempt ran in full");
+    assert!(!marker_after, "the marker is cleared when the attempt returns");
+    connect_after?;
+    assert!(armed_after, "once the attempt is over the Connect arms");
 
     cleanup().await;
     Ok(())
@@ -2757,6 +2764,351 @@ fn the_service_binary_starts_the_startup_fallback_after_the_cache_and_watchdogs_
         from = start + 1;
     }
     assert_eq!(paths, 2, "the SCM path and the standalone path both restore and must both spawn");
+}
+
+// --- Round 2 review of the startup fallback: marker fence, liveness, retirement exit ---
+
+/// A Connect's arm with the time it waits for a network restore injected.
+async fn connect_waiting(wait: std::time::Duration) -> Result<()> {
+    arm_bootstrap_waiting(&test_config(), "/opt/tono/mihomo", "owner-alice", wait).await
+}
+
+/// The arm was refused because a network restore is still writing DNS, with the stable prefix the
+/// App keeps in its connect failure, and armed nothing.
+fn assert_restore_in_progress(refused: Result<()>) {
+    let message = format!("{:#}", refused.expect_err("the Connect must be refused"));
+    assert!(message.contains(NETWORK_RESTORE_IN_PROGRESS_PREFIX), "{message}");
+    assert!(message.contains("retry in a few seconds"), "{message}");
+    assert!(ARMED.lock().unwrap().is_none(), "a refused Connect must arm nothing");
+}
+
+/// A Connect is refused while the in-progress marker is set, after waiting for it, and arms as
+/// soon as the marker is cleared.
+#[tokio::test]
+#[serial]
+async fn a_connect_is_refused_with_the_restore_in_progress_prefix_while_the_marker_is_set() -> Result<()> {
+    unprovable_redirected_machine_without_wfp().await?;
+    DNS_FALLBACK_IN_PROGRESS.store(true, Ordering::Release);
+
+    let started = std::time::Instant::now();
+    let refused = connect_waiting(std::time::Duration::from_millis(300)).await;
+    let waited = started.elapsed();
+    let wfp_free = WFP_OPERATION.try_lock().is_ok();
+    assert_restore_in_progress(refused);
+    DNS_FALLBACK_IN_PROGRESS.store(false, Ordering::Release);
+    connect_waiting(std::time::Duration::from_millis(300)).await?;
+    let armed = ARMED.lock().unwrap().is_some();
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+
+    assert!(waited >= std::time::Duration::from_millis(250), "refused after only {waited:?}");
+    assert!(wfp_free, "a refused Connect must not keep the WFP lock");
+    assert!(armed);
+
+    cleanup().await;
+    Ok(())
+}
+
+/// An abandoned engine call holds the DNS engine's claim for an unbounded time and its thread may
+/// still be writing: a Connect waits for it, and arms if it returns inside the wait.
+#[tokio::test]
+#[serial]
+async fn a_connect_waits_for_an_abandoned_engine_call_and_arms_once_it_returns() -> Result<()> {
+    unprovable_redirected_machine_without_wfp().await?;
+    let claim = crate::core::dns::test_hooks::park_engine_call().await;
+    let claim_held = crate::core::dns::engine_claim_is_held();
+
+    let connect = tokio::spawn(connect_waiting(std::time::Duration::from_secs(5)));
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let finished_while_claimed = connect.is_finished();
+    let armed_while_claimed = ARMED.lock().unwrap().is_some();
+    drop(claim);
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(3), connect)
+        .await
+        .expect("the Connect arms within its wait once the claim is returned")
+        .unwrap();
+    let armed = ARMED.lock().unwrap().is_some();
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+
+    assert!(claim_held);
+    assert!(!finished_while_claimed, "the Connect did not wait for the abandoned writer");
+    assert!(!armed_while_claimed);
+    outcome?;
+    assert!(armed);
+
+    cleanup().await;
+    Ok(())
+}
+
+/// The claim never comes back inside the wait: the Connect is refused, not queued.
+#[tokio::test]
+#[serial]
+async fn a_connect_is_refused_while_an_abandoned_engine_call_still_holds_the_claim() -> Result<()> {
+    unprovable_redirected_machine_without_wfp().await?;
+    let claim = crate::core::dns::test_hooks::park_engine_call().await;
+
+    let started = std::time::Instant::now();
+    let refused = connect_waiting(std::time::Duration::from_millis(300)).await;
+    let waited = started.elapsed();
+    assert_restore_in_progress(refused);
+    drop(claim);
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+
+    assert!(waited >= std::time::Duration::from_millis(250), "refused after only {waited:?}");
+
+    cleanup().await;
+    Ok(())
+}
+
+/// The adapter reset itself overruns its engine deadline: the blocking writer is abandoned and
+/// still holds the claim. The attempt returns and clears the marker, a Connect is still fenced (by
+/// the claim), nothing was applied, and once the writer returns the next attempt starts afresh.
+#[tokio::test]
+#[serial]
+async fn an_attempt_whose_engine_call_times_out_returns_clears_the_marker_and_leaves_the_claim_as_the_fence()
+-> Result<()> {
+    unprovable_redirected_machine_without_wfp().await?;
+    crate::core::dns::test_hooks::set_engine_call_times_out("reset families");
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        spawn_dns_fallback_with(
+            std::time::Duration::ZERO,
+            std::time::Duration::from_millis(20),
+            crate::core::dns::DNS_FALLBACK_ATTEMPT_BUDGET,
+            crate::core::dns::DNS_FALLBACK_FILE_READ_TIMEOUT,
+        ),
+    )
+    .await
+    .expect("an attempt returns even when its engine call timed out")
+    .unwrap();
+    let marker = DNS_FALLBACK_IN_PROGRESS.load(Ordering::Acquire);
+    let claim_held = crate::core::dns::engine_claim_is_held();
+    let wfp_free = WFP_OPERATION.try_lock().is_ok();
+    let resets_after_timeout = crate::core::dns::test_hooks::take_automatic_resets();
+    let refused = connect_waiting(std::time::Duration::from_millis(300)).await;
+    assert_restore_in_progress(refused);
+
+    crate::core::dns::test_hooks::release_parked_claim();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        spawn_dns_fallback_with(
+            std::time::Duration::ZERO,
+            std::time::Duration::from_millis(20),
+            crate::core::dns::DNS_FALLBACK_ATTEMPT_BUDGET,
+            crate::core::dns::DNS_FALLBACK_FILE_READ_TIMEOUT,
+        ),
+    )
+    .await
+    .expect("the next attempt finishes")
+    .unwrap();
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    let reset_adapters = crate::core::dns::test_hooks::take_last_automatic_reset();
+    let claim_after = crate::core::dns::engine_claim_is_held();
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+
+    assert!(!marker, "the marker is cleared when the attempt returns");
+    assert!(claim_held, "the abandoned writer's claim is the fence that remains");
+    assert!(wfp_free, "an attempt that returned holds no WFP lock");
+    assert_eq!(resets_after_timeout, 0, "a timed-out reset applied nothing");
+    assert!(!claim_after);
+    assert_eq!(resets, 1, "the next attempt, after the writer returned, reset the adapter");
+    assert_eq!(reset_adapters, vec!["{ETHERNET}".to_owned()]);
+
+    cleanup().await;
+    Ok(())
+}
+
+/// One of the attempt's two file reads never finishes. The attempt ends at the injected file
+/// timeout (5 s in production) with an ordinary error, so the loop stops instead of retrying, and
+/// it holds nothing: no marker, no WFP lock, no engine claim, no reset.
+async fn a_hung_file_read_ends_the_attempt_at_the_file_timeout(read: &'static str) -> Result<()> {
+    unprovable_redirected_machine_without_wfp().await?;
+    crate::core::dns::test_hooks::set_file_read_hangs(Some(read));
+
+    let started = std::time::Instant::now();
+    let finished = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        spawn_dns_fallback_with(
+            std::time::Duration::from_secs(10),
+            std::time::Duration::from_millis(20),
+            crate::core::dns::DNS_FALLBACK_ATTEMPT_BUDGET,
+            std::time::Duration::from_millis(300),
+        ),
+    )
+    .await;
+    let elapsed = started.elapsed();
+    crate::core::dns::test_hooks::set_file_read_hangs(None);
+    let marker = DNS_FALLBACK_IN_PROGRESS.load(Ordering::Acquire);
+    let wfp_free = WFP_OPERATION.try_lock().is_ok();
+    let claim = crate::core::dns::engine_claim_is_held();
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+
+    finished
+        .expect("a hung file read must end the attempt, and the loop must stop, at the file timeout")
+        .unwrap();
+    assert!(elapsed >= std::time::Duration::from_millis(250), "ended after only {elapsed:?}");
+    assert!(elapsed < std::time::Duration::from_secs(2), "took {elapsed:?}");
+    assert!(!marker && wfp_free && !claim);
+    assert_eq!(resets, 0);
+
+    cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn a_hung_snapshot_read_ends_the_attempt_at_the_file_timeout() -> Result<()> {
+    a_hung_file_read_ends_the_attempt_at_the_file_timeout("snapshot").await
+}
+
+#[tokio::test]
+#[serial]
+async fn a_hung_retirement_marker_read_ends_the_attempt_at_the_file_timeout() -> Result<()> {
+    a_hung_file_read_ends_the_attempt_at_the_file_timeout("retirement").await
+}
+
+/// Every engine call of one attempt is given what is left of the attempt's budget, not its own
+/// full budget: slow-but-successful calls cannot add up past it. The stub makes each call take
+/// 150 ms against a 400 ms attempt; the budgets handed out shrink, the attempt ends when one call
+/// no longer fits, and it holds nothing afterwards.
+#[tokio::test]
+#[serial]
+async fn the_engine_calls_of_one_attempt_share_one_cumulative_deadline() -> Result<()> {
+    unprovable_redirected_machine_without_wfp().await?;
+    crate::core::dns::test_hooks::set_engine_call_delay(None, std::time::Duration::from_millis(150));
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        spawn_dns_fallback_with(
+            std::time::Duration::ZERO,
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_millis(400),
+            crate::core::dns::DNS_FALLBACK_FILE_READ_TIMEOUT,
+        ),
+    )
+    .await
+    .expect("the attempt ends")
+    .unwrap();
+    let budgets = crate::core::dns::test_hooks::take_engine_call_budgets();
+    let marker = DNS_FALLBACK_IN_PROGRESS.load(Ordering::Acquire);
+    let wfp_free = WFP_OPERATION.try_lock().is_ok();
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+
+    assert!(budgets.len() >= 2, "{budgets:?}");
+    assert!(
+        budgets[0].1 <= std::time::Duration::from_millis(400),
+        "the first call got its own budget, not what the attempt had left: {budgets:?}"
+    );
+    assert!(
+        budgets.windows(2).all(|pair| pair[1].1 < pair[0].1),
+        "the budgets must shrink as the attempt's deadline nears: {budgets:?}"
+    );
+    assert!(!marker && wfp_free, "an attempt that ended holds nothing");
+    assert_eq!(resets, 0, "the reset call did not fit in the attempt's budget");
+
+    cleanup().await;
+    Ok(())
+}
+
+/// An attempt that is already out of time starts no engine call at all; its timeout is retried
+/// like a busy engine until the loop's own bound, and it leaves nothing held.
+#[tokio::test]
+#[serial]
+async fn an_attempt_that_is_out_of_time_starts_no_engine_call_and_is_retried_until_the_bound() -> Result<()> {
+    unprovable_redirected_machine_without_wfp().await?;
+
+    let started = std::time::Instant::now();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        spawn_dns_fallback_with(
+            std::time::Duration::from_millis(300),
+            std::time::Duration::from_millis(20),
+            std::time::Duration::ZERO,
+            crate::core::dns::DNS_FALLBACK_FILE_READ_TIMEOUT,
+        ),
+    )
+    .await
+    .expect("the loop ends at its bound")
+    .unwrap();
+    let elapsed = started.elapsed();
+    let budgets = crate::core::dns::test_hooks::take_engine_call_budgets();
+    let marker = DNS_FALLBACK_IN_PROGRESS.load(Ordering::Acquire);
+    let wfp_free = WFP_OPERATION.try_lock().is_ok();
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+
+    assert!(budgets.is_empty(), "no engine call may start past the deadline: {budgets:?}");
+    assert_eq!(resets, 0);
+    assert!(elapsed >= std::time::Duration::from_millis(280), "gave up after only {elapsed:?}");
+    assert!(!marker && wfp_free);
+
+    cleanup().await;
+    Ok(())
+}
+
+/// The emergency disarm's single attempt runs under the `WFP_OPERATION` the disarm already holds;
+/// it still sets the in-progress marker for its duration and clears it when it returns.
+#[tokio::test]
+#[serial]
+async fn the_emergency_attempt_sets_the_marker_and_clears_it() -> Result<()> {
+    arm_an_unprovable_redirected_machine().await?;
+    crate::core::dns::test_hooks::set_engine_call_delay(Some("reset families"), std::time::Duration::from_millis(400));
+
+    let emergency = tokio::spawn(emergency_disarm_windows_kill_switch());
+    let marked = eventually(|| DNS_FALLBACK_IN_PROGRESS.load(Ordering::Acquire)).await;
+    let holds_wfp = WFP_OPERATION.try_lock().is_err();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), emergency)
+        .await
+        .expect("the emergency disarm finishes")
+        .unwrap();
+    let marker_after = DNS_FALLBACK_IN_PROGRESS.load(Ordering::Acquire);
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+
+    assert!(result.is_err(), "the original DNS error is still returned");
+    assert!(marked, "the attempt must set the marker while it runs");
+    assert!(holds_wfp, "the emergency disarm keeps its WFP lock for the whole disarm");
+    assert!(!marker_after, "the marker is cleared when the attempt returns");
+    assert_eq!(resets, 1);
+
+    cleanup().await;
+    Ok(())
+}
+
+/// The startup retirement of an unverified barrier releases general traffic even though the DNS
+/// restore failed, and that is a startup release path like the others: it asks for the adapter
+/// fallback, and the Service binary's spawn point starts it. (The runtime unhealthy-session
+/// release does not.) Without it the machine is released and left on the dead Tono resolver, since
+/// the desired-Core restore is skipped and nothing else would reset the adapters.
+#[tokio::test]
+#[serial]
+async fn startup_retirement_of_an_unverified_barrier_requests_the_dns_fallback_when_it_releases() -> Result<()> {
+    unprovable_redirected_machine_without_wfp().await?;
+    let mut intent = valid_intent(KillSwitchStatusMode::Blocked, true);
+    intent.verified = Some(false);
+    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+
+    restore_on_service_start().await?;
+    let requested_before = startup_dns_fallback_wanted();
+    let armed_before = ARMED.lock().unwrap().is_some();
+    let outcome = retire_unverified_on_service_start().await;
+    let released = ARMED.lock().unwrap().is_none() && !status().await.wanted;
+    let wanted = startup_dns_fallback_wanted();
+    let resets = resets_after_the_spawn_point().await;
+    let reset_adapters = crate::core::dns::test_hooks::take_last_automatic_reset();
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+
+    assert!(armed_before && !requested_before, "the restore itself requests nothing for a wanted intent");
+    assert!(outcome.is_err(), "an unclean retirement is still reported to the caller");
+    assert!(released, "non-strict startup recovery releases general traffic");
+    assert!(wanted, "the retirement's release must request the adapter fallback");
+    assert_eq!(resets, 1, "the spawn point starts the fallback, which resets the adapter once");
+    assert_eq!(reset_adapters, vec!["{ETHERNET}".to_owned()]);
+
+    cleanup().await;
+    Ok(())
 }
 
 // --- The uninstall-only escalation ladder ---

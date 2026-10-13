@@ -152,7 +152,7 @@ mod uninstall;
 pub(crate) use enable::*;
 use enable_decisions::*;
 use engine_ops::*;
-pub(crate) use engine_ops::is_engine_busy_refusal;
+pub(crate) use engine_ops::{engine_claim_is_held, is_engine_busy_refusal};
 pub(crate) use markers::*;
 use name_servers::*;
 use orphaned::*;
@@ -401,6 +401,107 @@ pub(crate) mod test_hooks {
         }
     }
 
+    /// Park an abandoned engine call right now and keep it until [`release_parked_claim`]: what
+    /// a real call that overran its deadline leaves behind.
+    #[cfg(test)]
+    pub(crate) async fn park_claim_now() {
+        let claim = park_engine_call().await;
+        *PARKED_CLAIM
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(claim);
+    }
+
+    #[cfg(test)]
+    static ENGINE_CALL_DELAY: Mutex<Option<(Option<&'static str>, std::time::Duration)>> = Mutex::new(None);
+
+    /// Every stub engine call named `operation` (every call at all for `None`) takes `delay`. A
+    /// delay at least as long as the budget the call was given is a call that timed out.
+    #[cfg(test)]
+    pub(crate) fn set_engine_call_delay(operation: Option<&'static str>, delay: std::time::Duration) {
+        *ENGINE_CALL_DELAY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((operation, delay));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn engine_call_delay(operation: &str) -> Option<std::time::Duration> {
+        let delay = *ENGINE_CALL_DELAY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        delay.and_then(|(name, delay)| name.is_none_or(|name| name == operation).then_some(delay))
+    }
+
+    #[cfg(test)]
+    static ENGINE_CALL_TIMES_OUT: Mutex<Option<&'static str>> = Mutex::new(None);
+
+    /// The next stub engine call named `operation` does not return within its budget: it is
+    /// abandoned holding the claim, nothing is applied, and the caller gets the busy error.
+    #[cfg(test)]
+    pub(crate) fn set_engine_call_times_out(operation: &'static str) {
+        *ENGINE_CALL_TIMES_OUT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(operation);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn engine_call_times_out(operation: &str) -> bool {
+        let mut pending = ENGINE_CALL_TIMES_OUT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *pending == Some(operation) {
+            *pending = None;
+            return true;
+        }
+        false
+    }
+
+    #[cfg(test)]
+    static ENGINE_CALL_BUDGETS: Mutex<Vec<(&'static str, std::time::Duration)>> = Mutex::new(Vec::new());
+
+    #[cfg(test)]
+    pub(crate) fn record_engine_call_budget(operation: &'static str, budget: std::time::Duration) {
+        ENGINE_CALL_BUDGETS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((operation, budget));
+    }
+
+    /// The budgets the stub engine calls were given, in call order, since the last take.
+    #[cfg(test)]
+    pub(crate) fn take_engine_call_budgets() -> Vec<(&'static str, std::time::Duration)> {
+        std::mem::take(
+            &mut *ENGINE_CALL_BUDGETS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+
+    #[cfg(test)]
+    static FILE_READ_HANGS: Mutex<Option<&'static str>> = Mutex::new(None);
+
+    /// The fallback attempt's read of `"snapshot"` or of its `"retirement"` record never
+    /// finishes (a filter driver or a share that does not answer), until cleared with `None`.
+    #[cfg(test)]
+    pub(crate) fn set_file_read_hangs(read: Option<&'static str>) {
+        *FILE_READ_HANGS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = read;
+    }
+
+    /// Called right before the attempt's file read named `read`.
+    #[cfg(test)]
+    pub(crate) async fn file_read_gate(read: &'static str) {
+        for _ in 0..3000 {
+            let hangs = *FILE_READ_HANGS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if hangs != Some(read) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+
     /// Let the abandoned call [`park_claim_after`] left behind return, which releases the claim.
     #[cfg(test)]
     pub(crate) fn release_parked_claim() {
@@ -411,6 +512,20 @@ pub(crate) mod test_hooks {
         drop(claim);
     }
 
+    /// Clear the hooks that make the stub engine slow, stuck or its file reads hang, and the
+    /// record of the budgets it was given.
+    #[cfg(test)]
+    pub(crate) fn clear_fault_hooks() {
+        *ENGINE_CALL_DELAY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        *ENGINE_CALL_TIMES_OUT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        set_file_read_hangs(None);
+        take_engine_call_budgets();
+    }
+
     /// Clear every hook the adapter fallback tests set.
     #[cfg(test)]
     pub(crate) fn reset_fallback_hooks() {
@@ -418,6 +533,7 @@ pub(crate) mod test_hooks {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         release_parked_claim();
+        clear_fault_hooks();
         set_protection_wanted(false);
         set_collected_adapters(Vec::new());
         set_offline_registry(Vec::new());

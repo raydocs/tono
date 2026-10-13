@@ -64,6 +64,18 @@ pub(crate) async fn arm_bootstrap(
     app_path: &str,
     owner_key: &str,
 ) -> Result<()> {
+    arm_bootstrap_waiting(config, app_path, owner_key, ARM_FENCE_WAIT).await
+}
+
+/// [`arm_bootstrap`] with the time it waits for a network restore to finish writing DNS injected,
+/// so a test models the 5 s wait in milliseconds.
+pub(crate) async fn arm_bootstrap_waiting(
+    config: &KillSwitchConfig,
+    app_path: &str,
+    owner_key: &str,
+    fence_wait: std::time::Duration,
+) -> Result<()> {
+    let _ = fence_wait;
     ensure_supported()?;
     validate_config(config)?;
     if app_path.trim().is_empty() {

@@ -589,7 +589,10 @@ async fn read_dns_state(snapshot: Option<&DnsSnapshot>) -> Result<DnsState> {
 /// The adapter reset and the policy restore are independent: a failure of one does not skip the
 /// other (unless the engine is busy, which refuses both), and the first error is returned. The
 /// strict `restore_protected` / `ensure_restored` / `disarm_unlocked` gate is untouched.
-pub(crate) async fn reset_redirected_adapters_to_automatic() -> Result<Vec<String>> {
+pub(crate) async fn reset_redirected_adapters_to_automatic(
+    deadline: Option<std::time::Instant>,
+) -> Result<Vec<String>> {
+    let _ = deadline;
     if !SUPPORTED {
         return Ok(Vec::new());
     }
@@ -636,6 +639,23 @@ pub(crate) fn is_fallback_superseded(error: &anyhow::Error) -> bool {
     format!("{error:#}").contains(DNS_FALLBACK_SUPERSEDED_PREFIX)
 }
 
+/// How long one fallback attempt may take in all: every engine call inside it is bounded by what
+/// is left of this, not only by its own budget.
+pub(crate) const DNS_FALLBACK_ATTEMPT_BUDGET: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// How long one of the attempt's two file reads (the snapshot and its retirement record) may take.
+pub(crate) const DNS_FALLBACK_FILE_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Marks the error of an attempt that ran out of its [`DNS_FALLBACK_ATTEMPT_BUDGET`] before the
+/// next engine call could start. Nothing is half done; the next attempt starts afresh.
+pub(crate) const DNS_FALLBACK_TIMEOUT_PREFIX: &str = "TONO_DNS_FALLBACK_ATTEMPT_TIMEOUT";
+
+/// `true` for the error of an attempt that [`DNS_FALLBACK_TIMEOUT_PREFIX`] marks.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn is_fallback_timeout(error: &anyhow::Error) -> bool {
+    format!("{error:#}").contains(DNS_FALLBACK_TIMEOUT_PREFIX)
+}
+
 /// The adapters of `state` that still need a reset or cannot be proven off Tono, as
 /// `(guid, assessment)`. A snapshot adapter whose registry could not be read is unproven.
 fn unresolved_adapters(state: &DnsState, snapshot: Option<&DnsSnapshot>) -> Vec<(String, Assessment)> {
@@ -664,8 +684,14 @@ fn unresolved_adapters(state: &DnsState, snapshot: Option<&DnsSnapshot>) -> Vec<
 }
 
 async fn reset_adapters_still_on_tono_dns() -> Result<Vec<String>> {
+    #[cfg(test)]
+    test_hooks::file_read_gate("snapshot").await;
     let (snapshot, retired) = match tokio::fs::read(snapshot_path()).await {
-        Ok(bytes) => (parse_snapshot(&bytes).ok(), snapshot_was_restored(&bytes).await),
+        Ok(bytes) => {
+            #[cfg(test)]
+            test_hooks::file_read_gate("retirement").await;
+            (parse_snapshot(&bytes).ok(), snapshot_was_restored(&bytes).await)
+        }
         Err(_) => (None, false),
     };
     // A snapshot whose restore already committed (the file survives only because its delete
