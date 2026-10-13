@@ -3,8 +3,10 @@
 - Chosen: the narrower step. The Service (`apps/windows/service/src/core/direct_admission.rs`) now
   refuses over-broad DIRECT shapes in both cores: a process-path regex is admitted only in the form
   `tono-core` `config::windows_path_regex` writes (`^`, case classes `[Xx]`, the separator class
-  `[\\/]`, escaped specials, an optional final `$`) with at least 12 literal characters, so a bare
-  `^`, `^.*`, `^.+`, a drive root or any group/lookahead is refused; an exact-host pin needs a name
+  `[\\/]`, escaped specials, an optional final `$`) whose decoded path is a drive, a colon and a separator
+  plus at least three characters below the drive root (the shape `is_windows_path_shape` gives every
+  compiler input; short real installs such as `D:\Lark.exe` stay admitted), so a bare `^`, `^.*`,
+  `^.+`, a drive root or any group/lookahead is refused; an exact-host pin needs a name
   with a dot whose last label is not all digits, so `com` or an address is refused. Rejected for this
   PR: binding admission to the signed traffic policy. The App holds the verified policy document and
   its digest at the call (`CapturedTrafficPolicy`), but the Service has no copy of the policy

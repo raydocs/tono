@@ -25,9 +25,8 @@ const WEB_DIRECT_GROUP_NAME: &str = "Tono-China-Web-Direct";
 /// sing-box's compiler takes these; the WFP permit takes `REVIEWED_DIRECT_PORTS`.
 /// A port in only one of them is still bounded by WFP.
 const SING_BOX_PROCESS_PORTS: [u16; 4] = [80, 443, 8080, 8443];
-/// Below any signed install path the compiler writes (drive, folders, executable), so a drive
-/// root or a one-folder prefix is refused.
-const MIN_PATH_REGEX_LITERALS: usize = 12;
+/// Characters a process-path regex must name below the drive root (`D:\\飞书\\` has three).
+const MIN_BELOW_DRIVE_ROOT: usize = 3;
 const MEDIA_PORTS: [u16; 2] = [443, 8000];
 const WEB_SUFFIX_PORTS: [u16; 2] = [80, 443];
 const MIHOMO_LOOPBACK_RULES: [&str; 2] = [
@@ -400,46 +399,55 @@ fn in_range(address: Ipv4Addr, range: &str) -> bool {
 
 /// A process-path regex only in the form `tono-core` `config::windows_path_regex` writes:
 /// `^`, then literal path characters (case classes `[Xx]`, the separator class `[\\/]`,
-/// escaped specials), and at most a final `$`. A bare `^`, `^.*` or any short prefix is a
-/// catch-all for every process, so the literal part must be long enough to name one install.
+/// escaped specials), and at most a final `$`. The literal path must be a drive, a colon and a
+/// separator, then a few characters below the drive root, which is what `is_windows_path_shape`
+/// guarantees for every compiler input. A bare `^`, `^.*`, a drive root or any other
+/// metacharacter is a catch-all for processes the signed-app discovery never named. Short real
+/// installs (`D:\Lark.exe`, `D:\飞书\`) stay admitted: the bound is the structure, not a length
+/// that happens to fit today's products.
 fn regex_ok(regex: &str) -> bool {
     regex
         .strip_prefix('^')
         .filter(|_| payload_safe(regex))
-        .and_then(path_regex_literals)
-        .is_some_and(|literals| literals >= MIN_PATH_REGEX_LITERALS)
+        .and_then(path_regex_chars)
+        .is_some_and(|path| {
+            matches!(path.as_slice(), [drive, ':', '\\', below_root @ ..]
+                if drive.is_ascii_alphabetic() && below_root.len() >= MIN_BELOW_DRIVE_ROOT)
+        })
 }
 
-/// The literal characters in `body`, or `None` for any metacharacter the compiler never writes.
-fn path_regex_literals(body: &str) -> Option<usize> {
+/// The path characters `body` matches, or `None` for any metacharacter the compiler never writes.
+fn path_regex_chars(body: &str) -> Option<Vec<char>> {
     let mut rest = body;
-    let mut literals = 0;
+    let mut path = Vec::new();
     while !rest.is_empty() {
         if rest == "$" {
-            return Some(literals);
+            return Some(path);
         }
         let bytes = rest.as_bytes();
-        let width = if rest.starts_with(r"[\\/]") {
-            5
+        let (character, width) = if rest.starts_with(r"[\\/]") {
+            ('\\', 5)
         } else if bytes.len() >= 4
             && bytes[0] == b'['
             && bytes[3] == b']'
             && bytes[1].is_ascii_uppercase()
             && bytes[2] == bytes[1].to_ascii_lowercase()
         {
-            4
-        } else if ["\\x2c", "\\x28", "\\x29"]
-            .iter()
-            .any(|escape| rest.starts_with(escape))
-        {
-            4
+            (char::from(bytes[1]), 4)
+        } else if rest.starts_with("\\x2c") {
+            (',', 4)
+        } else if rest.starts_with("\\x28") {
+            ('(', 4)
+        } else if rest.starts_with("\\x29") {
+            (')', 4)
         } else if rest.starts_with("\\\\") {
-            2
+            ('\\', 2)
         } else if bytes[0] == b'\\' {
             match bytes.get(1) {
                 Some(
-                    b'.' | b'^' | b'$' | b'*' | b'+' | b'?' | b'{' | b'}' | b'[' | b']' | b'|',
-                ) => 2,
+                    b
+                    @ (b'.' | b'^' | b'$' | b'*' | b'+' | b'?' | b'{' | b'}' | b'[' | b']' | b'|'),
+                ) => (char::from(*b), 2),
                 _ => return None,
             }
         } else {
@@ -447,12 +455,12 @@ fn path_regex_literals(body: &str) -> Option<usize> {
             if ".^$*+?{}[]|()".contains(character) {
                 return None;
             }
-            character.len_utf8()
+            (character, character.len_utf8())
         };
-        literals += 1;
+        path.push(character);
         rest = &rest[width..];
     }
-    Some(literals)
+    Some(path)
 }
 
 /// `tono-core` `config::is_rule_payload_safe`: no separators mihomo would re-split.
@@ -536,10 +544,27 @@ mod tests {
     /// process's reviewed-port traffic DIRECT. Only the compiler's path-regex form is admitted.
     #[test]
     fn a_catch_all_process_regex_is_not_a_compiler_shape() {
-        let signed_install =
-            r"^[Cc]:[\\/][Pp]rogram [Ff]iles[\\/][Tt]encent[\\/][Ww][Ee][Cc][Hh][Aa][Tt][\\/]";
-        assert_eq!(admitted(process_rule(signed_install)), Ok(()));
-        for catch_all in ["^", "^.*", "^.+", r"^[Cc]:[\\/]", "^(?s).*", r"^C:\\.*"] {
+        // What `windows_path_regex` writes for a long install, a short folder and a short file.
+        for signed_install in [
+            r"^[Cc]:[\\/][Pp]rogram [Ff]iles[\\/][Tt]encent[\\/][Ww][Ee][Cc][Hh][Aa][Tt][\\/]",
+            r"^[Dd]:[\\/]飞书[\\/]",
+            r"^[Dd]:[\\/][Ll][Aa][Rr][Kk]\.[Ee][Xx][Ee]$",
+        ] {
+            assert_eq!(
+                admitted(process_rule(signed_install)),
+                Ok(()),
+                "{signed_install}"
+            );
+        }
+        for catch_all in [
+            "^",
+            "^.*",
+            "^.+",
+            r"^[Cc]:[\\/]",
+            "^[Cc]:",
+            "^(?s).*",
+            r"^C:\\.*",
+        ] {
             assert!(admitted(process_rule(catch_all)).is_err(), "{catch_all}");
         }
     }

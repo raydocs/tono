@@ -232,7 +232,7 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
 pub(super) const WINDOWS_OPTIONAL_DIRECT_ENABLED: bool = true;
 
 /// The reviewed process ports `tono_core::sing_box::build_runtime` accepts. Not widened here:
-/// a plan for sing-box carries this set instead of `REVIEWED_DIRECT_PORTS` (#1247).
+/// a plan for sing-box keeps only its ports inside this set (#1247).
 const SING_BOX_REVIEWED_DIRECT_PORTS: [u16; 4] = [80, 443, 8080, 8443];
 
 /// Maximum resolved addresses kept per policy domain (Mac parity).
@@ -1772,15 +1772,23 @@ async fn replace_sing_box_for_direct(
     };
     // #1247: the compiler accepts reviewed process ports only inside its own set, and the plan
     // the App builds carries the mihomo set (`REVIEWED_DIRECT_PORTS`, with 8000). Hand the
-    // compiler its set and ask the Service for no port outside it; the Service still keeps only
-    // what its own `REVIEWED_DIRECT_PORTS` sanctions, so no WFP permit is added.
+    // compiler the plan's ports that are also in its set, which are exactly the ports the
+    // Service will permit: 8443 is the compiler's but not WFP's, and a rule for a port with no
+    // permit would match and then be dropped. The Service still keeps only what its own
+    // `REVIEWED_DIRECT_PORTS` sanctions, so no WFP permit is added.
+    let sing_box_ports: Vec<u16> = plan
+        .reviewed_direct_ports
+        .iter()
+        .copied()
+        .filter(|port| SING_BOX_REVIEWED_DIRECT_PORTS.contains(port))
+        .collect();
     let plan = &tono_core::config::DirectPlan {
-        reviewed_direct_ports: SING_BOX_REVIEWED_DIRECT_PORTS.to_vec(),
+        reviewed_direct_ports: sing_box_ports,
         ..plan.clone()
     };
     let reviewed_direct_ports: Vec<u16> = reviewed_direct_ports
         .into_iter()
-        .filter(|port| SING_BOX_REVIEWED_DIRECT_PORTS.contains(port))
+        .filter(|port| plan.reviewed_direct_ports.contains(port))
         .collect();
     let full_tunnel = super::core_select::sing_box_runtime_document(
         nodes,
