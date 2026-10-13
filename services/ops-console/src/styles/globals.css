@@ -381,4 +381,10 @@ summary.day-head:focus-visible { outline: 2px solid var(--accent); outline-offse
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  /* Radix dialogs and sheets: no scaled or slid first frame when motion is reduced. */
+  [data-slot="dialog-overlay"], [data-slot="dialog-content"],
+  [data-slot="sheet-overlay"], [data-slot="sheet-content"] {
+    animation: none !important;
+    transition: none !important;
+  }
 }
