@@ -343,7 +343,7 @@ pub async fn quit_release(app: AppHandle) -> Result<(), String> {
     result
 }
 
-async fn flush_session_for_exit(
+pub(crate) async fn flush_session_for_exit(
     credentials: impl std::future::Future<Output = Arc<SessionCredentialStore>>,
 ) -> bool {
     matches!(tokio::time::timeout(AUDIT_FLUSH_BUDGET, async {

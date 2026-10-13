@@ -536,29 +536,63 @@ fn admit_install() -> Result<(tokio::sync::MutexGuard<'static, ()>, Cancellation
     Ok((install, cancel, slot))
 }
 
-/// RED-CHECK STUBS: the behavior before the fix. The install is started without flushing the
-/// session, and nothing watches the executor after Install.
+/// How long the Service may report an install as `Launching` before the executor it spawned is
+/// counted lost. The executor consumes the install within seconds (a private-store wait of at
+/// most 15 s, then image checks), so a record still `Launching` after this has no executor that
+/// is making progress. Long enough that a slow start under antivirus is not mistaken for a loss.
 const EXECUTOR_LAUNCH_GRACE: Duration = Duration::from_secs(120);
 const EXECUTOR_LAUNCH_POLL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, PartialEq, Eq)]
 enum ExecutorLaunch {
+    /// The executor consumed the install, or the Service cannot say. The executor and the
+    /// Service's own recovery own the update from here.
     Underway,
+    /// The Service still holds the install as `Launching` (or has returned it to `Staged`):
+    /// the executor died or refused before it stopped the Service.
     Lost,
 }
 
+/// R2UA-F2: Install records `Launching` and nothing else watched the executor. One that exits
+/// before it stops the Service (killed, a repair already running, a refused image binding or
+/// receipt, changed staged components) left Core stopped and the bootstrap block armed with no
+/// automatic release. A Status that cannot be read is no evidence either way (the executor
+/// stops the Service for a real install), so only an answer that still says `Launching` at the
+/// deadline, or `Staged`, is a loss.
 async fn watch_executor_launch<Fut: std::future::Future<Output = Result<UpdateStatus>>>(
-    _status: impl FnMut() -> Fut,
-    _grace: Duration,
-    _poll: Duration,
+    mut status: impl FnMut() -> Fut,
+    grace: Duration,
+    poll: Duration,
 ) -> ExecutorLaunch {
-    ExecutorLaunch::Underway
+    let deadline = tokio::time::Instant::now() + grace;
+    loop {
+        let mut launching = false;
+        match status().await.as_ref().map(|status| status.execution.as_str()) {
+            Ok("Launching") => launching = true,
+            Ok("Reserved" | "Extracting" | "Staged") => return ExecutorLaunch::Lost,
+            Ok(_) => return ExecutorLaunch::Underway,
+            Err(_) => {}
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return if launching { ExecutorLaunch::Lost } else { ExecutorLaunch::Underway };
+        }
+        tokio::time::sleep(poll).await;
+    }
 }
 
+/// WIN-UPDATE-TOKEN-FLUSH: the executor ends this process with TerminateProcess, so the exit
+/// flush (`flush_audit_for_exit`) never runs. A rotated refresh token whose vault write had
+/// failed was then lost with the process. Flush the session once more, retrying its writer,
+/// before the executor is started. A write that still fails does not block the update: the
+/// token stays in memory until this process ends, as it would after any other failed write.
 async fn install_after_session_flush<T>(
-    _flush: impl std::future::Future<Output = bool>,
+    flush: impl std::future::Future<Output = bool>,
     install: impl std::future::Future<Output = T>,
 ) -> T {
+    if !flush.await {
+        logging!(warn, Type::Service,
+            "Tono: the session credential writer did not acknowledge before the update executor started");
+    }
     install.await
 }
 
@@ -574,6 +608,8 @@ pub async fn tono_install_update(
     // only fold the attempt this update invalidated, never a live one.
     let mut invalidated = None;
     let mut preparation_complete = false;
+    // The Service launched the executor and it never took over (R2UA-F2).
+    let mut executor_lost = false;
     let outcome = async {
         let (manifest, signature, decoded) = OFFER.lock().await.clone().context("Check for updates again")?;
         ensure!(
@@ -654,9 +690,12 @@ pub async fn tono_install_update(
         );
         preparation_complete = true;
         let attempt_id = receipt.attempt_id;
-        if let Err(error) = request(UpdateRequest::Install {
+        let session = super::quit::flush_session_for_exit(async {
+            Arc::clone(&state.lock().await.credentials)
+        });
+        if let Err(error) = install_after_session_flush(session, request(UpdateRequest::Install {
             attempt_id: attempt_id.clone(),
-        })
+        }))
         .await
         {
             // Never retry execution after a lost acknowledgement. Query only.
@@ -665,6 +704,17 @@ pub async fn tono_install_update(
                 status.receipt.as_ref().is_some_and(|r| r.attempt_id == attempt_id)
                     && matches!(status.execution.as_str(), "Launching" | "Consumed" | "Replaced"),
                 "{error:#}"
+            );
+        }
+        // On success the executor ends this process; getting past that means it never did.
+        if watch_executor_launch(|| request(UpdateRequest::Status), EXECUTOR_LAUNCH_GRACE, EXECUTOR_LAUNCH_POLL)
+            .await
+            == ExecutorLaunch::Lost
+        {
+            executor_lost = true;
+            anyhow::bail!(
+                "the update executor did not take over within {} seconds",
+                EXECUTOR_LAUNCH_GRACE.as_secs()
             );
         }
         Ok::<_, anyhow::Error>(())
@@ -688,13 +738,16 @@ pub async fn tono_install_update(
         let current = inner.connect_generation;
         let release = quiesce_connection_after_update(&mut inner.fsm, core_running, prepare_failed, invalidated, current);
         super::emit_status(&app, &super::status_of(&inner));
-        release
+        // A lost executor never stopped the Service: Core is stopped and the bootstrap block is
+        // armed with nothing left to release it. Restore internet through the same
+        // update-aware release as a failed Prepare; an explicit strict switch stays blocked.
+        release || executor_lost
     };
     if release {
         if let Err(error) = connection::disconnect_for_generation(
             Arc::clone(state.inner()), app.clone(), invalidated,
         ).await {
-            logging!(warn, Type::Service, "Tono: failed update preparation could not restore internet: {error}");
+            logging!(warn, Type::Service, "Tono: failed update could not restore internet: {error}");
         }
     }
     super::quit::resync_after_cancelled_quit(app).await;
