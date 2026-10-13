@@ -152,6 +152,36 @@ final class ManagedDirectPinStabilityTests: XCTestCase {
         )
     }
 
+    /// A covered host that failed to resolve once and resolves later is not
+    /// adopted: it would only change a pin the runtime never emits, and that
+    /// alone would reload the session.
+    func testNewlyResolvedCoveredWebPinIsNotAnAdoptedChange() {
+        func mixed(_ pins: [ConfigPipeline.DirectDomainPin]) -> ConfigPipeline.ManagedDirectRuntimePolicy {
+            ConfigPipeline.ManagedDirectRuntimePolicy(
+                physicalInterface: "en0",
+                domainPins: [],
+                webDomainPins: pins,
+                webDomainSuffixes: [.init(host: "example.cn", ports: [80, 443])],
+                mediaEndpoints: [],
+                tcpEndpoints: [],
+                directResolverHosts: []
+            )
+        }
+        let uncovered = pin("img.example.org", ["101.32.104.6"])
+        XCTAssertNil(
+            AppState.mergedManagedDirectPolicy(
+                current: mixed([uncovered]),
+                resolved: mixed([uncovered, pin("static.example.cn", ["101.32.104.5"])])
+            ),
+            "only a pin the runtime still dials from may cause a reload"
+        )
+        let adopted = AppState.mergedManagedDirectPolicy(
+            current: mixed([uncovered]),
+            resolved: mixed([uncovered, pin("new.example.org", ["101.32.104.7"])])
+        )
+        XCTAssertEqual(adopted?.webDomainPins.map(\.host), ["img.example.org", "new.example.org"], "an uncovered new host is still adopted")
+    }
+
     func testFullyRotatedPinIsReplaced() {
         let current = policy([pin("cdn.example.com", ["1.1.1.1", "2.2.2.2"])])
         let resolved = policy([pin("cdn.example.com", ["9.9.9.9", "8.8.8.8"])])
