@@ -85,16 +85,13 @@ struct WindowsCoreJob(std::os::windows::io::OwnedHandle);
 
 #[cfg(windows)]
 impl WindowsCoreJob {
-    fn attach(pid: u32) -> Result<Self> {
+    fn create() -> Result<Self> {
         use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
         use windows_sys::Win32::Foundation::HANDLE;
         use windows_sys::Win32::System::JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
             JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
             SetInformationJobObject,
-        };
-        use windows_sys::Win32::System::Threading::{
-            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
         };
 
         let raw_job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
@@ -118,34 +115,26 @@ impl WindowsCoreJob {
             return Err(std::io::Error::last_os_error())
                 .context("failed to configure kill-on-close core Job Object");
         }
+        Ok(Self(job))
+    }
 
-        let raw_process = unsafe {
-            OpenProcess(
-                PROCESS_SET_QUOTA
-                    | PROCESS_TERMINATE
-                    | PROCESS_QUERY_LIMITED_INFORMATION
-                    | windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE,
-                0,
-                pid,
-            )
-        };
-        if raw_process.is_null() {
-            return Err(std::io::Error::last_os_error())
-                .with_context(|| format!("failed to open core process {pid} for Job assignment"));
-        }
-        // SAFETY: `OpenProcess` returned a new owned handle.
-        let process = unsafe { OwnedHandle::from_raw_handle(raw_process.cast()) };
-        if unsafe {
-            AssignProcessToJobObject(
-                job.as_raw_handle() as HANDLE,
-                process.as_raw_handle() as HANDLE,
-            )
-        } == 0
+    /// Join the Core, created suspended, to this Job through the process handle `spawn` returned,
+    /// so the PID cannot have been recycled meanwhile.
+    fn assign(&self, child: &Child) -> Result<()> {
+        use std::os::windows::io::AsRawHandle as _;
+        use windows_sys::Win32::Foundation::HANDLE;
+        use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+
+        let process = child
+            .raw_handle()
+            .context("spawned Windows core did not expose a process handle")?;
+        if unsafe { AssignProcessToJobObject(self.0.as_raw_handle() as HANDLE, process as HANDLE) }
+            == 0
         {
             return Err(std::io::Error::last_os_error())
-                .with_context(|| format!("failed to assign core process {pid} to Job Object"));
+                .context("failed to assign core process to Job Object");
         }
-        Ok(Self(job))
+        Ok(())
     }
 
     fn terminate(&self) -> Result<()> {
@@ -1225,6 +1214,21 @@ impl CoreManager {
     }
 }
 
+/// Test seam between creating the suspended Core and joining the Job: the test proves the Core
+/// has run nothing while it waits here.
+#[cfg(all(test, windows))]
+pub(crate) static TEST_AFTER_CORE_SPAWN: std::sync::Mutex<Option<fn()>> = std::sync::Mutex::new(None);
+
+#[cfg(all(test, windows))]
+fn run_test_after_core_spawn() {
+    let hook = *TEST_AFTER_CORE_SPAWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
 pub async fn run_with_logging(
     bin_path: &str,
     args: &[String],
@@ -1234,16 +1238,22 @@ pub async fn run_with_logging(
     set_or_update_writer(writer_config).await?;
 
     #[cfg(windows)]
-    let child = {
+    let (child, core_job) = {
         let OwnerIdentity::Windows { sid } = owner else {
             return Err(anyhow!("Windows core requires a Windows owner identity"));
         };
-        Command::new(bin_path)
+        let job = WindowsCoreJob::create()?;
+        // Created suspended: the Core (and so any descendant) runs nothing until it has joined
+        // the kill-on-close Job. A Service crash between creation and assignment therefore leaves
+        // a suspended process that never runs, not an unbound Core (WIN-CORE-JOB-SPAWN-WINDOW).
+        let child = Command::new(bin_path)
             .args(args)
             .env("LISTEN_NAMEDPIPE_SDDL", windows_owner_pipe_sddl(sid))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()?
+            .creation_flags(windows_sys::Win32::System::Threading::CREATE_SUSPENDED)
+            .spawn()?;
+        (child, job)
     };
 
     #[cfg(unix)]
@@ -1275,20 +1285,32 @@ pub async fn run_with_logging(
 
     #[cfg(windows)]
     {
+        #[cfg(test)]
+        run_test_after_core_spawn();
+        // Join the Job first, resume second: the Core never runs unbound. A failure at either
+        // step kills it (still suspended or just resumed) before the error is returned.
         let pid = child_guard
             .id()
             .context("spawned Windows core did not expose a PID")?;
-        match WindowsCoreJob::attach(pid) {
-            Ok(job) => child_guard.job = Some(job),
-            Err(error) => {
-                let cleanup = child_guard.kill_now().await;
-                return Err(match cleanup {
-                    Ok(()) => error.context("failed to contain Windows core in a Job Object"),
-                    Err(cleanup) => anyhow!(
-                        "failed to contain Windows core in a Job Object: {error:#}; cleanup also failed: {cleanup:#}"
-                    ),
-                });
+        let contained = match child_guard.inner() {
+            Some(child) => core_job.assign(child),
+            None => Err(anyhow!("spawned Windows core is gone before it joined the Job Object")),
+        };
+        let contained = match contained {
+            Ok(()) => {
+                child_guard.job = Some(core_job);
+                crate::core::process::resume_suspended_process(pid)
             }
+            Err(error) => Err(error),
+        };
+        if let Err(error) = contained {
+            let cleanup = child_guard.kill_now().await;
+            return Err(match cleanup {
+                Ok(()) => error.context("failed to contain Windows core in a Job Object"),
+                Err(cleanup) => anyhow!(
+                    "failed to contain Windows core in a Job Object: {error:#}; cleanup also failed: {cleanup:#}"
+                ),
+            });
         }
     }
 
@@ -1901,6 +1923,60 @@ mod restart_while_recovering_tests {
         manager.stop_core().await?;
         assert_eq!(identity, Some(started_pid), "the recovering watchdog cleared Core B's identity");
         assert_eq!(recorded, started_pid);
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    static CORE_RAN_BEFORE_JOB: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    #[cfg(windows)]
+    static CORE_MARKER: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+    /// WIN-CORE-JOB-SPAWN-WINDOW: a Core that exists but has not joined its kill-on-close Job
+    /// must not have run anything, or a Service crash in that gap leaves it unsupervised.
+    #[cfg(windows)]
+    #[tokio::test]
+    #[serial]
+    async fn the_core_runs_nothing_until_it_has_joined_its_job() -> Result<()> {
+        let marker = std::env::temp_dir().join(format!("tono-core-job-{}", std::process::id()));
+        let _ = std::fs::remove_dir(&marker);
+        CORE_RAN_BEFORE_JOB.store(false, Ordering::SeqCst);
+        *CORE_MARKER.lock().unwrap() = Some(marker.clone());
+        *TEST_AFTER_CORE_SPAWN.lock().unwrap() = Some(|| {
+            // Long enough for an unsuspended cmd.exe to finish `mkdir`.
+            std::thread::sleep(Duration::from_millis(1500));
+            let marker = CORE_MARKER.lock().unwrap().clone().expect("marker path");
+            CORE_RAN_BEFORE_JOB.store(marker.exists(), Ordering::SeqCst);
+        });
+        let logs = std::env::temp_dir().join(format!("tono-core-job-logs-{}", std::process::id()));
+        std::fs::create_dir_all(&logs)?;
+        let started = run_with_logging(
+            "cmd",
+            &["/C".to_owned(), format!("mkdir {}", marker.display())],
+            &WriterConfig {
+                directory: logs.to_string_lossy().into_owned(),
+                max_log_size: 1_000_000,
+                max_log_files: 1,
+            },
+            &owner(),
+        )
+        .await;
+        *TEST_AFTER_CORE_SPAWN.lock().unwrap() = None;
+        let mut guard = started?;
+
+        let resumed = tokio::time::timeout(Duration::from_secs(10), async {
+            while !marker.exists() {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await;
+        let _ = guard.kill_now().await;
+        let _ = std::fs::remove_dir(&marker);
+        assert!(
+            !CORE_RAN_BEFORE_JOB.load(Ordering::SeqCst),
+            "the Core ran before it joined the Job Object"
+        );
+        assert!(resumed.is_ok(), "the Core never ran after it joined the Job Object");
         Ok(())
     }
 }

@@ -478,7 +478,7 @@ pub(super) fn spawn_in_job(
 /// caller terminates the child.
 #[cfg(windows)]
 #[cfg_attr(feature = "test", allow(dead_code))]
-fn resume_suspended_process(pid: u32) -> Result<()> {
+pub(crate) fn resume_suspended_process(pid: u32) -> Result<()> {
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
