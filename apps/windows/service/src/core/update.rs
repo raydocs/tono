@@ -52,7 +52,22 @@ pub(crate) fn executor_possibly_live(recorded: &Image) -> bool {
 
 pub fn pending() -> bool {
     // A locked/unreadable/corrupt store is uncertainty, not absence.
-    open_store().map(|s| s.pending()).unwrap_or(true)
+    open_store()
+        .map(|mut store| {
+            retire_inert(&mut store);
+            store.pending()
+        })
+        .unwrap_or(true)
+}
+
+/// Archive an attempt whose receipt expired before anything was consumed (#1293, decision 119).
+/// It can grant nothing, yet while recorded it fenced every other user's Connect, release and
+/// Disconnect with no exit. A failed archive leaves it pending: uncertainty is not absence.
+fn retire_inert(store: &mut Store) {
+    let Ok(at) = now() else { return };
+    if let Err(error) = store.retire_expired_inert(at) {
+        tracing::warn!("expired unconsumed update attempt could not be archived: {error:#}");
+    }
 }
 
 pub(crate) fn lifecycle_allowed(owner: &AuthenticatedOwner) -> Result<()> {
@@ -61,6 +76,7 @@ pub(crate) fn lifecycle_allowed(owner: &AuthenticatedOwner) -> Result<()> {
         store.state.manual_installer.is_none(),
         "manual installer owns the machine lifecycle"
     );
+    retire_inert(&mut store);
     if !store.pending() {
         return Ok(());
     }
@@ -80,7 +96,8 @@ pub(crate) fn lifecycle_allowed(owner: &AuthenticatedOwner) -> Result<()> {
 }
 
 pub(crate) fn release_allowed() -> Result<()> {
-    let store = open_store()?;
+    let mut store = open_store()?;
+    retire_inert(&mut store);
     ensure!(
         !store.pending() && store.state.manual_installer.is_none(),
         "update pending; release/quit cannot cancel the recorded recovery obligation"
@@ -149,8 +166,9 @@ fn release_admission_at(
     state: &State,
     live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
 ) -> Result<()> {
+    // Not clock-proof by design: an unreadable clock counts as not expired, so it keeps refusing.
     ensure!(
-        !state.pending(),
+        !state.blocks_at(now().unwrap_or(0)),
         "update pending; release/quit cannot cancel the recorded recovery obligation"
     );
     no_live_lease(state, live).context("manual installer owns the machine lifecycle")?;
@@ -177,19 +195,57 @@ fn release_admission_at(
 /// incomplete, never a missed attempt.
 pub(crate) fn attempt_pending_read_only() -> Option<bool> {
     let mut cached = PENDING_FOR_STATUS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    // A cached "pending" re-reads once its time bound passes, which may free an inert attempt. A
+    // cached "not pending" that rests on the receipt having expired is dropped unless the clock
+    // still confirms it (a failed or regressed clock must not keep an unproven answer).
+    if cached.is_some_and(|entry| status_cache_stale(entry, now().ok())) {
+        *cached = None;
+    }
     if cached.is_none() {
         *cached = match read_store_state() {
-            Ok(state) => Some(state.pending()),
+            Ok(state) => {
+                let at = now().ok();
+                let pending = state.blocks_at(at.unwrap_or(0));
+                // Only a never-consumed attempt can be freed by time; a live executor past the
+                // expiry is probed again shortly, as it may exit before consuming.
+                Some((pending, status_cache_bound(state.expiry_frees_attempt(), pending, at)))
+            }
             Err(error) => {
                 tracing::warn!("update state unreadable for status; reporting it as unknown: {error:#}");
                 None
             }
         };
     }
-    *cached
+    cached.map(|(pending, _)| pending)
 }
 
-static PENDING_FOR_STATUS: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
+/// Whether a cached answer must be read again at clock reading `at` (`None`: the clock failed).
+fn status_cache_stale((pending, bound): (bool, u64), at: Option<u64>) -> bool {
+    if pending {
+        at.is_some_and(|at| at >= bound)
+    } else {
+        bound != u64::MAX && !at.is_some_and(|at| at >= bound)
+    }
+}
+
+/// The time bound stored with a freshly read answer; `expires` is
+/// [`State::expiry_frees_attempt`]. Only a never-consumed attempt can be freed by time; a live
+/// executor past the expiry is probed again shortly, as it may exit before consuming.
+fn status_cache_bound(expires: Option<u64>, pending: bool, at: Option<u64>) -> u64 {
+    match expires {
+        Some(expires) if pending => match at {
+            Some(at) if at >= expires => at.saturating_add(30),
+            _ => expires,
+        },
+        Some(expires) => expires,
+        None => u64::MAX,
+    }
+}
+
+/// `(pending, time bound)`: a pending answer is re-read at the bound; a not-pending answer that
+/// rests on an expired receipt is valid only while the clock is at or past it. `u64::MAX` when
+/// time cannot change the answer.
+static PENDING_FOR_STATUS: std::sync::Mutex<Option<(bool, u64)>> = std::sync::Mutex::new(None);
 
 /// The manual installer lease check for update requests. Only `Status`, the read the App sends
 /// before its release, passes a conclusively dead holder (Service half of BRICK-W2); every other
@@ -465,12 +521,14 @@ pub(crate) async fn request(
     let mut refresh = StatusCacheRefresh(None);
     let result = transact(owner, request).await;
     refresh.0 = result.as_ref().ok().map(|status| {
-        status.receipt.as_ref().is_some_and(|r| r.phase != Phase::Committed)
+        let pending = status.receipt.as_ref().is_some_and(|r| r.phase != Phase::Committed);
+        let expires = status.receipt.as_ref().filter(|_| pending).map_or(u64::MAX, |r| r.expires_at_unix);
+        (pending, expires)
     });
     result
 }
 
-struct StatusCacheRefresh(Option<bool>);
+struct StatusCacheRefresh(Option<(bool, u64)>);
 
 impl Drop for StatusCacheRefresh {
     fn drop(&mut self) {
@@ -487,6 +545,13 @@ async fn transact(
     update_lease_gate(&request, &store.state, super::process::process_identity)?;
     let _repair =
         crate::acquire_service_repair_gate()?.context("repair/uninstall already running")?;
+    // The owner's own Disconnect must release first: archiving an expired attempt under it would
+    // turn the release into a no-op status that the App takes for done (#1293).
+    let own_release = request.is_disconnect()
+        && store.state.attempt.as_ref().is_some_and(|a| a.receipt.owner == owner.key);
+    if !own_release {
+        retire_inert(&mut store);
+    }
     if let Some(a) = &store.state.attempt
         && store.pending()
     {
@@ -2916,6 +2981,41 @@ mod tests {
             "a killed lease holder still counted as alive"
         );
         drop(child);
+    }
+
+    #[test]
+    fn update_status_cache_never_keeps_an_unproven_expiry_answer() {
+        // Not pending only because the receipt expired: dropped when the clock fails or regresses.
+        assert!(status_cache_stale((false, 100), None));
+        assert!(status_cache_stale((false, 100), Some(99)));
+        assert!(!status_cache_stale((false, 100), Some(100)));
+        assert!(!status_cache_stale((false, u64::MAX), None));
+        // Pending: read again once the bound passes, never on a failed clock.
+        assert!(status_cache_stale((true, 100), Some(100)));
+        assert!(!status_cache_stale((true, 100), None));
+        // A live executor past the expiry is probed again shortly, not never.
+        assert_eq!(status_cache_bound(Some(100), true, Some(150)), 180);
+        assert_eq!(status_cache_bound(Some(100), true, Some(50)), 100);
+        assert_eq!(status_cache_bound(Some(100), false, Some(150)), 100);
+        assert_eq!(status_cache_bound(None, true, Some(150)), u64::MAX);
+    }
+
+    /// #1293: an attempt that expired before anything was consumed can never act, yet it fenced
+    /// every other user's release, Connect and Disconnect for good. It stops blocking at its
+    /// receipt expiry; a consumed attempt keeps its recovery obligation whatever the clock says.
+    #[test]
+    fn update_release_admission_frees_an_expired_unconsumed_attempt() {
+        let (root, store, _, _) = crate::update_transaction::tests::reserved();
+        let mut state = store.state.clone();
+        state.attempt.as_mut().unwrap().receipt.expires_at_unix = 1;
+        release_admission_at(&state, |_| Ok(None))
+            .expect("an expired attempt that consumed nothing kept fencing another user");
+        state.attempt.as_mut().unwrap().execution = Execution::Consumed;
+        state.consumed_sequence = state.attempt.as_ref().unwrap().manifest.release_sequence;
+        let consumed = release_admission_at(&state, |_| Ok(None)).unwrap_err();
+        assert!(format!("{consumed:#}").contains("update pending"), "{consumed:#}");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// #1307: only the install's helper copy may take the repair lease; the uninstaller runs the
