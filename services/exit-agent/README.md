@@ -120,7 +120,13 @@ stop `tono-xray` afterwards and start it again only when the node is
 re-enabled. `shared-legacy` comes back only when Xray restarts and reloads its
 static config, so re-enabling a node whose Xray kept running leaves it removed.
 The node keeps getting this answer after its token is rotated while disabled:
-disabling saves the deployed token's hash, which only ever earns the 403. Any
+disabling saves the deployed token's hash, which only ever earns the 403. A
+token rotated away on an active node earns the same 403 (message "Exit node
+token was superseded by a rotation", printed after the withdrawal): the agent
+removes its clients until the new token is deployed, then the next round
+reconciles again; restart `tono-xray` to restore `shared-legacy`. Only one
+superseded hash is kept (the slot disabling uses), so an older token whose
+hash was overwritten still gets a plain 401. Any
 other HTTP error or network failure keeps the last roster and retries.
 
 Xray drops every client added over its management API when it restarts. Each

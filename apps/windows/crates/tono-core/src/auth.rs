@@ -314,11 +314,10 @@ pub fn decode_auth_response(body: &[u8]) -> Result<AuthResponse, ApiError> {
     struct Envelope {
         auth: Option<AuthResponse>,
     }
-    if let Ok(envelope) = serde_json::from_slice::<Envelope>(body) {
-        if let Some(auth) = envelope.auth {
+    if let Ok(envelope) = serde_json::from_slice::<Envelope>(body)
+        && let Some(auth) = envelope.auth {
             return Ok(auth);
         }
-    }
     serde_json::from_slice::<AuthResponse>(body).map_err(|_| ApiError::InvalidResponse)
 }
 
@@ -1538,11 +1537,10 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
             if state.identity_epoch != identity {
                 return Err(ApiError::Unauthorized);
             }
-            if state.epoch != stale_epoch {
-                if let Some(token) = &state.access_token {
+            if state.epoch != stale_epoch
+                && let Some(token) = &state.access_token {
                     return Ok(token.clone());
                 }
-            }
             self.credentials.refresh_token()?.ok_or(ApiError::Unauthorized)?
         };
         let body = serde_json::to_string(&RefreshRequest {

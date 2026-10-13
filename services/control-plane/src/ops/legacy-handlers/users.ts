@@ -18,8 +18,9 @@ import {
   upsertHomeBinding,
   parseHomeLine,
   findSocks5Home,
-  assertHomeExitBindable,
+  assertHomeExitBindable, assertPastedPasswordMatches,
 } from '../../home';
+import { requireCan, resolveOpsRole } from '../roles';
 import {
   PRODUCT_CLAUDE,
   accountRefField,
@@ -203,6 +204,7 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
   const parsedLine = b.line !== undefined && b.line !== null && b.line !== ''
     ? parseHomeLine(b.line)
     : null;
+  if (parsedLine) requireCan('settings.publish', resolveOpsRole(actor.email, e)); // inventory write
   const user = await e.DB.prepare('SELECT * FROM users WHERE email = ?').bind(address).first<Row>();
   if (parsedLine) {
     const home = await findSocks5Home(e, parsedLine.host, parsedLine.port, parsedLine.username);
@@ -218,6 +220,7 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       if (user && parsedLine.password === String(home.socks5_password)) {
         await assertHomeExitBindable(e, String(user.id), String(home.id));
       }
+      assertPastedPasswordMatches(home, parsedLine.password);
     }
   }
   if (user && !parsedLine && b.homeExitId) {

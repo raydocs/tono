@@ -258,16 +258,65 @@ fn report_gate_panics(mode: &str, reason_file: Option<PathBuf>) {
     }));
 }
 
+/// Written to the reason file of a manual gate (update, orphan or uninstall) that PASSED by taking
+/// over a lease its previous holder never handed back. NSIS only tests that the file exists; a
+/// refusal writes its own text there. Every installer that ends normally hands its lease back
+/// (finish after a completed install, or a cancel before any file changed), so a lease still
+/// held by a dead holder is one that mutated files and failed or was killed
+/// (W9-RESOURCE-CANCEL-REPAIR).
+const LEASE_INHERITED: &str = "TONO_MANUAL_LEASE_INHERITED";
+
+/// Whether a lease is recorded before this gate takes it. The store may be busy for a moment
+/// (the Service or another helper), so it is waited for, as the executor does; a store that still
+/// cannot be read counts as held, and the gate then refuses on its own account.
+fn manual_lease_recorded() -> bool {
+    match open_waiting() {
+        Ok(store) => store.state.manual_installer.is_some(),
+        Err(_) => true,
+    }
+}
+
+/// The marker is a control signal, not a diagnostic: a gate that took over a lease but could not
+/// say so would let the cancelled wizard release it. Failing here refuses the gate and leaves
+/// the lease recorded, which the next installer inherits in turn.
+fn mark_lease_inherited(reason_file: Option<&Path>) -> Result<(), Error> {
+    use std::io::Write as _;
+    use std::os::windows::fs::OpenOptionsExt as _;
+    let Some(path) = reason_file else {
+        return Ok(());
+    };
+    let bytes: Vec<u8> = format!("{LEASE_INHERITED}\r\n")
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    // A fresh name in the installer's own plug-ins directory: never follow or reuse one.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+        .and_then(|mut file| file.write_all(&bytes))
+        .with_context(|| format!("could not record the inherited installer lease in {path:?}"))
+}
+
 pub(super) fn dispatch() -> Result<bool, Error> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if let Some((mode, reason_file)) = gate_invocation(&args) {
         report_gate_panics(&mode, reason_file.clone());
+        // Each gate mode takes the same lease.
+        let inherits_lease = manual_lease_recorded();
         let outcome = match mode.as_str() {
             "--manual-update-gate" => manual_update_gate(bring_scm_bfe_up, || {
                 super::shared::block_on_abandoning(native::begin_manual())?
             }),
             "--manual-orphan-gate" => native::begin_manual_orphan().map(|()| None),
             _ => native::begin_manual_uninstall().map(|()| None),
+        };
+        let outcome = match outcome {
+            Ok(note) if inherits_lease => {
+                mark_lease_inherited(reason_file.as_deref()).map(|()| note)
+            }
+            other => other,
         };
         let report = native::GateReport::for_machine(reason_file);
         std::process::exit(finish_gate(&mode, &report, outcome));
@@ -2188,6 +2237,36 @@ mod tests {
             Some("another manual installer is active: Un_A.exe (pid 4242) holds the lease")
         );
         assert_eq!(lines.next(), Some(log.display().to_string().as_str()));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// W9-RESOURCE-CANCEL-REPAIR: the marker is the only way the cancelled wizard learns it holds
+    /// an inherited lease, so it is never best-effort: a name that already exists is refused.
+    #[test]
+    fn update_manual_gate_marks_an_inherited_lease_or_refuses() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-lease-marker-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let reason = root.join("reason.txt");
+        mark_lease_inherited(Some(&reason)).unwrap();
+        let written = std::fs::read(&reason).unwrap();
+        let written = String::from_utf16(
+            &written
+                .chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        assert!(written.starts_with(LEASE_INHERITED), "{written}");
+        assert!(
+            mark_lease_inherited(Some(&reason)).is_err(),
+            "an existing reason file is never reused"
+        );
+        assert!(mark_lease_inherited(None).is_ok());
         std::fs::remove_dir_all(&root).unwrap();
     }
 

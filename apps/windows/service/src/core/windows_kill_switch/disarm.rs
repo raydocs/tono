@@ -358,6 +358,11 @@ pub(super) async fn reconcile_wanted_core_window_unlocked() -> Result<WantedCore
     let Some(armed) = armed_guard().clone() else {
         return Ok(WantedCoreWindow::Keep);
     };
+    if incomplete_recovery_superseded(&armed) {
+        tracing::info!("wfp: the App re-established its DIRECT lease; the incomplete-reload release is withdrawn");
+        withdraw_incomplete_recovery_window();
+        return Ok(WantedCoreWindow::Keep);
+    }
     let watching = WANTED_CORE_DEADLINE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)

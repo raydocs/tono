@@ -576,7 +576,8 @@ extension AccountSession {
         if accountLost {
             await sidecar.stop()
             let resumeProtection = shouldResumeProtection
-            await api.logout(); clearAccount(); state = .signedOut
+            let durable = await api.logout(); clearAccount(); state = .signedOut
+            noteSignOutDurability(durable)
             shouldResumeProtection = resumeProtection
         } else {
             guard entitlementRefusals == refusals else { return }
@@ -610,6 +611,14 @@ extension AccountSession {
         appRoutingResearchActivationConsumer()
     }
 
+    /// A sign-out whose credential removal could not be made durable still
+    /// signs this process out, but a relaunch may restore the account, so the
+    /// notice says that instead of claiming the sign-out is complete.
+    func noteSignOutDurability(_ durable: Bool) {
+        guard !durable else { return }
+        signInError = String(localized: "Tono signed you out, but could not erase its saved sign-in on this Mac, so it may sign you back in after a restart. Check available disk space and Tono's Application Support folder permissions, then sign out again.")
+    }
+
     func clearAccount() {
         DiagnosticsLogOwnership.shared.abandon()
         invalidateAccountReads()
@@ -637,6 +646,13 @@ extension AccountSession {
         deviceActionError = nil
         entitlementDetail = nil
         blockedWhileReady = false
+        // Diagnostic and spacing state of the account just cleared. The
+        // traffic policy itself is fleet-wide and stays installed.
+        lastTrafficPolicyRevision = nil
+        lastCatalogFailureMessage = nil
+        lastTrafficPolicyFailureMessage = nil
+        lastConnectFailureAt = nil
+        lastPeriodicTelemetryAt = nil
         // An offline admission described the account just cleared (#582),
         // and so did Tono's acceptance of its session (R612-O5).
         api.offlineGate.leaveOffline()

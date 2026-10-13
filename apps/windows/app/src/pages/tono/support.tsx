@@ -190,17 +190,19 @@ const SupportPage = () => {
   })
 
   // DNS warning markers (TONO_DNS_UNVERIFIED / TONO_DNS_RESTORE_DEGRADED /
-  // TONO_DNS_CAPTURE_QUARANTINED / TONO_DNS_POLICY_CONFLICT) ride in dnsLastError by design but
-  // are not failures — the tunnel stays protected. Showing them under "last error" panics users
+  // TONO_DNS_CAPTURE_QUARANTINED / TONO_DNS_POLICY_CONFLICT / TONO_DNS_SELECTIVE_POLICY_SUPPRESSED)
+  // ride in dnsLastError by design but are not failures — the tunnel stays protected. Showing them under "last error" panics users
   // for a healthy connection, so they get their own row. The first three mirror
   // DNS_WARNING_MARKERS in src-tauri/src/tono/connection_health.rs. The policy conflict is the
   // Service's separate resolver_policy_warning, which only the diagnostics report folds into
-  // dnsLastError.
+  // dnsLastError. TONO_DNS_SELECTIVE_POLICY_SUPPRESSED is the same advisory for the released AI
+  // hold: domain NRPT policy makes Windows ignore the hold's local rules (#1145).
   const dnsWarningMarkers = [
     'TONO_DNS_UNVERIFIED',
     'TONO_DNS_RESTORE_DEGRADED',
     'TONO_DNS_CAPTURE_QUARANTINED',
     'TONO_DNS_POLICY_CONFLICT',
+    'TONO_DNS_SELECTIVE_POLICY_SUPPRESSED',
   ]
   const dnsWarning =
     report?.dnsLastError &&
