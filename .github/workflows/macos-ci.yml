@@ -18,7 +18,11 @@ on:
   # release/macos and release/windows still trigger, so a commit that exists
   # only on a release line is tested. sing-box-input skips the macos-26 jobs
   # when that push's SHA is already on main (a fast-forward of a tree main
-  # already ran). The jobs' `if` is false, so they are not queued.
+  # already ran), and when a push to main is a merge commit whose macOS paths
+  # match a pull-request head that already passed (or this SHA itself already
+  # has a successful suite, which is what the merge queue lands). The jobs'
+  # `if` is false, so they are not queued. A direct push, a macOS-path
+  # conflict, or an API failure still runs.
   push:
     branches:
       - main
@@ -48,7 +52,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Release-branch duplicate skip
         run: node --test tooling/scripts/tests/macos-ci-skip-duplicate.test.mjs
-      - name: Skip a release-branch push whose commit is already on main
+      - name: Skip a macOS suite that already passed for this tree
         id: decide
         env:
           GH_TOKEN: ${{ github.token }}
@@ -56,22 +60,10 @@ jobs:
           REF_NAME: ${{ github.ref }}
         run: |
           set -euo pipefail
-          status=unknown
-          ahead=1
-          case "$EVENT_NAME:$REF_NAME" in
-            push:refs/heads/release/macos|push:refs/heads/release/windows)
-              if meta=$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${GITHUB_SHA}" --jq '{status:.status,ahead_by:.ahead_by}'); then
-                parsed=$(printf '%s' "$meta" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const j=JSON.parse(s);if(typeof j.status!=="string"||typeof j.ahead_by!=="number")process.exit(1);process.stdout.write(j.status+" "+j.ahead_by)})')
-                status=${parsed%% *}
-                ahead=${parsed##* }
-              else
-                echo "compare API failed; running the macOS suite" >&2
-              fi
-              ;;
-          esac
-          skip=$(node tooling/scripts/macos-ci-skip-duplicate.mjs --event "$EVENT_NAME" --ref "$REF_NAME" --status "$status" --ahead-by "$ahead")
+          skip=$(node tooling/scripts/macos-ci-skip-duplicate.mjs --decide)
+          case "$skip" in true|false) ;; *) echo "bad skip token" >&2; exit 1 ;; esac
           echo "skip=$skip" >> "$GITHUB_OUTPUT"
-          printf 'macos-ci duplicate skip=%s event=%s ref=%s sha=%s status=%s ahead=%s\n' "$skip" "$EVENT_NAME" "$REF_NAME" "$GITHUB_SHA" "$status" "$ahead" | tee -a "$GITHUB_STEP_SUMMARY"
+          printf 'macos-ci duplicate skip=%s event=%s ref=%s sha=%s\n' "$skip" "$EVENT_NAME" "$REF_NAME" "$GITHUB_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Build and verify fixed darwin-arm64 input
         if: steps.decide.outputs.skip != 'true'
         run: sh tooling/scripts/prepare-macos-sing-box.sh
