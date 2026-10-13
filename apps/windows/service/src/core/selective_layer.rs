@@ -42,6 +42,34 @@ fn worker_guard() -> MutexGuard<'static, WorkerState> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// #1145: set while the hold is installed but Windows is not applying Tono's local per-suffix
+/// NRPT rules, because domain (Group Policy) NRPT policy exists. Cleared when the hold is removed.
+static NRPT_SUPPRESSION: Mutex<Option<String>> = Mutex::new(None);
+
+fn nrpt_suppression_slot() -> MutexGuard<'static, Option<String>> {
+    NRPT_SUPPRESSION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The degraded reason of the installed hold, for the DNS status: `Some` when the DNS Client
+/// ignores Tono's suffix rules. The firewall prefixes stay in force; the AI DNS hold for names
+/// outside them does not.
+pub(crate) fn nrpt_suppression() -> Option<String> {
+    nrpt_suppression_slot().clone()
+}
+
+/// Judge the effective NRPT right after the suffix rules were written. Reports only; Tono never
+/// edits or removes enterprise policy and writes no catch-all to compensate.
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+fn record_nrpt_suppression(effective: Result<Vec<super::dns::EffectiveNrptRule>, String>) {
+    let verdict = super::dns::selective_hold_suppression(effective.as_deref());
+    if let Some(reason) = &verdict {
+        tracing::warn!("selective fail-open: {reason}");
+    }
+    *nrpt_suppression_slot() = verdict;
+}
+
 /// True only when the requested state was reached natively within the wait budget.
 async fn request(apply_narrow: bool) -> bool {
     let (revision, mut completed, start) = {
@@ -113,6 +141,11 @@ fn reconcile_blocking() {
 #[cfg(test)]
 static TEST_HOLD_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// What the effective-NRPT read returns right after the stubbed install; `None` is an ordinary
+/// machine whose local store carries Tono's suffix rules.
+#[cfg(test)]
+static TEST_EFFECTIVE_NRPT: Mutex<Option<Vec<super::dns::EffectiveNrptRule>>> = Mutex::new(None);
+
 #[cfg(test)]
 static TEST_ACTIVE_HOLD_REMOVALS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
@@ -157,6 +190,7 @@ fn firewall_command(
 
 #[cfg(all(windows, not(feature = "test")))]
 fn remove_blocking() {
+    *nrpt_suppression_slot() = None;
     run_commands(&selective_fail_open::firewall_delete_commands());
     if let Err(error) = super::dns::remove_selective_nrpt() {
         tracing::warn!("selective fail-open: NRPT sinkhole could not be removed: {error:#}");
@@ -178,13 +212,18 @@ fn apply_blocking() -> bool {
     }
     if let Err(error) = super::dns::install_selective_nrpt() {
         tracing::warn!("selective fail-open: NRPT sinkhole was not installed: {error:#}");
+        *nrpt_suppression_slot() = None;
         applied = false;
+    } else {
+        // Written is not in force: domain NRPT policy makes the DNS Client ignore the local store.
+        record_nrpt_suppression(super::dns::effective_nrpt_rules_now());
     }
     applied
 }
 
 #[cfg(not(all(windows, not(feature = "test"))))]
 fn remove_blocking() {
+    *nrpt_suppression_slot() = None;
     #[cfg(test)]
     {
         let pause = tests::pause(&tests::REMOVE_PAUSE);
@@ -203,6 +242,18 @@ fn apply_blocking() -> bool {
     {
         let pause = tests::pause(&tests::APPLY_PAUSE);
         TEST_HOLD_ACTIVE.store(true, std::sync::atomic::Ordering::SeqCst);
+        record_nrpt_suppression(Ok(TEST_EFFECTIVE_NRPT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .unwrap_or_else(|| {
+                // The ordinary machine: only the local store, so the suffix rules are in force.
+                vec![super::dns::EffectiveNrptRule {
+                    namespaces: vec!["anthropic.example".to_owned()],
+                    generic_dns_servers: vec![selective_fail_open::SINKHOLE_DNS.to_owned()],
+                    tono_owned: false,
+                }]
+            })));
         if let Some(pause) = pause {
             pause.completed.notify_one();
         }
@@ -288,6 +339,43 @@ mod tests {
 
         assert!(held, "the requested AI hold must remain installed");
         assert_eq!(after, before, "reapplying the same hold must never delete it first");
+    }
+
+    /// #1145: any domain NRPT policy, even for an unrelated namespace, makes the DNS Client ignore
+    /// the local store the hold writes to. The hold must say so in the DNS status instead of
+    /// reporting an install that has no effect, and must still change nothing else.
+    #[tokio::test]
+    #[serial]
+    async fn domain_nrpt_policy_over_the_ai_hold_is_reported_in_the_dns_status() {
+        let warning = || async { crate::core::dns::status().await.resolver_policy_warning };
+        remove().await;
+        *TEST_EFFECTIVE_NRPT.lock().unwrap() = Some(vec![crate::core::dns::EffectiveNrptRule {
+            namespaces: vec![".corp.example".to_owned()],
+            generic_dns_servers: vec!["10.0.0.53".to_owned()],
+            tono_owned: false,
+        }]);
+        finish_release(true).await;
+        let held = test_hold_active();
+        let suppressed = warning().await;
+        remove().await;
+        let after_remove = warning().await;
+        *TEST_EFFECTIVE_NRPT.lock().unwrap() = None;
+        finish_release(true).await;
+        let ordinary = warning().await;
+        remove().await;
+
+        assert!(
+            held,
+            "the hold stays installed; the policy is reported, never fought"
+        );
+        assert!(
+            suppressed.is_some_and(
+                |text| text.contains(crate::core::dns::DNS_SELECTIVE_POLICY_SUPPRESSED_PREFIX)
+            ),
+            "an unrelated domain namespace suppresses the local suffix rules"
+        );
+        assert_eq!(after_remove, None, "no hold, no degraded reason");
+        assert_eq!(ordinary, None, "an ordinary machine reports nothing");
     }
 
     #[tokio::test]
