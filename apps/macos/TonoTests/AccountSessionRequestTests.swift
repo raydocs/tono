@@ -59,6 +59,14 @@ nonisolated private final class HeldAccountProtocol: URLProtocol, @unchecked Sen
     }
 }
 
+/// Lets a fixture's recovery-record writer fail only after the account is set up.
+private final class RecordSwitch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var on = false
+    var isOn: Bool { lock.lock(); defer { lock.unlock() }; return on }
+    func turnOn() { lock.lock(); on = true; lock.unlock() }
+}
+
 @MainActor
 final class AccountSessionRequestTests: XCTestCase {
     private func fixture(
@@ -72,7 +80,8 @@ final class AccountSessionRequestTests: XCTestCase {
         offlineGate: OfflineGrantGate? = nil,
         installedCatalogConsumer: @escaping @MainActor () -> InstalledCatalogDigests? = { nil },
         keychainUpdate: @escaping @Sendable (CFDictionary, CFDictionary) -> OSStatus = { SecItemUpdate($0, $1) },
-        keychainDelete: @escaping @Sendable (CFDictionary) -> OSStatus = { SecItemDelete($0) }
+        keychainDelete: @escaping @Sendable (CFDictionary) -> OSStatus = { SecItemDelete($0) },
+        recoveryRecord: @escaping @Sendable (String, URL) throws -> Void = { try RuntimeCleanup.writeSynced($0, to: $1) }
     ) -> (AccountSession, URLSession, String, AsyncStream<HeldAccountProtocol>) {
         let host = "\(UUID().uuidString.lowercased()).invalid"
         let (requests, continuation) = AsyncStream<HeldAccountProtocol>.makeStream()
@@ -83,7 +92,8 @@ final class AccountSessionRequestTests: XCTestCase {
         let keychain = KeychainStore(
             service: "app.tono.tests.account-requests.\(host)",
             suppressionDirectory: testSuppressionDirectory(host),
-            updateItem: keychainUpdate, deleteItem: keychainDelete
+            updateItem: keychainUpdate, deleteItem: keychainDelete,
+            writeRecoveryRecord: recoveryRecord
         )
         let api = TonoAPIClient(
             baseURL: URL(string: "https://\(host)")!, keychain: keychain, session: transport,
@@ -2831,6 +2841,125 @@ final class AccountSessionRequestTests: XCTestCase {
         me.respond(status: 200, body: #"{"user":{"id":"original","email":"old@example.test"}}"#)
         _ = try await read.value
         XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "test-only-refresh")
+    }
+
+    func testSignOutWhoseKeychainDeleteFailsStaysSignedOutAcrossClientRelaunch() async throws {
+        let (account, transport, host, requests) = fixture(
+            keychainDelete: { _ in errSecInteractionNotAllowed }
+        )
+        defer {
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            try? FileManager.default.removeItem(at: testSuppressionDirectory(host))
+        }
+        try await adoptTestAccount(account)
+        let logout = Task { await account.api.logout() }
+        let revoke = try await nextRequest(requests)
+        XCTAssertTrue(revoke.request.url?.path.hasSuffix("/auth/logout") == true)
+        revoke.respond(status: 204, body: "")
+        await logout.value
+
+        XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "test-only-refresh", "the delete really failed")
+        let restorable = try await account.api.hasRestorableSession()
+        XCTAssertFalse(restorable)
+        let relaunched = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory)
+        )
+        let relaunchRestorable = try await relaunched.hasRestorableSession()
+        XCTAssertFalse(relaunchRestorable, "a sign-out whose delete failed must not restore the account")
+    }
+
+    func testClearAccountDropsThePreviousAccountsDiagnosticResidue() {
+        let (account, transport, host, _) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        account.lastTrafficPolicyRevision = 7
+        account.lastCatalogFailureMessage = "catalog failed"
+        account.lastTrafficPolicyFailureMessage = "policy failed"
+        account.lastConnectFailureAt = Date()
+        account.lastPeriodicTelemetryAt = Date()
+        account.clearAccount()
+        XCTAssertNil(account.lastTrafficPolicyRevision)
+        XCTAssertNil(account.lastCatalogFailureMessage)
+        XCTAssertNil(account.lastTrafficPolicyFailureMessage)
+        XCTAssertNil(account.lastConnectFailureAt)
+        XCTAssertNil(account.lastPeriodicTelemetryAt)
+    }
+
+    func testSignOutWhoseDeleteAndTombstoneBothFailStillStaysSignedOutAcrossClientRelaunch() async throws {
+        let recordsRefused = RecordSwitch()
+        let (account, transport, host, requests) = fixture(
+            keychainDelete: { _ in errSecInteractionNotAllowed },
+            recoveryRecord: { text, url in
+                if recordsRefused.isOn { throw POSIXError(.ENOSPC) }
+                try RuntimeCleanup.writeSynced(text, to: url)
+            }
+        )
+        defer {
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            try? FileManager.default.removeItem(at: testSuppressionDirectory(host))
+        }
+        try await adoptTestAccount(account)
+        recordsRefused.turnOn()
+        let logout = Task { await account.api.logout() }
+        let revoke = try await nextRequest(requests)
+        XCTAssertTrue(revoke.request.url?.path.hasSuffix("/auth/logout") == true)
+        revoke.respond(status: 204, body: "")
+        await logout.value
+
+        XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "test-only-refresh", "the delete really failed")
+        XCTAssertFalse(try testKeychain(host).isRefreshTokenRestorationSuppressed(), "the tombstone really failed")
+        let relaunched = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory)
+        )
+        let relaunchRestorable = try await relaunched.hasRestorableSession()
+        XCTAssertFalse(relaunchRestorable, "without a tombstone the adoption proof must go, or the account comes back")
+    }
+
+    func testSignOutWithNoDurableRecordAtAllReportsItAndRefusesTheOldCredentialInProcess() async throws {
+        let (account, transport, host, requests) = fixture(
+            keychainDelete: { _ in errSecInteractionNotAllowed }
+        )
+        let directory = testSuppressionDirectory(host)
+        defer {
+            // Restore write access first so the cleanup below can remove it.
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try await adoptTestAccount(account)
+        // A directory nobody can write to refuses both the tombstone and the
+        // removal of the adoption proof, on top of the failing keychain delete.
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+        let logout = Task { await account.api.logout() }
+        let revoke = try await nextRequest(requests)
+        XCTAssertTrue(revoke.request.url?.path.hasSuffix("/auth/logout") == true)
+        revoke.respond(status: 204, body: "")
+        let durable = await logout.value
+
+        XCTAssertFalse(durable, "nothing durable was written, and the caller must be told")
+        XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "test-only-refresh", "the delete really failed")
+        let restorable = try await account.api.hasRestorableSession()
+        XCTAssertFalse(restorable, "this process must still refuse the old credential")
+
+        account.noteSignOutDurability(durable)
+        XCTAssertTrue(
+            account.signInError?.contains("sign you back in after a restart") == true,
+            "the notice must say a restart may restore the account"
+        )
+    }
+
+    func testDurableSignOutLeavesNoSignInNotice() {
+        let (account, transport, host, _) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        account.noteSignOutDurability(true)
+        XCTAssertNil(account.signInError)
     }
 
     func testFailedSignInKeychainWriteAndDeleteSuppressesOldAccountAcrossClientRelaunch() async throws {
