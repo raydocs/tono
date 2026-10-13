@@ -2621,7 +2621,13 @@ async fn a_connect_is_refused_while_a_startup_fallback_attempt_waits_for_the_dns
     );
     let marked = eventually(|| DNS_FALLBACK_IN_PROGRESS.load(Ordering::Acquire)).await;
     let wfp_free_while_waiting = WFP_OPERATION.try_lock().is_ok();
-    let refused = connect_waiting(std::time::Duration::from_millis(300)).await;
+    // Bounded by the test: a Connect that queued behind an attempt waiting for the DNS lock this
+    // test holds would otherwise never return.
+    let refused = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        connect_waiting(std::time::Duration::from_millis(300)),
+    )
+    .await;
     let armed_while_waiting = ARMED.lock().unwrap().is_some();
     let resets_while_waiting = crate::core::dns::test_hooks::take_automatic_resets();
     drop(dns_lock);
@@ -2640,7 +2646,9 @@ async fn a_connect_is_refused_while_a_startup_fallback_attempt_waits_for_the_dns
         wfp_free_while_waiting,
         "the attempt must not hold the WFP lock while it waits: the fence is the marker"
     );
-    assert_restore_in_progress(refused);
+    assert_restore_in_progress(
+        refused.expect("a Connect must be refused by the marker, not queue behind the attempt"),
+    );
     assert!(!armed_while_waiting, "the Connect armed in the middle of the attempt");
     assert_eq!(resets_while_waiting, 0);
     assert_eq!(resets, 1, "the attempt ran in full");
