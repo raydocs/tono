@@ -753,6 +753,30 @@ class ReporterTests(unittest.TestCase):
             self.assertEqual(saved["peerCounters"]["stable-new"]["lastRawBytes"], 500)
             self.assertEqual(len(saved["peerCounters"]), reporter.MAX_INVENTORY_DEVICES + 1)
 
+    def test_a_full_baseline_store_keeps_metering_known_peers_and_leaves_new_ones_unbilled(self) -> None:
+        # HOME-AGENT-PEER-RETENTION-CAP: retention is bounded, and reaching the
+        # bound must not stop reports. A peer with a saved baseline keeps
+        # reporting its growth; a new one is not charged (its raw history would
+        # be charged again next round) and not saved. This pins the behavior
+        # #1439 introduced; it was not red on the code it ran against.
+        with mock.patch.object(reporter, "MAX_RETAINED_PEER_BASELINES", 2):
+            state = {
+                "totals": {"user-old": 7},
+                "peerCounters": {
+                    "stable-old-1": {"userId": "user-old", "lastRawBytes": 100},
+                    "stable-old-2": {"userId": "user-old", "lastRawBytes": 5},
+                },
+            }
+            observed = reporter.attribute_peer_counters(
+                state,
+                {"public-old": "user-old", "public-new": "user-new"},
+                {},
+                {"stable-old-1": ("public-old", 150), "stable-new": ("public-new", 500)},
+            )
+            self.assertEqual(observed, {"user-old": 57})
+            self.assertEqual(set(state["peerCounters"]), {"stable-old-1", "stable-old-2"})
+            self.assertEqual(state["peerCounters"]["stable-old-1"]["lastRawBytes"], 150)
+
     def test_duplicate_pending_report_ids_are_rejected(self) -> None:
         report = {
             "reportId": "same-report",
