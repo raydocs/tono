@@ -254,11 +254,22 @@ mod tests {
         imp::clear().expect("clear");
     }
 
+    /// Restores the shared in-memory record even when an assertion fails, so one failure does
+    /// not poison every later test that clears it.
+    struct Reset;
+
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            reset();
+        }
+    }
+
     /// Codex block on #1624: a delete that fails must never leave a record that a later crash
     /// would be read through. Only "the record no longer reads" counts as invalidated.
     #[test]
     #[serial]
     fn a_record_that_survives_the_delete_is_not_invalidated() {
+        let _reset = Reset;
         reset();
         record().unwrap();
         imp::CLEAR_REPORTS_ERROR.store(true, Ordering::SeqCst);
@@ -276,6 +287,7 @@ mod tests {
     #[test]
     #[serial]
     fn a_record_gone_by_any_route_is_invalidated() {
+        let _reset = Reset;
         reset();
         record().unwrap();
         // The key delete reported an error but the value fallback removed the record.
