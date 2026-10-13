@@ -521,6 +521,15 @@ fn regex_for_verified_reviewed_direct_exe(
     {
         return None;
     }
+    // Like the WeChat path: only a plain drive path becomes a rule. `normalize_windows_display_path`
+    // turns a canonical `\\?\UNC\server\share\app.exe` into the relative `UNC\server\...`, which
+    // matches no process, and the Service refuses a non-drive regex for the whole DIRECT runtime.
+    if !matches!(
+        normalized.as_bytes(),
+        [drive, b':', b'\\', ..] if drive.is_ascii_alphabetic()
+    ) {
+        return None;
+    }
     let parent = parent_directory(&normalized)?;
     if is_reviewed_direct_data_folder(file_name(parent)) {
         return None;
@@ -1434,6 +1443,23 @@ mod tests {
         )
         .unwrap();
         assert!(untrusted.ends_with('$'));
+    }
+
+    /// A UNC install (plain, or the canonical `\\?\UNC\` form the discovery chain sees) is not a
+    /// drive path: it must yield no rule instead of one the Service refuses for the whole runtime.
+    #[test]
+    fn a_unc_install_yields_no_reviewed_direct_regex() {
+        for path in [
+            r"\\nas\apps\Lark.exe",
+            r"\\?\UNC\nas\apps\Lark.exe",
+            r"UNC\nas\apps\Lark.exe",
+            r"//nas/apps/Lark.exe",
+        ] {
+            assert!(regex_for_verified_feishu_exe(path).is_none(), "{path}");
+            let ding = path.replace("Lark.exe", "DingTalk.exe");
+            assert!(regex_for_verified_dingtalk_exe(&ding).is_none(), "{ding}");
+        }
+        assert!(regex_for_verified_feishu_exe(r"D:\Apps\Feishu.exe").is_some());
     }
 
     #[test]
