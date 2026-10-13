@@ -404,7 +404,7 @@ async fn release_failed_preparation(
     let cleared = desired::clear_active_owner().await;
     // Automatic failure opens general traffic but retains the secondary AI hold.
     // Desired-state failures must not prevent the DNS/WFP release.
-    wfp::release_applying_narrow().await?;
+    wfp::release_applying_narrow_if_owed().await?;
     stopped?;
     persisted?;
     cleared?;
@@ -700,7 +700,7 @@ async fn transact(
                     if executor_spawn_failure_releases(wfp::strict_kill_switch_enabled()) {
                         let released = async {
                             begin_update_release(&mut store, owner, &peer)?;
-                            wfp::release_applying_narrow().await?;
+                            wfp::release_applying_narrow_if_owed().await?;
                             if let Err(clear_error) = desired::clear_active_owner().await {
                                 tracing::warn!(
                                     "executor did not start; general traffic was released, \

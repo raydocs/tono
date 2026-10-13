@@ -1070,6 +1070,8 @@ async fn replacement_preserves_automatic_ai_recovery_disposition() -> Result<()>
 #[serial]
 async fn interrupted_update_emergency_release_replays_the_ai_hold() -> Result<()> {
     cleanup().await;
+    // A protected session: an update failure owes it the hold.
+    arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
     TEST_INTERRUPT_RELEASE_FOLLOW_UP.store(true, Ordering::SeqCst);
     emergency_disarm_windows_kill_switch_applying_narrow().await?;
     crate::core::selective_layer::remove().await; // The pre-release hold died with the process.
@@ -2139,6 +2141,18 @@ async fn failed_update_recovery_does_not_install_an_ai_hold_for_an_unprotected_u
     let held = crate::core::selective_layer::test_hold_active();
     cleanup().await;
     assert!(!held, "an unprotected user or an explicit Restore owes no AI hold after a failed update");
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn failed_update_recovery_keeps_the_hold_an_earlier_automatic_release_left() -> Result<()> {
+    cleanup().await;
+    release_applying_narrow().await?; // a crash-style release: durable AI disposition, nothing armed
+    emergency_disarm_windows_kill_switch_applying_narrow().await?;
+    let held = crate::core::selective_layer::test_hold_active();
+    cleanup().await;
+    assert!(held, "a retained automatic AI hold must survive a failed update's release");
     Ok(())
 }
 

@@ -537,9 +537,10 @@ async fn commit_marker_when_durable(state: Arc<TonoState>, generation: u64) {
 }
 
 /// Adopt a verified sign-in that may replace an account which never signed out. A tunnel still
-/// running (or starting, or releasing) the previous account's runtime is retired first with
-/// sign-out semantics: the connection generation is invalidated and `release` runs the ordered
-/// DNS → Core → WFP release. A failed release refuses the adoption and keeps that protection
+/// running (or starting, or releasing) the previous account's runtime is retired first: the
+/// connection generation is invalidated and `release` runs the ordered DNS → Core → WFP release.
+/// Production passes `release_for_account_replacement`, which keeps the AI hold (decision 125);
+/// explicit Sign Out and Restore keep their full release. A failed release refuses the adoption and keeps that protection
 /// armed. An idle armed barrier (Protected Offline) has no runtime to retire and stays up.
 pub(crate) async fn adopt_replacing_with<R, RF>(
     state: &Arc<TonoState>, client: &Arc<crate::tono::state::TonoApiClient>,

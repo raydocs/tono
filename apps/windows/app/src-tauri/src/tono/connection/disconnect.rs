@@ -88,8 +88,13 @@ pub(crate) enum InternalRelease {
 }
 
 /// Whether this internal release keeps the secondary AI hold after general traffic opens.
-pub(crate) const fn internal_release_applies_narrow(_kind: InternalRelease) -> bool {
-    false
+/// Decision 125: Quit and account replacement restore ordinary internet but keep the hold until
+/// Tono reopens and connects, or the user chooses Restore internet (the only full release, which
+/// dominates an overlapping Quit through [`TonoState::begin_release`]).
+pub(crate) const fn internal_release_applies_narrow(kind: InternalRelease) -> bool {
+    match kind {
+        InternalRelease::Quit | InternalRelease::AccountReplacement => true,
+    }
 }
 
 /// Quit releases like [`release_explicit`], but with the disposition `Quit` owns.

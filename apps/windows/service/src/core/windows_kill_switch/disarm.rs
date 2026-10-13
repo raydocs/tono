@@ -484,6 +484,48 @@ pub(crate) async fn release_applying_narrow() -> Result<KillSwitchStatus> {
     release_with(true).await
 }
 
+/// Decision 031 / 125: a failed native update keeps the AI hold an armed or crash-released
+/// session is owed, and never installs a new one for a user who was Unprotected or had just
+/// chosen Restore internet. `intent` is the intent file as read; `None` means it does not exist.
+fn ai_hold_owed_by(armed_wanted: bool, intent: Option<std::io::Result<Vec<u8>>>) -> bool {
+    if armed_wanted {
+        return true;
+    }
+    match intent {
+        // Never armed, or removed by an explicit Restore: nothing is owed.
+        None => false,
+        // Unreadable or corrupt evidence is kept conservatively, as startup keeps it.
+        Some(Err(_)) => true,
+        Some(Ok(bytes)) => match serde_json::from_slice::<IntentRecord>(&bytes) {
+            Ok(intent) => intent.wanted || intent.apply_narrow_after_release == Some(true),
+            Err(_) => true,
+        },
+    }
+}
+
+/// Whether the secondary AI hold is owed right now. Call with the WFP operation lock held.
+pub(super) async fn ai_hold_owed() -> bool {
+    let armed_wanted = armed_guard().as_ref().is_some_and(|armed| armed.intent.wanted);
+    let intent = match tokio::fs::read(intent_path()).await {
+        Ok(bytes) => Some(Ok(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => Some(Err(error)),
+    };
+    ai_hold_owed_by(armed_wanted, intent)
+}
+
+/// Failed-update release: [`release_applying_narrow`] when an AI hold is owed, else [`release`].
+pub(crate) async fn release_applying_narrow_if_owed() -> Result<KillSwitchStatus> {
+    ensure_supported()?;
+    {
+        let _operation = WFP_OPERATION.lock().await;
+        let owed = ai_hold_owed().await;
+        disarm_unlocked(owed).await?;
+        note_explicit_release();
+    }
+    Ok(status().await)
+}
+
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) async fn release_after_service_stop() -> Result<()> {
     ensure_supported()?;

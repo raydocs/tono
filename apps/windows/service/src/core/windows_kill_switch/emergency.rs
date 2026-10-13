@@ -30,6 +30,10 @@ pub async fn emergency_disarm_windows_kill_switch_applying_narrow() -> Result<()
 
 async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
     let _operation = WFP_OPERATION.lock().await;
+    // Failed-update recovery keeps a hold that is owed and never installs a new one (decision
+    // 125). Read before the tombstone below rewrites the disposition. A second release after
+    // the first installed the hold sees its tombstone and keeps it.
+    let apply_narrow = apply_narrow && ai_hold_owed().await;
     // This is still the fail-open escape hatch: WFP objects are removed even if protected DNS
     // cannot be restored. The DNS failure is nevertheless returned *after* WFP and intent
     // cleanup so an uninstaller cannot report success and delete the remaining recovery files.
