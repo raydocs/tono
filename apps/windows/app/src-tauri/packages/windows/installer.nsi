@@ -1589,6 +1589,11 @@ Function un.onInit
     SetErrorLevel 76
     Abort "Disconnect and resolve any pending protected update before uninstalling."
   ${EndIf}
+  ; As in .onInit: a passing gate leaves its reason file only for a lease it took over from an
+  ; earlier installer that never handed it back. Cancelling this uninstaller must not release it.
+  ${If} ${FileExists} "$PLUGINSDIR\tono-gate-reason.txt"
+    StrCpy $TonoLeaseInherited 1
+  ${EndIf}
   CopyFiles /SILENT "$INSTDIR\resources\tono-service-install.exe" "$PLUGINSDIR\tono-gate.exe"
   !insertmacro SetContext
 
@@ -1835,6 +1840,9 @@ FunctionEnd
 ; At most three tries a second apart, and only exit 0 counts. If every try fails the lease stays
 ; exactly as an abort left it before.
 Function un.HandBackManualLease
+  ${If} $TonoLeaseInherited = 1
+    Return
+  ${EndIf}
   Push $0
   Push $1
   StrCpy $0 ""

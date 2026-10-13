@@ -235,3 +235,21 @@ fn a_cancelled_retry_wizard_does_not_release_a_lease_it_inherited() {
         "a lease taken over from a failed installer must survive this wizard's cancel"
     );
 }
+
+#[test]
+fn a_cancelled_uninstaller_does_not_hand_back_a_lease_it_inherited() {
+    // Contract check on the NSIS template, not a claim that an uninstaller ran on this host.
+    let template = include_str!("../../../../app/src-tauri/packages/windows/installer.nsi");
+    let hand_back = template
+        .split("Function un.HandBackManualLease")
+        .nth(1)
+        .and_then(|rest| rest.split("FunctionEnd").next())
+        .expect("the uninstaller must hand its lease back through un.HandBackManualLease");
+    let finish = hand_back
+        .find("--manual-update-finish")
+        .expect("an uninstaller that changed nothing still hands its own lease back");
+    assert!(
+        hand_back[..finish].contains("$TonoLeaseInherited"),
+        "a lease taken over from a failed installer must survive this uninstaller's cancel"
+    );
+}
