@@ -26,8 +26,9 @@
   cost is a wait of about two minutes (plus one Status look of at most 5 s) offline while the executor
   is slow or dead. A very slow executor that tries to consume after the release is refused: the
   release records the disconnect on the attempt first, and an attempt with a recorded disconnect
-  grants no further authority (`Store::live_attempt`). An executor that holds the transaction lock
-  first finishes its work before the release can run, so the two never work in parallel. The
+  grants no further authority (`Store::live_attempt`). While an executor holds the transaction lock the
+  release is refused (the store is busy) and protection stays as it was; the two never work in
+  parallel, and the release is not retried. The
   slow-executor case is therefore never worse than a user pressing Restore internet at that moment.
 - Applied in: the PR from `claude/win-update-executor-watch`; finding `R2UA-F2`
   (#1055).
