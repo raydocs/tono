@@ -609,10 +609,26 @@ pub(crate) fn release_generation_verdict(record: &Record, supplied: Option<u64>)
         || supplied.map_or(record.generation == 0, |generation| generation == record.generation)
 }
 
+/// Whether a narrow (AI-preserving) release may install the hold. A machine in `Released` mode
+/// was released by an explicit Restore internet and has admitted no Connect since, so no session
+/// is left for a Quit or a replacement sign-in to keep a hold for: a narrow request that was queued
+/// before the Restore must not reinstall what the Restore removed, whatever generation it carries
+/// (decision 125: Restore internet is always the full release). `None`: refused as stale, as
+/// [`release_generation_verdict`] decides; `Some(false)`: release in full.
+pub(crate) fn narrow_release_verdict(record: &Record, supplied: Option<u64>) -> Option<bool> {
+    release_generation_verdict(record, supplied).then_some(record.mode != Mode::Released)
+}
+
 /// [`release_generation_verdict`] under C. The caller holds the main Service's lifecycle lock
 /// across the check and its effect, and StartClash admits under that same lock, so nothing is
 /// admitted between the two.
 pub(crate) async fn check_release_generation(supplied: Option<u64>) -> std::result::Result<(), AdmissionRefusal> {
+    check_narrow_release(supplied).await.map(|_| ())
+}
+
+/// [`check_release_generation`] that also answers whether a narrow release may install the AI
+/// hold ([`narrow_release_verdict`]), read under the same C as the generation.
+pub(crate) async fn check_narrow_release(supplied: Option<u64>) -> std::result::Result<bool, AdmissionRefusal> {
     tokio::task::spawn_blocking(move || {
         let authority = Authority::live();
         let held = authority
@@ -624,11 +640,7 @@ pub(crate) async fn check_release_generation(supplied: Option<u64>) -> std::resu
         let record = authority
             .load()
             .map_err(|error| AdmissionRefusal::Corrupt(format!("{error:#}")))?;
-        if release_generation_verdict(&record, supplied) {
-            Ok(())
-        } else {
-            Err(AdmissionRefusal::Stale)
-        }
+        narrow_release_verdict(&record, supplied).ok_or(AdmissionRefusal::Stale)
     })
     .await
     .unwrap_or_else(|error| Err(AdmissionRefusal::Corrupt(format!("generation check failed: {error}"))))

@@ -34,12 +34,15 @@
 - Applied in: the macOS Quit copy and this decision (PR for #1052 macOS), the Windows Quit,
   replacement and update-failure code (PR for #1052 Windows, #1120, #1293 item 4, #1055 row).
   #1071 / #1504 (A13) is paused with another agent; it follows this decision when A13 resumes.
-- Known gaps in the Windows App (Codex review of #1642, recorded, not fixed here): the App's
-  memory that the last release kept the hold lives in the running process, so after the App is
-  reopened an idle Sign Out before the first Connect does not run the full release (the same is
-  already true after a crash hold), and a Restore internet that completes while a Quit or
-  replacement narrow release is still queued does not stop that older release from reinstalling
-  the hold. Restore internet afterwards removes it. Fixing both needs the Service to report the
-  retained hold in its status.
+- Windows App gaps found by the Codex review of #1642, closed afterwards: (1) the Service now
+  reports the retained hold in its status snapshot (`ai_hold_retained`; it is the secondary layer's
+  last requested disposition, so a crash, Quit, replacement or failed update all show it, and a
+  re-arm or full release clears it). The App reads it on startup and keeps it, so an idle Sign Out
+  after the App is reopened still runs the full release; an older Service that sends no field leaves
+  today's in-process behavior. (2) Restore internet always fences older narrow releases: when the
+  release record is in `Released` mode (an explicit Restore, no Connect admitted since), a Quit or
+  replacement narrow request is still accepted as a teardown but is released in full, whatever
+  generation it carries, so it cannot reinstall the hold. The release generation was already
+  advanced by Restore; the fence needs no new generation field.
 - Limits: the hold is best effort and does not promise that all AI traffic is blocked (see
   `selective-fail-open.md`). Native PF, WFP and NRPT behavior needs real hardware.

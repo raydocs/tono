@@ -106,6 +106,8 @@ async fn settle(
     let result = if report.outcome == "restored" {
         inner.fsm.sign_out_or_quit();
         inner.kill_switch = None;
+        // Restore internet is the full release: no hold remains to be released later.
+        inner.ai_hold_retained = false;
         inner.controller_secret = None;
         inner.controller_port = None;
         inner.network_events_counter = None;
