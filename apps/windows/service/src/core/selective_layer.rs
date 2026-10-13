@@ -63,7 +63,7 @@ pub(crate) fn nrpt_suppression() -> Option<String> {
 /// edits or removes enterprise policy and writes no catch-all to compensate.
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 fn record_nrpt_suppression(effective: Result<Vec<super::dns::EffectiveNrptRule>, String>) {
-    let verdict = super::dns::selective_hold_suppression(effective.as_deref());
+    let verdict = super::dns::selective_hold_suppression(effective.as_deref().map_err(String::as_str));
     if let Some(reason) = &verdict {
         tracing::warn!("selective fail-open: {reason}");
     }
