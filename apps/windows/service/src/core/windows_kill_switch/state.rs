@@ -617,6 +617,17 @@ pub(super) fn armed_guard() -> std::sync::MutexGuard<'static, Option<Armed>> {
 }
 
 pub(super) static STARTUP_RELEASE_RETRY_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// SHIM-ROUND1-TESTS-ONLY: a release path asked for the startup DNS fallback.
+pub(super) static STARTUP_DNS_FALLBACK_WANTED: AtomicBool = AtomicBool::new(false);
+
+/// SHIM-ROUND1-TESTS-ONLY: the Service reached the point where the fallback may start.
+pub(super) static STARTUP_DNS_FALLBACK_OPEN: AtomicBool = AtomicBool::new(false);
+
+/// Tests drive the startup residual-filter probe: `Some(Ok(present))` or `Some(Err(()))` (the
+/// probe itself failed). `None` is a machine with no filters.
+#[cfg(test)]
+pub(super) static TEST_RESIDUAL_PROBE: Mutex<Option<std::result::Result<bool, ()>>> = Mutex::new(None);
 #[cfg(test)]
 pub(super) static TEST_REMOVE_FAILURE: AtomicBool = AtomicBool::new(false);
 #[cfg(test)]

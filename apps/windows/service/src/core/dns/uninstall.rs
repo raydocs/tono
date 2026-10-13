@@ -687,3 +687,13 @@ async fn reset_adapters_still_on_tono_dns() -> Result<Vec<String>> {
     tracing::error!("dns: the automatic (DHCP) fallback could not be proven: {named}");
     bail!("the automatic (DHCP) fallback could not be proven off Tono's DNS target: {named}")
 }
+
+/// SHIM-ROUND1-TESTS-ONLY: the marker of an attempt that found protection wanted again.
+#[allow(dead_code)]
+pub(crate) const DNS_FALLBACK_SUPERSEDED_PREFIX: &str = "TONO_DNS_FALLBACK_SUPERSEDED";
+
+/// SHIM-ROUND1-TESTS-ONLY: inert.
+#[allow(dead_code)]
+pub(crate) fn is_fallback_superseded(_error: &anyhow::Error) -> bool {
+    false
+}

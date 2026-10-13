@@ -346,6 +346,175 @@
         Ok(())
     }
 
+    // --- Round 1 review of the adapter reset (re-arm fence, retirement, busy reads) ---
+
+    /// Mark the seeded snapshot as restored-and-retired, the way a successful exact restore whose
+    /// file delete failed leaves it: a record bound to the snapshot's exact bytes.
+    async fn retire_the_seeded_snapshot() -> Result<()> {
+        let bytes = tokio::fs::read(snapshot_path()).await?;
+        atomic_write(&snapshot_retirement_path(), &snapshot_fingerprint(&bytes)).await
+    }
+
+    /// A Connect that enabled protection while the fallback waited for the DNS lock owns the
+    /// redirect from then on. The gate is read again once the lock is held, and the attempt then
+    /// resets nothing and removes no resolver policy.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_does_nothing_once_protection_is_wanted_again_under_the_dns_lock() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_live_dns_on_loopback(true);
+        test_hooks::take_encrypted_restores();
+        let lock = test_hooks::hold_dns_operation().await;
+        let attempt = tokio::spawn(reset_redirected_adapters_to_automatic());
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let waited = !attempt.is_finished();
+        test_hooks::set_protection_wanted(true);
+        drop(lock);
+        let result = attempt.await.expect("the attempt does not panic");
+        let resets = test_hooks::take_automatic_resets();
+        let policy_restores = test_hooks::take_encrypted_restores();
+        let untouched = test_hooks::collected_adapters();
+        reset_dns_state().await;
+        assert!(waited, "the attempt waits for the DNS lock");
+        let error = result.expect_err("protection is wanted again, so the attempt is superseded");
+        assert!(is_fallback_superseded(&error), "{error:#}");
+        assert_eq!(resets, 0);
+        assert_eq!(policy_restores, 0, "the new session's resolver policy is not removed");
+        assert_eq!(untouched[0].ipv4_name_server.as_deref(), Some("198.18.0.2"));
+        Ok(())
+    }
+
+    /// The snapshot was restored and retired, so it no longer says what the user's servers were.
+    /// A loopback the user has set since then is their own resolver, and a policy-only failure
+    /// (which makes the startup exact restore fail while the adapter is fine) must not reset it.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_leaves_a_users_new_loopback_alone_when_the_snapshot_was_retired() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        retire_the_seeded_snapshot().await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("127.0.0.1"))]);
+        test_hooks::set_live_dns_on_loopback(true);
+        test_hooks::set_encrypted_restore_fails(true);
+        let result = reset_redirected_adapters_to_automatic().await;
+        let resets = test_hooks::take_automatic_resets();
+        let untouched = test_hooks::collected_adapters();
+        reset_dns_state().await;
+        assert!(result.is_err(), "the policy removal failed: {result:?}");
+        assert_eq!(resets, 0, "the user's own local resolver must not be reset to DHCP");
+        assert_eq!(untouched[0].ipv4_name_server.as_deref(), Some("127.0.0.1"));
+        Ok(())
+    }
+
+    /// The retirement only withdraws the old servers as evidence of ownership. Tono's own endpoint
+    /// is nobody else's, so an adapter on it is reset whatever the snapshot's state.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_still_resets_the_tono_endpoint_when_the_snapshot_was_retired() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        retire_the_seeded_snapshot().await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_to_automatic().await;
+        let reset = test_hooks::take_last_automatic_reset();
+        reset_dns_state().await;
+        assert_eq!(reset, vec!["{A}".to_owned()]);
+        assert_eq!(result?, vec!["{A}".to_owned()]);
+        Ok(())
+    }
+
+    /// A live snapshot that recorded a non-loopback original is what makes a plain loopback on that
+    /// family Tono's (an older build wrote 127.0.0.1): it is reset.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_resets_a_plain_loopback_where_a_live_snapshot_recorded_a_real_original() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("127.0.0.1"))]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_to_automatic().await;
+        let reset = test_hooks::take_last_automatic_reset();
+        reset_dns_state().await;
+        assert_eq!(reset, vec!["{A}".to_owned()]);
+        assert_eq!(result?, vec!["{A}".to_owned()]);
+        Ok(())
+    }
+
+    /// The engine answers the collect and only then is claimed by an abandoned call, so the
+    /// effective-DNS read is the refused one. The registry already holds the user's servers, so
+    /// without the effective list nothing would be selected: the refusal must still come back as
+    /// "busy" (to be retried), not be folded into an unknown state that ends the retries. Once the
+    /// claim is returned the next attempt resets the adapter.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_reports_busy_when_the_effective_read_is_refused_after_the_collect() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_effective_dns(vec![("{A}".to_owned(), vec!["198.18.0.2".parse().unwrap()])]);
+        test_hooks::set_live_dns_on_loopback(true);
+        test_hooks::take_encrypted_restores();
+        test_hooks::park_claim_after("collect", 1);
+        let result = reset_redirected_adapters_to_automatic().await;
+        let resets = test_hooks::take_automatic_resets();
+        let policy_restores = test_hooks::take_encrypted_restores();
+        test_hooks::release_parked_claim();
+        let again = reset_redirected_adapters_to_automatic().await;
+        let reset_after_release = test_hooks::take_last_automatic_reset();
+        reset_dns_state().await;
+        let error = result.expect_err("the effective read was refused");
+        assert!(is_engine_busy_refusal(&error), "busy must survive the effective read: {error:#}");
+        assert_eq!(resets, 0);
+        assert_eq!(policy_restores, 0);
+        assert_eq!(again?, vec!["{A}".to_owned()], "the retry after the release resets the adapter");
+        assert_eq!(reset_after_release, vec!["{A}".to_owned()]);
+        Ok(())
+    }
+
+    /// The same for the registry read of a snapshot adapter that is offline: a refusal there is
+    /// "busy", not "that adapter's registry is unreadable".
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_reports_busy_when_the_offline_registry_read_is_refused() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1")), adapter("{B}", Some("9.9.9.9"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_offline_registry(vec![adapter("{B}", Some("198.18.0.2"))]);
+        test_hooks::set_live_dns_on_loopback(true);
+        test_hooks::park_claim_after("collect", 1);
+        let result = reset_redirected_adapters_to_automatic().await;
+        let resets = test_hooks::take_automatic_resets();
+        test_hooks::release_parked_claim();
+        reset_dns_state().await;
+        let error = result.expect_err("the registry read was refused");
+        assert!(is_engine_busy_refusal(&error), "busy must survive the registry read: {error:#}");
+        assert_eq!(resets, 0);
+        Ok(())
+    }
+
+    /// The adapter leg ends in an ordinary error (the reset did not land), and the engine is then
+    /// claimed before the policy leg runs. The attempt is still "busy": a later ordinary error
+    /// does not hide that a step was refused, or the retries stop with the policy still installed.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_reports_busy_when_only_the_policy_leg_was_refused() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_effective_dns(vec![("{A}".to_owned(), vec!["198.18.0.2".parse().unwrap()])]);
+        test_hooks::set_live_dns_on_loopback(true);
+        test_hooks::set_reset_does_not_land(true);
+        test_hooks::park_claim_after("read effective DNS", 2);
+        let result = reset_redirected_adapters_to_automatic().await;
+        test_hooks::release_parked_claim();
+        reset_dns_state().await;
+        let error = result.expect_err("the reset did not land");
+        assert!(is_engine_busy_refusal(&error), "the refused policy leg must surface as busy: {error:#}");
+        Ok(())
+    }
+
     /// A registry call behind a filter driver can block for ever. The NRPT sweep runs on its own
     /// thread, so the uninstall gives up after its budget instead of hanging with it.
     #[test]

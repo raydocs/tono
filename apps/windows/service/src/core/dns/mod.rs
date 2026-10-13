@@ -344,9 +344,81 @@ pub(crate) mod test_hooks {
         }
     }
 
+    /// Take the DNS module's operation lock, as a long engine round of another caller would.
+    #[cfg(test)]
+    pub(crate) async fn hold_dns_operation() -> tokio::sync::MutexGuard<'static, ()> {
+        super::DNS_OPERATION.lock().await
+    }
+
+    /// Set the process-local "protection is wanted" gate, as an enable (a Connect) does.
+    #[cfg(test)]
+    pub(crate) fn set_protection_wanted(wanted: bool) {
+        super::PROTECTION_WANTED.store(wanted, Ordering::Release);
+    }
+
+    #[cfg(test)]
+    static PARK_CLAIM_AFTER: Mutex<Option<(&'static str, u32)>> = Mutex::new(None);
+
+    #[cfg(test)]
+    static PARKED_CLAIM: Mutex<Option<ParkedEngineCall>> = Mutex::new(None);
+
+    /// The `nth` (1-based) stub engine call named `operation` (`"collect"` or
+    /// `"read effective DNS"`) that succeeds leaves an abandoned engine call behind it, holding the
+    /// single-writer claim: the call itself answered, and every engine call after it is refused.
+    /// This is the interleaving where the claim appears in the middle of one fallback attempt.
+    #[cfg(test)]
+    pub(crate) fn park_claim_after(operation: &'static str, nth: u32) {
+        *PARK_CLAIM_AFTER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((operation, nth));
+    }
+
+    /// Called by a stub engine call that is about to return successfully.
+    #[cfg(test)]
+    pub(crate) async fn engine_call_returned(operation: &'static str) {
+        let fire = {
+            let mut pending = PARK_CLAIM_AFTER
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if matches!(&*pending, Some((name, _)) if *name == operation) {
+                let remaining = pending.as_ref().map_or(0, |(_, nth)| *nth).saturating_sub(1);
+                if remaining == 0 {
+                    *pending = None;
+                    true
+                } else {
+                    *pending = Some((operation, remaining));
+                    false
+                }
+            } else {
+                false
+            }
+        };
+        if fire {
+            let claim = park_engine_call().await;
+            *PARKED_CLAIM
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(claim);
+        }
+    }
+
+    /// Let the abandoned call [`park_claim_after`] left behind return, which releases the claim.
+    #[cfg(test)]
+    pub(crate) fn release_parked_claim() {
+        let claim = PARKED_CLAIM
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        drop(claim);
+    }
+
     /// Clear every hook the adapter fallback tests set.
     #[cfg(test)]
     pub(crate) fn reset_fallback_hooks() {
+        *PARK_CLAIM_AFTER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        release_parked_claim();
+        set_protection_wanted(false);
         set_collected_adapters(Vec::new());
         set_offline_registry(Vec::new());
         set_offline_registry_unreadable(Vec::new());

@@ -108,6 +108,15 @@ pub(super) fn spawn_startup_release_retry() {
     });
 }
 
+/// SHIM-ROUND1-TESTS-ONLY: inert.
+#[allow(dead_code)]
+pub fn spawn_startup_dns_fallback_if_wanted() {}
+
+#[cfg(test)]
+pub(super) fn startup_dns_fallback_wanted() -> bool {
+    STARTUP_DNS_FALLBACK_WANTED.load(Ordering::Acquire)
+}
+
 /// How long the detached fallback below keeps retrying while the DNS engine is busy.
 pub(super) const STARTUP_DNS_FALLBACK_BOUND: std::time::Duration = std::time::Duration::from_secs(90);
 

@@ -256,7 +256,10 @@ pub(super) async fn engine_collect() -> Result<Vec<AdapterDnsSnapshot>> {
     {
         #[cfg(test)]
         refuse_while_claimed("collect")?;
-        Ok(test_hooks::collected_adapters())
+        let collected = test_hooks::collected_adapters();
+        #[cfg(test)]
+        test_hooks::engine_call_returned("collect").await;
+        Ok(collected)
     }
 }
 
@@ -302,6 +305,8 @@ pub(super) async fn engine_read_registry_adapters(
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
+        #[cfg(test)]
+        refuse_while_claimed("read registry adapters")?;
         let unreadable = test_hooks::offline_registry_unreadable();
         let offline = test_hooks::offline_registry();
         let active = test_hooks::collected_adapters();
@@ -580,6 +585,8 @@ pub(super) async fn engine_effective_dns(
                 .filter(|guid| guid_listed(&guids, guid))
                 .map(|guid| (guid, None)),
         );
+        #[cfg(test)]
+        test_hooks::engine_call_returned("read effective DNS").await;
         Ok(read)
     }
 }
