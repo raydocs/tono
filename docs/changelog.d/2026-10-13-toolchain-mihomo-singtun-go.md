@@ -1,0 +1,9 @@
+## 2026-10-13 · mihomo v1.19.30 → v1.19.32，sing-tun v0.4.22 → v0.4.27，Go 1.27.1 → 1.27.2
+- 归属：ops 工具链漂移 Issue #257（所有者 2026-10-13 决定现在升级，不等 0.0.75）；Windows 内核（`windows-core.yml` 从钉死的上游提交现场构建）。
+- 来源：基线 `origin/main` 358fd9da1 → 分支 `claude/toolchain-go`；PR 见 GitHub。
+- 缺陷修复：无。
+- 新增/优化：`tooling/scripts/build-mihomo-adaptive.sh` 的钉：tag `v1.19.32`、提交 `88dcbf7f1614a67c3b36b848ee3592dfa92ada36`、sing-tun `v0.4.27`、`go1.27.2`、官方 darwin-arm64 与 windows-amd64-v2 的压缩包/二进制 SHA-256（压缩包摘要与 GitHub 发布页 digest 一致）；适配版本号 `v1.19.32-tono-gvisor-adaptive.2`，补丁修订不变。`core-identity.json`、`windows-core.yml` 的 `go-version`、`mihomo-adaptive/README.md`、`hy2_idle.rs`/`node.rs` 注释里的版本同步。
+- 工程与测试：`gvisor-adaptive-buffer.patch` 对 sing-tun v0.4.27 不改动即可套用（`patch --dry-run` 通过；`stack_gvisor.go` 在 v0.4.22…v0.4.27 间未变）。真正的构建和补丁自带的 `go test -tags with_gvisor` 由 windows-core 在 CI 跑。上游 1.19.31/1.19.32 把 tun 默认栈改为 mips；Tono 的两处 YAML（macOS `ConfigPipeline+Runtime.swift`、Windows `owned_config.rs`）都显式写 `stack: gvisor`，不受影响。sing-quic 由 `38b0e9295f51` 变为 `1c242664697a`，keepalive 10s/空闲 30s 默认值未变（注释已核对）。
+- 验证：见 PR 的 Verification。
+- 候选/发布：无新包，仅源码。下一个 Windows 候选会带 v1.19.32 内核。
+- 剩余限制：(1) `apps/macos/Tono/Resources/mihomo` 是已提交的二进制（仍是 `v1.19.30-tono-gvisor-adaptive.1`，早于脚本里的 `.2`），在 pbxproj 里是成员例外，不进 macOS 包，只被本地测试/基准脚本用；它需要在 Mac Studio 上用 Go 1.27.2 跑 `build-mihomo-adaptive.sh --install-adaptive` 重建，本 PR 没有重建。(2) sing-tun v0.4.23+ 带「Windows strict-route 下允许 IPv6 邻居发现（路由器请求到 ff02::2）」，影响 Windows 实机的 strict-route 行为，需实机核对 WFP 失败关闭不受影响。(3) sing-box alpha.9 的构建脚本仍用 go1.27.1（它钉着产物摘要），不在本次范围。

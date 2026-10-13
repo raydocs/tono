@@ -1,7 +1,7 @@
 # Tono adaptive gVisor core
 
-This experiment keeps Tono on upstream Mihomo `v1.19.30` and its existing
-`github.com/metacubex/sing-tun v0.4.22` dependency. The only runtime change is
+This experiment keeps Tono on upstream Mihomo `v1.19.32` and its existing
+`github.com/metacubex/sing-tun v0.4.27` dependency. The only runtime change is
 the gVisor TCP send/receive range:
 
 - stock: fixed `20 KiB`
@@ -26,7 +26,7 @@ tooling/scripts/build-mihomo-adaptive.sh --restore-stock
 tooling/scripts/build-mihomo-adaptive.sh --restore-stock-windows
 ```
 
-The script pins the Mihomo tag and commit, requires Go 1.27.1, tests the live
+The script pins the Mihomo tag and commit, requires Go 1.27.2, tests the live
 gVisor stack options before building, and verifies the official compressed and
 decompressed SHA-256 values during rollback. The Windows build keeps the
 official release's `GOAMD64=v2` baseline and installs the same verified binary

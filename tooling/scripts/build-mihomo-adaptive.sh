@@ -8,16 +8,16 @@ windows_alpha_target="$repo_root/apps/windows/app/src-tauri/sidecar/tono-core-al
 patch_file="$repo_root/tooling/scripts/mihomo-adaptive/gvisor-adaptive-buffer.patch"
 mode=${1:---install-adaptive}
 
-upstream_tag="v1.19.30"
-upstream_commit="ac017cdd246ce8bd547653d927e7bf77d7ee73d5"
-sing_tun_version="v0.4.22"
-adaptive_version="v1.19.30-tono-gvisor-adaptive.2"
-required_go_version="go1.27.1"
-stock_archive_sha256="2c7f3a7904fa1cee291e124123e630e7b1ebd13765dd9bf26c0a28432004d9f4"
-stock_binary_sha256="e80c6334b4e3aae53dfbc86cddd4434cec1565a61d4483931fac2ae12fec6d30"
+upstream_tag="v1.19.32"
+upstream_commit="88dcbf7f1614a67c3b36b848ee3592dfa92ada36"
+sing_tun_version="v0.4.27"
+adaptive_version="v1.19.32-tono-gvisor-adaptive.2"
+required_go_version="go1.27.2"
+stock_archive_sha256="3312a6780652c622890fd4357c6a853bbf865464fd047ac7b7f52dab8de18652"
+stock_binary_sha256="94a386ec0149080deadd86b1f667363bde3c70f7489dba3258e52c56fc9a6d66"
 stock_url="https://github.com/MetaCubeX/mihomo/releases/download/$upstream_tag/mihomo-darwin-arm64-$upstream_tag.gz"
-windows_stock_archive_sha256="837bcaa45aed61d698bba76da70c44818b1d345d497937b4db0fa5075e3c4a5c"
-windows_stock_binary_sha256="b37011cd25192f1e7a7151b19a209df01f08c3da936be9e90155f94137740892"
+windows_stock_archive_sha256="1ee9e6a30c4ba3ba4eb6f0bc7027fe77016a4471eb851a03d44841e3313d4012"
+windows_stock_binary_sha256="3c107d54ef1b895e4980b53f517d52f3c1137101fa2637347c9ce343fc50d7b2"
 windows_stock_url="https://github.com/MetaCubeX/mihomo/releases/download/$upstream_tag/mihomo-windows-amd64-v2-$upstream_tag.zip"
 
 work_dir=$(mktemp -d /tmp/tono-mihomo-adaptive.XXXXXX)
