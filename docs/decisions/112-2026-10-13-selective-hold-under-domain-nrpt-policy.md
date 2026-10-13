@@ -9,7 +9,10 @@
   it for as long as the hold is installed. The App folds that field into the diagnostics report
   (`dnsLastError`) and the Support page lists it on the DNS warning row. The hold's own result
   is unchanged: the firewall prefixes still apply and the release is not kept, restored or failed
-  because of this. A registry read that fails makes no claim. Rejected: removing or overriding
+  because of this. The read runs on its own observer thread, never inside the hold worker's
+  completion budget, so a slow or hung registry read cannot report a successful install as failed
+  or hold up a later removal; a generation counter drops a result that arrives after `remove()`
+  or a newer install, and at most one observer thread exists. A registry read that fails makes no claim. Rejected: removing or overriding
   enterprise policy, writing a catch-all `.` rule or a catch-all DNS/WFP block, blocking shared
   CDN ranges, and a replacement enforcement mechanism (needs its own product decision and Windows
   hardware qualification).
