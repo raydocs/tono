@@ -124,7 +124,12 @@ class Unreachable(RuntimeError):
 
 
 class NodeDisabled(RuntimeError):
-    """The control plane says this exit node is disabled or retired."""
+    """The control plane says this exit node is disabled, retired or holds a
+    superseded token (#1296). `reason` is the control plane's own message."""
+
+    def __init__(self, message: str, reason: str = "") -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -187,6 +192,19 @@ def is_node_disabled(error: urllib.error.HTTPError) -> bool:
         return False
     detail = payload.get("error") if isinstance(payload, dict) else None
     return isinstance(detail, dict) and detail.get("code") == EXIT_NODE_DISABLED_CODE
+
+
+def node_disabled_reason(error: urllib.error.HTTPError) -> str:
+    """The control plane's message on an EXIT_NODE_DISABLED answer, bounded and
+    printable so the operator can tell a disabled node from a superseded token."""
+    try:
+        payload = json.loads(getattr(error, "tono_body", b"") or b"")
+        message = payload["error"]["message"]
+    except (ValueError, UnicodeDecodeError, KeyError, TypeError):
+        return ""
+    if not isinstance(message, str):
+        return ""
+    return "".join(c for c in message if c.isprintable())[:120]
 
 
 def xray_binary() -> Path:
@@ -537,7 +555,10 @@ def fetch_roster(base: str, token: str) -> tuple[str, int, list[dict], bool, dic
         response = open_control_plane(request, timeout=20)
     except urllib.error.HTTPError as error:
         if is_node_disabled(error):
-            raise NodeDisabled("the control plane reports this exit node disabled") from error
+            raise NodeDisabled(
+                "the control plane reports this exit node disabled",
+                node_disabled_reason(error),
+            ) from error
         raise
     with response as opened:
         raw = opened.read(MAX_ROSTER_BYTES + 1)
@@ -1781,7 +1802,7 @@ def run_once(path: Path) -> None:
         node_id, observed_at, roster, server_retire_shared_legacy, watermarks = fetch_roster_or_discard_cache(
             base, token, cache,
         )
-    except NodeDisabled:
+    except NodeDisabled as disabled:
         # The control plane has spoken: the saved roster must not outlive the
         # node, or a later outage round would reinstall it on a disabled node.
         # fetch_roster_or_discard_cache has normally removed it already; a
@@ -1843,6 +1864,7 @@ def run_once(path: Path) -> None:
             " and emptied hy2"
             + ("" if remaining is not None else "; the client inventory is unknown")
             + procedure
+            + (f"; control plane said: {disabled.reason}" if disabled.reason else "")
             + cache_note
             + metering_note
         )

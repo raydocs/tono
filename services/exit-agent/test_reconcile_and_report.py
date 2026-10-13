@@ -1388,6 +1388,49 @@ class RosterControlSignals(unittest.TestCase):
         round_answering(json.dumps({"error": {"code": "EXIT_NODE_DISABLED"}}).encode())
         self.assertEqual(sorted(removed), sorted(["u:usr_1", agent.LEGACY_CLIENT_EMAIL]))
 
+    def test_a_superseded_token_withdraws_every_client_and_says_why(self) -> None:
+        # #1296: the control plane answers a token rotated away on an active node
+        # with the same 403 EXIT_NODE_DISABLED. The agent withdraws and tells the
+        # operator the control plane's reason, so a rotation is not read as a
+        # disabled node.
+        import io
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        removed: list[str] = []
+        listing = json.dumps({"users": [{"email": "u:usr_1"}, {"email": agent.LEGACY_CLIENT_EMAIL}]})
+
+        def fake_xray(_binary, arguments):
+            if "rmu" in arguments:
+                removed.append(arguments[-1])
+            stdout = listing if "inbounduser" in arguments else "Removed 1 user(s) in total." if "rmu" in arguments else ""
+            return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})
+
+        def refuse(request, timeout=None):  # noqa: ARG001
+            raise urllib.error.HTTPError(request.full_url, 403, "Forbidden", {}, io.BytesIO(json.dumps({
+                "error": {"code": "EXIT_NODE_DISABLED",
+                          "message": "Exit node token was superseded by a rotation"},
+            }).encode()))
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "old-node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu",
+                 "stats_query": "statsquery", "list_users": "inbounduser",
+             }), \
+             patch.object(agent, "run_xray", fake_xray), \
+             patch.object(agent.urllib.request, "build_opener") as opener, \
+             patch.object(agent, "acknowledge_roster") as acknowledge:
+            opener.return_value.open.side_effect = refuse
+            with self.assertRaisesRegex(agent.Refusal, "control plane said: Exit node token was superseded"):
+                agent.run_once(path)
+        acknowledge.assert_not_called()
+        self.assertEqual(sorted(removed), sorted(["u:usr_1", agent.LEGACY_CLIENT_EMAIL]))
+
     def test_a_disabled_round_still_folds_the_final_counter_sample(self) -> None:
         # TF-opus-4: the withdrawal round never read the counters, so traffic
         # since the last active round (1000 -> 1500) was never kept.
