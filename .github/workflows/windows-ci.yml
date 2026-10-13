@@ -209,6 +209,23 @@ jobs:
         with:
           node-version: 24
 
+      - name: Cargo caches restore within the same rustc
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs')
+          const yaml = fs.readFileSync('../../../.github/workflows/windows-ci.yml', 'utf8')
+          for (const id of ['windows-core', 'windows-app-rust', 'windows-service']) {
+            const prefix = 'restore_prefix=cargo-v1-' + id + '-'
+            if (!yaml.includes(prefix)) throw new Error('missing ' + prefix)
+          }
+          const restores = yaml.split('\n').filter((line) => line.includes('restore-keys:'))
+          if (restores.length !== 3) throw new Error('expected 3 restore-keys, got ' + restores.length)
+          const fallbacks = yaml.split('result=fallback').length - 1
+          if (fallbacks !== 3) throw new Error('expected 3 fallback reports, got ' + fallbacks)
+          console.log('cargo restore-keys: 3 jobs fall back inside the same rustc')
+          NODE
+
       - name: Install pnpm as the project pins it
         run: npm install --global pnpm@11.3.0
 

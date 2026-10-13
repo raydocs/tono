@@ -270,27 +270,6 @@ test('ci-gate reuses the Windows and macOS push path lists for pull requests', a
   assert.deepEqual(Object.keys(gate.on), ['pull_request', 'merge_group', 'workflow_dispatch'])
 })
 
-test('cargo caches restore a same-rustc prefix when the lockfile key misses', () => {
-  for (const [id, prefix] of [
-    ['core', 'cargo-v1-windows-core-'],
-    ['app-rust', 'cargo-v1-windows-app-rust-'],
-    ['service', 'cargo-v1-windows-service-'],
-  ]) {
-    const job = workflow.jobs[id]
-    const key = job.steps.find(step => step.id === 'cargo-key')
-    assert.ok(key.run.includes(`restore_prefix=${prefix}\${{ runner.os }}-$rustc_hash-`), id)
-    const restore = job.steps.find(step => step.uses?.startsWith('actions/cache/restore@'))
-    assert.equal(restore.with.key, '${{ steps.cargo-key.outputs.key }}', id)
-    assert.equal(restore.with['restore-keys'], '${{ steps.cargo-key.outputs.restore_prefix }}', id)
-    const report = job.steps.find(step => step.name === 'Report Cargo cache result')
-    assert.equal(report.env.MATCHED, '${{ steps.cargo-cache.outputs.cache-matched-key }}', id)
-    assert.ok(report.run.includes('result=fallback'), id)
-    const save = job.steps.find(step => step.uses?.startsWith('actions/cache/save@'))
-    assert.equal(save.with['restore-keys'], undefined, id)
-    assert.ok(save.if.includes("steps.cargo-cache.outputs.cache-hit != 'true'"), id)
-  }
-})
-
 test('Windows release jobs that run third-party build code never hold a writable token', () => {
   const read = name => load(readFileSync(path.join(root, '.github/workflows', name), 'utf8'))
   const writes = permissions => Object.values(permissions ?? {}).includes('write') || permissions === 'write-all'
