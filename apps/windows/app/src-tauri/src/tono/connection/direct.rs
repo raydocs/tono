@@ -2481,6 +2481,7 @@ mod cancellation_tests {
 
     async fn sing_box_replacement_fixture(
         plan: &tono_core::config::DirectPlan,
+        current_node: &str,
     ) -> (Arc<TonoState>, Result<Option<PendingDirectCommit>, StageFailure>) {
         let reference: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../../../../docs/reports/sing-box-evaluation/migration-m0/reference.json"
@@ -2508,7 +2509,7 @@ mod cancellation_tests {
         {
             let mut inner = state.lock().await;
             inner.connect_generation = 12;
-            inner.selected_node = Some("Fixture Beta".into());
+            inner.selected_node = Some(current_node.into());
             inner.policy_tracker = tono_core::policy::PolicyTracker::from_installed(7, "digest".into());
             inner.traffic_policy = Some(document);
         }
@@ -2554,15 +2555,14 @@ mod cancellation_tests {
 
     /// #1247: the sing-box compiler refuses a reviewed process port outside {80, 443, 8080,
     /// 8443}. The App's plan carries 8000, so the compile used to be refused for every real
-    /// plan. The plan is now compiled with the compiler's own set and reaches the Service.
+    /// plan. The plan is now compiled with the compiler's own set, and the stage moves on to the
+    /// admission step, which here reports a hot switch (Stale) so no Service call is reached.
     #[tokio::test]
     async fn the_apps_reviewed_ports_reach_the_sing_box_compiler() {
-        let (state, result) = sing_box_replacement_fixture(&sing_box_fixture_plan()).await;
-        assert!(matches!(result, Ok(None)), "an unreachable Service is a skip");
-        let skip = state.lock().await.optional_direct_skip.clone().unwrap_or_default();
+        let (_state, result) = sing_box_replacement_fixture(&sing_box_fixture_plan(), "Another Node").await;
         assert!(
-            skip.contains("process replacement did not keep the full tunnel"),
-            "the compiler must accept the plan and the stage must reach the Service: {skip}"
+            matches!(result, Err(StageFailure::Stale)),
+            "the compiler must accept the App's plan and the stage must reach admission"
         );
     }
 
@@ -2574,7 +2574,7 @@ mod cancellation_tests {
         // The compiler refuses a web suffix when no signed-app path regex is present.
         plan.web_suffix_rules = vec![("aliyuncs.com".into(), 443)];
         plan.wechat_process_path_regexes = Vec::new();
-        let (state, result) = sing_box_replacement_fixture(&plan).await;
+        let (state, result) = sing_box_replacement_fixture(&plan, "Fixture Beta").await;
         assert!(matches!(result, Ok(None)), "a refused overlay must not be a stage error");
         let inner = state.lock().await;
         assert!(!inner.optional_direct_active);
