@@ -34,3 +34,12 @@
 接受的限制与恢复：被 `atomic_file::replace` 超时放弃、之后才落地的 rename 仍是 BRICK-W11（`atomic_write` 已记录）。若第三次 Codex 审阅再因新类别问题 block，则按总监方案记为接受的限制：A 重新登录并 Disconnect，或管理员停止 Service 后用紧急释放；PR 保持 draft，不开第四版。
 
 红跑（第三版测试对第二版逻辑）：ci-gate run 38385306359，在抛弃分支 `claude/win-prepare-tx-red-3`（第三版测试 + a43500d2c 的 `takeover.rs` / 旧 `hold_for_takeover` / 无门侧对账；已删除）上，`windows / service` 失败 5 个：`a_third_users_connection_refuses_the_takeover_and_stops_nothing`（got Ok(7)）、`a_release_not_proven_finished_refuses_the_takeover_and_changes_nothing`（got Ok(7)）、`an_unclassifiable_intent_after_an_error_is_flagged_not_rewritten`（an owner write that cannot be classified must be flagged）、`an_unconfirmed_owner_record_is_reconciled_from_the_disk_by_the_gate`（OWNER_RECORD_UNCONFIRMED 未置位）、`owner_lifecycle_tests::an_unconfirmed_owner_record_refuses_the_owner_gates_until_it_can_be_read`（Unchecked admitted a caller on an unconfirmed owner record）。绿跑：同一 job 在第三版 head 通过（run 38384127202，9e66cb45c）。happy path 里“stop 闭包内 C 仍被持有”的断言在第二版逻辑上本来就成立（第二版也在 C 下停 Core），它是回归保护，不是红测试。
+
+## 第三版审阅结果（Codex gpt-6.1-sol，ffd1be970，verdict: block，新类别）与接受的限制
+按总监方案的停止规则，第三次 block 且属于新类别：不开第四版，PR 保持 draft，下列记为接受的限制，等协调者决定。
+- Major（取消）：`OWNER_RECORD_UNCONFIRMED` 只在写盘报错且三次重读都无法分类之后置位，不覆盖 future 被取消。场景：B 的 Prepare 在锁上排队几乎耗尽 IPC 超时预算，`atomic_write` 的 rename 已完成（磁盘 owner 为 B），读回等待时 IPC 超时取消 handler（`kode-bridge ipc_http_server.rs:795-803`，预算 `server/mod.rs:84-93`），内存仍是 A、标志未置位，下一次对账直接返回；Service 按 A 授权而独立 worker 按磁盘 B 授权。这不是 BRICK-W11（rename 在取消前已完成）。Codex 建议的方向：在第一个可能提交 owner 的 await 之前就进入待对账状态，只有确认 Old 或确认 New 并同步内存后才清除；补“rename 完成后暂停、取消 future、再进入 owner 门”的回归。
+- Minor（后台写入）：新标志只在两个 IPC 入口检查。旧 Core 退出后 watchdog/`direct.rs` 的 retraction 会复制内存 owner（A）并写盘，可能把磁盘上的 B 写回 A；`server/mod.rs:471-494` 的自动退休路径直接拿 lifecycle 锁，仍按未对账的内存选 owner。方向：后台 owner 决策与 intent 写入也要使用不重入 WFP 锁的读取对账；无法确认时不得把旧内存 owner 写盘。
+- Minor（可达性说明，非本版引入）：active owner 为 B、意图仍记 A 的不一致状态在 IPC 层可达（StartClash 不要求先完成本次 Prepare；停旧 Core 失败且释放也失败时），新 Prepare 会按设计拒绝。B 仍有有效 session proof 时 StopClash 可以退出；失去 proof 后需要额外恢复，所以“A 登录后 Disconnect”并不总是足够。
+- 已被 Codex 验证的部分：三个授权函数及 `release/worker.rs` 与 base 字节相同；所有 `authorize_*_for` 调用点都在对账之后（`server/mod.rs:1412` 之后、`UpdateTransaction` 在 `handlers.rs:95`）；事务顺序、第三方拒绝、无补偿写、`unretired_reason` 完整证明、锁序无反向等待。
+- 测试数：新增 4 个单测加改写 1 个，另有 server 层门测试 1 个，新增的 `#[tokio::test]` 共 12 个（含 server 门测试）。
+- 记录的恢复办法（接受的限制）：A 重新登录并 Disconnect；或管理员停止 Service 后用紧急释放（开始菜单“Restore Network”）；Service 重启会从磁盘重新加载 owner 记录。触发取消场景需要 Prepare 几乎耗尽 300 s 的 IPC 超时，且 rename 恰好在这时完成。
