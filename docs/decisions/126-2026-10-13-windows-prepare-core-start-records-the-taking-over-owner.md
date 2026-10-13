@@ -32,3 +32,5 @@
 6. 退休 A 的 active-owner 同时关闭了第二个砖化窗口：B 的 StartClash 在 `arm_bootstrap` 之后、`commit_active_owner_session` 之前失败时，active-owner 不会还是 A。
 
 接受的限制与恢复：被 `atomic_file::replace` 超时放弃、之后才落地的 rename 仍是 BRICK-W11（`atomic_write` 已记录）。若第三次 Codex 审阅再因新类别问题 block，则按总监方案记为接受的限制：A 重新登录并 Disconnect，或管理员停止 Service 后用紧急释放；PR 保持 draft，不开第四版。
+
+红跑（第三版测试对第二版逻辑）：ci-gate run 38385306359，在抛弃分支 `claude/win-prepare-tx-red-3`（第三版测试 + a43500d2c 的 `takeover.rs` / 旧 `hold_for_takeover` / 无门侧对账；已删除）上，`windows / service` 失败 5 个：`a_third_users_connection_refuses_the_takeover_and_stops_nothing`（got Ok(7)）、`a_release_not_proven_finished_refuses_the_takeover_and_changes_nothing`（got Ok(7)）、`an_unclassifiable_intent_after_an_error_is_flagged_not_rewritten`（an owner write that cannot be classified must be flagged）、`an_unconfirmed_owner_record_is_reconciled_from_the_disk_by_the_gate`（OWNER_RECORD_UNCONFIRMED 未置位）、`owner_lifecycle_tests::an_unconfirmed_owner_record_refuses_the_owner_gates_until_it_can_be_read`（Unchecked admitted a caller on an unconfirmed owner record）。绿跑：同一 job 在第三版 head 通过（run 38384127202，9e66cb45c）。happy path 里“stop 闭包内 C 仍被持有”的断言在第二版逻辑上本来就成立（第二版也在 C 下停 Core），它是回归保护，不是红测试。
