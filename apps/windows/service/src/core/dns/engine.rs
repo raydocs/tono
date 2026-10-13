@@ -720,9 +720,16 @@ fn active_adapters_read(include_dns: bool) -> Result<Vec<ActiveAdapter>> {
                     let dns_servers = if include_dns {
                         // SAFETY: the DNS records and socket addresses belong to this
                         // successful IP Helper buffer and are copied before it is dropped.
-                        Some(unsafe {
-                            native_apply::read_dns_servers(adapter.FirstDnsServerAddress)
-                        }?)
+                        // One adapter's unreadable list is that adapter's `None`, not the
+                        // whole enumeration's failure: its readers treat `None` as unknown and
+                        // keep every other adapter's evidence.
+                        unsafe { native_apply::read_dns_servers(adapter.FirstDnsServerAddress) }
+                            .map_err(|error| {
+                                tracing::warn!(
+                                    "dns: the effective DNS servers of {guid} could not be read: {error:#}"
+                                );
+                            })
+                            .ok()
                     } else {
                         None
                     };
@@ -813,6 +820,22 @@ pub(super) fn collect_interface_key_adapters() -> Result<Vec<AdapterDnsSnapshot>
         }
     }
     guids.iter().map(|guid| read_adapter(guid, None)).collect()
+}
+
+/// The registry DNS values of exactly these interfaces by GUID, active or not, `None` for an
+/// interface whose values could not be read. An interface with no DNS values at all reads as an
+/// adapter whose values are all absent (automatic): that is an answer; a failed read is not.
+pub(super) fn read_registry_adapters(guids: &[String]) -> Vec<(String, Option<AdapterDnsSnapshot>)> {
+    guids
+        .iter()
+        .map(|guid| {
+            let read = read_adapter(guid, None);
+            if let Err(error) = &read {
+                tracing::warn!("dns: the registry DNS values of adapter {guid} could not be read: {error:#}");
+            }
+            (guid.clone(), read.ok())
+        })
+        .collect()
 }
 
 /// Per-family inputs for native protected apply or legacy apply/restore. The latter batches
@@ -1472,9 +1495,6 @@ pub(super) fn any_loopback(guids: &[String]) -> Result<bool> {
 /// that is not active has no running resolver to prove (the registry check above still covers
 /// it); an active one whose list was not read is an error, never an empty list.
 fn effective_lists_tono_dns(guids: &[String], active: &[ActiveAdapter]) -> Result<bool> {
-    let parse = |value: &str| value.parse::<std::net::IpAddr>().ok();
-    let current = parse(super::PROTECTED_DNS_V4);
-    let tono = [super::PROTECTED_DNS_V4, super::LOOPBACK_V4, super::LOOPBACK_V6].map(parse);
     for adapter in active
         .iter()
         .filter(|adapter| guids.iter().any(|guid| guid.eq_ignore_ascii_case(&adapter.guid)))
@@ -1482,20 +1502,25 @@ fn effective_lists_tono_dns(guids: &[String], active: &[ActiveAdapter]) -> Resul
         let servers = adapter.dns_servers.as_ref().with_context(|| {
             format!("effective DNS servers of {} were not read", adapter.guid)
         })?;
-        for ipv6 in [false, true] {
-            let family: Vec<_> = servers
-                .iter()
-                .filter(|server| server.is_ipv6() == ipv6)
-                .map(|server| Some(*server))
-                .collect();
-            if family.contains(&current)
-                || (!family.is_empty() && family.iter().all(|server| tono.contains(server)))
-            {
-                return Ok(true);
-            }
+        let found = super::classify_effective_servers(servers);
+        if found.endpoint || found.tono_owned_family {
+            return Ok(true);
         }
     }
     Ok(false)
+}
+
+/// The effective resolver list of every active adapter among `guids`, for the emergency reset's
+/// target selection and its verification. An active adapter whose list could not be read is
+/// reported as `None` (unknown), never as an empty list, and does not hide the others.
+pub(super) fn effective_dns_servers(
+    guids: &[String],
+) -> Result<Vec<(String, Option<Vec<std::net::IpAddr>>)>> {
+    Ok(active_adapters_read(true)?
+        .into_iter()
+        .filter(|adapter| guids.iter().any(|guid| guid.eq_ignore_ascii_case(&adapter.guid)))
+        .map(|adapter| (adapter.guid, adapter.dns_servers))
+        .collect())
 }
 
 /// Whether every adapter is in the protected state. The two families do not answer the same

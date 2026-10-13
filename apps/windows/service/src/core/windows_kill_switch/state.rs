@@ -529,14 +529,27 @@ pub(super) const DNS_RESTORE_STALLED_PREFIX: &str = "TONO_DNS_RESTORE_STALLED";
 /// also stays under the IPC handler's 60 s budget, so the refusal still reaches the client.
 pub(super) const DNS_RESTORE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(40);
 
+/// The exact DNS restore's bound on the non-uninstall emergency path when the caller passes a
+/// deadline (the release worker, whose whole cleanup is 45 s). The restore is abandoned at this
+/// point, WFP is removed, and the adapters are put back on automatic (DHCP) by the one attempt in
+/// `emergency_disarm_with` or, if the engine is still busy, by the restarted Service.
+pub(super) const EMERGENCY_RESTORE_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The exact restore on the emergency path is never cut shorter than this, whatever the deadline.
+pub(super) const EMERGENCY_MIN_RESTORE: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// The budget of the exact DNS restore on the emergency path, given the time `remaining` before
-/// the caller's deadline (`None`: no deadline).
-pub(super) fn emergency_restore_budget(_remaining: Option<std::time::Duration>) -> std::time::Duration {
-    DNS_RESTORE_TIMEOUT
+/// the caller's deadline (`None`: the caller has no deadline and keeps [`DNS_RESTORE_TIMEOUT`]).
+pub(super) fn emergency_restore_budget(remaining: Option<std::time::Duration>) -> std::time::Duration {
+    match remaining {
+        None => DNS_RESTORE_TIMEOUT,
+        Some(remaining) => EMERGENCY_RESTORE_BUDGET.min(remaining.max(EMERGENCY_MIN_RESTORE)),
+    }
 }
 
 /// Marks the note the emergency disarm appends to its DNS error about the adapter reset that
-/// follows an unproven exact restore.
+/// follows an unproven exact restore. The note is information only: the error it rides on is still
+/// the exact restore's, so no caller may read it as "restored".
 pub(super) const DNS_FALLBACK_NOTE_PREFIX: &str = "TONO_DNS_FALLBACK";
 
 /// SCM `StopPending` hint posted by the service. Stop is accepted before startup

@@ -71,6 +71,10 @@ pub(super) fn spawn_startup_release_retry() {
                     tracing::warn!(
                         "service start: leftover DNS snapshot could not be restored: {error:#}"
                     );
+                    // The exact restore failed. Put the adapters Tono left on its resolver back on automatic
+                    // (DHCP), detached: this path must not get longer (the release worker waits only
+                    // `SERVICE_ANSWER_TIMEOUT` for the pipe that opens after it).
+                    spawn_dns_fallback_after_failed_startup_restore();
                 }
                 if let Some(apply_narrow) = follow_up {
                     finish_release_follow_up(apply_narrow).await;
@@ -104,13 +108,70 @@ pub(super) fn spawn_startup_release_retry() {
     });
 }
 
-/// The detached adapter reset after a failed startup restore, with its bound and retry pause
-/// injected.
+/// How long the detached fallback below keeps retrying while the DNS engine is busy.
+pub(super) const STARTUP_DNS_FALLBACK_BOUND: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// Pause between two attempts that were refused because the engine is busy.
+const STARTUP_DNS_FALLBACK_RETRY: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// The guarantee behind the emergency disarm's single adapter-reset attempt. The release worker
+/// always restarts the main Service after its cleanup, and this fresh process has a clean DNS
+/// engine claim and no cleanup deadline. When its startup exact restore fails, the adapters Tono
+/// left on its resolver are put back on automatic (DHCP) here, detached so startup does not get
+/// longer, retrying while the engine refuses as busy. The caller has already removed WFP (or there
+/// is none), so no lookup leaves a physical adapter while the barrier stands. Never spawned for a
+/// wanted (re-armed) intent: protection stays up and the DNS stays redirected on purpose.
+pub(super) fn spawn_dns_fallback_after_failed_startup_restore() -> tokio::task::JoinHandle<()> {
+    spawn_dns_fallback_within(STARTUP_DNS_FALLBACK_BOUND, STARTUP_DNS_FALLBACK_RETRY)
+}
+
+/// [`spawn_dns_fallback_after_failed_startup_restore`] with its bound and retry pause injected,
+/// so a test models the 90 s bound in milliseconds.
 pub(super) fn spawn_dns_fallback_within(
-    _bound: std::time::Duration,
-    _retry: std::time::Duration,
+    bound: std::time::Duration,
+    retry: std::time::Duration,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async {})
+    tokio::spawn(async move {
+        let attempts = async {
+            loop {
+                // A connect that arrived while the engine was busy re-armed protection, and
+                // its DNS redirect is on purpose from then on: not ours to undo.
+                if armed_guard().is_some() {
+                    tracing::info!(
+                        "service start: protection was armed again, so the DNS fallback stops"
+                    );
+                    return;
+                }
+                match crate::core::dns::reset_redirected_adapters_to_automatic().await {
+                    Ok(adapters) => {
+                        tracing::warn!(
+                            "service start: the exact DNS restore failed; {} adapter(s) on a Tono DNS \
+                             target were set to automatic (DHCP): {adapters:?}",
+                            adapters.len()
+                        );
+                        return;
+                    }
+                    Err(error) if crate::core::dns::is_engine_busy_refusal(&error) => {
+                        tracing::debug!("service start: DNS fallback waits for the busy DNS engine: {error:#}");
+                        tokio::time::sleep(retry).await;
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            "service start: the adapter reset to automatic (DHCP) after a failed DNS \
+                             restore did not complete: {error:#}"
+                        );
+                        return;
+                    }
+                }
+            }
+        };
+        if tokio::time::timeout(bound, attempts).await.is_err() {
+            tracing::error!(
+                "service start: the DNS engine stayed busy for {bound:?}, so adapters left on Tono's \
+                 DNS target were not reset; the saved servers are kept for the next start"
+            );
+        }
+    })
 }
 
 /// Ownerless block used only when the on-disk record explicitly enabled the strict kill
@@ -318,6 +379,10 @@ pub async fn restore_on_service_start() -> Result<()> {
                     tracing::warn!(
                         "service start: leftover DNS snapshot could not be restored: {error:#}"
                     );
+                    // The exact restore failed. Put the adapters Tono left on its resolver back on automatic
+                    // (DHCP), detached: this path must not get longer (the release worker waits only
+                    // `SERVICE_ANSWER_TIMEOUT` for the pipe that opens after it).
+                    spawn_dns_fallback_after_failed_startup_restore();
                 }
                 if let Some(apply_narrow) = follow_up {
                     finish_release_follow_up(apply_narrow).await;
@@ -379,6 +444,10 @@ pub async fn restore_on_service_start() -> Result<()> {
                 tracing::warn!(
                     "service start: leftover DNS snapshot could not be restored: {error:#}"
                 );
+                // The exact restore failed. Put the adapters Tono left on its resolver back on automatic
+                // (DHCP), detached: this path must not get longer (the release worker waits only
+                // `SERVICE_ANSWER_TIMEOUT` for the pipe that opens after it).
+                spawn_dns_fallback_after_failed_startup_restore();
             }
             Ok(())
         }
