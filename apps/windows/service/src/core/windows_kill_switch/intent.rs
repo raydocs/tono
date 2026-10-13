@@ -91,6 +91,38 @@ pub(super) async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// The gate-side half of `OWNER_RECORD_UNCONFIRMED`: while the recorded owner may differ between
+/// memory and disk, adopt the disk's. Called by every owner gate before it decides, under the
+/// owner lifecycle lock. A readable record is copied (owner, verification, timestamp) and the
+/// flag cleared; a missing or unparseable one refuses retryably and leaves the flag set. It never
+/// writes: uncertainty is resolved by reading, not by a second write.
+pub(crate) async fn reconcile_owner_record_if_unconfirmed()
+-> std::result::Result<(), crate::core::auth::ServiceError> {
+    if !OWNER_RECORD_UNCONFIRMED.load(Ordering::Acquire) {
+        return Ok(());
+    }
+    let _operation = WFP_OPERATION.lock().await;
+    if !OWNER_RECORD_UNCONFIRMED.load(Ordering::Acquire) {
+        return Ok(());
+    }
+    let on_disk = tokio::fs::read(intent_path())
+        .await
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<IntentRecord>(&bytes).ok());
+    let Some(on_disk) = on_disk else {
+        return Err(crate::core::auth::ServiceError::still_protected(
+            "the protection owner record cannot be read; try again",
+        ));
+    };
+    if let Some(armed) = armed_guard().as_mut() {
+        armed.intent.owner_key = on_disk.owner_key;
+        armed.intent.verified = on_disk.verified;
+        armed.intent.updated_at = on_disk.updated_at;
+    }
+    OWNER_RECORD_UNCONFIRMED.store(false, Ordering::Release);
+    Ok(())
+}
+
 pub(super) fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

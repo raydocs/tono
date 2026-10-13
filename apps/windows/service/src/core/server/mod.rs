@@ -1407,6 +1407,11 @@ async fn enter_owner_lifecycle(
     if lifecycle_is_stopping() {
         return ControlFlow::Break(service_unavailable("service is stopping"));
     }
+    // Before any owner decision below (or in `update::lifecycle_allowed`): a takeover whose
+    // owner write could not be confirmed leaves memory unproven until the disk is re-read.
+    if let Err(error) = windows_kill_switch::reconcile_owner_record_if_unconfirmed().await {
+        return ControlFlow::Break(service_error(error));
+    }
     #[cfg(windows)]
     let repair = match owner_lifecycle_repair_gate(
         crate::acquire_service_repair_gate(),

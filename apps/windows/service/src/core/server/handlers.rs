@@ -90,6 +90,11 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             if lifecycle_is_stopping() {
                 return service_unavailable("service is stopping");
             }
+            // `update::request` decides with `authorize_write_for`: first settle an owner
+            // record a takeover could not confirm (see `enter_owner_lifecycle`).
+            if let Err(error) = windows_kill_switch::reconcile_owner_record_if_unconfirmed().await {
+                return service_error(error);
+            }
             // Sol R2-F4: a Disconnect queued before a Restore internet or a newer admitted Connect
             // names an older session and is refused before it touches anything. Checked under the
             // lifecycle lock, which StartClash admission also holds.

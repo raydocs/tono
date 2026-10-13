@@ -22,6 +22,45 @@ fn owner(uid: u32) -> AuthenticatedOwner {
     }
 }
 
+/// #1293: while a takeover's owner write is unconfirmed and the intent file cannot be read, the
+/// owner gates refuse (retryably) before they judge any caller; an owner gate that skipped the
+/// reconcile would decide from a memory owner that may differ from the disk.
+#[tokio::test]
+#[serial]
+async fn an_unconfirmed_owner_record_refuses_the_owner_gates_until_it_can_be_read() {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            crate::core::windows_kill_switch::set_owner_record_unconfirmed_for_tests(false);
+        }
+    }
+    let _reset = Reset;
+    let intent = crate::service_paths().persistent_state_dir().join("kill-switch.json");
+    let _ = std::fs::remove_file(&intent);
+    crate::core::windows_kill_switch::set_owner_record_unconfirmed_for_tests(true);
+
+    for (gate_name, gate) in [
+        ("Unchecked", super::OwnerLifecycleGate::Unchecked),
+        ("ArmedPolicyOwner", super::OwnerLifecycleGate::ArmedPolicyOwner),
+        ("ArmedPolicyRelease", super::OwnerLifecycleGate::ArmedPolicyRelease),
+        ("ArmedPolicyTakeover", super::OwnerLifecycleGate::ArmedPolicyTakeover),
+    ] {
+        match super::enter_owner_lifecycle(&owner(97_010), gate).await {
+            std::ops::ControlFlow::Break(response) => {
+                let response = response.expect("a refusal must encode");
+                assert_ne!(
+                    response.status,
+                    http::StatusCode::OK,
+                    "{gate_name} must refuse while the owner record is unconfirmed and unreadable"
+                );
+            }
+            std::ops::ControlFlow::Continue(_) => {
+                panic!("{gate_name} admitted a caller on an unconfirmed owner record")
+            }
+        }
+    }
+}
+
 #[tokio::test]
 #[serial]
 async fn release_retires_run_intent_when_the_active_owner_record_is_corrupt() -> anyhow::Result<()> {
