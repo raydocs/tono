@@ -143,6 +143,14 @@ impl ProtocolInfo {
             && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT
     }
 
+    /// Whether `ReplaceSingBoxRuntime` verifies the signed traffic policy a DIRECT document comes
+    /// from (#1280). An older Service admits the DIRECT shapes alone, so a new App skips the
+    /// optional overlay against it and keeps the full tunnel.
+    pub const fn supports_sing_box_direct_policy(&self) -> bool {
+        self.protocol.epoch == ProtocolVersion::current().epoch
+            && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT_POLICY
+    }
+
     /// Whether, armed without a tunnel, rule C permits the [`crate::API_RELAYS`] for the Tono
     /// app (decision 090), so the App may reach the control plane through them alone (091).
     pub const fn supports_api_relay_permit(&self) -> bool {
@@ -402,6 +410,33 @@ pub struct ReplaceSingBoxRuntimeRequest {
     /// rollback sets this false so failure cannot write DIRECT rules back.
     #[serde(default = "default_restore_previous")]
     pub restore_previous: bool,
+    /// Revision 22. The signed traffic policy the DIRECT rules in `runtime_json` come from. The
+    /// Service verifies it with the compiled-in policy key and admits only the DIRECT entries it
+    /// lists. A document with no DIRECT rule (the full-tunnel rollback) needs none; an older App
+    /// sends none, so a document with DIRECT rules is refused and the overlay is skipped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub traffic_policy: Option<SignedTrafficPolicy>,
+}
+
+/// Revision 22. The traffic policy exactly as the control plane served it: the signed JSON
+/// bytes, their detached Ed25519 signature (standard base64) over
+/// `tono-traffic-policy-v1\n` + `json`, and the envelope's revision, which must equal the
+/// revision embedded in the signed JSON when there is one.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignedTrafficPolicy {
+    pub revision: i64,
+    pub json: String,
+    pub signature: String,
+}
+
+impl std::fmt::Debug for SignedTrafficPolicy {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SignedTrafficPolicy")
+            .field("revision", &self.revision)
+            .field("json_len", &self.json.len())
+            .finish_non_exhaustive()
+    }
 }
 
 /// Revision 19. Permits for the rules the App already read back. No reload id:

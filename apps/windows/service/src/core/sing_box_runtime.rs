@@ -12,6 +12,8 @@
 use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Value};
 
+use crate::core::direct_admission::DirectBinding;
+
 const TOP_LEVEL_KEYS: &[&str] = &[
     "log",
     "dns",
@@ -41,7 +43,18 @@ const FORBIDDEN_KEYS: &[&str] = &[
 const TUN_INTERFACE_NAME: &str = "Tono";
 const TUN_ADDRESS: &str = "198.18.0.1/30";
 
+/// The shape of the owned runtime, with the DIRECT rules admitted by shape alone. Only a document
+/// an earlier admission approved, or one with no DIRECT rule, belongs here; a replacement the App
+/// proposes goes through [`admit_owned_runtime_bound`].
 pub fn admit_owned_runtime(text: &str) -> Result<(), String> {
+    admit_owned_runtime_bound(text, DirectBinding::ShapeOnly)
+}
+
+/// The same shape check, and every DIRECT rule must also be what `binding` allows (#1280).
+pub(crate) fn admit_owned_runtime_bound(
+    text: &str,
+    binding: DirectBinding<'_>,
+) -> Result<(), String> {
     let FoldedJson(value) = serde_json::from_str(text)
         .map_err(|_| "runtime is not JSON with unambiguous keys".to_string())?;
     let root = value
@@ -100,7 +113,7 @@ pub fn admit_owned_runtime(text: &str) -> Result<(), String> {
             .ok_or_else(|| "route.rules is not a list".to_string())?
             .as_slice(),
     };
-    crate::core::direct_admission::admit_sing_box_direct_rules(outbounds, rules)?;
+    crate::core::direct_admission::admit_sing_box_direct_rules(outbounds, rules, binding)?;
 
     let dns = root
         .get("dns")

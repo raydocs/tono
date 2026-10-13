@@ -35,7 +35,7 @@ use tono_service_protocol::{
     DirectRuntimeReloadResult, DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, KillSwitchConfig,
     KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode, MacosProxyConfig, OwnerCredentials,
     OwnerSessionProof, ProxyApplyOutcome, RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest,
-    ReplaceProxyEndpointsRequest, ReplaceSingBoxRuntimeRequest, CommitSingBoxDirectRequest,
+    ReplaceProxyEndpointsRequest, ReplaceSingBoxRuntimeRequest, SignedTrafficPolicy, CommitSingBoxDirectRequest,
     RuntimeBundle, ServiceStatusSnapshot, StageRuntimeOutcome, StartClashRequest, StopClashOptions, WriterConfig,
 };
 use once_cell::sync::Lazy;
@@ -1297,11 +1297,14 @@ pub(crate) async fn tono_kill_switch_status() -> Result<KillSwitchStatus> {
     response.data.context("Tono Service 未返回 Kill Switch 状态")
 }
 
-/// Revision 19. Replace the running sing-box document and re-lock the full tunnel.
+/// Revision 19. Replace the running sing-box document and re-lock the full tunnel. Revision 22
+/// carries the signed traffic policy a DIRECT document is bound to (#1280); the full-tunnel
+/// rollback sends none.
 pub(crate) async fn tono_replace_sing_box_runtime(
     session: &OwnerSessionProof,
     runtime_json: String,
     restore_previous: bool,
+    traffic_policy: Option<SignedTrafficPolicy>,
 ) -> Result<()> {
     let credentials = current_owner_credentials()?;
     let response = tono_service_protocol::replace_sing_box_runtime(
@@ -1310,6 +1313,7 @@ pub(crate) async fn tono_replace_sing_box_runtime(
         ReplaceSingBoxRuntimeRequest {
             runtime_json,
             restore_previous,
+            traffic_policy,
         },
     )
     .await

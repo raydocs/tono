@@ -259,13 +259,17 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 &owner.identity,
                 &request.payload.runtime_json,
                 request.payload.restore_previous,
+                request.payload.traffic_policy.as_ref(),
             )
             .await
             {
                 Ok(()) => ok_empty("sing-box runtime replaced and the full tunnel was locked"),
-                Err(error) => service_unavailable(format!(
-                    "Failed to replace sing-box runtime: {error:#}"
-                )),
+                Err(error) => {
+                    warn!("sing-box runtime replacement refused or failed: {error:#}");
+                    service_unavailable(format!(
+                        "Failed to replace sing-box runtime: {error:#}"
+                    ))
+                }
             }
         })
         .post(IpcCommand::CommitSingBoxDirect.as_ref(), |ctx| async move {
