@@ -476,7 +476,10 @@ nonisolated enum HelperProtocolVersion {
     ///   `no state` in both directions (Apple PF keys ICMPv6 state without the
     ///   type, so a state from an inbound router advertisement could admit an
     ///   Echo Request). The tunneled rule is unchanged.
-    static let current = "4.52.53"
+    /// - 4.52.53 → 4.52.54: `--emergency-reset` keeps the helper, and prints
+    ///   what is left, while the AI-service layer (resolver sinkhole, blackhole
+    ///   routes) is not proven gone, as it already did for a DNS restore failure.
+    static let current = "4.52.54"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

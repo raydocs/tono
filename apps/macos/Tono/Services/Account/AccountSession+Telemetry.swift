@@ -637,6 +637,12 @@ extension AccountSession {
         deviceActionError = nil
         entitlementDetail = nil
         blockedWhileReady = false
+        // Diagnostic and spacing state of the account just cleared. The
+        // traffic policy itself is fleet-wide and stays installed.
+        lastTrafficPolicyRevision = nil
+        lastCatalogFailureMessage = nil
+        lastTrafficPolicyFailureMessage = nil
+        lastConnectFailureAt = nil
         // An offline admission described the account just cleared (#582),
         // and so did Tono's acceptance of its session (R612-O5).
         api.offlineGate.leaveOffline()

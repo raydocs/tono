@@ -2833,6 +2833,48 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "test-only-refresh")
     }
 
+    func testSignOutWhoseKeychainDeleteFailsStaysSignedOutAcrossClientRelaunch() async throws {
+        let (account, transport, host, requests) = fixture(
+            keychainDelete: { _ in errSecInteractionNotAllowed }
+        )
+        defer {
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            try? FileManager.default.removeItem(at: testSuppressionDirectory(host))
+        }
+        try await adoptTestAccount(account)
+        let logout = Task { await account.api.logout() }
+        let revoke = try await nextRequest(requests)
+        XCTAssertTrue(revoke.request.url?.path.hasSuffix("/auth/logout") == true)
+        revoke.respond(status: 204, body: "")
+        await logout.value
+
+        XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "test-only-refresh", "the delete really failed")
+        let restorable = try await account.api.hasRestorableSession()
+        XCTAssertFalse(restorable)
+        let relaunched = TonoAPIClient(
+            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            offlineGate: OfflineGrantGate(directory: Self.fixtureGrantDirectory)
+        )
+        let relaunchRestorable = try await relaunched.hasRestorableSession()
+        XCTAssertFalse(relaunchRestorable, "a sign-out whose delete failed must not restore the account")
+    }
+
+    func testClearAccountDropsThePreviousAccountsDiagnosticResidue() {
+        let (account, transport, host, _) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        account.lastTrafficPolicyRevision = 7
+        account.lastCatalogFailureMessage = "catalog failed"
+        account.lastTrafficPolicyFailureMessage = "policy failed"
+        account.lastConnectFailureAt = Date()
+        account.clearAccount()
+        XCTAssertNil(account.lastTrafficPolicyRevision)
+        XCTAssertNil(account.lastCatalogFailureMessage)
+        XCTAssertNil(account.lastTrafficPolicyFailureMessage)
+        XCTAssertNil(account.lastConnectFailureAt)
+    }
+
     func testFailedSignInKeychainWriteAndDeleteSuppressesOldAccountAcrossClientRelaunch() async throws {
         let refusal = RefuseOneTokenWrite("new-refresh")
         var disarms = 0

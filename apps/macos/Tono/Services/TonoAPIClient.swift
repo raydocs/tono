@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 nonisolated private final class TonoNoRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(
@@ -713,7 +714,26 @@ actor TonoAPIClient {
         accessToken = nil
         accessTokenExpiry = nil
         unpersistedRefreshToken = nil
-        try? keychain.remove(.refreshToken)
+        removeRefreshTokenForSignOut()
+    }
+
+    /// Signed out must stay signed out across a relaunch. A failed delete is
+    /// tried once more; if the item is still there, a signed-out tombstone
+    /// (the same file a refused adoption leaves) makes `hasRestorableSession`
+    /// refuse it, and this process stops using it at once. The next sign-in
+    /// replaces the item and clears the tombstone.
+    private func removeRefreshTokenForSignOut() {
+        var failure: Swift.Error?
+        for _ in 0..<2 {
+            do { try keychain.remove(.refreshToken); return } catch { failure = error }
+        }
+        failedAdoption = true
+        let log = Logger(subsystem: "com.raydocs.tono", category: "account")
+        log.error("Sign-out could not delete the refresh token: \(String(describing: failure), privacy: .public)")
+        do { try keychain.suppressRefreshTokenRestoration() }
+        catch {
+            log.error("Sign-out could not record the tombstone: \(String(describing: error), privacy: .public)")
+        }
     }
 
     private func retireCredentialGeneration() {

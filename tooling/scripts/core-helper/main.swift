@@ -1439,7 +1439,18 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
     try? bootout.run()
     bootout.waitUntilExit()
 
-    switch emergencyRelease(underLock: storage) {
+    return finishEmergencyReset(emergencyRelease(underLock: storage))
+}
+
+/// What the reset does once the release outcome is known. The closures are the
+/// system effects, so a test can drive every branch.
+func finishEmergencyReset(
+    _ outcome: EmergencyReleaseOutcome,
+    clearSelectiveLayer: () -> Bool = removeSelectiveLayerIfPresent,
+    keepHelper: () -> Void = bootstrapHelperDaemon,
+    removeInstallation: () -> Void = removeHelperInstallation
+) -> Bool {
+    switch outcome {
     case .released, .coreStillRunning:
         // The administrator asked for removal; the survivor was reported.
         break
@@ -1447,7 +1458,7 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
         // Protection could not be released; removing the installation now
         // would strand the machine fail-closed with nothing able to enforce
         // or undo it. Put the daemon registration back and keep everything.
-        bootstrapHelperDaemon()
+        keepHelper()
         fputs(
             "Tono emergency reset aborted: protection could not be released; "
             + "the installation was left in place.\n",
@@ -1458,7 +1469,7 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
         // PF is open, but DNS may still point at the stopped resolver.
         // The daemon retries that restore while the Core is down; removing
         // it would leave nothing to retry (#1165).
-        bootstrapHelperDaemon()
+        keepHelper()
         fputs(
             "Tono emergency reset released protection but could not restore DNS; "
             + "the helper was kept to retry it. Run the reset again later.\n",
@@ -1466,12 +1477,27 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
         )
         return false
     }
-    removeHelperInstallation()
+    // Decision 121: an AI-service layer not proven gone is retried only by this
+    // helper (its start and watchdog), so it stays, as for a DNS restore
+    // failure, instead of leaving the /etc/resolver sinkhole with no owner.
+    if !clearSelectiveLayer() {
+        keepHelper()
+        let prefixes = SelectiveFailOpen.routeGetArguments().compactMap(\.last).joined(separator: ", ")
+        fputs(
+            "Tono emergency reset released protection but could not remove the AI-service layer; "
+            + "the helper was kept to retry it. Left in place: the resolver files in /etc/resolver "
+            + "for \(SelectiveFailOpen.suffixes.joined(separator: ", ")) and the blackhole routes for "
+            + "\(prefixes). Run the reset again later.\n",
+            stderr
+        )
+        return false
+    }
+    removeInstallation()
     print("Tono helper installation removed. Reopen Tono to reinstall it.")
     return true
 }
 
-private func bootstrapHelperDaemon() {
+func bootstrapHelperDaemon() {
     let restore = Process()
     restore.executableURL = URL(fileURLWithPath: "/bin/launchctl")
     restore.arguments = [
@@ -1485,7 +1511,7 @@ private func bootstrapHelperDaemon() {
 }
 
 /// Removal after a verified release. Callers have released PF first.
-private func removeHelperInstallation() {
+func removeHelperInstallation() {
     // PF is released. Take Tono's hook back out of /etc/pf.conf and delete the
     // backups written before its first edits. A hook left behind only loads the
     // disarmed placeholder anchor, so a failure is reported, not fatal.
@@ -1724,10 +1750,7 @@ func releaseIfTonoWasRemoved(
 func releaseRemovedInstallationLocked(
     _ storage: UpdateStorage,
     release: (UpdateStorage) -> EmergencyReleaseOutcome = { emergencyRelease(underLock: $0) },
-    clearSelectiveLayer: () -> Bool = {
-        if !SelectiveFailOpenInstaller.layerProvenAbsent() { SelectiveFailOpenInstaller.removeBestEffort() }
-        return SelectiveFailOpenInstaller.layerProvenAbsent()
-    },
+    clearSelectiveLayer: () -> Bool = removeSelectiveLayerIfPresent,
     removeInstallation: () -> Void = { removeHelperInstallation(); bootoutRemovedHelper() }
 ) -> Bool {
     switch release(storage) {
@@ -1747,6 +1770,12 @@ func releaseRemovedInstallationLocked(
         fputs("tono: removal kept the helper because a stale Core is still running; retrying later\n", stderr)
         return false
     }
+}
+
+/// True only when the system proves none of the AI-service layer is left.
+func removeSelectiveLayerIfPresent() -> Bool {
+    if !SelectiveFailOpenInstaller.layerProvenAbsent() { SelectiveFailOpenInstaller.removeBestEffort() }
+    return SelectiveFailOpenInstaller.layerProvenAbsent()
 }
 
 func bootoutRemovedHelper() {
