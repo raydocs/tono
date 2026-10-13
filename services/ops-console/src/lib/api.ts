@@ -187,11 +187,19 @@ export async function getJson<T>(
  */
 const PAGE_LIMIT = 200;
 const MAX_ITEMS = 2_000;
+/**
+ * The customer list is the one that outgrows `MAX_ITEMS` first: customer
+ * 2,001 onward was neither listed nor searchable, and the shell dropped the
+ * cursor that said so. It walks to the end, with a guard two orders of
+ * magnitude above today's fleet.
+ */
+const MAX_CUSTOMERS = 50_000;
 
 export async function getAllJson<T>(
   path: string,
   signal?: AbortSignal,
   query?: Record<string, string>,
+  maxItems: number = MAX_ITEMS,
 ): Promise<ListDto<T>> {
   const items: T[] = [];
   const seen = new Set<string>();
@@ -207,10 +215,10 @@ export async function getAllJson<T>(
     cursor = page.nextCursor;
     if (cursor !== null && seen.has(cursor)) cursor = null;
     if (cursor !== null) seen.add(cursor);
-  } while (cursor !== null && items.length < MAX_ITEMS && page.items.length > 0);
+  } while (cursor !== null && items.length < maxItems && page.items.length > 0);
   // `total` travels with the envelope: an endpoint that counted cheaply said so,
   // and paging is not a reason to lose the count.
-  return { ...page, items: items.slice(0, MAX_ITEMS), nextCursor: cursor };
+  return { ...page, items: items.slice(0, maxItems), nextCursor: cursor };
 }
 
 /**
@@ -300,7 +308,7 @@ export const opsApi = {
   /** Last week's control-plane arrivals per client ASN and path, with reported success rates. */
   apiPaths: (signal?: AbortSignal) => getJson<ApiPathsDto>('api-paths', signal),
 
-  customers: (signal?: AbortSignal) => getAllJson<CustomerSummaryDto>('customers', signal),
+  customers: (signal?: AbortSignal) => getAllJson<CustomerSummaryDto>('customers', signal, undefined, MAX_CUSTOMERS),
   /**
    * Everyone who has not connected yet, plus the five counts above them.
    *

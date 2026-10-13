@@ -190,13 +190,12 @@ pub(crate) fn validate_residential_routing(
         if keep_socks5(&routing.home_socks5, &mut Vec::new()).is_none() {
             return Err(CatalogError::InvalidResponse);
         }
-    } else if let Some(name) = &routing.home_proxy {
-        if name.is_empty() || name.chars().count() > MAX_ROUTING_NAME_CHARS
-            || !nodes.iter().any(|node| &node.name == name)
+    } else if let Some(name) = &routing.home_proxy
+        && (name.is_empty() || name.chars().count() > MAX_ROUTING_NAME_CHARS
+            || !nodes.iter().any(|node| &node.name == name))
         {
             return Err(CatalogError::InvalidResponse);
         }
-    }
     Ok(())
 }
 
@@ -261,11 +260,10 @@ pub fn validate_catalog(catalog: &ExitCatalogResponse) -> Result<Vec<ValidatedNo
     if catalog.sha256 != catalog_digest(&catalog.yaml) {
         return Err(CatalogError::InvalidResponse);
     }
-    if let Some(served) = &catalog.routing_sha256 {
-        if *served != routing_digest(catalog.routing.as_ref()) {
+    if let Some(served) = &catalog.routing_sha256
+        && *served != routing_digest(catalog.routing.as_ref()) {
             return Err(CatalogError::InvalidResponse);
         }
-    }
     // 3. Parse and admit every node.
     let document: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(&catalog.yaml).map_err(|_| CatalogError::InvalidResponse)?;
