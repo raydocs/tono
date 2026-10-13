@@ -1,0 +1,8 @@
+## 2026-10-13 · Windows 更新恢复耗尽后可由完整安装修复
+- 归属：SHIP_PLAN §2 item 10 范围外的 Windows Service 更新事务加固（issue #1307，#1297 拆出）；分支 `claude/svc-repair`；尚未合 main。
+- 缺陷修复：恢复执行器失败 `MAX_RECOVERY_RUNS`（3）次后，Uncertain/Consumed 记录一直挂起，新更新、Disconnect、安装、卸载全部被拒，安装树混杂的机器没有出路。现在对这种记录（Consumed 或 Uncertain、恢复已耗尽、无存活执行器），安装链放行：`begin_manual` 在记录旁取得安装锁，`maintenance_allowed`/`enter_repair_gate` 仅在该锁下放行，`State::validate` 允许 Consumed/Uncertain 记录旁有安装锁；`finish_manual` 在同一个存储句柄下（不再二次 `open_store`，避开 #1297 的 `transaction.lock` 自锁、退出码 76）检查已安装的三组件等于记录的原版本或签名目标、且每个计划成员同侧，才归档记录（`retired-<id>.json`，保留证据、已消费高水位与代数，并退役恢复任务）；目标侧同时清理回滚副本。否则记录保持挂起，安装锁照常交还，不让安装器以 76 退出。Check 的拒绝与 `needs_attention` 带上修复指引（再运行一次同版本或上一版本的安装程序），App 把它显示为更新检查错误。决定见 [118](../decisions/118-2026-10-13-exhausted-update-repaired-by-full-install.md)（provisional）。
+- 新增/优化：无。
+- 工程与测试：`update_exhausted_attempt_accepts_the_installer_lease`（旧代码红）、`update_exhausted_attempt_is_repaired_only_by_the_lease_holder_and_keeps_its_evidence`、`update_install_chain_passes_only_an_exhausted_pending_attempt`、`update_repair_refuses_an_identity_that_is_neither_original_nor_target`、`update_repair_archives_the_attempt_once_the_installed_target_is_proven`（后四个针对新增函数，旧代码无法编译，不是红）。未在本机运行 cargo。
+- 验证：见 PR 正文；高风险（特权路径/生命周期/发布信任），合并前需要独立 Codex 审查。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：无实机验证（耗尽记录 + 混杂安装树上跑完整安装）；「更新到更新的签名版本」这条路未做：更新版本的完整安装能过闸但不会归档旧记录，须安装原版本或目标版本；卸载与 Replaced 记录仍被拒（修复锁只给安装器私有目录里运行的 gate 副本，卸载器运行安装目录里的副本，路径不可读也按卸载处理）；混杂树上存在与 live 文件不同的 `.rollback`/`.restore` 时 `--replace-runtime` 仍会拒绝并中止安装（Codex F3，记在 R4-WIN-UPDATE-REPAIR-SCRATCH）；归档后恢复任务删除失败没有持久重试（Codex F4，记在同一条）；NSIS 的 UpdatePending 对话框文案未改（另一位同事在改 installer.nsi）。
