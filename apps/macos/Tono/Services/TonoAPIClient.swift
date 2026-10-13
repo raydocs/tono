@@ -697,13 +697,13 @@ actor TonoAPIClient {
                 } else {
                     token = try await refreshAccessToken()
                 }
-                guard generation == credentialGeneration else { return }
+                guard generation == credentialGeneration else { return true }
                 do {
                     try await sendLogout(bearer: token, session: .bearer(scope))
                 } catch APIError.unauthorized {
-                    guard generation == credentialGeneration else { return }
+                    guard generation == credentialGeneration else { return true }
                     let renewed = try await accessTokenAfterUnauthorized(token)
-                    guard generation == credentialGeneration else { return }
+                    guard generation == credentialGeneration else { return true }
                     try await sendLogout(bearer: renewed, session: .decisive(scope))
                 }
             } catch {
