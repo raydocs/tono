@@ -39,6 +39,17 @@ fn store_root() -> Result<(PathBuf, Vec<std::fs::File>)> {
     Ok((root, pins))
 }
 
+/// Whether the recorded executor may still run: only no process with that PID, or one created at
+/// another time, is conclusive. Any probe error counts as alive (#1293).
+#[cfg(windows)]
+pub(crate) fn executor_possibly_live(recorded: &Image) -> bool {
+    match super::process::process_started_at(recorded.pid) {
+        Ok(None) => false,
+        Ok(Some(started_at)) => started_at == recorded.started_at,
+        Err(_) => true,
+    }
+}
+
 pub fn pending() -> bool {
     // A locked/unreadable/corrupt store is uncertainty, not absence.
     open_store().map(|s| s.pending()).unwrap_or(true)
