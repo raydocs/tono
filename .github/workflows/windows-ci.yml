@@ -215,14 +215,17 @@ jobs:
           node <<'NODE'
           const fs = require('fs')
           const yaml = fs.readFileSync('../../../.github/workflows/windows-ci.yml', 'utf8')
+          // Needles are split so this step's own source is not a match.
+          const prefixHead = 'restore_prefix=cargo-v1-'
           for (const id of ['windows-core', 'windows-app-rust', 'windows-service']) {
-            const prefix = 'restore_prefix=cargo-v1-' + id + '-'
-            if (!yaml.includes(prefix)) throw new Error('missing ' + prefix)
+            if (!yaml.includes(prefixHead + id + '-')) throw new Error('missing prefix ' + id)
           }
-          const restores = yaml.split('\n').filter((line) => line.includes('restore-keys:'))
-          if (restores.length !== 3) throw new Error('expected 3 restore-keys, got ' + restores.length)
-          const fallbacks = yaml.split('result=fallback').length - 1
-          if (fallbacks !== 3) throw new Error('expected 3 fallback reports, got ' + fallbacks)
+          const restoreMarker = 'outputs.restore_' + 'prefix'
+          const restores = yaml.split('\n').filter((line) => line.includes(restoreMarker))
+          if (restores.length !== 3) throw new Error('expected 3 restore lines, got ' + restores.length)
+          const fallbackMarker = 'result=' + 'fallback'
+          const fallbacks = yaml.split(fallbackMarker).length - 1
+          if (fallbacks !== 3) throw new Error('expected 3 fallback lines, got ' + fallbacks)
           console.log('cargo restore-keys: 3 jobs fall back inside the same rustc')
           NODE
 
