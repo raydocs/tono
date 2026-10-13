@@ -11,8 +11,9 @@
   is unchanged: the firewall prefixes still apply and the release is not kept, restored or failed
   because of this. The read runs on its own observer thread, never inside the hold worker's
   completion budget, so a slow or hung registry read cannot report a successful install as failed
-  or hold up a later removal; a generation counter drops a result that arrives after `remove()`
-  or a newer install, and at most one observer thread exists. A registry read that fails makes no claim. Rejected: removing or overriding
+  or hold up a later removal; an observer that starts after `remove()` reads nothing, a generation
+  counter drops a result that arrives after `remove()` or a newer install, and at most one observer
+  thread exists. A registry read that fails makes no claim. Rejected: removing or overriding
   enterprise policy, writing a catch-all `.` rule or a catch-all DNS/WFP block, blocking shared
   CDN ranges, and a replacement enforcement mechanism (needs its own product decision and Windows
   hardware qualification).

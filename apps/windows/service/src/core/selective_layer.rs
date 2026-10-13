@@ -116,33 +116,37 @@ fn begin_nrpt_observation(read: EffectiveNrptRead) {
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 fn observe_nrpt(read: EffectiveNrptRead) {
     loop {
-        let generation = nrpt_observation().generation;
+        #[cfg(test)]
+        let _before_snapshot = tests::pause(&tests::NRPT_OBSERVER_START_PAUSE);
+        // Snapshot and check `wanted` under one lock: a hold removed (or whose install failed)
+        // before this thread got going is not read at all.
+        let generation = {
+            let mut state = nrpt_observation();
+            if !state.wanted {
+                state.running = false;
+                return;
+            }
+            state.generation
+        };
         let effective = std::panic::catch_unwind(read)
             .unwrap_or_else(|_| Err("effective NRPT read panicked".to_owned()));
         let verdict =
             super::dns::selective_hold_suppression(effective.as_deref().map_err(String::as_str));
-        let finished = {
-            let mut state = nrpt_observation();
-            if state.generation == generation {
-                if let Some(reason) = &verdict {
-                    tracing::warn!("selective fail-open: {reason}");
-                }
-                state.verdict = verdict;
-                state.running = false;
-                true
-            } else if !state.wanted {
-                // Removed or failed meanwhile: the result describes a hold that no longer exists.
-                state.running = false;
-                true
-            } else {
-                false
-            }
-        };
-        if finished {
-            #[cfg(test)]
-            TEST_NRPT_OBSERVATIONS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut state = nrpt_observation();
+        if !state.wanted {
+            // Removed or failed meanwhile: the result describes a hold that no longer exists.
+            state.running = false;
             return;
         }
+        if state.generation == generation {
+            if let Some(reason) = &verdict {
+                tracing::warn!("selective fail-open: {reason}");
+            }
+            state.verdict = verdict;
+            state.running = false;
+            return;
+        }
+        // A newer install while this read was in flight: read again for it.
     }
 }
 
@@ -221,11 +225,6 @@ static TEST_HOLD_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// machine whose local store carries Tono's suffix rules.
 #[cfg(test)]
 static TEST_EFFECTIVE_NRPT: Mutex<Option<Vec<super::dns::EffectiveNrptRule>>> = Mutex::new(None);
-
-/// Observer runs that ended, whether the final result landed or was discarded as stale.
-#[cfg(test)]
-static TEST_NRPT_OBSERVATIONS: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
 
 #[cfg(test)]
 #[allow(dead_code)]
@@ -400,6 +399,8 @@ mod tests {
         Lazy::new(|| Mutex::new(None));
     pub(super) static NRPT_READ_PAUSE: Lazy<Mutex<Option<Arc<PausedStep>>>> =
         Lazy::new(|| Mutex::new(None));
+    pub(super) static NRPT_OBSERVER_START_PAUSE: Lazy<Mutex<Option<Arc<PausedStep>>>> =
+        Lazy::new(|| Mutex::new(None));
 
     fn pause_next(slot: &Mutex<Option<Arc<PausedStep>>>) -> PauseGuard {
         let step = Arc::new(PausedStep::default());
@@ -434,19 +435,17 @@ mod tests {
         assert_eq!(after, before, "reapplying the same hold must never delete it first");
     }
 
-    fn nrpt_observations() -> usize {
-        TEST_NRPT_OBSERVATIONS.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    /// The observer runs on its own thread: wait until it has finished one more read.
-    async fn observed_after(before: usize) {
+    /// The observer runs on its own thread. It marks itself idle in the same critical section
+    /// that publishes (or discards) its verdict, and `begin_nrpt_observation` marks it running
+    /// before the install returns, so idle after an install means that observation is settled.
+    async fn observer_idle() {
         tokio::time::timeout(Duration::from_secs(5), async {
-            while nrpt_observations() <= before {
+            while nrpt_observation().running {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         })
         .await
-        .expect("the advisory observer finished its read");
+        .expect("the advisory observer settled");
     }
 
     async fn warning() -> Option<String> {
@@ -460,22 +459,21 @@ mod tests {
     #[serial]
     async fn domain_nrpt_policy_over_the_ai_hold_is_reported_in_the_dns_status() {
         remove().await;
+        observer_idle().await; // settle observers left by earlier tests
         *TEST_EFFECTIVE_NRPT.lock().unwrap() = Some(vec![crate::core::dns::EffectiveNrptRule {
             namespaces: vec![".corp.example".to_owned()],
             generic_dns_servers: vec!["10.0.0.53".to_owned()],
             tono_owned: false,
         }]);
-        let before = nrpt_observations();
         finish_release(true).await;
-        observed_after(before).await;
+        observer_idle().await;
         let held = test_hold_active();
         let suppressed = warning().await;
         remove().await;
         let after_remove = warning().await;
         *TEST_EFFECTIVE_NRPT.lock().unwrap() = None;
-        let before = nrpt_observations();
         finish_release(true).await;
-        observed_after(before).await;
+        observer_idle().await;
         let ordinary = warning().await;
         remove().await;
 
@@ -499,13 +497,13 @@ mod tests {
     #[serial]
     async fn a_hung_nrpt_read_cannot_fail_the_install_block_the_removal_or_revive_a_warning() {
         remove().await;
+        observer_idle().await; // settle observers left by earlier tests
         *TEST_EFFECTIVE_NRPT.lock().unwrap() = Some(vec![crate::core::dns::EffectiveNrptRule {
             namespaces: vec![".corp.example".to_owned()],
             generic_dns_servers: vec!["10.0.0.53".to_owned()],
             tono_owned: false,
         }]);
         let hung = pause_next(&NRPT_READ_PAUSE);
-        let before = nrpt_observations();
 
         let installed = tokio::time::timeout(STEP_BUDGET * 2, finish_release(true))
             .await
@@ -522,7 +520,7 @@ mod tests {
 
         // The read finally returns the suppressing answer for the hold that no longer exists.
         hung.0.release();
-        observed_after(before).await;
+        observer_idle().await;
         let revived = warning().await;
         *TEST_EFFECTIVE_NRPT.lock().unwrap() = None;
 
@@ -531,6 +529,33 @@ mod tests {
         assert!(removed.is_ok(), "a hung read does not block the removal");
         assert!(!held_after_remove, "the removal took effect");
         assert_eq!(revived, None, "a late result cannot revive a warning after remove()");
+    }
+
+    /// The observer may not even have started when the hold is removed: it must then read nothing
+    /// and publish nothing, instead of judging the policy against a hold that is already gone.
+    #[tokio::test]
+    #[serial]
+    async fn an_observer_that_starts_after_the_removal_publishes_nothing() {
+        remove().await;
+        observer_idle().await; // settle observers left by earlier tests
+        *TEST_EFFECTIVE_NRPT.lock().unwrap() = Some(vec![crate::core::dns::EffectiveNrptRule {
+            namespaces: vec![".corp.example".to_owned()],
+            generic_dns_servers: vec!["10.0.0.53".to_owned()],
+            tono_owned: false,
+        }]);
+        let not_started = pause_next(&NRPT_OBSERVER_START_PAUSE);
+
+        assert!(finish_release(true).await, "the install does not wait for the observer");
+        tokio::time::timeout(Duration::from_secs(1), not_started.0.entered.notified())
+            .await
+            .expect("the observer is parked before its first snapshot");
+        remove().await;
+        not_started.0.release();
+        observer_idle().await;
+        let late = warning().await;
+        *TEST_EFFECTIVE_NRPT.lock().unwrap() = None;
+
+        assert_eq!(late, None, "an observer that starts after remove() must not warn");
     }
 
     #[tokio::test]
