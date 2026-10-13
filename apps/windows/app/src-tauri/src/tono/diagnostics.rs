@@ -353,7 +353,8 @@ pub fn build_report(sources: &DiagnosticsSources<'_>) -> DiagnosticsReport {
         dns_enabled: sources.dns.map(|status| status.enabled),
         // A resolver policy conflict arrives as the Service's advisory, never as its error. It
         // shares this field only for display, where the Support page lists it on the DNS warning
-        // row by its `TONO_DNS_POLICY_CONFLICT` marker; a real error takes precedence.
+        // row by its `TONO_DNS_POLICY_CONFLICT` marker; a real error takes precedence. The released
+        // AI hold's `TONO_DNS_SELECTIVE_POLICY_SUPPRESSED` (domain NRPT policy, #1145) rides the same way.
         dns_last_error: sources.dns.and_then(|status| {
             scrub_opt_text(
                 status.last_error.as_deref().or(status.resolver_policy_warning.as_deref()),
