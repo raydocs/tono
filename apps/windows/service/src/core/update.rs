@@ -41,7 +41,22 @@ fn store_root() -> Result<(PathBuf, Vec<std::fs::File>)> {
 
 pub fn pending() -> bool {
     // A locked/unreadable/corrupt store is uncertainty, not absence.
-    open_store().map(|s| s.pending()).unwrap_or(true)
+    open_store()
+        .map(|mut store| {
+            retire_inert(&mut store);
+            store.pending()
+        })
+        .unwrap_or(true)
+}
+
+/// Archive an attempt whose receipt expired before anything was consumed (#1293, decision 119).
+/// It can grant nothing, yet while recorded it fenced every other user's Connect, release and
+/// Disconnect with no exit. A failed archive leaves it pending: uncertainty is not absence.
+fn retire_inert(store: &mut Store) {
+    let Ok(at) = now() else { return };
+    if let Err(error) = store.retire_expired_inert(at) {
+        tracing::warn!("expired unconsumed update attempt could not be archived: {error:#}");
+    }
 }
 
 pub(crate) fn lifecycle_allowed(owner: &AuthenticatedOwner) -> Result<()> {
@@ -50,6 +65,7 @@ pub(crate) fn lifecycle_allowed(owner: &AuthenticatedOwner) -> Result<()> {
         store.state.manual_installer.is_none(),
         "manual installer owns the machine lifecycle"
     );
+    retire_inert(&mut store);
     if !store.pending() {
         return Ok(());
     }
@@ -69,7 +85,8 @@ pub(crate) fn lifecycle_allowed(owner: &AuthenticatedOwner) -> Result<()> {
 }
 
 pub(crate) fn release_allowed() -> Result<()> {
-    let store = open_store()?;
+    let mut store = open_store()?;
+    retire_inert(&mut store);
     ensure!(
         !store.pending() && store.state.manual_installer.is_none(),
         "update pending; release/quit cannot cancel the recorded recovery obligation"
@@ -138,8 +155,9 @@ fn release_admission_at(
     state: &State,
     live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
 ) -> Result<()> {
+    // Not clock-proof by design: an unreadable clock counts as not expired, so it keeps refusing.
     ensure!(
-        !state.pending(),
+        !state.blocks_at(now().unwrap_or(0)),
         "update pending; release/quit cannot cancel the recorded recovery obligation"
     );
     no_live_lease(state, live).context("manual installer owns the machine lifecycle")?;
@@ -168,7 +186,7 @@ pub(crate) fn attempt_pending_read_only() -> Option<bool> {
     let mut cached = PENDING_FOR_STATUS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     if cached.is_none() {
         *cached = match read_store_state() {
-            Ok(state) => Some(state.pending()),
+            Ok(state) => Some(state.blocks_at(now().unwrap_or(0))),
             Err(error) => {
                 tracing::warn!("update state unreadable for status; reporting it as unknown: {error:#}");
                 None
@@ -476,6 +494,7 @@ async fn transact(
     update_lease_gate(&request, &store.state, super::process::process_identity)?;
     let _repair =
         crate::acquire_service_repair_gate()?.context("repair/uninstall already running")?;
+    retire_inert(&mut store);
     if let Some(a) = &store.state.attempt
         && store.pending()
     {
@@ -2749,6 +2768,24 @@ mod tests {
             "a killed lease holder still counted as alive"
         );
         drop(child);
+    }
+
+    /// #1293: an attempt that expired before anything was consumed can never act, yet it fenced
+    /// every other user's release, Connect and Disconnect for good. It stops blocking at its
+    /// receipt expiry; a consumed attempt keeps its recovery obligation whatever the clock says.
+    #[test]
+    fn update_release_admission_frees_an_expired_unconsumed_attempt() {
+        let (root, store, _, _) = crate::update_transaction::tests::reserved();
+        let mut state = store.state.clone();
+        state.attempt.as_mut().unwrap().receipt.expires_at_unix = 1;
+        release_admission_at(&state, |_| Ok(None))
+            .expect("an expired attempt that consumed nothing kept fencing another user");
+        state.attempt.as_mut().unwrap().execution = Execution::Consumed;
+        state.consumed_sequence = state.attempt.as_ref().unwrap().manifest.release_sequence;
+        let consumed = release_admission_at(&state, |_| Ok(None)).unwrap_err();
+        assert!(format!("{consumed:#}").contains("update pending"), "{consumed:#}");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// BRICK-W2 (Service half): after a restart the App's Disconnect sends `Status` first, and

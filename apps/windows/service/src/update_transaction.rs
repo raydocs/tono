@@ -94,6 +94,31 @@ impl State {
             .is_some_and(|a| a.receipt.phase != Phase::Committed)
     }
 
+    /// An attempt that can never act again: past its receipt expiry, never consumed (the
+    /// high-water is still below its release) and without a live executor. `live_attempt`
+    /// already refuses it, so it grants no authority and fences nothing. A consumed attempt is
+    /// never inert: its recovery obligation outlives the receipt.
+    pub fn inert_at(&self, now: u64) -> bool {
+        self.attempt.as_ref().is_some_and(|a| {
+            a.receipt.phase != Phase::Committed
+                && now >= a.receipt.expires_at_unix
+                && matches!(
+                    a.execution,
+                    Execution::Reserved
+                        | Execution::Extracting
+                        | Execution::Staged
+                        | Execution::Launching
+                )
+                && self.consumed_sequence < a.manifest.release_sequence
+                && a.executor.as_ref().is_none_or(|e| !incarnation_live(e))
+        })
+    }
+
+    /// [`Self::pending`] for admission: an [`Self::inert_at`] attempt no longer blocks anyone.
+    pub fn blocks_at(&self, now: u64) -> bool {
+        self.pending() && !self.inert_at(now)
+    }
+
     fn validate(&self) -> Result<()> {
         ensure!(
             self.consumed_sequence <= 9_007_199_254_740_991
@@ -677,6 +702,26 @@ impl Store {
         self.save(next)
     }
 
+    /// Archive an [`State::inert_at`] attempt so its owner's expiry stops fencing every other
+    /// user (#1293). Like every retirement it keeps the evidence and the high-water; nothing is
+    /// cleared. `Ok(false)` when the attempt is not inert.
+    pub fn retire_expired_inert(&mut self, now: u64) -> Result<bool> {
+        self.retire_expired_inert_with(now, atomic_write)
+    }
+
+    fn retire_expired_inert_with(
+        &mut self,
+        now: u64,
+        archive: impl FnOnce(&Path, &[u8]) -> Result<()>,
+    ) -> Result<bool> {
+        if !self.state.inert_at(now) {
+            return Ok(false);
+        }
+        let attempt_id = self.attempt()?.receipt.attempt_id.clone();
+        self.archive_attempt(&attempt_id, archive)?;
+        Ok(true)
+    }
+
     pub fn retire_unconsumed(&mut self, owner: &str, peer: &Image) -> Result<()> {
         self.retire_unconsumed_with(owner, peer, atomic_write)
     }
@@ -1182,6 +1227,40 @@ pub(crate) mod tests {
         drop(store);
         let store = Store::open(&root).unwrap();
         assert!(!store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_expired_unconsumed_attempt_is_archived_and_a_consumed_one_never_is() {
+        let (root, mut store, _, _) = reserved();
+        let expires = store.attempt().unwrap().receipt.expires_at_unix;
+        let attempt_id = store.attempt().unwrap().receipt.attempt_id.clone();
+        assert!(
+            !store.retire_expired_inert(expires - 1).unwrap(),
+            "an unexpired attempt can still be installed"
+        );
+        assert!(store.pending());
+        assert!(store.retire_expired_inert(expires).unwrap());
+        assert!(!store.pending());
+        let high_water = store.state.consumed_sequence;
+        assert_eq!(high_water, 73, "the archive never lowers the high-water");
+        assert!(
+            root.join(format!("retired-{attempt_id}.json")).is_file(),
+            "the evidence is archived, not cleared"
+        );
+        drop(store);
+        std::fs::remove_dir_all(&root).unwrap();
+
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        let far = store.attempt().unwrap().receipt.expires_at_unix + 1_000_000;
+        assert!(
+            !store.retire_expired_inert(far).unwrap(),
+            "a consumed attempt keeps its recovery obligation past the receipt"
+        );
+        assert!(store.pending());
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }
