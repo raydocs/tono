@@ -702,6 +702,10 @@ pub async fn stop_ipc_server() -> Result<()> {
             Ok(Err(error)) => warn!("Service stop cleanup failed; continuing shutdown: {error:#}"),
             Err(_) => warn!("Service stop cleanup timed out; continuing shutdown"),
         }
+        // A release running in another task may still be inside its WFP removal; dropping the
+        // runtime now would abort that transaction and leave the block behind (#1284).
+        windows_kill_switch::settle_in_flight_wfp_removal(windows_kill_switch::STOP_WFP_REMOVAL_GRACE)
+            .await;
         return Ok(());
     }
     #[cfg(not(windows))]

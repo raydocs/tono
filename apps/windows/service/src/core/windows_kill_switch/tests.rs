@@ -4088,6 +4088,40 @@ async fn a_healthy_engine_call_leaves_no_claim_behind() -> Result<()> {
     Ok(())
 }
 
+/// #1284: SCM Stop must not drop the runtime while a release in another task is still inside
+/// its WFP removal; the kernel call is a stand-in closure that returns after the Stop timeout.
+#[tokio::test]
+#[serial]
+async fn stop_waits_for_an_in_flight_wfp_removal_before_the_runtime_is_dropped() -> Result<()> {
+    let (release, blocked) = std::sync::mpsc::channel::<()>();
+    let removal = move || -> Result<()> {
+        let _ = blocked.recv_timeout(std::time::Duration::from_secs(30));
+        Ok(())
+    };
+    // The release's own caller already gave up on the answer; the kernel call keeps running.
+    bounded_engine_call(std::time::Duration::from_millis(50), "remove all filters", removal)
+        .await
+        .expect_err("the removal outlasts its caller's deadline");
+    assert!(engine_call_in_flight().is_some());
+
+    // The removal stays blocked until the test releases it, so no scheduling delay can let a
+    // Stop that does not wait look correct: it would have returned before the timeout.
+    let settle = settle_in_flight_wfp_removal(std::time::Duration::from_secs(10));
+    tokio::pin!(settle);
+    let early = tokio::time::timeout(std::time::Duration::from_millis(300), &mut settle).await;
+    assert!(
+        early.is_err(),
+        "Stop must not go on to drop the runtime while the removal is inside the engine"
+    );
+    release.send(()).expect("the removal thread is still waiting");
+
+    let settled = settle.await;
+
+    assert!(engine_call_in_flight().is_none());
+    assert!(settled);
+    Ok(())
+}
+
 #[tokio::test]
 #[serial]
 async fn direct_endpoints_live_only_in_the_armed_session_memory() -> Result<()> {

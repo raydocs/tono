@@ -19,6 +19,19 @@ pub(super) const WFP_SLOW_CALL: std::time::Duration = std::time::Duration::from_
 #[cfg(all(windows, not(feature = "test")))]
 const BFE_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Engine-call name of the one operation that opens the machine (every release path).
+#[cfg(any(all(windows, not(feature = "test")), test))]
+const REMOVE_ALL_FILTERS: &str = "remove all filters";
+
+/// What SCM Stop still waits for an in-flight WFP removal after its own 60 s window ran out:
+/// one engine budget (`WFP_CALL_TIMEOUT`, 25 s) plus slack for the thread to hand its result back.
+pub(crate) const STOP_WFP_REMOVAL_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// After the removal returned, the release that owns it still writes its tombstone and clears the
+/// armed state under `WFP_OPERATION`; Stop gives that bookkeeping this long to finish.
+#[cfg(any(all(windows, not(feature = "test")), test))]
+const STOP_RELEASE_BOOKKEEPING_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// A WFP call that was handed to a blocking thread and has not come back yet.
 ///
 /// Registered *before* the thread is spawned and released *only* by that thread — never by the
@@ -371,10 +384,53 @@ pub(crate) async fn observe_for_update() -> Result<KillSwitchStatus> {
     Ok(status().await)
 }
 
+/// SCM Stop calls this once its own window ended, before the runtime is dropped (#1284).
+///
+/// A release already running in another task (a StartClash rollback, a Disconnect) owns its own
+/// DNS and WFP budgets, which together can outlast what is left of the Stop window. Dropping the
+/// runtime then kills the thread inside `FwpmTransactionCommit`, BFE aborts the transaction, and
+/// the persistent block survives on a non-strict machine until the next Service start. The wait
+/// is bounded by `budget`; it only ever delays the stop, never skips or reverses a release, and
+/// a removal that does not return in time leaves the machine exactly as the old drop did.
+/// Returns whether no WFP removal is still inside the engine.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) async fn settle_in_flight_wfp_removal(budget: std::time::Duration) -> bool {
+    #[cfg(any(all(windows, not(feature = "test")), test))]
+    {
+        let deadline = std::time::Instant::now() + budget;
+        let mut waited = false;
+        loop {
+            match engine_call_in_flight() {
+                Some(call) if call.operation == REMOVE_ALL_FILTERS => waited = true,
+                _ => break,
+            }
+            if std::time::Instant::now() >= deadline {
+                tracing::error!(
+                    "wfp: a removal is still inside the engine after {budget:?}; the service \
+                     stops anyway and the next Service start releases what is left"
+                );
+                return false;
+            }
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            tokio::time::sleep(remaining.min(std::time::Duration::from_millis(25))).await;
+        }
+        if waited {
+            tracing::info!("wfp: Stop waited for an in-flight removal to finish");
+            let _ = tokio::time::timeout(STOP_RELEASE_BOOKKEEPING_GRACE, WFP_OPERATION.lock()).await;
+        }
+        true
+    }
+    #[cfg(not(any(all(windows, not(feature = "test")), test)))]
+    {
+        let _ = budget;
+        true
+    }
+}
+
 pub(super) async fn remove_all_filters_unlocked() -> Result<()> {
     #[cfg(all(windows, not(feature = "test")))]
     {
-        engine_call("remove all filters", crate::core::wfp::remove_all_filters).await
+        engine_call(REMOVE_ALL_FILTERS, crate::core::wfp::remove_all_filters).await
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
@@ -403,7 +459,7 @@ pub(super) async fn remove_all_filters_unlocked() -> Result<()> {
 pub(super) async fn remove_all_filters_holding(fence: Option<std::fs::File>) -> Result<()> {
     #[cfg(all(windows, not(feature = "test")))]
     {
-        engine_call("remove all filters", move || {
+        engine_call(REMOVE_ALL_FILTERS, move || {
             let _fence = fence;
             crate::core::wfp::remove_all_filters()
         })
