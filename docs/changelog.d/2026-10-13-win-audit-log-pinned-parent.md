@@ -6,4 +6,4 @@
 - 工程与测试：`a_reopen_refuses_a_folder_that_no_longer_names_the_pinned_directory`、`a_linked_folder_cannot_be_pinned`、`a_rotation_refuses_a_redirected_folder_and_leaves_it_untouched`、`a_pinned_folder_cannot_be_renamed_while_it_is_held`（Windows）。Codex 审查（2 个 Major）后补充。
 - 验证：见 PR 正文 `## Verification`。
 - 候选/发布：仅源码，无新候选。
-- 剩余限制：仍按路径打开，不是相对目录句柄的操作：核对与打开之间若祖先联接被换走再换回（ABA），或后核对失败时那次打开已在另一目录建出一个空日志文件，都不能排除；严格保证需要 NtCreateFile 相对句柄的 open/rename/delete，未在此做；TW-OpenAI-1（DHCPv4 许可的服务 SID 范围）未动，见 #602 与决定 097 / PR #1605。
+- 剩余限制：仍按路径打开，不是相对目录句柄的操作：核对与打开之间若祖先联接被换走再换回（ABA），或后核对失败时那次打开已在另一目录建出一个空日志文件，都不能排除；预检查通过之后若祖先联接被持续重定向，轮换仍可能删除或改名另一目录里的 backup/current（后检查只拒绝新句柄，不能撤销）；严格保证需要 NtCreateFile 相对句柄的 open/rename/delete，未在此做；TW-OpenAI-1（DHCPv4 许可的服务 SID 范围）未动，见 #602 与决定 097 / PR #1605。

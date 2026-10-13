@@ -455,9 +455,10 @@ impl RotatingWriter {
     /// so a parent replaced by a junction or symlink cannot redirect the write (win2-F3).
     fn open_pinned(path: &Path, cap: u64, parent: Option<&Arc<state::PinnedDirectory>>) -> Result<Self> {
         if let Some(folder) = path.parent() {
-            std::fs::create_dir_all(folder)?;
-            if let Some(parent) = parent {
-                parent.still_names(folder)?;
+            match parent {
+                // A pinned folder already exists (Audit::new created it); verify, never create.
+                Some(parent) => parent.still_names(folder)?,
+                None => std::fs::create_dir_all(folder)?,
             }
         }
         let file = state::open_private_append(path)?;
@@ -1465,6 +1466,20 @@ mod tests {
         assert!(refused.to_string().contains("no longer names"), "{refused}");
         assert_eq!(std::fs::read(&foreign_current).unwrap(), b"foreign current");
         assert_eq!(std::fs::read(&foreign_backup).unwrap(), b"foreign backup");
+    }
+
+    /// win2-F3: a rotation under an intact pin still works (the pin must not get in its way).
+    #[test]
+    fn a_pinned_writer_still_rotates_normally() {
+        let dir = TempDir::new("rot-ok");
+        let pin = Arc::new(state::PinnedDirectory::open(dir.path()).unwrap());
+        let mut writer = RotatingWriter::open_pinned(&log_path(&dir), 16, Some(&pin)).unwrap();
+        writer.write_line("first line, longer than the cap", true).unwrap();
+        writer.write_line("second line", true).unwrap();
+
+        let backup = dir.path().join(super::AUDIT_BACKUP_FILE_NAME);
+        assert!(std::fs::read_to_string(&backup).unwrap().contains("first line"));
+        assert!(std::fs::read_to_string(log_path(&dir)).unwrap().contains("second line"));
     }
 
     /// win2-F3: the pin is only a lock if a rename of the folder fails while it is held.
