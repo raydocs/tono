@@ -1128,6 +1128,113 @@ pub(crate) fn open_private_append(path: &std::path::Path) -> Result<std::fs::Fil
     Ok(file)
 }
 
+/// A directory held open so the path that named it cannot be re-pointed behind a later reopen
+/// (win2-F3). The audit writer pins its folder once; a respawn after a crash reopens the log by
+/// path again, and the private-file primitive checks only the final path component, so a parent
+/// replaced by a junction or symlink in between would redirect the write. On Windows the handle
+/// is held without `FILE_SHARE_DELETE`, so the folder and its ancestors cannot be renamed or
+/// replaced while it is open, and [`Self::still_names`] proves the path still resolves to it.
+#[derive(Debug)]
+pub(crate) struct PinnedDirectory {
+    #[cfg(windows)]
+    handle: std::fs::File,
+    #[cfg(unix)]
+    identity: (u64, u64),
+}
+
+#[cfg(unix)]
+impl PinnedDirectory {
+    fn identity(path: &std::path::Path) -> Result<(u64, u64)> {
+        use std::os::unix::fs::MetadataExt as _;
+
+        let metadata = std::fs::symlink_metadata(path)
+            .with_context(|| format!("failed to inspect {}", path.display()))?;
+        if !metadata.is_dir() {
+            anyhow::bail!("{} is not a plain directory", path.display());
+        }
+        Ok((metadata.dev(), metadata.ino()))
+    }
+
+    pub(crate) fn open(path: &std::path::Path) -> Result<Self> {
+        Ok(Self { identity: Self::identity(path)? })
+    }
+
+    pub(crate) fn still_names(&self, path: &std::path::Path) -> Result<()> {
+        if Self::identity(path)? != self.identity {
+            anyhow::bail!("{} no longer names the directory it was pinned to", path.display());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+impl PinnedDirectory {
+    /// Open `path` as a directory, refusing a reparse point (junction or symlink) at the path.
+    fn open_handle(path: &std::path::Path, share_delete: bool) -> Result<std::fs::File> {
+        use std::os::windows::{ffi::OsStrExt as _, io::{AsRawHandle as _, FromRawHandle as _}};
+        use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+        use windows_sys::Win32::Storage::FileSystem::{
+            BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+            FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileInformationByHandle, OPEN_EXISTING,
+        };
+
+        let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+        wide.push(0);
+        let share = FILE_SHARE_READ | FILE_SHARE_WRITE | if share_delete { FILE_SHARE_DELETE } else { 0 };
+        let handle = unsafe {
+            CreateFileW(
+                wide.as_ptr(),
+                FILE_READ_ATTRIBUTES,
+                share,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                std::ptr::null_mut(),
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(std::io::Error::last_os_error())
+                .with_context(|| format!("failed to open directory {}", path.display()));
+        }
+        let file = unsafe { std::fs::File::from_raw_handle(handle) };
+        let mut information = BY_HANDLE_FILE_INFORMATION::default();
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) } == 0 {
+            return Err(std::io::Error::last_os_error())
+                .with_context(|| format!("failed to inspect directory {}", path.display()));
+        }
+        if information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0
+            || information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        {
+            anyhow::bail!("{} is not a plain directory", path.display());
+        }
+        Ok(file)
+    }
+
+    fn identity(file: &std::fs::File) -> Result<(u32, u32, u32)> {
+        use std::os::windows::io::AsRawHandle as _;
+        use windows_sys::Win32::Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle};
+
+        let mut information = BY_HANDLE_FILE_INFORMATION::default();
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) } == 0 {
+            return Err(std::io::Error::last_os_error()).context("failed to read directory identity");
+        }
+        Ok((information.dwVolumeSerialNumber, information.nFileIndexHigh, information.nFileIndexLow))
+    }
+
+    pub(crate) fn open(path: &std::path::Path) -> Result<Self> {
+        Ok(Self { handle: Self::open_handle(path, false)? })
+    }
+
+    pub(crate) fn still_names(&self, path: &std::path::Path) -> Result<()> {
+        let current = Self::open_handle(path, true)?;
+        if Self::identity(&current)? != Self::identity(&self.handle)? {
+            anyhow::bail!("{} no longer names the directory it was pinned to", path.display());
+        }
+        Ok(())
+    }
+}
+
 /// Windows cache safety (§3): no reparse points, a regular file owned by the
 /// current user whose DACL grants exactly the owner, SYSTEM, and
 /// Administrators full access — nobody else.
