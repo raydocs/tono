@@ -3,3 +3,4 @@
 - 问题：A 注销时释放失败，屏障仍记在 A 名下；B 点 Connect，`PrepareCoreStart` 停了 A 的 Core，但记录的 owner 要到 `StartClash` 的 `arm_bootstrap` 才改成 B。两步之间失败，`fail_connect` 的释放被 `authorize_write_for` 当成别的用户拒绝，B 从在线变成 Blocked。
 - 修复：`PrepareCoreStart` 在停 A 的 Core 时，持有释放进程的跨进程锁，在同一事务里确认没有在途释放（有则返回可重试错误）、退休 A 的连接记录、把记录的 owner 改成 B（A 已无登录会话才允许，与 `arm_bootstrap` 同一规则），再停旧 Core。写盘失败时按磁盘实际内容决定是否更新内存。A 仍登录时照旧拒绝且不停任何东西。没有放宽 `authorize_write_for` 或“恢复上网”的 owner 检查。决策 126（provisional）。
 - 验证：`windows / service` 新增 8 个单测（在途释放、A 的连接退休、三种写盘错误、仍登录的 owner、无接管对象）。
+> 搁置：第二版也被 Codex 审阅 block（两个 major，见决策 126），未采纳，不应随版本发布；PR 保持 draft，等协调者接手。

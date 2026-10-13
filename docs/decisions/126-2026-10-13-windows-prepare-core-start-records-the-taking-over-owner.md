@@ -1,5 +1,5 @@
 ## 2026-10-13 · 用户 B 接管已注销用户 A 的屏障：在持有释放锁 C 的同一事务里改 owner、退休 A、停旧 Core
-- Status: provisional（第二版；第一版被 Codex 审阅 block 后按协调者给出的事务设计重做）
+- Status: provisional；**第二版同样未采纳（Codex 审阅再次 block，PR 保持 draft，交协调者接手）**。第一版被 block 后按协调者给出的事务设计重做；第二版（a43500d2c）的三个原问题都已被测试覆盖并通过，但 Codex 又提出两个 major，见下方“第二版审阅结果”
 - Chosen: `PrepareCoreStart` 在需要停掉的 Core 属于一个已注销的 owner A 时，把下面几步放进一个事务，全程持有独立释放进程用的跨进程锁 C（`release.lock`）：
   1. `Authority::hold_for_takeover` 取 C 并确认没有在途释放：C 被占用返回 `InProgress`；上一次释放的 worker 或幸存进程仍在运行返回 `Unfinished`；记录不可读返回 `Corrupt`。三者都映射成现有的 `ReleaseInProgress` / `ReleaseUnfinished` / `ReleaseRecordCorrupt`，可重试，且什么都没改、没停。
   2. 在 `WFP_OPERATION` 下用 `authorize_takeover_for` 重新判定（A 仍有登录会话则与 `arm_bootstrap` 一样拒绝）；退休 A 的 active-owner 记录和 desired 运行状态（`desired::retire_owner_if_active`）；再把记录的 `owner_key` 改成 B（`verified=false`，A 的验证不属于 B）。退休在前且幂等：中途失败时 A 仍是记录的 owner，B 重试会把整步重做。
@@ -13,3 +13,11 @@
 - 偏离原话：协调者的措辞是“不要在新用户 `arm_bootstrap` 成功前停 A 的 Core”。没有这样做，因为 App 的 DNS 预检要绑定 loopback:53，A 的 Core 不停，B 就永远过不了预检；而 `PrepareCoreStart` 没有 `arm_bootstrap` 需要的配置。取而代之的是让所有权转移与停 Core 在同一事务里发生，目标（失败的 B 连接不会让机器停在 Blocked）相同。
 - Residual: 已被 `atomic_file::replace` 超时放弃、之后才落地的 rename 仍是 `atomic_write` 已记录的 BRICK-W11 限制，本事务同样不覆盖。事务里“写回旧记录也失败”时磁盘状态未知，返回错误、内存不变，由后续的 `StartClash` 或启动恢复重新对账。未做双账号实机验证。
 - Applied in: 本 PR（`apps/windows/service/src/core/release/mod.rs`、`core/windows_kill_switch/takeover.rs`、`core/server/handlers.rs`）
+
+## 第二版审阅结果（Codex gpt-6.1-sol，a43500d2c，verdict: block）
+- Major 1（成立）：`retire_owner_if_active(&departed)` 在 active owner 是第三方 X 时返回 `Ok(false)`，事务忽略这个布尔值，仍然把屏障改记 B 并停掉全局 Core。X 的 active-owner 记录和 desired 运行意图保留，`owner_refusal(B)` 与主 Service 的释放仍拒绝 B，重启还可能恢复 X。修复方向：active owner 既不是 departed owner 也不是调用者时，在改 owner、停 Core 之前拒绝（保留 X 的记录和进程），并补第三方 X 的回归。
+- Major 2（成立）：`commit_owner` 的 Unknown 分支在“新记录已落地、读回失败、写回旧记录也失败”时只返回错误，内存保持旧 owner，磁盘实际是 B：独立 worker 的 `owner_refusal(B)` 通过而 Service 的 `authorize_write_for(B)` 拒绝、`authorize_write_for(A)` 通过。这不是已接受的 BRICK-W11（本次 rename 已完成）。修复方向：补偿后也读回确认；仍未知时进入双方都尊重的待对账状态或隔离 Service，不能返回后继续按旧内存 owner 授权；补该场景的回归。
+- 未能验证（Codex 的覆盖说明）：`hold_for_takeover` 只检查记录里的 worker/stuck 进程，不检查 `jobs_unproven`、`completed`、历史丢失和 DNS ledger，所以它是“没有已知存活的释放进程”而不是完整的“无在途释放”证明；`admit_start` 之后阻止新的 Core admission，但不能证明 Prepare 期间旧异步工作已静止。是否需要改用 `unretired_reason`（会让 DNS ledger 未清时也拒绝 Prepare）需要协调者定。测试没有在 stop 闭包内断言 C 仍被持有。
+- 已验证为正确的部分：worker 先取 C 再 `owner_refusal`，C 覆盖转移和 stop；锁序无反向等待；A→B 正常路径两个授权入口都放行；`authorize_takeover_for` 在退休/移动/停之前拒绝仍登录的 owner；`authorize_write_for` 与 `owner_refusal` 未改；handler 的 freshness、OperationGuard、错误码映射保持。
+- 红跑：首版 stub 的 ci-gate run 38380465938 在 `windows / service` 失败 4/8（在途释放返回 `Ok(7)`、A 的 active-owner 未退休、commit-then-error 与写后不可读两种写盘错误）；第二版 head 的同一 job 通过（run 38380501700）。
+- 结论：按协调者的约定，第二次被 Codex block 后不再自行修第三轮，PR #1643 保持 draft，由协调者接手。
