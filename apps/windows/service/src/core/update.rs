@@ -1340,6 +1340,18 @@ pub fn maintenance_allowed() -> Result<()> {
     Ok(())
 }
 
+/// Left beside the installed binaries while a repairing full install is unfinished. The installer
+/// script keeps the failed update's rollback copies while it exists; [`finish_manual`] removes it.
+pub const REPAIR_EVIDENCE_MARKER: &str = ".update-repair-evidence";
+
+fn clear_repair_marker(root: &Path) {
+    match std::fs::remove_file(root.join(REPAIR_EVIDENCE_MARKER)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => tracing::warn!("could not remove the update repair marker: {error:#}"),
+    }
+}
+
 /// Whether this installer holds the manual lease beside an exhausted update attempt (#1307): the
 /// gate grants that lease only for such a record. The full install then keeps its own scratch
 /// names, so the failed update's recovery files stay untouched. A lock-free read; a different or
@@ -1856,6 +1868,7 @@ pub fn finish_manual() -> Result<()> {
         store.state.manual_installer.as_ref() == Some(&installer),
         "manual installer mismatch"
     );
+    let marker_root = store.state.attempt.as_ref().map(|a| a.install_root.clone());
     // A full install that left the exhausted attempt's original or target identity ends it
     // (#1307). It is repair, not part of the lease hand-back: an unproven install leaves the
     // record pending and still hands the lease back, or the installer would exit 76.
@@ -1877,6 +1890,10 @@ pub fn finish_manual() -> Result<()> {
             drop(store);
             store = open_store()?;
         }
+    }
+    // The install is over, proven or not: from here the evidence is judged by the record alone.
+    if let Some(root) = marker_root {
+        clear_repair_marker(&root);
     }
     let mut next = store.state.clone();
     next.manual_installer = None;
@@ -3012,6 +3029,17 @@ mod tests {
         retired.attempt = None;
         assert!(!repair_lease_in(&retired, &installer), "no attempt, no repair namespace");
         drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_repair_marker_is_cleared_once_and_a_missing_one_is_fine() {
+        let root = std::env::temp_dir().join(format!("tono-repair-marker-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(REPAIR_EVIDENCE_MARKER), b"").unwrap();
+        clear_repair_marker(&root);
+        assert!(!root.join(REPAIR_EVIDENCE_MARKER).exists());
+        clear_repair_marker(&root);
         std::fs::remove_dir_all(root).unwrap();
     }
 

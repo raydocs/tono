@@ -24,7 +24,10 @@
   (`repair_lease_held`). The failed update's `.rollback`/`.restore`/`.publish` files, which may be
   the only copy of the old generation, are neither read, adopted nor deleted by that install, so a
   mixed tree no longer aborts `--replace-runtime`. A leftover of the install's own names still
-  refuses the next repair, and the uninstall sweeps them. The recovery-task delete after the
+  refuses the next repair, and the uninstall sweeps them. While the repair is unfinished the helper
+  leaves a marker (`.update-repair-evidence`) beside the binaries; the installer script then keeps the
+  failed update's rollback copies instead of purging them, and `--manual-update-finish` removes the
+  marker (and, once the installed identity is proven, the copies). The recovery-task delete after the
   archive is tried four times; if the scheduler keeps refusing, the task stays and fails at boot.
 - Why stricter: nothing is released or relaxed. Protection, the fail-closed filters and the DNS and
   Core-absent checks of the install gate are unchanged; only the update-record refusal is lifted

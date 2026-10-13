@@ -762,14 +762,24 @@ fn set_repair_scratch(on: bool) {
 
 /// Choose the scratch namespace from the durable state: the repair names apply only while this
 /// installer holds the manual lease beside an exhausted update attempt. Anything unreadable keeps
-/// the strict update names.
+/// the strict update names. A repair also leaves the marker the installer script checks before it
+/// deletes the failed update's rollback copies (they are the only evidence of its old generation
+/// until `--manual-update-finish` proves the installed identity and removes the marker).
 #[cfg(windows)]
-fn choose_scratch_namespace() {
+fn choose_scratch_namespace() -> Result<(), Error> {
     let repair = tono_service_protocol::update_native::repair_lease_held().unwrap_or_else(|error| {
         eprintln!("could not read the update lease; keeping the update scratch names: {error:#}");
         false
     });
+    if repair {
+        let marker = windows_program_files_directory()?
+            .join("Tono")
+            .join(tono_service_protocol::update_native::REPAIR_EVIDENCE_MARKER);
+        std::fs::write(&marker, b"")
+            .with_context(|| format!("failed to mark the update repair in {marker:?}"))?;
+    }
     set_repair_scratch(repair);
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -1063,7 +1073,7 @@ fn runtime_replacement_candidate(helper: &Path) -> Result<InstalledBinaryCandida
     ensure_ordinary_windows_entry(&target, false)?;
     ensure_ordinary_windows_entry(&staged, false)?;
     // The authority checks above passed: only now read the durable lease (#1307).
-    choose_scratch_namespace();
+    choose_scratch_namespace()?;
     adopt_or_refuse_update_scratch(&target, &rollback_scratch_path(&target))?;
     adopt_or_refuse_update_scratch(&target, &restore_scratch_path(&target))?;
     adopt_or_refuse_update_scratch(&target, &publish_scratch_path(&target))?;
@@ -2481,7 +2491,7 @@ fn main() -> anyhow::Result<()> {
     // Legacy user journals are diagnostics only. This entry has no v1 grant:
     // both runtime replacement and service-only repair require verified Disconnect.
     shared::block_on_abandoning(tono_service_protocol::update_native::manual_gate())??;
-    choose_scratch_namespace();
+    choose_scratch_namespace()?;
     let install_dir = tono_service_protocol::prepare_service_install_directory()?;
     publish_core_digest_pin(&install_dir)?;
     if install_mode != WindowsInstallMode::ReplaceRuntime

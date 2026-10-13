@@ -163,6 +163,22 @@ export function validateNsisLegacyCleanup(source) {
       return `installer.nsi does not remove legacy payload path: ${relative}`
     }
   }
+  const macroAt = text.indexOf('!macro RemoveKnownLegacyPayload')
+  if (macroAt >= 0) {
+    // The failed update's rollback copies stay while a repairing install is unfinished (#1307).
+    const macro = text.slice(macroAt, text.indexOf('!macroend', macroAt))
+    const guardAt = macro.indexOf(
+      '${IfNot} ${FileExists} "$INSTDIR\\.update-repair-evidence"',
+    )
+    for (const artifact of WINDOWS_RUNTIME_REPAIR_ARTIFACTS.filter((name) =>
+      /\.(rollback|restore|publish)$/.test(name) && !name.includes('.install-'),
+    )) {
+      const statementAt = macro.indexOf(`Delete /REBOOTOK "$INSTDIR\\${artifact}"`)
+      if (guardAt < 0 || statementAt < guardAt) {
+        return `installer.nsi deletes update recovery evidence outside the repair guard: ${artifact}`
+      }
+    }
+  }
   const uses =
     text.match(/!insertmacro\s+RemoveKnownLegacyPayload/g)?.length ?? 0
   if (uses < 2) {
