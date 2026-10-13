@@ -580,7 +580,9 @@ where
                 return None;
             }
             let release_needed = matches!(protection, StoredProtection::Armed(_));
-            if release_needed {
+            {
+                // Also for a proven-absent barrier: the Service may report a retained AI hold
+                // that a later sign-in's Sign Out still has to release (decision 125).
                 let mut inner = state.lock().await;
                 if inner.sign_in_generation != generation {
                     return None;
@@ -1314,10 +1316,14 @@ mod ai_hold_report_tests {
             inner.account_state = AccountState::Ready;
             apply_stored_protection(&mut inner, &stored_protection_of(snapshot(reading)));
         }
+        user_sign_out_releases(&state).await
+    }
+
+    async fn user_sign_out_releases(state: &Arc<TonoState>) -> bool {
         let released = Arc::new(AtomicBool::new(false));
         let ran = Arc::clone(&released);
         super::super::account::close_account_with(
-            Arc::clone(&state),
+            Arc::clone(state),
             super::super::account::AccountCloseReason::User,
             move |_| async move {
                 ran.store(true, Ordering::SeqCst);
@@ -1347,6 +1353,34 @@ mod ai_hold_report_tests {
     #[tokio::test]
     async fn sign_out_after_a_reopen_removes_the_hold_the_service_reports() {
         assert!(sign_out_releases(Some(true)).await, "a reopened idle App still owes the full release");
+    }
+
+    async fn never_called(
+        _: Arc<crate::tono::state::TonoApiClient>,
+    ) -> Result<tono_core::auth::MeResponse, ApiError> {
+        unreachable!("no stored token, so me() must not run")
+    }
+
+    /// Codex review of #1648: a launch with no stored token took a branch that dropped the
+    /// Service's report, so signing in and out again left the hold behind.
+    #[tokio::test]
+    async fn a_launch_without_a_token_remembers_the_hold_for_the_next_sign_out() {
+        let state = Arc::new(TonoState::for_test());
+        let generation = state.lock().await.sign_in_generation;
+        let restored = restore_account_with(
+            &state,
+            generation,
+            &stored_protection_of(snapshot(Some(true))),
+            tokio::time::Instant::now() + Duration::from_secs(10),
+            never_called,
+            |_| async { Ok(()) },
+            |_| async { Ok(()) },
+            |_| {},
+        )
+        .await;
+        assert!(restored.is_none(), "no token, nothing to restore");
+        state.lock().await.account_state = AccountState::Ready; // a later sign-in
+        assert!(user_sign_out_releases(&state).await, "the hold survived the signed-out launch");
     }
 
     #[tokio::test]
