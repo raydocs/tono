@@ -19,7 +19,9 @@ import {
   parseHomeLine,
   findSocks5Home,
   assertHomeExitBindable,
+  assertPastedPasswordMatches,
 } from '../../home';
+import { requireCan, resolveOpsRole } from '../roles';
 import {
   PRODUCT_CLAUDE,
   accountRefField,
@@ -203,6 +205,10 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
   const parsedLine = b.line !== undefined && b.line !== null && b.line !== ''
     ? parseHomeLine(b.line)
     : null;
+  // A pasted line creates or changes home inventory through home-exits/assign,
+  // which is settings.publish. Onboarding is customers.write; it does not widen
+  // what an operator may do to the inventory (SOL-CP-ONBOARD-ROLE).
+  if (parsedLine) requireCan('settings.publish', resolveOpsRole(actor.email, e));
   const user = await e.DB.prepare('SELECT * FROM users WHERE email = ?').bind(address).first<Row>();
   if (parsedLine) {
     const home = await findSocks5Home(e, parsedLine.host, parsedLine.port, parsedLine.username);
@@ -218,6 +224,8 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       if (user && parsedLine.password === String(home.socks5_password)) {
         await assertHomeExitBindable(e, String(user.id), String(home.id));
       }
+      // The same refusal home-exits/assign makes, before any write here.
+      if (user) assertPastedPasswordMatches(home, parsedLine.password);
     }
   }
   if (user && !parsedLine && b.homeExitId) {
