@@ -85,6 +85,267 @@
         Ok(())
     }
 
+    /// The exact restore writes the user's registry values back even when its live apply failed,
+    /// so the registry alone says "restored" while the adapter's effective resolver list still
+    /// holds the dead Tono endpoint. Only that adapter is reset; the one whose registry and
+    /// effective lists are both the user's is left alone.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_selects_an_adapter_whose_effective_dns_is_still_tono() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1")), adapter("{B}", Some("9.9.9.9"))]).await?;
+        test_hooks::set_effective_dns(vec![
+            ("{A}".to_owned(), vec!["198.18.0.2".parse().unwrap()]),
+            ("{B}".to_owned(), vec!["9.9.9.9".parse().unwrap()]),
+        ]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_to_automatic().await;
+        let reset = test_hooks::take_last_automatic_reset();
+        reset_dns_state().await;
+        assert_eq!(reset, vec!["{A}".to_owned()]);
+        assert_eq!(result?, vec!["{A}".to_owned()]);
+        Ok(())
+    }
+
+    /// The reset's own report is not the proof: the machine is read back, like the uninstall
+    /// ladder does, and a reset after which an adapter still reads as Tono's is not a success.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_is_not_a_success_while_the_read_back_still_shows_tono() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_live_dns_on_loopback(true);
+        test_hooks::set_reset_does_not_land(true);
+        let result = reset_redirected_adapters_to_automatic().await;
+        reset_dns_state().await;
+        assert!(result.is_err(), "the read-back still shows Tono's resolver: {result:?}");
+        Ok(())
+    }
+
+    /// The user's own local resolver as the saved original is not a reason to leave the adapter
+    /// on a dead Tono endpoint: what exempts an adapter is that its current value is still that
+    /// original, and this one is on 198.18.0.2.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_covers_an_adapter_whose_saved_original_was_a_local_resolver() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("127.0.0.1"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_to_automatic().await;
+        let reset = test_hooks::take_last_automatic_reset();
+        reset_dns_state().await;
+        assert_eq!(reset, vec!["{A}".to_owned()]);
+        assert_eq!(result?, vec!["{A}".to_owned()]);
+        Ok(())
+    }
+
+    /// A plain loopback on an adapter the snapshot never recorded is the user's own resolver
+    /// (Pi-hole, Acrylic), not evidence of Tono's: resetting it would destroy their setup.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_leaves_an_unrecorded_adapter_on_the_users_own_loopback_alone() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("9.9.9.9"))]).await?;
+        test_hooks::set_collected_adapters(vec![
+            adapter("{A}", Some("198.18.0.2")),
+            adapter("{B}", Some("127.0.0.1")),
+        ]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_to_automatic().await;
+        let reset = test_hooks::take_last_automatic_reset();
+        reset_dns_state().await;
+        assert_eq!(reset, vec!["{A}".to_owned()]);
+        assert_eq!(result?, vec!["{A}".to_owned()]);
+        Ok(())
+    }
+
+    /// An effective list that cannot be read is unknown, not empty: with the registry restored
+    /// and nothing proving the machine off Tono, the fallback must not claim success.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_does_not_claim_success_when_the_effective_dns_cannot_be_read() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_effective_dns_fails(true);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_to_automatic().await;
+        reset_dns_state().await;
+        assert!(result.is_err(), "the machine was not proven off Tono: {result:?}");
+        Ok(())
+    }
+
+    /// One unreadable adapter does not discard the others' evidence, and it does not pass for
+    /// clean either: A is reset, B stays unknown, so the fallback is still not proven.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_is_not_proven_while_another_adapters_effective_dns_is_unreadable() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1")), adapter("{B}", Some("9.9.9.9"))]).await?;
+        test_hooks::set_collected_adapters(vec![
+            adapter("{A}", Some("198.18.0.2")),
+            adapter("{B}", Some("9.9.9.9")),
+        ]);
+        test_hooks::set_effective_dns_unreadable(vec!["{B}".to_owned()]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_to_automatic().await;
+        let reset = test_hooks::take_last_automatic_reset();
+        reset_dns_state().await;
+        assert_eq!(reset, vec!["{A}".to_owned()], "the readable adapter is still reset");
+        assert!(result.is_err(), "B's effective state is unknown: {result:?}");
+        Ok(())
+    }
+
+    /// The exemption for a user's own local resolver is per address family. IPv4 is the user's
+    /// 127.0.0.1 and stays; IPv6 was restored to a public resolver in the registry but its live
+    /// apply failed, so it still resolves through Tono's legacy `::1` and is reset.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_resets_only_the_family_still_on_tono_next_to_a_users_own_loopback() -> Result<()> {
+        reset_dns_state().await;
+        let dual_stack = AdapterDnsSnapshot {
+            interface_guid: "{A}".to_owned(),
+            ipv4_name_server: Some("127.0.0.1".to_owned()),
+            ipv6_name_server: Some("2606:4700:4700::1111".to_owned()),
+            ..Default::default()
+        };
+        seed_snapshot(vec![dual_stack]).await?;
+        test_hooks::set_effective_dns(vec![(
+            "{A}".to_owned(),
+            vec!["127.0.0.1".parse().unwrap(), "::1".parse().unwrap()],
+        )]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_to_automatic().await;
+        let after = test_hooks::collected_adapters();
+        reset_dns_state().await;
+        assert_eq!(result?, vec!["{A}".to_owned()]);
+        assert_eq!(after[0].ipv4_name_server.as_deref(), Some("127.0.0.1"), "the user's own IPv4 loopback stays");
+        assert_eq!(after[0].ipv6_name_server, None, "the IPv6 family still on Tono is reset to automatic");
+        Ok(())
+    }
+
+    /// An adapter that is offline (disabled, unplugged) is absent from the active enumeration,
+    /// but its registry still holds the Tono endpoint the exact restore failed to replace, and
+    /// it resolves through it the moment it comes back, with the watchdog no longer looking.
+    /// The candidates are the snapshot's adapters and the active ones, not the active ones alone:
+    /// B (online) and A (offline) are both put back on automatic (DHCP).
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_covers_a_snapshot_adapter_that_is_offline() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1")), adapter("{B}", Some("9.9.9.9"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{B}", Some("198.18.0.2"))]);
+        test_hooks::set_offline_registry(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_effective_dns(vec![("{B}".to_owned(), vec!["198.18.0.2".parse().unwrap()])]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_to_automatic().await;
+        let mut reset = test_hooks::take_last_automatic_reset();
+        reset.sort();
+        let offline = test_hooks::offline_registry();
+        let online = test_hooks::collected_adapters();
+        reset_dns_state().await;
+        assert_eq!(reset, vec!["{A}".to_owned(), "{B}".to_owned()]);
+        assert_eq!(offline[0].ipv4_name_server, None, "the offline adapter's registry is reset too");
+        assert_eq!(online[0].ipv4_name_server, None);
+        assert!(result.is_ok(), "{result:?}");
+        Ok(())
+    }
+
+    /// An offline snapshot adapter whose registry cannot be read is not evidence of a clean
+    /// machine: absence from the active enumeration is never "restored". B is still reset, and
+    /// the fallback is not proven.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_is_not_proven_while_an_offline_snapshot_adapters_registry_is_unreadable()
+    -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1")), adapter("{B}", Some("9.9.9.9"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{B}", Some("198.18.0.2"))]);
+        test_hooks::set_offline_registry(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_offline_registry_unreadable(vec!["{A}".to_owned()]);
+        test_hooks::set_effective_dns(vec![("{B}".to_owned(), vec!["198.18.0.2".parse().unwrap()])]);
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = reset_redirected_adapters_to_automatic().await;
+        let reset = test_hooks::take_last_automatic_reset();
+        reset_dns_state().await;
+        assert_eq!(reset, vec!["{B}".to_owned()], "the readable adapter is still reset");
+        assert!(result.is_err(), "A's registry could not be read, so nothing proves it: {result:?}");
+        Ok(())
+    }
+
+    /// The reset keeps the user's saved servers on disk under the live name, so a later exact
+    /// restore can still replay them, and it removes Tono's resolver policy (the NRPT catch-all and
+    /// the Encrypted DNS pin) as well. The adapter on the user's own static servers is not touched.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_keeps_the_snapshot_and_restores_the_resolver_policy() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1")), adapter("{B}", Some("9.9.9.9"))]).await?;
+        test_hooks::set_collected_adapters(vec![
+            adapter("{A}", Some("198.18.0.2")),
+            adapter("{B}", Some("9.9.9.9")),
+        ]);
+        test_hooks::set_live_dns_on_loopback(true);
+        test_hooks::take_encrypted_restores();
+        let result = reset_redirected_adapters_to_automatic().await;
+        let reset = test_hooks::take_last_automatic_reset();
+        let policy_restores = test_hooks::take_encrypted_restores();
+        let kept = read_snapshot().await;
+        let untouched = test_hooks::collected_adapters();
+        reset_dns_state().await;
+        assert_eq!(result?, vec!["{A}".to_owned()]);
+        assert_eq!(reset, vec!["{A}".to_owned()], "the adapter on the user's own servers is not reset");
+        assert_eq!(untouched[1].ipv4_name_server.as_deref(), Some("9.9.9.9"));
+        assert_eq!(kept?.adapters.len(), 2, "the saved servers stay on disk");
+        assert_eq!(policy_restores, 1, "the resolver policy is removed after the reset");
+        Ok(())
+    }
+
+    /// A user who runs their own local resolver (Pi-hole, Acrylic) has it in the snapshot as the
+    /// original. While the adapter still holds exactly that, in the registry and in the effective
+    /// list, it is the user's own setup and not Tono's redirect: nothing is reset.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_leaves_a_recorded_users_own_loopback_alone() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("127.0.0.1"))]).await?;
+        test_hooks::set_effective_dns(vec![("{A}".to_owned(), vec!["127.0.0.1".parse().unwrap()])]);
+        let result = reset_redirected_adapters_to_automatic().await;
+        let resets = test_hooks::take_automatic_resets();
+        reset_dns_state().await;
+        assert_eq!(result?, Vec::<String>::new());
+        assert_eq!(resets, 0, "the user's own local resolver must not be reset to DHCP");
+        Ok(())
+    }
+
+    /// The facade never waits for the engine. An exact restore that timed out keeps its engine call
+    /// (and the single-writer claim) for an unbounded time; the reset is refused at once with the
+    /// busy marker, writes nothing and leaves the policy alone, so the caller can defer it.
+    #[tokio::test]
+    #[serial]
+    async fn the_adapter_reset_is_refused_at_once_while_an_abandoned_engine_call_holds_the_claim() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("198.18.0.2"))]);
+        test_hooks::set_live_dns_on_loopback(true);
+        test_hooks::take_encrypted_restores();
+        let claim = test_hooks::park_engine_call().await;
+        let started = std::time::Instant::now();
+        let result = reset_redirected_adapters_to_automatic().await;
+        let elapsed = started.elapsed();
+        let resets = test_hooks::take_automatic_resets();
+        let policy_restores = test_hooks::take_encrypted_restores();
+        drop(claim);
+        reset_dns_state().await;
+        let error = result.expect_err("the engine is busy");
+        assert!(is_engine_busy_refusal(&error), "{error:#}");
+        assert!(elapsed < std::time::Duration::from_secs(1), "it must not wait: {elapsed:?}");
+        assert_eq!(resets, 0);
+        assert_eq!(policy_restores, 0);
+        Ok(())
+    }
+
     /// A registry call behind a filter driver can block for ever. The NRPT sweep runs on its own
     /// thread, so the uninstall gives up after its budget instead of hanging with it.
     #[test]
@@ -1231,7 +1492,7 @@
         test_hooks::set_snapshot_delete_paused(false);
         test_hooks::take_automatic_resets();
         test_hooks::take_encrypted_restores();
-        test_hooks::set_collected_adapters(Vec::new());
+        test_hooks::reset_fallback_hooks();
         // The tail of an earlier test's write window would otherwise still be running.
         SELF_WRITE_TAIL_UNTIL.store(0, Ordering::Relaxed);
     }

@@ -83,6 +83,14 @@ pub(super) fn wedged_dns_error(operation: &str, wedged: DnsCallInFlight) -> anyh
     )
 }
 
+/// `true` when `error` is the engine's marker that a DNS engine call is, or was, stuck: either a
+/// call refused because an earlier one still holds the single-writer claim, or a call that ran and
+/// hit its own deadline (which leaves its claim standing too). Both mean "the engine is busy
+/// now". A plain text match, because the error crosses `anyhow` contexts.
+pub(crate) fn is_engine_busy_refusal(error: &anyhow::Error) -> bool {
+    format!("{error:#}").contains(DNS_ENGINE_WEDGED_PREFIX)
+}
+
 /// Dropped on the blocking thread the instant the engine call returns — on time, or hours
 /// late. This is the *only* place an in-flight claim is released, and it releases only its own
 /// epoch.
@@ -393,7 +401,7 @@ pub(super) async fn engine_apply_snapshot(snapshot: &DnsSnapshot) -> Result<Vec<
         // even though its live apply keeps failing.
         if ok && is_automatic_reset(snapshot) {
             #[cfg(test)]
-            test_hooks::note_automatic_reset();
+            test_hooks::note_automatic_reset(snapshot);
             test_hooks::set_live_dns_on_loopback(false);
         }
         Ok(snapshot

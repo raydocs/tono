@@ -21,6 +21,12 @@ pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
     emergency_disarm_with(false).await
 }
 
+/// [`emergency_disarm_windows_kill_switch`] for a caller that cancels the whole disarm at
+/// `deadline` (the release worker).
+pub async fn emergency_disarm_windows_kill_switch_until(_deadline: std::time::Instant) -> Result<()> {
+    emergency_disarm_with(false).await
+}
+
 /// Automatic failed-update recovery uses the same WFP/DNS proof and reporting,
 /// but retains the secondary AI hold. The caller must first exclude strict mode
 /// and stop the Service while holding the repair and singleton owner gates.

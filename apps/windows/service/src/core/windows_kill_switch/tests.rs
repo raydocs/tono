@@ -2167,6 +2167,332 @@ async fn emergency_disarm_removes_wfp_intent_but_reports_unrestored_dns() -> Res
     Ok(())
 }
 
+// --- The adapter fallback after a failed exact DNS restore ---
+
+/// A machine whose exact restore cannot be proven (the stub reports the live resolver still on
+/// loopback) and whose Ethernet adapter still points at Tono's target, with a saved snapshot.
+/// WFP is not armed: the startup tests need a released machine.
+async fn unprovable_redirected_machine_without_wfp() -> Result<()> {
+    cleanup().await;
+    remove_superseded_snapshots().await;
+    atomic_write(
+        &dns_snapshot_path(),
+        &serde_json::to_vec_pretty(&redirected_snapshot())?,
+    )
+    .await?;
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+    crate::core::dns::test_hooks::set_collected_adapters(vec![crate::core::dns::AdapterDnsSnapshot {
+        interface_guid: "{ETHERNET}".to_owned(),
+        ipv4_name_server: Some("198.18.0.2".to_owned()),
+        ..Default::default()
+    }]);
+    simulate_machine_still_on_loopback_dns();
+    Ok(())
+}
+
+/// The same machine with the release service's protection armed.
+async fn arm_an_unprovable_redirected_machine() -> Result<()> {
+    unprovable_redirected_machine_without_wfp().await?;
+    arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+    Ok(())
+}
+
+/// Poll until `done` holds, at most five seconds.
+async fn eventually(mut done: impl FnMut() -> bool) -> bool {
+    for _ in 0..500 {
+        if done() {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    done()
+}
+
+/// Owner rule: a released machine resolves through the home broadband's DNS, never through a dead
+/// Tono resolver. The exact restore could not be proven (an adapter still reads as Tono's target),
+/// and the old code then removed WFP and left that adapter on 198.18.0.2: every lookup went to a
+/// resolver nothing answered. With the engine free, the one attempt after WFP removal puts the
+/// adapter back on automatic (DHCP), removes the resolver policy, keeps the saved servers, and the
+/// original DNS error is still what the caller gets, with a note, never a "restored".
+#[tokio::test]
+#[serial]
+async fn emergency_disarm_with_unproven_dns_resets_the_redirected_adapter_once_wfp_is_gone() -> Result<()> {
+    arm_an_unprovable_redirected_machine().await?;
+
+    let result = emergency_disarm_windows_kill_switch().await;
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    let reset_adapters = crate::core::dns::test_hooks::take_last_automatic_reset();
+    let policy_restores = crate::core::dns::test_hooks::take_encrypted_restores();
+    let sweeps = crate::core::dns::test_hooks::take_nrpt_sweeps();
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+    let message = format!(
+        "{:#}",
+        result.expect_err("the original DNS error is still returned after the cleanup")
+    );
+
+    assert!(ARMED.lock().unwrap().is_none(), "WFP is removed as before");
+    assert!(message.contains(crate::core::dns::WFP_REMOVED_CONTINUE_PREFIX), "{message}");
+    assert!(
+        message.contains(DNS_FALLBACK_NOTE_PREFIX),
+        "the fallback is reported as a note on the original error: {message}"
+    );
+    assert_eq!(resets, 1, "the adapter still on Tono's target is reset to automatic (DHCP) once");
+    assert_eq!(
+        reset_adapters,
+        vec!["{ETHERNET}".to_owned()],
+        "an adapter that is not on a Tono target must never be reset"
+    );
+    assert!(policy_restores >= 1, "the NRPT catch-all and the Encrypted DNS pin are removed");
+    assert_eq!(sweeps, 1, "the resolver-rule sweep still runs");
+    assert!(
+        tokio::fs::metadata(dns_snapshot_path()).await.is_ok(),
+        "the saved servers stay on disk so a later exact restore can still replay them"
+    );
+    assert!(!superseded_snapshot_exists().await, "the snapshot is kept under its own name");
+
+    cleanup().await;
+    Ok(())
+}
+
+/// The release worker's entry point passes a deadline; it reaches the same single attempt.
+#[tokio::test]
+#[serial]
+async fn the_release_workers_deadline_entry_point_also_resets_the_redirected_adapter() -> Result<()> {
+    arm_an_unprovable_redirected_machine().await?;
+
+    let result = emergency_disarm_windows_kill_switch_until(
+        std::time::Instant::now() + std::time::Duration::from_secs(45),
+    )
+    .await;
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+
+    assert!(result.is_err(), "the original DNS error is still returned");
+    assert!(ARMED.lock().unwrap().is_none(), "WFP is removed");
+    assert_eq!(resets, 1);
+
+    cleanup().await;
+    Ok(())
+}
+
+/// The exact restore timed out, so its engine call still runs on a blocking thread with the
+/// engine's single-writer claim, for as long as it takes. The single attempt after WFP removal is
+/// refused at once and does not wait or retry: WFP is removed, the sweep still runs, the original
+/// error comes back with a note that the reset is deferred to the restarted Service, and nothing
+/// is reset or claimed as restored.
+#[tokio::test]
+#[serial]
+async fn emergency_disarm_does_not_wait_for_a_busy_dns_engine_and_defers_the_reset() -> Result<()> {
+    arm_an_unprovable_redirected_machine().await?;
+    let claim = crate::core::dns::test_hooks::park_engine_call().await;
+
+    let started = std::time::Instant::now();
+    let result = emergency_disarm_windows_kill_switch().await;
+    let elapsed = started.elapsed();
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    let sweeps = crate::core::dns::test_hooks::take_nrpt_sweeps();
+    drop(claim);
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+    let message = format!("{:#}", result.expect_err("the original DNS error is still returned"));
+
+    assert!(ARMED.lock().unwrap().is_none(), "WFP is removed");
+    assert!(message.contains(crate::core::dns::WFP_REMOVED_CONTINUE_PREFIX), "{message}");
+    assert!(
+        message.contains(DNS_FALLBACK_NOTE_PREFIX) && message.contains("deferred"),
+        "the note says the reset was deferred: {message}"
+    );
+    assert_eq!(resets, 0, "nothing was reset while the claim was held");
+    assert_eq!(sweeps, 1, "the resolver-rule sweep still ran");
+    assert!(elapsed < std::time::Duration::from_secs(1), "the refusal must not wait: {elapsed:?}");
+
+    cleanup().await;
+    Ok(())
+}
+
+/// Under a caller deadline (the release worker's 45 s cleanup) the exact restore gets 10 s, so
+/// the rest of the disarm keeps its time; with no deadline it keeps the full 40 s.
+#[test]
+fn the_exact_restore_gets_ten_seconds_under_a_callers_deadline_and_forty_without() {
+    let secs = std::time::Duration::from_secs;
+    assert_eq!(emergency_restore_budget(None), DNS_RESTORE_TIMEOUT);
+    assert_eq!(emergency_restore_budget(Some(secs(45))), secs(10));
+    assert_eq!(emergency_restore_budget(Some(secs(7))), secs(7), "never more than what is left");
+    assert_eq!(emergency_restore_budget(Some(std::time::Duration::ZERO)), secs(5));
+}
+
+/// Service start with no intent record and a snapshot the exact restore cannot prove. Startup
+/// returns without waiting for the adapter reset (the release worker waits only 20 s for the pipe
+/// that opens after it); a detached task then puts the adapter back on automatic (DHCP).
+#[tokio::test]
+#[serial]
+async fn startup_without_intent_resets_the_adapters_in_a_detached_task_after_it_returned() -> Result<()> {
+    unprovable_redirected_machine_without_wfp().await?;
+
+    restore_on_service_start().await?;
+    let at_return = crate::core::dns::test_hooks::take_automatic_resets();
+    let mut resets = 0;
+    let reset_done = eventually(|| {
+        resets += crate::core::dns::test_hooks::take_automatic_resets();
+        resets >= 1
+    })
+    .await;
+    let reset_adapters = crate::core::dns::test_hooks::take_last_automatic_reset();
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+
+    assert_eq!(at_return, 0, "startup returned before the reset ran");
+    assert!(reset_done, "the detached task never reset the adapter");
+    assert_eq!(resets, 1);
+    assert_eq!(reset_adapters, vec!["{ETHERNET}".to_owned()]);
+    assert!(tokio::fs::metadata(dns_snapshot_path()).await.is_ok(), "the saved servers are kept");
+
+    cleanup().await;
+    Ok(())
+}
+
+/// An unwanted intent: startup removes WFP first (`remove_all_filters_unlocked`), then tries the
+/// exact restore, and the same detached fallback follows when that fails.
+#[tokio::test]
+#[serial]
+async fn startup_with_an_unwanted_intent_resets_the_adapters_after_the_failed_restore() -> Result<()> {
+    unprovable_redirected_machine_without_wfp().await?;
+    let intent = valid_intent(KillSwitchStatusMode::Blocked, false);
+    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+
+    restore_on_service_start().await?;
+    let at_return = crate::core::dns::test_hooks::take_automatic_resets();
+    let mut resets = 0;
+    let reset_done = eventually(|| {
+        resets += crate::core::dns::test_hooks::take_automatic_resets();
+        resets >= 1
+    })
+    .await;
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+
+    assert_eq!(at_return, 0, "startup returned before the reset ran");
+    assert!(reset_done, "the detached task never reset the adapter");
+    assert_eq!(resets, 1);
+
+    cleanup().await;
+    Ok(())
+}
+
+/// A wanted intent re-arms protection: the DNS redirect is on purpose, so no fallback is spawned
+/// (and no exact restore is tried either).
+#[tokio::test]
+#[serial]
+async fn startup_with_a_wanted_intent_spawns_no_dns_fallback() -> Result<()> {
+    unprovable_redirected_machine_without_wfp().await?;
+    TEST_CORE_STARTING.store(true, Ordering::Relaxed);
+    let intent = valid_intent(KillSwitchStatusMode::Locked, true);
+    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+
+    restore_on_service_start().await?;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    let policy_restores = crate::core::dns::test_hooks::take_encrypted_restores();
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+
+    assert!(ARMED.lock().unwrap().is_some(), "the wanted session is re-armed");
+    assert_eq!(resets, 0, "no adapter may be reset under a re-armed session");
+    assert_eq!(policy_restores, 0);
+
+    cleanup().await;
+    Ok(())
+}
+
+/// The fresh Service's fallback meets an engine still busy with an abandoned call: it retries
+/// instead of giving up, and resets the adapter once the claim is returned.
+#[tokio::test]
+#[serial]
+async fn the_startup_fallback_retries_while_the_engine_is_busy_and_resets_after_it_is_released() -> Result<()> {
+    unprovable_redirected_machine_without_wfp().await?;
+    let claim = crate::core::dns::test_hooks::park_engine_call().await;
+
+    let task = spawn_dns_fallback_within(
+        std::time::Duration::from_secs(10),
+        std::time::Duration::from_millis(20),
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let while_busy = crate::core::dns::test_hooks::take_automatic_resets();
+    assert!(!task.is_finished(), "a busy engine is retried, not an answer");
+    drop(claim);
+    tokio::time::timeout(std::time::Duration::from_secs(5), task)
+        .await
+        .expect("the task finishes once the engine is free")
+        .unwrap();
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    let reset_adapters = crate::core::dns::test_hooks::take_last_automatic_reset();
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+
+    assert_eq!(while_busy, 0);
+    assert_eq!(resets, 1, "the reset ran after the claim was returned");
+    assert_eq!(reset_adapters, vec!["{ETHERNET}".to_owned()]);
+
+    cleanup().await;
+    Ok(())
+}
+
+/// An engine that stays busy for ever ends the fallback at its bound, with nothing reset and the
+/// saved servers kept for the next start.
+#[tokio::test]
+#[serial]
+async fn the_startup_fallback_stops_at_its_bound_when_the_engine_never_frees() -> Result<()> {
+    unprovable_redirected_machine_without_wfp().await?;
+    let claim = crate::core::dns::test_hooks::park_engine_call().await;
+
+    let started = std::time::Instant::now();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        spawn_dns_fallback_within(
+            std::time::Duration::from_millis(300),
+            std::time::Duration::from_millis(20),
+        ),
+    )
+    .await
+    .expect("the fallback must end at its bound")
+    .unwrap();
+    let elapsed = started.elapsed();
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    drop(claim);
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+
+    assert_eq!(resets, 0);
+    assert!(elapsed >= std::time::Duration::from_millis(280), "gave up after only {elapsed:?}");
+    assert!(
+        tokio::fs::metadata(dns_snapshot_path()).await.is_ok(),
+        "the saved servers are kept for the next start"
+    );
+
+    cleanup().await;
+    Ok(())
+}
+
+/// A connect that re-armed protection while the fallback was waiting owns the DNS redirect from
+/// then on; the fallback must not reset it.
+#[tokio::test]
+#[serial]
+async fn the_startup_fallback_leaves_a_redirect_alone_once_protection_is_armed_again() -> Result<()> {
+    arm_an_unprovable_redirected_machine().await?;
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        spawn_dns_fallback_within(
+            std::time::Duration::from_secs(5),
+            std::time::Duration::from_millis(20),
+        ),
+    )
+    .await
+    .expect("the fallback stops at once")
+    .unwrap();
+    let resets = crate::core::dns::test_hooks::take_automatic_resets();
+    crate::core::dns::test_hooks::reset_fallback_hooks();
+
+    assert_eq!(resets, 0);
+
+    cleanup().await;
+    Ok(())
+}
+
 // --- The uninstall-only escalation ladder ---
 
 /// Opts the *process* into `dns::restore_for_uninstall`, exactly as `uninstall_service.rs`

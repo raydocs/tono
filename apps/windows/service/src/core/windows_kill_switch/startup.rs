@@ -104,6 +104,15 @@ pub(super) fn spawn_startup_release_retry() {
     });
 }
 
+/// The detached adapter reset after a failed startup restore, with its bound and retry pause
+/// injected.
+pub(super) fn spawn_dns_fallback_within(
+    _bound: std::time::Duration,
+    _retry: std::time::Duration,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async {})
+}
+
 /// Ownerless block used only when the on-disk record explicitly enabled the strict kill
 /// switch and its details are unusable. Any authenticated owner may still release it.
 fn emergency_armed() -> Armed {

@@ -191,6 +191,8 @@ pub(super) fn sweep_tono_resolver_rule() -> Result<()> {
 /// The stub stands in for a registry call that never returns, or one that fails.
 #[cfg(not(all(windows, not(feature = "test"))))]
 pub(super) fn sweep_tono_resolver_rule() -> Result<()> {
+    #[cfg(test)]
+    test_hooks::note_nrpt_sweep();
     while test_hooks::nrpt_sweep_hangs() {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }

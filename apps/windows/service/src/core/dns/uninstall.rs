@@ -334,3 +334,9 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
         }
     }
 }
+
+/// The adapter reset that answers a failed exact DNS restore (the emergency disarm's single
+/// attempt and the restarted Service's retry loop).
+pub(crate) async fn reset_redirected_adapters_to_automatic() -> Result<Vec<String>> {
+    Ok(Vec::new())
+}

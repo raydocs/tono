@@ -152,6 +152,7 @@ mod uninstall;
 pub(crate) use enable::*;
 use enable_decisions::*;
 use engine_ops::*;
+pub(crate) use engine_ops::is_engine_busy_refusal;
 pub(crate) use markers::*;
 use name_servers::*;
 use orphaned::*;
@@ -270,6 +271,96 @@ pub(crate) mod test_hooks {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = adapters;
     }
 
+    /// Interfaces whose registry keys exist but that are not in the active enumeration
+    /// (disabled or unplugged adapters). Their registry values are what the machine will resolve
+    /// through the moment the adapter comes back.
+    static OFFLINE_REGISTRY: LazyLock<Mutex<Vec<AdapterDnsSnapshot>>> =
+        LazyLock::new(|| Mutex::new(Vec::new()));
+
+    pub(crate) fn offline_registry() -> Vec<AdapterDnsSnapshot> {
+        OFFLINE_REGISTRY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_offline_registry(adapters: Vec<AdapterDnsSnapshot>) {
+        *OFFLINE_REGISTRY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = adapters;
+    }
+
+    static OFFLINE_REGISTRY_UNREADABLE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    pub(crate) fn offline_registry_unreadable() -> Vec<String> {
+        OFFLINE_REGISTRY_UNREADABLE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Interfaces whose registry values cannot be read at all (access denied, a hung key).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_offline_registry_unreadable(guids: Vec<String>) {
+        *OFFLINE_REGISTRY_UNREADABLE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = guids;
+    }
+
+    /// A real engine call that its caller gave up on: it is handed to `bounded_dns_call`, which
+    /// times out after 50 ms and leaves the blocking thread parked on a channel, still holding the
+    /// single-writer claim, exactly as an exact restore abandoned at its deadline does. Every stub
+    /// engine call that checks the claim is refused until this is released (or dropped).
+    #[cfg(test)]
+    pub(crate) async fn park_engine_call() -> ParkedEngineCall {
+        let (release, blocked) = std::sync::mpsc::channel::<()>();
+        let wedged = move || -> anyhow::Result<()> {
+            let _ = blocked.recv_timeout(std::time::Duration::from_secs(30));
+            Ok(())
+        };
+        let timed_out = super::bounded_dns_call(std::time::Duration::from_millis(50), "restore", wedged).await;
+        assert!(timed_out.is_err(), "the parked call must time out and keep its claim");
+        ParkedEngineCall { release }
+    }
+
+    /// The abandoned call's handle: dropping it lets the blocking thread return, which releases
+    /// the claim, and waits for that.
+    #[cfg(test)]
+    pub(crate) struct ParkedEngineCall {
+        release: std::sync::mpsc::Sender<()>,
+    }
+
+    #[cfg(test)]
+    impl Drop for ParkedEngineCall {
+        fn drop(&mut self) {
+            let _ = self.release.send(());
+            for _ in 0..500 {
+                if super::dns_call_in_flight().is_none() {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+    }
+
+    /// Clear every hook the adapter fallback tests set.
+    #[cfg(test)]
+    pub(crate) fn reset_fallback_hooks() {
+        set_collected_adapters(Vec::new());
+        set_offline_registry(Vec::new());
+        set_offline_registry_unreadable(Vec::new());
+        set_effective_dns(Vec::new());
+        set_effective_dns_unreadable(Vec::new());
+        set_effective_dns_fails(false);
+        set_reset_does_not_land(false);
+        set_live_dns_on_loopback(false);
+        take_last_automatic_reset();
+        take_automatic_resets();
+        take_encrypted_restores();
+        take_nrpt_sweeps();
+    }
+
     static LIVE_DNS_ON_LOOPBACK: AtomicBool = AtomicBool::new(false);
 
     pub(crate) fn live_dns_is_on_loopback() -> bool {
@@ -280,6 +371,122 @@ pub(crate) mod test_hooks {
     /// that cannot read its snapshot is genuinely unprovable.
     pub(crate) fn set_live_dns_on_loopback(on_loopback: bool) {
         LIVE_DNS_ON_LOOPBACK.store(on_loopback, Ordering::Relaxed);
+    }
+
+    static EFFECTIVE_DNS: LazyLock<Mutex<Vec<(String, Vec<std::net::IpAddr>)>>> =
+        LazyLock::new(|| Mutex::new(Vec::new()));
+
+    pub(crate) fn effective_dns() -> Vec<(String, Vec<std::net::IpAddr>)> {
+        EFFECTIVE_DNS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// An automatic (DHCP) reset that lands also takes these adapters' effective lists off
+    /// the Tono endpoint.
+    pub(crate) fn forget_effective_dns(guids: &[String]) {
+        EFFECTIVE_DNS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|(guid, _)| !guids.iter().any(|reset| reset.eq_ignore_ascii_case(guid)));
+    }
+
+    /// A per-family reset that lands: for each `(adapter, ipv4, ipv6)` the registry values of
+    /// the reset families go back to automatic (absent) and the effective list loses that
+    /// family's servers. The other family keeps what it had.
+    pub(crate) fn land_reset(resets: &[(String, bool, bool)]) {
+        {
+            let mut collected = COLLECTED_ADAPTERS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut offline = OFFLINE_REGISTRY
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for adapter in collected.iter_mut().chain(offline.iter_mut()) {
+                let Some((_, v4, v6)) = resets
+                    .iter()
+                    .find(|(guid, _, _)| guid.eq_ignore_ascii_case(&adapter.interface_guid))
+                else {
+                    continue;
+                };
+                if *v4 {
+                    adapter.ipv4_name_server = None;
+                    adapter.ipv4_profile_name_server = None;
+                }
+                if *v6 {
+                    adapter.ipv6_name_server = None;
+                    adapter.ipv6_profile_name_server = None;
+                }
+            }
+        }
+        let mut effective = EFFECTIVE_DNS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for (guid, servers) in effective.iter_mut() {
+            let Some((_, v4, v6)) = resets
+                .iter()
+                .find(|(reset, _, _)| reset.eq_ignore_ascii_case(guid))
+            else {
+                continue;
+            };
+            servers.retain(|server| !(if server.is_ipv6() { *v6 } else { *v4 }));
+        }
+    }
+
+    pub(crate) fn effective_dns_unreadable() -> Vec<String> {
+        EFFECTIVE_DNS_UNREADABLE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub(crate) fn effective_dns_fails() -> bool {
+        EFFECTIVE_DNS_FAILS.load(Ordering::Relaxed)
+    }
+
+    /// What the DNS Client resolves through per active adapter right now (the effective list
+    /// `GetAdaptersAddresses` reports), as opposed to the registry values `collected_adapters`
+    /// stands for. The two differ exactly when a restore wrote the registry back but its live
+    /// apply failed.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_effective_dns(adapters: Vec<(String, Vec<std::net::IpAddr>)>) {
+        *EFFECTIVE_DNS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = adapters;
+    }
+
+    static EFFECTIVE_DNS_UNREADABLE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    /// Adapters that are active but whose effective resolver list cannot be read (one adapter's
+    /// DNS record failing to parse), while the others answer.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_effective_dns_unreadable(guids: Vec<String>) {
+        *EFFECTIVE_DNS_UNREADABLE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = guids;
+    }
+
+    static EFFECTIVE_DNS_FAILS: AtomicBool = AtomicBool::new(false);
+
+    /// The whole effective-DNS read fails (`GetAdaptersAddresses` errors).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_effective_dns_fails(fails: bool) {
+        EFFECTIVE_DNS_FAILS.store(fails, Ordering::Relaxed);
+    }
+
+    static RESET_DOES_NOT_LAND: AtomicBool = AtomicBool::new(false);
+
+    pub(crate) fn reset_does_not_land() -> bool {
+        RESET_DOES_NOT_LAND.load(Ordering::Relaxed)
+    }
+
+    /// Simulate an automatic (DHCP) reset that reports success while the machine keeps
+    /// resolving through the Tono endpoint: the registry write and the CIM call returned, the
+    /// DNS Client has not adopted it.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_reset_does_not_land(does_not_land: bool) {
+        RESET_DOES_NOT_LAND.store(does_not_land, Ordering::Relaxed);
     }
 
     static LIVE_APPLY_FAILS: AtomicBool = AtomicBool::new(false);
@@ -332,6 +539,20 @@ pub(crate) mod test_hooks {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn set_nrpt_sweep_hangs(hangs: bool) {
         NRPT_SWEEP_HANGS.store(hangs, Ordering::Relaxed);
+    }
+
+    /// How many times the stubbed NRPT removal (the emergency disarm's resolver-rule sweep) ran.
+    #[cfg(test)]
+    static NRPT_SWEEPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    #[cfg(test)]
+    pub(crate) fn note_nrpt_sweep() {
+        NRPT_SWEEPS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_nrpt_sweeps() -> usize {
+        NRPT_SWEEPS.swap(0, Ordering::Relaxed)
     }
 
     static SNAPSHOT_DELETE_FAILS: AtomicBool = AtomicBool::new(false);
@@ -418,9 +639,30 @@ pub(crate) mod test_hooks {
     #[cfg(test)]
     static AUTOMATIC_RESETS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
+    /// The adapters named by the last automatic (DHCP) reset, so a test can prove which ones the
+    /// reset touched and which it left alone.
     #[cfg(test)]
-    pub(crate) fn note_automatic_reset() {
+    static LAST_AUTOMATIC_RESET: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    #[cfg(test)]
+    pub(crate) fn note_automatic_reset(snapshot: &super::DnsSnapshot) {
         AUTOMATIC_RESETS.fetch_add(1, Ordering::Relaxed);
+        *LAST_AUTOMATIC_RESET
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot
+            .adapters
+            .iter()
+            .map(|adapter| adapter.interface_guid.clone())
+            .collect();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_last_automatic_reset() -> Vec<String> {
+        std::mem::take(
+            &mut *LAST_AUTOMATIC_RESET
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
     }
 
     #[cfg(test)]

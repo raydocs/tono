@@ -529,6 +529,16 @@ pub(super) const DNS_RESTORE_STALLED_PREFIX: &str = "TONO_DNS_RESTORE_STALLED";
 /// also stays under the IPC handler's 60 s budget, so the refusal still reaches the client.
 pub(super) const DNS_RESTORE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(40);
 
+/// The budget of the exact DNS restore on the emergency path, given the time `remaining` before
+/// the caller's deadline (`None`: no deadline).
+pub(super) fn emergency_restore_budget(_remaining: Option<std::time::Duration>) -> std::time::Duration {
+    DNS_RESTORE_TIMEOUT
+}
+
+/// Marks the note the emergency disarm appends to its DNS error about the adapter reset that
+/// follows an unproven exact restore.
+pub(super) const DNS_FALLBACK_NOTE_PREFIX: &str = "TONO_DNS_FALLBACK";
+
 /// SCM `StopPending` hint posted by the service. Stop is accepted before startup
 /// finishes, and startup can still be inside this DNS budget — twice, when an
 /// unverified barrier is retired. One post of the hint does not cover that.
