@@ -1132,8 +1132,9 @@ pub(crate) fn open_private_append(path: &std::path::Path) -> Result<std::fs::Fil
 /// (win2-F3). The audit writer pins its folder once; a respawn after a crash reopens the log by
 /// path again, and the private-file primitive checks only the final path component, so a parent
 /// replaced by a junction or symlink in between would redirect the write. On Windows the handle
-/// is held without `FILE_SHARE_DELETE`, so the folder and its ancestors cannot be renamed or
-/// replaced while it is open, and [`Self::still_names`] proves the path still resolves to it.
+/// is held with traversal access and without `FILE_SHARE_DELETE`, so the folder itself cannot be
+/// renamed or replaced while it is open (an ancestor junction can still be re-pointed; the
+/// path checks catch that unless it is swapped back in between), and [`Self::still_names`] proves the path still resolves to it.
 #[derive(Debug)]
 pub(crate) struct PinnedDirectory {
     #[cfg(windows)]
@@ -1176,7 +1177,7 @@ impl PinnedDirectory {
         use windows_sys::Win32::Storage::FileSystem::{
             BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
             FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
-            FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileInformationByHandle, OPEN_EXISTING,
+            FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, GetFileInformationByHandle, OPEN_EXISTING,
         };
 
         let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
@@ -1185,7 +1186,9 @@ impl PinnedDirectory {
         let handle = unsafe {
             CreateFileW(
                 wide.as_ptr(),
-                FILE_READ_ATTRIBUTES,
+                // Attribute-only access does not take part in Windows' share check, so it would not
+                // stop a rename; FILE_TRAVERSE does.
+                FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
                 share,
                 std::ptr::null(),
                 OPEN_EXISTING,

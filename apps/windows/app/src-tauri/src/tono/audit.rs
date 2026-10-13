@@ -506,6 +506,11 @@ impl RotatingWriter {
         use std::io::Write as _;
 
         self.file.flush()?;
+        let other = |err: anyhow::Error| std::io::Error::other(err.to_string());
+        // Nothing is deleted or renamed unless the folder still names the pinned directory.
+        if let (Some(folder), Some(parent)) = (self.path.parent(), self.parent.as_ref()) {
+            parent.still_names(folder).map_err(other)?;
+        }
         let current_missing = matches!(
             std::fs::symlink_metadata(&self.path),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound
@@ -519,11 +524,12 @@ impl RotatingWriter {
             }
             std::fs::rename(&self.path, &backup)?;
         }
-        let other = |err: anyhow::Error| std::io::Error::other(err.to_string());
+        let next = state::open_private_append(&self.path).map_err(other)?;
+        // The new handle is only adopted once the folder is proved to be the pinned one again.
         if let (Some(folder), Some(parent)) = (self.path.parent(), self.parent.as_ref()) {
             parent.still_names(folder).map_err(other)?;
         }
-        self.file = state::open_private_append(&self.path).map_err(other)?;
+        self.file = next;
         self.written = 0;
         Ok(())
     }
@@ -1436,6 +1442,49 @@ mod tests {
         }
 
         assert!(state::PinnedDirectory::open(&link).is_err(), "a re-pointed folder is not a plain directory");
+    }
+
+    /// win2-F3: a rotation whose folder was re-pointed must neither delete nor rename anything
+    /// in the other directory, nor write there.
+    #[test]
+    fn a_rotation_refuses_a_redirected_folder_and_leaves_it_untouched() {
+        let pinned = TempDir::new("rot-pinned");
+        let redirected = TempDir::new("rot-redirected");
+        let pin = Arc::new(state::PinnedDirectory::open(pinned.path()).unwrap());
+        let mut writer = RotatingWriter::open_pinned(&log_path(&pinned), 16, Some(&pin)).unwrap();
+        writer.write_line("first line, longer than the cap", true).unwrap();
+        // The log path now resolves to another directory that holds files of its own.
+        let foreign_current = log_path(&redirected);
+        let foreign_backup = redirected.path().join(super::AUDIT_BACKUP_FILE_NAME);
+        std::fs::write(&foreign_current, b"foreign current").unwrap();
+        std::fs::write(&foreign_backup, b"foreign backup").unwrap();
+        writer.path = foreign_current.clone();
+
+        let refused = writer.write_line("second line", true).expect_err("the rotation must refuse");
+
+        assert!(refused.to_string().contains("no longer names"), "{refused}");
+        assert_eq!(std::fs::read(&foreign_current).unwrap(), b"foreign current");
+        assert_eq!(std::fs::read(&foreign_backup).unwrap(), b"foreign backup");
+    }
+
+    /// win2-F3: the pin is only a lock if a rename of the folder fails while it is held.
+    #[cfg(windows)]
+    #[test]
+    fn a_pinned_folder_cannot_be_renamed_while_it_is_held() {
+        let dir = TempDir::new("pin-rename");
+        let moved = dir.path().with_file_name(format!(
+            "{}-moved",
+            dir.path().file_name().unwrap().to_string_lossy()
+        ));
+        let pin = state::PinnedDirectory::open(dir.path()).unwrap();
+
+        assert!(
+            std::fs::rename(dir.path(), &moved).is_err(),
+            "a held pin must keep the folder from being renamed"
+        );
+        drop(pin);
+        std::fs::rename(dir.path(), &moved).expect("the folder moves once the pin is dropped");
+        std::fs::rename(&moved, dir.path()).unwrap();
     }
 
     /// H18-C-F2: a rotation that renamed the current file but could not create the next one
