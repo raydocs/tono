@@ -152,6 +152,10 @@ evidence in SHIP_PLAN §6; for 0.0.75 G1 and G2 only). Record each step's run UR
   G4.3 customer feeds (Windows: the back-office release row has `verifiedAt` before
   promotion) → G4.4 small group. Checking the customer feed after G4.3 is a follow-up
   check, not a substitute for G4.2.
+- **Signed policy revision (#317, finding issue-317).** Once every client version on the customer
+  feeds verifies the embedded policy revision (Windows #342, macOS #473; 0.0.75 has both), set
+  `TRAFFIC_POLICY_EMBED_REVISION` to `"true"` for the control plane, deploy as AGENTS.md says, publish
+  one new policy revision and check that GET serves it with the embedded revision equal to the envelope.
 
 Both platforms publish the accepted bytes; nothing is rebuilt at publish time. Release
 builds are dispatched with `update_release_sequence` (both workflows refuse an empty
