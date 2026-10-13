@@ -16,10 +16,15 @@
   - Windows replacement sign-in: the retirement inside `adopt_replacing_with` uses its own narrow
     disposition. Sign Out and Restore internet keep their full-release semantics, and a Restore
     that overlaps a Quit or a replacement dominates it (`begin_release` ANDs the dispositions).
+    After a replacement the App is idle but the hold remains, so the App remembers that the last
+    release kept it and an immediate Sign Out still runs the full release.
   - A failed native update (`*_applying_narrow`) installs the hold only when one is owed: the
     session was armed, or an earlier automatic release left one. A user who was Unprotected, or had
     just chosen Restore internet, gets no new hold (#1293 item 4). Explicit Restore is the user's
-    full release and is respected.
+    full release and is respected. When nothing is owed the release also leaves an existing hold
+    alone (an earlier release whose tombstone could not be written leaves a hold with no evidence);
+    only Restore internet removes it. A legacy crash tombstone (`reconnect_after_release` with no
+    explicit disposition) counts as owed, as Service start reads it.
   - A second emergency release must not remove the hold the first one installed (#1055
     R3REGW-ROLLBACK-DOUBLE-HOLD). #1087 already made the reapply in place; a regression now pins
     the emergency path.
