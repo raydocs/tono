@@ -154,8 +154,11 @@ export default function ClientsPage({
 /**
  * The sentence's three numbers.
  *
- * The two "behind" buckets add up into one word because the sentence is a
- * verdict, not the matrix: the split between them is a row below, and an
+ * The Worker counts each person once, at the oldest version any of their
+ * devices on a released platform reports, so a customer with a Mac and a
+ * Windows machine is one person here although the matrix shows them in both
+ * cells. The two "behind" buckets are already one word because the sentence is
+ * a verdict, not the matrix: the split between them is a row below, and an
  * opening line with four numbers in it is a table someone wrote as prose.
  * Unreleased platforms contribute nothing at all — there is nobody on them to
  * be current or behind.
@@ -166,13 +169,6 @@ function bucketTotals(matrix: AdoptionMatrixDto): {
   behind: number;
   unreported: number;
 } {
-  const released = new Set<Platform>(matrix.released);
-  const out = { platforms: released.size, current: 0, behind: 0, unreported: 0 };
-  for (const cell of matrix.cells) {
-    if (!released.has(cell.platform)) continue;
-    if (cell.bucket === 'current') out.current += cell.users;
-    else if (cell.bucket === 'unreported') out.unreported += cell.users;
-    else out.behind += cell.users;
-  }
-  return out;
+  const { current, behind, unreported } = matrix.people;
+  return { platforms: matrix.released.length, current, behind, unreported };
 }

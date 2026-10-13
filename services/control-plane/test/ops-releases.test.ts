@@ -77,6 +77,14 @@ async function seedWindowsStable() {
   }, NOW - 40);
 }
 
+async function seedMacosStable() {
+  for (const [version, at] of [['0.0.34', 20], ['0.0.33', 40], ['0.0.32', 60]] as const) {
+    await createRelease(db(), {
+      platform: 'macos', channel: 'stable', version, publishedAt: NOW - at,
+    }, NOW - at);
+  }
+}
+
 function cellOf(
   matrix: Awaited<ReturnType<typeof adoptionMatrix>>,
   platform: string,
@@ -320,6 +328,30 @@ describe('adoption matrix', () => {
     const matrix = await adoptionMatrix(db(), { range: '30d', nowSec: NOW });
     expect(cellOf(matrix, 'windows', 'current')).toEqual({ users: 1, devices: 2 });
     expect(cellOf(matrix, 'windows', 'behind_one')).toEqual({ users: 1, devices: 1 });
+  });
+
+  it('counts a customer on two platforms once in people, at their oldest version', async () => {
+    await seedWindowsStable();
+    await seedMacosStable();
+    await seedDeviceDay({ day: DAY_AT - DAY, deviceId: 'd-win', userId: 'u-a', version: '0.0.34' });
+    await seedDeviceDay({
+      day: DAY_AT - DAY, deviceId: 'd-mac', userId: 'u-a', version: '0.0.32', platform: 'macos',
+    });
+
+    const matrix = await adoptionMatrix(db(), { range: '30d', nowSec: NOW });
+    expect(cellOf(matrix, 'windows', 'current')).toEqual({ users: 1, devices: 1 });
+    expect(cellOf(matrix, 'macos', 'behind_more')).toEqual({ users: 1, devices: 1 });
+    expect(matrix.people).toEqual({ current: 0, behind: 1, unreported: 0 });
+  });
+
+  it('counts a person as unreported only when none of their devices reported a known version', async () => {
+    await seedWindowsStable();
+    await seedDeviceDay({ day: DAY_AT - DAY, deviceId: 'd-unknown', userId: 'u-x', version: '9.9.9' });
+    await seedDeviceDay({ day: DAY_AT - DAY, deviceId: 'd-1', userId: 'u-y', version: '9.9.9' });
+    await seedDeviceDay({ day: DAY_AT - DAY, deviceId: 'd-2', userId: 'u-y', version: '0.0.34' });
+
+    const matrix = await adoptionMatrix(db(), { range: '30d', nowSec: NOW });
+    expect(matrix.people).toEqual({ current: 1, behind: 0, unreported: 1 });
   });
 
   it("unions today's live windows, which no rollup has written yet", async () => {

@@ -134,7 +134,7 @@ test('the clients hero breaks only between its three segments', async ({ page })
     expect(segment.height).toBeLessThanOrEqual(segment.lineHeight * 1.5);
   }
   // On a phone the dots are gone: the three segments are separated by a gap.
-  await expect(segments).toHaveText(['11 位在最新版', '10 位落后', '2 位未上报']);
+  await expect(segments).toHaveText(['11 位在最新版', '5 位落后', '2 位未上报']);
   await expect(page.locator('.clients-hero .text-verdict .dot-joined-sep').first()).toBeHidden();
 });
 

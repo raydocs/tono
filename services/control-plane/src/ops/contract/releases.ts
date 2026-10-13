@@ -106,10 +106,18 @@ export interface AdoptionCellDto {
  * absent from it renders 未发布 rather than a column of zeros — a zero there
  * would read as "nobody upgraded" when the truth is "nothing shipped".
  */
+export interface AdoptionPeopleDto {
+  current: number;
+  behind: number;
+  unreported: number;
+}
+
 export interface AdoptionMatrixDto {
   range: RangeKey;
   released: Platform[];
   cells: AdoptionCellDto[];
+  /** Each customer once, at the oldest version any of their released-platform devices reports. */
+  people: AdoptionPeopleDto;
   updatedAt: number;
 }
 
@@ -197,7 +205,18 @@ export function assertAdoptionCell(value: unknown, path = 'adoptionCell'): Adopt
   };
 }
 
-const ADOPTION_KEYS = ['range', 'released', 'cells', 'updatedAt'];
+const ADOPTION_PEOPLE_KEYS = ['current', 'behind', 'unreported'];
+
+function assertAdoptionPeople(value: unknown, path: string): AdoptionPeopleDto {
+  const row = fields(value, path, ADOPTION_PEOPLE_KEYS);
+  return {
+    current: int(row, path, 'current'),
+    behind: int(row, path, 'behind'),
+    unreported: int(row, path, 'unreported'),
+  };
+}
+
+const ADOPTION_KEYS = ['range', 'released', 'cells', 'people', 'updatedAt'];
 
 export function assertAdoptionMatrix(value: unknown, path = 'adoption'): AdoptionMatrixDto {
   const row = fields(value, path, ADOPTION_KEYS);
@@ -205,6 +224,7 @@ export function assertAdoptionMatrix(value: unknown, path = 'adoption'): Adoptio
     range: oneOf<RangeKey>(row, path, 'range', RANGE_KEYS),
     released: enumList<Platform>(row, path, 'released', PLATFORMS),
     cells: arrayOf(row, path, 'cells', assertAdoptionCell),
+    people: assertAdoptionPeople(row.people, `${path}.people`),
     updatedAt: int(row, path, 'updatedAt'),
   };
 }

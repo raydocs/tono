@@ -306,11 +306,37 @@ describe('a matrix cell and the customer list it links to hold the same people',
       const onPlatform = people.filter((row) => row.platforms.includes(platform));
       for (const cell of matrix.cells.filter((row) => row.platform === platform)) {
         const counted = onPlatform.filter(
-          (row) => bucketFor(row.minAppVersion, published) === cell.bucket,
+          (row) => bucketFor(
+            row.versionByPlatform.find((entry) => entry.platform === platform)?.version ?? null,
+            published,
+          ) === cell.bucket,
         ).length;
         expect(counted, `${platform} ${cell.bucket}`).toBe(cell.users);
       }
     }
+  });
+
+  /** The sentence counts a person once, at the oldest bucket any of their released-platform devices is in. */
+  it('counts each person once in people, at their oldest bucket', () => {
+    const rank = { unreported: 0, current: 1, behind_one: 2, behind_more: 3 } as const;
+    const worst = new Map<string, keyof typeof rank>();
+    for (const platform of matrix.released) {
+      const published = publishedVersions(rows, platform);
+      for (const row of people) {
+        const version = row.versionByPlatform.find((entry) => entry.platform === platform)?.version;
+        if (version === undefined && !row.platforms.includes(platform)) continue;
+        const bucket = bucketFor(version ?? null, published);
+        const held = worst.get(row.userId);
+        if (held === undefined || rank[bucket] > rank[held]) worst.set(row.userId, bucket);
+      }
+    }
+    const counted = { current: 0, behind: 0, unreported: 0 };
+    for (const bucket of worst.values()) {
+      counted[bucket === 'current' ? 'current' : bucket === 'unreported' ? 'unreported' : 'behind'] += 1;
+    }
+    expect(matrix.people).toEqual(counted);
+    const cellSum = matrix.cells.reduce((sum, cell) => sum + cell.users, 0);
+    expect(matrix.people.current + matrix.people.behind + matrix.people.unreported).toBeLessThan(cellSum);
   });
 
   it('never claims a number for a platform nothing has shipped for', () => {

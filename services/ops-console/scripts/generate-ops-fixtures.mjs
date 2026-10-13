@@ -359,7 +359,35 @@ function minVersionFor(platforms) {
 
 function appVersionFor(platform, minVersion) {
   if (platform === 'windows') return minVersion === '1.7.9' ? '1.7.9' : '1.8.0';
+  // A customer whose oldest device is 1.7.9 has that on the Mac too, so the
+  // macOS cell they sit in and the macOS band they are listed under agree.
+  if (minVersion === '1.7.9') return '1.7.9';
   return minVersion === '1.8.1' ? '1.8.1' : '1.8.2';
+}
+
+function compareDotted(a, b) {
+  const left = a.split('.').map(Number);
+  const right = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
+    const diff = (left[i] ?? 0) - (right[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/** The oldest version per platform among a customer's devices; nothing reported, nothing listed. */
+function versionByPlatformFor(devices, minAppVersion) {
+  if (minAppVersion === null) return [];
+  const oldest = new Map();
+  for (const device of devices) {
+    const held = oldest.get(device.platform);
+    if (held === undefined || compareDotted(device.appVersion, held) < 0) {
+      oldest.set(device.platform, device.appVersion);
+    }
+  }
+  return ['macos', 'windows', 'linux', 'android', 'ios']
+    .filter((platform) => oldest.has(platform))
+    .map((platform) => ({ platform, version: oldest.get(platform) }));
 }
 
 function osVersionFor(platform, index) {
@@ -1171,6 +1199,7 @@ function buildCustomer(index, overrides = {}) {
     quotaBytes: spec.quotaBytes,
     services: spec.services,
     minAppVersion: spec.minAppVersion,
+    versionByPlatform: versionByPlatformFor(devices, spec.minAppVersion),
     stage: spec.stage,
     stageSinceAt: spec.stageSinceAt,
     firstConnectedAt: spec.firstConnectedAt,

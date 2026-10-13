@@ -138,9 +138,11 @@ export async function getReleaseAdoption(req: Request, e: Env): Promise<Response
     range,
     released: matrix.released,
     cells: matrix.cells,
+    people: matrix.people,
     updatedAt: now(),
   };
-  return entityJson(e, req, dto, weakEtag([range, dto.updatedAt, dto.cells.length]), assertAdoptionMatrix);
+  const { current, behind, unreported } = dto.people;
+  return entityJson(e, req, dto, weakEtag([range, dto.updatedAt, dto.cells.length, current, behind, unreported]), assertAdoptionMatrix);
 }
 
 /**

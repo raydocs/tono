@@ -237,6 +237,27 @@ export async function deviceCountsFor(
   return byUser;
 }
 
+/** Raw live device rows per user, for the per-platform version summary. */
+export async function deviceRowsFor(
+  db: D1Database,
+  userIds: string[],
+): Promise<Map<string, Row[]>> {
+  const byUser = new Map<string, Row[]>();
+  const rows = await rowsByUserIds(
+    db,
+    (placeholders) =>
+      `SELECT user_id, platform, os_version, app_version, last_seen_at FROM ops_device_status WHERE user_id IN (${placeholders})`,
+    userIds,
+  );
+  for (const row of rows) {
+    const userId = String(row.user_id);
+    const list = byUser.get(userId);
+    if (list) list.push(row);
+    else byUser.set(userId, [row]);
+  }
+  return byUser;
+}
+
 export async function servicesForUsers(
   db: D1Database,
   userIds: string[],
