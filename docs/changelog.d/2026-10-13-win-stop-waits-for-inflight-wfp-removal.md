@@ -6,4 +6,4 @@
 - 工程与测试：`stop_waits_for_an_in_flight_wfp_removal_before_the_runtime_is_dropped`。
 - 验证：见 PR 正文 `## Verification`。未在真机强制 DNS+WFP 同时接近超时。
 - 候选/发布：仅源码，无新候选。
-- 剩余限制：若释放仍在 DNS 阶段时 Stop 窗口已结束（需 Stop 前开始的释放 DNS 超过 60 s，受 40 s DNS 上限排除），运行时仍被丢弃；BFE 卡死时 30 s 后同旧行为。待实机。
+- 剩余限制：若释放仍在 DNS 阶段时 Stop 窗口已结束（Stop 先等生命周期锁再做 DNS 恢复，这些串行等待会耗尽 60 s 窗口，此时尚无 WFP 移除可等），运行时仍被丢弃；BFE 卡死时 30 s 后同旧行为。待实机。

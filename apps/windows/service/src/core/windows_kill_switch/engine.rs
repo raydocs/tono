@@ -411,7 +411,8 @@ pub(crate) async fn settle_in_flight_wfp_removal(budget: std::time::Duration) ->
                 );
                 return false;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            tokio::time::sleep(remaining.min(std::time::Duration::from_millis(25))).await;
         }
         if waited {
             tracing::info!("wfp: Stop waited for an in-flight removal to finish");

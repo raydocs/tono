@@ -4103,17 +4103,21 @@ async fn stop_waits_for_an_in_flight_wfp_removal_before_the_runtime_is_dropped()
         .await
         .expect_err("the removal outlasts its caller's deadline");
     assert!(engine_call_in_flight().is_some());
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        let _ = release.send(());
-    });
 
-    let settled = settle_in_flight_wfp_removal(std::time::Duration::from_secs(10)).await;
-
+    // The removal stays blocked until the test releases it, so no scheduling delay can let a
+    // Stop that does not wait look correct: it would have returned before the timeout.
+    let settle = settle_in_flight_wfp_removal(std::time::Duration::from_secs(10));
+    tokio::pin!(settle);
+    let early = tokio::time::timeout(std::time::Duration::from_millis(300), &mut settle).await;
     assert!(
-        engine_call_in_flight().is_none(),
+        early.is_err(),
         "Stop must not go on to drop the runtime while the removal is inside the engine"
     );
+    release.send(()).expect("the removal thread is still waiting");
+
+    let settled = settle.await;
+
+    assert!(engine_call_in_flight().is_none());
     assert!(settled);
     Ok(())
 }
