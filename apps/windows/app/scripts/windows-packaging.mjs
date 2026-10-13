@@ -82,15 +82,24 @@ export const WINDOWS_RUNTIME_REPAIR_ARTIFACTS = Object.freeze([
   'tono-core.exe.rollback',
   'tono-core.exe.restore',
   'tono-core.exe.publish',
+  'tono-core.exe.install-rollback',
+  'tono-core.exe.install-restore',
+  'tono-core.exe.install-publish',
   'sing-box.exe.next',
   'sing-box.exe.rollback',
   'sing-box.exe.restore',
   'sing-box.exe.publish',
+  'sing-box.exe.install-rollback',
+  'sing-box.exe.install-restore',
+  'sing-box.exe.install-publish',
   // The Service helper stages the root pin beside sing-box.exe as its own transaction member.
   'sing-box-sha256.txt.next',
   'sing-box-sha256.txt.rollback',
   'sing-box-sha256.txt.restore',
   'sing-box-sha256.txt.publish',
+  'sing-box-sha256.txt.install-rollback',
+  'sing-box-sha256.txt.install-restore',
+  'sing-box-sha256.txt.install-publish',
 ])
 
 // These inherited Clash Verge commands are not used by any route in the Tono
