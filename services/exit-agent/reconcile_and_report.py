@@ -124,7 +124,12 @@ class Unreachable(RuntimeError):
 
 
 class NodeDisabled(RuntimeError):
-    """The control plane says this exit node is disabled or retired."""
+    """The control plane says this exit node is disabled, retired or holds a
+    superseded token (#1296). `reason` is the control plane's own message."""
+
+    def __init__(self, message: str, reason: str = "") -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -187,6 +192,19 @@ def is_node_disabled(error: urllib.error.HTTPError) -> bool:
         return False
     detail = payload.get("error") if isinstance(payload, dict) else None
     return isinstance(detail, dict) and detail.get("code") == EXIT_NODE_DISABLED_CODE
+
+
+def node_disabled_reason(error: urllib.error.HTTPError) -> str:
+    """The control plane's message on an EXIT_NODE_DISABLED answer, bounded and
+    printable so the operator can tell a disabled node from a superseded token."""
+    try:
+        payload = json.loads(getattr(error, "tono_body", b"") or b"")
+        message = payload["error"]["message"]
+    except (ValueError, UnicodeDecodeError, KeyError, TypeError):
+        return ""
+    if not isinstance(message, str):
+        return ""
+    return "".join(c for c in message if c.isprintable())[:120]
 
 
 def xray_binary() -> Path:
@@ -537,7 +555,10 @@ def fetch_roster(base: str, token: str) -> tuple[str, int, list[dict], bool, dic
         response = open_control_plane(request, timeout=20)
     except urllib.error.HTTPError as error:
         if is_node_disabled(error):
-            raise NodeDisabled("the control plane reports this exit node disabled") from error
+            raise NodeDisabled(
+                "the control plane reports this exit node disabled",
+                node_disabled_reason(error),
+            ) from error
         raise
     with response as opened:
         raw = opened.read(MAX_ROSTER_BYTES + 1)
@@ -1648,6 +1669,12 @@ def withdraw_disabled_node(binary: Path, commands: dict[str, str], address: str,
     return removed, remaining if inventory is not None else None
 
 
+def control_plane_said(disabled: NodeDisabled) -> str:
+    """The control plane's own reason as a refusal suffix: a disabled node and a
+    token superseded by a rotation (#1296) share the code but not the cure."""
+    return f"; control plane said: {disabled.reason}" if disabled.reason else ""
+
+
 def run_hy2_roster_once() -> None:
     """Enforce hy2 only; never opt a VLESS node into a metering migration.
 
@@ -1661,9 +1688,12 @@ def run_hy2_roster_once() -> None:
         raise Refusal("hy2-only sync requires an explicit valid TONO_SOURCE_ID")
     try:
         node_id, observed_at, roster, _, _ = fetch_roster(base, token)
-    except NodeDisabled:
+    except NodeDisabled as disabled:
         sync_hy2_roster([])
-        raise Refusal("the control plane reports this exit node disabled; hy2 allowlist emptied")
+        raise Refusal(
+            "the control plane reports this exit node disabled; hy2 allowlist emptied"
+            + control_plane_said(disabled)
+        )
     if node_id != expected:
         raise Refusal("hy2 roster node identity does not match TONO_SOURCE_ID")
     if not sync_hy2_roster(roster):
@@ -1781,7 +1811,7 @@ def run_once(path: Path) -> None:
         node_id, observed_at, roster, server_retire_shared_legacy, watermarks = fetch_roster_or_discard_cache(
             base, token, cache,
         )
-    except NodeDisabled:
+    except NodeDisabled as disabled:
         # The control plane has spoken: the saved roster must not outlive the
         # node, or a later outage round would reinstall it on a disabled node.
         # fetch_roster_or_discard_cache has normally removed it already; a
@@ -1834,7 +1864,8 @@ def run_once(path: Path) -> None:
                      " (the restart restores shared-legacy)")
         if withdrawal_error is not None:
             raise Refusal(
-                f"{withdrawal_error}{procedure}{cache_note}{metering_note}"
+                f"{withdrawal_error}{procedure}{control_plane_said(disabled)}"
+                f"{cache_note}{metering_note}"
             ) from withdrawal_error
         # Never a success: the node is out of service and an operator should
         # stop tono-xray. Usage and acknowledgements are not sent.
@@ -1843,6 +1874,7 @@ def run_once(path: Path) -> None:
             " and emptied hy2"
             + ("" if remaining is not None else "; the client inventory is unknown")
             + procedure
+            + control_plane_said(disabled)
             + cache_note
             + metering_note
         )

@@ -110,3 +110,7 @@ Ops tables after the sequence was unique. Applied in numeric order:
 ## 0100
 
 - `0100_hy2_auto_switch.sql` — `users.internal_account` (ops-set) and `users.hy2_auto_switch` (`NULL` | `on` | `off`) plus singleton `hy2_auto_switch_settings.all_accounts`; the per-device exit catalog serves the resolved `hy2AutoSwitch` (D1-C: internal accounts on, everyone else off until an operator flips the global switch)
+
+## 0101
+
+- `0101_ops_node_profile_port.sql` — nullable `ops_node_profiles.port` (1–65535). The node profile's documented `port` was validated and dropped; node facts already read the column. Existing rows stay NULL.
