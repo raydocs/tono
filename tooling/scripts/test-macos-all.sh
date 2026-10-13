@@ -25,8 +25,18 @@ run() {
   local name=$1
   shift
   if "$@" > "/tmp/tono-all-$$.log" 2>&1; then
-    passed+=("$name")
-    print "  ok       $name"
+    # A suite can exit 0 after deciding not to run (the peer-authorization one
+    # does when the signing identity is absent). Exit status alone would count
+    # that as coverage, so its own SKIP line is what the summary reports.
+    local skip_reason
+    skip_reason=$(grep -m1 -E '^SKIP' "/tmp/tono-all-$$.log")
+    if [[ -n $skip_reason ]]; then
+      skipped+=("$name — $skip_reason")
+      print "  skipped  $name ($skip_reason)"
+    else
+      passed+=("$name")
+      print "  ok       $name"
+    fi
   else
     failed+=("$name")
     print "  FAILED   $name"
@@ -61,6 +71,8 @@ run "access token expiry parsing" tooling/scripts/test-jwt-expiry.sh
 run "terminal proxy diagnostics" tooling/scripts/test-terminal-proxy-diagnostics.sh
 run "appcast publisher" node --test tooling/scripts/tests/publish-macos-appcast.test.mjs
 run "test suite registration guard" node --test tooling/scripts/tests/suite-reachability.test.mjs
+run "test suite registration (this tree)" tooling/scripts/test-suite-reachability.sh
+run "aggregate reports skips" node --test tooling/scripts/tests/macos-all-aggregate.test.mjs
 run "relay-only evidence preflight" node --test tooling/scripts/tests/relay-only-preflight.test.mjs
 
 # Root-only. These cover the two faults that shipped, so a skip is reported
@@ -79,12 +91,18 @@ fi
 
 # Installs a launchd daemon and puts the previous one back, so it is opt-in by
 # path rather than by flag: it needs a signed bundle that only a release produces.
-if [[ $EUID -eq 0 && -n ${TONO_TEST_SIGNED_APP:-} ]]; then
-  run "helper install lifecycle" \
-    tooling/scripts/test-helper-install-lifecycle.sh --app "$TONO_TEST_SIGNED_APP"
-else
+# As root it cannot emit the install script itself (xcodebuild cannot read a
+# project under a TCC-protected directory), so the script emitted as yourself,
+# see the usage of test-helper-install-lifecycle.sh, is a required input too.
+if [[ -z ${TONO_TEST_SIGNED_APP:-} || -z ${TONO_TEST_INSTALL_SCRIPT:-} ]]; then
   skip "helper install lifecycle" \
-    "needs root and TONO_TEST_SIGNED_APP set to a Developer ID signed bundle"
+    "needs TONO_TEST_SIGNED_APP (a Developer ID signed bundle) and TONO_TEST_INSTALL_SCRIPT (the install script emitted as yourself), and root"
+elif [[ $EUID -ne 0 ]]; then
+  skip "helper install lifecycle" "needs root; re-run with sudo"
+else
+  run "helper install lifecycle" \
+    tooling/scripts/test-helper-install-lifecycle.sh \
+      --app "$TONO_TEST_SIGNED_APP" --script "$TONO_TEST_INSTALL_SCRIPT"
 fi
 
 # Needs a real runtime with credentials, and refuses while protection is armed.
