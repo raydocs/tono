@@ -64,6 +64,7 @@ const quota = () => ({
   cycleKind: 'calendar_day' as const,
   cycleStart: 1_756_684_800,
   cycleEnd: 1_759_276_800,
+  cycleAnchorDay: 1,
   counts: 'in_out' as const,
 });
 

@@ -88,6 +88,8 @@ export interface NodeQuotaDto {
   cycleKind: QuotaCycleKind;
   cycleStart: number | null;
   cycleEnd: number | null;
+  /** Configured anchor: 1-31 is a calendar day, above 31 an anniversary origin. Null when unset. */
+  cycleAnchorDay: number | null;
   counts: QuotaCounts;
 }
 
@@ -236,7 +238,7 @@ export function assertReturnPath(value: unknown, path = 'returnPath'): ReturnPat
 
 const QUOTA_KEYS = [
   'quota', 'used', 'pct', 'projectedExhaustAt', 'level',
-  'cycleKind', 'cycleStart', 'cycleEnd', 'counts',
+  'cycleKind', 'cycleStart', 'cycleEnd', 'cycleAnchorDay', 'counts',
 ];
 
 export function assertNodeQuota(value: unknown, path = 'quota'): NodeQuotaDto {
@@ -250,6 +252,7 @@ export function assertNodeQuota(value: unknown, path = 'quota'): NodeQuotaDto {
     cycleKind: oneOf<QuotaCycleKind>(row, path, 'cycleKind', QUOTA_CYCLE_KINDS),
     cycleStart: optInt(row, path, 'cycleStart'),
     cycleEnd: optInt(row, path, 'cycleEnd'),
+    cycleAnchorDay: optInt(row, path, 'cycleAnchorDay'),
     counts: oneOf<QuotaCounts>(row, path, 'counts', QUOTA_COUNTS),
   };
 }

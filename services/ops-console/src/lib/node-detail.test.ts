@@ -5,6 +5,7 @@ import { nowSec } from './clock';
 import {
   acceptanceTone,
   actionBlockReason,
+  anchorDayField,
   anchorDayOf,
   blockerLabels,
   barSize,
@@ -239,6 +240,15 @@ describe('what the 这台机器 form sends back', () => {
     const march9 = Math.floor(Date.UTC(2026, 2, 9) / 1_000);
     expect(anchorDayOf(march9)).toBe('9');
     expect(anchorDayOf(null)).toBe('1');
+  });
+
+  it('reads the configured anchor day, not the clamped cycle start', () => {
+    const feb28 = Math.floor(Date.UTC(2026, 1, 28) / 1_000);
+    expect(anchorDayField({ cycleAnchorDay: 31, cycleStart: feb28 })).toBe('31');
+    expect(anchorDayField({ cycleAnchorDay: null, cycleStart: feb28 })).toBe('28');
+    expect(anchorDayField({ cycleAnchorDay: null, cycleStart: null })).toBe('1');
+    // Above 31 is an anniversary origin, not a day of the month.
+    expect(anchorDayField({ cycleAnchorDay: 1_700_000_000, cycleStart: feb28 })).toBe('28');
   });
 });
 

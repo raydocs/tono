@@ -136,7 +136,7 @@ function forward(rows: Partial<ForwardPathDto>[], asOf: number | null) {
 
 const QUOTA: NodeQuotaDto = {
   quota: 1_000 * 1000 ** 3, used: 10, pct: 0.001, projectedExhaustAt: null,
-  level: 'ok', cycleKind: 'calendar_day', cycleStart: NOW - DAY, cycleEnd: NOW + 29 * DAY,
+  level: 'ok', cycleKind: 'calendar_day', cycleStart: NOW - DAY, cycleEnd: NOW + 29 * DAY, cycleAnchorDay: 1,
   counts: 'in_out',
 };
 
