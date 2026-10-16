@@ -1,12 +1,42 @@
 # 下一版智能分流 nightly：Home 链路与 DNS 防护设计提案
 
-日期：2026-10-11。状态：**设计提案，等待 owner / Claude 审阅；未实现、未生成 nightly、未做网络实验，不是生产架构批准。**
+日期：2026-10-11；实施准备续记：2026-10-16。状态：**owner 已授权桌面实施和测试；#1572 已开始续修，本 PR 的默认 DIRECT 模式仍未实现。§0 的三个产品取舍待确认，不将实施授权当作原设计矛盾已解决。**
 
-归属：[SHIP_PLAN](../SHIP_PLAN.md) G1/G2 的下一版设计准备，不进入 0.0.75 G4 冻结候选，不修改 G1–G3 勾选或客户更新源。具体产品版本由 owner 另定。
+归属：[SHIP_PLAN](../SHIP_PLAN.md) G1/G2 的后续桌面版本；保持现有 0.0.76 客户 RC 和正式 feeds 不变，不修改 G1–G3 勾选。具体产品版本由 owner 另定。
 
-源码核对基线：[main a8b0be2d5701dbabdb644699547398bdefb99a26](https://github.com/raydocs/tono/commit/a8b0be2d5701dbabdb644699547398bdefb99a26)。这是本提案的代码参照，**不是 owner 所说的用户稳定包的已确认源码**。稳定包版本、构建号、SHA、签名和安装组件仍待锁定。
+原始源码参照：[main a8b0be2d](https://github.com/raydocs/tono/commit/a8b0be2d5701dbabdb644699547398bdefb99a26)；本次重新核对并并入 [origin/main 345774bc](https://github.com/raydocs/tono/commit/345774bc9b163f5c16af47c37adbc036b0bd11ca)。§3 原始行号属于旧参照，不冒充当前行号。现有 [0.0.76 RC](https://github.com/raydocs/tono/releases/tag/tono-desktop-0.0.76-rc.20261016.1) 是客户测试候选，不是本模式的稳定资格或可直接覆盖任意旧版本的证明。
 
-本 PR 只交付设计、实现分解、验收与审查入口。不编写 harness，不执行故障注入，不改 App/Core/Helper/Service，不触发打包、签名、部署或发布。A13 / #1504 与解除实验 / #1569 保持暂停或原有准入边界；不把其未合代码带入本候选，也不将其文档审查当作本方案证据。
+本次在原 PR 继续设计合同与实施分解，不改变 App/Core/Helper/Service 或生产状态。实施、定点测试、独立审查可继续；合并、打包、签名、部署、发布或客户扩量未获授权。A13 / #1504 仍不恢复；#1569 已合入，不能再称未合依赖，但其存在不等于本模式的恢复/设备验收通过。移动端仅考虑复用合同，本轮不实现 iOS/Android，不改 rw8/Tono-droid。
+
+## 0. 实施入口：先完成有共识的范围，再闭合产品取舍
+
+### 已确认与当前源码事实
+
+- **先 #1572，后 #1571：** [Home 扩域 PR #1572](https://github.com/raydocs/tono/pull/1572) 保持现有默认云出口；166 个 Home 后缀和 21 个明确云视频例外延续已批准政策，不等于智能模式。YouTube 的 Google API 子域等具体例外先于宽 Google Home 和进程 fallback；除这些明确例外，Home 仍不得被签名云/DIRECT 规则覆盖。Twitch 仍属本模式待锁定名单，不能声称 #1572 已覆盖。
+- [#1569 已于 2026-10-12 合入](https://github.com/raydocs/tono/pull/1569)：当前 Mac `ReleaseAuthority.swift`/`ReleaseWorker.swift` 和 Windows `core/release/` 已有 release generation、Connect 准入与 unfinished writer/broker 终结证据。应复用并核对模式摘要/旧 writer 的适用面，不另造 ownership 框架；不把合入或源码审查当作真实系统 effect 已恢复。
+- [#1646 已于 2026-10-13 合入](https://github.com/raydocs/tono/pull/1646)：Windows Service 对新 Start/Stage 拒绝 DIRECT，替换文档需签名策略与成员关系准入。不能再把 [#1280](https://github.com/raydocs/tono/issues/1280) 的旧“只有形状校验”描述套用全部当前入口，也不能把它当成任意默认 DIRECT 或策略新鲜性已经获准。
+- Windows 当前 `sing_box_runtime.rs` 仍要求 `route.final = Tono-Exit`，HTTPS DNS 必须 `detour = Tono-Exit`；编译器 DIRECT 没有独立 resolver。普通 DNS 若依赖断开的云节点，“普通网络独立”目标就不成立。这是需要客户端和 Service 同一有界新合同的实现工作，不只是设备证据缺失，也不能简单撤掉现有拒绝。
+- Home SOCKS 的 `detour = Tono-Exit` 可从配置核实；抓到 SOCKS `ATYP=domain` 只证明委托 Home 解析，不能确认供应商使用哪个 resolver。当前云 DoH 不是本地明文泄露；Home 解析位置/实际出口必须另测。
+
+### 三个决定点：推荐不是已批准政策
+
+结合 [原审查](https://github.com/raydocs/tono/pull/1571#issuecomment-6117460125) 及 [更正](https://github.com/raydocs/tono/pull/1571#issuecomment-6117533750)，以下由 owner 选择，不能靠跳过断言或把 unsupported 改叫 protected 解决：
+
+| 决定 | 推荐方案 | 另一方案及代价 | 确认前边界 |
+|---|---|---|---|
+| Core/Helper/Service 死亡、卡住时普通网络是否也要继续 | 整机保持 fail-closed；普通网络独立只适用于 Core 健康、Home/云单跳故障 | 坚持通用浏览器共享 CDN 下独立阻断 Home 且普通网络恢复：现有 PF/WFP 缺少可用分类身份，模式不准入 | 不用窄 AI hold 或短暂重启代替严格防线；不承诺原 §5 场景3已经可实现 |
+| 未分类缓存 IP、自带 DoH、ECH、未知 UDP 的去向 | 单列未分类并拒绝；只有已确认受支持普通业务可 DIRECT | 云出口 fallback 可保本地 IP 不直出，但不能保证 Home 最终身份；不等于严格 Home | 未分类不默认 DIRECT；哪些普通游戏可证明身份仍需支持矩阵，不将非443 UDP自动视作普通 |
+| Home 数据解析是否接受供应商 resolver | 保留原提案固定、可审阅 DoH 经云→Home的严格要求，先锁端点/备用/缓存及 Service 准入 | 允许供应商解析：须确认 resolver/位置、变更保障与支持边界，且是对原要求的产品变更 | 不仅凭 ATYP=domain 宣布两跳 DNS 验收；不把当前实现升级为任一方案已完成 |
+
+### 最小实施顺序与退出条件
+
+1. #1572 原 Draft：修政策合同红灯、双端四编译器/视频优先级/DIRECT 守卫及独立探针回归；准确 head CI + high 路由审查，仍不合并/出包。
+2. owner 确认上表后，在原 #1571 锁一个不可变模式合同：Home/云视频/已分类普通/未分类四类、普通 DNS 独立路径、支持客户端与 IPv4/UDP 边界。只支持实际评审的 sing-box 产品路径；兼容 YAML 不静默承载新模式。合同可供未来移动端复用，不先新增移动端接口。
+3. 同一合同同时落入客户端编译器、Helper/Service 准入及物理许可；先验证开关关闭的稳定模式未变，再验证普通 DNS/游戏的正例和 Home/视频/未知流的负例。Mac root/Core 任意端口许可、Windows 新 DNS detour 或 final 不得通过删除现有校验实现；各自先给有界机制和回归。
+4. 复用当前 release generation/writer 账本，核对模式切换、迟到 DNS、Core/daemon 故障及再次 Connect。必须单独保留 [#1071/#1504](https://github.com/raydocs/tono/issues/1071) 的 Mac abandoned upgrade AI-hold 缺口和 [#1605](https://github.com/raydocs/tono/pull/1605) 的 Windows DNS 恢复收尾；未合修复、旧 head 的 major 或绿色 CI 均不自动转成当前实现结论。这两项不与分流扩域混为已解决。
+5. G0/带外恢复就绪后，再做双端设备 DNS/QUIC、Home A→B→C 云切换、故障/升级回退的正负对照；没有对应证据不开放默认 DIRECT 测试模式。一周小范围试用及任何新候选/正式推广仍需另行授权。
+
+以下各节保留原要求和验收矩阵。与上表相关的可行性结论仍待决定，不能抽取旧句子作为已批准的新合同。
 
 ## 1. Owner 已表达的目标与本提案的边界
 
@@ -30,9 +60,9 @@ Home 名单的受支持业务 ──→ 云节点 ──→ Home 家宽 ──�
 明确允许的本地资源   ──→ 本地网络接口 ─────────→ 手机 / NAS / 打印机
 ```
 
-规则语义依次为：有效协议与本地入口检查 → Home 域名/可信应用规则 → 已审阅云出口名单 → 普通默认 DIRECT。局域网是另一个有明确边界的许可，不能覆盖 Home 规则或为 Home DNS 开洞。IP 字面量、DNS 回答和既有连接另有准入要求，不能假定它们总携带域名。
+规则语义拟为：有效协议与本地入口检查 → 已批准的具体云视频例外 → Home 域名/可信应用规则 → 其他已审阅云名单 → 已分类普通 DIRECT；未分类单列，去向按 §0 决定。局域网是另一个有明确边界的许可，不能覆盖 Home 规则或为 Home DNS 开洞。IP 字面量、DNS 回答和既有连接另有准入要求，不能假定它们总携带域名。
 
-“国内直连”是体验目标，不是 GEOIP,CN 优先的安全实现。共享 CDN、国内域名的海外依赖、DNS 重绑定和国内 AI API 子域，都必须按实际业务规则处理。现有宽 Home 名单不准被签名的云/DIRECT 名单覆盖；重叠按 Home 处理，不能顺序相关地放开。未知海外网站会尝试直连，可能不可用，不能宣称所有海外网站自动可用。
+“国内直连”是体验目标，不是 GEOIP,CN 优先的安全实现。共享 CDN、国内域名的海外依赖、DNS 重绑定和国内 AI API 子域，都必须按实际业务规则处理。除明确批准的具体云视频例外，宽 Home 名单不准被签名的云/DIRECT 名单覆盖；重叠按 Home 处理。未在 Home/云名单但已分类的普通海外网站可能直连不可用；没有名单命中不能证明业务已分类，也不能宣称所有海外网站自动可用。
 
 名单内共享依赖用于普通工作时也走 Home：例如 Gmail、Stripe、npm、GitHub raw。Home 故障时这些请求同样会失败；“普通网络隔离”只指不属于 Home 的业务，不承诺所有页面/工作流毫无影响。不能为它们阻断整个 Cloudflare、Google、Azure 或 ASN。
 
@@ -84,7 +114,7 @@ Owner 的补充目标：云节点故障、节点供应商流量耗尽或不稳�
 
 路径入口：[Mac runtime](../../apps/macos/Tono/Core/Configuration/ConfigPipeline+SingBoxProduct.swift)、[Mac resolver](../../apps/macos/Tono/Core/SystemProxy.swift)、[Windows runtime](../../apps/windows/crates/tono-core/src/sing_box/runtime.rs)、[Windows DNS proof](../../apps/windows/app/src-tauri/src/tono/connection/probes.rs)、[Windows resolver policy](../../apps/windows/service/src/core/dns/resolver_policy.rs)、[Windows browser preflight](../../apps/windows/app/src-tauri/src/tono/browser_dns.rs)、[Windows route sampler](../../apps/windows/app/src-tauri/src/tono/connection_routes.rs)。
 
-已存在、须核对适用范围而非重复创建的条目：[Windows GPO/NRPT 压过本地 AI hold #1145](https://github.com/raydocs/tono/issues/1145)、[Service 的 DIRECT 准入未绑定签名策略 #1280](https://github.com/raydocs/tono/issues/1280)、findings 中 `WIN-DNS-RACE-MASKS-SYSTEM`、`WIN-NRPT-NO-REFRESH`、`WIN-DNS-ENABLE-NO-FLUSH`、`MAC-CONTINUITY-ONLINK-PF`。这不宣称所有条目都已实机复现，或一律阻断无关文档工作。
+既有条目须按最新实现和评论核对，而非重复创建或沿用旧缺陷描述：[Windows GPO/NRPT #1145](https://github.com/raydocs/tono/issues/1145)、[#1280（当前签名策略绑定已由 #1646 部分处理）](https://github.com/raydocs/tono/issues/1280)、findings 中 `WIN-DNS-RACE-MASKS-SYSTEM`、`WIN-NRPT-NO-REFRESH`、`WIN-DNS-ENABLE-NO-FLUSH`、`MAC-CONTINUITY-ONLINK-PF`。这不宣称所有条目都已实机复现，或一律阻断无关文档工作。
 
 ## 4. Home DNS 合同：入口、解析、缓存与数据流都要约束
 
@@ -164,7 +194,7 @@ Owner 的补充目标：云节点故障、节点供应商流量耗尽或不稳�
 
 ## 8. 实现拆分与准入：先代码合同，再设备，再用户
 
-以下是后续工作顺序，不是本 PR的执行授权。每个实现PR有自己的准确SHA、窄回归和高风险独立审查；不把未验证原型直接打给用户。
+owner 已授权桌面实施和测试；当前执行顺序与产品决定门以 §0 为准。每个实现 PR 有自己的准确 SHA、窄回归和高风险独立审查；不把未验证原型直接打给用户，也不把实施授权扩展为候选/合并/发布授权。
 
 1. **锁基线和合同：** 确认owner稳定包及组件；冻结宽Home清单、云出口清单、支持客户端/OS/Core版本、普通DNS/企业网策略。未审 cloud名单不靠热门网站全表或国家IP猜测；固定nightly包内非秘密名单优先，任何远端变更需独立授权/审阅，不重解释现有v1–v4 DIRECT策略给旧客户端。
 2. **平台可行性/ownership评审：** 提交§5独立Home防线、数据身份与DNS生命周期的具体实现设计，解决明确反例。拒绝原型依赖或平台能力不足时停止该平台，不宣布两端都可做。
@@ -229,4 +259,4 @@ Owner 的补充目标：云节点故障、节点供应商流量耗尽或不稳�
 8. 云第一跳切换是否真正保留assigned Home及完整链DNS？固定/粘性家宽机制能保证什么、何时失效；能否区分同绑定与实际出口变化、节点供应商额度与用户账户限制，并拒绝有副作用请求的自动重放？
 9. 默认DIRECT是否真覆盖普通游戏TCP/UDP而非现有web端口白名单？TUN/Core路径与PF/WFP新许可如何同时保留Home/云隔离，避免不支持的QUIC或无域名连接掉进DIRECT；Home末端DNS额外增强是否与这一改造分开定义和验收？
 
-可继续而不授权实验的下一步：锁定稳定包身份、补具体逐平台机制设计/支持矩阵，交Claude审阅；owner确定测试设备与带外恢复后，另批准实现和实验阶段。**当前阻塞：§5独立严格防线未定、运行时绕行约束未证、有效DNS准入需增强、家宽固定分配的实际配置与身份连续性/切换证据未核验、稳定包/DUT/云名单/回退候选未确认。本PR完整交付的是这些要求与审查计划，不是“nightly已完成”。**
+当前按 §0 推进 #1572 与本 PR 合同准备；三个产品决定确认后继续对应实现，不重新请求已经给出的实施授权。**仍未闭合：Core 故障可用性边界、未分类去向与 Home resolver 合同；普通 DNS 独立路径及特权准入需实现，家宽实际解析/身份连续性、DUT/G0/回退和升级恢复需证据。** 当前 PR 仍不是“智能分流 nightly 已完成”，不能合并、发布或更新客户 feeds。
