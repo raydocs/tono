@@ -45,3 +45,20 @@
 - **可延后硬化但需专门设备测试：** [#602](https://github.com/raydocs/tono/issues/602#issuecomment-6142302530) 只剩 DHCPv4 service-SID permit 项，当前没有真机旁路复现；不能不测就收紧而断租。设备矩阵/ETW捕获/首次DISCOVER/renew/release/重启/换网/非Dhcp进程否定对照在该评论。其余跟踪项已修，不把推测升级为泄漏事实。[#1293](https://github.com/raydocs/tono/issues/1293) 是读码推导的 P3 多用户/更新汇总，需逐项映射已合修复、设计和真机，尤其 #1643 HOLD 不强合。
 - **非桌面客户候选阻塞：** [#1665](https://github.com/raydocs/tono/issues/1665) 的截图 nightly 失败之后同源码两次成功：[38642992873](https://github.com/raydocs/tono/actions/runs/38642992873)、[38810450892](https://github.com/raydocs/tono/actions/runs/38810450892)，不是0.0.76真机证明，也未擅自关闭Issue。[#210](https://github.com/raydocs/tono/issues/210) 是未完成的 iOS Apple SDK/签名/路由/设备资格；关联 #204 当前 CLOSED且未合，并非遗漏的open Draft，不进入Mac/Windows候选。
 - 结论：可以交付 **明确标注的手动客户测试候选**（Mac已实际交付）；尚不能称双端稳定版或老客全量自动升级已完成。Windows剩余最小动作是上述一次有权限的environment审批，之后仍要完成真实签名构建和实物核验，不承诺必然成功。
+
+### 2026-10-16 · Windows 审批阻塞解除（decision023 记账）
+
+- 用户确认已亲自批准；run38966275119、`windows-release`/19923957922、准确源码同上、sequence7601。GitHub `/approvals` 读回 `approved / raydocs / comment=""`，`pending_deployments=[]`；deployment7129531321 的状态为 waiting21:08:03Z → queued21:33:24Z → in_progress21:33:26Z。账户审计本身不区分具体用户会话，用户亲自操作来自用户反馈，不冒称代理代批成功。
+- Orb 只有前述被拒绝的 integration 身份；MacBook 则找到现有有权的 gh keyring 身份，但提交前 guard 已发现审批并发完成，**ZERO审批POST**，未重复403、未改变认证配置或工作树。[MacBook只读核验证据](https://github.com/raydocs/tono/pull/1667#issuecomment-6225137619)。没有 `windows-update-channel` 审批。
+- 构建读回 `build-draft=in_progress`，版本/配置守护、签名key-pair校验、固定输入准备均通过；Windows最终安装包、实物签名验证和下载尚待构建完成，不将审批通过计为安装包通过。已有历史403和pending记录保留。
+
+### 2026-10-16 · 双端测试候选已实际可下载；非稳定验收
+
+- [Windows run38966275119](https://github.com/raydocs/tono/actions/runs/38966275119) **success**，全部10 jobs成功；实际 `build-draft` 31m15s，NSIS实物检查25 entries、Core/Service digest pins、静态CRT和打包守护均通过，随后 attest/publish-draft 成功。版本0.0.76、准确源码同上，构建环境序列7601；没有触发重建或改动发布门。
+- [Windows x64 EXE](https://github.com/raydocs/tono/releases/download/tono-desktop-0.0.76-rc.20261016.1/Tono_0.0.76_x64-setup.exe)：**41152075 bytes**，SHA-256 **`00b3cfbc6398b5548c9eb5cb3fa27417ea915ae8e91f66eaac00043237b84643`**。[Tauri .sig](https://github.com/raydocs/tono/releases/download/tono-desktop-0.0.76-rc.20261016.1/Tono_0.0.76_x64-setup.exe.sig)：436 bytes，SHA-256 `dc6066d0e9ff95daa60b70918c68e71f0ef3a217f5715190ccb676b2c0edf734`。
+- 独立实物验证：以只读取得的仓库配置公钥运行现有 `verifyUpdaterSignature`，完整EXE签名通过，翻转第4096 byte的否定对照被拒绝；版本及原始manifest两个平台的signature/URL一致。EXE与`.sig`各执行 `gh attestation verify`，固定 `windows-release.yml`、`refs/heads/release/windows`、上述源码digest及 `--deny-self-hosted-runners`，均exit0；证明构建来源而非真机行为。
+- **没有 Authenticode 发布者签名**：实际 PE certificate directory offset/size 均0；Tauri验签不代表SmartScreen或企业发布者策略放行。需该类证书的客户机器不适用这个候选，不关闭系统安全策略绕过。
+- 仅向新测试prerelease追加8个全新Windows资产（EXE、`.sig`、[校验和](https://github.com/raydocs/tono/releases/download/tono-desktop-0.0.76-rc.20261016.1/WINDOWS-SHA256SUMS.txt)、候选manifest、NSIS输出、验签与两个provenance结果），未用`--clobber`，Mac既有资产digest读回不变。原始 `v0.0.76` 新构建draft及其latest.json仍保留为draft，不转正、不发布到自动源。新增manifest明确 `candidateOnly=true/releaseAccepted=false/deviceUpgradeTested=false/authenticodeSigned=false`，Windows序列证据为构建环境，不冒称设备runtime观测。
+- 对公开EXE/`.sig`执行无认证头的 `curl -fLsS`：分别 **HTTP200/41152075 bytes**、**HTTP200/436 bytes**；对下载副本 `sha256sum --check --strict` 两者OK，且与hosted预检/GitHub资产digest一致。双端release仍为prerelease、非draft、非latest，tag源码不变；GitHub stable latest仍v0.0.72。
+- 正式源最后读回：`https://api.afk.ccwu.cc/appcast.xml` 首项0.0.67，Windows官方latest.json为0.0.34，客户端DISCOVERY_URL的 `https://releases.afk.ccwu.cc/desktop/v1/latest/manifest.json` HTTP404。没有正式R2镜像、update-channel审批、Worker部署或全量推广。
+- **最终交付边界：** 两端手动客户测试包已交付，无构建/签名审批阻塞；Mac限Apple芯片/macOS26.3+，Windows限x64 Win10 22H2/Win11。升级步骤、Windows0.0.32–34正常卸载/重启限制、P0/P1和已知风险都在release正文；Windows保留旧日志偏好，全新安装默认上传流量日志（设置可调），并非本轮改动。真机旧客升级、PF/WFP、G1/G2/G3、睡眠唤醒仍**未执行**，不关闭上述Issue，不宣布稳定验收。
