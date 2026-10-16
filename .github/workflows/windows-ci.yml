@@ -120,54 +120,25 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      # Cargo cache: restored on every run, saved only from a push to main. PR
-      # and merge-queue runs read main's entry and never write one, so a pull
-      # request cannot seed what main or another PR compiles against, and
-      # per-PR copies do not evict main's. The key is the runner's default
-      # rustc build (`rustc -vV` outside any toolchain file), the lockfiles and
-      # the pinned toolchain file; cargo still rebuilds whatever changed.
-      # restore-keys drops only the lockfile hash, so a lockfile miss reuses
-      # crates built by the same rustc and cargo rebuilds what changed.
-      # cache-hit stays exact-key only: a fallback still saves the new key
-      # from a push to main. The same steps repeat in each Cargo job below.
-      - name: Cargo cache key
-        id: cargo-key
-        shell: bash
-        working-directory: apps/windows
-        run: |
-          rustc_hash=$(rustc -vV | sha256sum | cut -c1-16)
-          echo "key=cargo-v1-windows-core-${{ runner.os }}-$rustc_hash-${{ hashFiles('apps/windows/Cargo.lock', 'apps/windows/app/rust-toolchain.toml') }}" >> "$GITHUB_OUTPUT"
-          echo "restore_prefix=cargo-v1-windows-core-${{ runner.os }}-$rustc_hash-" >> "$GITHUB_OUTPUT"
-
-      - name: Restore Cargo cache
-        id: cargo-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Registry and workspace build artifacts: restored on every run, saved
+      # only from a push to main, so a pull request cannot seed main's cache.
+      # Workspace crates are included because a deps-only cache still recompiles
+      # the Tauri crate on every run. Each Cargo job has its own shared-key.
+      # No second actions/cache on the same directories.
+      - name: Cache Cargo dependencies
+        id: rust-cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: ${{ steps.cargo-key.outputs.key }}
-          restore-keys: ${{ steps.cargo-key.outputs.restore_prefix }}
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            apps/windows/target/
+          shared-key: windows-core
+          cache-workspace-crates: "true"
+          workspaces: |
+            apps/windows
+            apps/windows/vendor/kode-bridge
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Report Cargo cache result
-        shell: bash
-        env:
-          HIT: ${{ steps.cargo-cache.outputs.cache-hit }}
-          KEY: ${{ steps.cargo-key.outputs.key }}
-          MATCHED: ${{ steps.cargo-cache.outputs.cache-matched-key }}
         run: |
-          if [ "$HIT" = true ]; then result=hit
-          elif [ -n "$MATCHED" ]; then result=fallback
-          else result=miss
-          fi
-          echo "::notice title=Cargo cache (windows-core)::$result $KEY"
-          if [ "$result" = fallback ]; then
-            echo "Cargo cache (windows-core): **fallback** \`$MATCHED\` → \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "Cargo cache (windows-core): **$result** \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          echo "Cargo cache (windows-core): cache-hit=${{ steps.rust-cache.outputs.cache-hit }}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify desktop product versions agree
         run: |
@@ -179,11 +150,18 @@ jobs:
         # cannot detect drift in the vendored crate's independent lockfile.
         run: cargo fetch --locked --manifest-path apps/windows/vendor/kode-bridge/Cargo.toml
 
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: nextest
+
       - name: Test tono-core
         # Run from the workspace root: the lockfile lives there, so `--locked`
         # from the crate directory would look for one that does not exist.
+        # nextest is safe here: tono-core has no serial_test. The later Windows
+        # journal and contract steps stay cargo test, and the service job stays
+        # cargo test because serial_test's lock is per process.
         working-directory: apps/windows
-        run: cargo test --locked -p tono-core
+        run: cargo nextest run --locked -p tono-core
 
       - name: Lint tono-core
         # After the tests so a lint never hides a failing test. The tests use
@@ -196,17 +174,6 @@ jobs:
           test -n "$toolchain"
           rustup toolchain install "$toolchain" --profile minimal --component clippy
           cargo "+$toolchain" clippy --locked -p tono-core --all-targets -- -D warnings
-
-      - name: Save Cargo cache (push to main only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          key: ${{ steps.cargo-key.outputs.key }}
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            apps/windows/target/
 
   core-coverage:
     needs: release-duplicate
@@ -267,24 +234,40 @@ jobs:
         with:
           node-version: 24
 
-      - name: Cargo caches restore within the same rustc
+      - name: Cargo caches are rust-cache, saved only on main
         shell: bash
         run: |
           node <<'NODE'
           const fs = require('fs')
           const yaml = fs.readFileSync('../../../.github/workflows/windows-ci.yml', 'utf8')
           // Needles are split so this step's own source is not a match.
-          const prefixHead = 'restore_prefix=cargo-v1-'
+          const pin = 'Swatinem/rust-cache@' + '6323deb102c322ba6fcbdcafc7e3dddab59af2b6'
+          const uses = yaml.split('\n').filter((line) => line.includes(pin))
+          if (uses.length !== 3) throw new Error('expected 3 rust-cache uses, got ' + uses.length)
           for (const id of ['windows-core', 'windows-app-rust', 'windows-service']) {
-            if (!yaml.includes(prefixHead + id + '-')) throw new Error('missing prefix ' + id)
+            const needle = 'shared-key: ' + id
+            const hits = yaml.split('\n').filter((line) => line.includes(needle))
+            if (hits.length !== 1) throw new Error('expected 1 ' + needle + ', got ' + hits.length)
           }
-          const restoreMarker = 'outputs.restore_' + 'prefix'
-          const restores = yaml.split('\n').filter((line) => line.includes(restoreMarker))
-          if (restores.length !== 3) throw new Error('expected 3 restore lines, got ' + restores.length)
-          const fallbackMarker = 'result=' + 'fallback'
-          const fallbacks = yaml.split(fallbackMarker).length - 1
-          if (fallbacks !== 3) throw new Error('expected 3 fallback lines, got ' + fallbacks)
-          console.log('cargo restore-keys: 3 jobs fall back inside the same rustc')
+          const saveMarker = 'save-' + 'if:'
+          const saves = yaml.split('\n').filter((line) => line.includes(saveMarker))
+          if (saves.length !== 3) throw new Error('expected 3 save-if lines, got ' + saves.length)
+          for (const line of saves) {
+            if (!line.includes("github.event_name == 'push'") || !line.includes("github.ref == 'refs/heads/main'")) {
+              throw new Error('save-if must be a push to main')
+            }
+          }
+          if (yaml.includes('actions/' + 'cache/restore@') || yaml.includes('actions/' + 'cache/save@')) {
+            throw new Error('manual cargo cache is still present')
+          }
+          const nextest = 'cargo nextest run --locked -p tono-' + 'core'
+          if (!yaml.includes(nextest)) throw new Error('tono-core suite is not nextest')
+          const serviceTest = 'cargo test --locked --features standalone,client,' + 'test'
+          if (!yaml.includes(serviceTest)) throw new Error('service suite must stay cargo test')
+          const workspace = 'cache-workspace-' + 'crates: "true"'
+          const crates = yaml.split('\n').filter((line) => line.includes(workspace))
+          if (crates.length !== 3) throw new Error('expected 3 workspace crate caches, got ' + crates.length)
+          console.log('rust-cache: 3 jobs cache workspace crates, save on main push only; nextest is tono-core only')
           NODE
 
       - name: Install pnpm as the project pins it
@@ -326,45 +309,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - name: Cargo cache key
-        id: cargo-key
-        shell: bash
-        working-directory: apps/windows
-        run: |
-          rustc_hash=$(rustc -vV | sha256sum | cut -c1-16)
-          echo "key=cargo-v1-windows-app-rust-${{ runner.os }}-$rustc_hash-${{ hashFiles('apps/windows/app/Cargo.lock', 'apps/windows/Cargo.lock', 'apps/windows/app/rust-toolchain.toml') }}" >> "$GITHUB_OUTPUT"
-          echo "restore_prefix=cargo-v1-windows-app-rust-${{ runner.os }}-$rustc_hash-" >> "$GITHUB_OUTPUT"
-
-      - name: Restore Cargo cache
-        id: cargo-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Cache Cargo dependencies
+        id: rust-cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: ${{ steps.cargo-key.outputs.key }}
-          restore-keys: ${{ steps.cargo-key.outputs.restore_prefix }}
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            apps/windows/app/target/
-            apps/windows/target/
+          shared-key: windows-app-rust
+          cache-workspace-crates: "true"
+          workspaces: |
+            apps/windows/app
+            apps/windows
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Report Cargo cache result
         shell: bash
-        env:
-          HIT: ${{ steps.cargo-cache.outputs.cache-hit }}
-          KEY: ${{ steps.cargo-key.outputs.key }}
-          MATCHED: ${{ steps.cargo-cache.outputs.cache-matched-key }}
         run: |
-          if [ "$HIT" = true ]; then result=hit
-          elif [ -n "$MATCHED" ]; then result=fallback
-          else result=miss
-          fi
-          echo "::notice title=Cargo cache (windows-app-rust)::$result $KEY"
-          if [ "$result" = fallback ]; then
-            echo "Cargo cache (windows-app-rust): **fallback** \`$MATCHED\` → \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "Cargo cache (windows-app-rust): **$result** \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          echo "Cargo cache (windows-app-rust): cache-hit=${{ steps.rust-cache.outputs.cache-hit }}" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -456,18 +415,6 @@ jobs:
           cargo test --locked -p tono-core --test update_contract $test -- --exact --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Shared update contract failed' }
 
-      - name: Save Cargo cache (push to main only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          key: ${{ steps.cargo-key.outputs.key }}
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            apps/windows/app/target/
-            apps/windows/target/
-
   service:
     needs: release-duplicate
     if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
@@ -477,44 +424,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - name: Cargo cache key
-        id: cargo-key
-        shell: bash
-        working-directory: apps/windows
-        run: |
-          rustc_hash=$(rustc -vV | sha256sum | cut -c1-16)
-          echo "key=cargo-v1-windows-service-${{ runner.os }}-$rustc_hash-${{ hashFiles('apps/windows/service/Cargo.lock') }}" >> "$GITHUB_OUTPUT"
-          echo "restore_prefix=cargo-v1-windows-service-${{ runner.os }}-$rustc_hash-" >> "$GITHUB_OUTPUT"
-
-      - name: Restore Cargo cache
-        id: cargo-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Cache Cargo dependencies
+        id: rust-cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: ${{ steps.cargo-key.outputs.key }}
-          restore-keys: ${{ steps.cargo-key.outputs.restore_prefix }}
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            apps/windows/service/target/
+          shared-key: windows-service
+          cache-workspace-crates: "true"
+          workspaces: apps/windows/service
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Report Cargo cache result
         shell: bash
-        env:
-          HIT: ${{ steps.cargo-cache.outputs.cache-hit }}
-          KEY: ${{ steps.cargo-key.outputs.key }}
-          MATCHED: ${{ steps.cargo-cache.outputs.cache-matched-key }}
         run: |
-          if [ "$HIT" = true ]; then result=hit
-          elif [ -n "$MATCHED" ]; then result=fallback
-          else result=miss
-          fi
-          echo "::notice title=Cargo cache (windows-service)::$result $KEY"
-          if [ "$result" = fallback ]; then
-            echo "Cargo cache (windows-service): **fallback** \`$MATCHED\` → \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "Cargo cache (windows-service): **$result** \`$KEY\`" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          echo "Cargo cache (windows-service): cache-hit=${{ steps.rust-cache.outputs.cache-hit }}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Validate fault targeting without stopping real processes
         shell: pwsh
@@ -598,14 +520,3 @@ jobs:
             throw 'Expected real WFP test is missing; zero executed tests is not qualification'
           }
           cargo test --locked --features standalone,client --lib $test -- --exact --nocapture
-
-      - name: Save Cargo cache (push to main only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          key: ${{ steps.cargo-key.outputs.key }}
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            apps/windows/service/target/
