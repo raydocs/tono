@@ -60,9 +60,9 @@ permissions:
 
 # Advance the reviewed candidate contract together; never admit arbitrary PR refs.
 env:
-  CANDIDATE_REF: refs/heads/stability/desktop-0.0.75-20261005
-  CANDIDATE_VERSION: '0.0.75'
-  CANDIDATE_BUILD: '75'
+  CANDIDATE_REF: refs/heads/release/macos
+  CANDIDATE_VERSION: '0.0.76'
+  CANDIDATE_BUILD: '77'
 
 concurrency:
   group: macos-release-${{ inputs.version }}
@@ -145,7 +145,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: sing-box-darwin-arm64
           path: apps/macos/Tono/Resources
@@ -391,7 +391,7 @@ jobs:
           PYTHON
 
       - name: Upload the notarized archive for the appcast job
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: ${{ steps.release-version.outputs.artifact_name }}
           path: |
@@ -402,7 +402,7 @@ jobs:
 
       - name: Preserve notarization diagnostics even on rejection
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: macos-notary-diagnostics-${{ github.sha }}
           path: |
@@ -432,7 +432,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: ${{ needs.build.outputs.artifact_name }}
           path: ${{ runner.temp }}/attest
@@ -458,7 +458,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
 
@@ -485,28 +485,28 @@ jobs:
           fi
 
       - name: Download the notarized archive built from this commit
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: ${{ needs.build.outputs.artifact_name }}
           path: ${{ runner.temp }}/release
 
-      - name: Locate the pinned Sparkle 2.9.6 sign_update tool
+      - name: Locate the pinned Sparkle 2.10.0 sign_update tool
         run: |
           set -euo pipefail
           # Only the offline signer is used. Tono.app no longer embeds Sparkle;
           # resolving the App's package graph therefore cannot obtain this tool.
-          # URL/checksum are Sparkle 2.9.6 Package.swift's binaryTarget pin.
+          # URL/checksum are Sparkle 2.10.0 Package.swift's binaryTarget pin.
           archive="$RUNNER_TEMP/Sparkle-for-Swift-Package-Manager.zip"
           curl --fail --location --proto '=https' --proto-redir '=https' \
-            'https://github.com/sparkle-project/Sparkle/releases/download/2.9.6/Sparkle-for-Swift-Package-Manager.zip' \
+            'https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-for-Swift-Package-Manager.zip' \
             --output "$archive"
           printf '%s  %s\n' \
-            '8d5fb41d960b43f4a68aa14126bf62b098544ec8d191cdcc73eb14e63a8e7606' "$archive" \
+            '17e28312b8e18ab7cdbbe09a6fb28cc55a5479ec6c371dbc07cdecd2a14fd959' "$archive" \
             | shasum -a 256 -c -
-          mkdir "$RUNNER_TEMP/sparkle-signing-2.9.6"
-          ditto -x -k "$archive" "$RUNNER_TEMP/sparkle-signing-2.9.6"
+          mkdir "$RUNNER_TEMP/sparkle-signing-2.10.0"
+          ditto -x -k "$archive" "$RUNNER_TEMP/sparkle-signing-2.10.0"
           sign_update=$(python3 tooling/scripts/find-sparkle-sign-update.py \
-            "$RUNNER_TEMP/sparkle-signing-2.9.6")
+            "$RUNNER_TEMP/sparkle-signing-2.10.0")
           codesign --verify --strict "$sign_update"
           echo "SIGN_UPDATE=$sign_update" >> "$GITHUB_ENV"
 
@@ -578,7 +578,7 @@ jobs:
           PYTHON
 
       - name: Export public signature and provenance for physical acceptance
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: macos-release-proof-${{ github.sha }}
           path: |

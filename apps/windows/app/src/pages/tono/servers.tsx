@@ -743,7 +743,7 @@ const ServersPage = () => {
                 background: hex(TONO_COLORS.latencyGood, dark ? 0.18 : 0.14),
               }}
             >
-              <TonoIcon name="shieldCheck" size={16} />
+              <TonoIcon name="sunHorizon" size={16} />
             </span>
             <div style={{ minWidth: 0 }}>
               <div

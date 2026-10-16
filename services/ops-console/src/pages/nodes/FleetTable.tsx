@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import type { NodeLifecycle, NodeSummaryDto, QuotaLevel } from '@contract';
 import { Chip } from '@/components/ops/Chip';
+import { Clauses } from '@/components/ops/DotJoined';
 import { Meter } from '@/components/ops/Meter';
 import { Panel, type PanelState } from '@/components/ops/Panel';
 import { Segmented } from '@/components/ops/Segmented';
@@ -13,6 +14,7 @@ import { formatBytesMeasured, formatPercent, formatRate, formatTally } from '@/l
 import type { NodeLoadRow } from '@/lib/fleet-load';
 import { openNodePage } from '@/lib/hash-route';
 import { formatDeadline } from '@/lib/node-detail';
+import { splitNodeName } from '@/lib/node-name';
 import { nowSec } from '@/lib/clock';
 import {
   countLine,
@@ -93,7 +95,7 @@ export function FleetTable({
   return (
     <Panel
       title={words.title}
-      description={words.lead}
+      description={<Clauses text={words.lead} />}
       source={words.source}
       asOfSec={asOfSec}
       state={bodyState}
@@ -101,7 +103,7 @@ export function FleetTable({
       onRetry={onRetry}
       bodyHeight={240}
       actions={(
-        <label className="nodes-search">
+        <label className="ops-search">
           <Search size={13} aria-hidden />
           <input
             type="search"
@@ -198,13 +200,27 @@ function Row({
   const outage = (quality?.outageMin ?? 0) > 0;
   const renew = view.renew.value;
   const renewSoon = renew !== null && renew - nowSec() < RENEW_SOON_SEC;
+  const label = node.displayName ?? node.name;
+  // On a phone the city is half the width of the cell and the same for six
+  // machines; the site is what tells them apart, so it gets the room.
+  const split = phone ? splitNodeName(label) : null;
 
   return (
+    // The row click is a mouse convenience; the name link is the keyboard path.
     <tr className={cn('quality-row', view.retired && 'nodes-row-retired')} onClick={() => openNodePage(node.name)}>
       {phone ? status : null}
       <td className="nodes-name">
         <a href={`#/nodes/${encodeURIComponent(node.name)}`} onClick={(event) => event.stopPropagation()}>
-          {node.displayName ?? node.name}
+          {split ? (
+            <>
+              {split.prefix === null ? null : (
+                <span className="text-micro line-clamp-2 whitespace-normal font-normal text-[var(--muted-foreground)] [overflow-wrap:anywhere]">
+                  {split.prefix}
+                </span>
+              )}
+              <span className="line-clamp-2 whitespace-normal [overflow-wrap:anywhere]">{split.main}</span>
+            </>
+          ) : label}
         </a>
         <span className="nodes-sub">
           {[view.region, node.provider].filter(Boolean).join(' · ')}

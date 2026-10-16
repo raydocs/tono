@@ -71,6 +71,12 @@ on:
       - tooling/scripts/windows-package-components.mjs
       - tooling/scripts/prune-merged-branches.mjs
       - tooling/scripts/tests/*.test.mjs
+      # The suite-registration guard reads these; a new or renamed suite must run it.
+      - tooling/scripts/test-*.sh
+      - tooling/scripts/tests/test_*.py
+      - tooling/scripts/tests/*.test.rb
+      - tooling/scripts/check-node-in-fleet.py
+      - tooling/scripts/analyze-mac-sea-polish.py
       - tooling/scripts/publish-managed-catalog.rb
       - tooling/scripts/write-dedirock-hy2-catalog-sources.rb
       - tooling/scripts/tests/publish-managed-catalog.test.rb
@@ -93,7 +99,61 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'merge_group' && github.event_name != 'workflow_call' }}
 
 jobs:
+  release-duplicate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Release-branch duplicate wiring
+        run: |
+          node <<'NODE'
+          const fs = require('fs')
+          const yaml = fs.readFileSync('.github/workflows/services-ci.yml', 'utf8')
+          const jobs = ['control-plane', 'service-agents', 'ops-contract', 'migrations', 'ops-console-e2e']
+          const need = 'needs: release-' + 'duplicate'
+          const needs = yaml.split('\n').filter((line) => line.trim() === need)
+          if (needs.length !== jobs.length) throw new Error('expected ' + jobs.length + ' needs, got ' + needs.length)
+          const gate = "needs.release-" + "duplicate.result == 'success' && needs.release-" + "duplicate.outputs.skip != 'true'"
+          const gates = yaml.split('\n').filter((line) => line.includes(gate))
+          if (gates.length !== jobs.length) throw new Error('expected ' + jobs.length + ' gates, got ' + gates.length)
+          const call = 'macos-ci-skip-duplicate.mjs --' + 'event'
+          if (!yaml.includes(call)) throw new Error('missing release skip script')
+          if (yaml.includes('macos-ci-skip-duplicate.mjs --' + 'decide')) throw new Error('this workflow must not use the macOS main-push decider')
+          console.log('release duplicate skip gates ' + jobs.length + ' jobs')
+          NODE
+
+      - name: Skip a release-branch push whose commit is already on main
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          status=unknown
+          ahead=1
+          case "$EVENT_NAME:$REF_NAME" in
+            push:refs/heads/release/macos|push:refs/heads/release/windows)
+              if meta=$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${GITHUB_SHA}" --jq '{status:.status,ahead_by:.ahead_by}'); then
+                parsed=$(printf '%s' "$meta" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const j=JSON.parse(s);if(typeof j.status!=="string"||typeof j.ahead_by!=="number")process.exit(1);process.stdout.write(j.status+" "+j.ahead_by)})')
+                status=${parsed%% *}
+                ahead=${parsed##* }
+              else
+                echo "compare API failed; running the suite" >&2
+              fi
+              ;;
+          esac
+          skip=$(node tooling/scripts/macos-ci-skip-duplicate.mjs --event "$EVENT_NAME" --ref "$REF_NAME" --status "$status" --ahead-by "$ahead")
+          case "$skip" in true|false) ;; *) echo "bad skip token" >&2; exit 1 ;; esac
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          printf 'release duplicate skip=%s event=%s ref=%s sha=%s status=%s ahead=%s\n' "$skip" "$EVENT_NAME" "$REF_NAME" "$GITHUB_SHA" "$status" "$ahead" | tee -a "$GITHUB_STEP_SUMMARY"
+
   control-plane:
+    needs: release-duplicate
+    if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -104,7 +164,7 @@ jobs:
           # the download-page check reads constants out of each released commit
           fetch-depth: 0
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
 
@@ -160,6 +220,8 @@ jobs:
         run: ../../tooling/scripts/test-policy-signing-contract.sh
 
   service-agents:
+    needs: release-duplicate
+    if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -184,6 +246,18 @@ jobs:
 
       - name: Home usage reporter
         run: python3 services/home-agent/test_report_example.py
+
+      - name: Fleet audit
+        # A substring match audits a different node than the one asked about.
+        run: python3 tooling/scripts/tests/test_check_node_in_fleet.py
+
+      - name: Mac sea polish metrics
+        # The analyzer imports Pillow at module level and the runner image does
+        # not ship it.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends python3-pil
+          python3 tooling/scripts/tests/test_mac_sea_polish_metrics.py
 
       - name: Node restart verification fixtures
         run: python3 tooling/scripts/remote/test_node_verification.py
@@ -218,6 +292,8 @@ jobs:
         run: python3 tooling/ops/node-install/test_check_node_install.py
 
   ops-contract:
+    needs: release-duplicate
+    if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     runs-on: ubuntu-24.04
     # Job-level permissions replace the workflow-level block entirely, so
     # contents: read has to be restated or checkout loses the tree.
@@ -227,7 +303,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
 
@@ -265,12 +341,24 @@ jobs:
         # without editing this step.
         run: node --test "tooling/scripts/tests/*.test.mjs"
 
+      - name: Test suite registration
+        # Every test-*.sh, test_*.py, *.test.rb and *.test.mjs under
+        # tooling/scripts must be run by a workflow (a wildcard invocation counts)
+        # or by test-macos-all.sh, or a suite can sit unrun and stay green.
+        run: tooling/scripts/test-suite-reachability.sh
+
       - name: Catalog publisher tests
         run: ruby tooling/scripts/tests/publish-managed-catalog.test.rb
 
       - name: Type-check the ops console
         working-directory: services/ops-console
         run: npm run typecheck
+
+      - name: Console unit tests
+        # 30 vitest files (api paging, customer board, facts, copy) existed and
+        # nothing in CI ran them; Playwright covers page flows, not these.
+        working-directory: services/ops-console
+        run: npm test
 
       - name: Build the console
         # npm run build ends in check-budgets.mjs, so a bundle that blows the
@@ -317,6 +405,8 @@ jobs:
             }
 
   migrations:
+    needs: release-duplicate
+    if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -324,7 +414,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
 
@@ -401,6 +491,8 @@ jobs:
           NODE
 
   ops-console-e2e:
+    needs: release-duplicate
+    if: needs.release-duplicate.result == 'success' && needs.release-duplicate.outputs.skip != 'true'
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -412,7 +504,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
 

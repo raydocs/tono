@@ -20,7 +20,11 @@ import { cn } from '@/lib/utils';
  * small vocabulary of a label, a box and a line of help.
  */
 
-const CONTROL = 'h-8 w-full min-w-0 rounded-[8px] border border-[var(--hairline)] bg-[var(--background)] px-2.5 text-body outline-none focus:border-[var(--accent)] placeholder:text-[var(--muted-foreground)]';
+const CONTROL = 'h-8 w-full min-w-0 rounded-[8px] border border-[var(--hairline)] bg-[var(--background)] px-2.5 text-body focus:border-[var(--accent)] placeholder:text-[var(--muted-foreground)]';
+
+/* Shape, border, chevron and focus ring come from `.ops-select`, which is
+   unlayered and so beats the utilities a text input needs. */
+const SELECT = 'ops-select w-full min-w-0 text-body';
 
 /** A label, a control, and — when the field has a trap in it — one line of help. */
 export function Field({
@@ -94,7 +98,7 @@ export function SelectField<T extends string>({
   return (
     <Field label={label} hint={hint}>
       <select
-        className={cn(CONTROL, disabled && 'text-[var(--muted-foreground)]')}
+        className={cn(SELECT, disabled && 'text-[var(--muted-foreground)]')}
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value as T)}
@@ -126,7 +130,7 @@ export function BoolField({
   return (
     <Field label={label} hint={hint}>
       <select
-        className={CONTROL}
+        className={SELECT}
         value={value ? 'on' : 'off'}
         onChange={(event) => onChange(event.target.value === 'on')}
       >
@@ -150,7 +154,7 @@ export function Toolbar({ children, aside }: { children?: ReactNode; aside?: Rea
       <div className="flex min-w-0 flex-wrap items-center gap-2 text-micro text-[var(--muted-foreground)]">
         {children}
       </div>
-      <div className="ml-auto flex shrink-0 items-center gap-2">{aside}</div>
+      <div className="toolbar-aside ml-auto flex shrink-0 items-center gap-2">{aside}</div>
     </div>
   );
 }
@@ -179,14 +183,14 @@ export function FormFooter({
 }) {
   return (
     <div className="flex flex-col gap-2 border-t border-[var(--hairline)] pt-4">
-      {error ? <p className="panel-error rounded-[8px] px-3 py-2 text-body">{error}</p> : null}
+      {error ? <p className="panel-error rounded-[8px] px-3 py-2 text-body" role="alert">{error}</p> : null}
       <ActionRow>
         <Action primary pending={pending} onClick={onSave}>
           {pending ? copy.settings.saving : copy.settings.save}
         </Action>
         <Action onClick={onCancel}>{copy.settings.cancel}</Action>
         {onRemove ? (
-          <Action className="ml-auto" pending={pending} onClick={onRemove}>
+          <Action danger className="ml-auto" pending={pending} onClick={onRemove}>
             {copy.settings.remove}
           </Action>
         ) : null}
@@ -207,6 +211,7 @@ export function ConfirmDialog({
   title,
   body,
   confirm,
+  danger,
   pending,
   onConfirm,
   onClose,
@@ -215,6 +220,7 @@ export function ConfirmDialog({
   title: string;
   body: string;
   confirm: string;
+  danger?: boolean;
   pending: boolean;
   onConfirm: () => void;
   onClose: () => void;
@@ -232,8 +238,8 @@ export function ConfirmDialog({
           </DialogDescription>
         </DialogHeader>
         <ActionRow>
-          <Action primary pending={pending} onClick={onConfirm}>{confirm}</Action>
           <Action onClick={onClose}>{copy.settings.cancel}</Action>
+          <Action primary danger={danger} pending={pending} onClick={onConfirm}>{confirm}</Action>
         </ActionRow>
       </DialogContent>
     </Dialog>

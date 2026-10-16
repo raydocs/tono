@@ -957,6 +957,9 @@ fn resumable_startup_runtime() -> (ServiceStatusSnapshot, DnsProtectionStatus) {
             }),
             network_events: Default::default(),
             update_attempt_pending: None,
+            release_generation: None,
+            kill_switch_held_by_another_user: false,
+            ai_hold_retained: None,
         },
         DnsProtectionStatus {
             enabled: true,
@@ -966,6 +969,31 @@ fn resumable_startup_runtime() -> (ServiceStatusSnapshot, DnsProtectionStatus) {
             resolver_policy_warning: None,
         },
     )
+}
+
+/// #1290 (Codex re-review): a Connect that fails while another user's machine-wide barrier is up
+/// must read "no barrier of mine" like every other consumer. Reading the raw machine state made
+/// `fail_connect` plan a release of that barrier, the Service refused it, and the refusal
+/// re-armed this App's latch (Protected Offline).
+#[test]
+fn a_failed_connect_does_not_treat_another_users_barrier_as_its_own() {
+    let (mut snapshot, _dns) = resumable_startup_runtime();
+    snapshot.is_active = false;
+    snapshot.kill_switch_held_by_another_user = true;
+    let raw = snapshot.kill_switch.clone().unwrap();
+    assert!(raw.wanted && raw.verified, "precondition: the raw machine state is armed");
+
+    let observed = crate::core::service::caller_kill_switch_view(snapshot).unwrap();
+
+    assert!(!observed.wanted && !observed.verified && !observed.live);
+    let plan = plan_failure(observed.wanted, observed.verified, false, false);
+    assert!(!plan.mark_armed, "a foreign barrier must not become this App's armed latch");
+    assert!(!plan.selective_ai_hold && !plan.restrict_bootstrap);
+
+    // The caller's own barrier is untouched by the fold.
+    let (own, _dns) = resumable_startup_runtime();
+    let own_view = crate::core::service::caller_kill_switch_view(own.clone()).unwrap();
+    assert_eq!(Some(own_view), own.kill_switch);
 }
 
 #[test]

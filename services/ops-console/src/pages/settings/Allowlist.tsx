@@ -99,6 +99,7 @@ export function Allowlist() {
           state={state}
           emptyMessage={words.empty}
           errorMessage={entries.status === 'error' ? entries.message : undefined}
+          onRetry={entries.reload}
           className="settings-allowlist-table"
         />
       </div>
@@ -108,6 +109,7 @@ export function Allowlist() {
         title={words.deleteTitle}
         body={removing ? words.deleteBody(privacy.email(removing.email)) : ''}
         confirm={copy.settings.remove}
+        danger
         pending={write.pending}
         onClose={() => setRemoving(null)}
         onConfirm={() => {
@@ -146,7 +148,7 @@ function columns(
       width: '84px',
       align: 'right',
       cell: (row) => (
-        <Action onClick={() => remove(row)}>{copy.settings.remove}</Action>
+        <Action danger onClick={() => remove(row)}>{copy.settings.remove}</Action>
       ),
     },
   ];

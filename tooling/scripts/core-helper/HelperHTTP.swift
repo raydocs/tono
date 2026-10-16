@@ -8,6 +8,9 @@ struct HTTPRequest {
     let method: String
     let path: String
     let body: Data
+    /// `X-Tono-Generation`: the session generation the app was admitted
+    /// with. Absent from apps that predate preemptive release.
+    var generation: UInt64? = nil
 }
 
 func readRequest(_ fd: Int32) throws -> HTTPRequest {
@@ -30,6 +33,7 @@ func readRequest(_ fd: Int32) throws -> HTTPRequest {
             }
             var contentLength = 0
             var sawContentLength = false
+            var generation: UInt64?
             for line in lines.dropFirst() {
                 let pair = line.split(separator: ":", maxSplits: 1)
                 guard pair.count == 2 else { throw HelperFailure.invalid("Invalid request header.") }
@@ -46,6 +50,12 @@ func readRequest(_ fd: Int32) throws -> HTTPRequest {
                     sawContentLength = true
                     contentLength = parsed
                 }
+                if name == "x-tono-generation" {
+                    guard generation == nil, let parsed = UInt64(value) else {
+                        throw HelperFailure.invalid("Invalid session generation.")
+                    }
+                    generation = parsed
+                }
             }
             expectedLength = split.upperBound + contentLength
             guard let total = expectedLength else {
@@ -60,7 +70,7 @@ func readRequest(_ fd: Int32) throws -> HTTPRequest {
                     throw HelperFailure.invalid("Invalid request line.")
                 }
                 let body = Data(data[split.upperBound..<total])
-                return HTTPRequest(method: String(fields[0]), path: String(fields[1]), body: body)
+                return HTTPRequest(method: String(fields[0]), path: String(fields[1]), body: body, generation: generation)
             }
         }
 

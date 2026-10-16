@@ -518,6 +518,11 @@
         "devices": 2
       }
     ],
+    "people": {
+      "current": 202,
+      "behind": 124,
+      "unreported": 24
+    },
     "updatedAt": 1725000000
   }
 }

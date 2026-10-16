@@ -16,6 +16,7 @@ import rawIncidents from '../../fixtures/incidents.json';
 import rawNodes from '../../fixtures/nodes.json';
 import { explainCode } from './codes';
 import {
+  bucketCounts,
   CUSTOMER_FILTERS,
   customerCounts,
   lastFailedAttempt,
@@ -27,6 +28,7 @@ import {
   releasedPlatforms,
   replyDraft,
   selectByPlatform,
+  selectByBucket,
   selectCustomers,
   spareNode,
 } from './customers';
@@ -112,6 +114,30 @@ describe('customer selectors', () => {
     }));
     expect(planWired(blank)).toBe(false);
     expect(planWired([])).toBe(false);
+  });
+
+  /**
+   * A cell of the matrix is "this platform's oldest version"; the all-platform
+   * minimum would drop a current Windows customer with one old Mac out of the
+   * Windows 最新 cell they were clicked from.
+   */
+  it('judges the band on the selected platform, not on the oldest device anywhere', () => {
+    const row: CustomerSummaryDto = {
+      ...rows[0],
+      minAppVersion: '0.0.30',
+      versionByPlatform: [
+        { platform: 'windows', version: '0.0.34' },
+        { platform: 'macos', version: '0.0.30' },
+      ],
+    };
+    const published = ['0.0.34', '0.0.33'];
+    expect(selectByBucket([row], published, 'current', 'windows')).toEqual([row]);
+    expect(selectByBucket([row], published, 'behind_more', 'windows')).toEqual([]);
+    expect(bucketCounts([row], published, 'windows').current).toBe(1);
+    expect(selectByBucket([row], published, 'behind_more', null)).toEqual([row]);
+    expect(selectByBucket([row], published, 'current', null)).toEqual([]);
+    // A platform the customer has nothing on is unreported there, not behind.
+    expect(selectByBucket([row], published, 'unreported', 'linux')).toEqual([row]);
   });
 
   it('offers all five platform chips, whether or not anything ships for them', () => {
@@ -208,12 +234,25 @@ describe('the reply draft', () => {
     expect(text).toContain(copy.replyQuestion.CATALOG_STALE);
   });
 
+  it('words the stale catalog sentence in ten characters, without the filler 手里', () => {
+    const sentence = copy.codeWord.CATALOG_STALE;
+    expect([...sentence]).toHaveLength(10);
+    expect(sentence).not.toContain('\u624b\u91cc');
+    expect(explainCode('CATALOG_STALE')).toBe(sentence);
+  });
+
   it('explains the Windows handshake taxonomy instead of 客户端没说原因', () => {
     expect(explainCode('CORE_EXIT_UNREACHABLE')).toBe(copy.codeWord.CORE_EXIT_UNREACHABLE);
     expect(explainCode('TONO_NODE_OR_CORE_UNREACHABLE')).toBe(
       copy.codeWord.TONO_NODE_OR_CORE_UNREACHABLE,
     );
     expect(explainCode('CORE_EXIT_UNREACHABLE')).not.toBe(copy.codeWord.UNKNOWN);
+  });
+
+  it('says the Windows service-down code in a sentence, not the raw code', () => {
+    expect(explainCode('TONO_SERVICE_NOT_RUNNING')).toBe(copy.codeWord.TONO_SERVICE_NOT_RUNNING);
+    expect(explainCode('TONO_SERVICE_NOT_RUNNING')).not.toBe('TONO_SERVICE_NOT_RUNNING');
+    expect(explainCode('TONO_SERVICE_NOT_RUNNING')).not.toBe(copy.codeWord.UNKNOWN);
   });
 });
 

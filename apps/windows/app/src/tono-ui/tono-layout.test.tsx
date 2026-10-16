@@ -8,6 +8,7 @@ import {
   applyWindowFrame,
   connectFromShortcut,
   handleTonoWindowShortcut,
+  seaBackdropDimmed,
 } from './tono-layout'
 
 const fire = (
@@ -99,4 +100,13 @@ describe('applyWindowFrame', () => {
     expect(await applyWindowFrame(target, false)).toBe(true)
     expect(target.setDecorations).toHaveBeenCalledWith(true)
   })
+})
+
+it('dims the shared scene only behind inner pages that draw no scene of their own', () => {
+  expect(seaBackdropDimmed('/servers', true)).toBe(true)
+  expect(seaBackdropDimmed('/settings', true)).toBe(true)
+  expect(seaBackdropDimmed('/', true)).toBe(false)
+  expect(seaBackdropDimmed('/login', true)).toBe(false)
+  expect(seaBackdropDimmed('/tray', true)).toBe(false)
+  expect(seaBackdropDimmed('/servers', false)).toBe(false)
 })

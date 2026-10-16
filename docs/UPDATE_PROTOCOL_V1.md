@@ -6,8 +6,8 @@ replace legacy clients. This document specifies the common release manifest,
 receipt shape and pure progress guard in Swift and Rust, with shared conformance
 inputs. Native callers, signature verification, private stores and replacement
 executors belong to [UPDATE_INTEGRATION_V1.md](UPDATE_INTEGRATION_V1.md). Shared
-conformance is not native installation or release acceptance. Product version
-remains 0.0.75.
+conformance is not native installation or release acceptance. The current
+customer-test source version is 0.0.76, not a completed G3 qualification.
 
 The protocol version is independent of the macOS Helper and Windows Service IPC
 capability versions. Those local versions change with their native adapters;

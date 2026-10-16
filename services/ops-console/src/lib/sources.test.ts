@@ -92,6 +92,6 @@ describe('the backfill line', () => {
   /** 5440 windows left, 200 a run, five minutes a run: 28 runs, 140 minutes. */
   it('counts whole runs, because a partial run finishes nothing', () => {
     expect(backfillLine({ windowsTotal: 8640, windowsFlattened: 8640, windowsProjected: 3200 }))
-      .toBe(copy.backfilling('3200', '8640', '140'));
+      .toEqual({ progress: copy.backfillProgress('3200', '8640'), eta: copy.backfillEta('140') });
   });
 });

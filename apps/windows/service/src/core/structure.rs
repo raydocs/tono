@@ -143,6 +143,14 @@ impl ProtocolInfo {
             && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT
     }
 
+    /// Whether `ReplaceSingBoxRuntime` verifies the signed traffic policy a DIRECT document comes
+    /// from (#1280). An older Service admits the DIRECT shapes alone, so a new App skips the
+    /// optional overlay against it and keeps the full tunnel.
+    pub const fn supports_sing_box_direct_policy(&self) -> bool {
+        self.protocol.epoch == ProtocolVersion::current().epoch
+            && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT_POLICY
+    }
+
     /// Whether, armed without a tunnel, rule C permits the [`crate::API_RELAYS`] for the Tono
     /// app (decision 090), so the App may reach the control plane through them alone (091).
     pub const fn supports_api_relay_permit(&self) -> bool {
@@ -220,6 +228,11 @@ pub struct OwnerCredentials {
 pub struct ReleaseKillSwitchPayload {
     #[serde(default)]
     pub apply_narrow_layer: bool,
+    /// The release generation of the session this teardown is for (revision 21). The Service
+    /// refuses it once a restore or a newer Connect has moved the generation on, so an old
+    /// teardown cannot reach a newer session. Also the body of `POST /dns/restore`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_generation: Option<u64>,
 }
 
 /// `null` (older clients) or the payload object.
@@ -235,6 +248,13 @@ impl ReleaseKillSwitchBody {
         match self {
             Self::Options(options) => options.apply_narrow_layer,
             Self::Absent(()) => false,
+        }
+    }
+
+    pub fn release_generation(&self) -> Option<u64> {
+        match self {
+            Self::Options(options) => options.release_generation,
+            Self::Absent(()) => None,
         }
     }
 }
@@ -390,6 +410,33 @@ pub struct ReplaceSingBoxRuntimeRequest {
     /// rollback sets this false so failure cannot write DIRECT rules back.
     #[serde(default = "default_restore_previous")]
     pub restore_previous: bool,
+    /// Revision 22. The signed traffic policy the DIRECT rules in `runtime_json` come from. The
+    /// Service verifies it with the compiled-in policy key and admits only the DIRECT entries it
+    /// lists. A document with no DIRECT rule (the full-tunnel rollback) needs none; an older App
+    /// sends none, so a document with DIRECT rules is refused and the overlay is skipped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub traffic_policy: Option<SignedTrafficPolicy>,
+}
+
+/// Revision 22. The traffic policy exactly as the control plane served it: the signed JSON
+/// bytes, their detached Ed25519 signature (standard base64) over
+/// `tono-traffic-policy-v1\n` + `json`, and the envelope's revision, which must equal the
+/// revision embedded in the signed JSON when there is one.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignedTrafficPolicy {
+    pub revision: i64,
+    pub json: String,
+    pub signature: String,
+}
+
+impl std::fmt::Debug for SignedTrafficPolicy {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SignedTrafficPolicy")
+            .field("revision", &self.revision)
+            .field("json_len", &self.json.len())
+            .finish_non_exhaustive()
+    }
 }
 
 /// Revision 19. Permits for the rules the App already read back. No reload id:
@@ -686,6 +733,10 @@ pub struct StartClashRequest {
     /// contract is byte-identical to what existing clients send; absent from older clients.
     #[serde(default)]
     pub windows_kill_switch: Option<KillSwitchConfig>,
+    /// The release generation this App last saw (revision 21). A start prepared before a
+    /// Restore internet carries the old one and is refused as stale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_generation: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -697,6 +748,9 @@ pub struct OwnerSessionHandle {
 pub struct StartClashResult {
     pub session: OwnerSessionHandle,
     pub proxy_outcome: ProxyApplyOutcome,
+    /// The release generation this session was admitted under (revision 21).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_generation: Option<u64>,
 }
 
 /// What staging a bundle into the running core's generation achieved.
@@ -775,6 +829,18 @@ pub enum ServiceErrorCode {
     /// are taken on main by `StaleReleaseEpoch`, `ProtectionHeldByAnotherUser` and
     /// `RemoteSessionConnectRefused`.)
     AppIdentityUnproven = 1016,
+    /// `StartClash` refused: a Restore internet run holds the release lock right now. Retry
+    /// once it has answered. Mapped to 409 Conflict.
+    ReleaseInProgress = 1017,
+    /// `StartClash` refused: the last Restore internet left a worker or a writer that may still
+    /// change the network. Mapped to 409 Conflict.
+    ReleaseUnfinished = 1018,
+    /// `StartClash` refused: `release-state.json` cannot be read, and it is never retired
+    /// automatically. Mapped to 409 Conflict.
+    ReleaseRecordCorrupt = 1019,
+    /// `StartClash` refused: it was prepared for a session a Restore internet already ended.
+    /// Mapped to 409 Conflict.
+    StaleGeneration = 1020,
 }
 
 pub fn owner_key(identity: &OwnerIdentity) -> String {
@@ -917,6 +983,52 @@ pub struct ServiceStatusSnapshot {
     /// absence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_attempt_pending: Option<bool>,
+    /// The release generation on disk (revision 21), read fresh for this snapshot. A teardown
+    /// with no captured generation sends this one, so a Connect admitted after the read still
+    /// refuses it. `None` when unreadable or from an older Service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_generation: Option<u64>,
+    /// `kill_switch` describes an armed barrier that another signed-in Windows user owns, not
+    /// this caller (#1290). Computed with the rule `authorize_write_for` applies to a release, so
+    /// an intent whose owner record was lost (any caller may release it) is never reported as
+    /// foreign. An older Service omits it and reads as false: the barrier is the caller's.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub kill_switch_held_by_another_user: bool,
+    /// The secondary AI hold is installed with no armed session behind it: a Quit, a replacement
+    /// sign-in, a crash or a failed update left it (decision 125). Only a full release removes
+    /// it, so an App that finds this set owes the user that release on Sign Out even when it is
+    /// idle. `None` from an older Service: unknown, and the App keeps its own in-process memory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_hold_retained: Option<bool>,
+}
+
+impl ServiceStatusSnapshot {
+    /// The snapshot as the calling App must read it. Another user's machine-wide barrier is not
+    /// this caller's protection: the App must not fold it into its own state (Protected Offline,
+    /// a refused Restore internet, a refused Quit). It reads the caller's own view, "no barrier
+    /// of mine", while the flag itself stays set for anything that wants to say who holds it.
+    #[must_use]
+    pub fn seen_by_caller(mut self) -> Self {
+        if self.kill_switch_held_by_another_user
+            && let Some(status) = self.kill_switch.as_mut()
+        {
+            *status = KillSwitchStatus {
+                wanted: false,
+                verified: false,
+                live: false,
+                mode: KillSwitchStatusMode::Blocked,
+                tunnel_permit_rendered: false,
+                endpoints: Vec::new(),
+                direct_endpoint_digest: direct_endpoint_digest(&[]).unwrap_or_default(),
+                last_error: None,
+                reconnect_after_release: false,
+            };
+            // Another user's machine-wide barrier is armed, which a full release of ours could not
+            // remove: do not promise this caller a hold to release.
+            self.ai_hold_retained = self.ai_hold_retained.map(|_| false);
+        }
+        self
+    }
 }
 
 /// Whether an already-running Windows Core is safe to preserve until `StartClash` replaces it.
@@ -1004,8 +1116,8 @@ impl<T> JsonConvert for T where T: Serialize + for<'de> Deserialize<'de> {}
 mod tests {
     use super::{
         MacosProxyConfig, OwnerIdentity, ProtocolInfo, ProtocolVersion, ReleaseKillSwitchBody,
-        RuntimeBundle, ServiceErrorCode, StartClashRequest, StopClashPayload, core_launch_args,
-        is_sing_box_core_path, owner_key,
+        RuntimeBundle, ServiceErrorCode, ServiceStatusSnapshot, StartClashRequest,
+        StopClashPayload, core_launch_args, is_sing_box_core_path, owner_key,
     };
 
     #[test]
@@ -1025,6 +1137,7 @@ mod tests {
             }),
             kill_switch: None,
             windows_kill_switch: None,
+            release_generation: None,
         };
         let encoded = serde_json::to_vec(&request).expect("request should serialize");
         let decoded: StartClashRequest =
@@ -1450,5 +1563,68 @@ mod tests {
         assert!(!info.supports_sing_box_core());
         info.protocol.revision = 18;
         assert!(info.supports_sing_box_core());
+    }
+    /// A `/status` payload whose Windows barrier is armed, verified and live.
+    fn snapshot_with_barrier(held_by_another_user: bool) -> ServiceStatusSnapshot {
+        let mut snapshot = serde_json::from_value::<ServiceStatusSnapshot>(serde_json::json!({
+            "is_active": false,
+            "active_generation": null,
+            "service_state": "Running",
+            "core_pid": null,
+            "core_started_at": null,
+            "last_core_exit_reason": null,
+            "restart_count": 0,
+            "last_recovery_at": null,
+            "desired_core_should_be_running": false,
+            "desired_generation": 0,
+            "desired_updated_at": 0,
+            "kill_switch": {
+                "wanted": true,
+                "verified": true,
+                "live": true,
+                "mode": "locked",
+                "endpoints": [],
+            },
+        }))
+        .expect("status payload parses");
+        snapshot.kill_switch_held_by_another_user = held_by_another_user;
+        snapshot
+    }
+
+    /// #1290: a second user's App reads another user's machine-wide barrier as "none of mine",
+    /// so it neither shows Protected Offline nor asks a Quit to release what it cannot release.
+    #[test]
+    fn another_users_barrier_reads_as_no_barrier_of_the_callers() {
+        let seen = snapshot_with_barrier(true).seen_by_caller();
+        let status = seen.kill_switch.expect("the reading stays present");
+        assert!(!status.wanted && !status.verified && !status.live);
+        assert!(seen.kill_switch_held_by_another_user, "the flag still says who holds it");
+    }
+
+    /// Decision 125: another user's armed barrier is not a hold this caller could release.
+    #[test]
+    fn another_users_barrier_is_not_a_hold_the_caller_owes_a_release_for() {
+        let mut snapshot = snapshot_with_barrier(true);
+        snapshot.ai_hold_retained = Some(true);
+        assert_eq!(snapshot.seen_by_caller().ai_hold_retained, Some(false));
+        let mut own = snapshot_with_barrier(false);
+        own.ai_hold_retained = Some(true);
+        assert_eq!(own.seen_by_caller().ai_hold_retained, Some(true));
+    }
+
+    /// An older Service omits the field: unknown, never "no hold".
+    #[test]
+    fn a_snapshot_from_an_older_service_reports_no_hold_information() {
+        let snapshot = snapshot_with_barrier(false);
+        assert_eq!(snapshot.ai_hold_retained, None);
+        let json = serde_json::to_value(&snapshot).unwrap();
+        assert!(json.get("ai_hold_retained").is_none(), "an absent report is not serialized");
+    }
+
+    #[test]
+    fn the_callers_own_barrier_is_read_unchanged() {
+        let seen = snapshot_with_barrier(false).seen_by_caller();
+        let status = seen.kill_switch.expect("the reading stays present");
+        assert!(status.wanted && status.verified && status.live);
     }
 }

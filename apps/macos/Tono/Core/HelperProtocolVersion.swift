@@ -443,7 +443,43 @@ nonisolated enum HelperProtocolVersion {
     ///   `KILLSWITCH_LOCAL_NETWORK_FAULT[_STOP_CORE]`). While that fault is
     ///   held, no failed arm releases, whatever its tunnel, and an
     ///   abandoned prompt-free helper upgrade does not disarm it.
-    static let current = "4.52.49"
+    /// - 4.52.49 → 4.52.50: preemptive Restore internet. The daemon installs
+    ///   a separate release job (`com.raydocs.tono.release`, socket
+    ///   `/var/run/tono-release.sock`) from its own executable. A release runs
+    ///   in a new session-leader worker under the machine lock
+    ///   `/Library/Application Support/Tono/release.lock`, records itself in
+    ///   `release-state.json` before any effect, boots out and kills the old
+    ///   writers, cleans up, and answers restored/partial/unknown per
+    ///   component. The daemon gained `POST /session/admit` and the optional
+    ///   `X-Tono-Generation` header: an effect from an earlier session is
+    ///   refused (`STALE_GENERATION`), and a protective request on a
+    ///   released machine is admitted under the lock first
+    ///   (`RELEASE_IN_PROGRESS`, `RELEASE_UNFINISHED`).
+    /// - 4.52.50 → 4.52.51: release review fixes. A component is settled
+    ///   only with terminal evidence (writers and Tono command children
+    ///   ended and confirmed gone, quarantine read back from launchd, stored
+    ///   DNS clean); unretired workers are carried forward, and admission
+    ///   needs every release session empty. `POST /session/admit` takes
+    ///   `{"expectedGeneration": G}` from the new `GET /session/status` and
+    ///   swaps it under the lock; nothing is admitted implicitly
+    ///   (`SESSION_NOT_ADMITTED`), and release-direction requests must name
+    ///   the current generation. The release job puts a booted-out daemon
+    ///   back after a worker crash, and the emergency commands take the
+    ///   release lock when it is free.
+    /// - 4.52.51 → 4.52.52: PF `tono-dhcp` (limited-broadcast DHCP) and
+    ///   `tono-ndp` (neighbor discovery) render in every armed ruleset, not
+    ///   only with a tunnel. After a Wi-Fi switch the Mac is in the no-tunnel
+    ///   bootstrap or preserve ruleset while it reconnects, and with no DHCP
+    ///   pass it could not get a lease on the new network. Same two permits,
+    ///   same text; the rules that need a tunnel or a setting are unchanged.
+    /// - 4.52.52 → 4.52.53: without a tunnel the `tono-ndp` passes render
+    ///   `no state` in both directions (Apple PF keys ICMPv6 state without the
+    ///   type, so a state from an inbound router advertisement could admit an
+    ///   Echo Request). The tunneled rule is unchanged.
+    /// - 4.52.53 → 4.52.54: `--emergency-reset` keeps the helper, and prints
+    ///   what is left, while the AI-service layer (resolver sinkhole, blackhole
+    ///   routes) is not proven gone, as it already did for a DNS restore failure.
+    static let current = "4.52.54"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

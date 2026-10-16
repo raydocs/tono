@@ -3,7 +3,7 @@ import { ChevronRight } from 'lucide-react';
 import type { ConnectionEventDto, CustomerDeviceDto } from '@contract';
 import { Bars } from '@/components/ops/Bars';
 import { Chip } from '@/components/ops/Chip';
-import { EmptyLine } from '@/components/ops/Empty';
+import { EmptyLine, ErrorLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
@@ -27,6 +27,7 @@ export function Timeline({
   devices = [],
   state,
   message,
+  onRetry,
   title = copy.customerSections.timeline,
   emptyMessage = copy.emptyTimeline,
   who,
@@ -36,6 +37,7 @@ export function Timeline({
   devices?: readonly CustomerDeviceDto[];
   state: 'loading' | 'error' | 'ready';
   message?: string;
+  onRetry?: () => void;
   /** The node page asks the same question of one machine, so it renames the block. */
   title?: string;
   emptyMessage?: string;
@@ -95,7 +97,7 @@ export function Timeline({
       }
     >
       {state === 'loading' ? <EmptyLine message={copy.loading} />
-        : state === 'error' ? <EmptyLine message={message || copy.loadError} />
+        : state === 'error' ? <ErrorLine message={message || copy.loadError} onRetry={onRetry} />
           : days.length === 0 ? <EmptyLine message={emptyMessage} />
             : (
               <div className="timeline-body">

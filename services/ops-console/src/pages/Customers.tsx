@@ -1,3 +1,4 @@
+import { Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type {
   AdoptionBucket,
@@ -11,11 +12,14 @@ import type {
 import { ADOPTION_BUCKETS } from '@contract';
 import { Action } from '@/components/ops/Action';
 import { Chip } from '@/components/ops/Chip';
+import { DataGapBanner } from '@/components/ops/DataGapBanner';
 import { CountText } from '@/components/ops/CountText';
+import { DotJoined } from '@/components/ops/DotJoined';
 import { PageNote } from '@/components/ops/PageNote';
 import { DataTable, type TableState } from '@/components/ops/DataTable';
 import { copy } from '@/copy/copy';
 import { followupApi } from '@/lib/api-followups';
+import { customerFactsGaps } from '@/lib/customer-facts';
 import {
   bucketCounts,
   CUSTOMER_FILTERS,
@@ -34,6 +38,7 @@ import {
 import { invitesOf, listRows, selectByStage, stageCounts } from '@/lib/funnel';
 import { closeInvite, openCustomer, openInvite, setCustomerFilter } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
+import { useIsPhone } from '@/lib/use-phone';
 import { publishedVersions } from '@/lib/releases';
 import { cn } from '@/lib/utils';
 import { oldestFetch, useResource, type Resource } from '@/lib/use-resource';
@@ -42,7 +47,7 @@ import type { Tone } from '@/components/ops/StatusWord';
 import { useCohort } from './customer/Cohort';
 import { useCustomerView } from './customer/use-customer-view';
 import { BatchResults } from './customer/BatchResults';
-import { customerColumns } from './customer/columns';
+import { customerColumns, phoneColumns } from './customer/columns';
 import { FunnelBar } from './customer/Funnel';
 import { InviteDrawer } from './customer/InviteDrawer';
 import { ListBand } from './customer/ListBand';
@@ -95,6 +100,7 @@ export default function CustomersPage({
   query?: string | null;
 }) {
   const privacy = usePrivacy();
+  const phone = useIsPhone();
   const context = useCustomerView(`${platform ?? ''}/${bucket ?? ''}`, customers.status === 'ready', initialQuery);
   const { filter, stage, sort, query } = context.view;
   const [onboarding, setOnboarding] = useState(false);
@@ -124,10 +130,11 @@ export default function CustomersPage({
     () => selectByPlatform(selectCustomers(all, filter), platform),
     [all, filter, platform],
   );
-  const perBucket = useMemo(() => bucketCounts(onPlatform, published), [onPlatform, published]);
+  const perBucket = useMemo(() => bucketCounts(onPlatform, published, platform),
+    [onPlatform, published, platform]);
   const rows = useMemo(
-    () => selectByBucket(onPlatform, published, bucket),
-    [onPlatform, published, bucket],
+    () => selectByBucket(onPlatform, published, bucket, platform),
+    [onPlatform, published, bucket, platform],
   );
   const invites = useMemo(
     () => invitesOf(funnel.status === 'ready' ? funnel.data : null),
@@ -180,14 +187,25 @@ export default function CustomersPage({
     return index.size === 0 ? null : index;
   }, [owed]);
   const cohort = useCohort(picked, customers.reload);
-  const columns = useMemo(
-    () => withInvites(
-      [cohort.column, ...customerColumns(privacy.email, wired, followups, wechat)],
-      privacy.email,
-      wechat,
-    ),
-    [cohort.column, privacy.email, wired, followups, wechat],
-  );
+  /** Of the customers listed, the in-use ones nobody has typed an expiry for. */
+  const gaps = useMemo(() => customerFactsGaps(picked), [picked]);
+  const columns = useMemo(() => {
+    const full = [cohort.column, ...customerColumns(privacy.email, wired, followups, wechat)];
+    return withInvites(phone ? phoneColumns(full) : full, privacy.email, wechat);
+  }, [cohort.column, privacy.email, wired, followups, wechat, phone]);
+
+  /** One count button per health word; the total comes first. */
+  const bits = (counts.all === 0 ? CUSTOMER_FILTERS.slice(0, 1) : CUSTOMER_FILTERS).map((id) => (
+    <button
+      key={id}
+      type="button"
+      aria-pressed={filter === id}
+      className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
+      onClick={() => context.change({ filter: filter === id ? null : id, top: 0, left: 0 })}
+    >
+      <CountText values={[counts[id] ?? 0]} render={(values) => copy.customerCount[id](values[0] ?? 0)} />
+    </button>
+  ));
 
   const state: TableState = customers.status === 'loading'
     ? 'loading'
@@ -199,9 +217,6 @@ export default function CustomersPage({
 
   return (
     <div ref={context.container} className="page-wrap customers-page customers-wide">
-      <label className="flex items-center gap-3 text-fine">{copy.traffic.search}
-        <input type="search" className="min-w-0 max-w-sm flex-1 rounded-md border border-[var(--hairline)] bg-[var(--surface)] px-3 py-2 text-body" value={query} onChange={(event) => context.change({ query: event.target.value })} />
-      </label>
       {privacy.privacy ? <p className="text-fine" role="status">{copy.privacyCustomerSearchNotice}</p> : null}
       <div className="page-head">
         <section className="customers-hero" aria-label={copy.pages.customers}>
@@ -210,19 +225,7 @@ export default function CustomersPage({
           <div className="customers-hero-row">
             {customers.status === 'ready' ? (
               <p className="text-verdict">
-                {CUSTOMER_FILTERS.map((id, index) => (
-                  <span key={id}>
-                    {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
-                    <button
-                      type="button"
-                      aria-pressed={filter === id}
-                      className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
-                      onClick={() => context.change({ filter: filter === id ? null : id, top: 0, left: 0 })}
-                    >
-                      <CountText values={[counts[id] ?? 0]} render={(values) => copy.customerCount[id](values[0] ?? 0)} />
-                    </button>
-                  </span>
-                ))}
+                <DotJoined parts={phone ? bits.slice(0, 1) : bits} />
               </p>
             ) : (
               <p className="text-verdict text-[var(--muted-foreground)]">
@@ -233,6 +236,14 @@ export default function CustomersPage({
               <Action primary onClick={() => setOnboarding(true)}>{copy.onboard}</Action>
             </div>
           </div>
+
+          {/* On a phone the total is the headline beside the button, and the
+              health words are the status line under them. */}
+          {phone && customers.status === 'ready' && bits.length > 1 ? (
+            <p className="text-body customers-hero-status">
+              <DotJoined parts={bits.slice(1)} />
+            </p>
+          ) : null}
 
           <PageNote
             className="customers-hero-note"
@@ -247,7 +258,9 @@ export default function CustomersPage({
           ) : null}
         </section>
 
-        {/* All five platforms, always. The ones nothing has shipped for say so. */}
+        {/* All five platforms, always. The ones nothing has shipped for say so.
+            The search shares the row and is outside every status branch above,
+            so it is there while the list loads and after it fails too. */}
         <div className="toolbar-row">
           {PLATFORM_CHIPS.map((id) => {
             const live = released.has(id);
@@ -264,6 +277,16 @@ export default function CustomersPage({
               </Chip>
             );
           })}
+          <label className="ops-search ml-auto">
+            <Search size={13} aria-hidden />
+            <input
+              type="search"
+              aria-label={copy.traffic.search}
+              placeholder={copy.traffic.search}
+              value={query}
+              onChange={(event) => context.change({ query: event.target.value })}
+            />
+          </label>
         </div>
 
         {/* The version bands only mean something once a platform is chosen:
@@ -302,8 +325,18 @@ export default function CustomersPage({
       {/* Between the filters and the table, because it is the second question
           this page answers and the first one an operator asks in the morning:
           of the people who are paying, who has not started using it. */}
-      {customers.status === 'ready' ? (
+      {customers.status === 'ready' && counts.all > 0 ? (
         <FunnelBar counts={perStage} stage={stage} onPick={(stage) => context.change({ stage, top: 0, left: 0 })} />
+      ) : null}
+
+      {customers.status === 'ready' && gaps.noExpiry.length > 0 ? (
+        <DataGapBanner
+          sentence={copy.customersBoard.expiryGap(gaps.noExpiry.length)}
+          action={{
+            label: copy.customersBoard.expiryGapAction,
+            onClick: () => cohort.pickForExpiry(gaps.noExpiry),
+          }}
+        />
       ) : null}
 
       {cohort.bar}
@@ -315,9 +348,10 @@ export default function CustomersPage({
         getRowId={(row) => row.key}
         /* The address column is the only flexible one: below the fixed
            columns' total it collapses to zero and no scroll can bring it
-           back. A local floor keeps identities readable on a phone while the
-           container keeps the sideways scroll. */
-        className="customer-list-table [&>table]:min-w-[1020px]"
+           back. A local floor keeps identities readable while the container
+           keeps the sideways scroll; the phone shows three columns, which fit
+           without one. */
+        className="customer-list-table min-[641px]:[&>table]:min-w-[1100px]"
         sort={sort}
         onSortChange={(sort) => context.change({ sort })}
         onRowClick={(row) => (row.customer === null
@@ -329,6 +363,7 @@ export default function CustomersPage({
            page is an answer to a question nobody asked. */
         emptyMessage={copy.emptyCustomers}
         errorMessage={customers.status === 'error' ? customers.message : undefined}
+        onRetry={customers.reload}
       />
 
       {cohort.dialog}

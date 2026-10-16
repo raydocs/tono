@@ -27,14 +27,3 @@
 .settings-page .settings-allowlist .settings-allowlist-table table {
   min-width: 416px;
 }
-
-@media (max-width: 640px) {
-  /* Row and toolbar actions are thumb targets on a phone, sized locally —
-     the shared Action and the portaled drawers are untouched. */
-  .settings-page .settings-homeinventory .ops-action,
-  .settings-page .settings-homelines .ops-action,
-  .settings-page .settings-providers .ops-action,
-  .settings-page .settings-allowlist .ops-action {
-    min-height: 44px;
-  }
-}

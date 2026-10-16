@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Fact } from '@/components/ops/DetailDrawer';
-import { Empty } from '@/components/ops/Empty';
+import { Empty, ErrorLine } from '@/components/ops/Empty';
 import { HeatStrip } from '@/components/ops/HeatStrip';
 import { Section } from '@/components/ops/Section';
 import { StatusWord } from '@/components/ops/StatusWord';
@@ -116,7 +116,9 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
     return (
       <div className="page-wrap">
         <BackLink />
-        <Empty message={customer.loading ? copy.loading : customer.message || copy.loadError} />
+        {customer.loading
+          ? <Empty message={copy.loading} />
+          : <ErrorLine message={customer.message || copy.loadError} onRetry={detail.reload} />}
       </div>
     );
   }
@@ -129,7 +131,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
 
       <header className="customer-hero-card flex flex-col gap-3" aria-label={privacy.email(row.email)}>
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-verdict">{privacy.email(row.email)}</h1>
+          <h1 className="text-verdict [overflow-wrap:anywhere]">{privacy.email(row.email)}</h1>
           <StatusWord word={row.health} reason={row.reason} />
           <span className="ops-tag">{copy.lifecycle[row.lifecycle]}</span>
           <CustomerWechat wechatId={row.wechatId} />
@@ -138,7 +140,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
           <p className="text-body text-[var(--muted-foreground)]">{row.reason}</p>
         ) : null}
         <div className="grid gap-5 border-y border-[var(--hairline)] py-4 sm:grid-cols-2">
-          <Fact
+          <Fact mono
             label={copy.expiresAt}
             measured={measured(
               row.billing.expiresAt === null ? null : formatDate(row.billing.expiresAt),
@@ -159,7 +161,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
           <Section title={copy.customerSections.now}>
             <div className="grid gap-x-8 sm:grid-cols-2">
               {nowFacts(row).map((fact) => (
-                <Fact key={fact.label} label={fact.label} measured={fact.measured} tier={fact.tier} />
+                <Fact key={fact.label} label={fact.label} measured={fact.measured} mono={fact.mono} tier={fact.tier} />
               ))}
             </div>
           </Section>
@@ -178,6 +180,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
             devices={row.devices}
             state={connections.status}
             message={connections.status === 'error' ? connections.message : undefined}
+            onRetry={connections.reload}
           />
 
           <CustomerDiagnostics userId={userId} />
@@ -188,8 +191,10 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
           >
             {activity.status === 'ready' ? (
               <HeatStrip rows={activity.data.items} source={copy.sourceWord.telemetry} />
+            ) : activity.status === 'loading' ? (
+              <Empty message={copy.loading} />
             ) : (
-              <Empty message={activity.status === 'loading' ? copy.loading : copy.loadError} />
+              <ErrorLine message={activity.message || copy.loadError} onRetry={activity.reload} />
             )}
           </Section>
 
@@ -197,12 +202,14 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
             rows={destinations.status === 'ready' ? destinations.data.items : []}
             state={destinations.status}
             message={destinations.status === 'error' ? destinations.message : undefined}
+            onRetry={destinations.reload}
           />
 
           <ServiceUsage
             rows={services.status === 'ready' ? services.data.items : []}
             state={services.status}
             message={services.status === 'error' ? services.message : undefined}
+            onRetry={services.reload}
           />
 
           <CarrierMatrix events={events} />
@@ -257,7 +264,7 @@ function BackLink() {
   return (
     <button
       type="button"
-      className="flex items-center gap-1.5 self-start text-micro text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+      className="back-link flex items-center gap-1.5 self-start text-micro text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
       onClick={closeCustomer}
     >
       <ArrowLeft size={12} strokeWidth={1.75} />

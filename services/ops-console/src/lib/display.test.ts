@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { copy } from '@/copy/copy';
 import { nowSec } from './clock';
-import { formatWhenAgo } from './display';
+import { formatWhen, formatWhenAgo } from './display';
 
 const AT = Date.parse('2026-09-09T03:23:46Z');
 
@@ -25,5 +25,13 @@ describe('relative time', () => {
     expect(formatWhenAgo(now - 3 * 3600)).toBe(copy.ago.hours(3));
     expect(formatWhenAgo(now - 5 * 86400)).toBe(copy.ago.days(5));
     expect(formatWhenAgo(null)).toBe(copy.missing);
+  });
+});
+
+describe('absolute time', () => {
+  it('prints a moment the way every other date on these pages reads', () => {
+    const at = new Date(2026, 8, 8, 22, 3, 46).getTime() / 1_000;
+    expect(formatWhen(at)).toBe('2026-09-08 22:03');
+    expect(formatWhen(null)).toBe(copy.missing);
   });
 });

@@ -1,0 +1,37 @@
+name: Ops console baseline reminder
+
+# D9-A keeps the ops-console pixel comparisons out of the PR gate, so a visible
+# console change can merge with stale baselines and only turn the nightly red
+# afterwards (#1543: 110 comparisons drifted unseen). This only warns. It is
+# not called by ci-gate, is not a required check and never fails.
+
+on:
+  pull_request:
+    paths:
+      - 'services/ops-console/src/**'
+
+permissions:
+  contents: read
+
+jobs:
+  remind:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Warn when the console changed without its baselines
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          if git diff --name-only "$BASE...$HEAD" -- services/ops-console/e2e/__screenshots__ | grep -q .; then
+            echo "This PR updates ops-console baselines."
+            exit 0
+          fi
+          msg="services/ops-console/src changed but e2e/__screenshots__ did not. If the change is visible, re-record on this branch with: gh workflow run screenshots-nightly.yml --ref $BRANCH -f update_baselines=true, check the ops-console-baselines artifact and commit it."
+          echo "::warning title=Ops console screenshot baselines::$msg"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"

@@ -333,6 +333,7 @@ export function newCustomerRow(userId: string, email: string, clock: number): Re
     quotaBytes: null,
     services: [],
     minAppVersion: null,
+    versionByPlatform: [],
     expiresAt: null,
     lastSeenAt: null,
     updatedAt: clock,

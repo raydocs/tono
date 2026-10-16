@@ -807,7 +807,12 @@ final class KillSwitchManager {
         replacing previous: Set<String>?,
         with passRules: Set<String>
     ) -> StateDisposal {
-        guard let withdrawn = previous?.subtracting(passRules) else { return .full }
+        guard let previous else { return .full }
+        // A pass that keeps no state left no state behind, so withdrawing it
+        // kills nothing. Without this, the stateless NDP pass of a no-tunnel
+        // ruleset giving way to the stateful tunneled one reads as a structural
+        // withdrawal and every tunnel arm flushes the machine.
+        let withdrawn = previous.subtracting(passRules).filter { !$0.contains(" no state label ") }
         guard !withdrawn.isEmpty else { return .keep }
         // Address-scoped withdrawals — a node switch moving the exit permit, a
         // refreshed control-plane pin — kill only those addresses' states.

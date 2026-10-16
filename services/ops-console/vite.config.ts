@@ -13,7 +13,7 @@ import { createHy2SwitchFixtures } from './fixtures/routes/hy2-switch';
 import { createFunnelFixtures } from './fixtures/routes/funnel';
 import { createFollowupFixtures } from './fixtures/routes/followups';
 import { createLedgerFixtures } from './fixtures/routes/ledger';
-import { updateChannels } from './fixtures/routes/releases';
+import { registerRelease, releaseObjects, updateChannels } from './fixtures/routes/releases';
 import { serveNodeRoutes } from './fixtures/routes/node-detail';
 import type { FleetFixtureFile, LiveFixtureFile } from './src/lib/types';
 import fleetRaw from './fixtures/fleet-nodes.json';
@@ -27,6 +27,9 @@ import nodesEmptyRaw from './fixtures/nodes.empty.json';
 import healthRaw from './fixtures/system-health.json';
 import healthDenseRaw from './fixtures/system-health.dense.json';
 import healthEmptyRaw from './fixtures/system-health.empty.json';
+import clustersRaw from './fixtures/failure-clusters.json';
+import clustersDenseRaw from './fixtures/failure-clusters.dense.json';
+import clustersEmptyRaw from './fixtures/failure-clusters.empty.json';
 import apiRelaysRaw from './fixtures/api-relays.json';
 import apiPathsRaw from './fixtures/api-paths.json';
 
@@ -37,9 +40,9 @@ import apiPathsRaw from './fixtures/api-paths.json';
  * ask for one.
  */
 const FIXTURE_SETS = {
-  default: { fleet: fleetRaw, live: liveRaw, nodes: nodesRaw, health: healthRaw },
-  dense: { fleet: fleetDenseRaw, live: liveDenseRaw, nodes: nodesDenseRaw, health: healthDenseRaw },
-  empty: { fleet: fleetEmptyRaw, live: liveRaw, nodes: nodesEmptyRaw, health: healthEmptyRaw },
+  default: { fleet: fleetRaw, live: liveRaw, nodes: nodesRaw, health: healthRaw, clusters: clustersRaw },
+  dense: { fleet: fleetDenseRaw, live: liveDenseRaw, nodes: nodesDenseRaw, health: healthDenseRaw, clusters: clustersDenseRaw },
+  empty: { fleet: fleetEmptyRaw, live: liveRaw, nodes: nodesEmptyRaw, health: healthEmptyRaw, clusters: clustersEmptyRaw },
 } as const;
 
 type FixtureSetName = keyof typeof FIXTURE_SETS;
@@ -364,6 +367,28 @@ function fixturesPlugin(): Plugin {
             return;
           }
           const parts = route.split('/').map(decodeURIComponent);
+          if (route === 'releases') {
+            const releases = opsFile(fileNames(set).releases, pickSession(url, set));
+            if (!releases) {
+              res.statusCode = 500;
+              res.end();
+              return;
+            }
+            void readBody(req).then((body) => {
+              const result = registerRelease(releases, body);
+              if ('error' in result) {
+                res.statusCode = result.status;
+                res.setHeader('content-type', 'application/json; charset=utf-8');
+                res.end(JSON.stringify({ error: result.error }));
+                return;
+              }
+              res.statusCode = 201;
+              res.setHeader('content-type', 'application/json; charset=utf-8');
+              res.setHeader('cache-control', 'no-store');
+              res.end(JSON.stringify(materializeOps(result.row, releases.clock)));
+            });
+            return;
+          }
           const file = parts[0] === 'incidents' && parts.length === 3
             ? opsFile(fileNames(set).incidents, pickSession(url, set))
             : null;
@@ -405,6 +430,11 @@ function fixturesPlugin(): Plugin {
           sendJson(res, materializeOps(chosen.health.health, chosen.health.clock));
           return;
         }
+        // Today failure clusters: open clusters per set; the error set never gets here.
+        if (route === 'failure-clusters') {
+          sendJson(res, materializeOps(chosen.clusters.body, chosen.clusters.clock));
+          return;
+        }
         // 节点 · API 中继: the same two relays in every set.
         if (route === 'api-relays') {
           sendJson(res, materializeOps(apiRelaysRaw.body, apiRelaysRaw.clock));
@@ -431,6 +461,17 @@ function fixturesPlugin(): Plugin {
           const file = opsFile(names.releases, pickSession(url, set));
           if (file) {
             sendJson(res, materializeOps(updateChannels(file), file.clock));
+            return;
+          }
+        }
+        // The register-release picker: the bucket's files, flagged by the loaded releases.
+        if (route === 'releases/objects') {
+          const file = opsFile(names.releases, pickSession(url, set));
+          if (file) {
+            const objects = JSON.parse(
+              readFileSync(path.resolve(rootDir, 'fixtures', 'release-objects.json'), 'utf8'),
+            ) as { items: Parameters<typeof releaseObjects>[1]['items'] };
+            sendJson(res, materializeOps(releaseObjects(file, objects), file.clock));
             return;
           }
         }

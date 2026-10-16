@@ -55,6 +55,28 @@
   font: inherit;
   color: var(--sea-accent);
 }
+/* The sunrise mark anchors the About card; version and tagline sit beside it. */
+.sea-settings-about-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 56px;
+  padding: 6px 0 12px;
+  border-bottom: 1px solid var(--sea-divider);
+  margin-bottom: 12px;
+}
+.sea-settings-about-head > div {
+  flex: 1;
+  min-width: 0;
+}
+.sea-settings-about-head > div > span {
+  font-size: 15px;
+}
+.sea-settings-about-head > div > p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--sea-secondary);
+}
 .sea-settings-about-copy {
   font-size: 12px;
   line-height: 1.6;

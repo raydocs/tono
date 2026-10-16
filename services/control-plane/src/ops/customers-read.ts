@@ -124,8 +124,8 @@ export async function activityHours(
       userId: String(row.user_id),
       deviceId: String(row.device_id ?? ''),
       hourAt: Number(row.hour_at),
-      onlineMinutes: Number(row.online_minutes) || 0,
-      connectedMinutes: Number(row.connected_minutes) || 0,
+      onlineMinutes: Math.min(60, Number(row.online_minutes) || 0),
+      connectedMinutes: Math.min(60, Number(row.connected_minutes) || 0),
       bytesUp: Number(row.bytes_up) || 0,
       bytesDown: Number(row.bytes_down) || 0,
       node: text(row.node),
@@ -234,6 +234,27 @@ export async function deviceCountsFor(
     userIds,
   );
   for (const row of rows) byUser.set(String(row.user_id), Number(row.n) || 0);
+  return byUser;
+}
+
+/** Raw live device rows per user, for the per-platform version summary. */
+export async function deviceRowsFor(
+  db: D1Database,
+  userIds: string[],
+): Promise<Map<string, Row[]>> {
+  const byUser = new Map<string, Row[]>();
+  const rows = await rowsByUserIds(
+    db,
+    (placeholders) =>
+      `SELECT user_id, platform, os_version, app_version, last_seen_at FROM ops_device_status WHERE user_id IN (${placeholders})`,
+    userIds,
+  );
+  for (const row of rows) {
+    const userId = String(row.user_id);
+    const list = byUser.get(userId);
+    if (list) list.push(row);
+    else byUser.set(userId, [row]);
+  }
   return byUser;
 }
 

@@ -19,26 +19,6 @@
     gap: 16px;
   }
 
-  .nodes-search {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    height: 30px;
-    padding: 0 10px;
-    border: 1px solid var(--hairline);
-    border-radius: 8px;
-    color: var(--muted-foreground);
-    background: var(--surface);
-  }
-  .nodes-search:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
-  .nodes-search input {
-    width: 168px;
-    background: transparent;
-    font-size: 13px;
-    color: var(--foreground);
-    outline: none;
-  }
-
   .nodes-filters {
     display: flex;
     flex-wrap: wrap;
@@ -87,11 +67,16 @@
     .nodes-wide-col { display: none; }
   }
   @media (max-width: 640px) {
+    /* The explanation is for the desk; on a phone it only pushes the list down. */
+    .nodes-lead { display: none; }
     .nodes-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .nodes-load-grid { grid-template-columns: minmax(0, 1fr); }
-    .nodes-search input { width: 120px; }
     .nodes-name { width: auto; }
-    .nodes-quota-col { width: auto; }
+    .nodes-table th:first-child, .nodes-table td:first-child { width: 1%; white-space: nowrap; }
+    .nodes-quota-col { width: 1%; }
+    /* Side by side, the meter and its figure leave the name column 37 px, which is
+       why every city was clipped to its first letters; stacked, the name gets the room. */
+    .nodes-quota { flex-direction: column; align-items: flex-start; gap: 4px; }
     .nodes-quota .meter { width: 32px; }
   }
 }

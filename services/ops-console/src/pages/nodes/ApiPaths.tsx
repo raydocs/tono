@@ -1,5 +1,5 @@
 import type { ApiPathRowDto, ApiPathsDto } from '@contract';
-import { EmptyLine } from '@/components/ops/Empty';
+import { EmptyLine, ErrorLine } from '@/components/ops/Empty';
 import { measured } from '@/components/ops/measured';
 import { Section } from '@/components/ops/Section';
 import { MeasuredValue } from '@/components/ops/Value';
@@ -17,12 +17,12 @@ const words = copy.apiPaths;
  * through a relay, the tunnel or an exit node shows the node's network, so its
  * ASN is unknown rather than the node's.
  */
-export function ApiPaths({ paths }: { paths: Resource<ApiPathsDto> }) {
+export function ApiPaths({ paths, onRetry }: { paths: Resource<ApiPathsDto>; onRetry?: () => void }) {
   return (
     <Section title={words.title}>
       <p className="text-fine text-[var(--muted-foreground)]">{words.lead}</p>
       {paths.status === 'loading' ? <EmptyLine message={copy.loading} /> : null}
-      {paths.status === 'error' ? <EmptyLine message={words.loadFailed} /> : null}
+      {paths.status === 'error' ? <ErrorLine message={words.loadFailed} onRetry={onRetry} /> : null}
       {paths.status === 'ready' && paths.data.rows.length === 0 ? <EmptyLine message={words.empty} /> : null}
       {paths.status === 'ready' && paths.data.rows.length > 0 ? <PathTable rows={paths.data.rows} /> : null}
     </Section>

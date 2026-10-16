@@ -204,7 +204,7 @@ struct SettingsView: View {
 
             settingDivider
 
-            SettingRow(label: "Interface Language", subtitle: "Reopens Tono to apply. Quitting drops the connection and releases network protection until you connect again.") {
+            SettingRow(label: "Interface Language", subtitle: "Reopens Tono to apply. Quitting drops the connection and restores normal internet. If protection was on, AI services stay blocked until you connect again.") {
                 settingsPicker(
                     label: "Interface Language",
                     selection: Binding(
@@ -548,7 +548,7 @@ struct SettingsView: View {
         alert.alertStyle = .warning
         alert.messageText = String(localized: "Change the language and reopen Tono?")
         alert.informativeText = String(
-            localized: "Tono has to quit and reopen to change languages. This Mac is protected right now, so the connection is dropped and Kill Switch is released until you connect again."
+            localized: "Tono has to quit and reopen to change languages. This Mac is protected right now, so the connection is dropped and normal internet is restored. AI services stay blocked until you connect again."
         )
         alert.addButton(withTitle: String(localized: "Reopen Tono"))
         alert.addButton(withTitle: String(localized: "Cancel"))

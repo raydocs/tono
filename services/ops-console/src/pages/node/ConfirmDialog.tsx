@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/dialog';
 
 const INPUT = 'h-9 w-full rounded-[10px] border border-[var(--hairline)] bg-[var(--background)]'
-  + ' px-3 text-body outline-none placeholder:text-[var(--muted-foreground)] focus:border-[var(--accent)]';
+  + ' px-3 text-body placeholder:text-[var(--muted-foreground)] focus:border-[var(--accent)]';
 
 /**
  * The step between "I meant to press that" and "I pressed that".
@@ -109,7 +109,12 @@ export function ConfirmDialog({
 
         <DialogFooter className="gap-2">
           <Action onClick={onClose}>{copy.nodeActionBack}</Action>
-          <Action primary pending={pending || !ready} onClick={onConfirm}>
+          <Action
+            primary
+            danger={action.id === 'unlist' || action.id === 'retire'}
+            pending={pending || !ready}
+            onClick={onConfirm}
+          >
             {copy.nodeActionGo(action.label)}
           </Action>
         </DialogFooter>

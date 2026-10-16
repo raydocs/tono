@@ -103,6 +103,7 @@ where
             macos_proxy: None,
             kill_switch: None,
             windows_kill_switch: None,
+            release_generation: None,
         },
     )
     .await?;

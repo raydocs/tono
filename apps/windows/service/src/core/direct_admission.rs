@@ -15,6 +15,7 @@ use std::net::Ipv4Addr;
 
 use serde_json::{Map, Value};
 
+use crate::core::direct_policy::DirectPolicy;
 use crate::direct_domains::{
     CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS, direct_suffix_overlaps_protected,
     is_address_free_web_suffix, is_protected_from_direct,
@@ -32,8 +33,24 @@ const MIHOMO_LOOPBACK_RULES: [&str; 2] = [
     "IP-CIDR6,::1/128,DIRECT,no-resolve",
 ];
 
+/// What, beyond the compilers' shapes, a sing-box DIRECT rule must match (#1280).
+#[derive(Clone, Copy)]
+pub(crate) enum DirectBinding<'a> {
+    /// Shape only: a document an earlier admission already approved (the watchdog respawn) and
+    /// the mihomo runtime, whose binding is not part of this revision.
+    ShapeOnly,
+    /// The request carried no verified policy (an older App): no DIRECT rule is admitted.
+    NoPolicy,
+    /// Only the entries the verified signed policy lists.
+    Policy(&'a DirectPolicy),
+}
+
 /// sing-box: `outbounds` and `route.rules` of an admitted-so-far document.
-pub fn admit_sing_box_direct_rules(outbounds: &[Value], rules: &[Value]) -> Result<(), String> {
+pub(crate) fn admit_sing_box_direct_rules(
+    outbounds: &[Value],
+    rules: &[Value],
+    binding: DirectBinding<'_>,
+) -> Result<(), String> {
     let mut direct = Vec::new();
     for outbound in outbounds {
         if outbound.get("type").and_then(Value::as_str) == Some("direct") {
@@ -67,13 +84,68 @@ pub fn admit_sing_box_direct_rules(outbounds: &[Value], rules: &[Value]) -> Resu
         }
     }
     for (index, rule) in rules.iter().enumerate() {
-        if json_names(rule, &direct) && !sing_box_direct_shape(rule, &rules[..index], &direct) {
+        if !json_names(rule, &direct) {
+            continue;
+        }
+        if !sing_box_direct_shape(rule, &rules[..index], &direct) {
             return Err(format!(
                 "a rule to `{DIRECT_GROUP_NAME}` is not a compiler shape"
             ));
         }
+        match binding {
+            DirectBinding::ShapeOnly => {}
+            DirectBinding::NoPolicy => {
+                return Err(format!(
+                    "a rule to `{DIRECT_GROUP_NAME}` needs the signed traffic policy"
+                ));
+            }
+            DirectBinding::Policy(policy) => {
+                if !listed_by_policy(rule, policy) {
+                    return Err(format!(
+                        "a rule to `{DIRECT_GROUP_NAME}` is not listed by the signed traffic policy"
+                    ));
+                }
+            }
+        }
     }
     Ok(())
+}
+
+/// Whether the verified policy lists the entry an already shape-checked DIRECT rule routes.
+/// Each shape maps to the policy list the compilers derive it from.
+fn listed_by_policy(rule: &Value, policy: &DirectPolicy) -> bool {
+    let Some(rule) = rule.as_object() else {
+        return false;
+    };
+    if str_of(rule, "type") == Some("logical") {
+        // Exact host + /32 pin: the host and port come from `domains` or `webDomains`.
+        let Some(destination) = rule
+            .get("rules")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(Value::as_object)
+        else {
+            return false;
+        };
+        return one_str(destination, "domain")
+            .zip(port_of(destination))
+            .is_some_and(|(host, port)| policy.lists_exact_host(&host.to_ascii_lowercase(), port));
+    }
+    match str_of(rule, "network") {
+        // A signed-app process rule has no destination of its own; the policy authorises
+        // native-app DIRECT by listing native hosts.
+        Some("tcp") if rule.contains_key("process_path_regex") => policy.lists_native_apps(),
+        Some("tcp") => one_str(rule, "domain_suffix")
+            .zip(port_of(rule))
+            .is_some_and(|(suffix, port)| policy.lists_suffix(suffix, port)),
+        // A process-bound media pin: the /32 and the port come from `mediaEndpoints`.
+        Some("udp") => one_str(rule, "ip_cidr")
+            .and_then(|cidr| cidr.strip_suffix("/32"))
+            .and_then(|address| address.parse::<Ipv4Addr>().ok())
+            .zip(port_of(rule))
+            .is_some_and(|(address, port)| policy.lists_media(address, port)),
+        _ => false,
+    }
 }
 
 /// mihomo: the rule strings, every proxy as (name, type), every group as (name, members).
@@ -346,9 +418,16 @@ fn suffix_ok(suffix: &str, child_pinned: impl Fn(&str) -> bool) -> bool {
             .all(|child| child_pinned(*child))
 }
 
+/// A name with at least a registrable label and a TLD. A bare `com`, `cn` or an all-digit
+/// last label (an address) is a catch-all, never one reviewed host.
 fn host_ok(host: &str) -> bool {
     !host.is_empty()
         && host.len() <= 253
+        && host.contains('.')
+        && host
+            .rsplit('.')
+            .next()
+            .is_some_and(|tld| !tld.bytes().all(|b| b.is_ascii_digit()))
         && host.split('.').all(|label| {
             !label.is_empty()
                 && label.len() <= 63
@@ -388,8 +467,77 @@ fn in_range(address: Ipv4Addr, range: &str) -> bool {
     u32::from(address) & mask == u32::from(network) & mask
 }
 
+/// A process-path regex only in the form `tono-core` `config::windows_path_regex` writes:
+/// `^`, then literal path characters (case classes `[Xx]`, the separator class `[\\/]`,
+/// escaped specials), and at most a final `$`. The literal path must be a drive, a colon and a
+/// separator, then at least one real path component below the drive root, closed either by a
+/// directory separator (an install-directory prefix) or by the final `$` (one exact file). That
+/// is what `is_windows_path_shape` plus the compiler's prefix/file normalisation guarantee for
+/// every compiler input, whatever the length: `D:\A\` and `D:\Lark.exe` are admitted. A bare `^`,
+/// `^.*`, a drive root, an open-ended name prefix (`^D:\A`) or any other metacharacter is a
+/// catch-all for processes the signed-app discovery never named. The bound is the structure, not
+/// a length that happens to fit today's products.
 fn regex_ok(regex: &str) -> bool {
-    regex.starts_with('^') && payload_safe(regex)
+    regex
+        .strip_prefix('^')
+        .filter(|_| payload_safe(regex))
+        .and_then(path_regex_chars)
+        .is_some_and(|(path, exact_end)| match path.as_slice() {
+            [drive, ':', '\\', below_root @ ..] => {
+                drive.is_ascii_alphabetic()
+                    && below_root.iter().any(|character| *character != '\\')
+                    && (exact_end || below_root.last() == Some(&'\\'))
+            }
+            _ => false,
+        })
+}
+
+/// The path characters `body` matches and whether it ends with `$`, or `None` for any
+/// metacharacter the compiler never writes.
+fn path_regex_chars(body: &str) -> Option<(Vec<char>, bool)> {
+    let mut rest = body;
+    let mut path = Vec::new();
+    while !rest.is_empty() {
+        if rest == "$" {
+            return Some((path, true));
+        }
+        let bytes = rest.as_bytes();
+        let (character, width) = if rest.starts_with(r"[\\/]") {
+            ('\\', 5)
+        } else if bytes.len() >= 4
+            && bytes[0] == b'['
+            && bytes[3] == b']'
+            && bytes[1].is_ascii_uppercase()
+            && bytes[2] == bytes[1].to_ascii_lowercase()
+        {
+            (char::from(bytes[1]), 4)
+        } else if rest.starts_with("\\x2c") {
+            (',', 4)
+        } else if rest.starts_with("\\x28") {
+            ('(', 4)
+        } else if rest.starts_with("\\x29") {
+            (')', 4)
+        } else if rest.starts_with("\\\\") {
+            ('\\', 2)
+        } else if bytes[0] == b'\\' {
+            match bytes.get(1) {
+                Some(
+                    b
+                    @ (b'.' | b'^' | b'$' | b'*' | b'+' | b'?' | b'{' | b'}' | b'[' | b']' | b'|'),
+                ) => (char::from(*b), 2),
+                _ => return None,
+            }
+        } else {
+            let character = rest.chars().next()?;
+            if ".^$*+?{}[]|()".contains(character) {
+                return None;
+            }
+            (character, character.len_utf8())
+        };
+        path.push(character);
+        rest = &rest[width..];
+    }
+    Some((path, false))
 }
 
 /// `tono-core` `config::is_rule_payload_safe`: no separators mihomo would re-split.
@@ -445,4 +593,159 @@ fn as_port(value: &Value) -> Option<u16> {
 
 fn port_of(map: &Map<String, Value>) -> Option<u16> {
     map.get("port").and_then(as_port)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::{
+        CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS, DirectBinding, DirectPolicy,
+        admit_sing_box_direct_rules,
+    };
+    use crate::core::direct_policy::tests::{POLICY_JSON, key, sign};
+
+    fn admitted(rule: Value) -> Result<(), String> {
+        admitted_by(rule, DirectBinding::ShapeOnly)
+    }
+
+    fn admitted_by(rule: Value, binding: DirectBinding<'_>) -> Result<(), String> {
+        let outbounds =
+            [json!({"type":"direct","tag":"Tono-China-Direct","bind_interface":"Ethernet"})];
+        let rules = [
+            json!({"network":"tcp","domain_suffix":CLAUDE_HOME_DOMAINS.as_slice(),"action":"route","outbound":"Tono-Exit"}),
+            json!({"network":"tcp","ip_cidr":CLAUDE_HOME_IPV4_CIDRS.as_slice(),"action":"route","outbound":"Tono-Exit"}),
+            rule,
+        ];
+        admit_sing_box_direct_rules(&outbounds, &rules, binding)
+    }
+
+    /// The policy `direct_policy::tests::POLICY_JSON` signs, read after it verified.
+    fn listed() -> DirectPolicy {
+        let (signing, public) = key(1);
+        DirectPolicy::verify_with_key(&sign(&signing, POLICY_JSON, 7), &public).unwrap()
+    }
+
+    fn exact_host_rule(host: &str, port: u16) -> Value {
+        json!({"type":"logical","mode":"and","rules":[
+            {"network":"tcp","port":port,"domain":[host]},{"ip_cidr":["203.0.113.50/32"]}],
+            "action":"route","outbound":"Tono-China-Direct"})
+    }
+
+    fn media_rule(address: &str, port: u16) -> Value {
+        json!({"network":"udp","ip_cidr":[format!("{address}/32")],"port":port,
+            "process_name":["Lark.exe"],"action":"route","outbound":"Tono-China-Direct"})
+    }
+
+    fn suffix_rule(suffix: &str, port: u16) -> Value {
+        json!({"network":"tcp","port":port,"domain_suffix":[suffix],
+            "action":"route","outbound":"Tono-China-Direct"})
+    }
+
+    /// #1280: a request that passes the App identity gate could name any host the shape allows.
+    /// With the signed policy bound, only the hosts and ports it lists leave the tunnel.
+    #[test]
+    fn a_direct_host_the_signed_policy_does_not_list_is_refused() {
+        let policy = listed();
+        let by = DirectBinding::Policy(&policy);
+        assert_eq!(admitted_by(exact_host_rule("szextshort.weixin.qq.com", 443), by), Ok(()));
+        assert_eq!(admitted_by(exact_host_rule("res.wx.qq.com", 443), by), Ok(()));
+        assert!(admitted_by(exact_host_rule("evil.example.com", 443), by).is_err());
+        assert!(
+            admitted_by(exact_host_rule("szextshort.weixin.qq.com", 8080), by).is_err(),
+            "a listed host on a port the policy does not list"
+        );
+    }
+
+    /// An older App sends no policy: no DIRECT rule is admitted, but a document without one is.
+    #[test]
+    fn a_direct_rule_without_a_policy_is_refused_and_a_full_tunnel_needs_none() {
+        let direct = exact_host_rule("szextshort.weixin.qq.com", 443);
+        assert!(admitted_by(direct, DirectBinding::NoPolicy).is_err());
+        let to_exit = json!({"network":"tcp","domain_suffix":["example.org"],
+            "action":"route","outbound":"Tono-Exit"});
+        assert_eq!(admitted_by(to_exit, DirectBinding::NoPolicy), Ok(()));
+    }
+
+    #[test]
+    fn a_media_address_the_signed_policy_does_not_list_is_refused() {
+        let policy = listed();
+        let by = DirectBinding::Policy(&policy);
+        assert_eq!(admitted_by(media_rule("203.0.113.9", 8000), by), Ok(()));
+        assert!(admitted_by(media_rule("203.0.113.10", 8000), by).is_err());
+        assert!(admitted_by(media_rule("203.0.113.9", 443), by).is_ok());
+    }
+
+    /// An unlisted suffix is refused; the product suffixes the App always adds ride on the policy
+    /// authorising native apps.
+    #[test]
+    fn a_direct_suffix_follows_the_signed_policy() {
+        let policy = listed();
+        let by = DirectBinding::Policy(&policy);
+        assert_eq!(admitted_by(suffix_rule("bilibili.com", 443), by), Ok(()));
+        assert_eq!(admitted_by(suffix_rule("taobao.com", 80), by), Ok(()));
+        let no_native = DirectPolicy::from_json(r#"{"version":3,"domains":[]}"#, 1).unwrap();
+        assert!(admitted_by(suffix_rule("taobao.com", 80), DirectBinding::Policy(&no_native)).is_err());
+    }
+
+    #[test]
+    fn a_process_rule_needs_native_app_entries_in_the_signed_policy() {
+        let rule = || process_rule(r"^[Dd]:[\\/][Ll][Aa][Rr][Kk][\\/]");
+        let policy = listed();
+        assert_eq!(admitted_by(rule(), DirectBinding::Policy(&policy)), Ok(()));
+        let no_native = DirectPolicy::from_json(r#"{"version":3,"domains":[]}"#, 1).unwrap();
+        assert!(admitted_by(rule(), DirectBinding::Policy(&no_native)).is_err());
+    }
+
+    fn process_rule(regex: &str) -> Value {
+        json!({"network":"tcp","port":[443],"process_path_regex":[regex],
+            "action":"route","outbound":"Tono-China-Direct"})
+    }
+
+    /// #1280: with the assistant pins in place a bare `^` or `^.*` used to pass, sending every
+    /// process's reviewed-port traffic DIRECT. Only the compiler's path-regex form is admitted.
+    #[test]
+    fn a_catch_all_process_regex_is_not_a_compiler_shape() {
+        // What `windows_path_regex` writes (pinned by `tono-core`'s
+        // `windows_path_regex_for_short_installs_is_pinned`) for a long install, one-letter and
+        // non-ASCII folders, and short files.
+        for signed_install in [
+            r"^[Cc]:[\\/][Pp]rogram [Ff]iles[\\/][Tt]encent[\\/][Ww][Ee][Cc][Hh][Aa][Tt][\\/]",
+            r"^[Dd]:[\\/][Aa][\\/]",
+            r"^[Dd]:[\\/]飞书[\\/]",
+            r"^[Dd]:[\\/][Aa]$",
+            r"^[Dd]:[\\/][Ll][Aa][Rr][Kk]\.[Ee][Xx][Ee]$",
+        ] {
+            assert_eq!(
+                admitted(process_rule(signed_install)),
+                Ok(()),
+                "{signed_install}"
+            );
+        }
+        for catch_all in [
+            "^",
+            "^.*",
+            "^.+",
+            r"^[Cc]:[\\/]",
+            r"^[Dd]:[\\/][Aa]",
+            r"^[Dd]:[\\/]$",
+            "^[Cc]:",
+            "^(?s).*",
+            r"^C:\\.*",
+        ] {
+            assert!(admitted(process_rule(catch_all)).is_err(), "{catch_all}");
+        }
+    }
+
+    /// #1280: a single-label name such as `com` is a catch-all domain, not one reviewed host.
+    #[test]
+    fn a_catch_all_domain_is_not_a_compiler_shape() {
+        let exact = |host: &str| {
+            json!({"type":"logical","mode":"and","rules":[
+                {"network":"tcp","port":443,"domain":[host]},{"ip_cidr":["101.1.2.3/32"]}],
+                "action":"route","outbound":"Tono-China-Direct"})
+        };
+        assert_eq!(admitted(exact("qq.com")), Ok(()));
+        assert!(admitted(exact("com")).is_err());
+    }
 }

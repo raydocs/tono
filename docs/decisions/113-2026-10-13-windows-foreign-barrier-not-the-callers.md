@@ -1,0 +1,5 @@
+## 2026-10-13 · 第二个 Windows 用户的 App 看到另一用户的全机拦截时显示什么
+- Status: provisional（所有者可推翻；只有所有者能写 `owner` 或 `reversed`）
+- Chosen: Service 在 `/status` 聚合里新增 `kill_switch_held_by_another_user`，用 `authorize_write_for` 的同一条规则计算：已武装且记录了 owner、且 owner 不是调用者、且调用者不是活动 owner。App 在读取状态快照的唯一入口把这种读数换成“我没有拦截”（`wanted=false`），不再把它折进自己的 FSM：不显示 Protected Offline，不触发“恢复上网被拒”，退出不弹释放拒绝框。第二个用户看到的是普通的未连接，点 Connect 时仍由 Service 以现有的 1014 文案（`protectionHeldByAnotherUser`）拒绝。owner 记录丢失（WIN-OWNER-RELEASE-NONE）时 `authorize_write_for` 放行任何人，所以该读数不算“别人的”，真正的 owner 仍然按自己的拦截折叠。被否决的方案：只看 `is_active=false`（分不清别人的拦截和自己丢了 owner 记录的拦截，会对真 owner 隐藏正在生效的拦截）。
+- Why stricter: 不放宽任何释放权限，也不让第二个用户的 App 读到可以据此释放或接管的信息；`authorize_write_for`、`authorize_takeover_for` 和 1014 都不变。旧 Service 不带该字段，读作 false，等于今天的行为。代价：第二个用户在 A 的拦截下没有专门的“被另一用户占用”提示，只有点 Connect 后的 1014 文案；专门的状态位留给后续 UI 工作。
+- Applied in: 本 PR（`apps/windows/service/src/core/{structure,status}.rs`、`windows_kill_switch/report.rs`、`apps/windows/app/src-tauri/src/core/service/mod.rs`）

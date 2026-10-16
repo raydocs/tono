@@ -64,6 +64,8 @@
   --hairline: rgb(20 20 19 / 0.08);
   --accent: #5b4cf5;
   --accent-hover: #4a3ee0;
+  --accent-text: var(--accent);
+  --focus-ring: var(--accent);
 
   --sev-fg: 354 66% 37%;
   --sev-line: 354 72% 50%;
@@ -103,6 +105,8 @@
   --hairline: rgb(255 255 255 / 0.08);
   --accent: #5b4cf5;
   --accent-hover: #4a3ee0;
+  --accent-text: #8f84ff;
+  --focus-ring: #8f84ff;
 
   --sev-fg: 3 92% 78%;
   --sev-line: 3 76% 60%;
@@ -142,6 +146,9 @@ body {
 button, input, select, textarea { font: inherit; color: inherit; }
 a { color: inherit; text-decoration: none; }
 
+/* Mono is for machine tokens: digits, versions, IPs and ports, hashes, dates,
+   money and ids. A name or a word (a provider, a carrier, a line's name, a
+   CJK unit) stays sans even inside a fact that is otherwise mono. */
 .font-mono, .tabular, code, kbd {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;

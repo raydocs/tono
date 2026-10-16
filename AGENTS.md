@@ -4,6 +4,8 @@ Cloud-managed VPN (product identity is Tono, not Clash Verge or LiquidClash): cl
 Reality nodes. Maps: [docs/README.md](docs/README.md), [docs/architecture.md](docs/architecture.md) (deployables, code map, do-not list).
 [docs/SHIP_PLAN.md](docs/SHIP_PLAN.md) owns customer 0.0.75 (G1–G4); [docs/ops/plan-2026-09-11.md](docs/ops/plan-2026-09-11.md) owns ops work (not a
 ship gate). Every PR names one of them; during the G4 freeze only SHIP_PLAN §2 item 10 fixes merge.
+Before a fix, a review or a merge, read [docs/LESSONS.md](docs/LESSONS.md) (mistakes the nightly retro found) and the
+promoted lessons at the end of this file.
 
 ## Invariants (never loosen)
 
@@ -17,17 +19,16 @@ ship gate). Every PR names one of them; during the G4 freeze only SHIP_PLAN §2 
 
 These conditions are the approval: when they hold, act; do not stop to ask.
 
-**1. Merge** through the merge queue. Auto-merge is on for `main`. The only required status check is `ci-gate`. Merges use merge commits. Enable auto-merge with `gh pr merge --auto --merge` on a ready, non-draft PR when the conditions below hold. Do not enable it on a UI PR or a PR that needs real-hardware testing. On a conflict or a helper-version collision, rebase onto current `main` and set `HelperProtocolVersion.current` (`apps/macos/Tono/Core/HelperProtocolVersion.swift`) to main's value plus `0.0.1`.
+**1. Merge** through the merge queue. Auto-merge is on for `main`. The only required status check is `ci-gate`. Merges use merge commits. Enable auto-merge with `gh pr merge --auto --merge --match-head-commit <checked head SHA>` on a ready, non-draft PR when the conditions below hold, so a later push cannot merge unchecked. Then do not wait on CI: start the next item and come back when a check fails or a merge-order dependency clears. Do not enable it on a UI PR or a PR that needs real-hardware testing. On a conflict or a helper-version collision, rebase onto current `main` and set `HelperProtocolVersion.current` (`apps/macos/Tono/Core/HelperProtocolVersion.swift`) to main's value plus `0.0.1`.
 - `ci-gate` is green on the exact head SHA. It calls the path-filtered workflows and passes when each relevant job succeeded or was skipped because its paths were not touched. A missing `ci-gate` run is not green; dispatch `ci-gate`. Do not also dispatch those workflows on the pull request (they would run a second time). Docs-only and uncovered paths: [docs/BUILD_AND_TEST.md](docs/BUILD_AND_TEST.md#which-workflow-must-be-green-for-a-pr).
 - Ordinary work (copy, docs, UI, a normal bug or feature outside the risks below): the main session checks the
-  diff and runs the narrowest relevant test. No mandatory Jev call, planning agent, external review or second
-  model checking a report. Jev is optional, not a per-PR approval gate.
+  diff and runs the narrowest relevant test. No planning agent, external review or second model
+  checking a report.
 - High-risk changes (money, credentials/permissions, PF/WFP fail-closed behavior, privileged paths, concurrency/
   lifecycle, migrations, routing or release trust), or an owner-requested review: an independent Codex high review
   of the current diff must finish before merge/deploy. Run it in the background with named invariants and a
   coverage checklist; it never blocks implementation, tests or a draft PR. Record the covered SHA, scope,
   findings and verification in a PR comment. Pending, timed-out, incomplete or stale coverage is not a pass.
-  If Jev is explicitly chosen, use trusted main's policy, not the PR's; preserve its applicable risk floors.
   Stop rule: only major or worse blocks. Minors get one fix round; any still open after it are recorded
   open in `docs/findings.d/` (product defects) or in the PR body's limitations (engineering/test/docs items the ledger excludes),
   then merge. At least major: loosening fail-closed PF/WFP, a leak, privilege escalation, cross-account mixing, or showing
@@ -68,13 +69,16 @@ edited workspace; `services/control-plane` `npm test` or the matching test file;
 the file, Playwright only for a changed page flow; docs only none. The MacBook edits and reviews; it does not
 run `xcodebuild`, `swift build/test`, native `cargo`, Tauri, Core builds or packaging; hosted
 CI does. Do not install toolchains, sync build caches, remove active worktrees or delete retained evidence to
-make a default local command work. Unrunnable checks are reported as not run. One narrow regression per behavior: one `#[test]`, one XCTest,
+make a default local command work. Unrunnable checks are reported as not run. Before merge the PR carries one
+verification comment on the merged head SHA: `Red check:` (the new test on the old code: run id and the assertion that
+failed; a compile error or a skipped test is not red), `Ran:` (commands or run ids that passed), `Not run:` (every check
+not run, never left out). One narrow regression per behavior: one `#[test]`, one XCTest,
 one `it`; no tables.
 
 ## Records and Git
 
 Every delivery adds one `docs/changelog.d/YYYY-MM-DD-<slug>.md` in the same PR ([template](docs/changelog.d/README.md); continuations edit
-that file; [docs/INTERNAL_CHANGELOG.md](docs/INTERNAL_CHANGELOG.md) is frozen history; the merging agent checks, read-only and formatting-only
+that file; [docs/INTERNAL_CHANGELOG.md](docs/INTERNAL_CHANGELOG.md) is frozen history; the merging agent checks, read-only, formatting-only and nightly-retro
 PRs excepted), as does each deploy, publish, self-approval and reviewed range. Read all: `node tooling/scripts/records.mjs changelog`.
 Read the findings (`node tooling/scripts/records.mjs findings`: [docs/FINDINGS_LEDGER.md](docs/FINDINGS_LEDGER.md) plus `docs/findings.d/`) before a
 review or bug fix; in the delivering PR add one `docs/findings.d/<ID>.md` per new finding ([format](docs/findings.d/README.md)) and update
@@ -82,6 +86,11 @@ status in that fragment, or in the ledger row if the ID has none. Delete stale d
 Lines `release/macos`, `release/windows`, `main` (sole production Worker source; merge commits, no rewrite): [docs/RELEASE_LINES.md](docs/RELEASE_LINES.md).
 Merged branches are deleted (D10-A): `node tooling/scripts/prune-merged-branches.mjs remote|worktrees` (dry-run; `--apply` acts, never `--force`)
 removes only branches whose tip is on main and merged worktrees with a clean tree; the weekly workflow applies the remote part.
+
+## Promoted lessons
+
+Lessons from [docs/LESSONS.md](docs/LESSONS.md) seen on 3 different days; the nightly retro adds them here
+([prompt](docs/ops/nightly-retro.md)). Each is checked on every PR. None yet.
 
 ## Session state
 

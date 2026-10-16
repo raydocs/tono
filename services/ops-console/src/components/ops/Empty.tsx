@@ -1,3 +1,4 @@
+import { Action } from '@/components/ops/Action';
 import { copy } from '@/copy/copy';
 
 export function Empty({ message = copy.emptyMigrated }: { message?: string }) {
@@ -23,5 +24,21 @@ export function Empty({ message = copy.emptyMigrated }: { message?: string }) {
 export function EmptyLine({ message }: { message: string }) {
   return (
     <p className="text-body text-[var(--muted-foreground)]" role="status">{message}</p>
+  );
+}
+
+/**
+ * A read that failed, in one line, with the way to ask again.
+ *
+ * Plain-text errors used to end at the sentence: the operator's only move was
+ * to reload the whole console. When a refetch exists the page passes it as
+ * `onRetry` and the sentence gets a retry button beside it (under it on a phone).
+ */
+export function ErrorLine({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <p className="tone-sev tone-fg text-body">{message}</p>
+      {onRetry ? <Action onClick={onRetry}>{copy.retry}</Action> : null}
+    </div>
   );
 }

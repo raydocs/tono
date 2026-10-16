@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Search, UserRound } from 'lucide-react';
 import {
   DropdownMenu,
@@ -10,7 +10,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Action } from '@/components/ops/Action';
 import { copy } from '@/copy/copy';
+import { formatClock } from '@/lib/display';
 import { cn } from '@/lib/utils';
 import { BLANK_ROUTE, readRoute, writeRoute, type OpsRoute } from '@/lib/hash-route';
 import { trafficRange } from '@/lib/api-traffic';
@@ -44,6 +46,7 @@ export function Shell({
   customers,
   funnel,
   incidents,
+  unreachable,
 }: {
   children: ReactNode;
   fleet: FleetState;
@@ -55,6 +58,8 @@ export function Shell({
   /** ⌘K searches the people who have no customer row too; null until it lands. */
   funnel: FunnelDto | null;
   incidents: IncidentDto[];
+  /** Set while a shared read has no answer from the hub; `since` is when the oldest copy on screen arrived. */
+  unreachable?: { since: number | null; onRetry: () => void } | null;
 }) {
   const [route, setRoute] = useState<OpsRoute>(() => (
     typeof window === 'undefined' ? BLANK_ROUTE : readRoute()
@@ -63,6 +68,25 @@ export function Shell({
   const theme = useTheme();
   const role = currentRole();
   const context = navigationContext(route, role);
+  const main = useRef<HTMLElement>(null);
+  // A page is the route minus its query: opening a drawer or typing a filter
+  // must not move focus, but arriving somewhere else must be announced.
+  const pageKey = [route.page, route.nodeName, route.customerId, route.section].join('/');
+  const shownPage = useRef(pageKey);
+
+  useEffect(() => {
+    document.title = `${context.title} · ${copy.brand}`;
+  }, [context.title]);
+
+  useEffect(() => {
+    if (shownPage.current === pageKey) return;
+    shownPage.current = pageKey;
+    const active = document.activeElement;
+    const typing = active instanceof HTMLElement
+      && (active.closest('[role="dialog"][data-state="open"]') !== null
+        || active.matches('input, textarea, select, [contenteditable="true"]'));
+    if (!typing) main.current?.focus({ preventScroll: true });
+  }, [pageKey]);
 
   useEffect(() => {
     const sync = () => setRoute(readRoute());
@@ -81,6 +105,17 @@ export function Shell({
 
   return (
     <div className="shell-root flex min-h-screen bg-[var(--background)] text-[var(--foreground)]">
+      {/* The hash is the router, so a bare #main link would navigate; focus the landmark instead. */}
+      <a
+        href="#main"
+        className="skip-link"
+        onClick={(event) => {
+          event.preventDefault();
+          main.current?.focus({ preventScroll: true });
+        }}
+      >
+        {copy.skipToContent}
+      </a>
       <Navigation route={route} role={role} />
 
       <div className="shell-frame flex min-w-0 flex-1 flex-col">
@@ -107,10 +142,19 @@ export function Shell({
           </div>
         ) : null}
 
-        <main className="shell-main flex-1">
+        {unreachable && !(fleet.status === 'error' && fleet.sessionExpired) ? (
+          <div className="banner-alert flex flex-wrap items-center justify-between gap-3 px-4 py-3 min-[960px]:px-6" role="alert">
+            <span className="min-w-0">
+              {copy.shellUnreachable(unreachable.since === null ? null : formatClock(unreachable.since))}
+            </span>
+            <Action onClick={unreachable.onRetry}>{copy.retry}</Action>
+          </div>
+        ) : null}
+
+        <main id="main" ref={main} tabIndex={-1} className="shell-main flex-1">
           {route.legacyFilter ? <p className="px-6 py-3 text-fine" role="status">{copy.legacyFilterNotice}</p> : null}
           {route.returnToTraffic ? <div className="flex flex-wrap items-center gap-3 px-6 py-3 text-fine">
-            <button type="button" className="text-[color:var(--accent)] hover:underline"
+            <button type="button" className="text-[color:var(--accent-text)] hover:underline"
               onClick={() => writeRoute({ ...BLANK_ROUTE, page: 'traffic', range: route.range })}>
               {copy.traffic.back(copy.traffic.range[trafficRange(route.range)])}
             </button><span>{copy.traffic.detailWindow}</span>
@@ -150,7 +194,7 @@ function SearchBox() {
       <input
         id="ops-search"
         readOnly
-        className="hidden min-[960px]:block h-8 w-64 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] pl-3 pr-12 text-body outline-none placeholder:text-[var(--muted-foreground)]"
+        className="hidden min-[960px]:block h-8 w-64 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] pl-3 pr-12 text-body placeholder:text-[var(--muted-foreground)]"
         placeholder={copy.searchPrompt}
         onFocus={() => {
           const event = new KeyboardEvent('keydown', { key: 'k', metaKey: true });
@@ -181,7 +225,7 @@ function PreferencesMenu({
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={copy.preferences}
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[999px] border border-[var(--hairline)] bg-[var(--background)] text-[var(--muted-foreground)] outline-none hover:text-[var(--foreground)]"
+        className="shell-avatar flex h-8 w-8 shrink-0 items-center justify-center rounded-[999px] border border-[var(--hairline)] bg-[var(--background)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
       >
         <UserRound size={14} strokeWidth={1.75} />
       </DropdownMenuTrigger>

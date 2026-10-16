@@ -277,6 +277,9 @@ pub struct TonoInner {
     pub fsm: ConnectionFsm,
     /// Last observed kill switch aggregate.
     pub kill_switch: Option<KillSwitchStatus>,
+    /// The last completed release kept the secondary AI hold (Quit or a replacement sign-in,
+    /// decision 125). An idle App still owes the user a full release on an explicit Sign Out.
+    pub ai_hold_retained: bool,
     /// Last observed `network_events.counter` from the Service `/status` feed.
     pub network_events_counter: Option<u64>,
     /// Per-start controller secret of the running runtime (memory only, §5).
@@ -292,10 +295,16 @@ pub struct TonoInner {
     /// switch bumps it; an in-flight attempt re-checks it at every stage
     /// boundary and exits without side effects when it moved.
     pub connect_generation: u64,
+    /// The one loop retrying a refused health-failure release, with the generation it retries
+    /// for. The token is held by the loop itself, so an aborted or finished loop frees it.
+    pub retry_owner: Option<(u64, std::sync::Weak<()>)>,
     /// Immediate cancellation signal for read-only/current-stage work. Privileged IPC mutations
     /// are deliberately detached and reconcile after commit, but the user-facing transaction no
     /// longer waits for them after Disconnect, node replacement, Quit, or its absolute deadline.
     pub connect_cancellation: CancellationToken,
+    /// The release ticket of the latest admitted attempt: taken when it began, then the
+    /// generation the Service admitted it under. Teardowns of that session send its generation.
+    pub release_ticket: crate::core::service::ReleaseTicket,
     /// The intent of the latest generation bump (H-1): `true` when the
     /// bumper releases the barrier (disconnect / sign-out / quit), `false`
     /// when it re-arms or keeps blocking (node switch, catalog teardown).
@@ -362,6 +371,10 @@ pub struct TonoInner {
     /// and safety checks (`managed-traffic-policy.json`).
     pub policy_tracker: tono_core::policy::PolicyTracker,
     pub traffic_policy: Option<tono_core::policy::TonoTrafficPolicy>,
+    /// The signed response `traffic_policy` was read from, exactly as the control plane served
+    /// it. The Service re-verifies the signature before it admits any sing-box DIRECT rule
+    /// (#1280), so these bytes are forwarded unchanged and never rebuilt from the document.
+    pub traffic_policy_response: Option<tono_core::policy::TonoTrafficPolicyResponse>,
     /// A policy *behavior change* that arrived while the FSM was Connecting
     /// (F5). `handle_network_change_inner` has nothing to act on mid-connect —
     /// no session exists to tear down — so the change is recorded here and the
@@ -579,6 +592,26 @@ impl TonoInner {
         self.connect_error_at_ms = None;
     }
 
+    /// Take the sole right to retry a refused health-failure release for `generation`, or
+    /// `None` when another live loop already holds it (several health handlers can receive the
+    /// same failed release) or when `generation` is no longer the current one. The loop keeps the returned token for
+    /// as long as it retries.
+    pub fn claim_health_retry(&mut self, generation: u64) -> Option<std::sync::Arc<()>> {
+        // A late joiner of a retired session's failure claims nothing, and above all must not
+        // overwrite the slot of the current session's owner.
+        if generation != self.connect_generation {
+            return None;
+        }
+        if let Some((owner, token)) = &self.retry_owner {
+            if *owner == generation && token.strong_count() > 0 {
+                return None;
+            }
+        }
+        let token = std::sync::Arc::new(());
+        self.retry_owner = Some((generation, std::sync::Arc::downgrade(&token)));
+        Some(token)
+    }
+
     /// Retire the current connection generation and wake every stage waiting on its cancellation
     /// token. `release_on_stale` preserves the existing late-commit contract: releasing flows
     /// patch a late arm; protected reconnect/switch flows keep the barrier.
@@ -611,6 +644,9 @@ impl TonoInner {
     fn retire_connection_generation_as(&mut self, release_on_stale: bool, automatic: bool) {
         let retired = self.connect_generation;
         self.connect_generation = self.connect_generation.wrapping_add(1);
+        // The retry loop of the retired session is aborted or stops at its next ownership
+        // check; its right to retry must not outlive the session.
+        self.retry_owner = None;
         self.release_on_stale = release_on_stale;
         // A deferred policy change belongs to the attempt being retired (F5).
         self.pending_policy_change = None;
@@ -803,12 +839,15 @@ impl TonoState {
                 server_test_cancellation: None,
                 fsm: ConnectionFsm::new(),
                 kill_switch: None,
+                ai_hold_retained: false,
                 network_events_counter: None,
                 controller_secret: None,
                 controller_port: None,
                 controller_generation: 0,
                 connect_generation: 0,
+                retry_owner: None,
                 connect_cancellation: CancellationToken::new(),
+                release_ticket: Default::default(),
                 release_on_stale: false,
                 retired_intents: VecDeque::new(),
                 last_core_pid: None,
@@ -830,6 +869,7 @@ impl TonoState {
                 hy2_switch: Default::default(),
                 policy_tracker: tono_core::policy::PolicyTracker::new(),
                 traffic_policy: None,
+                traffic_policy_response: None,
                 pending_policy_change: None,
                 applied_wechat_path_regexes: None,
                 optional_direct_active: false,
@@ -1095,6 +1135,116 @@ pub(crate) fn open_private_append(path: &std::path::Path) -> Result<std::fs::Fil
         .with_context(|| format!("failed to open {}", path.display()))?;
     file.seek(SeekFrom::End(0))?;
     Ok(file)
+}
+
+/// A directory held open so the path that named it cannot be re-pointed behind a later reopen
+/// (win2-F3). The audit writer pins its folder once; a respawn after a crash reopens the log by
+/// path again, and the private-file primitive checks only the final path component, so a parent
+/// replaced by a junction or symlink in between would redirect the write. On Windows the handle
+/// is held with traversal access and without `FILE_SHARE_DELETE`, so the folder itself cannot be
+/// renamed or replaced while it is open (an ancestor junction can still be re-pointed; the
+/// path checks catch that unless it is swapped back in between), and [`Self::still_names`] proves the path still resolves to it.
+#[derive(Debug)]
+pub(crate) struct PinnedDirectory {
+    #[cfg(windows)]
+    handle: std::fs::File,
+    #[cfg(unix)]
+    identity: (u64, u64),
+}
+
+#[cfg(unix)]
+impl PinnedDirectory {
+    fn identity(path: &std::path::Path) -> Result<(u64, u64)> {
+        use std::os::unix::fs::MetadataExt as _;
+
+        let metadata = std::fs::symlink_metadata(path)
+            .with_context(|| format!("failed to inspect {}", path.display()))?;
+        if !metadata.is_dir() {
+            anyhow::bail!("{} is not a plain directory", path.display());
+        }
+        Ok((metadata.dev(), metadata.ino()))
+    }
+
+    pub(crate) fn open(path: &std::path::Path) -> Result<Self> {
+        Ok(Self { identity: Self::identity(path)? })
+    }
+
+    pub(crate) fn still_names(&self, path: &std::path::Path) -> Result<()> {
+        if Self::identity(path)? != self.identity {
+            anyhow::bail!("{} no longer names the directory it was pinned to", path.display());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+impl PinnedDirectory {
+    /// Open `path` as a directory, refusing a reparse point (junction or symlink) at the path.
+    fn open_handle(path: &std::path::Path, share_delete: bool) -> Result<std::fs::File> {
+        use std::os::windows::{ffi::OsStrExt as _, io::{AsRawHandle as _, FromRawHandle as _}};
+        use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+        use windows_sys::Win32::Storage::FileSystem::{
+            BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+            FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, GetFileInformationByHandle, OPEN_EXISTING,
+        };
+
+        let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+        wide.push(0);
+        let share = FILE_SHARE_READ | FILE_SHARE_WRITE | if share_delete { FILE_SHARE_DELETE } else { 0 };
+        let handle = unsafe {
+            CreateFileW(
+                wide.as_ptr(),
+                // Attribute-only access does not take part in Windows' share check, so it would not
+                // stop a rename; FILE_TRAVERSE does.
+                FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
+                share,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                std::ptr::null_mut(),
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(std::io::Error::last_os_error())
+                .with_context(|| format!("failed to open directory {}", path.display()));
+        }
+        let file = unsafe { std::fs::File::from_raw_handle(handle) };
+        let mut information = BY_HANDLE_FILE_INFORMATION::default();
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) } == 0 {
+            return Err(std::io::Error::last_os_error())
+                .with_context(|| format!("failed to inspect directory {}", path.display()));
+        }
+        if information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0
+            || information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        {
+            anyhow::bail!("{} is not a plain directory", path.display());
+        }
+        Ok(file)
+    }
+
+    fn identity(file: &std::fs::File) -> Result<(u32, u32, u32)> {
+        use std::os::windows::io::AsRawHandle as _;
+        use windows_sys::Win32::Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle};
+
+        let mut information = BY_HANDLE_FILE_INFORMATION::default();
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) } == 0 {
+            return Err(std::io::Error::last_os_error()).context("failed to read directory identity");
+        }
+        Ok((information.dwVolumeSerialNumber, information.nFileIndexHigh, information.nFileIndexLow))
+    }
+
+    pub(crate) fn open(path: &std::path::Path) -> Result<Self> {
+        Ok(Self { handle: Self::open_handle(path, false)? })
+    }
+
+    pub(crate) fn still_names(&self, path: &std::path::Path) -> Result<()> {
+        let current = Self::open_handle(path, true)?;
+        if Self::identity(&current)? != Self::identity(&self.handle)? {
+            anyhow::bail!("{} no longer names the directory it was pinned to", path.display());
+        }
+        Ok(())
+    }
 }
 
 /// Windows cache safety (§3): no reparse points, a regular file owned by the

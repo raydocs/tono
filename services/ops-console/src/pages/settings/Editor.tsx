@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Action } from '@/components/ops/Action';
 import { copy } from '@/copy/copy';
 import { formatWhen } from '@/lib/display';
 import type { LineDiff } from '@/lib/settings-publish';
 import { cn } from '@/lib/utils';
 import type { Notice } from './use-document';
+import { CopyStatus } from '@/components/ops/CopyStatus';
 
 /**
  * The furniture the two publishing sections share: a text box you can count
@@ -60,7 +62,7 @@ export function CodeBox({
         className={cn(
           LINE,
           height,
-          'relative block w-full resize-none bg-transparent py-2 pl-[52px] pr-3 outline-none',
+          'relative block w-full resize-none bg-transparent py-2 pl-[52px] pr-3',
         )}
       />
     </div>
@@ -166,7 +168,7 @@ export function DocumentMeta({
           {updatedAt === null ? never : formatWhen(updatedAt)}
         </span>
       </div>
-      <div className="ml-auto flex shrink-0 items-center gap-2">{children}</div>
+      <div className="toolbar-aside ml-auto flex shrink-0 items-center gap-2">{children}</div>
     </div>
   );
 }
@@ -202,6 +204,7 @@ export function CanonicalBlock({ title, text }: { title: string; text: string })
         >
           {copied ? copy.settings.copied : copy.settings.copyText}
         </button>
+        <CopyStatus copied={copied} message={copy.settings.copied} />
       </div>
       <pre className={cn('max-h-[200px] overflow-auto rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] p-3 whitespace-pre', LINE)}>
         {text}
@@ -211,7 +214,11 @@ export function CanonicalBlock({ title, text }: { title: string; text: string })
 }
 
 /** The loading and error states both editors show before there is a document. */
-export function DocumentGate({ status, message }: { status: 'loading' | 'error'; message: string }) {
+export function DocumentGate({ status, message, onRetry }: {
+  status: 'loading' | 'error';
+  message: string;
+  onRetry?: () => void;
+}) {
   if (status === 'loading') {
     return (
       <div
@@ -224,7 +231,8 @@ export function DocumentGate({ status, message }: { status: 'loading' | 'error';
   }
   return (
     <div className="panel-error rounded-[10px] px-5 py-10 text-center" role="alert">
-      {message || copy.loadError}
+      <p>{message || copy.loadError}</p>
+      {onRetry ? <Action className="mt-3" onClick={onRetry}>{copy.retry}</Action> : null}
     </div>
   );
 }

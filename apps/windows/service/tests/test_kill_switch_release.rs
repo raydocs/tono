@@ -38,6 +38,7 @@ async fn start(credentials: &OwnerCredentials, token: &str) -> Result<OwnerSessi
             macos_proxy: None,
             kill_switch: None,
             windows_kill_switch: None,
+            release_generation: None,
         },
     )
     .await?;
@@ -83,7 +84,7 @@ async fn kill_switch_release_succeeds_after_stop_cleared_the_owner() -> Result<(
     let session = start(&credentials, &token).await?;
     stop_without_release(&credentials, &session).await;
 
-    let release = client_release_kill_switch(&credentials).await?;
+    let release = client_release_kill_switch(&credentials, None).await?;
     assert_eq!(
         release.code, 0,
         "release after stop(false) must succeed, got: {}",
@@ -115,7 +116,7 @@ async fn disconnect_path_routes_reach_their_handlers_after_stop() -> Result<()> 
 
     let not_active = ServiceErrorCode::NotActive as u16;
 
-    let dns_restore = client_restore_protected_dns(&credentials).await?;
+    let dns_restore = client_restore_protected_dns(&credentials, None).await?;
     assert_eq!(
         dns_restore.code, 0,
         "dns/restore after stop must succeed (nothing to restore): {}",

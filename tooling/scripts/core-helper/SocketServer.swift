@@ -819,7 +819,34 @@ final class SocketServer {
     }
 
     private func handleRuntime(_ request: HTTPRequest, client: Int32, owner: SessionOwner?) throws {
+            if let kind = Self.releaseRequestKind(method: request.method, path: request.path) {
+                try Self.enforceSessionGeneration(request.generation, kind: kind)
+            }
             switch (request.method, request.path) {
+            case ("POST", "/session/admit"):
+                // Body `{"expectedGeneration": G}`: the generation the app
+                // read from `/session/status` just before (R-F3). An empty
+                // body is an app that predates the check.
+                var expected: UInt64?
+                if !request.body.isEmpty {
+                    let object = try jsonObject(request.body)
+                    guard object.count == 1, let number = object["expectedGeneration"] as? NSNumber else {
+                        throw HelperFailure.invalid("Invalid session admission.")
+                    }
+                    expected = number.uint64Value
+                }
+                let generation = try Self.admitSession(expectedGeneration: expected)
+                sendResponse(client, status: 200, object: ["ok": true, "generation": NSNumber(value: generation)])
+            case ("GET", "/session/status"):
+                guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
+                var object: [String: Any] = ["ok": true]
+                if let record = try? ReleaseAuthority().load() {
+                    object["mode"] = record.mode.rawValue
+                    object["generation"] = NSNumber(value: record.generation)
+                } else {
+                    object["mode"] = "unknown"
+                }
+                sendResponse(client, status: 200, object: object)
             case ("GET", "/version"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
                 sendResponse(client, status: 200, object: ["ok": true, "version": helperVersion])
@@ -953,6 +980,81 @@ final class SocketServer {
             default:
                 sendResponse(client, status: 404, object: ["ok": false, "error": "Not found."])
             }
+    }
+
+    /// Which requests change the network for a session. Reads, updates and
+    /// the upgrade path are not session effects.
+    static func releaseRequestKind(method: String, path: String) -> ReleaseAuthority.RequestKind? {
+        switch (method, path) {
+        case ("POST", "/core/start"), ("POST", "/core/sync"), ("POST", "/killswitch/arm"), ("POST", "/dns/enable"):
+            return .protective
+        case ("DELETE", "/core/stop"), ("POST", "/killswitch/quit"), ("POST", "/killswitch/disarm"),
+             ("POST", "/killswitch/release"), ("POST", "/dns/restore"):
+            return .releasing
+        default:
+            return nil
+        }
+    }
+
+    /// An effect from an earlier session (a teardown or arm queued before a
+    /// Restore and a newer Connect) is refused instead of touching the new
+    /// session. Nothing is admitted implicitly: a protective request on a
+    /// released machine, and any release-direction request, must name the
+    /// current generation (R-F3, R-F4).
+    ///
+    /// Decided under C, so it is ordered against every release and every
+    /// admission. The effect runs after C is let go but still inside the
+    /// update lock this request holds, which also serialises
+    /// `/session/admit`: no newer session can be admitted between this check
+    /// and the effect, and a release that starts in between boots out and
+    /// kills this daemon before it acts.
+    static func enforceSessionGeneration(
+        _ generation: UInt64?,
+        kind: ReleaseAuthority.RequestKind,
+        authority: ReleaseAuthority = ReleaseAuthority()
+    ) throws {
+        let record: ReleaseAuthority.Record
+        do {
+            record = try authority.withLock(timeout: 1.5) { _ in try authority.load() }
+        } catch ReleaseAuthority.Failure.busy {
+            throw HelperFailure.coded(
+                code: ReleaseAuthority.AdmissionRefusal.releaseInProgress.code,
+                message: ReleaseAuthority.AdmissionRefusal.releaseInProgress.message
+            )
+        } catch {
+            // A release-direction effect never needs a trusted record: with
+            // the record unreadable no session can be admitted.
+            if kind == .releasing { return }
+            throw HelperFailure.coded(
+                code: ReleaseAuthority.AdmissionRefusal.recordCorrupt.code,
+                message: ReleaseAuthority.AdmissionRefusal.recordCorrupt.message
+            )
+        }
+        switch ReleaseAuthority.verdict(record: record, generation: generation, kind: kind) {
+        case .allowed:
+            return
+        case .needsAdmission:
+            throw HelperFailure.coded(
+                code: "SESSION_NOT_ADMITTED",
+                message: "This request does not belong to an admitted Tono session and was not applied. Choose Connect again."
+            )
+        case .stale:
+            throw HelperFailure.coded(
+                code: "STALE_GENERATION",
+                message: "This request belongs to an earlier Tono session and was not applied."
+            )
+        }
+    }
+
+    static func admitSession(expectedGeneration: UInt64?) throws -> UInt64 {
+        do {
+            return try ReleaseAuthority().admit(expectedGeneration: expectedGeneration, restoreExecutor: {
+                guard FileManager.default.fileExists(atPath: UpdateExecutor.plist) else { return }
+                _ = try? KillSwitchManager.run("/bin/launchctl", ["bootstrap", "system", UpdateExecutor.plist], deadline: 5)
+            })
+        } catch let refusal as ReleaseAuthority.AdmissionRefusal {
+            throw HelperFailure.coded(code: refusal.code, message: refusal.message)
+        }
     }
 
     private func handleUpdate(_ request: HTTPRequest, peer: TonoAuthenticatedPeer, client: Int32) throws {

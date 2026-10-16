@@ -56,6 +56,48 @@ final class ConnectionCoordinator {
 
     private var deferredConnect: (id: UUID, task: Task<Void, Never>)?
 
+    /// The helper session that connect, reconnect and teardown tasks belong
+    /// to. Each task captures the box current when it is created; a
+    /// preemptive Restore replaces it, so late work from the earlier session
+    /// is refused by the helper instead of touching the next one.
+    private(set) var helperSession = HelperSessionGeneration()
+
+    /// Retires every task of the current session for a preemptive Restore
+    /// internet. Nothing is awaited: the release service ends the old
+    /// writers, and the earlier session's late helper requests carry its
+    /// generation. Teardowns still queued cannot publish over the result.
+    func beginPreemptiveRelease() {
+        bumpGeneration()
+        cancelConnectionTasks()
+        cancelReconnectTasks()
+        nodeSwitchTask?.cancel()
+        nodeSwitchTask = nil
+        configReloadTask?.cancel()
+        configReloadTask = nil
+        coreMonitorTask?.cancel()
+        coreMonitorTask = nil
+        disconnectRequestID &+= 1
+        disconnectQueueReleaseIntent = false
+        explicitReleaseDominatesQuit = true
+        helperSession.retire()
+        helperSession = HelperSessionGeneration()
+    }
+
+    /// The user's own Connect: a session not yet admitted is replaced by one
+    /// that may admit a released machine. Automatic connects keep the box
+    /// they have, which cannot (R-F3).
+    func beginUserConnect() {
+        guard helperSession.value == nil, !helperSession.userInitiated else { return }
+        helperSession.retire()
+        helperSession = HelperSessionGeneration(userInitiated: true)
+    }
+
+    /// A preemptive release that could not confirm the network is restored
+    /// keeps the release intent, like the queued path, until the user connects.
+    func notePreemptiveReleaseUnconfirmed() {
+        disconnectQueueReleaseIntent = true
+    }
+
     /// Whether the pending or in-flight teardown queue's newest request is an
     /// explicit release, or was one that could not release PF. Newest-wins,
     /// matching `disconnectRequestID`: a later teardown request replaces the
@@ -81,10 +123,13 @@ final class ConnectionCoordinator {
         if disposition == .explicit { explicitReleaseDominatesQuit = true }
         disconnectQueueReleaseIntent = releaseIntent
         let previousDisconnect = disconnectSequence
+        let session = helperSession
         disconnectSequence = Task {
             await previousDisconnect?.value
             for task in pendingTasks { await task.value }
-            await operation(requestID)
+            await HelperSessionGeneration.$current.withValue(session) {
+                await operation(requestID)
+            }
         }
     }
 
@@ -246,11 +291,14 @@ final class ConnectionCoordinator {
             await onWatchdog(attemptID)
         }
 
+        let session = helperSession
         connectTask = Task { [weak self] in
             guard let self, !Task.isCancelled,
                   self.protectionOperationGeneration == currentGeneration,
                   self.connectAttemptID == attemptID else { return }
-            await perform(attemptID, currentGeneration)
+            await HelperSessionGeneration.$current.withValue(session) {
+                await perform(attemptID, currentGeneration)
+            }
         }
     }
 
@@ -295,6 +343,7 @@ final class ConnectionCoordinator {
         let attemptID = UUID()
         protectedReconnectID = attemptID
         onScheduled(delay)
+        let session = helperSession
         protectedReconnectTask = Task { [weak self] in
             if delay > 0 {
                 try? await Task.sleep(for: .seconds(delay))
@@ -303,7 +352,9 @@ final class ConnectionCoordinator {
                   self.protectedReconnectID == attemptID else { return }
             self.protectedReconnectTask = nil
             self.protectedReconnectID = nil
-            await perform(attemptID)
+            await HelperSessionGeneration.$current.withValue(session) {
+                await perform(attemptID)
+            }
         }
     }
 
@@ -322,6 +373,7 @@ final class ConnectionCoordinator {
 
         let recoveryID = UUID()
         protectedReconnectID = recoveryID
+        let session = helperSession
         protectedReconnectTask = Task { [weak self] in
             defer {
                 if let self, self.protectedReconnectID == recoveryID {
@@ -344,7 +396,9 @@ final class ConnectionCoordinator {
                     try? await Task.sleep(for: .seconds(TimeInterval(delay)))
                 }
                 guard !Task.isCancelled else { return }
-                let didConnect = await performAttempt()
+                let didConnect = await HelperSessionGeneration.$current.withValue(session) {
+                    await performAttempt()
+                }
                 if didConnect {
                     return
                 }

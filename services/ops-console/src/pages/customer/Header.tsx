@@ -10,6 +10,7 @@ import { usePrivacy } from '@/lib/privacy';
 import { useAsk } from './ask';
 import { ExpiryDrawer } from './ExpiryDrawer';
 import { SelectField, TextField } from '../settings/form';
+import { CopyStatus } from '@/components/ops/CopyStatus';
 
 /**
  * The four things this page can do to the account, in the header's own row.
@@ -96,7 +97,7 @@ export function CustomerHeader({
             {words.restore}
           </Action>
         ) : (
-          <Action onClick={() => setSuspending(true)}>{words.suspend}</Action>
+          <Action danger onClick={() => setSuspending(true)}>{words.suspend}</Action>
         )}
       </ActionRow>
 
@@ -163,6 +164,7 @@ export function CustomerWechat({ wechatId }: { wechatId: string | null }) {
       >
         {copied ? copy.wechatCopied : copy.wechatCopy}
       </Action>
+      <CopyStatus copied={copied} message={copy.wechatCopied} />
     </span>
   );
 }
@@ -255,6 +257,7 @@ function SuspendDialog({
       title={copy.suspendTitle}
       consequence={copy.suspendBody(email)}
       confirm={copy.suspendConfirm}
+      danger
       pending={ask.pending}
       failure={ask.error}
       onConfirm={() => {

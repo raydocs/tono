@@ -55,13 +55,9 @@ const PATHS = {
   upload: ['M12 19V4.6', 'm7.2 9.4 4.8-4.8 4.8 4.8', 'M4.8 20.4h14.4'],
   download: ['M12 4.2v14.4', 'm7.2 13.8 4.8 4.8 4.8-4.8', 'M4.8 20.4h14.4'],
   power: ['M12 3v9', 'M6.3 6.6a8 8 0 1 0 11.4 0'],
-  shield: [
-    'M12 21.2c4.5-1.8 7-5 7-9.2V5.6L12 3 5 5.6v6.4c0 4.2 2.5 7.4 7 9.2z',
-  ],
-  shieldCheck: [
-    'M12 21.2c4.5-1.8 7-5 7-9.2V5.6L12 3 5 5.6v6.4c0 4.2 2.5 7.4 7 9.2z',
-    'm8.9 11.8 2.2 2.2 4-4.6',
-  ],
+  // The brand's sun on the horizon, in the set's stroke: Tono's own exits.
+  sunHorizon: ['M5.8 14.2a6.2 6.2 0 0 1 12.4 0', 'M2.6 14.2h18.8', 'M7.4 18.4h9.2'],
+  pulse: ['M2.8 12.6h4.2l2.4-6 4.4 12 2.4-6h5'],
 } as const
 
 export type TonoIconName = keyof typeof PATHS

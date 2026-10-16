@@ -70,7 +70,15 @@ export function Policy() {
   }, [online, start, change, setNotice]);
 
   if (online === null) {
-    return <DocumentGate status={doc.status === 'error' ? 'error' : 'loading'} message={doc.message} />;
+    return (
+      <DocumentGate
+        status={doc.status === 'error' ? 'error' : 'loading'}
+        message={doc.message}
+        onRetry={() => {
+          void doc.reload((row) => ({ text: words.reloadDone(row.revision), detail: null, bad: false }));
+        }}
+      />
+    );
   }
 
   const draft = doc.draft;

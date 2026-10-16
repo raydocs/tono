@@ -1,5 +1,5 @@
 import type { ChangeReceiptDto, NodeHistoryEntryDto } from '@contract';
-import { EmptyLine } from '@/components/ops/Empty';
+import { EmptyLine, ErrorLine } from '@/components/ops/Empty';
 import { FoldedSection } from '@/components/ops/Section';
 import { StatusWord } from '@/components/ops/StatusWord';
 import { copy } from '@/copy/copy';
@@ -8,16 +8,19 @@ import { reasonSentence } from '@/lib/node-detail';
 import { receiptDetail } from '@/lib/receipts';
 
 /** Health changes remain readable independently of operator action receipts. */
-export function NodeHistory({ rows, state, message }: {
+export function NodeHistory({ rows, state, message, onRetry }: {
   rows: readonly NodeHistoryEntryDto[];
   state: 'loading' | 'error' | 'ready';
   message?: string;
+  onRetry?: () => void;
 }) {
   const sorted = [...rows].sort((a, b) => b.at - a.at);
   return (
     <FoldedSection title={copy.nodeSections.history} count={state === 'ready' ? sorted.length : null}>
-      {state !== 'ready' ? (
-        <EmptyLine message={state === 'loading' ? copy.loading : message || copy.loadError} />
+      {state === 'error' ? (
+        <ErrorLine message={message || copy.loadError} onRetry={onRetry} />
+      ) : state === 'loading' ? (
+        <EmptyLine message={copy.loading} />
       ) : sorted.length === 0 ? (
         <EmptyLine message={copy.nodeNoHistory} />
       ) : (
@@ -48,17 +51,21 @@ export function NodeReceipts({
   rows,
   state,
   message,
+  onRetry,
 }: {
   rows: readonly ChangeReceiptDto[];
   state: 'loading' | 'error' | 'ready';
   message?: string;
+  onRetry?: () => void;
 }) {
   const sorted = [...rows].sort((a, b) => b.at - a.at);
 
   return (
     <FoldedSection title={copy.receipt} count={state === 'ready' ? sorted.length : null}>
-      {state !== 'ready' ? (
-        <EmptyLine message={state === 'loading' ? copy.loading : message || copy.loadError} />
+      {state === 'error' ? (
+        <ErrorLine message={message || copy.loadError} onRetry={onRetry} />
+      ) : state === 'loading' ? (
+        <EmptyLine message={copy.loading} />
       ) : sorted.length === 0 ? (
         <EmptyLine message={copy.nodeNoReceipts} />
       ) : (

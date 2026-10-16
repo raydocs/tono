@@ -12,7 +12,7 @@ reimplemented in the React admin under `services/control-plane/admin`.
 
 ## Tailscale
 
-The optional Tono userspace sidecar is built from Tailscale, pinned by
+The optional Tono userspace sidecar is built from Tailscale v1.104.1, pinned by
 `tooling/scripts/build-tailscale-sidecar.sh`. Tailscale is copyright Tailscale Inc. and
 contributors and is distributed under the BSD 3-Clause License. The complete
 license is available in the pinned source at `LICENSE` and at
@@ -27,7 +27,7 @@ an unprivileged app child; it is separate from Tono's root Mihomo helper.
 
 ## Sparkle
 
-Tono embeds Sparkle 2.9.6 to deliver signed application updates outside the Mac
+Tono embeds Sparkle 2.10.0 to deliver signed application updates outside the Mac
 App Store. Sparkle and its bundled third-party components are distributed under
 the licenses reproduced in `apps/macos/Tono/Resources/Sparkle-LICENSE.txt`; that file is
 also embedded in the final application bundle. Tono requires both Sparkle

@@ -3,6 +3,7 @@ import type { CustomerSummaryDto, FunnelRowDto } from '@contract';
 import type { DataColumn } from '@/components/ops/DataTable';
 import { copy } from '@/copy/copy';
 import type { ListRow } from '@/lib/funnel';
+import { CustomerCell } from './customer-cell';
 
 type Mask = (value: string) => string;
 
@@ -17,7 +18,8 @@ type Mask = (value: string) => string;
  * fix.
  *
  * The address and the handle are the two things there are, and both mask with
- * the privacy switch like everywhere else. Everything else is the em dash on
+ * the privacy switch like everywhere else; the handle is the address cell's
+ * second line, as it is for a customer. Everything else is the em dash on
  * its own: `Value`'s dash carries the source word for a measurement that
  * failed to arrive, and this is not that — there is nothing to measure yet.
  */
@@ -29,19 +31,12 @@ function inviteCell(
 ): ReactNode {
   if (id === 'status') return <span className="ops-tag">{copy.inviteTag}</span>;
   if (id === 'customer') {
-    const shown = mask(row.email);
     return (
-      <div className="flex items-baseline gap-2" title={shown}>
-        <span className="min-w-0 truncate text-row">{shown}</span>
-      </div>
+      <CustomerCell
+        address={mask(row.email)}
+        wechatId={wechat === null || row.wechatId === null ? null : wechat(row.wechatId)}
+      />
     );
-  }
-  if (id === 'wechat' && wechat !== null) {
-    if (row.wechatId === null || row.wechatId === '') {
-      return <span className="text-[var(--muted-foreground)]">{copy.missing}</span>;
-    }
-    const handle = wechat(row.wechatId);
-    return <span className="block min-w-0 truncate" title={handle}>{handle}</span>;
   }
   // The selection box included: nothing here can be renewed or refreshed.
   if (id === 'pick') return null;
@@ -51,7 +46,6 @@ function inviteCell(
 function inviteSort(id: string, row: FunnelRowDto): string | number | null {
   if (id === 'status') return copy.inviteTag;
   if (id === 'customer') return row.email;
-  if (id === 'wechat') return row.wechatId ?? '';
   return null;
 }
 

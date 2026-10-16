@@ -61,8 +61,10 @@
    text, which is why the page-level overflow check never caught it. The
    floor (920 + 128 readable for notes) keeps the column on screen behind
    the DataTable's own inner scroll; the page itself never scrolls. */
-.clients-page .clients-release-table table {
-  min-width: 1048px;
+@media (min-width: 641px) {
+  .clients-page .clients-release-table table {
+    min-width: 1048px;
+  }
 }
 
 @media (max-width: 640px) {
@@ -71,7 +73,25 @@
     border-radius: 18px;
   }
 
-  /* 44 px targets, sized locally — the shared controls are untouched. */
+  /* The 600 px floor above is a desktop rule: it made the five columns
+     (platform plus four bands) scroll inside the 350 px card, clipping the
+     third. On a phone the table sizes itself to its content (the same
+     shrink-wrapped pattern as `.nodes-table`): headers never wrap, cells keep
+     6 px of padding, and the band columns share what is left, so all five
+     fit with no sideways scroll. */
+  .clients-page .clients-matrix table {
+    min-width: 0;
+    table-layout: auto;
+  }
+  .clients-page .clients-matrix :is(th, td) {
+    padding-inline: 6px;
+    white-space: nowrap;
+  }
+  .clients-page .clients-matrix :is(th, td):first-child {
+    width: 1%;
+  }
+
+  /* The matrix links are bare anchors, not a shared control: 44 px here. */
   .clients-page .clients-matrix td a {
     display: inline-flex;
     align-items: center;
@@ -80,7 +100,10 @@
     min-height: 44px;
   }
 
-  .clients-page .clients-release-table .ops-action {
-    min-height: 44px;
+  /* The phone drops the checks and notes columns, so the fixed columns add up
+     to 592 px: channel, version and the actions come first and sit inside
+     the first 390 px, the dates scroll behind them in the table's own box. */
+  .clients-page .clients-release-table table {
+    min-width: 592px;
   }
 }

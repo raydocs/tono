@@ -59,6 +59,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/tono')>()),
   tonoConnect: mocks.tonoConnect,
   tonoDisconnect: mocks.tonoDisconnect,
+  tonoRestoreInternet: mocks.tonoDisconnect,
   tonoRetryNow: mocks.tonoRetryNow,
   tonoPrepareSupportReport: mocks.tonoPrepareSupportReport,
   tonoUploadDiagnostics: mocks.tonoUploadDiagnostics,
@@ -218,7 +219,7 @@ describe('dashboard action-error ownership', () => {
     // protection must not drop on the click itself.
     expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
     fireEvent.click(
-      screen.getByRole('button', { name: 'Restore Normal Internet' }),
+      screen.getByRole('button', { name: 'Restore normal internet' }),
     )
     await waitFor(() => expect(mocks.tonoDisconnect).toHaveBeenCalled())
   })
@@ -347,7 +348,7 @@ describe('dashboard action-error ownership', () => {
       data: makeStatus({ selectedServer: 'US West 1' }),
     })
     fireEvent.click(
-      screen.getByRole('button', { name: 'Restore Normal Internet' }),
+      screen.getByRole('button', { name: 'Restore normal internet' }),
     )
     await waitFor(() => expect(mocks.tonoDisconnect).toHaveBeenCalled())
 
@@ -570,7 +571,7 @@ describe('dashboard claude residential route badge', () => {
     expect(
       screen.getByText(/profile-level routing is unavailable/),
     ).toBeDefined()
-    expect(screen.getByRole('button', { name: 'View Rules' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'View rules' })).toBeDefined()
   })
 
   it('renders standard protection badge when connected and home is not active', () => {
@@ -594,7 +595,7 @@ describe('dashboard claude residential route badge', () => {
     })
     renderDashboard()
 
-    fireEvent.click(screen.getByRole('button', { name: 'View Rules' }))
+    fireEvent.click(screen.getByRole('button', { name: 'View rules' }))
     expect(
       screen.getByText('Claude / AI Residential Protection Scope'),
     ).toBeDefined()
@@ -710,7 +711,7 @@ describe('dashboard claude residential route badge', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }))
     expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
     fireEvent.click(
-      screen.getByRole('button', { name: 'Restore Normal Internet' }),
+      screen.getByRole('button', { name: 'Restore normal internet' }),
     )
     await waitFor(() => expect(mocks.tonoDisconnect).toHaveBeenCalledOnce())
     expect(mocks.tonoConnect).not.toHaveBeenCalled()

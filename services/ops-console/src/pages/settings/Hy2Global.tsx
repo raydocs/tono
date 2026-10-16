@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Action, ActionRow } from '@/components/ops/Action';
 import { ConfirmDialog } from '@/components/ops/ConfirmDialog';
 import { Fact } from '@/components/ops/DetailDrawer';
-import { Empty } from '@/components/ops/Empty';
+import { Empty, ErrorLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
 import { measured } from '@/components/ops/measured';
 import { copy } from '@/copy/copy';
@@ -32,7 +32,7 @@ export function Hy2Global() {
     >
       <p className="text-body text-[var(--muted-foreground)]">{copy.hy2Lead}</p>
       {state.status === 'loading' ? <Empty message={copy.loading} /> : null}
-      {state.status === 'error' ? <Empty message={state.message} /> : null}
+      {state.status === 'error' ? <ErrorLine message={state.message} onRetry={state.reload} /> : null}
 
       {row === null ? null : (
         <>

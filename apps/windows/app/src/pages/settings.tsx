@@ -743,7 +743,12 @@ const AboutCard = () => {
         <UpdateViewer ref={updateRef} />
         <GlassCard>
           <h2>{t('tono.settings.about.title')}</h2>
-          <Row label={`Tono v${version}`}>
+          <div className="sea-settings-about-head">
+            <TonoLogo connected={false} size={44} variant="sun" />
+            <div>
+              <span>Tono v{version}</span>
+              <p>{t('tono.settings.about.tagline')}</p>
+            </div>
             <button
               type="button"
               className="sea-button"
@@ -754,11 +759,10 @@ const AboutCard = () => {
             >
               {t('tono.settings.about.checkUpdates')}
             </button>
-          </Row>
-          <Row
-            label={t('tono.settings.about.tagline')}
-            subtitle={t('tono.settings.about.description')}
-          />
+          </div>
+          <p className="sea-settings-about-copy">
+            {t('tono.settings.about.description')}
+          </p>
           <p className="sea-settings-about-copy">
             {t('tono.settings.about.unsigned')}
           </p>

@@ -1,0 +1,39 @@
+## 2026-10-11 · 抢占式“恢复正常网络”（Mac + Windows，测试版源码）
+- 归属：所有者 2026-10-11 直接指派（一键恢复网络可靠性），不属于 0.0.75 G1–G4；所有者 2026-10-12 指示合入 main（客户换 Wi‑Fi 后只能卸载才能上网），真机测试仍待完成；影响 macOS helper/App、Windows 服务/App。
+- 来源：分支 `claude/bounded-restore-proposal-mzjlr6`，草稿 PR #1569；提交 14dc9c4（Mac helper）、fe905ce（Mac App）、4ac679c（Windows 服务）、ee2a908（Windows App）及其后续。2026-10-12 按所有者指示合入 main。
+- 缺陷修复：旧版：“恢复正常网络”要排在旧连接、旧更新、旧守卫之后执行，旧任务可能把恢复卡住，也可能在之后重新挡网，或者破坏新的连接。改后：恢复由独立的解除组件执行（Mac 的 launchd job、Windows 的 `TonoRelease` 服务），不等旧任务；先隔离并终止旧写入者，再解除，按分项读回；答复只有 restored、partial、unknown 三种。Connect 只能在机器锁下通过准入，带着过期代数的旧请求会被拒绝。
+- 新增/优化：Windows 协议修订 21，新增错误码 1017–1020（解除中、未收尾、记录损坏、代数过期）；Mac helper 4.52.50。设计依据和简化见 [IMPLEMENTATION.md](../reports/bounded-restore-spike-2026-10-11/IMPLEMENTATION.md)。
+- 工程与测试：Mac 新增 helper 特权自测，加上 `PreemptiveReleaseSessionTests`；Windows 新增释放模块单测和前端 vitest 用例。
+- 验证：
+  - macOS CI fe905ce 特权测试 18/18 `PASS release`。
+  - Linux 上 `cargo test --features standalone,client,test --lib release` 66 通过。
+  - 本地 vitest 7 个文件 133/133 通过。
+  - Windows 服务代码只由托管 Windows CI 编译，结果以 PR #1569 的 CI 为准。
+  - 未执行：任何真机测试。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：见 IMPLEMENTATION.md §4。所有机制都没有真机实验验证；SCM 注册、Job 关闭、计划任务停用、launchd bootout 的真实行为待测试用户检验。不能声称“恢复已可靠”。
+- Sol 审查第 1 轮修复（6 个主要问题、2 个次要问题全部接受）：
+  - 判断“已恢复”改用终结证据，不再看两次读回一致（决策 094）。Windows 新增 WMI DNS 账本。
+  - 未结束的任务在重试和崩溃之后保留。Windows 要证明 Job 已清空；Mac 要求 session 和进程组为空。
+  - 每次连接带自己的代数；拆除请求（`ReleaseKillSwitch`、`RestoreProtectedDns`、Mac 解除方向请求）在服务端核对代数。
+  - 失败一律不当成功：计划任务、扫描、bootout、最后落盘。
+  - Mac 的 helper 守护进程在 worker 崩溃后恢复。
+  - Mac 的 Tono 系统代理纳入结果。
+  - 紧急命令与 C 的边界写明。
+  - Mac helper 升到 4.52.51。
+  - 验证：Linux 上 `cargo test --lib release broker_ledger` 74 通过；整个 lib 有 476 通过，另有 3 个失败，这 3 个在改动前就只在 Linux 上失败。Swift 和 Windows 代码由托管 CI 编译，结果以 PR #1569 的 CI 为准。未执行：真机测试。
+- Sol 审查第 2 轮修复（4 个主要问题全部接受，详见 IMPLEMENTATION.md §3c）：
+  - Windows WMI 账本：条目在进程创建前独占创建并落盘；只有脚本走到最后、每个 CIM 调用都有答复才删除；Connect 准入在 C 下直接读账本；首次使用时为旧版本记一个条目。
+  - Windows “已恢复”要等 Job 证明清空，并由解除服务再读一次全部分项；记录写成 `completed` 后才准入。解除服务死后不再当作 Job 已证明清空。
+  - 重启不再自动清除未完成的状态（Mac + Windows），要在新的开机里再恢复一次。Windows 开机身份改用独立的易失注册表键，加开机时间和计数器判断。
+  - Windows 旧的“恢复正常网络”结果被新操作取代时不改任何状态；更新事务的 Disconnect 带代数并在服务端核对。
+  - Mac 清除系统代理最多等 10 s，超时报 unknown。
+  - 决策 094 更新：去掉“重启即可清除”的说法。
+- Sol 审查第 3 轮修复（详见 IMPLEMENTATION.md §3d）：
+  - Windows App：“恢复正常网络”和用户的 Connect 在第一次等待前取得归属。被更新的操作超过的恢复不做任何改动；Connect 读代数期间开始了恢复，这次 Connect 作废，不解除围栏也不启动。恢复进行中点 Connect 会提示稍后再试。
+  - Windows 解除服务：答复期限到时还没证明 Job 清空，各分项风险报 unknown；最后一次读回不一致时，报告换成最后读到的结果。
+  - Mac 旧版系统代理模式的清除写明不在旧效果隔离的保证范围内。
+  - 新增回归：两个交错（旧恢复在新 Connect 之后恢复执行；旧 Connect 拿到新恢复释放的代数）和一个报告折叠测试。Linux 上 `cargo test --lib release` 76 通过。App 和 Swift 由托管 CI 编译。
+- Sol 审查第 4 轮修复：用户点 Connect 时，先在等待状态锁之前记下纪元序号，拿到锁后比较交换认领。在 Connect 排队期间点下的“恢复正常网络”不再被这个更早的 Connect 夺走归属、悄悄跳过。新增排队顺序回归（真实状态锁）。
+- 测试包（2026-10-12，老板选测试候选分支）：从 `stability/restore-test-20261012`（`8905043`，产品代码同 `15d1ea0`）构建。Mac `Tono-0.0.75-build75-arm64.zip` 已签名公证，SHA-256 `298e0f0c…ff4e6b`（run 38192923562）；Windows `Tono_0.0.75_x64-setup.exe` SHA-256 `02f6b0e9…1f1719`，无 Authenticode、自动更新关闭（run 38192924877）。只给知情测试用户，未进更新通道，未发布。
+- 测试包第二版（2026-10-12，老板要求替换还没人用的第一版）：恢复分支合入 main（`766ec9c`，含 #1584/#1585/#1586、#1478；只有依赖版本行冲突，取 main），从 `stability/restore-test-20261012b`（`0586f3a`）构建。Mac `Tono-0.0.75-build75-arm64.zip` 已签名公证，SHA-256 `b93e3764…5915fc`（run 38212837011）；Windows `Tono_0.0.75_x64-setup.exe` SHA-256 `2f9ceeaf…7a094`，无 Authenticode、自动更新关闭（run 38212839503）。第一次重建的 Mac 包因 #1585 的 `MacSeaPolishRenderTests` 断言过期失败（只在签名流程里跑），由 #1586 修复后重建。第一版作废。只给知情测试用户，未进更新通道，未发布。

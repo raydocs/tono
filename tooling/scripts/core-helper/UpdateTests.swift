@@ -619,6 +619,21 @@ func runUpdateSelfTests() -> Bool {
                                                     removeInstallation: { removals += 1 })
                   && removals == 0, "A removal deleted the helper while the AI layer was still installed")
     }
+    // Decision 121: the administrator reset removed the helper while the AI
+    // layer was pending, leaving the /etc/resolver sinkhole with nothing to
+    // retry it. Like a DNS restore failure, it now keeps the helper.
+    test("emergency-reset-keeps-helper-while-selective-layer-remains") { _ in
+        var removals = 0
+        var kept = 0
+        try check(!finishEmergencyReset(.released, clearSelectiveLayer: { false },
+                                        keepHelper: { kept += 1 }, removeInstallation: { removals += 1 })
+                  && removals == 0 && kept == 1,
+                  "An emergency reset removed the helper while the AI layer was still installed")
+        try check(finishEmergencyReset(.released, clearSelectiveLayer: { true },
+                                       keepHelper: { kept += 1 }, removeInstallation: { removals += 1 })
+                  && removals == 1 && kept == 1,
+                  "An emergency reset with the AI layer gone kept the installation")
+    }
     // A full disk can lose the recovery record while the sinkhole stays, and
     // a corrupt receipt can keep the record pending after the sinkhole is
     // gone. The removal check reads the resolver and the routes themselves,

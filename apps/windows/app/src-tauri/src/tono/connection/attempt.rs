@@ -32,7 +32,16 @@ pub(super) enum Attempt {
 /// Returns a boxed future (see [`BoxedAttempt`]); call sites `await` it as
 /// before.
 pub(super) fn attempt_for_generation<'a>(state: &'a Arc<TonoState>, app: &'a AppHandle, expected_generation: Option<u64>) -> BoxedAttempt<'a> {
-    Box::pin(attempt_inner(state, app, expected_generation))
+    Box::pin(attempt_inner(state, app, expected_generation, None))
+}
+
+/// [`attempt_for_generation`] for the user's Connect: admitted only while `owner`, its claim on
+/// the release epoch, is still current (Sol R3-F1 on PR #1569).
+pub(super) fn attempt_owned<'a>(
+    state: &'a Arc<TonoState>, app: &'a AppHandle, expected_generation: Option<u64>,
+    owner: Option<crate::core::service::ReleaseTicket>,
+) -> BoxedAttempt<'a> {
+    Box::pin(attempt_inner(state, app, expected_generation, owner))
 }
 
 /// A new attempt has not committed an overlay. `applied_wechat_path_regexes == None`
@@ -62,6 +71,9 @@ pub(crate) async fn begin_attempt(
     }
     // Abort-free: the registered reconnect/switch task may itself be admitting this attempt.
     inner.retire_connection_generation(false);
+    // Fixed now, under the lock that admits the attempt: a Restore or a newer Connect after
+    // this point leaves this attempt with an out-of-date ticket.
+    inner.release_ticket = crate::core::service::release_ticket();
     Some((inner.connect_generation, inner.connect_cancellation.clone(), account_owner))
 }
 
@@ -69,7 +81,13 @@ pub(super) fn selection_still_current(captured: Option<&str>, current: Option<&s
     captured == current
 }
 
-async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generation: Option<u64>) -> Attempt {
+async fn attempt_inner(
+    state: &Arc<TonoState>, app: &AppHandle, expected_generation: Option<u64>,
+    owner: Option<crate::core::service::ReleaseTicket>,
+) -> Attempt {
+    // Before any lock: an App with no generation yet reads one, so the ticket taken at
+    // admission has it.
+    crate::core::service::prime_release_epoch().await;
     // Admission is a lifecycle mutation too: failure may have made the FSM idle while its
     // detached cleanup still owns the Core. Do not reuse that idle window or its generation.
     let admission = state.begin_connect_mutation().await;
@@ -97,6 +115,11 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
         // The recovery TCP wait leaves the FSM idle, so a new selection may not bump the
         // generation. Check the user's preference, not the healer's possible backup dial.
         if !selection_still_current(selected_node.as_deref(), inner.selected_node.as_deref()) {
+            return Attempt::Stale;
+        }
+        // Before the attempt changes anything: a user's Connect that a Restore internet or a
+        // newer Connect overtook while it waited starts nothing.
+        if owner.is_some_and(|owner| !crate::core::service::release_ticket_current(&owner)) {
             return Attempt::Stale;
         }
         let Some((admitted_generation, cancellation, account_owner)) = begin_attempt(&mut inner, generation).await else {

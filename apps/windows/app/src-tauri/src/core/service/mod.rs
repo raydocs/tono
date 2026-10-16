@@ -8,6 +8,8 @@ pub(crate) use install::{
 };
 #[cfg(windows)]
 pub(crate) use install::tono_request_service_owner_goodbye;
+#[cfg(windows)]
+pub(crate) use install::registered_service_stopped;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::utils::dirs;
@@ -35,7 +37,7 @@ use tono_service_protocol::{
     DirectRuntimeReloadResult, DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, KillSwitchConfig,
     KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode, MacosProxyConfig, OwnerCredentials,
     OwnerSessionProof, ProxyApplyOutcome, RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest,
-    ReplaceProxyEndpointsRequest, ReplaceSingBoxRuntimeRequest, CommitSingBoxDirectRequest,
+    ReplaceProxyEndpointsRequest, ReplaceSingBoxRuntimeRequest, SignedTrafficPolicy, CommitSingBoxDirectRequest,
     RuntimeBundle, ServiceStatusSnapshot, StageRuntimeOutcome, StartClashRequest, StopClashOptions, WriterConfig,
 };
 use once_cell::sync::Lazy;
@@ -394,6 +396,19 @@ pub(crate) async fn tono_prepare_core_start() -> Result<u32> {
 /// (TW-anthropic-1) — get their stable markers; every other refusal keeps the Service's message
 /// untouched.
 fn tono_start_refusal(code: u16, message: String) -> String {
+    use tono_service_protocol::ServiceErrorCode;
+    // PROPOSAL §10 v5: a Connect the release authority did not admit says why.
+    let release_prefix = [
+        (ServiceErrorCode::ReleaseInProgress, "TONO_RELEASE_IN_PROGRESS"),
+        (ServiceErrorCode::ReleaseUnfinished, "TONO_RELEASE_UNFINISHED"),
+        (ServiceErrorCode::ReleaseRecordCorrupt, "TONO_RELEASE_RECORD_CORRUPT"),
+        (ServiceErrorCode::StaleGeneration, "TONO_STALE_GENERATION"),
+    ]
+    .into_iter()
+    .find(|(candidate, _)| code == *candidate as u16);
+    if let Some((_, prefix)) = release_prefix {
+        return format!("{prefix}: {message}");
+    }
     if code == tono_service_protocol::ServiceErrorCode::ProtectionHeldByAnotherUser as u16 {
         return format!(
             "{}: {message}",
@@ -718,6 +733,310 @@ pub(crate) async fn tono_probe_kill_switch_release_support() -> Result<Option<St
     Ok(Some(detail))
 }
 
+/// What one connect attempt may claim from the release authority (PROPOSAL §10 v5), fixed when
+/// the attempt begins and never re-read from shared state later (Sol R-F3 on PR #1569). A task
+/// that outlives a Restore internet or a newer Connect keeps its old ticket, so the Service
+/// refuses it as stale instead of admitting it under the newer generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct ReleaseTicket {
+    /// The App-local epoch: Restore internet and the user's Connect each move it on.
+    serial: u64,
+    /// Taken after a Restore internet and before the user's next Connect: refused locally.
+    fenced: bool,
+    /// The release generation the attempt runs under; after an admission, the admitted one.
+    pub(crate) generation: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ReleaseEpoch {
+    serial: u64,
+    fenced: bool,
+    generation: Option<u64>,
+}
+
+static RELEASE_EPOCH: std::sync::Mutex<ReleaseEpoch> = std::sync::Mutex::new(ReleaseEpoch {
+    serial: 0,
+    fenced: false,
+    generation: None,
+});
+
+/// Tests that move the process-wide epoch take this, so they do not overtake each other.
+#[cfg(test)]
+pub(crate) static RELEASE_EPOCH_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn release_epoch() -> std::sync::MutexGuard<'static, ReleaseEpoch> {
+    RELEASE_EPOCH
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The ticket for an attempt that begins now. Taken under the state lock that admits it.
+pub(crate) fn release_ticket() -> ReleaseTicket {
+    let epoch = *release_epoch();
+    ReleaseTicket {
+        serial: epoch.serial,
+        fenced: epoch.fenced,
+        generation: epoch.generation,
+    }
+}
+
+/// Whether a Restore internet has fenced the epoch and no user Connect has lifted it since.
+pub(crate) fn release_fenced() -> bool {
+    release_epoch().fenced
+}
+
+/// Restore internet: every ticket taken before now is out of date, and no attempt starts the
+/// Core again until the user clicks Connect.
+pub(crate) fn raise_release_fence() -> ReleaseTicket {
+    let mut epoch = release_epoch();
+    epoch.serial += 1;
+    epoch.fenced = true;
+    ReleaseTicket {
+        serial: epoch.serial,
+        fenced: true,
+        generation: epoch.generation,
+    }
+}
+
+/// Whether the operation holding `ticket` still owns the release epoch: no Restore internet and
+/// no user Connect has begun since it took the ticket.
+pub(crate) fn release_ticket_current(ticket: &ReleaseTicket) -> bool {
+    release_epoch().serial == ticket.serial
+}
+
+/// Record a generation the release authority reported to the operation holding `ticket`, unless
+/// a Restore or a Connect has moved the epoch on since that operation began.
+pub(crate) fn learn_release_generation(ticket: &ReleaseTicket, generation: u64) {
+    let mut epoch = release_epoch();
+    if epoch.serial == ticket.serial {
+        epoch.generation = Some(generation);
+    }
+}
+
+/// A stale refusal for `ticket`: fence only if nothing newer has started since it was taken.
+/// A refusal caused by the user's newer Connect must not stop that Connect's own reconnects.
+fn fence_after_stale(ticket: &ReleaseTicket) {
+    let mut epoch = release_epoch();
+    if epoch.serial == ticket.serial {
+        epoch.serial += 1;
+        epoch.fenced = true;
+    }
+}
+
+/// The release generation on disk, read now: from the release service, else from the main
+/// Service's status snapshot. `None` when neither can tell.
+pub(crate) async fn fresh_release_generation() -> Option<u64> {
+    let credentials = current_owner_credentials().ok()?;
+    #[cfg(windows)]
+    if tono_service_protocol::release_service_available()
+        && let Ok(response) = tono_service_protocol::release_status(&credentials).await
+        && let Some(status) = response.data
+        && status.mode != "unreadable"
+    {
+        return Some(status.generation);
+    }
+    tono_service_protocol::get_status(&credentials)
+        .await
+        .ok()
+        .and_then(|response| response.data)
+        .and_then(|snapshot| snapshot.release_generation)
+}
+
+/// Before an automatic attempt takes its ticket: an App that has seen no generation yet (it just
+/// started) reads one, so its first start is not sent without. A machine found released is
+/// fenced, because only the user's Connect may start again after Restore internet.
+pub(crate) async fn prime_release_epoch() {
+    let before = release_ticket();
+    if before.generation.is_some() {
+        return;
+    }
+    #[cfg(windows)]
+    {
+        let Ok(credentials) = current_owner_credentials() else {
+            return;
+        };
+        if tono_service_protocol::release_service_available()
+            && let Ok(response) = tono_service_protocol::release_status(&credentials).await
+            && let Some(status) = response.data
+            && status.mode != "unreadable"
+        {
+            let mut epoch = release_epoch();
+            if epoch.serial == before.serial && epoch.generation.is_none() {
+                epoch.generation = Some(status.generation);
+                // Already fenced (a Restore internet holds the epoch): moving the serial on
+                // would take that Restore's ownership away from it.
+                if status.mode != "secured" && !epoch.fenced {
+                    epoch.serial += 1;
+                    epoch.fenced = true;
+                }
+            }
+            return;
+        }
+    }
+    if let Some(generation) = fresh_release_generation().await {
+        let mut epoch = release_epoch();
+        if epoch.serial == before.serial && epoch.generation.is_none() {
+            epoch.generation = Some(generation);
+        }
+    }
+}
+
+/// Where the epoch stood when the user clicked Connect, read before the Connect waits for
+/// anything (Sol R4-F1 on PR #1569). It orders the click against a Restore internet that raises
+/// its fence without the state lock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ConnectStamp(u64);
+
+pub(crate) fn user_connect_stamp() -> ConnectStamp {
+    ConnectStamp(release_epoch().serial)
+}
+
+/// An explicit Connect from the user claims the release epoch, so every ticket taken before the
+/// click is out of date and a Restore internet clicked after it wins (Sol R3-F1, R4-F1). The
+/// claim is a compare-and-swap against `stamp`: a Connect that a Restore internet or another
+/// Connect overtook while it waited for the state lock gets `None` and no new identity. The
+/// fence stays as it was until [`begin_user_connect`] has read the generation: an attempt that
+/// starts in between is still refused locally.
+///
+/// The caller holds the state lock and has checked that no Restore internet is under way.
+pub(crate) fn claim_user_connect(stamp: ConnectStamp) -> Option<ReleaseTicket> {
+    let mut epoch = release_epoch();
+    if epoch.serial != stamp.0 {
+        return None;
+    }
+    epoch.serial += 1;
+    Some(ReleaseTicket {
+        serial: epoch.serial,
+        fenced: epoch.fenced,
+        generation: epoch.generation,
+    })
+}
+
+/// The second half of the user's Connect: lift the fence and record `generation`, but only while
+/// `claim` still owns the epoch. A Restore internet or a newer Connect that began during the
+/// read makes this Connect stale: it neither lifts the fence nor adopts the generation it read,
+/// which may be the one that Restore released (Sol R3-F1).
+pub(crate) fn finish_user_connect(claim: &ReleaseTicket, generation: Option<u64>) -> bool {
+    let mut epoch = release_epoch();
+    if epoch.serial != claim.serial {
+        return false;
+    }
+    epoch.fenced = false;
+    if generation.is_some() {
+        epoch.generation = generation;
+    } else {
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: 读取解除代数失败，沿用已知代数"
+        );
+    }
+    true
+}
+
+/// Read the generation the machine holds now for the Connect that made `claim`. `false` when a
+/// newer Restore internet or Connect began meanwhile; that Connect must then start nothing.
+pub(crate) async fn begin_user_connect(claim: ReleaseTicket) -> bool {
+    let generation = fresh_release_generation().await;
+    finish_user_connect(&claim, generation)
+}
+
+/// What the release service answered for one Restore internet.
+#[cfg(windows)]
+pub(crate) enum PreemptiveRelease {
+    /// No release service to ask: the caller takes the ordinary release path.
+    Unavailable(String),
+    /// A newer Restore internet or the user's Connect began first; this one sent nothing.
+    Superseded,
+    Answered(tono_service_protocol::release_wire::ReleaseReport),
+}
+
+/// Restore internet through the separate release service. It does not wait for the main
+/// Service, its lifecycle lock or any task this App still has in flight.
+///
+/// `ticket` is the one [`raise_release_fence`] returned for this click. The request carries the
+/// generation the machine holds now, read after the fence went up: a Connect the user clicks
+/// after this restore is admitted under a newer one, and the restore then reports superseded
+/// rather than undo it (Sol R-F4).
+///
+/// The generation must be one this Restore saw while it still owned the epoch (Sol R2-F4). A
+/// newer Connect moves the epoch on before it can be admitted, so a read that completes while
+/// the ticket is still current cannot name that Connect's session; one that completes after is
+/// dropped, and nothing is sent.
+#[cfg(windows)]
+pub(crate) async fn tono_restore_internet_preemptively(ticket: ReleaseTicket) -> PreemptiveRelease {
+    use tono_service_protocol::release_wire::ReleaseRequest;
+
+    if !tono_service_protocol::release_service_available() {
+        return PreemptiveRelease::Unavailable("the release service is not running".into());
+    }
+    let credentials = match current_owner_credentials() {
+        Ok(credentials) => credentials,
+        Err(error) => return PreemptiveRelease::Unavailable(format!("{error:#}")),
+    };
+    // The release ends the main Service's session; a monitor still ticking would read that as
+    // an owner loss and run its own recovery in the middle of the restore. Under the epoch lock,
+    // so a Connect begun since keeps its own monitors and session.
+    {
+        let epoch = release_epoch();
+        if epoch.serial != ticket.serial {
+            return PreemptiveRelease::Superseded;
+        }
+        cancel_owner_monitors();
+        clear_active_service_session();
+    }
+    let expected_generation = fresh_release_generation().await.or(ticket.generation);
+    if !release_ticket_current(&ticket) {
+        return PreemptiveRelease::Superseded;
+    }
+    let request = ReleaseRequest {
+        request_id: generate_service_session_token().unwrap_or_else(|_| "restore".into()),
+        expected_generation,
+    };
+    match tono_service_protocol::request_release(&credentials, &request).await {
+        Ok(response) => match response.data {
+            Some(report) => {
+                if let Some(generation) = report.generation {
+                    learn_release_generation(&ticket, generation);
+                }
+                PreemptiveRelease::Answered(report)
+            }
+            // Another Windows user owns the protection; the ordinary path refuses the same.
+            None if response.code
+                == tono_service_protocol::ServiceErrorCode::ProtectionHeldByAnotherUser as u16 =>
+            {
+                PreemptiveRelease::Answered(
+                    tono_service_protocol::release_wire::ReleaseReport::without_components(
+                        &request.request_id,
+                        "refused",
+                        Some(response.message),
+                    ),
+                )
+            }
+            // The service answered but did not run a release (refused credentials, an older
+            // protocol): the ordinary path still can.
+            None => PreemptiveRelease::Unavailable(format!(
+                "the release service refused the request ({}): {}",
+                response.code, response.message
+            )),
+        },
+        // The request may have reached the service; its status says whether a release ran.
+        Err(error) => match tono_service_protocol::release_status(&credentials).await {
+            Ok(status) if status.data.as_ref().is_some_and(|status| status.running || status.mode != "secured") => {
+                let mut report = tono_service_protocol::release_wire::ReleaseReport::without_components(
+                    &request.request_id,
+                    "unknown",
+                    Some(format!("the restore answer was lost: {error:#}")),
+                );
+                report.finished = false;
+                report.generation = status.data.map(|status| status.generation);
+                PreemptiveRelease::Answered(report)
+            }
+            _ => PreemptiveRelease::Unavailable(format!("{error:#}")),
+        },
+    }
+}
+
 /// Start the core with the Tono owned runtime and the WFP bootstrap kill switch.
 ///
 /// The Service persists intent, arms the bootstrap policy (block all + Mihomo endpoint permit +
@@ -725,11 +1044,22 @@ pub(crate) async fn tono_probe_kill_switch_release_support() -> Result<Option<St
 /// anywhere in that sequence is fail-closed on the Service side. Mirrors
 /// `start_with_existing_service` so the owner session, the owner monitor, and the Run State all
 /// observe the Tono core exactly like a legacy one.
+///
+/// `ticket` is the attempt's own (see [`ReleaseTicket`]). Returns the release generation the
+/// Service admitted the session under, when it reported one.
 pub(crate) async fn tono_start_core_with_kill_switch(
     runtime: RuntimeBundle,
     kill_switch: KillSwitchConfig,
-) -> Result<()> {
+    ticket: ReleaseTicket,
+) -> Result<Option<u64>> {
     logging!(info, Type::Service, "Tono: 通过服务启动核心并 arm Kill Switch");
+    // Refused here, before anything is torn down: the restore or the newer Connect that moved
+    // the epoch on owns the machine now. The Service checks the generation again under its lock.
+    if ticket.fenced || release_ticket().serial != ticket.serial {
+        bail!(
+            "TONO_STALE_GENERATION: Restore internet or a newer Connect ran after this connect was prepared; press Connect to start again"
+        );
+    }
     // Cancel the previous start's owner monitor before the session is cleared, exactly as
     // `tono_stop_core` does. Between this line and `adopt_tono_service_session` the Service
     // truthfully answers "not your session", and a monitor still ticking in that window reads
@@ -751,6 +1081,7 @@ pub(crate) async fn tono_start_core_with_kill_switch(
         macos_proxy: None,
         kill_switch: None,
         windows_kill_switch: Some(kill_switch),
+        release_generation: ticket.generation,
     };
 
     let response = match tono_service_protocol::start_clash(&credentials, &request).await {
@@ -763,7 +1094,9 @@ pub(crate) async fn tono_start_core_with_kill_switch(
                     Type::Service,
                     "Tono: StartClash response was lost, but Service generation {generation} proves the start committed"
                 );
-                return Ok(());
+                // The admitted release generation was in the lost answer; read it back. This
+                // App holds the connect mutation, so nothing of its own was admitted since.
+                return Ok(admitted_after_lost_answer(&ticket).await);
             }
             start_owner_monitor();
             return Err(error).context("无法连接到Tono Service");
@@ -771,6 +1104,10 @@ pub(crate) async fn tono_start_core_with_kill_switch(
     };
 
     if response.code > 0 {
+        if response.code == tono_service_protocol::ServiceErrorCode::StaleGeneration as u16 {
+            // Only the user's next Connect, which reads the current generation, starts again.
+            fence_after_stale(&ticket);
+        }
         let err_msg = tono_start_refusal(response.code, response.message);
         logging!(error, Type::Service, "Tono: 启动核心失败: {}", err_msg);
         start_owner_monitor();
@@ -785,14 +1122,23 @@ pub(crate) async fn tono_start_core_with_kill_switch(
                 Type::Service,
                 "Tono: StartClash omitted its response body, but Service generation {generation} proves the start committed"
             );
-            return Ok(());
+            return Ok(admitted_after_lost_answer(&ticket).await);
         }
         start_owner_monitor();
         bail!("Tono Service 未返回会话信息");
     };
+    if let Some(generation) = result.release_generation {
+        learn_release_generation(&ticket, generation);
+    }
     adopt_tono_service_session(result.session.generation, proposed_session_token).await;
     logging!(info, Type::Service, "Tono: 服务成功启动核心");
-    Ok(())
+    Ok(result.release_generation)
+}
+
+async fn admitted_after_lost_answer(ticket: &ReleaseTicket) -> Option<u64> {
+    let generation = fresh_release_generation().await?;
+    learn_release_generation(ticket, generation);
+    Some(generation)
 }
 
 async fn tono_active_generation(credentials: &OwnerCredentials) -> Result<Option<u64>> {
@@ -953,11 +1299,14 @@ pub(crate) async fn tono_kill_switch_status() -> Result<KillSwitchStatus> {
     response.data.context("Tono Service 未返回 Kill Switch 状态")
 }
 
-/// Revision 19. Replace the running sing-box document and re-lock the full tunnel.
+/// Revision 19. Replace the running sing-box document and re-lock the full tunnel. Revision 22
+/// carries the signed traffic policy a DIRECT document is bound to (#1280); the full-tunnel
+/// rollback sends none.
 pub(crate) async fn tono_replace_sing_box_runtime(
     session: &OwnerSessionProof,
     runtime_json: String,
     restore_previous: bool,
+    traffic_policy: Option<SignedTrafficPolicy>,
 ) -> Result<()> {
     let credentials = current_owner_credentials()?;
     let response = tono_service_protocol::replace_sing_box_runtime(
@@ -966,6 +1315,7 @@ pub(crate) async fn tono_replace_sing_box_runtime(
         ReplaceSingBoxRuntimeRequest {
             runtime_json,
             restore_previous,
+            traffic_policy,
         },
     )
     .await
@@ -1302,9 +1652,12 @@ pub(crate) async fn tono_protected_dns_status() -> Result<DnsProtectionStatus> {
 
 /// `POST /dns/restore`: restore the snapshotted adapter DNS. Always runs before the kill
 /// switch is disarmed; a failure here keeps the system armed (product contract §6).
-pub(crate) async fn tono_restore_protected_dns() -> Result<DnsProtectionStatus> {
+///
+/// `release_generation` is the release generation of the session being torn down; see
+/// [`teardown_release_generation`].
+pub(crate) async fn tono_restore_protected_dns(release_generation: Option<u64>) -> Result<DnsProtectionStatus> {
     let credentials = current_owner_credentials()?;
-    let response = match tono_service_protocol::restore_protected_dns(&credentials).await {
+    let response = match tono_service_protocol::restore_protected_dns(&credentials, release_generation).await {
         Ok(response) => response,
         Err(error) => {
             // A transport error may mean only the response was lost. Prove the idempotent
@@ -1333,6 +1686,13 @@ pub(crate) async fn tono_restore_protected_dns() -> Result<DnsProtectionStatus> 
 
 /// `GET /status`: the full Service snapshot (kill switch aggregate + network event feed).
 pub(crate) async fn tono_service_status_snapshot() -> Result<ServiceStatusSnapshot> {
+    // Another user's machine-wide barrier is not this App's protection (#1290).
+    tono_service_status_snapshot_raw()
+        .await
+        .map(ServiceStatusSnapshot::seen_by_caller)
+}
+
+async fn tono_service_status_snapshot_raw() -> Result<ServiceStatusSnapshot> {
     let credentials = current_owner_credentials()?;
     let response = tono_service_protocol::get_status(&credentials)
         .await
@@ -1341,6 +1701,21 @@ pub(crate) async fn tono_service_status_snapshot() -> Result<ServiceStatusSnapsh
         bail!(response.message);
     }
     response.data.context("Tono Service 未返回状态快照")
+}
+
+/// The kill-switch reading a failed Connect must act on: the caller's own view of the barrier.
+/// `/kill-switch/status` reports the machine-wide state, so a failure handler reading it would
+/// see another user's barrier as its own, plan a release the Service refuses, and fold the
+/// refusal back into Protected Offline (#1290). The aggregate carries who holds the barrier, so
+/// the same fold the status reader applies is applied here.
+pub(crate) fn caller_kill_switch_view(snapshot: ServiceStatusSnapshot) -> Option<KillSwitchStatus> {
+    snapshot.seen_by_caller().kill_switch
+}
+
+/// `/status` read as [`caller_kill_switch_view`]: the failure handler's observation of the barrier.
+pub(crate) async fn tono_kill_switch_status_as_caller() -> Result<KillSwitchStatus> {
+    caller_kill_switch_view(tono_service_status_snapshot_raw().await?)
+        .context("Tono Service 未返回 Kill Switch 状态")
 }
 
 /// A release that got no reading from the Tono Service: the owner credentials could not be read,
@@ -1362,14 +1737,31 @@ impl std::error::Error for ReleaseGotNoReading {}
 /// user disarm. Works without a session — by the time Protected Offline is
 /// released, the session that armed the switch is long gone. Idempotent on
 /// the Service side and itself enforces DNS-before-disarm.
-pub(crate) async fn tono_release_kill_switch() -> Result<KillSwitchStatus> {
-    tono_release_kill_switch_inner(false).await
+///
+/// `release_generation` is the release generation of the session being torn down; the Service
+/// refuses the release once a restore or a newer Connect has replaced that session (Sol R-F4).
+pub(crate) async fn tono_release_kill_switch(release_generation: Option<u64>) -> Result<KillSwitchStatus> {
+    tono_release_kill_switch_inner(false, release_generation).await
 }
 
 /// Full release, then the secondary AI hold. Used only after a non-strict
 /// fail-open. Restore and disconnect call [`tono_release_kill_switch`].
-pub(crate) async fn tono_release_kill_switch_applying_narrow() -> Result<KillSwitchStatus> {
-    release_applying_narrow_with(tono_release_kill_switch_inner).await
+pub(crate) async fn tono_release_kill_switch_applying_narrow(
+    release_generation: Option<u64>,
+) -> Result<KillSwitchStatus> {
+    release_applying_narrow_with(|apply_narrow| tono_release_kill_switch_inner(apply_narrow, release_generation))
+        .await
+}
+
+/// The release generation a teardown sends: the one its session was admitted under, captured
+/// when the teardown began. A teardown with none (the session was started by an earlier run of
+/// this App) reads the current one: the Service still refuses it if anything is admitted between
+/// the read and the release.
+pub(crate) async fn teardown_release_generation(captured: Option<u64>) -> Option<u64> {
+    match captured {
+        Some(generation) => Some(generation),
+        None => fresh_release_generation().await,
+    }
 }
 
 #[derive(Debug)]
@@ -1419,12 +1811,15 @@ where
     }
 }
 
-async fn tono_release_kill_switch_inner(apply_narrow: bool) -> Result<KillSwitchStatus> {
+async fn tono_release_kill_switch_inner(
+    apply_narrow: bool,
+    release_generation: Option<u64>,
+) -> Result<KillSwitchStatus> {
     let credentials = current_owner_credentials().context(ReleaseGotNoReading)?;
     let response = match if apply_narrow {
-        tono_service_protocol::release_kill_switch_applying_narrow(&credentials).await
+        tono_service_protocol::release_kill_switch_applying_narrow(&credentials, release_generation).await
     } else {
-        tono_service_protocol::release_kill_switch(&credentials).await
+        tono_service_protocol::release_kill_switch(&credentials, release_generation).await
     } {
         Ok(response) => response,
         Err(error) => {

@@ -2,7 +2,6 @@ import SwiftUI
 
 struct AccountSettingsCard: View {
     @Bindable var session: AccountSession
-    @Environment(\.seaAccent) private var seaAccent
     @SeaAppearancePreference private var seaEnabled
 
     var body: some View {
@@ -35,7 +34,7 @@ struct AccountSettingsCard: View {
                             GeometryReader { geometry in
                                 ZStack(alignment: .leading) {
                                     Capsule().fill(.white.opacity(0.10))
-                                    Capsule().fill(seaAccent)
+                                    Capsule().fill(SeaTheme.primaryGradient)
                                         .frame(width: geometry.size.width * min(Double(usage) / Double(quota), 1))
                                 }
                             }

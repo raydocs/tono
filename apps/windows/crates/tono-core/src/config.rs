@@ -34,57 +34,8 @@ pub const DIRECT_GROUP_NAME: &str = "Tono-China-Direct";
 pub const WEB_DIRECT_GROUP_NAME: &str = "Tono-China-Web-Direct";
 pub use crate::direct_domains::{
     ADDRESS_FREE_WEB_SUFFIXES, CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS,
-    DEDICATED_MODEL_API_SUFFIXES, is_address_free_web_suffix,
+    ALWAYS_ADDRESS_FREE_WEB_SUFFIXES, DEDICATED_MODEL_API_SUFFIXES, is_address_free_web_suffix,
 };
-/// Always attached to a native-app DIRECT plan, even if the published policy
-/// omitted them. Unidentified helpers and browsers hit these trees.
-pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 45] = [
-    "qq.com",
-    "baidu.com",
-    "aliyuncs.com",
-    "edu.cn",
-    "weixinbridge.com",
-    "bilibili.com",
-    "taobao.com",
-    "tmall.com",
-    "alipay.com",
-    "alicdn.com",
-    "jd.com",
-    "douyin.com",
-    "163.com",
-    "netease.com",
-    "weibo.com",
-    "meituan.com",
-    "dianping.com",
-    "pinduoduo.com",
-    "amap.com",
-    "douyu.com",
-    "huya.com",
-    "kuaishou.com",
-    "yy.com",
-    "ixigua.com",
-    "iqiyi.com",
-    "youku.com",
-    "mgtv.com",
-    "xiaohongshu.com",
-    "wps.cn",
-    "kdocs.cn",
-    "yuque.com",
-    "voovmeeting.com",
-    "12306.cn",
-    "kugou.com",
-    "kuwo.cn",
-    "migu.cn",
-    "ximalaya.com",
-    "qingting.fm",
-    "xylink.com",
-    "zhumu.me",
-    "quanshi.com",
-    "zhihu.com",
-    "zhimg.com",
-    "goofish.com",
-    "1688.com",
-];
 
 /// Main and known helper executables for the three reviewed China-office
 /// clients. These names are used only alongside exact cloud-approved media
@@ -534,8 +485,7 @@ pub fn build_owned_runtime_with_ports(
         secret,
         &route_exclusions,
         direct,
-        home_node,
-        home_socks5,
+        HomeRoute { node: home_node, socks5: home_socks5 },
         ports,
     ))
     .map_err(|err| ConfigError::Node(NodeRejection::Malformed(err.to_string())))?;
@@ -679,14 +629,21 @@ fn home_socks5_outbound(socks5: &CatalogHomeSocks5) -> Value {
     Value::Mapping(outbound)
 }
 
+/// The two ways Claude traffic can be routed to a home exit, passed together so
+/// `runtime_value` stays within clippy's argument limit.
+#[derive(Clone, Copy)]
+struct HomeRoute<'a> {
+    node: Option<&'a ValidatedNode>,
+    socks5: Option<&'a CatalogHomeSocks5>,
+}
+
 fn runtime_value(
     nodes: &[ValidatedNode],
     selected: &str,
     secret: &str,
     route_exclusions: &[String],
     direct: Option<&DirectPlan>,
-    home: Option<&ValidatedNode>,
-    home_socks5: Option<&CatalogHomeSocks5>,
+    home: HomeRoute<'_>,
     ports: RuntimePorts,
 ) -> Value {
     let mut root = Mapping::new();
@@ -848,7 +805,7 @@ fn runtime_value(
     put(&mut root, "tun", Value::Mapping(tun));
 
     let mut proxies: Vec<Value> = nodes.iter().map(proxy_mapping).collect();
-    if let Some(socks5) = home_socks5 {
+    if let Some(socks5) = home.socks5 {
         proxies.push(home_socks5_outbound(socks5));
     }
     if let Some(plan) = direct {
@@ -889,7 +846,7 @@ fn runtime_value(
         Value::Sequence(ordered.iter().map(|name| string(name)).collect()),
     );
     groups.push(Value::Mapping(group));
-    if home_socks5.is_some() {
+    if home.socks5.is_some() {
         // Claude split routing via the cloud-assigned residential exit: the
         // dedicated group holds exactly the chained SOCKS5 outbound.
         let mut home_group = Mapping::new();
@@ -901,7 +858,7 @@ fn runtime_value(
             Value::Sequence(vec![string(HOME_SOCKS5_OUTBOUND_NAME)]),
         );
         groups.push(Value::Mapping(home_group));
-    } else if let Some(home) = home {
+    } else if let Some(home_node) = home.node {
         // Claude split routing: a dedicated group holding exactly the bound
         // home-broadband node, so the Claude rules below cannot follow the
         // user's Tono-Exit selection.
@@ -911,7 +868,7 @@ fn runtime_value(
         put(
             &mut home_group,
             "proxies",
-            Value::Sequence(vec![string(&home.name)]),
+            Value::Sequence(vec![string(&home_node.name)]),
         );
         groups.push(Value::Mapping(home_group));
     }
@@ -922,7 +879,7 @@ fn runtime_value(
         .iter()
         .map(|rule| rule.to_string())
         .collect();
-    if home.is_some() || home_socks5.is_some() {
+    if home.node.is_some() || home.socks5.is_some() {
         // TCP-scoped on purpose: these pins sit ahead of the UDP REJECT rows,
         // and a network-agnostic Claude pin would swallow UDP into a group
         // that cannot carry it (Vision) — Mihomo's fallback for that is a
@@ -977,11 +934,11 @@ fn runtime_value(
                 "AND,((NETWORK,UDP),(PROCESS-PATH-REGEX,{regex})),REJECT"
             ));
         }
-    } else if let Some(plan) = direct {
-        if !plan.tcp_wechat_rules.is_empty()
+    } else if let Some(plan) = direct
+        && (!plan.tcp_wechat_rules.is_empty()
             || !plan.tcp_web_rules.is_empty()
             || !plan.web_suffix_rules.is_empty()
-            || !plan.udp_wechat_rules.is_empty()
+            || !plan.udp_wechat_rules.is_empty())
         {
             // The address-free signed-app rules below match every destination
             // on the reviewed ports, including an assistant site opened in
@@ -1012,7 +969,6 @@ fn runtime_value(
                 ));
             }
         }
-    }
     if let Some(plan) = direct {
         // WeChat TCP is pinned per resolved endpoint, exactly like the web rules below.
         //
@@ -2027,6 +1983,33 @@ reality-opts:
             .map(|rule| rule.as_str().unwrap())
             .collect();
         assert_eq!(rules, [RULES[0], RULES[1], "AND,((NETWORK,UDP)),REJECT", RULES[2]]);
+    }
+
+    /// The Windows Service admits exactly these strings (`direct_admission` tests carry the same
+    /// literals): short installs and the drive-root regex the encoder also writes for `D:\`.
+    #[test]
+    fn windows_path_regex_for_short_installs_is_pinned() {
+        assert_eq!(
+            wechat_prefix_path_regex(r"D:\A\").as_deref(),
+            Some(r"^[Dd]:[\\/][Aa][\\/]")
+        );
+        assert_eq!(
+            wechat_prefix_path_regex(r"D:\飞书").as_deref(),
+            Some(r"^[Dd]:[\\/]飞书[\\/]")
+        );
+        assert_eq!(
+            wechat_file_path_regex(r"D:\A").as_deref(),
+            Some(r"^[Dd]:[\\/][Aa]$")
+        );
+        assert_eq!(
+            wechat_file_path_regex(r"D:\Lark.exe").as_deref(),
+            Some(r"^[Dd]:[\\/][Ll][Aa][Rr][Kk]\.[Ee][Xx][Ee]$")
+        );
+        // The encoder also writes the whole-drive regex; the Service refuses it.
+        assert_eq!(
+            wechat_prefix_path_regex(r"D:\").as_deref(),
+            Some(r"^[Dd]:[\\/]")
+        );
     }
 
     #[test]

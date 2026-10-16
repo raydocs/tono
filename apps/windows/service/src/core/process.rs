@@ -450,7 +450,7 @@ pub(super) fn spawn_bound_to_process_exit(
 /// returned.
 #[cfg(windows)]
 #[cfg_attr(feature = "test", allow(dead_code))]
-fn spawn_in_job(
+pub(super) fn spawn_in_job(
     job: &std::os::windows::io::OwnedHandle,
     command: &mut std::process::Command,
 ) -> Result<std::process::Child> {
@@ -478,7 +478,7 @@ fn spawn_in_job(
 /// caller terminates the child.
 #[cfg(windows)]
 #[cfg_attr(feature = "test", allow(dead_code))]
-fn resume_suspended_process(pid: u32) -> Result<()> {
+pub(crate) fn resume_suspended_process(pid: u32) -> Result<()> {
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
@@ -552,7 +552,7 @@ fn resume_suspended_process(pid: u32) -> Result<()> {
 
 #[cfg(windows)]
 #[cfg_attr(feature = "test", allow(dead_code))]
-fn kill_on_close_job() -> Result<std::os::windows::io::OwnedHandle> {
+pub(super) fn kill_on_close_job() -> Result<std::os::windows::io::OwnedHandle> {
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
     use windows_sys::Win32::Foundation::HANDLE;
     use windows_sys::Win32::System::JobObjects::{
@@ -723,13 +723,20 @@ pub(super) async fn sweep_orphan_core_processes(
 /// decided on the canonicalized path by the caller.
 #[cfg(windows)]
 fn core_image_candidates() -> Result<Vec<(u32, ProcessIdentity)>> {
+    const CORE_IMAGE_FILE_NAMES: &[&str] = &["tono-core.exe", "verge-mihomo.exe", "sing-box.exe"];
+    image_candidates(CORE_IMAGE_FILE_NAMES)
+}
+
+/// Running processes whose image file name is one of `image_file_names`, with their identity
+/// (canonical path and creation time). A process that exits mid-scan or refuses inspection is
+/// skipped.
+#[cfg(windows)]
+pub(super) fn image_candidates(image_file_names: &[&str]) -> Result<Vec<(u32, ProcessIdentity)>> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
         TH32CS_SNAPPROCESS,
     };
-
-    const CORE_IMAGE_FILE_NAMES: &[&str] = &["tono-core.exe", "verge-mihomo.exe", "sing-box.exe"];
 
     // SAFETY: a snapshot of the process table has no caller-supplied pointers to invalidate.
     let raw = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
@@ -760,7 +767,7 @@ fn core_image_candidates() -> Result<Vec<(u32, ProcessIdentity)>> {
             .position(|unit| *unit == 0)
             .unwrap_or(entry.szExeFile.len());
         let image_name = String::from_utf16_lossy(&entry.szExeFile[..name_end]);
-        if CORE_IMAGE_FILE_NAMES
+        if image_file_names
             .iter()
             .any(|name| image_name.eq_ignore_ascii_case(name))
         {

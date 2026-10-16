@@ -1,94 +1,199 @@
-"""Generate Tono's clean, transparent Windows icon set.
+"""Generate Tono's sun-on-the-horizon icon set for Windows and macOS.
 
-The checked-in RGBA master contains only the TO glyph: no tile, outer frame,
-bevel, or drop shadow. Run this file from any working directory; all paths are
-resolved relative to the monorepo root.
+The artwork is the approved brand sheet in `src/dev/sea-shell/brand/` (owner, 2026-10-12):
+a dark indigo tile with a warm half sun and three horizon reflections. The hand-tuned
+pixel-aligned rasters there (`icons/tono-{16,24,32,48,64,128,256}.png`) are used as they are
+for those sizes; every other size is drawn here from the same geometry as `icons/tono-256.svg`,
+supersampled, so no browser or font is needed and the output is reproducible.
+
+Run from any working directory; paths resolve from the monorepo root:
+
+    python3 apps/windows/app/scripts/generate-tono-icons.py
 """
 
 from __future__ import annotations
 
+import io
+import json
+import math
+import struct
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFilter
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-SRC_MASTER = REPO_ROOT / "design-assets/tono-icon/03-clean-TO-transparent.png"
 APP_DIR = REPO_ROOT / "apps/windows/app"
+BRAND_DIR = APP_DIR / "src/dev/sea-shell/brand"
 ICONS_DIR = APP_DIR / "src-tauri/icons"
-ASSETS_DIR = APP_DIR / "src/assets/image"
-OUT_DIR = REPO_ROOT / "design-assets/tono-icon/export"
+ASSETS_DIR = APP_DIR / "src/assets"
+MAC_ASSETS = REPO_ROOT / "apps/macos/Tono/Assets.xcassets"
 
+TUNED_SIZES = (16, 24, 32, 48, 64, 128, 256)
 MAIN_ICO_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
-# 16/20/24 should come from the optical SVG (tono-mark-16-color.svg) once
-# design signs that reconstruction off. Until then keep the raster master —
-# the concentric counter collapses on the pixel grid below ~28px.
 TRAY_ICO_SIZES = (16, 20, 24, 32, 40, 48, 64)
 
+GROUND = ((0x15, 0x16, 0x2E), (0x24, 0x26, 0x4B))
+SUN = ((0xFF, 0xF0, 0xD2), (0xFF, 0xAD, 0x74))
+SUPERSAMPLE = 4096  # drawing canvas; 16x the 256 viewBox
 
-def load_master() -> Image.Image:
-    master = Image.open(SRC_MASTER).convert("RGBA")
-    if master.size != (1024, 1024):
-        raise ValueError(f"transparent icon master must be 1024x1024, got {master.size}")
 
-    alpha = master.getchannel("A")
-    if alpha.getextrema() != (0, 255):
-        raise ValueError("transparent icon master must contain transparent and opaque pixels")
+def vertical_gradient(size: tuple[int, int], top: tuple[int, int, int], bottom: tuple[int, int, int]) -> Image.Image:
+    width, height = size
+    column = Image.new("RGB", (1, height))
+    for y in range(height):
+        t = y / max(1, height - 1)
+        column.putpixel((0, y), tuple(round(a + (b - a) * t) for a, b in zip(top, bottom)))
+    return column.resize((width, height))
 
-    bbox = alpha.getbbox()
-    if bbox is None:
-        raise ValueError("transparent icon master has no visible glyph")
-    left, top, right, bottom = bbox
-    if min(left, top, 1024 - right, 1024 - bottom) < 48:
-        raise ValueError(f"transparent icon master needs at least 48px safety margin, got {bbox}")
 
-    for point in ((0, 0), (1023, 0), (0, 1023), (1023, 1023)):
-        if master.getpixel(point)[3] != 0:
-            raise ValueError(f"transparent icon master corner is not transparent: {point}")
+def paint(canvas: Image.Image, mask: Image.Image, box: tuple[int, int, int, int], colors) -> None:
+    """Fill `mask` with a vertical gradient spanning `box` (SVG objectBoundingBox)."""
 
-    # A green-screen extraction was used while developing the artwork. Green is not part of this
-    # mark's palette, so reject spill anywhere in the visible glyph before it reaches the taskbar.
-    spill = 0
-    for red, green, blue, opacity in master.get_flattened_data():
-        if opacity > 0 and green > max(red, blue) + 5:
-            spill += 1
-    if spill:
-        raise ValueError(f"transparent icon master contains {spill} green-spill pixels")
+    left, top, right, bottom = box
+    fill = Image.new("RGB", canvas.size)
+    fill.paste(vertical_gradient((right - left, bottom - top), *colors), (left, top))
+    canvas.paste(fill, (0, 0), mask)
 
-    return master
+
+def draw_tile(rounded: bool = True) -> Image.Image:
+    """`icons/tono-256.svg` at SUPERSAMPLE px. `rounded=False` fills the square to its corners."""
+
+    k = SUPERSAMPLE / 256
+    canvas = Image.new("RGBA", (SUPERSAMPLE, SUPERSAMPLE), (0, 0, 0, 0))
+
+    def mask_of(shape) -> Image.Image:
+        mask = Image.new("L", canvas.size, 0)
+        shape(ImageDraw.Draw(mask))
+        return mask
+
+    ground = mask_of(
+        lambda d: d.rounded_rectangle((0, 0, SUPERSAMPLE - 1, SUPERSAMPLE - 1), radius=round(59 * k) if rounded else 0, fill=255)
+    )
+    paint(canvas, ground, (0, 0, SUPERSAMPLE, SUPERSAMPLE), GROUND)
+
+    # M64 131 a64 64 0 0 1 128 0 Z: the upper half disc, centre (128, 131), r 64.
+    sun = mask_of(lambda d: d.pieslice((64 * k, 67 * k, 192 * k, 195 * k), 180, 360, fill=255))
+    paint(canvas, sun, (round(64 * k), round(67 * k), round(192 * k), round(131 * k)), SUN)
+
+    for x, y, w in ((30, 141, 195), (73, 153, 110), (102, 165, 51)):
+        box = (round(x * k), round(y * k), round((x + w) * k), round((y + 4) * k))
+        bar = mask_of(lambda d, b=box: d.rounded_rectangle(b, radius=round(2 * k), fill=255))
+        paint(canvas, bar, box, SUN)
+    return canvas
+
+
+def draw_mark() -> Image.Image:
+    """`mark.svg` (sun and two reflections, no tile) at SUPERSAMPLE px."""
+
+    k = SUPERSAMPLE / 32
+    canvas = Image.new("RGBA", (SUPERSAMPLE, SUPERSAMPLE), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+    draw.pieslice((6 * k, 7 * k, 26 * k, 27 * k), 180, 360, fill=(0xFF, 0xD5, 0x8E, 255))
+    draw.rounded_rectangle((2 * k, 19 * k, 30 * k, 21 * k), radius=k, fill=(0xFF, 0xB8, 0x77, 255))
+    draw.rounded_rectangle((9 * k, 24 * k, 23 * k, 25.5 * k), radius=0.75 * k, fill=(0xFF, 0xB8, 0x77, 255))
+    return canvas
+
+
+# Protection-state glyphs (macOS menu bar, Windows tray). An 18-unit grid: a half sun over a
+# horizon line and one reflection. Shape alone carries state, because the macOS status item is a
+# template image (no colour): only a verified connection gets the filled sun; every state that
+# makes no protection claim is an open arch; blocked adds a slash, a doubtful state a badge.
+STATES = ("connected", "connecting", "standby", "blocked", "degraded", "unconfirmed")
+
+
+def draw_state_glyph(state: str, side: int = SUPERSAMPLE, rgb: tuple[int, int, int] = (0, 0, 0)) -> Image.Image:
+    if state not in STATES:
+        raise ValueError(state)
+    u = side / 18
+    alpha = Image.new("L", (side, side), 0)
+    draw = ImageDraw.Draw(alpha)
+
+    def bar(x1: float, x2: float, y: float, height: float) -> None:
+        draw.rounded_rectangle((x1 * u, y * u, x2 * u, (y + height) * u), radius=height / 2 * u, fill=255)
+
+    def stroke(points: tuple[float, float, float, float], width: float, fill: int) -> None:
+        x1, y1, x2, y2 = (v * u for v in points)
+        draw.line((x1, y1, x2, y2), fill=fill, width=round(width * u))
+        for x, y in ((x1, y1), (x2, y2)):
+            r = width / 2 * u
+            draw.ellipse((x - r, y - r, x + r, y + r), fill=fill)
+
+    cx, cy, r = 9.0, 10.0, 6.2
+    sun_box = ((cx - r) * u, (cy - r) * u, (cx + r) * u, (cy + r) * u)
+    if state in ("connected", "degraded"):
+        draw.pieslice(sun_box, 180, 360, fill=255)
+    else:
+        width = round(1.5 * u)
+        # A pieslice outline would close the arch along the horizon; an arc keeps it open.
+        segments = ((180, 360),) if state != "connecting" else ((180, 222), (249, 291), (318, 360))
+        for start, end in segments:
+            draw.arc(sun_box, start, end, fill=255, width=width)
+            for angle in (start, end):
+                mid = r - 0.75
+                x = (cx + mid * math.cos(math.radians(angle))) * u
+                y = (cy + mid * math.sin(math.radians(angle))) * u
+                draw.ellipse((x - 0.75 * u, y - 0.75 * u, x + 0.75 * u, y + 0.75 * u), fill=255)
+    bar(1.5, 16.5, 11.2, 1.5)
+    bar(5.5, 12.5, 14.0, 1.3)
+
+    if state == "blocked":
+        stroke((2.6, 2.6, 15.4, 15.4), 3.4, 0)
+        stroke((2.6, 2.6, 15.4, 15.4), 1.5, 255)
+    if state in ("degraded", "unconfirmed"):
+        bx, by, br = 14.4, 3.6, 3.4
+        draw.ellipse(((bx - br - 1.1) * u, (by - br - 1.1) * u, (bx + br + 1.1) * u, (by + br + 1.1) * u), fill=0)
+        draw.ellipse(((bx - br) * u, (by - br) * u, (bx + br) * u, (by + br) * u), fill=255)
+        draw.rounded_rectangle(((bx - 0.6) * u, (by - 2.2) * u, (bx + 0.6) * u, (by + 0.6) * u), radius=0.6 * u, fill=0)
+        draw.ellipse(((bx - 0.65) * u, (by + 1.25) * u, (bx + 0.65) * u, (by + 2.55) * u), fill=0)
+
+    glyph = Image.new("RGBA", (side, side), (*rgb, 0))
+    glyph.putalpha(alpha)
+    return glyph
+
+
+def tray_tile(state: str, glyph_rgb: tuple[int, int, int]) -> Image.Image:
+    """Windows tray: the brand ground with the state glyph in place of the brand sun."""
+
+    k = SUPERSAMPLE / 256
+    canvas = Image.new("RGBA", (SUPERSAMPLE, SUPERSAMPLE), (0, 0, 0, 0))
+    mask = Image.new("L", canvas.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, SUPERSAMPLE - 1, SUPERSAMPLE - 1), radius=round(59 * k), fill=255)
+    paint(canvas, mask, (0, 0, SUPERSAMPLE, SUPERSAMPLE), GROUND)
+    inner = round(SUPERSAMPLE * 0.84)
+    glyph = resize_rgba(draw_state_glyph(state, rgb=glyph_rgb), inner)
+    canvas.alpha_composite(glyph, ((SUPERSAMPLE - inner) // 2, (SUPERSAMPLE - inner) // 2))
+    return canvas
 
 
 def resize_rgba(image: Image.Image, size: int) -> Image.Image:
     """Resize in premultiplied-alpha space so transparent edges never gain a halo."""
 
-    resized = (
-        image.convert("RGBa")
-        .resize((size, size), Image.Resampling.LANCZOS)
-        .convert("RGBA")
-    )
-    pixels = bytearray(resized.tobytes())
-    for offset in range(0, len(pixels), 4):
-        opacity = pixels[offset + 3]
-        if opacity < 4:
-            pixels[offset : offset + 4] = b"\0\0\0\0"
-            continue
-        red, green, blue = pixels[offset : offset + 3]
-        green_ceiling = min(255, max(red, blue) + 5)
-        if green > green_ceiling:
-            pixels[offset + 1] = green_ceiling
-    return Image.frombytes("RGBA", resized.size, bytes(pixels))
+    return image.convert("RGBa").resize((size, size), Image.Resampling.LANCZOS).convert("RGBA")
 
 
-def monochrome_icon(master: Image.Image, size: int) -> Image.Image:
-    alpha = resize_rgba(master, size).getchannel("A")
-    output = Image.new("RGBA", (size, size), (255, 255, 255, 0))
-    output.putalpha(alpha)
-    return output
+def tuned_or_drawn(master: Image.Image, size: int) -> Image.Image:
+    if size in TUNED_SIZES:
+        return Image.open(BRAND_DIR / f"icons/tono-{size}.png").convert("RGBA")
+    return resize_rgba(master, size)
+
+
+def mac_icon(tile: Image.Image) -> Image.Image:
+    """macOS app-icon grid: an 824/1024 body centred on a transparent canvas with a soft shadow."""
+
+    side, body = 1024, 824
+    offset = (side - body) // 2
+    shape = resize_rgba(tile, body)
+    shadow = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    alpha = Image.new("L", (side, side), 0)
+    alpha.paste(shape.getchannel("A"), (offset, offset + 10))
+    shadow.putalpha(alpha.point(lambda a: a * 0.3).filter(ImageFilter.GaussianBlur(10)))
+    canvas = Image.alpha_composite(Image.new("RGBA", (side, side), (0, 0, 0, 0)), shadow)
+    canvas.alpha_composite(shape, (offset, offset))
+    return canvas
 
 
 def with_status_dot(image: Image.Image, rgb: tuple[int, int, int]) -> Image.Image:
     """Corner status pip so 16px tray states stay distinct on light and dark taskbars."""
-
-    from PIL import ImageDraw
 
     output = image.copy()
     draw = ImageDraw.Draw(output)
@@ -106,72 +211,49 @@ def with_status_dot(image: Image.Image, rgb: tuple[int, int, int]) -> Image.Imag
     return output
 
 
+def monochrome(image: Image.Image) -> Image.Image:
+    output = Image.new("RGBA", image.size, (255, 255, 255, 0))
+    output.putalpha(image.getchannel("A"))
+    return output
+
+
 def save_png(image: Image.Image, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     image.save(path, format="PNG", optimize=True)
-    print(f"wrote {path} {image.size}")
+    print(f"wrote {path.relative_to(REPO_ROOT)} {image.size}")
 
 
-def save_ico(images: list[Image.Image], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    ordered = sorted(
-        [image.convert("RGBA") for image in images],
-        key=lambda image: image.size[0],
-        reverse=True,
-    )
-    ordered[0].save(
-        path,
-        format="ICO",
-        sizes=[image.size for image in ordered],
-        append_images=ordered[1:],
-    )
-    print(f"wrote {path} {[image.size for image in ordered]}")
+def png_bytes(image: Image.Image) -> bytes:
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
 
 
-def write_clean_svg() -> None:
-    # This vector companion is used by web surfaces. The cutout masks the complete union so the
-    # centre of the O stays transparent even where the T passes behind it.
-    svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
-  <defs>
-    <linearGradient id="tono-gradient" x1="12" y1="18" x2="116" y2="112" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#1433D5"/>
-      <stop offset="0.38" stop-color="#583EDE"/>
-      <stop offset="0.68" stop-color="#D553CA"/>
-      <stop offset="1" stop-color="#FFB26F"/>
-    </linearGradient>
-    <mask id="tono-cutout" maskUnits="userSpaceOnUse" x="0" y="0" width="128" height="128">
-      <rect width="128" height="128" fill="white"/>
-      <ellipse cx="86" cy="67" rx="10" ry="21" fill="black"/>
-    </mask>
-  </defs>
-  <g mask="url(#tono-cutout)">
-    <path d="M18 16h66v24H67v65c0 8-5 12-12 12h-2c-7 0-12-4-12-12V40H18C11 40 6 35 6 28s5-12 12-12z" fill="url(#tono-gradient)"/>
-    <ellipse cx="86" cy="67" rx="36" ry="51" fill="url(#tono-gradient)"/>
-    <ellipse cx="86" cy="67" rx="29" ry="43" stroke="#3447DE" stroke-opacity="0.52" stroke-width="5"/>
-    <ellipse cx="86" cy="67" rx="22" ry="34" stroke="#F47DAF" stroke-opacity="0.48" stroke-width="5"/>
-    <ellipse cx="86" cy="67" rx="15" ry="26" stroke="#7049D9" stroke-opacity="0.48" stroke-width="4"/>
-  </g>
-</svg>
-"""
-    path = ASSETS_DIR / "logo.svg"
-    path.write_text(svg, encoding="utf-8")
-    print(f"wrote {path}")
+def save_ico(entries: list[tuple[int, bytes]], path: Path) -> None:
+    """Pack PNG entries into an ICO without re-encoding, so the tuned rasters ship byte for byte."""
+
+    entries = sorted(entries, key=lambda entry: entry[0])
+    header = struct.pack("<HHH", 0, 1, len(entries))
+    offset = len(header) + 16 * len(entries)
+    directory, blobs = b"", b""
+    for size, data in entries:
+        directory += struct.pack("<BBBBHHII", size % 256, size % 256, 0, 0, 1, 32, len(data), offset + len(blobs))
+        blobs += data
+    path.write_bytes(header + directory + blobs)
+    print(f"wrote {path.relative_to(REPO_ROOT)} {[size for size, _ in entries]}")
+
+
+def ico_entry(master: Image.Image, size: int) -> tuple[int, bytes]:
+    if size in TUNED_SIZES:
+        return size, (BRAND_DIR / f"icons/tono-{size}.png").read_bytes()
+    return size, png_bytes(resize_rgba(master, size))
 
 
 def main() -> None:
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    ICONS_DIR.mkdir(parents=True, exist_ok=True)
-    ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+    tile = draw_tile()
+    mark = draw_mark()
 
-    master = load_master()
-    mono_master = Image.new("RGBA", master.size, (255, 255, 255, 0))
-    mono_master.putalpha(master.getchannel("A"))
-
-    save_png(master, OUT_DIR / "windows-icon-master-1024.png")
-    save_png(master, OUT_DIR / "primary-square.png")
-    save_png(mono_master, OUT_DIR / "mono-square.png")
-    save_png(master, OUT_DIR / "icon-1024-mask.png")
-
+    # Windows bundle icons (tauri.conf.json `bundle.icon`, the NSIS installer icon, Store tiles).
     png_sizes = {
         "32x32.png": 32,
         "128x128.png": 128,
@@ -189,37 +271,68 @@ def main() -> None:
         "StoreLogo.png": 50,
     }
     for name, size in png_sizes.items():
-        save_png(resize_rgba(master, size), ICONS_DIR / name)
+        save_png(tuned_or_drawn(tile, size), ICONS_DIR / name)
+    main_ico = [ico_entry(tile, size) for size in MAIN_ICO_SIZES]
+    save_ico(main_ico, ICONS_DIR / "icon.ico")
+    save_ico(main_ico, ASSETS_DIR / "image/logo.ico")
+    mac_master = mac_icon(tile)
+    mac_master.save(ICONS_DIR / "icon.icns", format="ICNS")
+    print("wrote icon.icns")
 
-    main_ico_images = [resize_rgba(master, size) for size in MAIN_ICO_SIZES]
-    save_ico(main_ico_images, ICONS_DIR / "icon.ico")
-    save_ico(main_ico_images, ASSETS_DIR / "logo.ico")
-
-    save_png(resize_rgba(master, 256), ASSETS_DIR / "logo.png")
-    save_png(resize_rgba(master, 256), ASSETS_DIR / "logo-mask.png")
-
-    color_tray_dots = {
-        "tray-icon.ico": (142, 142, 147),
-        "tray-icon-sys.ico": (255, 159, 10),
-        "tray-icon-tun.ico": (46, 213, 115),
-    }
-    mono_tray_names = (
+    # Tray: the brand ground with the protection-state glyph (core/tray/mod.rs `tray_icon_kind`):
+    # Common = not connected or connecting (grey open arch), SysProxy = protected offline (amber
+    # arch with slash), Tun = connected (the warm filled sun).
+    for name, (state, rgb) in {
+        "tray-icon.ico": ("standby", (0xA9, 0xAA, 0xC4)),
+        "tray-icon-sys.ico": ("blocked", (0xFF, 0xB3, 0x47)),
+        "tray-icon-tun.ico": ("connected", (0xFF, 0xD5, 0x8E)),
+    }.items():
+        master = tray_tile(state, rgb)
+        save_ico([(size, png_bytes(resize_rgba(master, size))) for size in TRAY_ICO_SIZES], ICONS_DIR / name)
+    # macOS-only template variants of the Windows app's tray (not in the Windows package).
+    mono_tray = [(size, png_bytes(monochrome(resize_rgba(mark, size)))) for size in TRAY_ICO_SIZES]
+    for name in (
         "tray-icon-mono.ico",
         "tray-icon-sys-mono.ico",
         "tray-icon-sys-mono-new.ico",
         "tray-icon-tun-mono.ico",
         "tray-icon-tun-mono-new.ico",
-    )
-    mono_tray_images = [monochrome_icon(master, size) for size in TRAY_ICO_SIZES]
-    for name, rgb in color_tray_dots.items():
-        save_ico(
-            [with_status_dot(resize_rgba(master, size), rgb) for size in TRAY_ICO_SIZES],
-            ICONS_DIR / name,
-        )
-    for name in mono_tray_names:
-        save_ico(mono_tray_images, ICONS_DIR / name)
+    ):
+        save_ico(mono_tray, ICONS_DIR / name)
 
-    write_clean_svg()
+    # NSIS Modern UI bitmaps, copied from the approved sheet (24-bit BMP, 150x57 and 164x314).
+    for name in ("installer-header.bmp", "installer-sidebar.bmp"):
+        (ICONS_DIR / name).write_bytes((BRAND_DIR / name).read_bytes())
+        print(f"wrote {(ICONS_DIR / name).relative_to(REPO_ROOT)}")
+
+    # Welcome hero: the tile filled to its corners; the component clips it to a 22% radius.
+    save_png(resize_rgba(draw_tile(rounded=False), 512).convert("RGB"), ASSETS_DIR / "welcome-hero.png")
+
+    # macOS app icon, in-app mark and welcome hero.
+    for size in (16, 32, 128, 256, 512):
+        save_png(resize_rgba(mac_master, size), MAC_ASSETS / f"AppIcon.appiconset/icon_{size}x{size}.png")
+        save_png(resize_rgba(mac_master, size * 2), MAC_ASSETS / f"AppIcon.appiconset/icon_{size}x{size}@2x.png")
+    save_png(resize_rgba(tile, 1024), MAC_ASSETS / "TonoMark.imageset/tono-mark.png")
+    save_png(resize_rgba(mark, 16), MAC_ASSETS / "MenuBarIcon.imageset/icon_16x16.png")
+    save_png(resize_rgba(mark, 32), MAC_ASSETS / "MenuBarIcon.imageset/icon_16x16@2x.png")
+
+    # Menu-bar status item: one template image set per protection state (MenuBarProtectionStatus).
+    for state in STATES:
+        name = "MenuBarStatus" + state.capitalize()
+        folder = MAC_ASSETS / f"{name}.imageset"
+        master = draw_state_glyph(state)
+        save_png(resize_rgba(master, 18), folder / f"{state}.png")
+        save_png(resize_rgba(master, 36), folder / f"{state}@2x.png")
+        contents = {
+            "images": [
+                {"filename": f"{state}.png", "idiom": "mac", "scale": "1x"},
+                {"filename": f"{state}@2x.png", "idiom": "mac", "scale": "2x"},
+            ],
+            "info": {"author": "xcode", "version": 1},
+            "properties": {"template-rendering-intent": "template"},
+        }
+        (folder / "Contents.json").write_text(json.dumps(contents, indent=2) + "\n")
+    save_png(resize_rgba(draw_tile(rounded=False), 1024).convert("RGB"), MAC_ASSETS / "WelcomeHero.imageset/welcome-hero-1024.png")
     print("DONE")
 
 

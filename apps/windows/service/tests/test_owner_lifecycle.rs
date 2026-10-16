@@ -95,6 +95,7 @@ async fn start_clash(
             macos_proxy: None,
             kill_switch: None,
             windows_kill_switch: None,
+            release_generation: None,
         },
     )
     .await?;
@@ -670,7 +671,7 @@ async fn late_prepare_core_start_superseded_by_release_cannot_stop_the_successor
     let first_token = "e1".repeat(32);
     let first_start = start_clash(&credentials, &bundle, &first_token).await?;
     assert_eq!(first_start.code, 0, "{}", first_start.message);
-    let released = client_release_kill_switch(&credentials).await?;
+    let released = client_release_kill_switch(&credentials, None).await?;
     assert_eq!(released.code, 0, "{}", released.message);
     let bumped_epoch = current_release_epoch().await?;
     assert_ne!(

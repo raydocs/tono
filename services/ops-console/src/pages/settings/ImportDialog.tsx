@@ -87,7 +87,7 @@ export function ImportDialog({
           rows={5}
           value={text}
           onChange={(event) => { setText(event.target.value); setFault(null); }}
-          className="w-full resize-none rounded-[8px] border border-[var(--hairline)] bg-[var(--background)] p-3 font-mono text-[12px] leading-[18px] outline-none focus:border-[var(--accent)]"
+          className="w-full resize-none rounded-[8px] border border-[var(--hairline)] bg-[var(--background)] p-3 font-mono text-[12px] leading-[18px] focus:border-[var(--accent)]"
         />
 
         {problem ? (

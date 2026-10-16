@@ -1,0 +1,173 @@
+/* Failure clusters on Today: one hairline-divided row per cluster. The list is
+ * the grid and each row is a subgrid of it, so severity, sentence, details,
+ * counts and status share x positions even though the last two are `auto`.
+ * Under 641 px a row stacks: severity + sentence, details (items wrap,
+ * dots hidden), counts + status. */
+
+.cluster-list {
+  display: grid;
+  grid-template-columns: auto fit-content(196px) minmax(0, 1fr) auto auto;
+  column-gap: 10px;
+}
+
+/* No p0 in the list: rows carry no severity cell, and the column goes with it
+ * so its gap does not push the sentences right of the heading's edge. */
+.cluster-list[data-severity="none"] {
+  grid-template-columns: fit-content(196px) minmax(0, 1fr) auto auto;
+}
+
+.cluster-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 14px;
+}
+
+.cluster-row:last-child { border-bottom: 0; }
+
+/* The same red the incident rail and the open count use, by its text token so
+ * the dark theme swaps it. Empty on rows that are not p0. */
+.cluster-severity {
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: hsl(var(--sev-fg));
+}
+
+.cluster-sentence {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+/* Three flex items on one line at 13 px, its line box pinned to the 21 px the
+ * row had at 14 px. The dot between them is a `::before` on items two and up.
+ * Stage and platform never shrink; the node is the only item that gives way.
+ * Inside it the city absorbs the squeeze first (shrink weight 100, floor 4ch),
+ * then the site ellipsises too: the node never overflows its box, so nothing
+ * is clipped mid-glyph by the overflow here. */
+.cluster-detail {
+  display: flex;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 21px;
+  white-space: nowrap;
+  overflow: hidden;
+  color: var(--muted-foreground);
+}
+
+.cluster-seg + .cluster-seg::before {
+  content: "·";
+  margin: 0 5px;
+}
+
+.cluster-stage,
+.cluster-platform { flex: none; }
+
+.cluster-node {
+  display: flex;
+  min-width: 0;
+}
+
+.cluster-node-city {
+  flex: 1 100 auto;
+  min-width: 4ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cluster-node-site {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cluster-node-site::before {
+  content: "·";
+  margin: 0 5px;
+}
+
+.cluster-counts {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Both statuses share one 12 px / 22 px geometry (the border is transparent on
+ * 进行中). 已安静 drops the fill for a hairline outline and the muted text
+ * colour, and the whole row goes quiet with it. */
+.cluster-row .cluster-status {
+  justify-self: end;
+  box-sizing: border-box;
+  height: 22px;
+  border: 1px solid transparent;
+  font-size: 12px;
+}
+
+.cluster-row.is-quiet .cluster-status {
+  background: transparent;
+  border-color: rgb(20 20 19 / 0.12);
+  color: var(--muted-foreground);
+}
+
+.dark .cluster-row.is-quiet .cluster-status { border-color: rgb(255 255 255 / 0.14); }
+
+.cluster-row.is-quiet .cluster-sentence,
+.cluster-row.is-quiet .cluster-counts { color: var(--muted-foreground); }
+
+/* The heading's count: the Today tab chips' muted colour and 8 px gap, set
+ * at reading size on the heading's baseline. */
+.cluster-count {
+  margin-inline-start: 8px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .cluster-list { display: flex; flex-direction: column; }
+
+  .cluster-row {
+    grid-column: auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "severity sentence sentence"
+      "detail detail detail"
+      "counts counts status";
+    row-gap: 4px;
+    column-gap: 0;
+  }
+
+  .cluster-severity { grid-area: severity; margin-inline-end: 8px; }
+  .cluster-severity:empty { display: none; }
+  .cluster-sentence { grid-area: sentence; white-space: normal; overflow: visible; }
+  .cluster-detail {
+    grid-area: detail;
+    flex-wrap: wrap;
+    gap: 2px 12px;
+    white-space: normal;
+    overflow: visible;
+  }
+  .cluster-seg + .cluster-seg::before { display: none; }
+  /* Each item is one flex item. One longer than the row (a node with a long name) is cut with an
+   * ellipsis rather than pushing the page sideways; the full text is on title. */
+  .cluster-seg {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cluster-counts { grid-area: counts; text-align: left; }
+  .cluster-status { grid-area: status; justify-self: end; }
+}
