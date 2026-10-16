@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open, settle } from './ops';
+import { open, sessionFor, settle } from './ops';
 
 const NODE = 'Tokyo · Fuji';
 const DENSE = 'Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2） · 副本 6 · 香港中转 · 移动优先 · 备用观测点 07';
@@ -54,7 +54,7 @@ test.describe('node detail page', () => {
     }
 
     // The one registration nobody did is a chore, not an incident.
-    await expect(page.getByText('身份同步 还没登记')).toBeVisible();
+    await expect(page.getByText('身份同步 没登记')).toBeVisible();
 
     // The two directions disagree, and the page says both.
     await expect(page.getByRole('heading', { name: '客户连得上吗' })).toBeVisible();
@@ -107,7 +107,8 @@ test.describe('node detail page', () => {
   test('a failing hub is an error, not an empty machine', async ({ page }) => {
     await open(page, page1(NODE), 'error');
 
-    await expect(page.getByRole('status')).toBeVisible();
+    // An error is an alert with a way to ask again, not a status line.
+    await expect(page.getByRole('main').getByRole('alert').first()).toBeVisible();
     await expect(page.locator('body')).not.toContainText('正常');
     await expect(page).toHaveScreenshot('error.png');
   });
@@ -379,5 +380,73 @@ test.describe('the sale-readiness sheet on an unlisted machine', () => {
     await expect(block.getByText('可以上架')).toBeVisible();
     await expect(block.getByText('这台机器已经在售，这张单子留着复核')).toBeVisible();
     await expect(block.locator('li')).toHaveCount(12);
+  });
+});
+
+/** The lifecycle and listing words under the heading are the page's `.ops-tag`s. */
+function tag(page: Page, word: string) {
+  return page.locator('.ops-tag').filter({ hasText: new RegExp(`^${word}$`) });
+}
+
+/**
+ * The three rail actions that are never pressed to the end elsewhere. Each
+ * test opens its own copy of the fixture store, so the write cannot leak into
+ * the screenshots or into the same test in the other project.
+ */
+test.describe('node detail actions, pressed through', () => {
+  test('下架 with the name typed back marks the machine unlisted and swaps the rail', async ({ page }) => {
+    await open(page, page1(NODE), 'default', sessionFor('flow-unlist'));
+    await expect(tag(page, '在售')).toBeVisible();
+
+    await page.getByRole('button', { name: '下架', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('textbox').fill(NODE);
+    await dialog.getByRole('button', { name: '就下架' }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    await expect(tag(page, '已下架')).toBeVisible();
+    await expect(tag(page, '不在客户端单子里')).toBeVisible();
+    await expect(page.getByRole('button', { name: '下架', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: '上架', exact: true })).toBeEnabled();
+    const row = section(page, '任务').locator('tbody tr').filter({ hasText: '下架' });
+    await expect(row).toContainText('排队中');
+  });
+
+  test('退役 with a reason and the name typed back retires the machine and turns every action off', async ({ page }) => {
+    await open(page, page1(NODE), 'default', sessionFor('flow-retire'));
+
+    await page.getByRole('button', { name: '退役', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('会影响 4 位正在用的客户');
+    const go = dialog.getByRole('button', { name: '就退役' });
+    await expect(go).toBeDisabled();
+    await dialog.getByLabel('为什么退役').fill('机房不稳');
+    await dialog.getByLabel('把节点名原样打一遍，确认是这台机器').fill(NODE);
+    await expect(go).toBeEnabled();
+    await go.click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    await expect(page.getByText(`${NODE} 已经退役`)).toBeVisible();
+    await expect(tag(page, '已退役')).toBeVisible();
+    for (const action of ['退役', '下架', '上架', '同步身份', '重启 Xray']) {
+      await expect(page.getByRole('button', { name: action, exact: true })).toBeDisabled();
+    }
+  });
+
+  test('同步身份 with the name typed back queues a job row beside the failed one', async ({ page }) => {
+    await open(page, page1(NODE), 'default', sessionFor('flow-identity-sync'));
+    const jobs = section(page, '任务').locator('tbody tr').filter({ hasText: '同步身份' });
+    await expect(jobs).toHaveCount(1);
+    await expect(jobs).toContainText('失败');
+
+    await page.getByRole('button', { name: '同步身份', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('这台机器上的账号会被改成控制台里的那份');
+    await dialog.getByRole('textbox').fill(NODE);
+    await dialog.getByRole('button', { name: '就同步身份' }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    await expect(jobs).toHaveCount(2);
+    await expect(jobs.filter({ hasText: '排队中' })).toHaveCount(1);
   });
 });

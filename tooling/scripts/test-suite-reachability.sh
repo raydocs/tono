@@ -48,6 +48,39 @@ references=$(
   } | /usr/bin/sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*-[[:space:]][^[:space:]]*$/d'
 )
 
+# A wildcard invocation such as `node --test "tooling/scripts/tests/*.test.mjs"`
+# runs every suite it matches without naming any of them. These are collected
+# from the same stripped text, so a trigger filter (a bare sequence entry) or a
+# comment still counts for nothing. Only the file name may carry the wildcard,
+# and it must keep a literal character (`*.test.mjs`, not `*`), so a stray
+# `tests/*` or `**` cannot register a whole tree it does not run.
+globs=$(
+  printf '%s\n' "$references" | tr -s '[:space:]' '\n' |
+    /usr/bin/sed -e "s/^[\"'(]*//" -e "s/[\"')]*\$//" |
+    /usr/bin/awk 'index($0, "*") && index($0, "/")'
+)
+
+# True when a wildcard invocation covers the suite at this repository-relative
+# path. A leading ./ or ../ is dropped as for a named path; the directory must
+# be the suite's own, and the file name is matched as a shell pattern.
+covered_by_glob() {
+  local relative=$1 glob glob_dir glob_name
+  while IFS= read -r glob; do
+    [[ -n $glob ]] || continue
+    while [[ $glob == ./* || $glob == ../* ]]; do glob=${glob#*/}; done
+    glob_dir=${glob%/*}
+    glob_name=${glob##*/}
+    [[ $glob_dir == *'*'* ]] && continue
+    [[ $glob_name == *[!*]* ]] || continue
+    [[ $glob_dir == "${relative%/*}" ]] || continue
+    # shellcheck disable=SC2053 # the pattern is the point
+    [[ ${relative##*/} == $glob_name ]] && return 0
+  done <<EOF_GLOBS
+$globs
+EOF_GLOBS
+  return 1
+}
+
 shopt -s nullglob
 suites=("$scripts_dir"/test-*.sh "$scripts_dir"/tests/test_*.py \
         "$scripts_dir"/tests/*.test.rb "$scripts_dir"/tests/*.test.mjs)
@@ -70,6 +103,9 @@ for suite in ${suites[@]+"${suites[@]}"}; do
   # the whole token: `test-wired.sh.skip` contains `test-wired.sh` and would
   # otherwise count as wiring while running nothing. A leading `../../` is
   # still a hit; a following path character is not.
+  if covered_by_glob "$relative"; then
+    continue
+  fi
   if ! printf '%s\n' "$references" | /usr/bin/awk -v path="$relative" '
     BEGIN { found = 0 }
     {

@@ -58,10 +58,12 @@ export function Destinations({
   rows,
   state,
   message,
+  onRetry,
 }: {
   rows: readonly DestinationRowDto[];
   state: 'loading' | 'error' | 'ready';
   message?: string;
+  onRetry?: () => void;
 }) {
   const merged = useMemo(() => merge(rows), [rows]);
   const top = merged[0]?.bytes ?? 0;
@@ -82,7 +84,9 @@ export function Destinations({
         columns={columns}
         getRowId={(row) => row.id}
         state={tableState}
+        emptyMessage={copy.emptyDestinations}
         errorMessage={message}
+        onRetry={onRetry}
       />
       {merged.length > FIRST ? (
         <Action className="mt-3" onClick={() => setAll((value) => !value)}>

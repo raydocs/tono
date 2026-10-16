@@ -1,9 +1,11 @@
-import { EmptyLine } from '@/components/ops/Empty';
+import { EmptyLine, ErrorLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { getJson } from '@/lib/api';
+import { sortClusters } from '@/lib/failure-clusters';
 import { useResource } from '@/lib/use-resource';
-import { clusterLine } from './format';
+import '@/styles/today-clusters.css';
+import { ClusterRow } from './ClusterRow';
 import type { FailureClusterList } from './types';
 
 /**
@@ -17,28 +19,34 @@ export function FailureClusters() {
   const resource = useResource('failure-clusters', (signal) =>
     getJson<FailureClusterList>('failure-clusters', signal),
   );
+  if (resource.status === 'loading') return <EmptyLine message={copy.loading} />;
+  /*
+   * Nothing to list is one grey line, not a section: a heading over "none"
+   * or "not deployed yet" promises a block that is not there, and the main
+   * column paid a heading's height for it on every visit.
+   */
+  if (resource.status === 'error') {
+    return <ErrorLine message={copy.diagnosticsPanel.clustersUnavailable} onRetry={resource.reload} />;
+  }
+  if (resource.data.clusters.length === 0) {
+    return <p className="text-fine" role="status">{copy.diagnosticsPanel.clustersNone}</p>;
+  }
+  const hasSevere = resource.data.clusters.some((cluster) => cluster.severity === 'p0');
   return (
-    <Section title={copy.diagnosticsPanel.clustersTitle}>
-      {resource.status === 'ready' && resource.data.clusters.length === 0 ? (
-        <EmptyLine message={copy.diagnosticsPanel.clustersNone} />
-      ) : null}
-      {resource.status === 'ready' && resource.data.clusters.length > 0 ? (
-        <ul className="grid gap-2">
-          {resource.data.clusters.map((cluster) => (
-            <li key={cluster.id} className="text-sm">
-              <span className="font-mono">{clusterLine(cluster)}</span>
-              <span className="text-[var(--muted-foreground)]">
-                {' '}
-                {copy.diagnosticsPanel.clusterReach(cluster.users, cluster.devices)} · {cluster.status}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {resource.status === 'loading' ? <EmptyLine message={copy.diagnosticsPanel.clustersLoading} /> : null}
-      {resource.status === 'error' ? (
-        <EmptyLine message={copy.diagnosticsPanel.clustersUnavailable} />
-      ) : null}
+    <Section
+      title={
+        <>
+          {copy.diagnosticsPanel.clustersTitle}
+          {/* Sized for reading, in the Today tab chips' muted colour and gap. */}
+          <span className="cluster-count">{resource.data.clusters.length}</span>
+        </>
+      }
+    >
+      <ul className="cluster-list" data-severity={hasSevere ? 'some' : 'none'}>
+        {sortClusters(resource.data.clusters).map((cluster) => (
+          <ClusterRow key={cluster.id} cluster={cluster} showSeverity={hasSevere} />
+        ))}
+      </ul>
     </Section>
   );
 }

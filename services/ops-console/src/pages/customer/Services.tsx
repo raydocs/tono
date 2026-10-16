@@ -39,10 +39,12 @@ export function ServiceUsage({
   rows,
   state,
   message,
+  onRetry,
 }: {
   rows: readonly ServiceUsageDto[];
   state: 'loading' | 'error' | 'ready';
   message?: string;
+  onRetry?: () => void;
 }) {
   const families = useMemo(() => fold(rows), [rows]);
   const columns = useMemo(() => serviceColumns(), []);
@@ -60,7 +62,9 @@ export function ServiceUsage({
         columns={columns}
         getRowId={(row) => row.family}
         state={tableState}
+        emptyMessage={copy.emptyServices}
         errorMessage={message}
+        onRetry={onRetry}
       />
     </Section>
   );

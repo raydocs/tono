@@ -412,7 +412,7 @@ async fn accepted_goodbye_refuses_new_lifecycle_work_before_its_response_grace()
     let _reset = ResetGoodbye;
     let reserved_before_unlock = {
         let _lifecycle = super::OWNER_LIFECYCLE_LOCK.lock().await;
-        super::owner_goodbye_verdict(false, Some(false)).expect("an idle daemon may stop");
+        super::owner_goodbye_verdict(false, Some(false), false).expect("an idle daemon may stop");
         super::schedule_owner_goodbye_shutdown();
         // No await between scheduling and this sample: the response-grace task cannot run yet.
         super::lifecycle_is_stopping()

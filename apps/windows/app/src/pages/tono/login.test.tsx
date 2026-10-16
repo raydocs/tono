@@ -39,6 +39,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   tonoSignInDismiss: mocks.dismiss,
   tonoSignOut: mocks.signOut,
   tonoDisconnect: mocks.disconnect,
+  tonoRestoreInternet: mocks.disconnect,
   tonoRetryRestore: vi.fn(),
   formatTonoActionError: (error: Error) => error.message,
 }))
@@ -105,6 +106,20 @@ describe('login welcome v2', () => {
     expect(details?.open).toBe(true)
     expect(screen.getByRole('button', { name: 'Send code' })).toBeDefined()
   })
+
+  it('puts the sea sign-in form on its own glass card', () => {
+    setNewAppearance(true)
+    const { container } = render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    const card = container.querySelector('.sea-login-card')
+    expect(card?.classList.contains('tono-welcome__form')).toBe(true)
+    expect(
+      card?.contains(screen.getByRole('button', { name: 'Send code' })),
+    ).toBe(true)
+  })
 })
 
 describe('login code not received', () => {
@@ -150,7 +165,7 @@ describe('login paused screen', () => {
     expect(screen.getByText('Previous connection still running')).toBeDefined()
     expect(screen.queryByText('Internet is blocked')).toBeNull()
     await act(async () =>
-      fireEvent.click(screen.getByRole('button', { name: 'Sign Out' })),
+      fireEvent.click(screen.getByRole('button', { name: 'Sign out' })),
     )
     expect(mocks.signOut).toHaveBeenCalledTimes(1)
     expect(mocks.disconnect).not.toHaveBeenCalled()

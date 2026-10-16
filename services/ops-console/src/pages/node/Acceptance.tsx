@@ -1,6 +1,6 @@
 import { Check } from 'lucide-react';
 import type { AcceptanceItemDto, NodeAcceptanceDto, NodeLifecycle } from '@contract';
-import { EmptyLine } from '@/components/ops/Empty';
+import { EmptyLine, ErrorLine } from '@/components/ops/Empty';
 import { FoldedSection, Section } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { formatWhenAgo } from '@/lib/display';
@@ -26,18 +26,25 @@ import { cn } from '@/lib/utils';
 export function NodeAcceptance({
   sheet,
   lifecycle,
+  onRetry,
 }: {
   sheet: Resource<NodeAcceptanceDto>;
   lifecycle: NodeLifecycle;
+  onRetry?: () => void;
 }) {
-  const body = <AcceptanceBody sheet={sheet} listed={lifecycle === 'listed'} />;
+  const body = <AcceptanceBody sheet={sheet} listed={lifecycle === 'listed'} onRetry={onRetry} />;
   const ready = sheet.status === 'ready' ? sheet.data : null;
 
   if (lifecycle === 'listed') {
+    /* A sellable sheet has no blockers, and "0" beside the heading reads as zero checks
+       passed. The count is only worth showing while there is something to fix;
+       otherwise the word says what the zero meant. */
+    const passed = ready !== null && ready.sellable;
     return (
       <FoldedSection
         title={copy.nodeSections.acceptance}
-        count={ready === null ? null : ready.blockers.length}
+        count={ready === null || passed ? null : ready.blockers.length}
+        aside={passed ? copy.acceptancePassed : undefined}
       >
         {body}
       </FoldedSection>
@@ -60,10 +67,13 @@ export function NodeAcceptance({
   );
 }
 
-function AcceptanceBody({ sheet, listed }: { sheet: Resource<NodeAcceptanceDto>; listed: boolean }) {
-  if (sheet.status !== 'ready') {
-    return <EmptyLine message={sheet.status === 'error' ? sheet.message : copy.loading} />;
-  }
+function AcceptanceBody({ sheet, listed, onRetry }: {
+  sheet: Resource<NodeAcceptanceDto>;
+  listed: boolean;
+  onRetry?: () => void;
+}) {
+  if (sheet.status === 'error') return <ErrorLine message={sheet.message} onRetry={onRetry} />;
+  if (sheet.status === 'loading') return <EmptyLine message={copy.loading} />;
   const data = sheet.data;
   const labels = blockerLabels(data);
 

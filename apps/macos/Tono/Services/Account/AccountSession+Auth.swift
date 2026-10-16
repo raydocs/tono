@@ -442,9 +442,10 @@ extension AccountSession {
         catalogRefreshTask?.task.cancel()
         await accountLifecycle.enqueueCleanup(kind: .signOut) {
             await self.stopRuntime(logOutIdentity: true, releaseKillSwitch: true)
-            await self.api.logout()
+            let durable = await self.api.logout()
             self.clearAccount()
             self.state = .signedOut
+            self.noteSignOutDurability(durable)
         }.value
     }
 

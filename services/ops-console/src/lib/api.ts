@@ -15,6 +15,7 @@ import type {
   NodeSummaryDto,
   RangeKey,
   ReleaseDto,
+  ReleaseObjectListDto,
   ServiceUsageDto,
   SystemHealthDto,
   UpdateChannelDto,
@@ -22,12 +23,9 @@ import type {
 import { copy } from '@/copy/copy';
 import type { FleetDto, LiveDto } from './types';
 
-export class SessionExpiredError extends Error {
-  constructor() {
-    super(copy.sessionExpired);
-    this.name = 'SessionExpiredError';
-  }
-}
+import { ApiRefusal, BackendUnreachableError, SessionExpiredError } from './api-errors';
+
+export { ApiRefusal, BackendUnreachableError, SessionExpiredError };
 
 export function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
@@ -74,10 +72,39 @@ export function urlFor(path: string, query?: Record<string, string>): string {
   return `/api/v1/ops/${path}${search ? `?${search}` : ''}`;
 }
 
-export async function getJson<T>(
+/**
+ * The one automatic retry a read gets. The delay lives in an object so a test
+ * can set it to zero rather than waiting a real second.
+ */
+export const readRetry = { delayMs: 1_000 };
+
+function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('aborted', 'AbortError'));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('aborted', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/** An answer we will not read still has to be let go, or the browser holds the request open. */
+function discard(response: Response): void {
+  void response.body?.cancel().catch(() => undefined);
+}
+
+async function readOnce<T>(
   path: string,
-  signal?: AbortSignal,
-  query?: Record<string, string>,
+  signal: AbortSignal | undefined,
+  query: Record<string, string> | undefined,
 ): Promise<T> {
   let response: Response;
   try {
@@ -87,28 +114,62 @@ export async function getJson<T>(
       headers: { accept: 'application/json' },
     });
   } catch (error) {
-    if (isAbortError(error)) throw error;
+    if (signal?.aborted || isAbortError(error)) throw error;
     if (error instanceof DOMException && error.name === 'TimeoutError') {
-      throw new Error(copy.loadError, { cause: error });
+      throw new BackendUnreachableError('timeout', copy.backendTimeout, undefined, { cause: error });
     }
-    throw error;
+    throw new BackendUnreachableError('network', copy.backendUnreachable, undefined, { cause: error });
   }
-  if (response.status === 401 || response.status === 403) throw new SessionExpiredError();
-  const contentType = response.headers.get('content-type');
-  if (!contentType?.toLowerCase().includes('application/json')) {
+  if (response.status === 401 || response.status === 403) {
+    discard(response);
     throw new SessionExpiredError();
   }
+  // A 5xx is the hub (or the edge in front of it) failing, whatever the body
+  // is: an HTML 502 from the edge is not a login page.
+  if (response.status >= 500) {
+    discard(response);
+    throw new BackendUnreachableError('server', copy.backendError(response.status), response.status);
+  }
+  const contentType = response.headers.get('content-type');
+  const json = contentType?.toLowerCase().includes('application/json') === true;
   if (!response.ok) {
     let message: string = copy.loadError;
-    try {
-      const envelope = await response.json() as ErrorEnvelope;
-      message = envelope.error?.message || message;
-    } catch {
-      // Keep the generic load error for non-JSON bodies.
+    if (json) {
+      try {
+        const envelope = await response.json() as ErrorEnvelope;
+        message = envelope.error?.message || message;
+      } catch {
+        // Keep the generic load error when the envelope is unreadable.
+      }
+    } else {
+      discard(response);
     }
     throw new Error(message);
   }
-  return response.json() as Promise<T>;
+  // An OK answer that is not JSON is the Access login page.
+  if (!json) {
+    discard(response);
+    throw new SessionExpiredError();
+  }
+  try {
+    return await response.json() as T;
+  } catch {
+    throw new Error(copy.loadError);
+  }
+}
+
+export async function getJson<T>(
+  path: string,
+  signal?: AbortSignal,
+  query?: Record<string, string>,
+): Promise<T> {
+  try {
+    return await readOnce<T>(path, signal, query);
+  } catch (error) {
+    if (!(error instanceof BackendUnreachableError)) throw error;
+    await pause(readRetry.delayMs, signal);
+    return readOnce<T>(path, signal, query);
+  }
 }
 
 /**
@@ -126,11 +187,19 @@ export async function getJson<T>(
  */
 const PAGE_LIMIT = 200;
 const MAX_ITEMS = 2_000;
+/**
+ * The customer list is the one that outgrows `MAX_ITEMS` first: customer
+ * 2,001 onward was neither listed nor searchable, and the shell dropped the
+ * cursor that said so. It walks to the end, with a guard two orders of
+ * magnitude above today's fleet.
+ */
+const MAX_CUSTOMERS = 50_000;
 
 export async function getAllJson<T>(
   path: string,
   signal?: AbortSignal,
   query?: Record<string, string>,
+  maxItems: number = MAX_ITEMS,
 ): Promise<ListDto<T>> {
   const items: T[] = [];
   const seen = new Set<string>();
@@ -146,10 +215,10 @@ export async function getAllJson<T>(
     cursor = page.nextCursor;
     if (cursor !== null && seen.has(cursor)) cursor = null;
     if (cursor !== null) seen.add(cursor);
-  } while (cursor !== null && items.length < MAX_ITEMS && page.items.length > 0);
+  } while (cursor !== null && items.length < maxItems && page.items.length > 0);
   // `total` travels with the envelope: an endpoint that counted cheaply said so,
   // and paging is not a reason to lose the count.
-  return { ...page, items: items.slice(0, MAX_ITEMS), nextCursor: cursor };
+  return { ...page, items: items.slice(0, maxItems), nextCursor: cursor };
 }
 
 /**
@@ -181,13 +250,15 @@ async function writeJson<T>(
   if (response.status === 401 || response.status === 403) throw new SessionExpiredError();
   if (!response.ok) {
     let message: string = copy.actionFailed;
+    let code = '';
     try {
       const envelope = await response.json() as ErrorEnvelope;
       message = envelope.error?.message || message;
+      code = envelope.error?.code ?? '';
     } catch {
       // Keep the generic failure for non-JSON bodies.
     }
-    throw new Error(message);
+    throw new ApiRefusal(message, code);
   }
   // A delete that succeeded answers 204: there is nothing to parse, and
   // asking anyway turns a working write into "动作没做成".
@@ -201,6 +272,20 @@ export const patchJson = <T>(path: string, body: unknown, signal?: AbortSignal) 
   writeJson<T>('PATCH', path, body, signal);
 export const deleteJson = <T>(path: string, signal?: AbortSignal) =>
   writeJson<T>('DELETE', path, undefined, signal);
+
+/** What `POST releases` takes; the first six are required by the Worker. */
+export interface ReleaseCreateBody {
+  platform: string;
+  channel: string;
+  version: string;
+  r2Key: string;
+  sizeBytes: number;
+  sha256: string;
+  build?: string;
+  signature?: string;
+  minOsVersion?: string;
+  notes?: string;
+}
 
 const SNOOZE_SECONDS = 4 * 60 * 60;
 
@@ -223,7 +308,7 @@ export const opsApi = {
   /** Last week's control-plane arrivals per client ASN and path, with reported success rates. */
   apiPaths: (signal?: AbortSignal) => getJson<ApiPathsDto>('api-paths', signal),
 
-  customers: (signal?: AbortSignal) => getAllJson<CustomerSummaryDto>('customers', signal),
+  customers: (signal?: AbortSignal) => getAllJson<CustomerSummaryDto>('customers', signal, undefined, MAX_CUSTOMERS),
   /**
    * Everyone who has not connected yet, plus the five counts above them.
    *
@@ -270,12 +355,18 @@ export const opsApi = {
   releases: (signal?: AbortSignal) => getAllJson<ReleaseDto>('releases', signal),
   releaseAdoption: (signal?: AbortSignal) => getJson<AdoptionMatrixDto>('releases/adoption', signal),
   releaseChannels: (signal?: AbortSignal) => getAllJson<UpdateChannelDto>('releases/channels', signal),
+  /** The newest objects in the release bucket: what the register-release drawer offers. */
+  releaseObjects: (signal?: AbortSignal) =>
+    getJson<ReleaseObjectListDto>('releases/objects', signal, { limit: '50' }),
   /**
-   * All three of the 客户端 page's actions are edits to a release that already
-   * exists, so all three are the PATCH. `POST releases` creates a new row from
-   * a build, which is the release pipeline's job and not something the console
-   * has a form for; it is deliberately not wired up here.
+   * `POST releases` is wired for one caller: the register-release drawer, which starts from an
+   * object the publish tooling already put in R2 and pre-fills the row from
+   * it. The tooling writes R2 and GitHub, never D1, and the route accepts only
+   * the Access session, so registering from the console is the only way a
+   * build becomes a row at all. The other three actions below are edits to
+   * a row that exists, so they are the PATCH.
    */
+  createRelease: (body: ReleaseCreateBody) => postJson<ReleaseDto>('releases', body),
   publishRelease: (id: string) =>
     patchJson<ReleaseDto>(`releases/${encodeURIComponent(id)}`, { publish: true }),
   withdrawRelease: (id: string) =>

@@ -78,6 +78,41 @@ where
     start(guard, true).await
 }
 
+/// An internal release that is not the user's explicit Restore internet, Disconnect or Sign Out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum InternalRelease {
+    /// The user quits the App.
+    Quit,
+    /// A verified replacement sign-in retires the previous account's live runtime.
+    AccountReplacement,
+}
+
+/// Whether this internal release keeps the secondary AI hold after general traffic opens.
+/// Decision 125: Quit and account replacement restore ordinary internet but keep the hold until
+/// Tono reopens and connects, or the user chooses Restore internet (the only full release, which
+/// dominates an overlapping Quit through [`TonoState::begin_release`]).
+pub(crate) const fn internal_release_applies_narrow(kind: InternalRelease) -> bool {
+    match kind {
+        InternalRelease::Quit | InternalRelease::AccountReplacement => true,
+    }
+}
+
+/// Quit releases like [`release_explicit`], but with the disposition `Quit` owns.
+pub(crate) async fn release_for_quit(state: &Arc<TonoState>, app: &AppHandle) -> Result<(), String> {
+    let apply_narrow = internal_release_applies_narrow(InternalRelease::Quit);
+    let operation = start_explicit_release(state, app, None, false, apply_narrow).await;
+    wait_explicit_release(&operation).await
+}
+
+/// Replacement sign-in owns its release like [`release_for_account`], with its own disposition.
+pub(crate) async fn release_for_account_replacement(
+    state: &Arc<TonoState>, app: &AppHandle,
+) -> Result<(), String> {
+    let apply_narrow = internal_release_applies_narrow(InternalRelease::AccountReplacement);
+    let operation = start_explicit_release(state, app, None, false, apply_narrow).await;
+    complete_account_release(&operation).await
+}
+
 /// Account teardown must own the release, not just the UI's wait for it.
 pub(crate) async fn release_for_account(state: &Arc<TonoState>, app: &AppHandle) -> Result<(), String> {
     let operation = start_explicit_release(state, app, None, false, false).await;
@@ -157,6 +192,23 @@ where
     ).await
 }
 
+/// Test seam: a release that keeps the AI hold, as Quit and a replacement sign-in do.
+#[cfg(test)]
+pub(crate) async fn coordinate_narrow_release<F, C, S, SF>(
+    state: &Arc<TonoState>, sequence: C, settled: S,
+) -> Arc<LifecycleOperation>
+where
+    C: FnOnce(Arc<tokio::sync::OwnedRwLockWriteGuard<()>>) -> F + Send + 'static,
+    F: std::future::Future<Output = Result<(), String>> + Send + 'static,
+    S: FnOnce() -> SF + Send + 'static,
+    SF: std::future::Future<Output = ()> + Send + 'static,
+{
+    let mut sequence = Some(sequence);
+    coordinate_release_with_disposition(state, None, false, true,
+        move |guard, _, _| sequence.take().expect("narrow release runs once")(guard), settled,
+    ).await
+}
+
 async fn coordinate_release_with_disposition<F, C, S, SF>(
     state: &Arc<TonoState>, guard: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
     explicit_disconnect: bool, apply_narrow: bool, mut sequence: C, settled: S,
@@ -219,6 +271,8 @@ where
                 // The slot was sealed with inner held; this writer and inner still exclude
                 // admission until ALL metadata is finalized, once for the whole operation.
                 inner.fsm.sign_out_or_quit();
+                // A narrow release leaves the AI hold behind; only a full release removes it.
+                inner.ai_hold_retained = applied_narrow;
                 inner.controller_secret = None;
                 inner.controller_port = None;
                 inner.network_events_counter = None;
@@ -300,19 +354,27 @@ async fn run_release_sequence(
         }
     }
 
+    // The session this release tears down, read while the release guard keeps any attempt from
+    // replacing it (Sol R-F4: same owner is not same session).
+    let release_generation =
+        service::teardown_release_generation(state.lock().await.release_ticket.generation).await;
+
     #[cfg(windows)]
     let status = {
         // User Disconnect and failed-Prepare recovery request this durable release.
         // Quit, sign-out and ordinary failure cleanup keep the pending-update fence.
         let update_release = if _explicit_disconnect {
-            pending_update_release_result(state, commands::update::disconnect_if_pending(apply_narrow).await).await?
+            pending_update_release_result(
+                state,
+                commands::update::disconnect_if_pending(apply_narrow, release_generation).await,
+            ).await?
         } else { None };
         match update_release {
             Some(status) => status,
             None => match if apply_narrow {
-                service::tono_release_kill_switch_applying_narrow().await
+                service::tono_release_kill_switch_applying_narrow(release_generation).await
             } else {
-                service::tono_release_kill_switch().await
+                service::tono_release_kill_switch(release_generation).await
             } {
                 Ok(status) => status,
                 Err(error) => return Err(release_failed(state, &error).await),
@@ -322,14 +384,14 @@ async fn run_release_sequence(
 
     #[cfg(not(windows))]
     let status = {
-        service::tono_restore_protected_dns()
+        service::tono_restore_protected_dns(release_generation)
             .await
             .map_err(|error| format!("DNS restore failed; protection stays on: {error}"))?;
         let core_active = matches!(*CoreManager::global().get_running_mode(), RunningMode::Service);
         if stop_core_before_release(core_active, service::tono_session_live()) {
             let _ = service::tono_stop_core(false).await;
         }
-        match service::tono_release_kill_switch().await {
+        match service::tono_release_kill_switch(release_generation).await {
             Ok(status) => status,
             Err(error) => return Err(release_failed(state, &error).await),
         }
@@ -426,9 +488,29 @@ fn idle_release_can_be_skipped(
 pub(crate) async fn disconnect_for_generation(
     state: Arc<TonoState>, app: AppHandle, expected_generation: Option<u64>,
 ) -> Result<(), String> {
+    disconnect_owned(state, app, expected_generation, None).await
+}
+
+/// The ordinary release a Restore internet falls back to. It runs only while that Restore still
+/// owns the release epoch, checked under the lock that admits attempts (Sol R2-F4 on PR #1569):
+/// once the user clicked Connect or Restore again, this older Restore changes nothing.
+#[cfg(windows)]
+pub(crate) async fn disconnect_for_restore(
+    state: Arc<TonoState>, app: AppHandle, ticket: crate::core::service::ReleaseTicket,
+) -> Result<(), String> {
+    disconnect_owned(state, app, None, Some(ticket)).await
+}
+
+async fn disconnect_owned(
+    state: Arc<TonoState>, app: AppHandle, expected_generation: Option<u64>,
+    restore_ticket: Option<crate::core::service::ReleaseTicket>,
+) -> Result<(), String> {
     let operation = {
         let mut inner = state.lock().await;
         if expected_generation.is_some_and(|generation| inner.connect_generation != generation) {
+            return Ok(());
+        }
+        if restore_ticket.is_some_and(|ticket| !crate::core::service::release_ticket_current(&ticket)) {
             return Ok(());
         }
         inner.client.transport().set_auth_tunnel_port(0);
@@ -626,6 +708,27 @@ mod tests {
         }).await;
         assert_eq!(result, Err("injected release refusal".to_string()));
         assert!(lifecycle.try_read().is_ok(), "the settled request relinquishes ownership");
+    }
+
+    #[tokio::test]
+    async fn only_a_full_release_clears_the_retained_ai_hold_flag() {
+        let state = Arc::new(TonoState::for_test());
+        let narrow = coordinate_narrow_release(&state, |_guard| async { Ok(()) }, || async {}).await;
+        narrow.wait().await.unwrap();
+        assert!(state.lock().await.ai_hold_retained, "a narrow release leaves the AI hold behind");
+        let full = coordinate_release(&state, None, |_guard| async { Ok(()) }, || async {}).await;
+        full.wait().await.unwrap();
+        assert!(!state.lock().await.ai_hold_retained, "a full release removes it");
+    }
+
+    #[test]
+    fn quit_release_keeps_the_ai_hold() {
+        assert!(internal_release_applies_narrow(InternalRelease::Quit));
+    }
+
+    #[test]
+    fn replacement_sign_in_retirement_keeps_the_ai_hold() {
+        assert!(internal_release_applies_narrow(InternalRelease::AccountReplacement));
     }
 
     #[tokio::test]

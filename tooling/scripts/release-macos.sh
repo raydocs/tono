@@ -256,7 +256,7 @@ step "signing the archive for the update feed"
 # Only the offline signer is used: the App no longer embeds Sparkle, so its
 # empty package graph cannot supply this tool. Use the same archive/checksum
 # pin as macos-release.yml instead of a stale DerivedData artifact.
-sparkle_version=2.9.6
+sparkle_version=2.10.0
 sparkle_tools="$out/.sparkle-$sparkle_version"
 [[ -L $sparkle_tools ]] && fail "refusing to use $sparkle_tools: it is a symlink"
 /bin/mkdir -p "$sparkle_tools" || fail "could not stage the Sparkle signer"
@@ -266,7 +266,7 @@ sparkle_archive="$sparkle_tools/Sparkle-for-Swift-Package-Manager.zip"
   "https://github.com/sparkle-project/Sparkle/releases/download/$sparkle_version/Sparkle-for-Swift-Package-Manager.zip" \
   --output "$sparkle_archive" || fail "could not download the pinned Sparkle signer"
 printf '%s  %s\n' \
-  '8d5fb41d960b43f4a68aa14126bf62b098544ec8d191cdcc73eb14e63a8e7606' "$sparkle_archive" \
+  '17e28312b8e18ab7cdbbe09a6fb28cc55a5479ec6c371dbc07cdecd2a14fd959' "$sparkle_archive" \
   | /usr/bin/shasum -a 256 -c - || fail "the Sparkle signer archive checksum did not match"
 # A fresh extraction prevents a past DerivedData cache from supplying a second
 # signer or an obsolete tool. The archive is public and contains no key material.

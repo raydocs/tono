@@ -23,6 +23,18 @@ export function explainCode(code: string | null): string | null {
   return CODES.includes(key) ? copy.codeWord[key] : copy.codeWord.UNKNOWN;
 }
 
+/**
+ * The sentence for a code the map knows, or null for one it does not.
+ *
+ * `explainCode` answers an unknown code with "客户端没说原因", which is right
+ * beside the code in the timeline; where the code is shown instead of the
+ * sentence it must stay the code.
+ */
+export function codeSentence(code: string): string | null {
+  const key = code.toUpperCase() as CodeKey;
+  return CODES.includes(key) ? copy.codeWord[key] : null;
+}
+
 /** 拨号 / 握手 / 加密 / 取节点 / 探测 — where in the attempt it fell over. */
 export function stageWord(stage: string | null): string | null {
   if (!stage) return null;

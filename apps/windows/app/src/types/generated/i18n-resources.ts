@@ -1068,12 +1068,16 @@ export interface TranslationResources {
           protectedHttpsFailed: string
           protectionHeldByAnotherUser: string
           protectionReleaseFailed: string
+          releaseInProgress: string
           releaseReconciling: string
+          releaseRecordCorrupt: string
+          releaseUnfinished: string
           remoteSessionConnectRefused: string
           sendDiagnostics: string
           serviceBusy: string
           serviceNotRunning: string
           serviceTooOld: string
+          staleGeneration: string
           tunDataPlaneBroken: string
           tunIngressBroken: string
           wfpEngineWedged: string
@@ -1221,10 +1225,6 @@ export interface TranslationResources {
           recommended: string
           title: string
         }
-        recovery: {
-          scheduled: string
-          unscheduled: string
-        }
         retry: {
           checking: string
           now: string
@@ -1311,6 +1311,20 @@ export interface TranslationResources {
         }
         noEmail: {
           description: string
+          title: string
+        }
+        paths: {
+          elapsed: string
+          kind: {
+            connect: string
+            dns: string
+            other: string
+            timeout: string
+            tls: string
+          }
+          pinned: string
+          relay: string
+          system_dns: string
           title: string
         }
         privacyDetails: string
@@ -1444,8 +1458,11 @@ export interface TranslationResources {
         protectionUnknownBody: string
         releasedFailureBody: string
         restore: string
+        restoreBusy: string
         restoreConfirmMessage: string
         restoreConfirmTitle: string
+        restorePartial: string
+        restoreUnknown: string
         retryIn: string
         retrying: string
         retryNow: string
@@ -1584,6 +1601,7 @@ export interface TranslationResources {
         explanation: string
         inUse: string
         noEvidence: string
+        others: string
         recommendation: string
         selected: string
       }

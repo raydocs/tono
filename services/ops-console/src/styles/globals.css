@@ -4,6 +4,14 @@
 @import "./charts.css";
 @import "./dashboard.css";
 
+/* One keyboard focus ring for every control; components that draw their own
+   (specificity above zero) still win. Programmatic page focus on <main> is
+   not a control and shows no ring. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+main[tabindex="-1"]:focus-visible { outline: none; }
 
 .hairline { border-color: var(--hairline); }
 .hairline-b { border-bottom: 1px solid var(--hairline); }
@@ -36,6 +44,51 @@
   align-items: center;
   gap: 8px;
 }
+
+/* The search field of a list page. One shape for the nodes panel and the
+   customer toolbar, so the same control does not look like two. The label
+   wraps the icon and the input: pressing anywhere in the box focuses it. */
+.ops-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  color: var(--muted-foreground);
+  background: var(--surface);
+}
+.ops-search:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.ops-search input {
+  width: 168px;
+  background: transparent;
+  font-size: 13px;
+  color: var(--foreground);
+  outline: none;
+}
+
+/* A native select in the field's clothes. `appearance: none` drops the
+   platform arrow, so the chevron is drawn here; its stroke is a mid grey
+   that holds against both the light and the dark surface, which a
+   `currentColor` data URI cannot do (it never inherits). */
+.ops-select {
+  height: 32px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background-color: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%238a8a94' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px 12px;
+  appearance: none;
+}
+.ops-select:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.ops-select:disabled { cursor: not-allowed; }
+/* The open list is drawn by the platform: without this it stays white under a
+   dark surface. */
+.dark .ops-select { color-scheme: dark; }
 
 /* Radix's sheet ships its own slide keyframes. The drawer animates on a
    Motion spring instead, so the shell it positions must not move at all —
@@ -134,6 +187,7 @@
 .count-bit {
   border-bottom: 2px solid transparent;
   padding-bottom: 2px;
+  white-space: nowrap;
   color: var(--muted-foreground);
   transition: border-color 150ms ease, color 150ms ease;
 }
@@ -158,8 +212,8 @@
   transition: border-color 150ms ease, transform 150ms ease;
 }
 button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--foreground) 22%, transparent); }
-.ops-chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-.ops-chip[aria-pressed="true"] .font-mono { color: var(--accent); }
+.ops-chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-text); }
+.ops-chip[aria-pressed="true"] .font-mono { color: var(--accent-text); }
 /* The accent is too dark to read as 11 px text on the dark surface; the ring keeps it. */
 .dark .ops-chip[aria-pressed="true"],
 .dark .ops-chip[aria-pressed="true"] .font-mono { color: var(--foreground); }
@@ -184,7 +238,7 @@ button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color
 }
 
 /* Actions. Exactly one per view gets the accent; the rest are outlines, and a
-   disabled one keeps its reason in the title attribute. */
+   disabled one keeps its reason in the title attribute and `aria-describedby`. */
 .ops-action {
   display: inline-flex;
   align-items: center;
@@ -198,11 +252,26 @@ button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color
   white-space: nowrap;
   transition: transform 150ms ease, background 150ms ease, border-color 150ms ease;
 }
-.ops-action:hover:not(:disabled) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--foreground) 22%, transparent); }
-.ops-action:disabled { color: var(--muted-foreground); background: transparent; cursor: not-allowed; }
+.ops-action:hover:not(:disabled, [aria-disabled="true"]) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--foreground) 22%, transparent); }
+.ops-action:is(:disabled, [aria-disabled="true"]) { color: var(--muted-foreground); background: transparent; cursor: not-allowed; }
 .ops-action-primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }
-.ops-action-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
-.ops-action-primary:disabled { background: transparent; border-color: var(--hairline); color: var(--muted-foreground); }
+.ops-action-primary:hover:not(:disabled, [aria-disabled="true"]) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.ops-action-primary:is(:disabled, [aria-disabled="true"]) { background: transparent; border-color: var(--hairline); color: var(--muted-foreground); }
+.ops-action-danger:not(:disabled, [aria-disabled="true"]) { color: hsl(var(--sev-fg)); border-color: hsl(var(--sev-line) / 0.5); }
+.ops-action-danger:hover:not(:disabled, [aria-disabled="true"]) { background: hsl(var(--sev-bg)); border-color: hsl(var(--sev-line)); }
+.ops-action-primary.ops-action-danger:not(:disabled, [aria-disabled="true"]) { background: hsl(var(--sev-line)); border-color: hsl(var(--sev-line)); color: #ffffff; }
+.ops-action-primary.ops-action-danger:hover:not(:disabled, [aria-disabled="true"]) { background: hsl(var(--sev-fg)); border-color: hsl(var(--sev-fg)); }
+
+/* A toolbar's actions wrap under the stamp instead of pushing the last one
+   off a narrow screen; each button keeps its own size. */
+.toolbar-aside {
+  flex-wrap: wrap;
+  flex-shrink: 1;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
+  row-gap: 8px;
+}
 
 /* The severity rail on a 今天 row: the only colour an incident line carries. */
 .sev-rail {
@@ -212,6 +281,17 @@ button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color
   border-radius: 999px;
   background: hsl(var(--tone-line));
 }
+
+/* The severity word on an incident card: 严重 in the cluster severity cell's
+   text colour at 12 px / 500, 注意 in the amber the 早报 pill uses. 提示 stays
+   muted micro text. Colour and weight only; the rail and layout are untouched. */
+.incident-row .incident-sev-severe,
+.incident-row .incident-sev-warn {
+  font-size: 12px;
+  font-weight: 500;
+}
+.incident-row .incident-sev-severe { color: hsl(var(--sev-fg)); }
+.incident-row .incident-sev-warn { color: hsl(var(--warn-fg)); }
 
 /* Seven days of daily bytes. A bar above the week's mean carries whatever tone
    the surrounding block is in (the quota tone, on a node card); the rest stay
@@ -272,97 +352,6 @@ button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color
 .incident-row:last-child { border-bottom: 0; }
 .incident-row:hover { background: color-mix(in srgb, var(--foreground) 3%, transparent); }
 
-/* At 390 px a row with a rail down its left edge, a paragraph in the middle
-   and a button on the right is three columns in 350 px: the sentence wraps to
-   five lines and the action ends up level with the fourth of them. Each row
-   becomes its own card instead — the rail across the top, the sentence, the
-   facts, and the action full width at the bottom where the thumb is. */
-@media (max-width: 640px) {
-  .incident-row {
-    flex-direction: column;
-    gap: 10px;
-    margin-bottom: 10px;
-    padding: 14px;
-    border: 1px solid var(--hairline);
-    border-radius: 10px;
-    background: var(--surface);
-  }
-  .incident-row:last-child { margin-bottom: 0; border-bottom: 1px solid var(--hairline); }
-  .incident-row .sev-rail { width: 100%; height: 3px; align-self: stretch; }
-  /* One button per line meant two or three thumb-width slabs under every
-     incident and the next card starting below the fold. They share a line
-     instead, in the order they were written — the act that moves the fault
-     leads — and each is 44 px tall, the smallest target a thumb hits blind. */
-  .incident-row > [role="presentation"] { width: 100%; display: flex; flex-wrap: wrap; gap: 8px; }
-  .incident-row .ops-action { flex: 1 1 40%; min-height: 44px; justify-content: center; }
-}
-
-/* 今天 on a phone, which is where it is read: at three in the morning, from a
-   Telegram alert, with one hand. Everything here is about the thumb — the tabs
-   scroll rather than wrap, the morning read folds shut so the incidents are
-   the first thing under the sentence, and nothing pressable is under 44 px. */
-@media (max-width: 640px) {
-  /* 32 px of verdict is two words a line on a 390 px screen, and the sentence
-     is the one thing that has to be read before the list under it. It still
-     takes two lines at 24; balancing them keeps the second from being one
-     stranded character under a full first line. */
-  .page-wrap .text-verdict { font-size: 24px; text-wrap: balance; }
-
-  /* Three tabs and three counts do not fit one 350 px line. Wrapping them
-     would move the list every time a count changed, so the strip scrolls
-     sideways instead and the rule under the live tab stays the only mark. */
-  .today-tabs {
-    gap: 20px;
-    overflow-x: auto;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-  }
-  .today-tabs::-webkit-scrollbar { display: none; }
-  .today-tabs .ops-tab {
-    display: inline-flex;
-    flex: none;
-    align-items: center;
-    min-height: 44px;
-    padding-top: 10px;
-    white-space: nowrap;
-  }
-
-  /* The morning read is a paragraph of prose sitting on top of the list it
-     summarises. Folded, it keeps the two counts that decide whether it is
-     worth opening; nothing in it is lost, it is one tap further away. */
-  .digest-fold > summary {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 44px;
-    list-style: none;
-    cursor: pointer;
-  }
-  .digest-fold > summary::-webkit-details-marker { display: none; }
-  .digest-fold > summary::after {
-    content: '';
-    margin-left: auto;
-    width: 6px;
-    height: 6px;
-    border-right: 1.5px solid var(--muted-foreground);
-    border-bottom: 1.5px solid var(--muted-foreground);
-    transform: rotate(45deg) translateY(-2px);
-  }
-  .digest-fold[open] > summary::after { transform: rotate(-135deg) translateY(-2px); }
-  .digest-fold[open] > .digest-body { padding-top: 12px; }
-  /* 昨夜's titles wrap here rather than ending in an ellipsis: the whole point
-     of the line is which machine it was, and that is the half being cut. */
-  .digest-fold .night-title {
-    overflow: visible;
-    white-space: normal;
-    text-overflow: clip;
-  }
-
-  /* The sheet's action bar sits on the bottom edge; three buttons across it,
-     each a thumb tall, is the whole reason the drawer became a sheet. */
-  .sheet-actions .ops-action { flex: 1 1 28%; min-height: 44px; justify-content: center; }
-}
-
 /* The connection timeline: a day heading that sticks while its rows scroll. */
 .day-head {
   position: sticky;
@@ -391,5 +380,11 @@ summary.day-head:focus-visible { outline: 2px solid var(--accent); outline-offse
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+  /* Radix dialogs and sheets: no scaled or slid first frame when motion is reduced. */
+  [data-slot="dialog-overlay"], [data-slot="dialog-content"],
+  [data-slot="sheet-overlay"], [data-slot="sheet-content"] {
+    animation: none !important;
+    transition: none !important;
   }
 }

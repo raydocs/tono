@@ -12,17 +12,30 @@ name: Screenshots nightly
 #   they assert native labels, identifiers and opacity, not pixels.
 #   macos-release.yml still runs the whole target, these captures included.
 # - Ops console: Playwright pixel comparisons (`toHaveScreenshot`). The PR gate
-#   runs the same specs with --ignore-snapshots on Linux; the baselines were
-#   captured on macOS at DPR 2, so they are compared here on macOS.
+#   runs the same specs with --ignore-snapshots on Linux, in four shards; the
+#   baselines were captured on macOS at DPR 2, so they are compared here on
+#   macOS in the same four shards (no --ignore-snapshots). One serial
+#   `npx playwright test` was the whole nightly's wall clock.
 # - Windows: the PR gate has no screenshot test, so nothing moved.
 #
 # A failure is a red run in the Actions tab, and a scheduled or dispatched run
 # on main opens (or comments on) one tracking issue so it is not missed.
+#
+# Re-recording: dispatch with update_baselines=true on the branch whose console
+# changed. Only ops-console-rerecord runs; it re-records the Playwright baselines
+# on this same macos-26 image and uploads e2e/__screenshots__ as the artifact
+# ops-console-baselines-<sha> to commit after a visual check. The scheduled run
+# never re-records. Re-recording stays one job so the artifact is one tree.
 
 on:
   schedule:
     - cron: '23 18 * * *' # 02:23 Asia/Shanghai
   workflow_dispatch:
+    inputs:
+      update_baselines:
+        description: Re-record the ops-console Playwright baselines instead of comparing them
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -33,13 +46,14 @@ concurrency:
 
 jobs:
   sing-box-input:
+    if: ${{ !inputs.update_baselines }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Build and verify fixed darwin-arm64 input
         run: sh tooling/scripts/prepare-macos-sing-box.sh
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: sing-box-darwin-arm64-nightly
           path: apps/macos/Tono/Resources/sing-box
@@ -48,12 +62,13 @@ jobs:
 
   macos-window-captures:
     needs: sing-box-input
+    if: ${{ !inputs.update_baselines }}
     runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: sing-box-darwin-arm64-nightly
           path: apps/macos/Tono/Resources
@@ -97,7 +112,7 @@ jobs:
 
       - name: Preserve captures and result bundles
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: tono-macos-window-captures-${{ github.sha }}
           path: |
@@ -109,15 +124,20 @@ jobs:
           retention-days: 7
 
   ops-console-screenshots:
+    if: ${{ !inputs.update_baselines }}
     runs-on: macos-26
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     defaults:
       run:
         working-directory: services/ops-console
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
 
@@ -128,22 +148,60 @@ jobs:
         run: npx playwright install chromium
 
       - name: Screenshot baselines compared
-        # The same specs as the PR gate, without --ignore-snapshots, so every
-        # toHaveScreenshot assertion compares against e2e/__screenshots__.
-        run: npx playwright test
+        # The same specs and the same four-way split as the PR gate, without
+        # --ignore-snapshots, so every toHaveScreenshot assertion compares
+        # against e2e/__screenshots__.
+        run: npx playwright test --shard=${{ matrix.shard }}/4
 
       - name: Preserve diffs
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: ops-console-screenshot-diffs-${{ github.sha }}
+          name: ops-console-screenshot-diffs-${{ github.sha }}-${{ matrix.shard }}
           path: services/ops-console/test-results
           if-no-files-found: warn
           retention-days: 7
 
+  ops-console-rerecord:
+    if: ${{ inputs.update_baselines }}
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: services/ops-console
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+
+      - name: Install exactly what the lockfile pins
+        run: npm ci
+
+      - name: Install Playwright's Chromium
+        run: npx playwright install chromium
+
+      - name: Screenshot baselines re-recorded
+        if: ${{ inputs.update_baselines }}
+        # Re-records only the baselines that differ, and adds missing ones.
+        # 账目 ›「一个月的账，一页」(light) has hung here in Playwright's font
+        # wait while the compare run captured it stably (#1588); if it fails,
+        # take its baseline from a compare run's ledger-actual.png.
+        run: npx playwright test --update-snapshots=changed
+
+      - name: Upload re-recorded baselines
+        if: ${{ always() && inputs.update_baselines }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ops-console-baselines-${{ github.sha }}
+          path: services/ops-console/e2e/__screenshots__
+          if-no-files-found: error
+          retention-days: 7
+
   report-failure:
-    needs: [sing-box-input, macos-window-captures, ops-console-screenshots]
-    if: failure() && github.ref == 'refs/heads/main'
+    needs: [sing-box-input, macos-window-captures, ops-console-screenshots, ops-console-rerecord]
+    if: failure() && github.ref == 'refs/heads/main' && !inputs.update_baselines
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

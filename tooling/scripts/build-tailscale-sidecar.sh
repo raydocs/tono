@@ -2,8 +2,8 @@
 set -eu
 
 # Reproducible source pin. Update only after reviewing upstream changes and notices.
-TAILSCALE_TAG="v1.102.4"
-TAILSCALE_COMMIT="bbcd7d1fc2054b9189ebc1531acf74bd880ca0c8"
+TAILSCALE_TAG="v1.104.1"
+TAILSCALE_COMMIT="9a522a9786c97eb7910c01ccb7bd66557b04c910"
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 BUILD=$(mktemp -d "${TMPDIR:-/tmp}/tono-tailscale.XXXXXX")
 trap 'rm -rf "$BUILD"' EXIT INT TERM

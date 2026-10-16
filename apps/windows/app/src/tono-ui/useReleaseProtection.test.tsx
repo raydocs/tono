@@ -14,13 +14,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
 
-const { tonoDisconnectMock } = vi.hoisted(() => ({
+const { tonoDisconnectMock, tonoRestoreInternetMock } = vi.hoisted(() => ({
   tonoDisconnectMock: vi.fn(),
+  tonoRestoreInternetMock: vi.fn(),
 }))
 
 vi.mock('@/services/tono', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/tono')>()),
   tonoDisconnect: tonoDisconnectMock,
+  tonoRestoreInternet: tonoRestoreInternetMock,
 }))
 
 vi.mock('@/services/states', () => ({ useThemeMode: () => 'dark' }))
@@ -48,6 +50,7 @@ afterEach(() => cleanup())
 
 beforeEach(() => {
   tonoDisconnectMock.mockReset().mockResolvedValue(undefined)
+  tonoRestoreInternetMock.mockReset().mockResolvedValue(undefined)
 })
 
 describe('useReleaseProtection', () => {
@@ -58,12 +61,12 @@ describe('useReleaseProtection', () => {
     const dialog = await screen.findByRole('dialog', {
       name: 'Restore normal internet',
     })
-    expect(tonoDisconnectMock).not.toHaveBeenCalled()
+    expect(tonoRestoreInternetMock).not.toHaveBeenCalled()
     expect(document.activeElement).toBe(
       within(dialog).getByRole('button', { name: 'Cancel' }),
     )
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
-    expect(tonoDisconnectMock).not.toHaveBeenCalled()
+    expect(tonoRestoreInternetMock).not.toHaveBeenCalled()
     expect(mutate).not.toHaveBeenCalled()
     expect(screen.queryByRole('dialog')).toBeNull()
   })
@@ -74,15 +77,17 @@ describe('useReleaseProtection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open restore' }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(
-      within(dialog).getByRole('button', { name: 'Restore Normal Internet' }),
+      within(dialog).getByRole('button', { name: 'Restore normal internet' }),
     )
-    await waitFor(() => expect(tonoDisconnectMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(tonoRestoreInternetMock).toHaveBeenCalledTimes(1))
+    // Restore goes through the release service, never the ordinary Disconnect.
+    expect(tonoDisconnectMock).not.toHaveBeenCalled()
     await waitFor(() => expect(mutate).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
   it('keeps the dialog open with the fallback error when disconnect fails', async () => {
-    tonoDisconnectMock.mockRejectedValue(
+    tonoRestoreInternetMock.mockRejectedValue(
       new Error('sc.exe start TonoService: os error 10061'),
     )
     const mutate = vi.fn()
@@ -90,7 +95,7 @@ describe('useReleaseProtection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open restore' }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(
-      within(dialog).getByRole('button', { name: 'Restore Normal Internet' }),
+      within(dialog).getByRole('button', { name: 'Restore normal internet' }),
     )
     await screen.findByText(
       'Something went wrong. Details are below; copy them for support.',

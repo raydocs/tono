@@ -399,7 +399,7 @@ struct ActivityView: View {
             }
             if appState.trafficFeedLive {
                 Text(verbatim: "·").foregroundStyle(SeaTheme.tertiary)
-                Text(verbatim: "↑ \(activityBytes(appState.trafficStats.uploadSpeed))/s  ↓ \(activityBytes(appState.trafficStats.downloadSpeed))/s")
+                Text(verbatim: "↓ \(activityBytes(appState.trafficStats.downloadSpeed))/s  ↑ \(activityBytes(appState.trafficStats.uploadSpeed))/s")
                     .monospacedDigit()
                     .lineLimit(1)
             }
@@ -506,6 +506,7 @@ struct ActivityView: View {
                     }
                     seaRouteCounts
                 } else {
+                    if !appState.isConnected { SeaEmptyMark() }
                     Text(appState.isConnected ? "Reading connections…" : "Connect Tono to view live activity.")
                         .font(.system(size: 12))
                         .foregroundStyle(SeaTheme.muted)

@@ -166,6 +166,7 @@ mod app_init {
             tono::commands::catalog::tono_cancel_server_tests,
             tono::commands::connection_cmd::tono_connect,
             tono::commands::connection_cmd::tono_disconnect,
+            tono::commands::connection_cmd::tono_restore_internet,
             tono::commands::connection_cmd::tono_status,
             tono::commands::connection_cmd::tono_close_connection,
             tono::commands::connection_cmd::tono_close_all_connections,

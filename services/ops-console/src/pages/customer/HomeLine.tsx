@@ -70,7 +70,7 @@ export function HomeLine({
             label={copy.homeFacts.line}
             measured={measured(binding.displayName, binding.updatedAt, copy.sourceWord.manual)}
           />
-          <Fact
+          <Fact mono
             label={copy.homeFacts.address}
             measured={measured(address, binding.updatedAt, copy.sourceWord.manual)}
           />
@@ -86,7 +86,7 @@ export function HomeLine({
             label={copy.homeFacts.defaultNode}
             measured={measured(binding.defaultProxyName, binding.updatedAt, copy.sourceWord.catalog)}
           />
-          <Fact
+          <Fact mono
             label={copy.homeFacts.boundAt}
             measured={measured(formatDate(binding.createdAt), binding.createdAt, copy.sourceWord.manual)}
           />

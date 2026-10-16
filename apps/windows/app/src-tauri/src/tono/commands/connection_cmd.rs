@@ -32,6 +32,13 @@ pub async fn tono_disconnect(state: tauri::State<'_, Arc<TonoState>>, app: AppHa
     connection::disconnect(state.inner().clone(), app).await
 }
 
+/// Restore internet (PROPOSAL §10 v5): through the separate release service when it runs,
+/// else the explicit disconnect. Resolves only when the read-back proved the network restored.
+#[tauri::command]
+pub async fn tono_restore_internet(state: tauri::State<'_, Arc<TonoState>>, app: AppHandle) -> Result<(), String> {
+    connection::restore_internet(state.inner().clone(), app).await
+}
+
 /// F3 connect progress for the steps UI. Semantics: the *latest*
 /// transaction's record — during an attempt it shows live step state; after
 /// success all steps read completed; after a failure the failed step and

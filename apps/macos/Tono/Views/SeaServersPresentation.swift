@@ -50,12 +50,20 @@ struct SeaSignalBars: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 2) {
-            ForEach(0..<3, id: \.self) { index in
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(index < lit ? SeaTheme.warm : SeaTheme.text.opacity(0.22))
-                    .frame(width: 3, height: CGFloat(5 + index * 3))
+            if lit == 0 {
+                // Not measured yet: one hollow ring, so "untested" never reads as "weak".
+                Circle().strokeBorder(SeaTheme.text.opacity(0.3), lineWidth: 1)
+                    .frame(width: 7, height: 7)
+            } else {
+                ForEach(0..<3, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(index < lit ? AnyShapeStyle(SeaTheme.primaryGradient)
+                                          : AnyShapeStyle(SeaTheme.text.opacity(0.22)))
+                        .frame(width: 3, height: CGFloat(5 + index * 3))
+                }
             }
         }
+        .frame(height: 11)
         .accessibilityHidden(true)
     }
 }
@@ -70,7 +78,7 @@ extension ProxiesView {
     var seaHeaderRow: some View {
         HStack(alignment: .center, spacing: 12) {
             Text("Servers")
-                .font(.system(size: 28, weight: .light)).tracking(-0.5)
+                .font(.system(size: 28, weight: .regular)).tracking(-0.5)
                 .foregroundStyle(SeaTheme.text).accessibilityAddTraits(.isHeader)
                 .lineLimit(1)
             Spacer(minLength: 12)
@@ -191,6 +199,8 @@ extension ProxiesView {
                 }
             } label: {
                 HStack(spacing: 10) {
+                    NodeRouteMark(size: 30, city: nodeCityParts(node.displayName).city,
+                                  gradient: SeaTheme.primaryGradient, warmTile: true)
                     Text(nodeRouteTitle(node)).font(.system(size: 15))
                         .foregroundStyle(SeaTheme.text).lineLimit(1)
                     Spacer(minLength: 8)
@@ -221,7 +231,7 @@ extension ProxiesView {
                 isSwitching: switching, latency: latency, didFail: didFail))
         }
         .padding(.leading, 4).padding(.trailing, 14)
-        .background(selected ? Color.white.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 10))
+        .modifier(SeaWarmRowSurface(selected: selected, reduceMotion: reduceMotion))
         .overlay(alignment: .bottom) {
             Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
         }
@@ -262,5 +272,32 @@ extension ProxiesView {
                 catalogIssueRow(label: String(localized: "Traffic policy refresh failed"), reason: reason)
             }
         }
+    }
+}
+
+
+/// Hover and selection on a sea list row: a warm wash with a sunrise edge on
+/// the selected row, matching the Windows rows.
+struct SeaWarmRowSurface: ViewModifier {
+    let selected: Bool
+    let reduceMotion: Bool
+    @State private var hovered = false
+
+    static func washOpacity(selected: Bool, hovered: Bool) -> Double {
+        selected ? 0.09 : (hovered ? 0.06 : 0)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .background(Color(hex: "FFD6A0").opacity(Self.washOpacity(selected: selected, hovered: hovered)),
+                        in: RoundedRectangle(cornerRadius: 10))
+            .overlay(alignment: .leading) {
+                if selected {
+                    RoundedRectangle(cornerRadius: 1).fill(Color(hex: "FFB877"))
+                        .frame(width: 2).padding(.vertical, 8)
+                }
+            }
+            .onHover { hovered = $0 }
+            .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: hovered)
     }
 }

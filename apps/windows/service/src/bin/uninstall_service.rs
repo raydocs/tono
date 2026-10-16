@@ -690,6 +690,14 @@ fn windows_cleanup() -> CleanupOutcome {
         {
             cosmetic_error = Some(error);
         }
+        // The release service is registered by the main Service from its own image; it goes
+        // with it (PROPOSAL §10 v5).
+        #[cfg(not(feature = "test"))]
+        if let Err(error) = tono_service_protocol::release_service_remove()
+            && cosmetic_error.is_none()
+        {
+            cosmetic_error = Some(error);
+        }
         cosmetic_error
     })
 }
@@ -868,6 +876,10 @@ const INSTALL_DIR_SWEEP: &[&str] = &[
     "tono-service.exe.rollback",
     "tono-service.exe.restore",
     "tono-service.exe.publish",
+    // The scratch a repairing full install used instead of the update names above (#1307).
+    "tono-service.exe.install-rollback",
+    "tono-service.exe.install-restore",
+    "tono-service.exe.install-publish",
     // The Service-only repair's copy of the executable it replaces (#815).
     "tono-service.exe.repair-previous",
     "tono-service.exe.repair-restore",

@@ -15,7 +15,7 @@ export function Section({
   children,
   className,
 }: {
-  title: string;
+  title: ReactNode;
   aside?: ReactNode;
   children: ReactNode;
   className?: string;
@@ -37,10 +37,13 @@ export function Section({
 export function FoldedSection({
   title,
   count,
+  aside,
   children,
 }: {
   title: string;
   count?: number | null;
+  /** A word where a count would only mislead; it sits outside the heading. */
+  aside?: ReactNode;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -58,7 +61,8 @@ export function FoldedSection({
         {count === null || count === undefined ? null : (
           <span className="font-mono text-micro text-[var(--muted-foreground)]">{count}</span>
         )}
-        <span className="ml-auto text-micro text-[var(--muted-foreground)]">
+        <span className="ml-auto flex items-baseline gap-2 text-micro text-[var(--muted-foreground)]">
+          {aside}
           {open ? copy.foldShut : copy.foldOpen}
         </span>
       </button>

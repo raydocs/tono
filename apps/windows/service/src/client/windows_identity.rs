@@ -28,7 +28,11 @@ fn trusted_service_identity(
 
 #[cfg(not(feature = "test"))]
 fn verify_registered_service_process_id_inner(pipe_process_id: u32) -> Result<()> {
-    let service_name = crate::WINDOWS_SERVICE_NAME;
+    verify_service_process_id(crate::WINDOWS_SERVICE_NAME, pipe_process_id)
+}
+
+#[cfg(not(feature = "test"))]
+fn verify_service_process_id(service_name: &str, pipe_process_id: u32) -> Result<()> {
     let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
         .context("failed to connect to the Windows Service Control Manager")?;
     let service = manager
@@ -80,6 +84,35 @@ pub(super) fn verify_registered_service_process_id(pipe_process_id: u32) -> std:
             "the Tono Service is not answering the Service Control Manager",
         )),
     }
+}
+
+/// The release pipe must be served by the registered `TonoRelease` LocalSystem process.
+#[cfg(not(feature = "test"))]
+pub(super) fn verify_registered_release_process_id(pipe_process_id: u32) -> std::io::Result<()> {
+    match super::run_with_deadline(SCM_QUERY_DEADLINE, move || {
+        verify_service_process_id(crate::release_wire::RELEASE_SERVICE_NAME, pipe_process_id)
+    }) {
+        Some(verification) => verification.map_err(std::io::Error::other),
+        None => Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "the Tono release service is not answering the Service Control Manager",
+        )),
+    }
+}
+
+/// Whether the release service is registered and running, so Restore internet can use it.
+#[cfg(not(feature = "test"))]
+pub(super) fn release_service_running() -> bool {
+    super::run_with_deadline(SCM_QUERY_DEADLINE, || -> Result<bool> {
+        let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+        let service = manager.open_service(
+            crate::release_wire::RELEASE_SERVICE_NAME,
+            ServiceAccess::QUERY_STATUS,
+        )?;
+        Ok(service.query_status()?.current_state == platform_lib::service::ServiceState::Running)
+    })
+    .and_then(Result::ok)
+    .unwrap_or(false)
 }
 
 #[cfg(test)]

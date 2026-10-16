@@ -80,6 +80,7 @@ vi.mock('@/services/tono', async (original) => ({
   ...(await original<typeof import('@/services/tono')>()),
   tonoConnect: mocks.connect,
   tonoDisconnect: mocks.disconnect,
+  tonoRestoreInternet: mocks.disconnect,
   tonoSelectServer: mocks.select,
   tonoRetryNow: mocks.retry,
   tonoStatus: async () => mocks.status,
@@ -219,9 +220,9 @@ it('keeps protected-offline retry, restore, diagnostics and route actions withou
   expect(
     container.querySelector('.sea-scene')?.getAttribute('data-phase'),
   ).toBe('failed')
-  expect(screen.getAllByRole('button', { name: 'Retry Now' }).length).toBe(1)
+  expect(screen.getAllByRole('button', { name: 'Retry now' }).length).toBe(1)
   expect(
-    screen.getAllByRole('button', { name: 'Restore Normal Internet' }).length,
+    screen.getAllByRole('button', { name: 'Restore normal internet' }).length,
   ).toBe(1)
   expect(
     screen.getByRole('button', { name: 'Copy details', hidden: true }),
@@ -358,7 +359,9 @@ it('keeps the protected cancellation confirmation instead of directly releasing 
   mocks.status.protectionBlocked = true
   render(view())
   fireEvent.click(screen.getByRole('button', { name: 'Cancel connection' }))
-  expect(screen.getByText(enTono.progress.restoreConfirmTitle)).toBeDefined()
+  expect(screen.getByRole('dialog').textContent).toContain(
+    enTono.progress.restoreConfirmTitle,
+  )
   expect(mocks.disconnect).not.toHaveBeenCalled()
 })
 it('updates the protected duration once a minute without animating the numeric change', () => {
@@ -424,6 +427,7 @@ it('does not claim an automatic retry when the protected-offline record has no t
     'No automatic retry is scheduled',
   )
   expect(screen.queryByText(enTono.experience.recoveryTitle)).toBeNull()
+  expect(screen.queryByTestId('tono-recovery-feedback')).toBeNull()
 })
 
 it('marks the home that offers restore, so the layout keeps its three controls on one row', () => {
@@ -477,7 +481,7 @@ it('shows a released failure sentence and retry only once, with secondary tools 
   expect(
     screen.getAllByRole('button', { name: enTono.dashboard.errorRetry }),
   ).toHaveLength(1)
-  expect(screen.queryByRole('button', { name: 'Retry Now' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Retry now' })).toBeNull()
   const technical = screen
     .getByText(enTono.progress.technicalDetails)
     .closest('details')
@@ -628,7 +632,7 @@ it('leaves the keyboard to an open confirmation instead of pressing the primary 
   } as TonoStatus['killSwitch']
   render(view())
   fireEvent.click(
-    screen.getByRole('button', { name: 'Restore Normal Internet' }),
+    screen.getByRole('button', { name: 'Restore normal internet' }),
   )
   ;(document.activeElement as HTMLElement).blur()
   fireEvent.keyDown(document, { key: 'Enter' })

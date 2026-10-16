@@ -1,4 +1,5 @@
-import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Action } from '@/components/ops/Action';
 import { copy } from '@/copy/copy';
 import { cn } from '@/lib/utils';
 
@@ -27,10 +28,12 @@ export function DataTable<T>({
   selectedId,
   state,
   errorMessage,
+  onRetry,
   emptyMessage,
   className,
   sort,
   onSortChange,
+  limit,
 }: {
   rows: T[];
   columns: DataColumn<T>[];
@@ -39,16 +42,24 @@ export function DataTable<T>({
   selectedId?: string | null;
   state: TableState;
   errorMessage?: string;
-  /** What an empty table is empty *of*; the fleet's wording is the default. */
+  /** A refetch exists: the error state offers it as a retry button under the message. */
+  onRetry?: () => void;
+  /** What an empty table is empty *of*; a table of nodes passes `copy.emptyList`. */
   emptyMessage?: string;
   className?: string;
   /** Opt-in controlled sorting; other tables retain their local behavior. */
   sort?: TableSort;
   onSortChange?: (sort: TableSort) => void;
+  /** Draw only the first `limit` rows, counted after sorting so they are the sorted top. */
+  limit?: number;
 }) {
   const [localSort, setLocalSort] = useState<TableSort>({ id: null, direction: 'asc' });
   const { id: sortId, direction: sortDir } = sort ?? localSort;
   const [focusId, setFocusId] = useState<string | null>(null);
+  // Whether the scroll box has more to show on its right. Only the phone
+  // stylesheet draws anything from it (a fade over the right edge).
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
+  const [moreRight, setMoreRight] = useState(false);
 
   const sorted = useMemo(() => {
     if (!sortId) return rows;
@@ -69,6 +80,24 @@ export function DataTable<T>({
     return copyRows;
   }, [rows, columns, sortId, sortDir]);
 
+  const visible = limit === undefined ? sorted : sorted.slice(0, limit);
+
+  useEffect(() => {
+    if (!scroller) return undefined;
+    const check = () => setMoreRight(scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 1);
+    check();
+    scroller.addEventListener('scroll', check, { passive: true });
+    window.addEventListener('resize', check);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(check);
+    observer?.observe(scroller);
+    if (scroller.firstElementChild) observer?.observe(scroller.firstElementChild);
+    return () => {
+      scroller.removeEventListener('scroll', check);
+      window.removeEventListener('resize', check);
+      observer?.disconnect();
+    };
+  }, [scroller]);
+
   function toggleSort(id: string) {
     const next: TableSort = { id, direction: sortId === id && sortDir === 'asc' ? 'desc' : 'asc' };
     if (onSortChange) onSortChange(next);
@@ -80,14 +109,14 @@ export function DataTable<T>({
     if (event.target !== event.currentTarget && (event.target as HTMLElement).closest('button, a, input, select, textarea')) return;
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      const next = sorted[index + 1];
+      const next = visible[index + 1];
       if (next) {
         setFocusId(getRowId(next));
         event.currentTarget.nextElementSibling?.querySelector<HTMLElement>('td')?.focus();
       }
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
-      const prev = sorted[index - 1];
+      const prev = visible[index - 1];
       if (prev) {
         setFocusId(getRowId(prev));
         event.currentTarget.previousElementSibling?.querySelector<HTMLElement>('td')?.focus();
@@ -108,20 +137,25 @@ export function DataTable<T>({
   if (state === 'error') {
     return (
       <div className="panel-error rounded-[10px] px-5 py-10 text-center" role="alert">
-        {errorMessage || copy.tableError}
+        <p>{errorMessage || copy.tableError}</p>
+        {onRetry ? <Action className="mt-3" onClick={onRetry}>{copy.retry}</Action> : null}
       </div>
     );
   }
   if (state === 'empty' || sorted.length === 0) {
     return (
       <div className="rounded-[10px] border border-dashed border-[var(--hairline)] bg-[var(--surface)] px-5 py-10 text-center text-[var(--muted-foreground)]" role="status">
-        {emptyMessage ?? copy.emptyList}
+        {emptyMessage ?? copy.emptyRows}
       </div>
     );
   }
 
   return (
-    <div className={cn('raised overflow-auto rounded-[10px] bg-[var(--surface)]', className)}>
+    <div
+      ref={setScroller}
+      data-more={moreRight ? 'true' : 'false'}
+      className={cn('data-scroll raised overflow-auto rounded-[10px] bg-[var(--surface)]', className)}
+    >
       {/* Fixed layout: with `auto`, a long CJK node name takes the width the
           numeric columns need and every other cell wraps to five lines. */}
       <table className="w-full table-fixed border-collapse text-body">
@@ -131,6 +165,9 @@ export function DataTable<T>({
               <th
                 key={col.id}
                 style={col.width ? { width: col.width } : undefined}
+                aria-sort={col.sortValue
+                  ? (sortId === col.id ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none')
+                  : undefined}
                 className={cn(
                   'overflow-hidden px-3 whitespace-nowrap text-micro font-medium text-[var(--muted-foreground)]',
                   col.align === 'right' ? 'text-right' : 'text-left',
@@ -147,7 +184,7 @@ export function DataTable<T>({
                     onClick={() => toggleSort(col.id)}
                   >
                     {col.header}
-                    {sortId === col.id ? <span className="font-mono">{sortDir === 'asc' ? '↑' : '↓'}</span> : null}
+                    {sortId === col.id ? <span className="font-mono" aria-hidden>{sortDir === 'asc' ? '↑' : '↓'}</span> : null}
                   </button>
                 ) : col.headerHidden ? <span className="sr-only">{col.header}</span> : col.header}
               </th>
@@ -155,7 +192,7 @@ export function DataTable<T>({
           </tr>
         </thead>
         <tbody>
-          {sorted.map((row, index) => {
+          {visible.map((row, index) => {
             const id = getRowId(row);
             const selected = selectedId === id;
             const focused = focusId === id;

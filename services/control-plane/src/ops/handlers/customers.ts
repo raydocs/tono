@@ -2,7 +2,8 @@ import { ApiError } from '../../errors';
 import { sniffPlatform } from '../customers';
 import { listFailureClusters, loadCustomerDiagnostics } from '../../telemetry/diagnostics-read';
 import { customerSortKey, loadCustomerListCounts, loadCustomerPage } from '../customers-list';
-import { activityHours, customerStatus, customerStatuses, deviceCountsFor, servicesForUsers } from '../customers-read';
+import { activityHours, customerStatus, customerStatuses, deviceCountsFor, deviceRowsFor, servicesForUsers } from '../customers-read';
+import { versionByPlatform } from '../customers-device';
 import {
   SERVICE_FAMILIES,
   assertActivityHour,
@@ -144,6 +145,7 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
   const funnel = await loadFunnelFacts(e.DB, t, userIds);
   const statusByUser = await customerStatuses(e.DB, userIds);
   const deviceCountByUser = await deviceCountsFor(e.DB, userIds);
+  const deviceRowsByUser = await deviceRowsFor(e.DB, userIds);
   const servicesByUser = await servicesForUsers(e.DB, userIds, t - 30 * 86_400);
   const counts = await loadCustomerListCounts(e.DB, filter);
   const duplicateWechat = await loadDuplicateWechatKeys(e.DB);
@@ -177,6 +179,7 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
       quotaBytes: nullInt(user.quota_bytes),
       services: familiesOf(servicesByUser.get(userId)),
       minAppVersion: status?.appVersion ?? null,
+      versionByPlatform: versionByPlatform(deviceRowsByUser.get(userId) ?? [], t),
       expiresAt: nullInt(user.expires_at),
       lastSeenAt: status?.lastSeenAt ?? null,
       stage, stageSinceAt, firstConnectedAt: person?.firstConnectedAt ?? null,

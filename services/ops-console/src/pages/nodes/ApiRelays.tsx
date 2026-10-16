@@ -1,5 +1,5 @@
 import type { ApiRelayDto, ApiRelayEndToEndDto, ApiRelaysDto } from '@contract';
-import { Empty } from '@/components/ops/Empty';
+import { Empty, EmptyLine, ErrorLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
 import { StatusWord, type Tone } from '@/components/ops/StatusWord';
 import { copy } from '@/copy/copy';
@@ -21,13 +21,14 @@ export const END_TO_END_STALE_SEC = 15 * 60;
  *
  * Nothing measured yet is grey, not red; a failure carries its error on hover.
  */
-export function ApiRelays({ relays }: { relays: Resource<ApiRelaysDto> }) {
+export function ApiRelays({ relays, onRetry }: { relays: Resource<ApiRelaysDto>; onRetry?: () => void }) {
   return (
     <Section title={copy.apiRelays.title}>
       <p className="text-fine text-[var(--muted-foreground)]">{copy.apiRelays.lead}</p>
       {relays.status === 'loading' ? <Empty message={copy.loading} /> : null}
-      {relays.status === 'error' ? <Empty message={copy.apiRelays.loadFailed} /> : null}
-      {relays.status === 'ready' ? (
+      {relays.status === 'error' ? <ErrorLine message={copy.apiRelays.loadFailed} onRetry={onRetry} /> : null}
+      {relays.status === 'ready' && relays.data.relays.length === 0 ? <EmptyLine message={copy.apiRelays.empty} /> : null}
+      {relays.status === 'ready' && relays.data.relays.length > 0 ? (
         <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.2fr)] items-baseline">
           <span />
           <span className="text-micro text-[var(--muted-foreground)]">{copy.apiRelays.tcpColumn}</span>

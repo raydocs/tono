@@ -1572,7 +1572,8 @@ extension KillSwitchManager {
             // and only while the Core is running. Boot, launch and status()
             // do not. A saved utun that is not up must render the no-tunnel
             // form: no Continuity, mDNS, LAN,
-            // link-local, DHCP or NDP pass and no rule for that utun. A utun
+            // link-local pass and no rule for that utun (DHCP and NDP render in
+            // every ruleset). A utun
             // that is up (a helper restart mid-session) is kept. The
             // reinstall needs root and pfctl, so this checks the
             // `restorableState` filter it renders through.
@@ -1582,7 +1583,7 @@ extension KillSwitchManager {
             )
             let tunnelOnlyLabels = [
                 "tono-continuity", "tono-mdns", "tono-igmp", "tono-lan", "tono-linklocal",
-                "tono-dhcp", "tono-ndp", "tono-multicast", "tono-dns-multicast",
+                "tono-multicast", "tono-dns-multicast",
                 "tono-fragment-multicast", "tono-ssdp", "tono-tunnel",
             ]
             let bootRestoreHasNoTunnelPass =
@@ -1603,6 +1604,10 @@ extension KillSwitchManager {
                 "# Managed by Tono Kill Switch — do not edit",
                 "pass in quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
                 "pass out quick on lo0 all no state label \"tono-loopback\"",
+                "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\"",
+                "pass in quick inet proto udp from any port 67 to any port 68 no state label \"tono-dhcp\"",
+                "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } no state label \"tono-ndp\"",
+                "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } no state label \"tono-ndp\"",
                 "block drop out quick all label \"tono-block\"",
                 "",
             ].joined(separator: "\n")
@@ -2436,6 +2441,64 @@ extension KillSwitchManager {
             ))
         }
         return failures.isEmpty
+    }
+
+    /// Wi-Fi switch: with no tunnel (the connect bootstrap, the preserve
+    /// teardown, a re-assert, the emergency block) the Mac still has to get a
+    /// DHCP lease and resolve neighbors on the new network. The broadcast
+    /// DHCP passes and NDP render in a ruleset without a tunnel, ahead of the
+    /// final block.
+    static func runNoTunnelDHCPNDPSelfTest() -> Bool {
+        func state(tunnel: [String]) -> KillSwitchState {
+            KillSwitchState(
+                armed: true, tailscaleBootstrapEnabled: false, apiHosts: [], exitHints: [],
+                tunnelInterfaces: tunnel, resolvedHosts: [:], pinnedHosts: [:], derpEndpoints: [],
+                cachedDERPEndpoints: [], proxyTargets: [], sessionDirectEndpoints: [],
+                reviewedBundleDirectEnabled: false, allowLocalNetworkDevices: false
+            )
+        }
+        let rules = renderRules(state: state(tunnel: []), allowedUID: 501, physicalInterfaces: ["en0"])
+        let lines = rules.split(separator: "\n").map(String.init)
+        let required = [
+            "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\"",
+            "pass in quick inet proto udp from any port 67 to any port 68 no state label \"tono-dhcp\"",
+            "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } no state label \"tono-ndp\"",
+            "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } no state label \"tono-ndp\"",
+        ]
+        let block = lines.firstIndex(of: "block drop out quick all label \"tono-block\"")
+        // Apple PF keys non-error ICMPv6 state without the type, so a state made
+        // by an inbound type 134 could later admit an Echo Request. Without a
+        // tunnel both NDP directions are stateless; each has its own pass.
+        let ndpLines = lines.filter { $0.contains("label \"tono-ndp\"") }
+        let ndpStateless = ndpLines.count == 2
+            && ndpLines.allSatisfy { $0.contains(" no state ") && !$0.contains("keep state") }
+        // The permit is DHCP and NDP only: nothing on a DNS port may pass
+        // without a tunnel, so a lease cannot open a resolver path. Where the
+        // physical-interface DNS block renders (a tunnel is up), it still does.
+        let dnsPass = #"port (\{ )?([0-9]+, )*(53|853)\b"#
+        let noDNSPass = !lines.contains { line in
+            line.hasPrefix("pass") && line.range(of: dnsPass, options: .regularExpression) != nil
+        }
+        let tunneledLines = renderRules(
+            state: state(tunnel: ["utun199"]), allowedUID: 501, physicalInterfaces: ["en0"]
+        ).split(separator: "\n").map(String.init)
+        let dnsBlockKept = tunneledLines.contains {
+            $0.hasPrefix("block drop out quick on { en0 } inet proto { tcp, udp }")
+                && $0.hasSuffix("port { 53, 853 } label \"tono-lan-dns\"")
+        }
+        // The stateless NDP pass giving way to the tunneled stateful one (every
+        // tunnel arm) withdraws no state, so it must not become a machine flush.
+        let ndpSwapKeepsStates = stateDisposal(replacing: Set(ndpLines), with: []) == .keep
+        let holds = block != nil && ndpStateless && ndpSwapKeepsStates && noDNSPass && dnsBlockKept && required.allSatisfy { line in
+            guard let at = lines.firstIndex(of: line), let block else { return false }
+            return at < block
+        }
+        if !holds {
+            FileHandle.standardError.write(Data(
+                "self-test: no-tunnel-ruleset-passes-dhcp-and-ndp-before-the-block failed\n".utf8
+            ))
+        }
+        return holds
     }
 
     static func runNetworkSelfTest() -> Bool {

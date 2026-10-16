@@ -3,7 +3,7 @@ import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useThemeMode } from '@/services/states'
-import { formatTonoActionError, tonoDisconnect } from '@/services/tono'
+import { formatTonoActionError, tonoRestoreInternet } from '@/services/tono'
 
 import { TonoConfirmDialog } from './TonoAccountCard'
 
@@ -30,7 +30,7 @@ export const useReleaseProtection = (
   const confirm = useLockFn(async () => {
     setError(null)
     try {
-      await tonoDisconnect()
+      await tonoRestoreInternet()
       await mutateStatus()
       setOpen(false)
     } catch (cause) {

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { CustomerBillingDto } from '@contract';
 import { Action, ActionRow } from '@/components/ops/Action';
 import { DetailDrawer, Fact } from '@/components/ops/DetailDrawer';
-import { EmptyLine } from '@/components/ops/Empty';
+import { EmptyLine, ErrorLine } from '@/components/ops/Empty';
 import { FoldedSection } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { CLAUDE_PLAN, customerApi, type UserPatch } from '@/lib/api-customer-actions';
@@ -84,11 +84,11 @@ export function Billing({
           label={copy.billingFacts.plan}
           measured={measured(billing.plan, updatedAt, copy.sourceWord.profile)}
         />
-        <Fact
+        <Fact mono
           label={copy.billingFacts.deviceLimit}
           measured={measured(String(billing.deviceLimit), updatedAt, copy.sourceWord.profile)}
         />
-        <Fact
+        <Fact mono
           label={copy.billingFacts.since}
           measured={measured(
             billing.firstEntitledAt === null ? null : formatDate(billing.firstEntitledAt),
@@ -96,7 +96,7 @@ export function Billing({
             copy.sourceWord.profile,
           )}
         />
-        <Fact
+        <Fact mono
           label={copy.billingFacts.expires}
           measured={measured(
             billing.expiresAt === null ? null : formatDate(billing.expiresAt),
@@ -164,20 +164,17 @@ export function Billing({
 function LedgerFacts({ userId }: { userId: string }) {
   const month = monthOf(nowSec());
   const summary = useResource(`ledger-month-${month}`, (signal) => ledgerApi.month(month, signal));
-  if (summary.status !== 'ready') {
-    return (
-      <EmptyLine message={summary.status === 'error' ? summary.message : copy.loading} />
-    );
-  }
+  if (summary.status === 'error') return <ErrorLine message={summary.message} onRetry={summary.reload} />;
+  if (summary.status === 'loading') return <EmptyLine message={copy.loading} />;
   const row = customerRow(summary.data, userId);
   if (row === null) return <EmptyLine message={copy.ledger.customerNone} />;
   const at = summary.data.updatedAt;
   const say = (value: string | null) => measured(value, at, copy.ledger.source);
   return (
     <div className="grid gap-x-8 sm:grid-cols-3">
-      <Fact label={copy.ledger.customerRevenue} measured={say(formatCny(row.revenueCnyMinor))} />
-      <Fact label={copy.ledger.customerCost} measured={say(formatCny(row.costCnyMinor))} />
-      <Fact
+      <Fact mono label={copy.ledger.customerRevenue} measured={say(formatCny(row.revenueCnyMinor))} />
+      <Fact mono label={copy.ledger.customerCost} measured={say(formatCny(row.costCnyMinor))} />
+      <Fact mono={row.marginCnyMinor !== null}
         label={copy.ledger.customerMargin}
         measured={say(row.marginCnyMinor === null
           ? copy.ledger.pending

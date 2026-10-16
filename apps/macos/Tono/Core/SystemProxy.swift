@@ -328,6 +328,74 @@ nonisolated struct SystemProxy {
         try? disable()
     }
 
+    // MARK: - Restore internet (R-M1)
+
+    /// Whether `proxies` (the effective proxy dictionary) point at Tono's
+    /// loopback listener: an enabled HTTP, HTTPS or SOCKS proxy on
+    /// 127.0.0.1 or localhost at one of `listenerPorts`. Anything else is
+    /// the user's and is never touched.
+    static func isTonoOwned(proxies: [String: Any], listenerPorts: Set<Int>) -> Bool {
+        let classes: [(CFString, CFString, CFString)] = [
+            (kSCPropNetProxiesHTTPEnable, kSCPropNetProxiesHTTPProxy, kSCPropNetProxiesHTTPPort),
+            (kSCPropNetProxiesHTTPSEnable, kSCPropNetProxiesHTTPSProxy, kSCPropNetProxiesHTTPSPort),
+            (kSCPropNetProxiesSOCKSEnable, kSCPropNetProxiesSOCKSProxy, kSCPropNetProxiesSOCKSPort),
+        ]
+        return classes.contains { entry in
+            let (enable, host, port) = entry
+            guard (proxies[enable as String] as? NSNumber)?.boolValue == true,
+                  let server = proxies[host as String] as? String,
+                  server == "127.0.0.1" || server == "localhost",
+                  let number = proxies[port as String] as? NSNumber else { return false }
+            return listenerPorts.contains(number.intValue)
+        }
+    }
+
+    /// Clears a system proxy Tono set, then reads the effective proxies
+    /// back. True when a Tono-owned proxy is still in place, nil when they
+    /// cannot be read. Restore internet runs this before it reports.
+    static func clearTonoOwnedProxy(sessionPorts: Set<Int>) -> Bool? {
+        var ports = sessionPorts
+        for key in [activePortKey, activeSocksPortKey] {
+            let port = AppProfile.defaults.integer(forKey: key)
+            if port > 0 { ports.insert(port) }
+        }
+        guard let before = SCDynamicStoreCopyProxies(nil) as? [String: Any] else { return nil }
+        guard didSetProxy || isTonoOwned(proxies: before, listenerPorts: ports) else { return false }
+        // The readback below is the evidence, not this call's result.
+        try? disable()
+        // configd applies the change asynchronously.
+        let end = Date().addingTimeInterval(2)
+        while true {
+            guard let after = SCDynamicStoreCopyProxies(nil) as? [String: Any] else { return nil }
+            let remains = isTonoOwned(proxies: after, listenerPorts: ports)
+            if !remains || Date() >= end { return remains }
+            usleep(200_000)
+        }
+    }
+
+    /// The clear above with a deadline on the wait (Sol R2 carry-over of
+    /// R-M1). Clearing can wait on configd and on the privilege path for far
+    /// longer than Restore internet may: past `seconds` the result is nil
+    /// (unknown), and a clear still running finishes on its own. The
+    /// deadline bounds the wait, not the writer: a clear that outlives it is
+    /// not retired, cancelled or tied to a generation, and `disable()` may
+    /// restore a whole earlier snapshot rather than remove one setting (Sol
+    /// R3-M1). Legacy system-proxy mode is therefore outside Restore
+    /// internet's old-effect isolation; normal Connect uses TUN and sets no
+    /// system proxy.
+    static func clearTonoOwnedProxy(sessionPorts: Set<Int>, within seconds: TimeInterval) async -> Bool? {
+        let once = ProxyClearOnce()
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool?, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let remains = SystemProxy.clearTonoOwnedProxy(sessionPorts: sessionPorts)
+                if once.claim() { continuation.resume(returning: remains) }
+            }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + seconds) {
+                if once.claim() { continuation.resume(returning: nil) }
+            }
+        }
+    }
+
     // MARK: - Proxy Guard
 
     /// Check if system proxy still points to our ports. Returns false if tampered.
@@ -695,5 +763,19 @@ nonisolated struct SystemNetworkObservation: Equatable {
                 resolverFiles: fileResolvers
             )
         )
+    }
+}
+
+/// Lets exactly one of the clear and its deadline answer.
+nonisolated private final class ProxyClearOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var answered = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if answered { return false }
+        answered = true
+        return true
     }
 }

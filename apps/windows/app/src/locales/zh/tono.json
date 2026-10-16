@@ -293,6 +293,20 @@
       "tlsIntercepted": "网络在拦截加密连接：这台电脑与 Tono 之间有设备或软件替换了 Tono 的证书，Tono 不会接受。如果这个网络有网页登录，请先在浏览器里完成；否则请关闭检查 HTTPS 的代理或安全软件，然后重试。",
       "serverError": "登录服务暂时不可用，请稍后重试。",
       "unknown": "这次操作未完成，请重试。"
+    },
+    "paths": {
+      "title": "已尝试的连接路径",
+      "system_dns": "系统 DNS",
+      "pinned": "固定地址",
+      "relay": "Tono 中继",
+      "kind": {
+        "dns": "域名解析失败",
+        "connect": "无法连接",
+        "tls": "安全连接失败",
+        "timeout": "超时",
+        "other": "失败"
+      },
+      "elapsed": "{{seconds}} 秒"
     }
   },
   "pill": {
@@ -388,7 +402,11 @@
       "dnsPortBusy": "检测到其他代理软件（如 Clash Verge、CFW 等）正在运行并占用了系统网络。请在系统托盘彻底退出其他代理后再连接。",
       "protectionReleaseFailed": "保护还没解除。请再点一次「恢复正常网络」。",
       "encryptedDns": "Windows 还开着「加密 DNS」。点下面打开设置，关掉后再连接。",
-      "sendDiagnostics": "发给支持"
+      "sendDiagnostics": "发给支持",
+      "releaseInProgress": "正在恢复正常网络，完成后才能连接。请稍等几秒再试。",
+      "releaseUnfinished": "上一次恢复正常网络还没有完全结束，暂时不能连接。请再点一次「恢复正常网络」，或重启电脑后再连。",
+      "releaseRecordCorrupt": "Tono 读不到上一次恢复网络的记录，为安全起见暂时不能连接。请重启电脑；仍不行请联系客服。",
+      "staleGeneration": "这次连接是在恢复网络之前发起的，已作废。请重新连接。"
     },
     "status": {
       "connecting": "连接中",
@@ -499,7 +517,10 @@
       "securingDNS": "保护 DNS",
       "checkingExit": "检查出口",
       "verifyingTraffic": "验证连接"
-    }
+    },
+    "restorePartial": "网络还没有完全恢复：Tono 的部分网络设置仍在生效。请再点一次「恢复正常网络」；仍不行请重启电脑。",
+    "restoreUnknown": "Tono 无法确认网络是否已经恢复。请再点一次「恢复正常网络」；仍不行请重启电脑。",
+    "restoreBusy": "正在恢复网络，请稍等几秒再试。"
   },
   "nodes": {
     "title": "线路",
@@ -789,10 +810,6 @@
       "unscheduled": "已拦住直连。没有安排自动重试，可以立即重试或恢复正常网络。",
       "scheduled": "已拦住直连，{{seconds}} 秒后自动重试。",
       "now": "已拦住直连，正在自动重试。"
-    },
-    "recovery": {
-      "scheduled": "已安排自动重试",
-      "unscheduled": "未安排自动重试"
     }
   },
   "seaLines": {
@@ -800,6 +817,7 @@
     "explanation": "线路偏好说明",
     "inUse": "正在使用",
     "all": "全部线路 · {{count}}",
+    "others": "其他线路 · {{count}}",
     "evidence": "近 24 小时内连上过，已通过验证",
     "noEvidence": "暂无近期记录",
     "selected": "已选 {{name}} · {{latency}}"

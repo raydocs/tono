@@ -36,7 +36,7 @@ struct RecoveryNotice: View {
     var body: some View {
         if let cause = appState.recoveryCause, let feedback = appState.recoveryFeedback {
             VStack(alignment: .leading, spacing: 4) {
-                Label(cause.title, systemImage: "arrow.clockwise.shield")
+                Label(cause.title, systemImage: "arrow.clockwise.circle")
                     .font(.system(size: 12, weight: .semibold))
                 Text(feedback).font(.system(size: 11)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

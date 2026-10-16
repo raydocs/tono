@@ -283,7 +283,7 @@ nonisolated extension ConfigPipeline {
             // transport, so those lookups skip this table and still return
             // the pinned or China answer at dial time.
             let clientListeners = ["Tono-DNS", "Tono-TUN", "Tono-Mixed"]
-            let webPinHosts = plan.webDomainPins.map(\.host).sorted()
+            let webPinHosts = plan.staticWebDomainPins.map(\.host).sorted()
             if !webPinHosts.isEmpty {
                 dnsRules.append(["inbound": clientListeners, "query_type": ["A"], "domain": webPinHosts,
                     "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30])
@@ -294,7 +294,7 @@ nonisolated extension ConfigPipeline {
                     "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30])
             }
             var hosts: [String: [String]] = [:]
-            for pin in plan.domainPins + plan.webDomainPins { hosts[pin.host] = pin.addresses }
+            for pin in plan.domainPins + plan.staticWebDomainPins { hosts[pin.host] = pin.addresses }
             if !hosts.isEmpty {
                 dnsServers.append(["type": "hosts", "tag": "Tono-Hosts", "predefined": hosts])
                 dnsRules.append(["inbound": clientListeners,
@@ -325,7 +325,7 @@ nonisolated extension ConfigPipeline {
                 }
                 rules.append(["process_path_regex": appRegexes, "action": "reject"])
             }
-            for pin in plan.webDomainPins {
+            for pin in plan.staticWebDomainPins {
                 rules.append(["domain": [pin.host], "action": "resolve", "server": "Tono-Hosts", "strategy": "ipv4_only"])
                 rules.append(["type": "logical", "mode": "and", "rules": [
                     ["domain": [pin.host]], ["ip_cidr": pin.addresses.map { "\($0)/32" }],

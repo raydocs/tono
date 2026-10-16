@@ -18,9 +18,13 @@ export const shellCopy = {
   legacyFilterNotice: '旧入口的筛选或搜索范围不能完全等价迁移，已保留可用的关键词与对象链接；请在此重新核对筛选。',
   privacyCustomerSearchNotice: '隐私模式下可搜索显示的邮箱掩码、微信号或客户 ID；完整邮箱搜索需先关闭隐私模式。',
   emptyMigrated: '还没有可展示的数据',
+  skipToContent: '跳到内容',
+  /** Read by a screen reader when a detail panel opens; the visible close control is the 关闭 button. */
+  drawerDescription: '详情面板，按 Esc 可关闭。',
   searchPrompt: '搜索客户、节点或功能',
   navigation: {
     label: '业务导航',
+    dockLabel: '底部导航',
     more: '更多',
     close: '关闭导航',
     description: '按业务找到客户、线路、账目和管理功能。',
@@ -71,14 +75,14 @@ export const shellCopy = {
    * it would teach the operator to ignore the pill.
    */
   sourceLate: (who: string, lasting: string) => `${who} 停了 ${lasting}`,
-  sourceGone: (who: string) => `${who} 未接`,
+  sourceGone: (who: string) => `${who} 未接入`,
   sourceBroken: (who: string) => `${who} 不通`,
   /** The hover list: every source, how it is doing, and when it last spoke. */
   sourceState: {
     ready: '正常',
     stale: '停了',
     error: '不通',
-    missing: '未接',
+    missing: '未接入',
   } as const,
   sourceLine: (who: string, state: string, when: string) => `${who} ${state} · ${when}`,
   sourceLineNever: (who: string, state: string) => `${who} ${state}`,
@@ -95,15 +99,30 @@ export const shellCopy = {
    * of telemetry are worked through. This says so, with how far along it is,
    * instead of letting the page look broken.
    */
-  backfilling: (done: string, total: string, minutes: string) =>
-    `正在回填 30 天遥测：已处理 ${done} / ${total}，约 ${minutes} 分钟后齐`,
+  backfillProgress: (done: string, total: string) =>
+    `正在回填 30 天遥测：已处理 ${done} / ${total}，`,
+  /** Its own part, so the page can keep number, unit and verb on one line. */
+  backfillEta: (minutes: string) => `约 ${minutes} 分钟后齐`,
   sessionExpired: '登录已过期',
   sessionExpiredBody: '登录已过期，页面上的数据不会再更新。重新登录后继续。',
   reload: '重新登录',
-  pathNotWired: '客户去程数据尚未接入',
+  /** The hub did not answer a read; each of these is shown as the page's own error line too. */
+  backendTimeout: '后台 15 秒没回应',
+  backendUnreachable: '连不上后台',
+  backendError: (status: number) => `后台报错 ${status}`,
+  /** `since` is the clock time of the oldest read still on screen; null when nothing ever loaded. */
+  shellUnreachable: (since: string | null) => (
+    since === null ? '连不上后台 · 页面还没有读到数据' : `连不上后台 · 页面上的数据停在 ${since}`
+  ),
+  pageCrashed: '这页出错了',
+  pageCrashedBody: '页面渲染时出了错。重新载入后继续。',
+  reloadPage: '重新载入',
+  pathNotWired: '客户去程数据未接入',
   renew: '续费/到期',
   lastMeasured: '最后测量',
   missing: '—',
+  /** The hover and accessible name of an empty value: what is missing and who would have said. */
+  missingFrom: (source: string) => `没有数据 · 来源 ${source}`,
   noQuota: '未设额度',
   exhaustEta: '预计耗尽',
   remaining: '剩余',
@@ -112,7 +131,8 @@ export const shellCopy = {
   inUse: '在用',
   loading: '载入中',
   loadError: '载入失败',
-  emptyList: '没有节点',
+  emptyList: '还没有节点',
+  emptyRows: '没有记录',
   tableError: '表格没载入上来',
   retry: '重试',
   close: '关闭',

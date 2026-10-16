@@ -21,9 +21,23 @@ test('every screenshot test the PR gate skips runs in the nightly, and only ther
 
   assert.ok(/^ {8}run: npx playwright test --shard=.+ --ignore-snapshots$/m.test(services),
     'services-ci.yml (PR gate) must keep --ignore-snapshots on the Playwright shards')
-  assert.ok(/^ {8}run: npx playwright test$/m.test(nightly), 'the nightly must compare the screenshot baselines')
+  assert.ok(/^ {8}run: npx playwright test --shard=\$\{\{ matrix\.shard \}\}\/4$/m.test(nightly),
+    'the nightly must shard the pixel comparison the same way as the PR gate')
+  assert.equal([...nightly.matchAll(/^ {8}run:.*--ignore-snapshots/gm)].length, 0, 'the nightly must compare pixels')
+  assert.ok(nightly.includes('shard: [1, 2, 3, 4]'), 'the nightly uses the PR gate shard count')
 
   assert.ok(/^on:\n {2}schedule:\n {4}- cron: /m.test(nightly), 'the nightly needs a schedule')
   assert.ok(/^ {2}workflow_dispatch:/m.test(nightly), 'the nightly needs workflow_dispatch')
   assert.ok(!/^ {2}(pull_request|merge_group|workflow_call):/m.test(nightly), 'the nightly must stay out of the PR gate')
+})
+
+test('the nightly re-records baselines only when a dispatch asks for it', () => {
+  const nightly = workflow('screenshots-nightly.yml')
+
+  assert.ok(/^ {2}workflow_dispatch:\n {4}inputs:\n {6}update_baselines:\n(?: {8}.+\n)*? {8}default: false$/m.test(nightly),
+    'update_baselines must be a dispatch input that defaults to false')
+  const updates = [...nightly.matchAll(/^ {6}- name: .+\n {8}if: (.+)\n(?: {8}.*\n)*? {8}run: .*--update-snapshots.*$/gm)]
+  assert.equal(updates.length, 1, 'exactly one step re-records baselines')
+  assert.equal(updates[0][1], '${{ inputs.update_baselines }}')
+  assert.equal([...nightly.matchAll(/--update-snapshots/g)].length, 1, 'no other step may re-record')
 })

@@ -16,7 +16,7 @@ const safeDiagnosticLine = (line: string) => {
     const code = line.slice('Error code: '.length)
     return code === '(none)' || AUTH_ERROR_CODES.has(code)
   }
-  return /^(?:Auth stage: (?:send-code|verify-code)|Recovery cause: (?:relaysUnreachable|network|clock|interception|captive|localConflict|service|localStore)|Routes: Tono relays|Relay [1-3]: (?:dns|connect|tls|timeout|other)|Transport: (?:(?:dns|connect|tls|timeout|other)|(?:pinned|system-dns|relay)=(?:dns|connect|tls|timeout|other)(?:, (?:pinned|system-dns|relay)=(?:dns|connect|tls|timeout|other))*))$/.test(
+  return /^(?:Auth stage: (?:send-code|verify-code)|Recovery cause: (?:relaysUnreachable|network|clock|interception|captive|localConflict|service|localStore)|Routes: Tono relays|Relay [1-3]: (?:dns|connect|tls|timeout|other)|Paths: (?:system_dns|pinned|relay)\[\d{1,9}ms (?:dns|connect|tls|timeout|other)\](?:; (?:system_dns|pinned|relay)\[\d{1,9}ms (?:dns|connect|tls|timeout|other)\]){0,2}|Transport: (?:(?:dns|connect|tls|timeout|other)|(?:pinned|system-dns|relay)=(?:dns|connect|tls|timeout|other)(?:, (?:pinned|system-dns|relay)=(?:dns|connect|tls|timeout|other))*))$/.test(
     line,
   )
 }

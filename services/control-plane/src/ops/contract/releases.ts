@@ -10,8 +10,10 @@ import {
   RANGE_KEYS,
   RELEASE_CHANNELS,
 } from './vocabulary';
+import type { ListDto } from './checkers';
 import {
   arrayOf,
+  assertList,
   bool,
   enumList,
   fields,
@@ -53,6 +55,40 @@ export interface ReleaseDto {
   minOsVersion?: string | null;
 }
 
+/** What the key alone says about an object; null fields are the operator's to fill. */
+export interface ReleaseObjectGuessDto {
+  platform: Platform;
+  channel: ReleaseChannel;
+  version: string;
+  build: string | null;
+}
+
+/**
+ * One object in the release bucket, for the console's register-release drawer.
+ *
+ * `sha256` is only what R2 stored (custom metadata or the upload checksum);
+ * null means the operator has to supply it. `registered` is true when a
+ * `client_releases` row already points at the key.
+ */
+export interface ReleaseObjectDto {
+  key: string;
+  sizeBytes: number;
+  uploadedAt: number;
+  sha256: string | null;
+  etag: string;
+  guess: ReleaseObjectGuessDto | null;
+  registered: boolean;
+}
+
+/**
+ * The picker's list. `truncated` is true when the bucket had more keys than
+ * one request reads; R2 lists by key, not by upload time, so the newest
+ * objects may then be missing.
+ */
+export interface ReleaseObjectListDto extends ListDto<ReleaseObjectDto> {
+  truncated: boolean;
+}
+
 export const ADOPTION_BUCKETS = ['current', 'behind_one', 'behind_more', 'unreported'] as const;
 export type AdoptionBucket = (typeof ADOPTION_BUCKETS)[number];
 
@@ -70,10 +106,18 @@ export interface AdoptionCellDto {
  * absent from it renders 未发布 rather than a column of zeros — a zero there
  * would read as "nobody upgraded" when the truth is "nothing shipped".
  */
+export interface AdoptionPeopleDto {
+  current: number;
+  behind: number;
+  unreported: number;
+}
+
 export interface AdoptionMatrixDto {
   range: RangeKey;
   released: Platform[];
   cells: AdoptionCellDto[];
+  /** Each customer once, at the oldest version any of their released-platform devices reports. */
+  people: AdoptionPeopleDto;
   updatedAt: number;
 }
 
@@ -111,6 +155,44 @@ export function assertRelease(value: unknown, path = 'release'): ReleaseDto {
   };
 }
 
+const OBJECT_KEYS = ['key', 'sizeBytes', 'uploadedAt', 'sha256', 'etag', 'guess', 'registered'];
+const OBJECT_GUESS_KEYS = ['platform', 'channel', 'version', 'build'];
+
+function assertObjectGuess(value: unknown, path: string): ReleaseObjectGuessDto | null {
+  if (value === null) return null;
+  const row = fields(value, path, OBJECT_GUESS_KEYS);
+  return {
+    platform: oneOf<Platform>(row, path, 'platform', PLATFORMS),
+    channel: oneOf<ReleaseChannel>(row, path, 'channel', RELEASE_CHANNELS),
+    version: text(row, path, 'version'),
+    build: optText(row, path, 'build'),
+  };
+}
+
+export function assertReleaseObject(value: unknown, path = 'releaseObject'): ReleaseObjectDto {
+  const row = fields(value, path, OBJECT_KEYS);
+  const sizeBytes = int(row, path, 'sizeBytes');
+  if (sizeBytes < 0) violation(`${path}.sizeBytes`);
+  return {
+    key: text(row, path, 'key'),
+    sizeBytes,
+    uploadedAt: int(row, path, 'uploadedAt'),
+    sha256: optText(row, path, 'sha256'),
+    etag: text(row, path, 'etag'),
+    guess: assertObjectGuess(row.guess, `${path}.guess`),
+    registered: bool(row, path, 'registered'),
+  };
+}
+
+export function assertReleaseObjectList(value: unknown, path = 'releaseObjects'): ReleaseObjectListDto {
+  const row = fields(value, path, ['items', 'nextCursor', 'total', 'updatedAt', 'counts', 'truncated']);
+  const { truncated: _truncated, ...envelope } = row;
+  return {
+    ...assertList(envelope, assertReleaseObject, path),
+    truncated: bool(row, path, 'truncated'),
+  };
+}
+
 const ADOPTION_CELL_KEYS = ['platform', 'bucket', 'users', 'devices'];
 
 export function assertAdoptionCell(value: unknown, path = 'adoptionCell'): AdoptionCellDto {
@@ -123,7 +205,18 @@ export function assertAdoptionCell(value: unknown, path = 'adoptionCell'): Adopt
   };
 }
 
-const ADOPTION_KEYS = ['range', 'released', 'cells', 'updatedAt'];
+const ADOPTION_PEOPLE_KEYS = ['current', 'behind', 'unreported'];
+
+function assertAdoptionPeople(value: unknown, path: string): AdoptionPeopleDto {
+  const row = fields(value, path, ADOPTION_PEOPLE_KEYS);
+  return {
+    current: int(row, path, 'current'),
+    behind: int(row, path, 'behind'),
+    unreported: int(row, path, 'unreported'),
+  };
+}
+
+const ADOPTION_KEYS = ['range', 'released', 'cells', 'people', 'updatedAt'];
 
 export function assertAdoptionMatrix(value: unknown, path = 'adoption'): AdoptionMatrixDto {
   const row = fields(value, path, ADOPTION_KEYS);
@@ -131,6 +224,7 @@ export function assertAdoptionMatrix(value: unknown, path = 'adoption'): Adoptio
     range: oneOf<RangeKey>(row, path, 'range', RANGE_KEYS),
     released: enumList<Platform>(row, path, 'released', PLATFORMS),
     cells: arrayOf(row, path, 'cells', assertAdoptionCell),
+    people: assertAdoptionPeople(row.people, `${path}.people`),
     updatedAt: int(row, path, 'updatedAt'),
   };
 }

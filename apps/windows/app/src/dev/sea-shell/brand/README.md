@@ -1,6 +1,6 @@
-# Tono 0.0.75 brand proposal — unapproved, unwired
+# Tono brand: sun on the horizon (approved 2026-10-12, wired)
 
-This directory is **dev-only**. It does not change the application/installer/tray icon, navbar or startup screen. Owner approval of the sheet is required before wiring. Native NSIS/WebView, DPI and installation are not verified by this artwork.
+The owner approved this sheet on 2026-10-12 ([decision 095](../../../../../../../docs/decisions/095-2026-10-12-sun-horizon-icons.md)). These files are the sources; `scripts/generate-tono-icons.py` writes every shipped raster from them (Windows bundle, tray and installer images, macOS app icon, menu-bar state glyphs, mark and welcome hero). Native NSIS/WebView, DPI and installation are not verified by this artwork.
 
 ## Review
 
@@ -10,7 +10,7 @@ From `apps/windows/app`, reuse the shell preview:
 pnpm exec vite --config vite.shell-preview.config.mts --port 3015
 ```
 
-Open `http://127.0.0.1:3015/brand-sheet.html`. It shows the application icon at **16,24,32,48,256 CSS pixels on both grounds** (1× at DPR1), lockup, splash, two illustrative installer placements and the unapproved PR7 tray sheet. Installer progress is explicitly illustrative, not an installation.
+Open `http://127.0.0.1:3015/brand-sheet.html`. It shows the application icon at **16,24,32,48,256 CSS pixels on both grounds** (1× at DPR1), lockup, splash, and two illustrative installer placements. Installer progress is explicitly illustrative, not an installation.
 
 - `icons/tono-{16,24,32,48,64,128,256}.svg`: independently pixel-aligned geometry; 16px reflection spacing is optically adjusted. Transparent exterior; dark indigo tile, warm sun/horizon.
 - Matching PNGs: rasterised from the SVG documents with EgoTaskSpace23/Chromium at DPR1, exact viewBox crops and transparent browser ground. They are artwork, not Windows UI screenshots.

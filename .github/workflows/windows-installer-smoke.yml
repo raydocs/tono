@@ -48,14 +48,14 @@ jobs:
             if ($built -ne $current) { throw "Candidate source differs from the tested tree: $path" }
           }
           $output = Join-Path $env:RUNNER_TEMP 'tono-candidate'
-          gh run download $id --name "tono-windows-0.0.75-candidate-$source" --dir $output
+          gh run download $id --name "tono-windows-0.0.76-candidate-$source" --dir $output
           $manifest = Get-Content (Join-Path $output 'candidate-manifest.json') -Raw | ConvertFrom-Json
           if ($manifest.source -ne $source) { throw 'Artifact manifest source does not match its workflow run.' }
           "CANDIDATE_DIRECTORY=$output" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
       - name: Install, repair and uninstall on the ephemeral administrator runner
         shell: pwsh
         run: tooling/scripts/test-windows-candidate-install.ps1 -CandidateDirectory $env:CANDIDATE_DIRECTORY
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: windows-installer-smoke-${{ github.sha }}

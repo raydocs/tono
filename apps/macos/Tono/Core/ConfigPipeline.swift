@@ -61,6 +61,15 @@ nonisolated struct ConfigPipeline {
     struct DirectDomainSuffix: Equatable, Sendable {
         let host: String
         let ports: [UInt16]
+
+        /// Whether this suffix already routes the pinned host direct on every
+        /// port the pin names. Only then is the pin a redundant narrower match.
+        func covers(_ pin: DirectDomainPin) -> Bool {
+            let suffix = host.lowercased()
+            let name = pin.host.lowercased()
+            return (name == suffix || name.hasSuffix("." + suffix))
+                && Set(pin.ports).isSubset(of: Set(ports))
+        }
     }
 
     struct ManagedDirectRuntimePolicy: Equatable, Sendable {
@@ -170,6 +179,25 @@ nonisolated struct ConfigPipeline {
                 }
             }
             return suffixes.sorted { $0.host < $1.host }
+        }
+
+        /// Web pins the runtime still resolves and dials from their pinned
+        /// addresses. A pin that a policy suffix already covers is left out of
+        /// the runtime: the suffix rule resolves it through the China DNS at
+        /// dial time, so a retired CDN address cannot strand the host, and the
+        /// pin needs no refresh (a refresh reloads the whole session). Without
+        /// policy suffixes every web pin stays.
+        var staticWebDomainPins: [DirectDomainPin] {
+            webDomainPins.filter { pin in
+                !webDomainSuffixes.contains { $0.covers(pin) }
+            }
+        }
+
+        /// Whether a pin still decides a dial, so that its refresh is worth the
+        /// session reload it costs. Pins are the only route for a policy with no
+        /// suffix rules; with them, only a pin no suffix covers is.
+        var pinsAreLoadBearing: Bool {
+            webDomainSuffixes.isEmpty || !staticWebDomainPins.isEmpty
         }
 
         var requiresAddressFreeDirectPermit: Bool {

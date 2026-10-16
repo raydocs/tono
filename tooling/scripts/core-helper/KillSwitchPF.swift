@@ -382,24 +382,37 @@ extension KillSwitchManager {
                     "pass in quick inet6 from { fe80::/10, ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""
                 )
             }
-            // DHCP is identified by ports alone, and any local process can send
-            // from port 68, so the destination carries the bound: the limited
-            // broadcast only (unicast renewal to a LAN server is `tono-lan`).
-            // Server replies come from the server's own address, so the inbound
-            // permit cannot name one; `no state` keeps it from creating a return
-            // path that would let port 68 answer an arbitrary public host.
-            lines.append(
-                "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\""
-            )
-            lines.append(
-                "pass in quick inet proto udp from any port 67 to any port 68 no state label \"tono-dhcp\""
-            )
-            lines.append(
-                "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\""
-            )
-            lines.append(
-                "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\""
-            )
+        }
+        // Every ruleset, tunnel or not. After a network move the Mac sits in the
+        // no-tunnel bootstrap or preserve ruleset while it reconnects, and
+        // without these it cannot take a lease on the new network or resolve
+        // its router. Windows permits the same two in every armed mode.
+        // DHCP is identified by ports alone, and any local process can send
+        // from port 68, so the destination carries the bound: the limited
+        // broadcast only (unicast renewal to a LAN server is `tono-lan`).
+        // Server replies come from the server's own address, so the inbound
+        // permit cannot name one; `no state` keeps it from creating a return
+        // path that would let port 68 answer an arbitrary public host.
+        lines.append(
+            "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\""
+        )
+        lines.append(
+            "pass in quick inet proto udp from any port 67 to any port 68 no state label \"tono-dhcp\""
+        )
+        // Without a tunnel the NDP passes keep no state: Apple PF keys non-error
+        // ICMPv6 state by addresses and id without the type, and looks state up
+        // before rules, so a state made by an inbound router advertisement
+        // (spoofable by a LAN peer) could admit an Echo Request from any local
+        // process. Both directions have their own pass, so no return state is
+        // needed. With a tunnel the rule keeps its existing text.
+        let ndpState = state.tunnelInterfaces.isEmpty ? "no state" : "keep state (if-bound)"
+        lines.append(
+            "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } \(ndpState) label \"tono-ndp\""
+        )
+        lines.append(
+            "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } \(ndpState) label \"tono-ndp\""
+        )
+        if !state.tunnelInterfaces.isEmpty {
             // Discovery beyond mDNS goes with the same setting: off, the
             // devices it would find are unreachable anyway.
             if state.allowLocalNetworkDevices {
@@ -1938,6 +1951,10 @@ extension KillSwitchManager {
     /// `/core/stop`, forever (R609-F2).
     static let helperCommandDeadline: TimeInterval = 15
 
+    /// The `/bin/sh` admission gate in front of every command. The release
+    /// worker recognises a gated child of a dead helper by this exact text.
+    static let commandGateScript = #"IFS= read -r gate || exit 125; [ "$gate" = go ] || exit 125; exec "$0" "$@""#
+
     /// Past `deadline` the command has failed, whatever it would have done:
     /// no caller may read a load, an enable or a release that never reported
     /// back as done. The deadline starts before the launch: `Process.run()`
@@ -1970,7 +1987,7 @@ extension KillSwitchManager {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [
-            "-c", #"IFS= read -r gate || exit 125; [ "$gate" = go ] || exit 125; exec "$0" "$@""#,
+            "-c", commandGateScript,
             executable,
         ] + arguments
         process.environment = environment

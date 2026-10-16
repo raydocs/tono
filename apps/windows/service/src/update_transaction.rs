@@ -94,6 +94,41 @@ impl State {
             .is_some_and(|a| a.receipt.phase != Phase::Committed)
     }
 
+    /// An attempt that can never act again: past its receipt expiry, never consumed (the
+    /// high-water is still below its release) and without a live executor. `live_attempt`
+    /// already refuses it, so it grants no authority and fences nothing. A consumed attempt is
+    /// never inert: its recovery obligation outlives the receipt.
+    pub fn inert_at(&self, now: u64) -> bool {
+        self.expiry_frees_attempt().is_some_and(|expires| now >= expires)
+            && self.attempt.as_ref().is_some_and(|a| {
+                a.executor.as_ref().is_none_or(|e| !incarnation_possibly_live(e))
+            })
+    }
+
+    /// The receipt expiry after which the attempt may stop blocking ([`Self::inert_at`] also
+    /// needs its executor gone): only a never-consumed, uncommitted attempt has one.
+    pub fn expiry_frees_attempt(&self) -> Option<u64> {
+        self.attempt
+            .as_ref()
+            .filter(|a| {
+                a.receipt.phase != Phase::Committed
+                    && matches!(
+                        a.execution,
+                        Execution::Reserved
+                            | Execution::Extracting
+                            | Execution::Staged
+                            | Execution::Launching
+                    )
+                    && self.consumed_sequence < a.manifest.release_sequence
+            })
+            .map(|a| a.receipt.expires_at_unix)
+    }
+
+    /// [`Self::pending`] for admission: an [`Self::inert_at`] attempt no longer blocks anyone.
+    pub fn blocks_at(&self, now: u64) -> bool {
+        self.pending() && !self.inert_at(now)
+    }
+
     fn validate(&self) -> Result<()> {
         ensure!(
             self.consumed_sequence <= 9_007_199_254_740_991
@@ -150,8 +185,13 @@ impl State {
                     "proof/execution evidence conflicts"
                 );
             }
+            // A consumed attempt may sit beside the lease of a full install that repairs an
+            // exhausted recovery (#1307). Only the install chain's gates take that lease, and
+            // only for a record `Store::repair_eligible` accepts.
             ensure!(
-                self.manual_installer.is_none() || a.receipt.phase == Phase::Committed,
+                self.manual_installer.is_none()
+                    || a.receipt.phase == Phase::Committed
+                    || matches!(a.execution, Execution::Consumed | Execution::Uncertain),
                 "manual lease conflicts with pending update"
             );
             if let Some(disconnect) = &a.disconnect {
@@ -430,6 +470,19 @@ impl Store {
         ) && self.recovery_runs()? >= MAX_RECOVERY_RUNS)
     }
 
+    /// Whether a verified full install may end this attempt (#1307): recovery is exhausted, the
+    /// attempt is Consumed or Uncertain (never a Replaced one a live successor may still adopt),
+    /// and no executor incarnation is alive. Without an attempt, or with a committed one, no.
+    pub fn repair_eligible(&self) -> Result<bool> {
+        let Some(a) = self.state.attempt.as_ref() else {
+            return Ok(false);
+        };
+        Ok(self.pending()
+            && matches!(a.execution, Execution::Consumed | Execution::Uncertain)
+            && self.recovery_exhausted()?
+            && a.executor.as_ref().is_none_or(|e| !incarnation_possibly_live(e)))
+    }
+
     /// Count one failed recovery run whose network outcome settled. Like rollback
     /// finalization, this private sidecar grants no publication or consumption authority.
     pub fn note_recovery_run(&self) -> Result<()> {
@@ -675,6 +728,50 @@ impl Store {
         let mut next = self.state.clone();
         next.attempt = None;
         self.save(next)
+    }
+
+    /// Archive an [`State::inert_at`] attempt so its owner's expiry stops fencing every other
+    /// user (#1293). Like every retirement it keeps the evidence and the high-water; nothing is
+    /// cleared. `Ok(false)` when the attempt is not inert.
+    pub fn retire_expired_inert(&mut self, now: u64) -> Result<bool> {
+        self.retire_expired_inert_with(now, atomic_write)
+    }
+
+    fn retire_expired_inert_with(
+        &mut self,
+        now: u64,
+        archive: impl FnOnce(&Path, &[u8]) -> Result<()>,
+    ) -> Result<bool> {
+        if !self.state.inert_at(now) {
+            return Ok(false);
+        }
+        let attempt_id = self.attempt()?.receipt.attempt_id.clone();
+        self.archive_attempt(&attempt_id, archive)?;
+        Ok(true)
+    }
+
+    /// Terminal archive for an exhausted attempt after a full install the lease holder ran
+    /// (#1307). Like every retirement it keeps the evidence, the original obligation and the
+    /// consumed high-water: no recovery is fabricated and the same release is not replayable. The
+    /// caller proves the installed identity first; `release_backups` runs before the slot clears
+    /// and must be idempotent, so a failure leaves a retryable pending record.
+    pub fn retire_repaired(
+        &mut self,
+        installer: &Image,
+        release_backups: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        ensure!(!self.write_failed, "failed write requires reopening durable evidence");
+        ensure!(
+            self.repair_eligible()?,
+            "only an exhausted, executor-less Consumed or Uncertain attempt can be repaired"
+        );
+        ensure!(
+            self.state.manual_installer.as_ref() == Some(installer),
+            "only the installer holding the manual lease can repair an attempt"
+        );
+        release_backups()?;
+        let attempt_id = self.attempt()?.receipt.attempt_id.clone();
+        self.archive_attempt(&attempt_id, atomic_write)
     }
 
     pub fn retire_unconsumed(&mut self, owner: &str, peer: &Image) -> Result<()> {
@@ -925,6 +1022,20 @@ fn incarnation_live(recorded: &Image) -> bool {
 
 #[cfg(not(windows))]
 fn incarnation_live(recorded: &Image) -> bool {
+    let _ = recorded;
+    false
+}
+
+/// [`incarnation_live`] for decisions that free a fence: only a conclusive answer says the
+/// executor is gone (no such PID, or one created at another time). A refused probe, such as a
+/// sharing violation on its image, counts as alive.
+#[cfg(windows)]
+fn incarnation_possibly_live(recorded: &Image) -> bool {
+    crate::core::update::executor_possibly_live(recorded)
+}
+
+#[cfg(not(windows))]
+fn incarnation_possibly_live(recorded: &Image) -> bool {
     let _ = recorded;
     false
 }
@@ -1187,6 +1298,40 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn update_expired_unconsumed_attempt_is_archived_and_a_consumed_one_never_is() {
+        let (root, mut store, _, _) = reserved();
+        let expires = store.attempt().unwrap().receipt.expires_at_unix;
+        let attempt_id = store.attempt().unwrap().receipt.attempt_id.clone();
+        assert!(
+            !store.retire_expired_inert(expires - 1).unwrap(),
+            "an unexpired attempt can still be installed"
+        );
+        assert!(store.pending());
+        assert!(store.retire_expired_inert(expires).unwrap());
+        assert!(!store.pending());
+        let high_water = store.state.consumed_sequence;
+        assert_eq!(high_water, 73, "the archive never lowers the high-water");
+        assert!(
+            root.join(format!("retired-{attempt_id}.json")).is_file(),
+            "the evidence is archived, not cleared"
+        );
+        drop(store);
+        std::fs::remove_dir_all(&root).unwrap();
+
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        let far = store.attempt().unwrap().receipt.expires_at_unix + 1_000_000;
+        assert!(
+            !store.retire_expired_inert(far).unwrap(),
+            "a consumed attempt keeps its recovery obligation past the receipt"
+        );
+        assert!(store.pending());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn update_recovery_stops_relaunching_after_bounded_failed_runs() {
         let (root, mut store, peer, executor) = reserved();
         authorize(&mut store, &peer);
@@ -1206,6 +1351,87 @@ pub(crate) mod tests {
         );
         assert!(store.recovery_exhausted().unwrap());
         assert!(store.pending(), "exhaustion must not fabricate recovery");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An Uncertain attempt whose recovery ran out: the record a full install has to repair.
+    fn exhausted(store: &mut Store, peer: &Image, executor: &Image) {
+        authorize(store, peer);
+        store.consume(executor, 1_900_000_050).unwrap();
+        store.execution(Execution::Uncertain).unwrap();
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        for _ in 0..MAX_RECOVERY_RUNS {
+            store.note_recovery_run().unwrap();
+        }
+    }
+
+    /// #1307: a full install repairing an exhausted attempt holds the manual lease while the
+    /// attempt is still recorded. `validate` refused that pair, so the install chain could not
+    /// even take its lease and the exhausted record had no way out.
+    #[test]
+    fn update_exhausted_attempt_accepts_the_installer_lease() {
+        let (root, mut store, peer, executor) = reserved();
+        exhausted(&mut store, &peer, &executor);
+        assert!(store.recovery_exhausted().unwrap());
+        let mut leased = store.state.clone();
+        leased.manual_installer = Some(peer.clone());
+        store
+            .save(leased)
+            .expect("an exhausted attempt must be able to sit beside the repairing installer's lease");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_exhausted_attempt_is_repaired_only_by_the_lease_holder_and_keeps_its_evidence() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::Uncertain).unwrap();
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        let installer = Image {
+            pid: 30,
+            started_at: 300,
+            path: root.join("installer.exe"),
+            sha256: "1".repeat(64),
+        };
+        assert!(!store.repair_eligible().unwrap(), "recovery can still run");
+        for _ in 0..MAX_RECOVERY_RUNS {
+            store.note_recovery_run().unwrap();
+        }
+        assert!(store.repair_eligible().unwrap());
+        assert!(
+            store.retire_repaired(&installer, || Ok(())).is_err(),
+            "no lease, no repair"
+        );
+        let mut leased = store.state.clone();
+        leased.manual_installer = Some(installer.clone());
+        store.save(leased).unwrap();
+        let other = Image {
+            pid: 31,
+            ..installer.clone()
+        };
+        assert!(store.retire_repaired(&other, || Ok(())).is_err());
+        assert!(
+            store
+                .retire_repaired(&installer, || Err(anyhow::anyhow!("rollback copy is locked")))
+                .is_err()
+        );
+        assert!(store.pending(), "a failed backup release keeps the attempt retryable");
+
+        let attempt_id = store.attempt().unwrap().receipt.attempt_id.clone();
+        store.retire_repaired(&installer, || Ok(())).unwrap();
+        assert!(!store.pending());
+        assert_eq!(
+            store.state.consumed_sequence, 74,
+            "the repair never lowers the consumed high-water"
+        );
+        assert!(
+            root.join(format!("retired-{attempt_id}.json")).is_file(),
+            "the evidence is archived, not cleared"
+        );
+        assert_eq!(store.state.manual_installer.as_ref(), Some(&installer));
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }

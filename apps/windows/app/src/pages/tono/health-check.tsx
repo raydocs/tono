@@ -107,7 +107,7 @@ export const HealthCheck = ({
       disabled={busy || repairing}
       aria-busy={busy}
     >
-      <TonoIcon name="shieldCheck" size={15} />
+      <TonoIcon name="pulse" size={15} />
       {t(
         busy
           ? 'tono.experience.checking'

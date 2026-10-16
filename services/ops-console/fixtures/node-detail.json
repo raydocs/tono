@@ -156,6 +156,7 @@
         "cycleKind": "anniversary",
         "cycleStart": 1723617600,
         "cycleEnd": 1726209600,
+        "cycleAnchorDay": 14,
         "counts": "in_out"
       },
       "asOfSec": 1724999100,

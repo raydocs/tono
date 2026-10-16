@@ -27,7 +27,7 @@ use std::time::Duration;
 use anyhow::{Context as _, Result};
 use async_trait::async_trait;
 use tono_core::auth::{
-    ApiError, ApiRequest, ApiResponse, HttpMethod, HttpTransport, TransportKind,
+    ApiError, ApiRequest, ApiResponse, HttpMethod, HttpTransport, TransportKind, path_failure,
     should_retry_transport,
 };
 
@@ -1571,12 +1571,17 @@ impl TonoTransport {
         // budgets before every request would make the app unusable rather than merely slow.
         // Its failure text joins the combined message below when nothing else answers.
         let mut relay_note = String::new();
+        // Time spent on each path, named with its failure when nothing answers.
+        let mut relay_elapsed = Duration::ZERO;
         let mut relay_tried = None;
         // The same failure in the relay-only message's form, should the walk switch to it.
         let mut relay_entry = String::new();
         let preferred_relay = self.preference.relay();
         if preferred_relay != 0 {
-            match self.attempt_one_relay(&request, preferred_relay - 1).await {
+            let started = tokio::time::Instant::now();
+            let attempt = self.attempt_one_relay(&request, preferred_relay - 1).await;
+            relay_elapsed += started.elapsed();
+            match attempt {
                 Ok(result) => return result,
                 // Provably not delivered: forget it, so the pins run as usual below.
                 Err(failure) => {
@@ -1597,11 +1602,13 @@ impl TonoTransport {
                 return self.send_over_relays(&request, "", relay_entry, relay_tried).await;
             }
             let mut lease = PreferenceLease { preference: &self.preference, answered: false };
+            let started = tokio::time::Instant::now();
             match self.attempt(&self.resolved, &request, AttemptPath::SystemDns).await {
                 Err(ApiError::Transport { kind, message })
                     if should_retry_transport(request.method, kind) =>
                 {
-                    resolved_failed = Some(ApiError::Transport { kind, message });
+                    resolved_failed =
+                        Some((ApiError::Transport { kind, message }, started.elapsed()));
                 }
                 // May already have been delivered: never re-sent to the pins.
                 Err(error @ ApiError::Transport { .. }) => return Err(error),
@@ -1612,19 +1619,21 @@ impl TonoTransport {
             }
         }
 
+        let pinned_started = tokio::time::Instant::now();
         let pinned = {
             // Each attempt keeps its own pool/pin snapshot. Publishing fresh pins must not
             // wait for a slow response, nor cancel or replay an already delivered request.
             let client = self.client.read().await.clone();
             if !self.direct_step_allowed(&request, &gate).await {
                 let earlier = match &resolved_failed {
-                    Some(ApiError::Transport { message, .. }) => format!("system-dns[{message}]"),
+                    Some((ApiError::Transport { message, .. }, _)) => format!("system-dns[{message}]"),
                     _ => String::new(),
                 };
                 return self.send_over_relays(&request, &earlier, relay_entry, relay_tried).await;
             }
             self.attempt(&client, &request, AttemptPath::Pinned).await
         };
+        let pinned_elapsed = pinned_started.elapsed();
         let Err(ApiError::Transport { kind, message }) = pinned else {
             return pinned;
         };
@@ -1640,10 +1649,16 @@ impl TonoTransport {
             let earlier = format!("pinned[{message}]");
             return self.send_over_relays(&request, &earlier, relay_entry, relay_tried).await;
         }
-        let fallback = match resolved_failed {
+        // The system resolver was tried before the pins when it is preferred; the combined
+        // message lists the paths in the order they ran.
+        let (fallback, resolved_elapsed, resolved_ran_first) = match resolved_failed {
             // Already tried for this request, just before the pins.
-            Some(failure) => Err(failure),
-            None => self.attempt(&self.resolved, &request, AttemptPath::SystemDns).await,
+            Some((failure, elapsed)) => (Err(failure), elapsed, true),
+            None => {
+                let started = tokio::time::Instant::now();
+                let attempt = self.attempt(&self.resolved, &request, AttemptPath::SystemDns).await;
+                (attempt, started.elapsed(), false)
+            }
         };
         match fallback {
             Ok(response) => {
@@ -1680,7 +1695,10 @@ impl TonoTransport {
                         let earlier = format!("pinned[{message}]; system-dns[{fallback_message}]");
                         return self.send_over_relays(&request, &earlier, relay_entry, relay_tried).await;
                     }
-                    if let Some(result) = self.attempt_relays(&request, &mut relay_note).await {
+                    let started = tokio::time::Instant::now();
+                    let relayed = self.attempt_relays(&request, &mut relay_note).await;
+                    relay_elapsed += started.elapsed();
+                    if let Some(result) = relayed {
                         return result;
                     }
                     if let Some(result) = self.attempt_doh(&request, &gate).await {
@@ -1709,17 +1727,29 @@ impl TonoTransport {
                         return self.send_over_relays(&request, &earlier, String::new(), None).await;
                     }
                 }
-                let relay_part = if relay_note.is_empty() {
-                    String::new()
+                // Every path that ran, in the macOS client's wording (#1464) with the time each
+                // took, so the sign-in screen can list them and support can tell a slow drop
+                // from an instant refusal.
+                let pinned_part =
+                    path_failure(AttemptPath::Pinned.header_value(), pinned_elapsed, &message);
+                let resolved_part = path_failure(
+                    AttemptPath::SystemDns.header_value(),
+                    resolved_elapsed,
+                    &fallback_message,
+                );
+                let mut parts = if resolved_ran_first {
+                    vec![resolved_part, pinned_part]
                 } else {
-                    format!("; relay[{relay_note}]")
+                    vec![pinned_part, resolved_part]
                 };
-                Err(ApiError::Transport {
-                    kind: fallback_kind,
-                    message: format!(
-                        "pinned[{message}]; system-dns[{fallback_message}]{relay_part}"
-                    ),
-                })
+                if !relay_note.is_empty() {
+                    parts.push(path_failure(
+                        AttemptPath::Relay.header_value(),
+                        relay_elapsed,
+                        &relay_note,
+                    ));
+                }
+                Err(ApiError::Transport { kind: fallback_kind, message: parts.join("; ") })
             }
             Err(other) => Err(other),
         }
@@ -2662,8 +2692,8 @@ Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
         let ApiError::Transport { message, .. } = error else {
             panic!("expected a transport error");
         };
-        assert!(message.contains("pinned["), "{message}");
-        assert!(message.contains("system-dns["), "{message}");
+        assert!(message.starts_with("pinned["), "{message}");
+        assert!(message.contains("]; system_dns["), "{message}");
         // Not only that both were tried: each half must still say which phase
         // failed and why. Asserting the merge markers alone passed even when the
         // message fell back to reqwest's bare sentence.

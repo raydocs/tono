@@ -955,6 +955,9 @@ mod tests {
             }),
             network_events: Default::default(),
             update_attempt_pending: None,
+            release_generation: None,
+            kill_switch_held_by_another_user: false,
+            ai_hold_retained: None,
         };
         assert_eq!(
             classify_service_refusal(false, Some(&snapshot)),
@@ -1019,6 +1022,9 @@ mod tests {
             }),
             network_events: Default::default(),
             update_attempt_pending: None,
+            release_generation: None,
+            kill_switch_held_by_another_user: false,
+            ai_hold_retained: None,
         };
         let mut second = first.clone();
         second.snapshot_generation = 6;

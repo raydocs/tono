@@ -7,6 +7,7 @@ import { batchCopy } from '@/copy/batch';
 import { batchSnapshot, startBatch, subscribeBatch } from '@/lib/customer-batch';
 import { renewable } from '@/lib/customers';
 import { useAsk } from './ask';
+import { ExpiryBatchDialog } from './ExpiryBatchDialog';
 
 /**
  * Picking several customers, and the two things worth doing to all of them.
@@ -23,6 +24,7 @@ export function useCohort(rows: readonly CustomerSummaryDto[], onChanged: () => 
   const ask = useAsk(onChanged);
   const batch = useSyncExternalStore(subscribeBatch, batchSnapshot);
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
+  const [settingExpiry, setSettingExpiry] = useState(false);
 
   const chosen = useMemo(
     () => rows.filter((row) => picked.has(row.userId)),
@@ -36,6 +38,12 @@ export function useCohort(rows: readonly CustomerSummaryDto[], onChanged: () => 
       else next.add(userId);
       return next;
     });
+  }
+
+  /** Pick exactly these customers and open the one-date form for them. */
+  function pickForExpiry(userIds: readonly string[]) {
+    setPicked(new Set(userIds));
+    setSettingExpiry(true);
   }
 
   const column: DataColumn<CustomerSummaryDto> = {
@@ -88,10 +96,30 @@ export function useCohort(rows: readonly CustomerSummaryDto[], onChanged: () => 
         >
           {copy.batchRenew}
         </Action>
+        <Action
+          reason={batch.kind !== null ? batchCopy.previous : null}
+          pending={ask.pending || batch.busy}
+          onClick={() => setSettingExpiry(true)}
+        >
+          {copy.batchSetExpiry}
+        </Action>
         <Action onClick={() => setPicked(new Set())}>{copy.clearSelection}</Action>
       </ActionRow>
     </div>
   );
 
-  return { column, bar, dialog: ask.dialog };
+  const dialog = (
+    <>
+      {ask.dialog}
+      <ExpiryBatchDialog
+        open={settingExpiry && chosen.length > 0}
+        rows={chosen}
+        blocked={batch.kind !== null}
+        onClose={() => setSettingExpiry(false)}
+        onChanged={onChanged}
+      />
+    </>
+  );
+
+  return { column, bar, dialog, pickForExpiry };
 }

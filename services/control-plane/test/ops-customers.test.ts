@@ -320,6 +320,44 @@ describe('customer_activity_hours accrual', () => {
   });
 });
 
+describe('customer_activity_hours overlap', () => {
+  it('never books more than 60 minutes of one device in one hour', async () => {
+    // SOL-C4-ACTIVITY-OVERLAP: 22-minute windows every 20 minutes overlap, and
+    // each overlap was added again.
+    await seedUser();
+    for (const [index, startMinute] of [0, 20, 40].entries()) {
+      await accrueActivityHours(db(), windowInput({
+        id: `w-overlap-${index}`,
+        window_start_ms: (HOUR + startMinute * 60) * 1000,
+        window_end_ms: (HOUR + (startMinute + 22) * 60) * 1000,
+        payload: payload({ uiState: 'connected' }),
+      }), HOUR);
+    }
+    // The stored row itself is capped, not only what the read returns.
+    expect(await db().prepare(
+      'SELECT online_minutes, connected_minutes FROM customer_activity_hours',
+    ).first()).toEqual({ online_minutes: 60, connected_minutes: 60 });
+    const rows = await activityHours(db(), USER, { fromSec: HOUR, toSec: HOUR + 3600 });
+    expect(rows[0]).toMatchObject({ hourAt: HOUR, onlineMinutes: 60, connectedMinutes: 60, windows: 3 });
+  });
+
+  it('clamps an hour already stored above 60 minutes when it is read', async () => {
+    // Rows written before the write-side cap can hold more than an hour.
+    await seedUser();
+    await accrueActivityHours(db(), windowInput({
+      id: 'w-legacy',
+      window_start_ms: HOUR * 1000,
+      window_end_ms: (HOUR + 22 * 60) * 1000,
+      payload: payload({ uiState: 'connected' }),
+    }), HOUR);
+    await db().prepare(
+      'UPDATE customer_activity_hours SET online_minutes = 90, connected_minutes = 75',
+    ).run();
+    const rows = await activityHours(db(), USER, { fromSec: HOUR, toSec: HOUR + 3600 });
+    expect(rows[0]).toMatchObject({ onlineMinutes: 60, connectedMinutes: 60 });
+  });
+});
+
 describe('projectBacklog cursor', () => {
   it('applies status and hours in received_at order and resumes from the cursor', async () => {
     await seedUser();

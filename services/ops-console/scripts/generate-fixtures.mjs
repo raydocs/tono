@@ -411,7 +411,7 @@ function quotaCell(spec) {
     return {
       value: {
         quota: null, used: null, pct: null, projectedExhaustAt: null,
-        level: 'ok', cycleKind: 'manual', cycleStart: null, cycleEnd: null, counts: 'in_out',
+        level: 'ok', cycleKind: 'manual', cycleStart: null, cycleEnd: null, cycleAnchorDay: null, counts: 'in_out',
       },
       asOfSec: null,
       source: 'profile',
@@ -435,6 +435,8 @@ function quotaCell(spec) {
       cycleKind: 'calendar_day',
       cycleStart: CLOCK - 12 * 86400,
       cycleEnd: CLOCK + 18 * 86400,
+      // The day the cycle started on, as an operator who set a calendar day would have it stored.
+      cycleAnchorDay: new Date((CLOCK - 12 * 86400) * 1000).getUTCDate(),
       counts: 'in_out',
     },
     asOfSec: CLOCK - 3600,

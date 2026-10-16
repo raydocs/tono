@@ -71,6 +71,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   tonoRetryNow: mocks.tonoRetryNow,
   tonoConnect: mocks.tonoConnect,
   tonoDisconnect: mocks.tonoDisconnect,
+  tonoRestoreInternet: mocks.tonoDisconnect,
   tonoStatus: async () => mocks.status,
 }))
 
@@ -502,4 +503,17 @@ it('new-look tray reads latency in milliseconds, as the home chip and the lines 
   } finally {
     cached.mockRestore()
   }
+})
+
+it('new-look tray names a released failed attempt as the home does', async () => {
+  setNewAppearance(true)
+  mocks.status = makeStatus({
+    uiState: 'notConnected',
+    protectionBlocked: false,
+  })
+  render(<TrayPanel />, { wrapper: freshSWR })
+  expect(
+    await screen.findByRole('heading', { name: "Couldn't connect" }),
+  ).toBeDefined()
+  expect(screen.getByRole('button', { name: 'Try again' })).toBeDefined()
 })

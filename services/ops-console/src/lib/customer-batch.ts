@@ -6,7 +6,8 @@ import { customerApi, WriteRefusal } from './api-customer-actions';
 import { nowSec } from './clock';
 import { extendedExpiry, refreshable } from './customers';
 
-export type BatchKind = 'refresh' | 'renew';
+/** `expiry` is one typed date for everybody; `renew` is thirty days on each person's own. */
+export type BatchKind = 'refresh' | 'renew' | 'expiry';
 export type BatchStatus = keyof typeof words.states;
 export type BatchItem = {
   id: string;
@@ -14,7 +15,7 @@ export type BatchItem = {
   email: string;
   deviceId?: string;
   deviceName?: string;
-  operation: BatchKind | 'discover';
+  operation: 'refresh' | 'renew' | 'discover';
   originalExpiry?: number | null;
   targetExpiry?: number;
   receiptId?: string;
@@ -137,14 +138,23 @@ async function execute(items: readonly BatchItem[]) {
   }
 }
 
-export async function startBatch(kind: BatchKind, rows: readonly CustomerSummaryDto[]) {
+/**
+ * `expiresAt` is the one date an `expiry` batch writes to everybody; it is the
+ * same write, freeze and read-back as a renewal, with the target fixed up front.
+ */
+export async function startBatch(
+  kind: BatchKind,
+  rows: readonly CustomerSummaryDto[],
+  expiresAt?: number,
+) {
   if (state.busy || state.kind !== null || rows.length === 0) return;
+  if (kind === 'expiry' && expiresAt === undefined) return;
   const at = nowSec();
   const items: BatchItem[] = rows.map((row) => ({
     id: row.userId, userId: row.userId, email: row.email,
     operation: kind === 'refresh' ? 'discover' : 'renew',
     originalExpiry: row.expiresAt,
-    targetExpiry: kind === 'renew' ? extendedExpiry(row.expiresAt, at) : undefined,
+    targetExpiry: kind === 'renew' ? extendedExpiry(row.expiresAt, at) : kind === 'expiry' ? expiresAt : undefined,
     status: 'waiting', retryable: false,
   }));
   publish({ kind, busy: true, items });

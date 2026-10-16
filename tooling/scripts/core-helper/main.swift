@@ -1439,7 +1439,18 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
     try? bootout.run()
     bootout.waitUntilExit()
 
-    switch emergencyRelease(underLock: storage) {
+    return finishEmergencyReset(emergencyRelease(underLock: storage))
+}
+
+/// What the reset does once the release outcome is known. The closures are the
+/// system effects, so a test can drive every branch.
+func finishEmergencyReset(
+    _ outcome: EmergencyReleaseOutcome,
+    clearSelectiveLayer: () -> Bool = removeSelectiveLayerIfPresent,
+    keepHelper: () -> Void = bootstrapHelperDaemon,
+    removeInstallation: () -> Void = removeHelperInstallation
+) -> Bool {
+    switch outcome {
     case .released, .coreStillRunning:
         // The administrator asked for removal; the survivor was reported.
         break
@@ -1447,7 +1458,7 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
         // Protection could not be released; removing the installation now
         // would strand the machine fail-closed with nothing able to enforce
         // or undo it. Put the daemon registration back and keep everything.
-        bootstrapHelperDaemon()
+        keepHelper()
         fputs(
             "Tono emergency reset aborted: protection could not be released; "
             + "the installation was left in place.\n",
@@ -1458,7 +1469,7 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
         // PF is open, but DNS may still point at the stopped resolver.
         // The daemon retries that restore while the Core is down; removing
         // it would leave nothing to retry (#1165).
-        bootstrapHelperDaemon()
+        keepHelper()
         fputs(
             "Tono emergency reset released protection but could not restore DNS; "
             + "the helper was kept to retry it. Run the reset again later.\n",
@@ -1466,12 +1477,27 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
         )
         return false
     }
-    removeHelperInstallation()
+    // Decision 121: an AI-service layer not proven gone is retried only by this
+    // helper (its start and watchdog), so it stays, as for a DNS restore
+    // failure, instead of leaving the /etc/resolver sinkhole with no owner.
+    if !clearSelectiveLayer() {
+        keepHelper()
+        let prefixes = SelectiveFailOpen.routeGetArguments().compactMap(\.last).joined(separator: ", ")
+        fputs(
+            "Tono emergency reset released protection but could not remove the AI-service layer; "
+            + "the helper was kept to retry it. Left in place: the resolver files in /etc/resolver "
+            + "for \(SelectiveFailOpen.suffixes.joined(separator: ", ")) and the blackhole routes for "
+            + "\(prefixes). Run the reset again later.\n",
+            stderr
+        )
+        return false
+    }
+    removeInstallation()
     print("Tono helper installation removed. Reopen Tono to reinstall it.")
     return true
 }
 
-private func bootstrapHelperDaemon() {
+func bootstrapHelperDaemon() {
     let restore = Process()
     restore.executableURL = URL(fileURLWithPath: "/bin/launchctl")
     restore.arguments = [
@@ -1485,7 +1511,7 @@ private func bootstrapHelperDaemon() {
 }
 
 /// Removal after a verified release. Callers have released PF first.
-private func removeHelperInstallation() {
+func removeHelperInstallation() {
     // PF is released. Take Tono's hook back out of /etc/pf.conf and delete the
     // backups written before its first edits. A hook left behind only loads the
     // disarmed placeholder anchor, so a failure is reported, not fatal.
@@ -1494,6 +1520,8 @@ private func removeHelperInstallation() {
     } catch {
         fputs("Tono emergency reset left its /etc/pf.conf hook in place: \(error)\n", stderr)
     }
+    // The release job is installed by this helper and leaves with it.
+    ReleaseInstaller.remove()
     // The socket goes too: it is still owned by the account this helper
     // served, and another account's app reads that owner as "bound to them".
     for path in [
@@ -1722,10 +1750,7 @@ func releaseIfTonoWasRemoved(
 func releaseRemovedInstallationLocked(
     _ storage: UpdateStorage,
     release: (UpdateStorage) -> EmergencyReleaseOutcome = { emergencyRelease(underLock: $0) },
-    clearSelectiveLayer: () -> Bool = {
-        if !SelectiveFailOpenInstaller.layerProvenAbsent() { SelectiveFailOpenInstaller.removeBestEffort() }
-        return SelectiveFailOpenInstaller.layerProvenAbsent()
-    },
+    clearSelectiveLayer: () -> Bool = removeSelectiveLayerIfPresent,
     removeInstallation: () -> Void = { removeHelperInstallation(); bootoutRemovedHelper() }
 ) -> Bool {
     switch release(storage) {
@@ -1747,6 +1772,12 @@ func releaseRemovedInstallationLocked(
     }
 }
 
+/// True only when the system proves none of the AI-service layer is left.
+func removeSelectiveLayerIfPresent() -> Bool {
+    if !SelectiveFailOpenInstaller.layerProvenAbsent() { SelectiveFailOpenInstaller.removeBestEffort() }
+    return SelectiveFailOpenInstaller.layerProvenAbsent()
+}
+
 func bootoutRemovedHelper() {
     // Unload this job last. launchd ends it with SIGTERM, which must now stop
     // the process instead of setting the shutdown flag. If the bootout does
@@ -1760,6 +1791,16 @@ func bootoutRemovedHelper() {
     bootout.standardError = FileHandle.nullDevice
     try? bootout.run()
     bootout.waitUntilExit()
+}
+
+/// Bounded: a release that outlives its own hard deadline is not waited for.
+func waitForActiveRelease(authority: ReleaseAuthority = ReleaseAuthority(), limit: TimeInterval = 120) {
+    guard geteuid() == 0 else { return }
+    let end = Date().addingTimeInterval(limit)
+    while authority.lockHeldElsewhere(), Date() < end {
+        if helperShutdownRequested != 0 { exit(0) }
+        usleep(200_000)
+    }
 }
 
 func fileType(_ value: stat) -> mode_t {
@@ -2134,6 +2175,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && SocketServer.runOrphanedBootstrapSelectiveReleaseSelfTest()
             && KillSwitchManager.runUnprovenHealthSelfTest()
             && KillSwitchManager.runControlRelayPermitSelfTest()
+            && KillSwitchManager.runNoTunnelDHCPNDPSelfTest()
             && emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: false)
             && !emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: true)
             && emergencyReleaseDespiteStaleCore(strictKillSwitchEnabled: false)
@@ -2145,12 +2187,30 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
 if CommandLine.arguments.dropFirst() == ["--network-self-test"] {
     exit(KillSwitchManager.runNetworkSelfTest() ? 0 : 1)
 }
+// Both go through the release lock C when it is free within 3 s, and are
+// manual break-glass that leaves the release record alone when it is not
+// (runEmergencyUnderReleaseAuthority, R-M2).
 if CommandLine.arguments.dropFirst() == ["--emergency-disarm"] {
-    exit(runEmergencyDisarm() ? 0 : 1)
+    exit(runEmergencyUnderReleaseAuthority({ runEmergencyDisarm() }) ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--emergency-reset"] {
-    exit(runEmergencyReset() ? 0 : 1)
+    exit(runEmergencyUnderReleaseAuthority({ runEmergencyReset() }) ? 0 : 1)
 }
+if CommandLine.arguments.dropFirst() == ["--release-daemon"] {
+    exit(ReleaseDaemon.runMain())
+}
+if CommandLine.arguments.dropFirst() == ["--release-worker"] {
+    exit(ReleaseWorker.run())
+}
+if CommandLine.arguments.dropFirst() == ["--release"] {
+    exit(runReleaseCommand())
+}
+if CommandLine.arguments.dropFirst() == ["--release-self-test"] {
+    exit(runReleaseSelfTests() ? 0 : 1)
+}
+// A running release owns cleanup and has booted this daemon out; a KeepAlive
+// restart that slipped in first waits here instead of racing it.
+waitForActiveRelease()
 do {
     // Executor recovery must precede CoreManager's stale-child cleanup.
     // startup() does not install a PF block, including when the ledger is
@@ -2172,6 +2232,7 @@ if let server = startHelperDaemon(
         )
     }
 ) {
+    DispatchQueue.global(qos: .utility).async { ReleaseInstaller.ensureInstalled() }
     server.run()
 } else {
     exit(1)

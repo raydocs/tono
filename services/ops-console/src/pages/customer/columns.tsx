@@ -5,9 +5,10 @@ import { StatusWord } from '@/components/ops/StatusWord';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
 import type { FollowupDto } from '@/lib/api-followups';
-import { explainCode, stageWord } from '@/lib/codes';
-import { formatDate, formatPercent, formatWhenAgo, splitBytes } from '@/lib/display';
+import { formatDate, formatPercent, splitBytes } from '@/lib/display';
 import { shown } from '@/lib/sources';
+import { CustomerCell } from './customer-cell';
+import { FailureCell, NodeCell } from './location-cells';
 
 type Mask = (email: string) => string;
 
@@ -24,6 +25,21 @@ export type FollowupIndex = Map<string, FollowupDto> | null;
 export type WechatMask = Mask | null;
 
 /**
+ * The three columns a 390 px phone keeps: the health word, the address, and
+ * the expiry. The selection box is left out because batch selection is desktop
+ * work and its column cost the address 40 px of 390; the rest are one tap away
+ * on the customer 360.
+ * The column objects are the desktop ones, so widths, sorting and cells cannot
+ * drift between the two layouts; a column the fleet has not filled in (the
+ * expiry, while no plan is wired) is simply absent from both.
+ */
+const PHONE_COLUMN_IDS: ReadonlySet<string> = new Set(['status', 'customer', 'expires']);
+
+export function phoneColumns<T>(columns: readonly DataColumn<T>[]): DataColumn<T>[] {
+  return columns.filter((column) => PHONE_COLUMN_IDS.has(column.id));
+}
+
+/**
  * The address is the row's name, so it gets the width nothing else claims.
  *
  * Every other column here is fixed, which makes this one the one that takes
@@ -32,22 +48,22 @@ export type WechatMask = Mask | null;
  * carries the whole address for the widths where even that is not enough, and
  * it is the masked one: the privacy toggle must not be undone by a hover.
  *
- * The fixed widths were re-cut when the followup column arrived, because the
- * table had none to spare: at 1440 px the address column already sat at exactly
- * the width its longest entry plus a lifecycle tag needs, so a ninth column
- * would have clipped every address on the page. Each one below was measured
- * against the widest thing it actually renders and given the slack that leaves
- * — which hands the address column more room than it had before, not less.
- *
- * The handle column arrived into the same nothing-to-spare, and was paid for
- * out of the three columns that were already truncating and already carrying
- * the whole value on the hover: the current node, the last failure and the
- * service list. Every column holding a number or a date — the quota, the
- * version, the expiry, the followup date and the device count — kept its
- * width, because a clipped date is a wrong date while a clipped node name is
- * still recognisable and one hover from complete. The address column comes out
- * of it with the same six pixels over its longest entry that it had before,
- * which is the constraint the whole cut was solved against.
+ * The WeChat id is no column of its own: it is the quiet second line of the
+ * address cell, and the search box still matches it. That returns 66 px,
+ * which go to the columns whose values were being cut: the failure column
+ * takes 28 (142 px with 4 px of side air, so the longest sentence keeps 20 px
+ * to the cell edge), the service column 20, and the follow-up column 12 (96 px
+ * with 8 px of side air: a whole `YYYY-MM-DD` keeps 9.6 px of room on macOS, so
+ * the wider monospace face on Linux, 4 px more, still fits). The node column
+ * takes 6 (130 px): the site line, the part that tells two machines in a city
+ * apart, is whole for every realistic site; the two deliberate stress names in
+ * the fixtures (a 33-character Latin site and an eight-character one behind a
+ * three-segment name) end in their own ellipsis with the whole name on the
+ * hover. The version column keeps its 70 px (a three-part number keeps 8 px of
+ * room). The address column keeps the 260 px the longest address with its tag
+ * needs (the customers spec asserts none is clipped). Widths include
+ * the cells' padding (border-box). Below the table floor in Customers.tsx the
+ * container scrolls sideways rather than squeeze any column further.
  */
 export function customerColumns(
   mask: Mask,
@@ -67,13 +83,12 @@ export function customerColumns(
        * The 30 px are paid for by the three columns that can spare them
        * without losing a fact: 14 from the quota figure, which needs 62 px and
        * had 76, and 8 each from the handle and the service list, both of which
-       * were already truncating with the whole value one hover away. Not a
-       * pixel comes out of the addresses: at 1440 that column sits exactly at
-       * its longest entry. The narrower padding here is the same argument —
+       * were already truncating with the whole value one hover away. The
+       * narrower padding here is the same argument —
        * this cell is one short word, and its side air is worth less than a
        * word that can be read.
        */
-      width: '94px',
+      width: '86px',
       className: 'px-2',
       sortValue: (row) => row.health,
       cell: (row) => <StatusWord word={row.health} reason={row.reason} />,
@@ -83,28 +98,18 @@ export function customerColumns(
       header: copy.customerColumns.customer,
       sortValue: (row) => row.email,
       cell: (row) => (
-        <div className="flex items-baseline gap-2" title={mask(row.email)}>
-          <span className="min-w-0 truncate text-row">{mask(row.email)}</span>
-          {row.lifecycle === 'active' ? null : (
-            <span className="ops-tag shrink-0">{copy.lifecycle[row.lifecycle]}</span>
+        <CustomerCell
+          address={mask(row.email)}
+          tag={row.lifecycle === 'active' ? null : (
+            /* The tag is 20 px tall; its vertical margin is taken back so
+               the two-line cell stays inside the 36 px row. */
+            <span className="ops-tag -my-0.5 shrink-0">{copy.lifecycle[row.lifecycle]}</span>
           )}
-        </div>
+          wechatId={wechat === null || row.wechatId === null ? null : wechat(row.wechatId)}
+          duplicate={row.wechatDuplicate === true}
+        />
       ),
     },
-    /* Beside the address, because the two are the same question — which
-       person is this row — and an operator scanning for somebody they only
-       know by their handle should not have to cross the table to find it. */
-    ...(wechat === null ? [] : [
-      {
-        id: 'wechat',
-        header: copy.customerColumns.wechat,
-        width: '68px',
-        sortValue: (row: CustomerSummaryDto) => row.wechatId ?? '',
-        cell: (row: CustomerSummaryDto) => (
-          <WechatCell id={row.wechatId} mask={wechat} duplicate={row.wechatDuplicate === true} />
-        ),
-      },
-    ]),
     {
       id: 'devices',
       header: copy.customerColumns.devices,
@@ -117,21 +122,23 @@ export function customerColumns(
     {
       id: 'node',
       header: copy.customerColumns.node,
-      width: '80px',
+      width: '130px',
       sortValue: (row) => row.selectedServer ?? '',
-      cell: (row) => <Value value={row.selectedServer} source={copy.sourceWord.catalog} />,
+      cell: (row) => <NodeCell name={row.selectedServer} />,
     },
     {
       id: 'failure',
       header: copy.customerColumns.failure,
-      width: '80px',
+      width: '142px',
+      className: 'px-1',
       sortValue: (row) => row.lastFailure?.at ?? 0,
-      cell: (row) => <FailureCell row={row} />,
+      cell: (row) => <FailureCell failure={row.lastFailure} />,
     },
     {
       id: 'usage',
       header: copy.customerColumns.usage,
-      width: '86px',
+      width: '78px',
+      className: 'px-2',
       align: 'right',
       mono: true,
       sortValue: (row) => row.usageBytes.value,
@@ -144,7 +151,8 @@ export function customerColumns(
       {
         id: 'followup',
         header: copy.customerColumns.followup,
-        width: '88px',
+        width: '96px',
+        className: 'px-2',
         sortValue: (row: CustomerSummaryDto) => followups.get(row.userId)?.dueAt ?? 0,
         cell: (row: CustomerSummaryDto) => <FollowupCell row={followups.get(row.userId)} />,
       },
@@ -153,17 +161,19 @@ export function customerColumns(
       {
         id: 'services',
         header: copy.customerColumns.services,
-        width: '72px',
+        width: '100px',
+        className: 'px-2',
         cell: (row: CustomerSummaryDto) => (
           row.services.length === 0
-            ? <Value value={null} source={copy.sourceWord.telemetry} />
+            ? <Value value={null} source={copy.sourceWord.telemetry} reason={copy.customersBoard.servicesMissing} />
             : <ServicesCell families={row.services} />
         ),
       },
       {
         id: 'version',
         header: copy.customerColumns.minVersion,
-        width: '56px',
+        width: '70px',
+        className: 'px-2',
         mono: true,
         sortValue: (row: CustomerSummaryDto) => row.minAppVersion ?? '',
         cell: (row: CustomerSummaryDto) => (
@@ -173,8 +183,8 @@ export function customerColumns(
       {
         id: 'expires',
         header: copy.customerColumns.expires,
-        width: '88px',
-        className: 'px-1',
+        width: '92px',
+        className: 'pl-1 pr-2',
         align: 'right' as const,
         mono: true,
         sortValue: (row: CustomerSummaryDto) => row.expiresAt ?? 0,
@@ -182,6 +192,7 @@ export function customerColumns(
           <Value
             value={row.expiresAt === null ? null : formatDate(row.expiresAt)}
             source={copy.sourceWord.profile}
+            reason={copy.customersBoard.expiryMissing}
             mono
             tier="body"
           />
@@ -189,52 +200,6 @@ export function customerColumns(
       },
     ] : []),
   ];
-}
-
-/**
- * The handle, masked, and nothing else on the hover.
- *
- * The title is the masked id too, for the same reason the address column's is:
- * a privacy switch that a mouse pointer undoes was never on. A customer with
- * no handle gets the em dash and the word for where one would have come from,
- * like every other absent fact on the page.
- */
-function WechatCell({ id, mask, duplicate }: { id: string | null; mask: Mask; duplicate: boolean }) {
-  if (id === null || id === '') return <Value value={null} source={copy.sourceWord.profile} />;
-  const shownId = mask(id);
-  if (!duplicate) return <span className="block min-w-0 truncate" title={shownId}>{shownId}</span>;
-  return (
-    <span className="flex min-w-0 flex-col items-start leading-tight" title={`${shownId} · ${copy.wechatDuplicateTitle}`}>
-      <span className="block min-w-0 max-w-full truncate">{shownId}</span>
-      <span className="ops-tag tone-unk">{copy.wechatDuplicate}</span>
-    </span>
-  );
-}
-
-/**
- * When it happened, then what the client called it and what that means.
- *
- * `ETIMEDOUT` on its own tells an operator nothing an hour later, and the
- * Chinese sentence on its own loses the token they will paste into a search.
- * The column has 150 px, so the pair is truncated and the title carries the
- * whole thing — including the stage, which is the least of the three and the
- * first to go.
- */
-function FailureCell({ row }: { row: CustomerSummaryDto }) {
-  const failure = row.lastFailure;
-  if (!failure) return <Value value={null} source={copy.sourceWord.telemetry} />;
-  const why = explainCode(failure.code);
-  const said = failure.code ? [failure.code, why].filter(Boolean).join(' · ') : why;
-  const line = said ?? stageWord(failure.stage) ?? copy.missing;
-  const full = [stageWord(failure.stage), said].filter(Boolean).join(' · ');
-  return (
-    <span className="flex min-w-0 flex-col leading-tight" title={full || undefined}>
-      <span className="truncate font-mono text-body">{formatWhenAgo(failure.at)}</span>
-      <span className="truncate text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
-        {line}
-      </span>
-    </span>
-  );
 }
 
 /**
@@ -280,27 +245,23 @@ function UsageCell({ row }: { row: CustomerSummaryDto }) {
 }
 
 /**
- * The two busiest families, and how many others there are.
+ * The first service by name, then how many others there are.
  *
- * One name plus a count made every multi-service customer look the same;
- * two names is what actually separates a Claude-and-ChatGPT account from a
- * Claude-and-Meta one, which is the distinction this column exists for. Three
- * does not fit, so the tail becomes an exact count and the full list stays one
- * hover away.
+ * Named services come first and "other" last, so "other +2" is never what a
+ * row says while a real name is available; "other" leads only when it is the
+ * only service. A fixed rule instead of a measured one: the first name is always whole,
+ * "+N" is the exact count of the rest (never shown for one service), and the
+ * full list is on the hover. No partial name and no trailing separator, at any
+ * column width.
  */
-const SERVICES_SHOWN = 2;
-
-function ServicesCell({ families }: { families: CustomerSummaryDto['services'] }) {
-  const rest = families.length - SERVICES_SHOWN;
+export function ServicesCell({ families }: { families: CustomerSummaryDto['services'] }) {
+  const ordered = [...families.filter((f) => f !== 'other'), ...families.filter((f) => f === 'other')];
+  const names = ordered.map((f) => copy.serviceName[f]);
+  const rest = names.length - 1;
   return (
-    <span
-      className="flex min-w-0 items-baseline gap-1"
-      title={families.map((f) => copy.serviceName[f]).join(' · ')}
-    >
-      <span className="min-w-0 truncate">
-        {families.slice(0, SERVICES_SHOWN).map((f) => copy.serviceName[f]).join(' · ')}
-      </span>
-      {rest > 0 ? <span className="shrink-0 text-[var(--muted-foreground)]">+{rest}</span> : null}
+    <span className="flex min-w-0 items-baseline gap-1" title={names.join(' · ')}>
+      <span className="shrink-0 whitespace-nowrap">{names[0]}</span>
+      {rest > 0 ? <span className="shrink-0 whitespace-nowrap text-[var(--muted-foreground)]">+{rest}</span> : null}
     </span>
   );
 }
@@ -311,7 +272,9 @@ function ServicesCell({ families }: { families: CustomerSummaryDto['services'] }
  *
  * A followup with no date is not a gap in a measurement — it is a note
  * somebody wrote without promising a day — so it shows its own word and stays
- * quiet about the date. A customer with nothing open gets the em dash through
+ * quiet about the date. The date is never cut (it is the one thing the
+ * column is for, and its width fits `YYYY-MM-DD`); only the kind word above it
+ * may end in an ellipsis. A customer with nothing open gets the em dash through
  * `Value`, like every other absent fact on the page.
  */
 function FollowupCell({ row }: { row: FollowupDto | undefined }) {
@@ -320,7 +283,7 @@ function FollowupCell({ row }: { row: FollowupDto | undefined }) {
     <span className="flex min-w-0 flex-col leading-tight" title={row.body}>
       <span className="truncate text-body">{copy.followupKind[row.kind]}</span>
       {row.dueAt === null ? null : (
-        <span className="truncate font-mono text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
+        <span className="whitespace-nowrap font-mono text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
           {formatDate(row.dueAt)}
         </span>
       )}

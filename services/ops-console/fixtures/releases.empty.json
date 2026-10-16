@@ -131,6 +131,11 @@
         "devices": 0
       }
     ],
+    "people": {
+      "current": 0,
+      "behind": 0,
+      "unreported": 0
+    },
     "updatedAt": 1725000000
   }
 }

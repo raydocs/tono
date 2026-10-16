@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Action } from '@/components/ops/Action';
+import { ErrorLine } from '@/components/ops/Empty';
 import { copy } from '@/copy/copy';
 import { followupApi, type FollowupDto } from '@/lib/api-followups';
 import { formatWhen, formatWhenAgo } from '@/lib/display';
@@ -75,15 +76,18 @@ export function FollowupLog({
 
   return (
     <div className="flex flex-col gap-2">
-      {items.length === 0 ? (
+      {rows.status === 'error' ? (
+        <ErrorLine message={rows.message} onRetry={rows.reload} />
+      ) : items.length === 0 ? (
         <p className="text-micro text-[var(--muted-foreground)]">
           {rows.status === 'ready' ? copy.followupNone : copy.loading}
         </p>
       ) : items.map((row) => <FollowupRow key={row.id} row={row} />)}
       <div className="flex gap-2">
         <input
-          className="h-8 min-w-0 flex-1 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-3 text-body outline-none placeholder:text-[var(--muted-foreground)]"
+          className="h-8 min-w-0 flex-1 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-3 text-body placeholder:text-[var(--muted-foreground)]"
           placeholder={copy.incidentDrawer.notePrompt}
+          aria-label={copy.incidentDrawer.notePrompt}
           value={note}
           onChange={(event) => setNote(event.target.value)}
         />

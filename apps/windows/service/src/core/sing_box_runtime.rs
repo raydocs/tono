@@ -12,6 +12,8 @@
 use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Value};
 
+use crate::core::direct_admission::DirectBinding;
+
 const TOP_LEVEL_KEYS: &[&str] = &[
     "log",
     "dns",
@@ -41,7 +43,27 @@ const FORBIDDEN_KEYS: &[&str] = &[
 const TUN_INTERFACE_NAME: &str = "Tono";
 const TUN_ADDRESS: &str = "198.18.0.1/30";
 
+/// A new document a request brings (`StartClash`, `StageRuntime`): the shape check, and no rule
+/// may route to `Tono-China-Direct`. The App launches sing-box without a DIRECT plan and adds the
+/// overlay only through `ReplaceSingBoxRuntime`, which carries the signed policy (#1280), so
+/// these entries cannot be a way around that binding.
+pub(crate) fn admit_new_runtime(text: &str) -> Result<(), String> {
+    admit_owned_runtime_bound(text, DirectBinding::NoPolicy)
+}
+
+/// The shape of the owned runtime, with the DIRECT rules admitted by shape alone. Only a document
+/// an earlier admission approved (the watchdog respawn), or one with no DIRECT rule, belongs
+/// here; a document a request proposes goes through [`admit_new_runtime`] or
+/// [`admit_owned_runtime_bound`].
 pub fn admit_owned_runtime(text: &str) -> Result<(), String> {
+    admit_owned_runtime_bound(text, DirectBinding::ShapeOnly)
+}
+
+/// The same shape check, and every DIRECT rule must also be what `binding` allows (#1280).
+pub(crate) fn admit_owned_runtime_bound(
+    text: &str,
+    binding: DirectBinding<'_>,
+) -> Result<(), String> {
     let FoldedJson(value) = serde_json::from_str(text)
         .map_err(|_| "runtime is not JSON with unambiguous keys".to_string())?;
     let root = value
@@ -100,7 +122,7 @@ pub fn admit_owned_runtime(text: &str) -> Result<(), String> {
             .ok_or_else(|| "route.rules is not a list".to_string())?
             .as_slice(),
     };
-    crate::core::direct_admission::admit_sing_box_direct_rules(outbounds, rules)?;
+    crate::core::direct_admission::admit_sing_box_direct_rules(outbounds, rules, binding)?;
 
     let dns = root
         .get("dns")
@@ -415,7 +437,7 @@ fn decode_standard_base64(value: &str) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::admit_owned_runtime;
+    use super::{admit_new_runtime, admit_owned_runtime};
     use serde_json::{Value, json};
 
     const SECRET: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
@@ -547,6 +569,23 @@ mod tests {
         let unpinned_process = json!({"network":"tcp","port":[443],"process_path_regex":["^"],
             "action":"route","outbound":"Tono-China-Direct"});
         assert!(with_rule(unpinned_process).is_err());
+    }
+
+    /// #1280: `StartClash` and `StageRuntime` bring a new document and carry no signed policy, so
+    /// a compiler-shaped DIRECT rule there would skip the binding `ReplaceSingBoxRuntime` enforces.
+    #[test]
+    fn a_new_document_cannot_carry_a_direct_rule_around_the_policy_binding() {
+        let mut runtime = compiled();
+        runtime["outbounds"].as_array_mut().unwrap().push(
+            json!({"type":"direct","tag":"Tono-China-Direct","bind_interface":"Ethernet"}),
+        );
+        assert_eq!(admit_new_runtime(&runtime.to_string()), Ok(()), "no rule, no policy needed");
+        runtime["route"]["rules"].as_array_mut().unwrap().push(json!({
+            "type":"logical","mode":"and","rules":[
+                {"network":"tcp","port":443,"domain":["qq.com"]},{"ip_cidr":["101.1.2.3/32"]}],
+            "action":"route","outbound":"Tono-China-Direct"}));
+        assert_eq!(admit_owned_runtime(&runtime.to_string()), Ok(()), "shape alone admits it");
+        assert!(admit_new_runtime(&runtime.to_string()).is_err());
     }
 
     /// A selector whose member is `Tono-China-Direct` is DIRECT too, so an

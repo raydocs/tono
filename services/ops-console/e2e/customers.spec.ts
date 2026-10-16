@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { copy } from '../src/copy/copy';
 import { open, settle } from './ops';
 
 test.describe('customers page', () => {
@@ -26,7 +27,10 @@ test.describe('customers page', () => {
 
     // Three platforms have shipped nothing; they are shown, greyed, and say so.
     await expect(page.getByRole('button', { name: /Linux 未发布/ })).toBeDisabled();
-    await expect(page.locator('tbody tr').first()).toHaveCSS('height', '36px');
+    // Node, failure and service cells stay on their line, so every row is 36 px.
+    const heights = await page.locator('tbody tr').evaluateAll((trs) => trs.map((tr) => tr.getBoundingClientRect().height));
+    expect(heights.slice(0, 8)).toEqual(Array(8).fill(36));
+    expect(heights.filter((height) => height !== 36)).toEqual([]);
     await expect(page).toHaveScreenshot('table.png');
   });
 
@@ -76,7 +80,7 @@ test.describe('customers page', () => {
   test('the addresses are not clipped, and the whole one is there to read', async ({ page }) => {
     await open(page, '/customers');
     // The first cell is the selection box; the address is the one after it.
-    await expect(page.locator('tbody tr').first().locator('td').nth(2).locator('div'))
+    await expect(page.locator('tbody tr').first().locator('td').nth(2).locator('div[title]'))
       .toHaveAttribute('title', /@/);
 
     const table = await page.evaluate(() => {
@@ -93,6 +97,102 @@ test.describe('customers page', () => {
     const widest = table.heads.reduce((a, b) => (b.width > a.width ? b : a));
     expect(widest.head).toBe('客户');
     expect(table.clipped).toBeLessThanOrEqual(0);
+  });
+
+  /**
+   * The production page showed "Los Angeles ·" (the site cut off) in the node
+   * cell and "12 小…" over "TONO_S…" in the failure cell. Both cells now keep
+   * each line on one line: a text too long for its column ends in its own
+   * ellipsis (never a clipped glyph, never a taller row), the node never ends
+   * on the separator, a known code reads as its Chinese sentence with the raw
+   * code on the hover, and the first service name is never the part that is cut.
+   */
+  test('the node, failure and service cells are cut only by their own ellipsis', async ({ page }) => {
+    await open(page, '/customers', 'dense');
+    const cells = await page.evaluate(() => {
+      const column = (name: string) => {
+        const index = [...document.querySelectorAll('thead th')].findIndex((th) => th.textContent?.trim() === name);
+        return [...document.querySelectorAll('tbody tr')].map((row) => row.querySelectorAll('td')[index]!);
+      };
+      /** Wider than what shows: only a span that ends in an ellipsis may be. */
+      const ellipsis = (span: Element) => {
+        const style = getComputedStyle(span);
+        return style.textOverflow === 'ellipsis' && style.overflow === 'hidden' && style.whiteSpace === 'nowrap';
+      };
+      const clipped = (cell: Element) => cell.scrollWidth > cell.clientWidth + 1
+        || [...cell.querySelectorAll('span')].some((span) => span.scrollWidth > span.clientWidth + 1 && !ellipsis(span));
+      const read = (cell: Element) => ({
+        text: (cell.textContent ?? '').trim(),
+        lines: [...cell.querySelectorAll('span > span')].map((line) => (line.textContent ?? '').trim()),
+        title: cell.querySelector('[title]')?.getAttribute('title') ?? null,
+        clipped: clipped(cell),
+        height: cell.getBoundingClientRect().height,
+        first: cell.querySelector('span span')?.getBoundingClientRect().width ?? 0,
+        firstNatural: (cell.querySelector('span span') as HTMLElement | null)?.scrollWidth ?? 0,
+        /** The lower line is the site, the part that tells two machines in one city apart. */
+        site: (() => {
+          const line = [...cell.querySelectorAll('span > span')].at(-1);
+          return line === undefined ? null : { text: (line.textContent ?? '').trim(), over: line.scrollWidth - line.clientWidth };
+        })(),
+      });
+      return {
+        node: column('当前节点').map(read),
+        failure: column('最近失败').map(read),
+        services: column('服务使用').map(read),
+      };
+    });
+
+    const named = cells.node.filter((cell) => cell.text !== '—');
+    expect(named.length).toBeGreaterThan(20);
+    for (const cell of cells.node) {
+      expect(cell.text.endsWith('·')).toBe(false);
+      expect(cell.clipped, cell.text).toBe(false);
+      // Each line is a whole segment: no line ends in a separator or carries a cut one.
+      for (const line of cell.lines) {
+        expect(line.endsWith('·'), line).toBe(false);
+        expect(line, line).not.toContain('· …');
+      }
+    }
+    /*
+     * The site is what the operator reads the node by, so it is whole in every
+     * row. The two sites that are not are the fixtures' deliberate stress
+     * names (LONG_NODES in generate-ops-fixtures.mjs): a 33-character Latin
+     * site and the last segment of a four-segment name. No column fits them,
+     * so each ends in its own ellipsis with the whole name on the hover.
+     */
+    const stress = ['Pacific-Coast-Highway-Backhaul-01', '法兰克福备用出口'];
+    for (const cell of named) {
+      if (stress.includes(cell.site!.text)) {
+        expect(cell.site!.over, cell.text).toBeGreaterThan(0);
+        expect(cell.title, cell.text).toContain(cell.site!.text);
+      } else {
+        expect(cell.site!.over, cell.text).toBeLessThanOrEqual(0);
+      }
+    }
+    // The upper line is only the first segment of the name, never the middle ones too.
+    for (const cell of named) {
+      expect(cell.lines.length, cell.text).toBeLessThanOrEqual(2);
+      if (cell.lines.length === 2) expect(cell.lines[0], cell.text).not.toContain(' · ');
+      expect(cell.title!.startsWith(cell.lines[0]!), cell.text).toBe(true);
+    }
+
+    const failed = cells.failure.filter((cell) => cell.text !== '—');
+    expect(failed.length).toBeGreaterThan(3);
+    for (const cell of cells.failure) expect(cell.clipped, cell.text).toBe(false);
+    for (const cell of failed) {
+      expect(cell.text).toContain(copy.codeWord[cell.title as keyof typeof copy.codeWord]);
+      expect(cell.text).not.toContain(cell.title!);
+    }
+
+    const served = cells.services.filter((cell) => cell.text !== '—');
+    expect(served.length).toBeGreaterThan(10);
+    for (const cell of cells.services) {
+      expect(cell.clipped, cell.text).toBe(false);
+      // 其他 leads only when it is the only service.
+      if (cell.text.startsWith(copy.serviceName.other)) expect(cell.title).toBe(copy.serviceName.other);
+      // The first name is whole; only what follows it may end in an ellipsis.
+      expect(cell.first, cell.text).toBeGreaterThanOrEqual(cell.firstNatural - 1);
+    }
   });
 
   test('expiry dates fit their cell content box without taking identity space', async ({ page }) => {
@@ -125,22 +225,149 @@ test.describe('customers page', () => {
   });
 
   /**
-   * The handle sits beside the address because the two answer the same
-   * question — which person is this row — and it hides as a group the way the
-   * last three columns do, so a fleet where nobody gave one keeps its width.
+   * The handle is the quiet second line of the customer cell, under the
+   * address: the two answer the same question, and a column of its own cost the
+   * failure sentence and the follow-up date the width they needed.
+   * The search box still matches it.
    */
-  test('微信号 has a column of its own, and the addresses still fit', async ({ page }) => {
+  test('the WeChat id is the second line of the customer cell, not a column', async ({ page }) => {
     await open(page, '/customers');
-    await expect(page.getByRole('columnheader', { name: '微信' })).toBeVisible();
-    await expect(page.locator('tbody tr').filter({ hasText: 'chen.jie@example.com' }))
-      .toContainText('wx_chen_jie');
+    await expect(page.getByRole('columnheader', { name: '微信' })).toHaveCount(0);
+    const first = page.locator('tbody tr').first().locator('td').nth(2);
+    await expect(first).toContainText('chen.jie@example.com');
+    await expect(first.locator('span[title="wx_chen_jie"]')).toBeVisible();
+    await expect(first.locator('span[title="wx_chen_jie"]')).toHaveText('wx_chen_jie');
 
-    const widest = await page.evaluate(() => {
+    const geometry = await page.evaluate(() => {
       const heads = [...document.querySelectorAll('thead th')]
         .map((th) => ({ head: th.textContent ?? '', width: th.getBoundingClientRect().width }));
-      return heads.reduce((a, b) => (b.width > a.width ? b : a)).head;
+      const ids = [...document.querySelectorAll('tbody tr td:nth-child(3) span[title^="wx_"]')]
+        .map((span) => span.scrollWidth - span.clientWidth);
+      return { widest: heads.reduce((a, b) => (b.width > a.width ? b : a)).head, ids };
     });
-    expect(widest).toBe('客户');
+    expect(geometry.widest).not.toBe('');
+    expect(geometry.ids.length).toBeGreaterThan(10);
+    // The whole id is there; the ellipsis is only a safety net.
+    for (const over of geometry.ids) expect(over).toBeLessThanOrEqual(0);
+
+    await page.getByRole('searchbox').fill('wx_wang_tao');
+    await settle(page);
+    await expect(page.locator('tbody tr')).toHaveCount(1);
+    await expect(page.locator('tbody tr')).toContainText('wang.tao@example.com');
+  });
+
+  /**
+   * A service list is the first name whole and a count of the rest, never a
+   * partial name or a trailing dot; the follow-up date is never cut; and the
+   * longest failure sentence has the column it needs.
+   */
+  test('the longest failure sentence keeps 20 px to its cell edge, and the follow-up date stays on one line', async ({ page }) => {
+    await open(page, '/customers', 'dense');
+    const found = await page.evaluate(() => {
+      const index = (name: string) => [...document.querySelectorAll('thead th')]
+        .findIndex((th) => th.textContent?.trim() === name);
+      const rows = [...document.querySelectorAll('tbody tr')];
+      const failureAt = index('最近失败');
+      const followupAt = index('跟进');
+      const slack = rows.flatMap((row) => {
+        const cell = row.querySelectorAll('td')[failureAt]!;
+        const sentence = [...cell.querySelectorAll('span')].at(-1)!;
+        if (cell.querySelectorAll('span').length < 2) return [];
+        const range = document.createRange();
+        range.selectNodeContents(sentence);
+        return [{ text: sentence.textContent ?? '', slack: cell.getBoundingClientRect().right - range.getBoundingClientRect().right }];
+      });
+      const dates = rows.flatMap((row) => {
+        const cell = row.querySelectorAll('td')[followupAt]!;
+        const date = [...cell.querySelectorAll('span')].at(-1);
+        if (date === undefined || !/^\d{4}-\d{2}-\d{2}$/.test((date.textContent ?? '').trim())) return [];
+        return [{ lines: Math.round(date.getBoundingClientRect().height / parseFloat(getComputedStyle(date).lineHeight)), over: date.scrollWidth - date.clientWidth }];
+      });
+      const versionAt = index('最低版本');
+      const usageAt = index('本期流量');
+      /** Room between the text and the content edge it is read from: the right for left-aligned, the left for right-aligned. */
+      const fits = (cell: Element, text: Element, side: 'left' | 'right') => {
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const box = cell.getBoundingClientRect();
+        const style = getComputedStyle(cell);
+        const reach = range.getBoundingClientRect();
+        return side === 'right'
+          ? box.right - parseFloat(style.paddingRight) - reach.right
+          : reach.left - (box.left + parseFloat(style.paddingLeft));
+      };
+      const versions = rows.flatMap((row) => {
+        const cell = row.querySelectorAll('td')[versionAt]!;
+        if (!/^\d+\.\d+\.\d+/.test((cell.textContent ?? '').trim())) return [];
+        return [{ text: (cell.textContent ?? '').trim(), room: fits(cell, cell, 'right') }];
+      });
+      const usages = rows.flatMap((row) => {
+        const cell = row.querySelectorAll('td')[usageAt]!;
+        const figure = cell.querySelector('span span');
+        if (figure === null || !/^\d/.test((figure.textContent ?? '').trim())) return [];
+        return [{ text: (figure.textContent ?? '').trim(), room: fits(cell, figure, 'left') }];
+      });
+      return { slack, dates, versions, usages, scroll: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+    });
+    expect(found.slack.length).toBeGreaterThan(3);
+    const stale = found.slack.filter((entry) => entry.text === copy.codeWord.CATALOG_STALE);
+    expect(stale.length).toBeGreaterThan(0);
+    const longest = found.slack.reduce((a, b) => (b.slack < a.slack ? b : a));
+    expect(longest.slack, longest.text).toBeGreaterThanOrEqual(20);
+    for (const entry of stale) expect(entry.slack, entry.text).toBeGreaterThanOrEqual(20);
+    expect(found.dates.length).toBeGreaterThan(0);
+    for (const date of found.dates) {
+      expect(date.lines).toBe(1);
+      expect(date.over).toBeLessThanOrEqual(0);
+    }
+    // The version numbers keep 8 px of room, and the traffic figures fit whole.
+    expect(found.versions.length).toBeGreaterThan(3);
+    for (const version of found.versions) expect(version.room, version.text).toBeGreaterThanOrEqual(8);
+    expect(found.usages.length).toBeGreaterThan(3);
+    for (const usage of found.usages) expect(usage.room, usage.text).toBeGreaterThanOrEqual(0);
+    expect(found.scroll).toBeLessThanOrEqual(0);
+  });
+
+  test('the service, follow-up and failure cells never show a cut value', async ({ page }) => {
+    await open(page, '/customers');
+    const cells = await page.evaluate(() => {
+      const index = (name: string) => [...document.querySelectorAll('thead th')]
+        .findIndex((th) => th.textContent?.trim() === name);
+      const cell = (row: number, name: string) => document.querySelectorAll('tbody tr')[row]!
+        .querySelectorAll('td')[index(name)]!;
+      const text = [...document.querySelectorAll('tbody td')].map((td) => (td.textContent ?? '').trim());
+      /** How far the text itself reaches past the right edge of the cell's content box. */
+      const reach = (span: Element, td: Element) => {
+        const range = document.createRange();
+        range.selectNodeContents(span);
+        const style = getComputedStyle(td);
+        return range.getBoundingClientRect().right - (td.getBoundingClientRect().right - parseFloat(style.paddingRight));
+      };
+      const failure = cell(0, '最近失败');
+      const sentence = [...failure.querySelectorAll('span')].at(-1)!;
+      const followup = cell(3, '跟进');
+      const date = [...followup.querySelectorAll('span')].at(-1)!;
+      const services = cell(3, '服务使用');
+      return {
+        text,
+        services: { text: (services.textContent ?? '').trim(), title: services.querySelector('[title]')?.getAttribute('title') ?? '' },
+        sentence: { text: sentence.textContent, over: Math.max(sentence.scrollWidth - sentence.clientWidth, reach(sentence, failure)) },
+        date: { text: date.textContent, over: Math.max(date.scrollWidth - date.clientWidth, reach(date, followup)), nowrap: getComputedStyle(date).whiteSpace },
+      };
+    });
+    for (const text of cells.text) {
+      expect(text, text).not.toContain('· …');
+      expect(text.endsWith('·'), text).toBe(false);
+    }
+    // Row 4 uses four services: the first by name, the other three as a count, all four on the hover.
+    const named = cells.services.title.split(' · ');
+    expect(named).toHaveLength(4);
+    expect(cells.services.text).toBe(`${named[0]}+3`);
+    expect(cells.sentence.text).toBe(copy.codeWord.CATALOG_STALE);
+    expect(cells.sentence.over).toBeLessThanOrEqual(0.5);
+    expect(cells.date.text).toMatch(/\d{4}-\d{2}-\d{2}/);
+    expect(cells.date.nowrap).toBe('nowrap');
+    expect(cells.date.over).toBeLessThanOrEqual(0.5);
   });
 
   /**

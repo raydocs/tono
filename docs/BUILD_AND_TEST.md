@@ -111,7 +111,7 @@ Docs-only means every touched path is `*.md` or under `docs/`, none is under `.a
 and no filter above matches it. `ci-gate` still runs and passes with those jobs skipped; that skip is
 not qualification of a tree the PR did not touch. A `*.md` that a filter matches (for example under
 `apps/` or `services/`) needs that workflow. Non-docs paths no filter covers (for example
-`.jev-route.json`, `.agents/`, `.claude/`, release or promote workflows) need no called workflow; apply
+`.agents/`, `.claude/`, release or promote workflows) need no called workflow; apply
 the risk-based review rules in [AGENTS.md](../AGENTS.md#finish-the-work-owner-decisions),
 not an automatic dual-vendor review for every uncovered path. Changes to routing/review policy,
 credentials/permissions or release trust still require independent review before merge/deploy.
@@ -129,6 +129,14 @@ no screenshot test. A failed nightly is red and opens or comments on the issue
 (they assert labels, identifiers and opacity), and `macos-release.yml` still runs
 the whole XCTest target. `tooling/scripts/tests/screenshot-nightly-split.test.mjs`
 keeps the skip and nightly lists equal.
+
+**Re-recording ops-console baselines.** Record them on the nightly's own `macos-26`
+image, not on a laptop: `gh workflow run screenshots-nightly.yml --ref <branch> -f update_baselines=true`.
+Only the ops-console job runs. It re-records the baselines that differ, adds missing ones and
+uploads `e2e/__screenshots__` as `ops-console-baselines-<sha>`; check the images and commit them
+on that branch. A PR that touches `services/ops-console/src/**` without touching the baselines
+gets a warning from `ops-console-baseline-reminder.yml`. That workflow is not part of `ci-gate`
+and never fails.
 
 **Build caches.** The three Cargo jobs in `windows-ci.yml` restore a cache keyed
 on the runner's `rustc -vV`, the lockfiles and the pinned toolchain file, and

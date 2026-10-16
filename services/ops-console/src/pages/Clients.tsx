@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type {
   AdoptionMatrixDto,
   Platform,
@@ -7,8 +7,10 @@ import type {
   UpdateChannelDto,
 } from '@contract';
 import { PLATFORMS } from '@contract';
+import { Action } from '@/components/ops/Action';
 import { CountText } from '@/components/ops/CountText';
-import { Empty } from '@/components/ops/Empty';
+import { DotJoined } from '@/components/ops/DotJoined';
+import { Empty, ErrorLine } from '@/components/ops/Empty';
 import { PageNote } from '@/components/ops/PageNote';
 import { Section } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
@@ -17,6 +19,7 @@ import { releasedPlatformSet } from '@/lib/releases';
 import { oldestFetch, useResource, type Resource } from '@/lib/use-resource';
 import '@/styles/clients.css';
 import { AdoptionMatrix } from './clients/AdoptionMatrix';
+import { RegisterReleaseDrawer } from './clients/RegisterReleaseDrawer';
 import { ReleaseTable } from './clients/ReleaseTable';
 
 /**
@@ -55,6 +58,7 @@ export default function ClientsPage({
     [releases],
   );
   const shipped = useMemo(() => releasedPlatformSet(rows), [rows]);
+  const [registering, setRegistering] = useState(false);
   const totals = adoption.status === 'ready' ? bucketTotals(adoption.data) : null;
 
   return (
@@ -73,11 +77,15 @@ export default function ClientsPage({
           <p className="text-verdict">
             <CountText
               values={[totals.current, totals.behind, totals.unreported]}
-              render={(v) => [
-                copy.adoptionCount.current(v[0]),
-                copy.adoptionCount.behind(v[1]),
-                copy.adoptionCount.unreported(v[2]),
-              ].join(' · ')}
+              render={(v) => (
+                <DotJoined
+                  parts={[
+                    copy.adoptionCount.current(v[0]),
+                    copy.adoptionCount.behind(v[1]),
+                    copy.adoptionCount.unreported(v[2]),
+                  ]}
+                />
+              )}
             />
           </p>
         )}
@@ -90,20 +98,21 @@ export default function ClientsPage({
       <Section title={copy.clientSections.adoption}>
         {adoption.status === 'ready' ? (
           <AdoptionMatrix matrix={adoption.data} />
+        ) : adoption.status === 'loading' ? (
+          <Empty message={copy.loading} />
         ) : (
-          <Empty
-            message={adoption.status === 'loading'
-              ? copy.loading
-              : adoption.message || copy.loadError}
-          />
+          <ErrorLine message={adoption.message || copy.loadError} onRetry={adoption.reload} />
         )}
       </Section>
 
-      <Section title={copy.clientSections.releases}>
-        {releases.status !== 'ready' ? (
-          <Empty
-            message={releases.status === 'loading' ? copy.loading : releases.message || copy.loadError}
-          />
+      <Section
+        title={copy.clientSections.releases}
+        aside={<Action onClick={() => setRegistering(true)}>{copy.releaseRegister.open}</Action>}
+      >
+        {releases.status === 'loading' ? (
+          <Empty message={copy.loading} />
+        ) : releases.status === 'error' ? (
+          <ErrorLine message={releases.message || copy.loadError} onRetry={onChanged} />
         ) : shipped.size === 0 ? (
           <Empty message={copy.noReleases} />
         ) : (
@@ -133,6 +142,11 @@ export default function ClientsPage({
           </div>
         )}
       </Section>
+      <RegisterReleaseDrawer
+        open={registering}
+        onClose={() => setRegistering(false)}
+        onSaved={() => { onChanged(); adoption.reload(); channels.reload(); }}
+      />
     </div>
   );
 }
@@ -140,8 +154,11 @@ export default function ClientsPage({
 /**
  * The sentence's three numbers.
  *
- * The two "behind" buckets add up into one word because the sentence is a
- * verdict, not the matrix: the split between them is a row below, and an
+ * The Worker counts each person once, at the oldest version any of their
+ * devices on a released platform reports, so a customer with a Mac and a
+ * Windows machine is one person here although the matrix shows them in both
+ * cells. The two "behind" buckets are already one word because the sentence is
+ * a verdict, not the matrix: the split between them is a row below, and an
  * opening line with four numbers in it is a table someone wrote as prose.
  * Unreleased platforms contribute nothing at all — there is nobody on them to
  * be current or behind.
@@ -152,13 +169,6 @@ function bucketTotals(matrix: AdoptionMatrixDto): {
   behind: number;
   unreported: number;
 } {
-  const released = new Set<Platform>(matrix.released);
-  const out = { platforms: released.size, current: 0, behind: 0, unreported: 0 };
-  for (const cell of matrix.cells) {
-    if (!released.has(cell.platform)) continue;
-    if (cell.bucket === 'current') out.current += cell.users;
-    else if (cell.bucket === 'unreported') out.unreported += cell.users;
-    else out.behind += cell.users;
-  }
-  return out;
+  const { current, behind, unreported } = matrix.people;
+  return { platforms: matrix.released.length, current, behind, unreported };
 }

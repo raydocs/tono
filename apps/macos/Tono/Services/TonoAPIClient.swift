@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 nonisolated private final class TonoNoRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(
@@ -222,7 +223,7 @@ actor TonoAPIClient {
     private var authenticationPrepared = false
     private var authenticationRetiredCredential: RetiredCredential?
     private var refreshTask: (id: UUID, task: Task<String, Error>)?
-    private var logoutTask: (id: UUID, generation: UInt64, task: Task<Void, Never>)?
+    private var logoutTask: (id: UUID, generation: UInt64, task: Task<Bool, Never>)?
     private var credentialGeneration: UInt64 = 0
     private var isLoggingOut = false
     /// Expiry of `accessToken`, read from its own `exp` claim.
@@ -655,10 +656,14 @@ actor TonoAPIClient {
         return try await refreshAccessToken()
     }
 
-    func logout() async {
+    /// Whether the sign-out will hold across a relaunch: the refresh token is
+    /// gone, or a tombstone or the removed adoption proof stops its restore.
+    /// False means none of them could be written; this process still refuses
+    /// the token, but a relaunch may restore the account.
+    @discardableResult
+    func logout() async -> Bool {
         if let current = logoutTask, current.generation == credentialGeneration {
-            await current.task.value
-            return
+            return await current.task.value
         }
         let id = UUID()
         let generation = credentialGeneration
@@ -667,14 +672,15 @@ actor TonoAPIClient {
         isLoggingOut = true
         let task = Task { await performLogout(generation: generation) }
         logoutTask = (id, generation, task)
-        await task.value
+        let durable = await task.value
         if logoutTask?.id == id { logoutTask = nil }
+        return durable
     }
 
-    private func performLogout(generation: UInt64) async {
-        guard generation == credentialGeneration else { return }
+    private func performLogout(generation: UInt64) async -> Bool {
+        guard generation == credentialGeneration else { return true }
         if let pending = refreshTask { _ = try? await pending.task.value }
-        guard generation == credentialGeneration else { return }
+        guard generation == credentialGeneration else { return true }
         // Revoke server-side whenever a refresh token exists, even without a
         // live access token — deleting only the local copy leaves a valid
         // credential orphaned server-side. The body is re-encoded per attempt:
@@ -691,13 +697,13 @@ actor TonoAPIClient {
                 } else {
                     token = try await refreshAccessToken()
                 }
-                guard generation == credentialGeneration else { return }
+                guard generation == credentialGeneration else { return true }
                 do {
                     try await sendLogout(bearer: token, session: .bearer(scope))
                 } catch APIError.unauthorized {
-                    guard generation == credentialGeneration else { return }
+                    guard generation == credentialGeneration else { return true }
                     let renewed = try await accessTokenAfterUnauthorized(token)
-                    guard generation == credentialGeneration else { return }
+                    guard generation == credentialGeneration else { return true }
                     try await sendLogout(bearer: renewed, session: .decisive(scope))
                 }
             } catch {
@@ -708,12 +714,38 @@ actor TonoAPIClient {
         }
         // A new sign-in may have been adopted while server revocation waited.
         // The old logout may finish remotely, but does not own those credentials.
-        guard generation == credentialGeneration else { return }
+        guard generation == credentialGeneration else { return true }
         retireCredentialGeneration()
         accessToken = nil
         accessTokenExpiry = nil
         unpersistedRefreshToken = nil
-        try? keychain.remove(.refreshToken)
+        return removeRefreshTokenForSignOut()
+    }
+
+    /// Signed out must stay signed out across a relaunch. A failed delete is
+    /// tried once more; if the item is still there, a signed-out tombstone
+    /// (the same file a refused adoption leaves) makes `hasRestorableSession`
+    /// refuse it, and this process stops using it at once. If the tombstone
+    /// cannot be written either, the adoption proof a launch also requires is
+    /// removed. The next sign-in replaces the item and clears the tombstone.
+    /// False when none of the three held.
+    private func removeRefreshTokenForSignOut() -> Bool {
+        var failure: Swift.Error?
+        for _ in 0..<2 {
+            do { try keychain.remove(.refreshToken); return true } catch { failure = error }
+        }
+        failedAdoption = true
+        let log = Logger(subsystem: "com.raydocs.tono", category: "account")
+        log.error("Sign-out could not delete the refresh token: \(String(describing: failure), privacy: .public)")
+        do { try keychain.suppressRefreshTokenRestoration(); return true }
+        catch {
+            log.error("Sign-out could not record the tombstone: \(String(describing: error), privacy: .public)")
+        }
+        do { try keychain.discardRefreshTokenAdoptionProof(); return true }
+        catch {
+            log.error("Sign-out could not discard the adoption proof: \(String(describing: error), privacy: .public)")
+        }
+        return false
     }
 
     private func retireCredentialGeneration() {

@@ -30,7 +30,7 @@
   --tono-radius-card-lg: 18px;
   --tono-radius-card-sm: 18px;
   --tono-size-page-title: 28px;
-  --tono-weight-title: 300;
+  --tono-weight-title: 400;
   --tono-page-padding: 0px;
   font-family: var(--sea-font);
   color: var(--sea-text);
@@ -80,6 +80,18 @@
 }
 .sea-button:hover:not(:disabled) {
   opacity: 0.88;
+}
+.sea-button[data-variant="primary"] {
+  box-shadow: 0 10px 28px -14px #ff9e63cc;
+  transition:
+    transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 200ms ease-out,
+    opacity 120ms ease-out;
+}
+.sea-button[data-variant="primary"]:hover:not(:disabled) {
+  opacity: 1;
+  transform: translateY(-1px);
+  box-shadow: 0 14px 34px -12px #ff9e63e6;
 }
 .sea-button:active:not(:disabled) {
   transform: scale(0.97);
@@ -168,9 +180,16 @@
   color: var(--sea-secondary);
 }
 .sea-segmented button[aria-pressed="true"] {
-  background: #ffffff1f;
+  background: #ffc87830;
+  color: #ffe9c4;
+  box-shadow: inset 0 1px 0 #ffe9c43d;
+}
+.sea-segmented button:not([aria-pressed="true"]):hover {
   color: var(--sea-text);
-  box-shadow: inset 0 1px 0 #ffffff1f;
+  background: #ffffff0f;
+}
+.sea-tabs button:not([aria-selected="true"]):hover {
+  color: var(--sea-secondary);
 }
 .sea-toggle {
   width: 36px;
@@ -182,7 +201,7 @@
   cursor: pointer;
 }
 .sea-toggle[aria-checked="true"] {
-  background: var(--sea-accent);
+  background: var(--sea-primary);
 }
 .sea-toggle span {
   position: absolute;
@@ -192,15 +211,27 @@
   height: 16px;
   border-radius: 50%;
   background: #f6f2ec;
-  transition: transform 120ms ease-out;
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .sea-signal > span {
   width: 3px;
   border-radius: 1px;
   background: #ffffff26;
 }
+/* Measured strength is drawn in the sunrise gradient whatever the page tone;
+   the tone accent stays for links and selection. */
 .sea-signal > span[data-lit="true"] {
-  background: var(--sea-accent);
+  background: var(--sea-primary);
+}
+/* Not measured yet: one hollow ring instead of three dark bars, so "untested"
+   never reads as "weak". */
+.sea-signal[data-level="0"] > span {
+  width: 7px;
+  height: 7px !important;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid #ffffff4d;
+  align-self: center;
 }
 .sea-toggle[aria-checked="true"] span {
   transform: translateX(16px);
@@ -229,7 +260,13 @@
   border-radius: 18px;
   padding: 20px;
   background: var(--sea-panel);
-  box-shadow: inset 0 1px 0 #ffffff1f;
+  border: 1px solid #ffffff10;
+  box-shadow:
+    inset 0 1px 0 #ffffff1f,
+    0 18px 40px -28px rgb(0 0 0 / 0.7);
+  /* Real glass: the dimmed sea shows through the card as a soft wash. */
+  backdrop-filter: blur(18px) saturate(1.15);
+  -webkit-backdrop-filter: blur(18px) saturate(1.15);
 }
 .sea-attention {
   border-radius: 18px;
@@ -253,6 +290,11 @@
 }
 .sea-empty p {
   margin: 0 0 12px;
+}
+.sea-empty-mark {
+  display: block;
+  margin: 24px auto 10px;
+  color: #ffd58e;
 }
 .sea-skeleton {
   min-height: 46px;
@@ -291,15 +333,20 @@
   --tono-toast-text: #ff9a8a;
 }
 [data-sea-ui="true"] :is(button, input, a):focus-visible {
-  outline: 2px solid var(--sea-accent);
+  outline: 2px solid #ffd9a0;
   outline-offset: 2px;
+}
+.sea-field:focus-visible {
+  border-color: #ffd9a0;
+  outline-offset: 0;
 }
 @media (prefers-reduced-motion: reduce) {
   .sea-button,
   .sea-toggle span {
     transition: opacity 120ms ease-out;
   }
-  .sea-button:active:not(:disabled) {
+  .sea-button:active:not(:disabled),
+  .sea-button[data-variant="primary"]:hover:not(:disabled) {
     transform: none;
   }
 }

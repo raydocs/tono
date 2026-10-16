@@ -4,7 +4,7 @@ import { test } from 'node:test'
 
 const assets = new URL('../src/dev/sea-shell/brand/', import.meta.url)
 
-test('draft ICO and installer bitmaps contain the declared, reviewable source dimensions', () => {
+test('the approved icon and installer artwork is what the bundle ships', () => {
   const ico = readFileSync(new URL('tono-draft.ico', assets))
   assert.equal(ico.readUInt16LE(0), 0)
   assert.equal(ico.readUInt16LE(2), 1)
@@ -43,14 +43,43 @@ test('draft ICO and installer bitmaps contain the declared, reviewable source di
     assert.equal(bmp.readInt32LE(22), Number(height))
     assert.equal(bmp.readUInt16LE(28), 24)
   }
+  // The approved artwork is wired: the bundle icon carries the same pixel-aligned rasters, and
+  // the installer bitmaps are byte copies of the sheet's (scripts/generate-tono-icons.py).
+  const bundleIco = readFileSync(
+    new URL('../src-tauri/icons/icon.ico', import.meta.url),
+  )
+  const entries = new Map()
+  for (let index = 0; index < bundleIco.readUInt16LE(4); index++) {
+    const entry = 6 + index * 16
+    entries.set(
+      bundleIco[entry] || 256,
+      bundleIco.subarray(
+        bundleIco.readUInt32LE(entry + 12),
+        bundleIco.readUInt32LE(entry + 12) + bundleIco.readUInt32LE(entry + 8),
+      ),
+    )
+  }
+  for (const size of [16, 24, 32, 48, 64, 128, 256]) {
+    assert.deepEqual(
+      entries.get(size),
+      readFileSync(new URL(`icons/tono-${size}.png`, assets)),
+    )
+  }
   const windowsConfig = readFileSync(
     new URL('../src-tauri/tauri.windows.conf.json', import.meta.url),
     'utf8',
   )
-  assert.equal(
-    JSON.parse(windowsConfig).bundle.windows.nsis.installerIcon,
-    'icons/icon.ico',
-  )
-  assert.ok(!windowsConfig.includes('tono-draft.ico'))
+  const nsis = JSON.parse(windowsConfig).bundle.windows.nsis
+  assert.equal(nsis.installerIcon, 'icons/icon.ico')
+  for (const [key, name] of [
+    ['headerImage', 'installer-header'],
+    ['sidebarImage', 'installer-sidebar'],
+  ]) {
+    assert.equal(nsis[key], `icons/${name}.bmp`)
+    assert.deepEqual(
+      readFileSync(new URL(`../src-tauri/icons/${name}.bmp`, import.meta.url)),
+      readFileSync(new URL(`${name}.bmp`, assets)),
+    )
+  }
   assert.ok(!windowsConfig.includes('sea-shell/brand'))
 })

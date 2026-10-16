@@ -22,13 +22,13 @@
   --tono-size-micro: 10px; /* column heads, node meta */
   --tono-size-nano: 9px; /* codename chips, version */
 
-  /* Weights — Tono uses 650 for titles, not 700 */
+  /* Weights — titles at 600: YaHei UI has no 650 and would round up to Bold */
   --tono-weight-regular: 400; /* @kind font */
   --tono-weight-medium: 500; /* @kind font */
   --tono-weight-semibold: 600; /* @kind font */
-  --tono-weight-title: 650; /* @kind font */
+  --tono-weight-title: 600; /* @kind font */
   --tono-weight-strong: 700; /* @kind font */
-  --tono-weight-chip: 750; /* @kind font */
+  --tono-weight-chip: 700; /* @kind font */
 
   /* Tracking */
   --tono-tracking-page-title: -0.45px;

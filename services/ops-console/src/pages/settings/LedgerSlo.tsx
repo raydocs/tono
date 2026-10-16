@@ -1,6 +1,6 @@
 import { memo, useMemo, useState } from 'react';
+import { Action } from '@/components/ops/Action';
 import { DataTable, type DataColumn } from '@/components/ops/DataTable';
-import { EmptyLine } from '@/components/ops/Empty';
 import { measured } from '@/components/ops/measured';
 import { MetricCard } from '@/components/ops/MetricCard';
 import { Value } from '@/components/ops/Value';
@@ -11,6 +11,9 @@ import { useResource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
 
 const words = copy.ledger;
+
+/** Rows drawn before the toggle: the full set is a row per day, node, platform and carrier. */
+export const SLO_ROWS_SHOWN = 10;
 
 /**
  * Memoised because it is the heaviest thing on the ledger page — a row per
@@ -28,6 +31,7 @@ export const LedgerSlo = memo(function LedgerSlo({
   platform?: string;
 }) {
   const [range, setRange] = useState<'7d' | '30d'>('30d');
+  const [all, setAll] = useState(false);
 
   const resource = useResource(
     `slo-${range}-${node ?? ''}-${carrier ?? ''}-${platform ?? ''}`,
@@ -176,8 +180,6 @@ export const LedgerSlo = memo(function LedgerSlo({
 
       {summary ? (
         <SloSummaryCards summary={summary} updatedAt={updatedAt} />
-      ) : resource.status === 'error' ? (
-        <EmptyLine message={resource.message} />
       ) : null}
 
       <DataTable
@@ -187,7 +189,14 @@ export const LedgerSlo = memo(function LedgerSlo({
         state={tableState}
         emptyMessage={words.sloNone}
         errorMessage={resource.status === 'error' ? resource.message : undefined}
+        onRetry={resource.reload}
+        limit={all ? undefined : SLO_ROWS_SHOWN}
       />
+      {tableState === 'ready' && items.length > SLO_ROWS_SHOWN ? (
+        <Action className="self-start" onClick={() => setAll((value) => !value)}>
+          {all ? words.sloFewer : words.sloMore(items.length)}
+        </Action>
+      ) : null}
     </div>
   );
 });
@@ -207,7 +216,7 @@ function SloSummaryCards({
   const coverageCell = measured<number | null>(summary.coverage, at, words.source);
 
   return (
-    <div className="grid gap-4 border-y border-[var(--hairline)] py-4 sm:grid-cols-5">
+    <div className="metric-band grid gap-4 border-y border-[var(--hairline)] py-4 sm:grid-cols-5">
       <MetricCard
         label={words.sloSuccessRate}
         value={rateCell}

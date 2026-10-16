@@ -21,12 +21,14 @@ import {
   SeaTabs,
   SeaTag,
 } from '@/tono-ui/SeaControls'
+import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
 
 import {
   catalogBaseName,
   hy2UdpIsVendorBlocked,
   isHy2CatalogName,
   nodeCityLabel,
+  nodeCityParts,
   byRegionCode,
   nodeCode,
   nodeDisplayName,
@@ -145,6 +147,10 @@ export const SeaLines = ({
           nodeCode(server.name) === preferences.fixedRegion)
     )
   })
+  const pinned = favoritesOnly
+    ? []
+    : visible.filter((server) => favorite(server.name))
+  const rest = visible.filter((server) => !favorite(server.name))
   const recommended = servers?.find(
     (server) => server.name === recommendation?.name,
   )
@@ -215,6 +221,11 @@ export const SeaLines = ({
             }
           }}
         >
+          <TonoNodeBadge
+            size={30}
+            city={nodeCityParts(server.name).city}
+            tone="sunrise"
+          />
           <span className="sea-line-name">{nodeDisplayName(server.name)}</span>
           {/* A line with no city word falls back to its own name: say it once. */}
           <span className="sea-line-city">
@@ -315,6 +326,13 @@ export const SeaLines = ({
         }}
       />
       <SeaPanel className="sea-lines-recommended">
+        {recommended && (
+          <TonoNodeBadge
+            size={48}
+            city={nodeCityParts(recommended.name).city}
+            tone="sunrise"
+          />
+        )}
         <div>
           <SeaTag>{t('tono.seaLines.recommendation')}</SeaTag>
           <SeaButton
@@ -470,24 +488,25 @@ export const SeaLines = ({
         </SeaEmpty>
       ) : (
         <div ref={listRef}>
-          {!favoritesOnly &&
-            visible.some((server) => favorite(server.name)) && (
-              <section>
-                <h3>{t('tono.routes.favorites')}</h3>
-                {visible.filter((server) => favorite(server.name)).map(row)}
-              </section>
-            )}
-          <section>
-            <h3>
-              {favoritesOnly
-                ? t('tono.routes.favorites')
-                : t('tono.seaLines.all', { count: visible.length })}
-            </h3>
-            {(favoritesOnly
-              ? visible
-              : visible.filter((server) => !favorite(server.name))
-            ).map(row)}
-          </section>
+          {pinned.length > 0 && (
+            <section>
+              <h3>{t('tono.routes.favorites')}</h3>
+              {pinned.map(row)}
+            </section>
+          )}
+          {/* Under favorites, the heading counts only the rows it lists. */}
+          {(favoritesOnly || pinned.length === 0 || rest.length > 0) && (
+            <section>
+              <h3>
+                {favoritesOnly
+                  ? t('tono.routes.favorites')
+                  : pinned.length > 0
+                    ? t('tono.seaLines.others', { count: rest.length })
+                    : t('tono.seaLines.all', { count: visible.length })}
+              </h3>
+              {(favoritesOnly ? visible : rest).map(row)}
+            </section>
+          )}
         </div>
       )}
       <footer className="sea-lines-sync">

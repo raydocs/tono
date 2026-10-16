@@ -358,6 +358,11 @@ pub(super) async fn reconcile_wanted_core_window_unlocked() -> Result<WantedCore
     let Some(armed) = armed_guard().clone() else {
         return Ok(WantedCoreWindow::Keep);
     };
+    if incomplete_recovery_superseded(&armed) {
+        tracing::info!("wfp: the App re-established its DIRECT lease; the incomplete-reload release is withdrawn");
+        withdraw_incomplete_recovery_window();
+        return Ok(WantedCoreWindow::Keep);
+    }
     let watching = WANTED_CORE_DEADLINE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -482,6 +487,53 @@ pub(crate) async fn release() -> Result<KillSwitchStatus> {
 /// disconnect use [`release`] and do not pass true.
 pub(crate) async fn release_applying_narrow() -> Result<KillSwitchStatus> {
     release_with(true).await
+}
+
+/// Decision 031 / 125: a failed native update keeps the AI hold an armed or crash-released
+/// session is owed, and never installs a new one for a user who was Unprotected or had just
+/// chosen Restore internet. `intent` is the intent file as read; `None` means it does not exist.
+fn ai_hold_owed_by(armed_wanted: bool, intent: Option<std::io::Result<Vec<u8>>>) -> bool {
+    if armed_wanted {
+        return true;
+    }
+    match intent {
+        // Never armed, or removed by an explicit Restore: nothing is owed.
+        None => false,
+        // Unreadable or corrupt evidence is kept conservatively, as startup keeps it.
+        Some(Err(_)) => true,
+        Some(Ok(bytes)) => match serde_json::from_slice::<IntentRecord>(&bytes) {
+            // `release_follow_up` also reads the legacy crash record (`reconnect_after_release` with
+            // no explicit disposition) as a narrow recovery, exactly as Service start does.
+            Ok(intent) => intent.wanted || intent.release_follow_up() == Some(true),
+            Err(_) => true,
+        },
+    }
+}
+
+/// Whether the secondary AI hold is owed right now. Call with the WFP operation lock held.
+pub(super) async fn ai_hold_owed() -> bool {
+    let armed_wanted = armed_guard().as_ref().is_some_and(|armed| armed.intent.wanted);
+    let intent = match tokio::fs::read(intent_path()).await {
+        Ok(bytes) => Some(Ok(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => Some(Err(error)),
+    };
+    ai_hold_owed_by(armed_wanted, intent)
+}
+
+/// Failed-update release: [`release_applying_narrow`] when an AI hold is owed. Otherwise it
+/// installs no new hold and leaves whatever hold and disposition already exist untouched: an
+/// earlier release whose tombstone could not be written may have left a hold with no evidence,
+/// and removing it is only an explicit Restore's job (decision 125).
+pub(crate) async fn release_applying_narrow_if_owed() -> Result<KillSwitchStatus> {
+    ensure_supported()?;
+    {
+        let _operation = WFP_OPERATION.lock().await;
+        let owed = ai_hold_owed().await;
+        disarm_unlocked_with_narrow(owed.then_some(true)).await?;
+        note_explicit_release();
+    }
+    Ok(status().await)
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]

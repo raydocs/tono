@@ -21,11 +21,14 @@ enum GateProtectionNotice: Equatable {
         }
     }
 
-    var symbolName: String {
+    /// The menu bar's sun-on-the-horizon state glyphs, so the notice and the
+    /// status item say the same thing (template image sets, see
+    /// MenuBarProtectionStatus).
+    var imageName: String {
         switch self {
-        case .blocking: "shield.slash"
-        case .unconfirmed: "exclamationmark.shield"
-        case .selectiveRecovery: "shield.lefthalf.filled"
+        case .blocking: "MenuBarStatusBlocked"
+        case .unconfirmed: "MenuBarStatusUnconfirmed"
+        case .selectiveRecovery: "MenuBarStatusStandby"
         }
     }
 }
@@ -64,24 +67,29 @@ struct GateProtectionSection: View {
 
     var body: some View {
         if seaStandalone, let notice = appState.gateProtectionNotice {
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: notice.symbolName)
-                    .foregroundStyle(SeaTheme.attention)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(notice.message)
-                    Text("Restoring internet turns protection off.")
+            // The sentence gets the full row; beside the button it wrapped to five lines.
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(notice.imageName)
+                        .renderingMode(.template)
+                        .foregroundStyle(SeaTheme.attention)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(notice.message)
+                        Text("Restoring internet turns protection off.")
+                    }
+                        .font(.system(size: 12))
+                        .foregroundStyle(SeaTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
                 }
-                    .font(.system(size: 12))
-                    .foregroundStyle(SeaTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
                 Button("Restore internet") {
                     Task { await session.restoreDirectInternet() }
                 }
                 .disabled(disabled)
                 .buttonStyle(SeaButtonStyle(variant: .quiet, size: .row))
                 .fixedSize()
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
             .background(display.reduceTransparency || display.contrast == .increased
@@ -93,7 +101,7 @@ struct GateProtectionSection: View {
             }
         } else if !seaStandalone, let notice = appState.gateProtectionNotice {
             Divider().padding(.vertical, 4)
-            Label(notice.message, systemImage: notice.symbolName)
+            Label(notice.message, image: notice.imageName)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button("Restore internet (turn off protection)") {

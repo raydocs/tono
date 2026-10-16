@@ -9,7 +9,7 @@ const customer = (userId: string, expiresAt = 2_000_000_000) => ({
   userId, email: `${userId}@example.com`, expiresAt,
 }) as CustomerSummaryDto;
 const device = (id: string) => ({ id, name: id, platform: 'macos', status: 'active' }) as CustomerDeviceDto;
-const detail = (devices: CustomerDeviceDto[], expiresAt = 2_000_000_000) => ({
+const detail = (devices: CustomerDeviceDto[], expiresAt: number | null = 2_000_000_000) => ({
   devices, billing: { expiresAt },
 }) as CustomerDetailDto;
 const receipt = (id: string, status = 'pending') => ({ id, deviceId: id, status }) as DeviceAction;
@@ -78,4 +78,28 @@ it('bounds the combined customer and device fanout to three in-flight requests',
   expect(send).toHaveBeenCalledTimes(10);
   expect(peak).toBe(3);
   expect(active).toBe(0);
+});
+
+it('writes one typed date to every customer with no expiry and reads each back', async () => {
+  const target = 2_100_000_000;
+  const stored = new Map<string, number | null>();
+  vi.spyOn(opsApi, 'customer').mockImplementation(async (id) => detail([], stored.get(id) ?? null));
+  const patch = vi.spyOn(customerApi, 'patchUser').mockImplementation(async (id, input) => {
+    stored.set(id, input.expiresAt ?? null);
+    return null;
+  });
+  const open = (id: string) => ({ ...customer(id), expiresAt: null }) as CustomerSummaryDto;
+  await startBatch('expiry', [open('a'), open('b'), open('c')], target);
+  expect(patch.mock.calls.map(([id, input]) => [id, input])).toEqual([
+    ['a', { expiresAt: target }], ['b', { expiresAt: target }], ['c', { expiresAt: target }],
+  ]);
+  expect(batchSnapshot().kind).toBe('expiry');
+  expect(batchSnapshot().items.map((item) => item.status)).toEqual(['done', 'done', 'done']);
+});
+
+it('does not start a date batch without a date', async () => {
+  const patch = vi.spyOn(customerApi, 'patchUser');
+  await startBatch('expiry', [customer('u')]);
+  expect(batchSnapshot().kind).toBeNull();
+  expect(patch).not.toHaveBeenCalled();
 });

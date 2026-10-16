@@ -19,29 +19,41 @@ const TIER_CLASS: Record<Tier, string> = {
 };
 
 /**
- * R2 in one component: a value that is not there renders the em dash and the
- * word for where it should have come from, never `0` and never a colour.
- * Everything that prints a fact goes through here so the rule cannot be
- * forgotten in one cell and honoured in the next.
+ * R2 in one component: a value that is not there renders the em dash, never
+ * `0` and never a colour. Everything that prints a fact goes through here so
+ * the rule cannot be forgotten in one cell and honoured in the next.
+ *
+ * The word for where it should have come from is on the hover and in the
+ * accessible name, not beside the dash: printed in every empty cell it turned
+ * a column of nothing into a column of grey words (nine "— follow-up" in one
+ * table), which read as data. The dash is muted and takes the tier's size
+ * without the mono bump, so an empty cell is lighter than a full one.
  */
 export function Value({
   value,
   source,
+  reason,
   mono,
   tier = 'row',
   className,
 }: {
   value: string | null;
   source: string;
+  /** Replaces the hover and accessible name when "no data from X" is not the real reason. */
+  reason?: string;
   mono?: boolean;
   tier?: Tier;
   className?: string;
 }) {
   if (value === null) {
+    const label = reason ?? copy.missingFrom(source);
     return (
-      <span className={cn('inline-flex items-baseline gap-1.5', className)}>
-        <span className={cn('font-mono', TIER_CLASS[tier])}>{copy.missing}</span>
-        <span className="text-micro text-[var(--muted-foreground)]">{source}</span>
+      <span
+        className={cn(TIER_CLASS[tier], 'text-[var(--muted-foreground)]', className)}
+        title={label}
+        aria-label={label}
+      >
+        {copy.missing}
       </span>
     );
   }

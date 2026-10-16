@@ -22,13 +22,13 @@ export function Navigation({ route, role }: { route: OpsRoute; role: OpsRole }) 
   const dock = DOCK_IDS.flatMap((id) => groups.flatMap((group) => group.items.filter((item) => item.id === id)));
   return (
     <>
-      <aside className="shell-sidebar" aria-label={copy.navigation.label}>
+      <aside className="shell-sidebar">
         <div className="sidebar-brand"><span className="rail-brand" aria-hidden>T</span>
           <div><strong>{copy.brand}</strong><span>{copy.brandSub}</span></div>
         </div>
         <NavigationList groups={groups} route={route} />
       </aside>
-      <nav className="shell-dock" aria-label={copy.navigation.label}>
+      <nav className="shell-dock" aria-label={copy.navigation.dockLabel}>
         {dock.map((item) => <NavigationLink key={item.id} item={item} route={route} />)}
         <Sheet open={more} onOpenChange={setMore}>
           <SheetTrigger className="navigation-link" data-active={route.page === 'settings'}>

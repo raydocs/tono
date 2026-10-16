@@ -12,7 +12,7 @@ pub use structure::{
     ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, PrepareCoreStartFreshness,
     PrepareCoreStartPayload, RemoteProvider,
     RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
-    ReplaceSingBoxRuntimeRequest, CommitSingBoxDirectRequest,
+    ReplaceSingBoxRuntimeRequest, SignedTrafficPolicy, CommitSingBoxDirectRequest,
     RuntimeAsset, RuntimeBundle,
     LEGACY_SERVICE_PROTOCOL_HEADER, SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN,
     ServiceErrorCode, ServiceLifecycleState,
@@ -63,6 +63,20 @@ mod proxy;
 #[cfg(feature = "standalone")]
 mod reconcile;
 #[cfg(feature = "standalone")]
+pub(crate) mod release;
+#[cfg(all(feature = "standalone", windows, not(feature = "test")))]
+pub use release::daemon::{
+    recover_quarantine as release_service_recover_quarantine, shutdown as release_service_shutdown,
+};
+#[cfg(all(feature = "standalone", windows, not(feature = "test")))]
+pub use release::install::{
+    remove as release_service_remove, spawn_ensure_installed as release_service_spawn_install,
+};
+#[cfg(all(feature = "standalone", windows, not(feature = "test")))]
+pub use release::worker::run as release_worker_run;
+#[cfg(all(feature = "standalone", windows, not(feature = "test")))]
+pub use server::run_release_server_until;
+#[cfg(feature = "standalone")]
 mod repair;
 #[cfg(feature = "standalone")]
 mod runtime;
@@ -81,9 +95,26 @@ mod sing_box_runtime;
 #[cfg(any(feature = "standalone", feature = "client"))]
 mod direct_admission;
 #[cfg(any(feature = "standalone", feature = "client"))]
+mod direct_policy;
+#[cfg(any(feature = "standalone", feature = "client"))]
 pub use direct_admission::admit_mihomo_direct_rules;
 #[cfg(any(feature = "standalone", feature = "client"))]
 pub use sing_box_runtime::admit_owned_runtime as admit_sing_box_runtime;
+/// For the App's compiler-compatibility tests: the owned runtime, DIRECT rules bound to the
+/// entries a policy document lists. The Service itself always verifies the signature first
+/// (`sing_box_direct`); this entry trusts `policy_json` and is never reached from the wire.
+#[cfg(any(feature = "standalone", feature = "client"))]
+pub fn admit_sing_box_runtime_listed_by(
+    text: &str,
+    policy_json: &str,
+    revision: i64,
+) -> Result<(), String> {
+    let policy = direct_policy::DirectPolicy::from_json(policy_json, revision)?;
+    sing_box_runtime::admit_owned_runtime_bound(
+        text,
+        direct_admission::DirectBinding::Policy(&policy),
+    )
+}
 #[cfg(feature = "standalone")]
 mod state;
 #[cfg(feature = "standalone")]

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { HomeLineDto } from '@contract';
 import { BILLING_KINDS, METER_SOURCES } from '@contract';
 import { DetailDrawer, Fact } from '@/components/ops/DetailDrawer';
+import { ErrorLine } from '@/components/ops/Empty';
 import { copy } from '@/copy/copy';
 import { settingsApi, type HomeLineInput } from '@/lib/api-settings';
 import { formatBytesMeasured, formatDate, formatUtcDate } from '@/lib/display';
@@ -137,7 +138,7 @@ export function HomeLineDrawer({
               measured={measured(statusWord(existing.status), existing.updatedAt, copy.sourceWord.manual)}
             />
             <UsageFacts line={existing} />
-            <Fact
+            <Fact mono
               label={words.columns.expires}
               measured={measured(
                 existing.expiresAt === null ? null : formatDate(existing.expiresAt),
@@ -149,6 +150,8 @@ export function HomeLineDrawer({
           <UsageStrip
             days={usage.status === 'ready' ? usageDays(usage.data.items) : []}
             ready={usage.status === 'ready'}
+            error={usage.status === 'error' ? usage.message : undefined}
+            onRetry={usage.reload}
           />
         </>
       ) : null}
@@ -258,7 +261,7 @@ function UsageFacts({ line }: { line: HomeLineDto }) {
   const bound = shown(line.boundUsers);
   return (
     <>
-      <Fact
+      <Fact mono
         label={words.facts.up}
         measured={measured(
           usage.value === null ? null : formatBytesMeasured(usage.value.bytesUp),
@@ -266,7 +269,7 @@ function UsageFacts({ line }: { line: HomeLineDto }) {
           usage.source,
         )}
       />
-      <Fact
+      <Fact mono
         label={words.facts.down}
         measured={measured(
           usage.value === null ? null : formatBytesMeasured(usage.value.bytesDown),
@@ -274,7 +277,7 @@ function UsageFacts({ line }: { line: HomeLineDto }) {
           usage.source,
         )}
       />
-      <Fact
+      <Fact mono
         label={words.facts.users}
         measured={measured(
           bound.value === null ? null : String(bound.value),
@@ -293,8 +296,20 @@ function UsageFacts({ line }: { line: HomeLineDto }) {
  * because the two are the same picture and only one of them is a reason to go
  * and look at the meter.
  */
-export function UsageStrip({ days, ready }: { days: UsageDay[]; ready: boolean }) {
+export function UsageStrip({
+  days,
+  ready,
+  error,
+  onRetry,
+}: {
+  days: UsageDay[];
+  ready: boolean;
+  /** The read failed: say so, instead of the loading word that never resolves. */
+  error?: string;
+  onRetry?: () => void;
+}) {
   const peak = days.reduce((max, day) => Math.max(max, day.bytes ?? 0), 0);
+  if (error !== undefined) return <ErrorLine message={error} onRetry={onRetry} />;
   if (!ready || peak === 0) {
     return (
       <p className="text-micro normal-case tracking-normal text-[var(--muted-foreground)]" role="status">

@@ -71,3 +71,67 @@ test('the bar on the bottom edge can end the incident without a scroll', async (
   await expect(closure).toBeVisible();
   await expect(closure.getByRole('radio')).toHaveCount(3);
 });
+
+/**
+ * A card standing in for a dozen machines is only worth having if its verbs
+ * stay as easy to hit as one row's: a thumb tall, whole on the screen, and the
+ * machine list shut so the card is not the whole first screen.
+ */
+test('the group card keeps its three actions a thumb tall and on screen', async ({ page }) => {
+  await open(page, '/today', 'dense');
+  const group = page.locator('.incident-group');
+  await expect(group).toHaveCount(1);
+  await group.scrollIntoViewIfNeeded();
+  await expect(group.locator('details')).not.toHaveAttribute('open', '');
+
+  for (const name of ['下架预览', '认领全部', '静默全部 4 小时']) {
+    const button = group.getByRole('button', { name });
+    await expect(button).toBeInViewport({ ratio: 1 });
+    expect(Math.round((await button.boundingBox())!.height)).toBeGreaterThanOrEqual(44);
+  }
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
+/**
+ * The meta line may wrap on a phone, but no line of the meta cell may begin or end
+ * with the "·" separator (on a phone the separators are hidden).
+ */
+test('failure cluster meta lines never begin or end with a separator', async ({ page }) => {
+  await open(page, '/today', 'dense');
+  const details = page.locator('.cluster-detail');
+  await details.first().scrollIntoViewIfNeeded();
+  const lines = await details.evaluateAll((nodes) => nodes.map((node) => {
+    const rows: { top: number; text: string }[] = [];
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+      const value = text.textContent ?? '';
+      for (let i = 0; i < value.length; i += 1) {
+        if (value[i] === ' ') continue;
+        const range = document.createRange();
+        range.setStart(text, i);
+        range.setEnd(text, i + 1);
+        const rect = range.getClientRects()[0];
+        if (!rect) continue; // hidden (the dots), so not part of any line
+        const top = Math.round(rect.top);
+        const last = rows[rows.length - 1];
+        if (last && Math.abs(last.top - top) < 4) last.text += value[i];
+        else rows.push({ top, text: value[i]! });
+      }
+    }
+    return rows.map((row) => row.text);
+  }));
+  expect(lines.length).toBeGreaterThan(0);
+  // The separators are CSS `::before` on items two and up; on a phone they are not rendered.
+  const separators = await details.evaluateAll((nodes) => nodes.flatMap((node) =>
+    [...node.querySelectorAll('.cluster-seg')].slice(1).map((seg) => getComputedStyle(seg, '::before').display)));
+  expect(separators.length).toBeGreaterThan(0);
+  for (const display of separators) expect(display).toBe('none');
+  for (const rows of lines) {
+    for (const text of rows) {
+      expect(text.startsWith('·')).toBe(false);
+      expect(text.endsWith('·')).toBe(false);
+    }
+  }
+});

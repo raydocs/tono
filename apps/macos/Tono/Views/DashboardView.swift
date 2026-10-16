@@ -95,7 +95,7 @@ struct DashboardView: View {
                                         || appState.isProtectionUnconfirmed {
                                 appState.restoreInternet()
                             } else if newValue {
-                                appState.connect()
+                                appState.userConnect()
                             } else {
                                 appState.disconnect(releaseKillSwitch: true)
                             }
@@ -300,7 +300,7 @@ struct DashboardView: View {
             .buttonStyle(SeaHomePillStyle(primary: true))
             .disabled(!appState.isTonoReady || appState.isDisconnecting)
         } else {
-            Button("Retry now") { appState.connect() }
+            Button("Retry now") { appState.userConnect() }
                 .buttonStyle(SeaHomePillStyle(primary: true))
                 .disabled(!appState.isTonoReady || appState.isDisconnecting)
                 .modifier(SeaHomeActionShortcut(ownsShortcut: !appState.isProtectionUnconfirmed
@@ -328,7 +328,7 @@ struct DashboardView: View {
         } else if appState.isProtectionBlocked || appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable {
             appState.restoreInternet()
         } else if !appState.isConnected {
-            appState.connect()
+            appState.userConnect()
         } else {
             appState.disconnect(releaseKillSwitch: true)
         }
@@ -420,7 +420,7 @@ struct DashboardView: View {
                 title: "Protection",
                 value: protectionValue,
                 detail: protectionDetail,
-                systemImage: appState.isConnected ? "checkmark.shield.fill" : "shield",
+                systemImage: appState.isConnected ? "sun.horizon.fill" : "sun.horizon",
                 tint: appState.isConnected ? TonoStatus.positive : TonoStatus.neutral
             )
 
@@ -790,7 +790,7 @@ private struct ConnectionProgressCard: View {
                         .controlSize(.small)
                         .tint(headerColor)
                 } else {
-                    Image(systemName: "exclamationmark.shield.fill")
+                    Image(systemName: "exclamationmark.circle.fill")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(headerColor)
                 }
@@ -1064,7 +1064,7 @@ private struct ConnectionProgressCard: View {
             ) {
                 if !primaryActionInHeader {
                     Button("Retry now") {
-                        appState.connect()
+                        appState.userConnect()
                     }
                     .modifier(SeaActionStyle(variant: .primary, size: .row, legacy: .gatePrimary))
                     .controlSize(.small)

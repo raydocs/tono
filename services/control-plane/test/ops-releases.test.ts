@@ -15,6 +15,7 @@ import {
   utcDay,
   versionBucket,
 } from '../src/ops/releases';
+import { guessReleaseFromKey } from '../src/ops/releases-objects';
 
 const db = () => (env as unknown as { DB: D1Database }).DB;
 const bucket = () => (env as unknown as { RELEASES: R2Bucket }).RELEASES;
@@ -74,6 +75,14 @@ async function seedWindowsStable() {
   await createRelease(db(), {
     platform: 'windows', channel: 'stable', version: '0.0.33', publishedAt: NOW - 40,
   }, NOW - 40);
+}
+
+async function seedMacosStable() {
+  for (const [version, at] of [['0.0.34', 20], ['0.0.33', 40], ['0.0.32', 60]] as const) {
+    await createRelease(db(), {
+      platform: 'macos', channel: 'stable', version, publishedAt: NOW - at,
+    }, NOW - at);
+  }
 }
 
 function cellOf(
@@ -321,6 +330,30 @@ describe('adoption matrix', () => {
     expect(cellOf(matrix, 'windows', 'behind_one')).toEqual({ users: 1, devices: 1 });
   });
 
+  it('counts a customer on two platforms once in people, at their oldest version', async () => {
+    await seedWindowsStable();
+    await seedMacosStable();
+    await seedDeviceDay({ day: DAY_AT - DAY, deviceId: 'd-win', userId: 'u-a', version: '0.0.34' });
+    await seedDeviceDay({
+      day: DAY_AT - DAY, deviceId: 'd-mac', userId: 'u-a', version: '0.0.32', platform: 'macos',
+    });
+
+    const matrix = await adoptionMatrix(db(), { range: '30d', nowSec: NOW });
+    expect(cellOf(matrix, 'windows', 'current')).toEqual({ users: 1, devices: 1 });
+    expect(cellOf(matrix, 'macos', 'behind_more')).toEqual({ users: 1, devices: 1 });
+    expect(matrix.people).toEqual({ current: 0, behind: 1, unreported: 0 });
+  });
+
+  it('counts a person as unreported only when none of their devices reported a known version', async () => {
+    await seedWindowsStable();
+    await seedDeviceDay({ day: DAY_AT - DAY, deviceId: 'd-unknown', userId: 'u-x', version: '9.9.9' });
+    await seedDeviceDay({ day: DAY_AT - DAY, deviceId: 'd-1', userId: 'u-y', version: '9.9.9' });
+    await seedDeviceDay({ day: DAY_AT - DAY, deviceId: 'd-2', userId: 'u-y', version: '0.0.34' });
+
+    const matrix = await adoptionMatrix(db(), { range: '30d', nowSec: NOW });
+    expect(matrix.people).toEqual({ current: 1, behind: 0, unreported: 1 });
+  });
+
   it("unions today's live windows, which no rollup has written yet", async () => {
     await seedWindowsStable();
     await seedUser('u-a', 'a@example.com');
@@ -530,5 +563,17 @@ describe('release verification on publish', () => {
         code: 'RELEASE_UNVERIFIED',
         reason: 'sha256_mismatch',
       });
+  });
+});
+
+describe('guessReleaseFromKey', () => {
+  it('reads the two publish file names and nothing else', () => {
+    expect(guessReleaseFromKey('Tono-1.2.3-build45-arm64.zip'))
+      .toEqual({ platform: 'macos', channel: 'stable', version: '1.2.3', build: '45' });
+    expect(guessReleaseFromKey('releases/Tono-0.0.75-setup.exe'))
+      .toEqual({ platform: 'windows', channel: 'stable', version: '0.0.75', build: null });
+    expect(guessReleaseFromKey('Tono-1.2.3-arm64.zip')).toBeNull();
+    expect(guessReleaseFromKey('Tono-1.2.3-build45-x64.zip')).toBeNull();
+    expect(guessReleaseFromKey('latest.json')).toBeNull();
   });
 });

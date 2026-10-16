@@ -12,12 +12,33 @@ const LABEL_EVERY = 6;
 type Day = { key: number; label: string; hours: (ActivityHourDto | null)[] };
 
 /**
+ * Two rows land in one local hour when a customer has two devices, or when the
+ * clocks go back and the same local hour happens twice. Presence is the max
+ * (a person is there for at most the whole hour), traffic adds up, and the
+ * title fields come from the row that carried the longest connection.
+ */
+export function mergeHour(a: ActivityHourDto, b: ActivityHourDto): ActivityHourDto {
+  const lead =
+    b.connectedMinutes > a.connectedMinutes || (b.connectedMinutes === a.connectedMinutes && b.hourAt < a.hourAt) ? b : a;
+  return {
+    hourAt: lead.hourAt,
+    onlineMinutes: Math.min(MINUTES_IN_HOUR, Math.max(a.onlineMinutes, b.onlineMinutes)),
+    connectedMinutes: Math.min(MINUTES_IN_HOUR, Math.max(a.connectedMinutes, b.connectedMinutes)),
+    bytesUp: a.bytesUp + b.bytesUp,
+    bytesDown: a.bytesDown + b.bytesDown,
+    node: lead.node,
+    platform: lead.platform,
+    appVersion: lead.appVersion,
+  };
+}
+
+/**
  * Bucket the hours into calendar days without assuming the server sent a
  * complete grid: a missing hour stays `null` and renders as an empty cell,
  * which is the honest picture of "we have no measurement for 03:00" and not
  * the same thing as "they were offline at 03:00".
  */
-function toDays(rows: readonly ActivityHourDto[]): Day[] {
+export function toDays(rows: readonly ActivityHourDto[]): Day[] {
   const byDay = new Map<number, Day>();
   for (const row of rows) {
     const date = new Date(row.hourAt * 1_000);
@@ -31,7 +52,9 @@ function toDays(rows: readonly ActivityHourDto[]): Day[] {
       };
       byDay.set(key, day);
     }
-    day.hours[date.getHours()] = row;
+    const slot = date.getHours();
+    const held = day.hours[slot];
+    day.hours[slot] = held ? mergeHour(held, row) : row;
   }
   // Seven days ending today. A window measured in hours never lines up with
   // calendar days at both ends, and the oldest row is the ragged one — showing

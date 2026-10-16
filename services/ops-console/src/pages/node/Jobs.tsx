@@ -67,6 +67,7 @@ export function NodeJobs({
           getRowId={(row) => row.id}
           state={tableState}
           errorMessage={message}
+          onRetry={onChanged}
           className="[&>table]:min-w-[720px]"
         />
       )}

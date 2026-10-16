@@ -183,14 +183,14 @@
       {
         "platform": "macos",
         "bucket": "behind_one",
-        "users": 0,
-        "devices": 0
+        "users": 1,
+        "devices": 1
       },
       {
         "platform": "macos",
         "bucket": "behind_more",
-        "users": 5,
-        "devices": 5
+        "users": 4,
+        "devices": 4
       },
       {
         "platform": "macos",
@@ -295,6 +295,11 @@
         "devices": 0
       }
     ],
+    "people": {
+      "current": 11,
+      "behind": 5,
+      "unreported": 2
+    },
     "updatedAt": 1725000000
   }
 }

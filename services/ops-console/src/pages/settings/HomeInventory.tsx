@@ -179,6 +179,7 @@ export function HomeInventory() {
         title={words.removeTitle}
         consequence={removing ? words.removeBody(removing.displayName) : ''}
         confirm={words.remove}
+        danger
         pending={write.pending}
         failure={removingBound > 0 ? words.boundBlocks(removingBound) : write.error}
         onConfirm={() => {
@@ -273,6 +274,7 @@ function inventoryColumns({
               {row.status === 'active' ? words.disable : words.enable}
             </Action>
             <Action
+              danger
               reason={carrying > 0 ? words.boundBlocks(carrying) : null}
               onClick={() => onRemove(row)}
             >
