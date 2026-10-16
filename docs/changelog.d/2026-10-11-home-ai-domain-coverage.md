@@ -9,3 +9,10 @@
 - 验证：Linux orb 的源码覆盖/两端一致性、签名策略合同与 diff 检查见准确 head PR 回执；原生测试由正常 PR CI 在指定宿主运行，具体通过/失败/pending 以回执为准。未执行设备、抓包、DNS 泄露或第三方账户实验，不将配置测试当作端到端安全证明。
 - 候选/发布：仅源码，无新候选、nightly、合并、部署或客户发布；保持 #1571 设计 PR 独立与 A13 暂停。
 - 剩余限制：已有 Claude/ChatGPT/Codex/Cursor/VS Code/Grok 等进程名和安装路径匹配，但不等于不可伪造身份或任意客户端全覆盖；共享 node/python 不整体捕获。截图目录应使用路径匹配而非 PROCESS-NAME；clau.de 已有，IPv4 /23 已被 /21 覆盖，IPv6 仍禁用。未添加泛化 openai 关键词或 HTTPS URL-REGEX，不能按加密 URL 的查询参数识别流量。gstatic/cloudflare 等共享父域不进 Home；不承诺网站免风控。路由名单不背书第三方域名归属，也不新增 Home 第二跳 DNS 或持续无泄露保证。独立路由审核、设备/DNS/节点切换及一周试用仍待安排；本轮不产出 nightly。
+
+### 2026-10-16 · 延续现有 Draft，修复政策测试冲突并对齐无 Home 的云视频行为
+- 归属与来源：后续桌面版本的 SHIP_PLAN G1/G2，继续 #1572 / `fix/home-ai-domain-coverage`；并入 [main 345774bc](https://github.com/raydocs/tono/commit/345774bc9b163f5c16af47c37adbc036b0bd11ca)，不移入 #1504/#1605/#1643 的暂停代码。
+- 工程与测试修正：[旧 head 的 macOS policy-tests](https://github.com/raydocs/tono/actions/runs/38169430412/job/114559261115) 确实在“shared infrastructure googleapis.com must not be pinned to the residential hop”失败。按已确认的 Google/GitHub 扩域合同补独立 Home 正例，保留未批准共享父域负例，增加 YouTube Google 子域先于 Home/进程且 UDP REJECT 的断言；没有跳过测试或撤掉 DIRECT 拒收。
+- 跨端一致性：Windows 两个编译器现在与 Mac 一样，即使没有 Home 绑定或 DIRECT 计划，也保留云视频 TCP/UDP 拒绝前缀；HY2 的普通 UDP 能力不被全局关闭。扩展既有无 Home/HY2 回归，不增加第二套测试框架或新文件。其余 Home/DIRECT、DNS、恢复、PF/WFP 许可均不改。
+- 验证状态：本轮 portable 检查、准确提交原生 CI 及独立高风险审查的实际结果记录在 PR 回执；旧 head 的绿灯不沿用。Linux orb 无 Swift/Rust，不运行原生测试、不安装工具链；设备抓包、第二跳解析与换云连续性未执行。
+- 客户版边界：0.0.76 RC、版本、签名候选和正式 feeds 均不动；仅源码 Draft，无合并、构建发布或客户推送。#1571 的 Core 故障、未分类流量及 Home DNS 产品取舍仍需 owner 确认；#1071 helper upgrade AI hold 和 #1605 DNS 恢复风险不由本 PR 宣称解决。

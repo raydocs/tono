@@ -880,16 +880,12 @@ fn runtime_value(
         .iter()
         .map(|rule| rule.to_string())
         .collect();
-    if home.node.is_some() || home.socks5.is_some() || direct.is_some_and(|plan| {
-        !plan.tcp_wechat_rules.is_empty() || !plan.tcp_web_rules.is_empty()
-            || !plan.web_suffix_rules.is_empty() || !plan.udp_wechat_rules.is_empty()
-    }) {
-        // Specific video/API exceptions precede Google parents and every
-        // Home/DIRECT process rule. Do not attempt a Reality UDP fallback.
-        for domain in CLOUD_VIDEO_DOMAINS {
-            rules.push(format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{EXIT_GROUP_NAME}"));
-            rules.push(format!("AND,((NETWORK,UDP),(DOMAIN-SUFFIX,{domain})),REJECT"));
-        }
+    // Specific video/API exceptions precede Google parents and every
+    // Home/DIRECT process rule. Keep the same TCP-only contract without a
+    // Home hop or DIRECT plan, including when the cloud exit supports HY2 UDP.
+    for domain in CLOUD_VIDEO_DOMAINS {
+        rules.push(format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{EXIT_GROUP_NAME}"));
+        rules.push(format!("AND,((NETWORK,UDP),(DOMAIN-SUFFIX,{domain})),REJECT"));
     }
     if home.node.is_some() || home.socks5.is_some() {
         // TCP-scoped on purpose: these pins sit ahead of the UDP REJECT rows,
@@ -1465,7 +1461,7 @@ reality-opts:
             .iter()
             .map(|rule| rule.as_str().unwrap())
             .collect();
-        assert_eq!(rules, [RULES[0], RULES[1], "AND,((NETWORK,UDP)),REJECT", RULES[2]]);
+        assert_eq!(rules, expected_cloud_only_rules(true));
         assert_eq!(get(&redacted, &["proxies"]).as_sequence().unwrap().len(), 3);
         let groups = get(&redacted, &["proxy-groups"]).as_sequence().unwrap();
         assert_eq!(groups.len(), 1);
@@ -1538,6 +1534,16 @@ reality-opts:
             format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),Tono-Exit"),
             format!("AND,((NETWORK,UDP),(DOMAIN-SUFFIX,{domain})),REJECT"),
         ]).collect()
+    }
+
+    fn expected_cloud_only_rules(reject_udp: bool) -> Vec<String> {
+        let mut rules = vec![RULES[0].to_string(), RULES[1].to_string()];
+        rules.extend(expected_cloud_video_rules());
+        if reject_udp {
+            rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
+        }
+        rules.push(RULES[2].to_string());
+        rules
     }
 
     /// Mirrors the emission order in `runtime_value`: the resolved TCP pins in plan order,
@@ -1640,7 +1646,7 @@ reality-opts:
     }
 
     #[test]
-    fn no_direct_build_is_byte_identical_to_before() {
+    fn no_direct_build_contains_only_cloud_routes() {
         let without =
             build_owned_runtime(&three_nodes(), "JP Reality 02", "test-secret", None).unwrap();
         let value = parsed(&without);
@@ -1655,7 +1661,7 @@ reality-opts:
             .iter()
             .map(|rule| rule.as_str().unwrap())
             .collect();
-        assert_eq!(rules, [RULES[0], RULES[1], "AND,((NETWORK,UDP)),REJECT", RULES[2]]);
+        assert_eq!(rules, expected_cloud_only_rules(true));
         let proxies = get(&value, &["proxies"]).as_sequence().unwrap();
         assert_eq!(proxies.len(), 3);
         assert!(
@@ -2007,7 +2013,7 @@ reality-opts:
             .iter()
             .map(|rule| rule.as_str().unwrap())
             .collect();
-        assert_eq!(rules, [RULES[0], RULES[1], "AND,((NETWORK,UDP)),REJECT", RULES[2]]);
+        assert_eq!(rules, expected_cloud_only_rules(true));
     }
 
     /// The Windows Service admits exactly these strings (`direct_admission` tests carry the same
@@ -2906,7 +2912,9 @@ fingerprint: "1e5374a79bdb83b04c3d3c84722c03211d1c941c2de9f92431d2198ba7212cad"
             .map(|rule| rule.as_str().unwrap())
             .collect();
         assert!(!rules.contains(&"AND,((NETWORK,UDP)),REJECT"));
-        assert_eq!(rules, [RULES[0], RULES[1], RULES[2]]);
+        assert_eq!(rules, expected_cloud_only_rules(false));
+        assert!(rules.contains(&"AND,((NETWORK,TCP),(DOMAIN-SUFFIX,youtubei.googleapis.com)),Tono-Exit"));
+        assert!(rules.contains(&"AND,((NETWORK,UDP),(DOMAIN-SUFFIX,youtubei.googleapis.com)),REJECT"));
     }
 
 }

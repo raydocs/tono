@@ -316,12 +316,11 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
     } else {
         home.map(|n| n.name.as_str())
     };
-    if home_target.is_some() || input.direct_plan.is_some() {
-        // YouTube API children override Google Home; video overrides process
-        // fallbacks too. UDP rejection keeps retries on the protected TCP path.
-        rules.push(json!({"network":"tcp","domain_suffix":config::CLOUD_VIDEO_DOMAINS.to_vec(),"action":"route","outbound":"Tono-Exit"}));
-        rules.push(json!({"network":"udp","domain_suffix":config::CLOUD_VIDEO_DOMAINS.to_vec(),"action":"reject"}));
-    }
+    // YouTube API children override Google Home; video overrides process
+    // fallbacks too. Match macOS even without Home/DIRECT: HY2 must not turn
+    // the reviewed TCP-only video contract into a UDP forwarding exception.
+    rules.push(json!({"network":"tcp","domain_suffix":config::CLOUD_VIDEO_DOMAINS.to_vec(),"action":"route","outbound":"Tono-Exit"}));
+    rules.push(json!({"network":"udp","domain_suffix":config::CLOUD_VIDEO_DOMAINS.to_vec(),"action":"reject"}));
     if let Some(target) = home_target {
         rules.push(json!({"network":"tcp","domain_suffix":config::CLAUDE_HOME_DOMAINS.to_vec(),"action":"route","outbound":target}));
         rules.push(json!({"network":"tcp","ip_cidr":config::CLAUDE_HOME_IPV4_CIDRS.to_vec(),"action":"route","outbound":target}));
@@ -815,6 +814,17 @@ mod tests {
         assert!(!selected.runtime_json().contains("disable_chrome_parrot"));
         assert!(!selected.runtime_json().contains("insecure"));
         assert_eq!(selected.unavailable_nodes(), &[2]);
+        // No Home binding or DIRECT plan: video still uses cloud TCP, while
+        // ordinary HY2 UDP remains supported (no unconditional UDP rejection).
+        let value: Value = serde_json::from_str(selected.runtime_json()).unwrap();
+        let rules = value["route"]["rules"].as_array().unwrap();
+        assert!(rules.iter().any(|rule| rule["network"] == "tcp" && rule["action"] == "route"
+            && rule["outbound"] == "Tono-Exit"
+            && rule["domain_suffix"].as_array().is_some_and(|hosts| hosts.contains(&json!("youtubei.googleapis.com")))));
+        assert!(rules.iter().any(|rule| rule["network"] == "udp" && rule["action"] == "reject"
+            && rule["domain_suffix"].as_array().is_some_and(|hosts| hosts.contains(&json!("youtubei.googleapis.com")))));
+        assert!(!rules.iter().any(|rule| rule["network"] == "udp" && rule["action"] == "reject"
+            && rule.get("domain_suffix").is_none() && rule.get("ip_cidr").is_none()));
         nodes[2].tls_fingerprint = None;
         assert_eq!(
             build_runtime(input(&nodes, &routing)).unwrap_err(),
