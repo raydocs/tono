@@ -1014,7 +1014,43 @@ mod tests {
         let yaml = runtime.yaml();
         assert!(yaml.contains("fake-ip-range: 198.18.0.1/16"));
         assert!(!yaml.contains("198.18.16.0/20"));
-        let digest = Sha256::digest(yaml.as_bytes());
+        // Pin the approved addition independently of the compiler's domain constant;
+        // every other byte must still match the original fallback document below.
+        let video_rules: Vec<String> = [
+            "youtube.com", "youtube-nocookie.com", "youtu.be", "googlevideo.com", "ytimg.com",
+            "youtube.googleapis.com", "youtubei.googleapis.com", "youtubeembeddedplayer.googleapis.com",
+            "youtube-ui.l.google.com", "wide-youtube.l.google.com", "yt3.googleusercontent.com", "ggpht.com",
+            "pornhub.com", "pornhub.org", "pornhubpremium.com", "phncdn.com", "phprcdn.com",
+            "porngub.com", "pornhub-deutsch.net", "pornhubapparel.com", "gaytube.com",
+        ]
+        .iter()
+        .flat_map(|domain| [
+            format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),Tono-Exit"),
+            format!("AND,((NETWORK,UDP),(DOMAIN-SUFFIX,{domain})),REJECT"),
+        ])
+        .collect();
+        let mut expected = vec![
+            "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve".to_string(),
+            "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
+        ];
+        expected.extend(video_rules.iter().cloned());
+        expected.push("AND,((NETWORK,UDP)),REJECT".to_string());
+        expected.push("MATCH,Tono-Exit".to_string());
+        let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let rules: Vec<_> = parsed["rules"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        assert_eq!(rules, expected);
+        let mut unchanged_yaml = yaml.to_owned();
+        for rule in video_rules {
+            let line = format!("- {rule}\n");
+            assert_eq!(unchanged_yaml.matches(&line).count(), 1);
+            unchanged_yaml = unchanged_yaml.replacen(&line, "", 1);
+        }
+        let digest = Sha256::digest(unchanged_yaml.as_bytes());
         let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
         assert_eq!(hex, PINNED_YAML_SHA256);
     }
