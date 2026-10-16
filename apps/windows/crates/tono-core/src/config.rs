@@ -1325,15 +1325,7 @@ reality-opts:
             .iter()
             .map(|rule| rule.as_str().unwrap())
             .collect();
-        assert_eq!(
-            rules,
-            [
-                "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
-                "IP-CIDR6,::1/128,DIRECT,no-resolve",
-                "AND,((NETWORK,UDP)),REJECT",
-                "MATCH,Tono-Exit"
-            ]
-        );
+        assert_eq!(rules, expected_cloud_only_rules(true));
         let raw = build().yaml().to_string();
         assert!(!raw.contains("GEOIP"), "no GEOIP rules may leak in");
     }
