@@ -17,7 +17,7 @@ use serde_json::{Map, Value};
 
 use crate::core::direct_policy::DirectPolicy;
 use crate::direct_domains::{
-    CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS, direct_suffix_overlaps_protected,
+    CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS, CLOUD_VIDEO_DOMAINS, direct_suffix_overlaps_protected,
     is_address_free_web_suffix, is_protected_from_direct,
 };
 
@@ -246,7 +246,7 @@ fn sing_box_direct_shape(rule: &Value, earlier: &[Value], direct: &[&str]) -> bo
                 })
                 && strs(rule, "process_path_regex")
                     .is_some_and(|all| all.iter().all(|r| regex_ok(r)))
-                && assistants_pinned(
+                && protected_destinations_pinned(
                     |domain| sing_box_pins(earlier, direct, "domain_suffix", domain),
                     |cidr| sing_box_pins(earlier, direct, "ip_cidr", cidr),
                 )
@@ -358,7 +358,7 @@ fn mihomo_direct_shape(rule: &str, earlier: &[&str], direct: &[&str]) -> bool {
             target == DIRECT_GROUP_NAME
                 && port(*p).is_some_and(|port| crate::REVIEWED_DIRECT_PORTS.contains(&port))
                 && regex_ok(*regex)
-                && assistants_pinned(
+                && protected_destinations_pinned(
                     |domain| mihomo_pins(earlier, direct, &format!("DOMAIN-SUFFIX,{domain}")),
                     |cidr| mihomo_pins(earlier, direct, &format!("IP-CIDR,{cidr},no-resolve")),
                 )
@@ -402,9 +402,13 @@ fn mihomo_pins(earlier: &[&str], direct: &[&str], condition: &str) -> bool {
     })
 }
 
-/// A rule with no destination bound needs every assistant host and range pinned first.
-fn assistants_pinned(domain: impl Fn(&str) -> bool, cidr: impl Fn(&str) -> bool) -> bool {
-    CLAUDE_HOME_DOMAINS.iter().all(|host| domain(*host))
+/// A rule with no destination bound needs Home and cloud-video destinations pinned first.
+/// This gate excludes DIRECT; the compilers/readback enforce the specific exit identity.
+fn protected_destinations_pinned(domain: impl Fn(&str) -> bool, cidr: impl Fn(&str) -> bool) -> bool {
+    CLAUDE_HOME_DOMAINS
+        .iter()
+        .chain(CLOUD_VIDEO_DOMAINS.iter())
+        .all(|host| domain(*host))
         && CLAUDE_HOME_IPV4_CIDRS.iter().all(|range| cidr(*range))
 }
 
@@ -600,8 +604,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS, DirectBinding, DirectPolicy,
-        admit_sing_box_direct_rules,
+        CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS, CLOUD_VIDEO_DOMAINS, DirectBinding, DirectPolicy,
+        admit_mihomo_direct_rules, admit_sing_box_direct_rules,
     };
     use crate::core::direct_policy::tests::{POLICY_JSON, key, sign};
 
@@ -613,6 +617,7 @@ mod tests {
         let outbounds =
             [json!({"type":"direct","tag":"Tono-China-Direct","bind_interface":"Ethernet"})];
         let rules = [
+            json!({"network":"tcp","domain_suffix":CLOUD_VIDEO_DOMAINS.as_slice(),"action":"route","outbound":"Tono-Exit"}),
             json!({"network":"tcp","domain_suffix":CLAUDE_HOME_DOMAINS.as_slice(),"action":"route","outbound":"Tono-Exit"}),
             json!({"network":"tcp","ip_cidr":CLAUDE_HOME_IPV4_CIDRS.as_slice(),"action":"route","outbound":"Tono-Exit"}),
             rule,
@@ -689,12 +694,63 @@ mod tests {
     }
 
     #[test]
-    fn a_process_rule_needs_native_app_entries_in_the_signed_policy() {
-        let rule = || process_rule(r"^[Dd]:[\\/][Ll][Aa][Rr][Kk][\\/]");
+    fn a_process_rule_needs_native_app_entries_and_all_protected_pins() {
+        let regex = r"^[Dd]:[\\/][Ll][Aa][Rr][Kk][\\/]";
         let policy = listed();
-        assert_eq!(admitted_by(rule(), DirectBinding::Policy(&policy)), Ok(()));
+        let by = DirectBinding::Policy(&policy);
+        let outbounds =
+            [json!({"type":"direct","tag":"Tono-China-Direct","bind_interface":"Ethernet"})];
+        let mut rules = vec![
+            json!({"network":"tcp","domain_suffix":CLOUD_VIDEO_DOMAINS.as_slice(),"action":"route","outbound":"Tono-Exit"}),
+            json!({"network":"tcp","domain_suffix":CLAUDE_HOME_DOMAINS.as_slice(),"action":"route","outbound":"Tono-Exit"}),
+            json!({"network":"tcp","ip_cidr":CLAUDE_HOME_IPV4_CIDRS.as_slice(),"action":"route","outbound":"Tono-Exit"}),
+            process_rule(regex),
+        ];
+        assert_eq!(admit_sing_box_direct_rules(&outbounds, &rules, by), Ok(()));
+        // Keep all Home pins and native-app policy authority; one missing video is enough.
+        let videos = rules[0]["domain_suffix"].as_array_mut().unwrap();
+        let youtube = videos.iter().position(|host| host == "youtube.com").unwrap();
+        let removed = videos.remove(youtube);
+        assert!(admit_sing_box_direct_rules(&outbounds, &rules, by).is_err());
+        rules[0]["domain_suffix"]
+            .as_array_mut()
+            .unwrap()
+            .insert(youtube, removed);
+        let videos = rules.remove(0);
+        rules.push(videos);
+        assert!(admit_sing_box_direct_rules(&outbounds, &rules, by).is_err());
+
+        let mut mihomo: Vec<String> = CLOUD_VIDEO_DOMAINS
+            .iter()
+            .chain(CLAUDE_HOME_DOMAINS.iter())
+            .map(|host| format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{host})),Tono-Exit"))
+            .chain(CLAUDE_HOME_IPV4_CIDRS.iter().map(|cidr| {
+                format!("AND,((NETWORK,TCP),(IP-CIDR,{cidr},no-resolve)),Tono-Exit")
+            }))
+            .collect();
+        mihomo.push(format!(
+            "AND,((NETWORK,TCP),(DST-PORT,443),(PROCESS-PATH-REGEX,{regex})),Tono-China-Direct"
+        ));
+        let proxies = [("Tono-China-Direct", "direct")];
+        let admit_mihomo = |rules: &[String]| {
+            admit_mihomo_direct_rules(
+                &rules.iter().map(String::as_str).collect::<Vec<_>>(),
+                &proxies,
+                &[],
+            )
+        };
+        assert_eq!(admit_mihomo(&mihomo), Ok(()));
+        let youtube = mihomo
+            .iter()
+            .position(|rule| rule == "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,youtube.com)),Tono-Exit")
+            .unwrap();
+        let removed = mihomo.remove(youtube);
+        assert!(admit_mihomo(&mihomo).is_err());
+        mihomo.push(removed);
+        assert!(admit_mihomo(&mihomo).is_err());
+
         let no_native = DirectPolicy::from_json(r#"{"version":3,"domains":[]}"#, 1).unwrap();
-        assert!(admitted_by(rule(), DirectBinding::Policy(&no_native)).is_err());
+        assert!(admitted_by(process_rule(regex), DirectBinding::Policy(&no_native)).is_err());
     }
 
     fn process_rule(regex: &str) -> Value {
