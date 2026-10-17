@@ -128,7 +128,9 @@ class DeviceEvidenceTest {
         if (ok == null) diagnose("real-03-consent-no-ok")
         assertNotNull("consent OK button", ok)
         ok!!.click()
-        device.waitForIdle(3_000)
+        // The system records consent asynchronously after the dialog closes.
+        val deadline = System.currentTimeMillis() + 10_000
+        while (VpnService.prepare(context) != null && System.currentTimeMillis() < deadline) Thread.sleep(250)
         assertNull("consent recorded by Android", VpnService.prepare(context))
         shot("real-04-after-consent")
     }
