@@ -153,6 +153,38 @@ pub(super) fn adapter_reads_as_tono_dns(adapter: &AdapterDnsSnapshot) -> bool {
         || is_tono_dns_value(adapter.ipv6_profile_name_server.as_deref())
 }
 
+/// How one adapter's *effective* resolver list (what the DNS Client resolves through, as
+/// opposed to the registry values) relates to Tono.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct EffectiveTono {
+    /// The current TUN endpoint (`198.18.0.2`) is in the list. No user owns that address.
+    pub(super) endpoint: bool,
+    /// A whole address family of the list is Tono-owned, legacy loopback included. A user's own
+    /// local resolver reads like this too, so it is evidence of Tono's redirect only together
+    /// with a record of what the adapter was before.
+    pub(super) tono_owned_family: bool,
+}
+
+/// One place for "does this effective list still resolve through Tono", shared by the restore
+/// proof's live read and the emergency reset's target selection.
+pub(super) fn classify_effective_servers(servers: &[std::net::IpAddr]) -> EffectiveTono {
+    let parse = |value: &str| value.parse::<std::net::IpAddr>().ok();
+    let current = parse(PROTECTED_DNS_V4);
+    let tono = [PROTECTED_DNS_V4, LOOPBACK_V4, LOOPBACK_V6].map(parse);
+    let mut found = EffectiveTono::default();
+    for ipv6 in [false, true] {
+        let family: Vec<_> = servers
+            .iter()
+            .filter(|server| server.is_ipv6() == ipv6)
+            .map(|server| Some(*server))
+            .collect();
+        found.endpoint |= family.contains(&current);
+        found.tono_owned_family |=
+            !family.is_empty() && family.iter().all(|server| tono.contains(server));
+    }
+    found
+}
+
 pub(super) fn is_current_tunnel_adapter(
     adapter: &AdapterDnsSnapshot,
     current_tunnel_luid: Option<u64>,

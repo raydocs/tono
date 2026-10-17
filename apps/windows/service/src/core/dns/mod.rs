@@ -152,6 +152,7 @@ mod uninstall;
 pub(crate) use enable::*;
 use enable_decisions::*;
 use engine_ops::*;
+pub(crate) use engine_ops::{engine_claim_is_held, is_engine_busy_refusal};
 pub(crate) use markers::*;
 use name_servers::*;
 use orphaned::*;
@@ -221,6 +222,12 @@ enum EnableTrigger {
 /// snapshot that survives a disarm does not resurrect the loopback redirect.
 static PROTECTION_WANTED: AtomicBool = AtomicBool::new(false);
 
+/// Whether DNS protection is wanted again in this process (see [`PROTECTION_WANTED`]); read by an
+/// adapter-fallback attempt before it marks itself in progress.
+pub(crate) fn protection_wanted() -> bool {
+    PROTECTION_WANTED.load(Ordering::Acquire)
+}
+
 static CONSECUTIVE_LIVE_FAILURES: AtomicU32 = AtomicU32::new(0);
 
 /// One enable/restore round's live-apply outcome; returns the current streak of failing rounds.
@@ -270,6 +277,342 @@ pub(crate) mod test_hooks {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = adapters;
     }
 
+    /// Interfaces whose registry keys exist but that are not in the active enumeration
+    /// (disabled or unplugged adapters). Their registry values are what the machine will resolve
+    /// through the moment the adapter comes back.
+    static OFFLINE_REGISTRY: LazyLock<Mutex<Vec<AdapterDnsSnapshot>>> =
+        LazyLock::new(|| Mutex::new(Vec::new()));
+
+    pub(crate) fn offline_registry() -> Vec<AdapterDnsSnapshot> {
+        OFFLINE_REGISTRY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_offline_registry(adapters: Vec<AdapterDnsSnapshot>) {
+        *OFFLINE_REGISTRY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = adapters;
+    }
+
+    static OFFLINE_REGISTRY_UNREADABLE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    pub(crate) fn offline_registry_unreadable() -> Vec<String> {
+        OFFLINE_REGISTRY_UNREADABLE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Interfaces whose registry values cannot be read at all (access denied, a hung key).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_offline_registry_unreadable(guids: Vec<String>) {
+        *OFFLINE_REGISTRY_UNREADABLE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = guids;
+    }
+
+    /// A real engine call that its caller gave up on: it is handed to `bounded_dns_call`, which
+    /// times out after 50 ms and leaves the blocking thread parked on a channel, still holding the
+    /// single-writer claim, exactly as an exact restore abandoned at its deadline does. Every stub
+    /// engine call that checks the claim is refused until this is released (or dropped).
+    #[cfg(test)]
+    pub(crate) async fn park_engine_call() -> ParkedEngineCall {
+        let (release, blocked) = std::sync::mpsc::channel::<()>();
+        let wedged = move || -> anyhow::Result<()> {
+            let _ = blocked.recv_timeout(std::time::Duration::from_secs(30));
+            Ok(())
+        };
+        let timed_out = super::bounded_dns_call_exact(std::time::Duration::from_millis(50), "restore", wedged).await;
+        assert!(timed_out.is_err(), "the parked call must time out and keep its claim");
+        ParkedEngineCall { release }
+    }
+
+    /// The abandoned call's handle: dropping it lets the blocking thread return, which releases
+    /// the claim, and waits for that.
+    #[cfg(test)]
+    pub(crate) struct ParkedEngineCall {
+        release: std::sync::mpsc::Sender<()>,
+    }
+
+    #[cfg(test)]
+    impl Drop for ParkedEngineCall {
+        fn drop(&mut self) {
+            let _ = self.release.send(());
+            for _ in 0..500 {
+                if super::dns_call_in_flight().is_none() {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+    }
+
+    /// Take the DNS module's operation lock, as a long engine round of another caller would.
+    #[cfg(test)]
+    pub(crate) async fn hold_dns_operation() -> tokio::sync::MutexGuard<'static, ()> {
+        super::DNS_OPERATION.lock().await
+    }
+
+    /// Set the process-local "protection is wanted" gate, as an enable (a Connect) does.
+    #[cfg(test)]
+    pub(crate) fn set_protection_wanted(wanted: bool) {
+        super::PROTECTION_WANTED.store(wanted, Ordering::Release);
+    }
+
+    #[cfg(test)]
+    static PARK_CLAIM_AFTER: Mutex<Option<(&'static str, u32)>> = Mutex::new(None);
+
+    #[cfg(test)]
+    static PARKED_CLAIM: Mutex<Option<ParkedEngineCall>> = Mutex::new(None);
+
+    /// The `nth` (1-based) stub engine call named `operation` (`"collect"` or
+    /// `"read effective DNS"`) that succeeds leaves an abandoned engine call behind it, holding the
+    /// single-writer claim: the call itself answered, and every engine call after it is refused.
+    /// This is the interleaving where the claim appears in the middle of one fallback attempt.
+    #[cfg(test)]
+    pub(crate) fn park_claim_after(operation: &'static str, nth: u32) {
+        *PARK_CLAIM_AFTER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((operation, nth));
+    }
+
+    #[cfg(test)]
+    static SPEND_AFTER: Mutex<Option<(&'static str, u32, std::time::Duration)>> = Mutex::new(None);
+
+    /// After the `nth` (1-based) successful stub engine call named `operation` the attempt spends
+    /// `time` before it makes its next call (a slow lock wait, a slow read): its cumulative
+    /// deadline runs down without any engine call overrunning its own budget.
+    #[cfg(test)]
+    pub(crate) fn set_spend_after(operation: &'static str, nth: u32, time: std::time::Duration) {
+        *SPEND_AFTER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((operation, nth, time));
+    }
+
+    /// Called by a stub engine call that is about to return successfully.
+    #[cfg(test)]
+    pub(crate) async fn engine_call_returned(operation: &'static str) {
+        let spend = {
+            let mut pending = SPEND_AFTER
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match *pending {
+                Some((name, nth, time)) if name == operation => {
+                    if nth <= 1 {
+                        *pending = None;
+                        Some(time)
+                    } else {
+                        *pending = Some((name, nth - 1, time));
+                        None
+                    }
+                }
+                _ => None,
+            }
+        };
+        if let Some(time) = spend {
+            tokio::time::sleep(time).await;
+        }
+        let fire = {
+            let mut pending = PARK_CLAIM_AFTER
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if matches!(&*pending, Some((name, _)) if *name == operation) {
+                let remaining = pending.as_ref().map_or(0, |(_, nth)| *nth).saturating_sub(1);
+                if remaining == 0 {
+                    *pending = None;
+                    true
+                } else {
+                    *pending = Some((operation, remaining));
+                    false
+                }
+            } else {
+                false
+            }
+        };
+        if fire {
+            let claim = park_engine_call().await;
+            *PARKED_CLAIM
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(claim);
+        }
+    }
+
+    /// Park an abandoned engine call right now and keep it until [`release_parked_claim`]: what
+    /// a real call that overran its deadline leaves behind.
+    #[cfg(test)]
+    pub(crate) async fn park_claim_now() {
+        let claim = park_engine_call().await;
+        *PARKED_CLAIM
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(claim);
+    }
+
+    #[cfg(test)]
+    static ENGINE_CALL_DELAY: Mutex<Option<(Option<&'static str>, std::time::Duration)>> = Mutex::new(None);
+
+    /// Every stub engine call named `operation` (every call at all for `None`) takes `delay`. A
+    /// delay at least as long as the budget the call was given is a call that timed out.
+    #[cfg(test)]
+    pub(crate) fn set_engine_call_delay(operation: Option<&'static str>, delay: std::time::Duration) {
+        *ENGINE_CALL_DELAY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((operation, delay));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn engine_call_delay(operation: &str) -> Option<std::time::Duration> {
+        let delay = *ENGINE_CALL_DELAY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        delay.and_then(|(name, delay)| name.is_none_or(|name| name == operation).then_some(delay))
+    }
+
+    #[cfg(test)]
+    static ENGINE_CALL_TIMES_OUT: Mutex<Option<&'static str>> = Mutex::new(None);
+
+    /// The next stub engine call named `operation` does not return within its budget: it is
+    /// abandoned holding the claim, nothing is applied, and the caller gets the busy error.
+    #[cfg(test)]
+    pub(crate) fn set_engine_call_times_out(operation: &'static str) {
+        *ENGINE_CALL_TIMES_OUT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(operation);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn engine_call_times_out(operation: &str) -> bool {
+        let mut pending = ENGINE_CALL_TIMES_OUT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *pending == Some(operation) {
+            *pending = None;
+            return true;
+        }
+        false
+    }
+
+    #[cfg(test)]
+    static ENGINE_CALL_BUDGETS: Mutex<Vec<(&'static str, std::time::Duration)>> = Mutex::new(Vec::new());
+
+    #[cfg(test)]
+    pub(crate) fn record_engine_call_budget(operation: &'static str, budget: std::time::Duration) {
+        ENGINE_CALL_BUDGETS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((operation, budget));
+    }
+
+    /// The budgets the stub engine calls were given, in call order, since the last take.
+    #[cfg(test)]
+    pub(crate) fn take_engine_call_budgets() -> Vec<(&'static str, std::time::Duration)> {
+        std::mem::take(
+            &mut *ENGINE_CALL_BUDGETS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+
+    /// Every stub facade entry, including a call the attempt deadline refused before it started.
+    #[cfg(test)]
+    static FACADE_CALLS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+
+    #[cfg(test)]
+    pub(crate) fn record_facade_call(operation: &'static str) {
+        FACADE_CALLS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(operation);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_facade_calls() -> Vec<&'static str> {
+        std::mem::take(
+            &mut *FACADE_CALLS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+
+    #[cfg(test)]
+    static FILE_READ_HANGS: Mutex<Option<&'static str>> = Mutex::new(None);
+
+    /// The fallback attempt's read of `"snapshot"` or of its `"retirement"` record never
+    /// finishes (a filter driver or a share that does not answer), until cleared with `None`.
+    #[cfg(test)]
+    pub(crate) fn set_file_read_hangs(read: Option<&'static str>) {
+        *FILE_READ_HANGS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = read;
+    }
+
+    /// Called right before the attempt's file read named `read`.
+    #[cfg(test)]
+    pub(crate) async fn file_read_gate(read: &'static str) {
+        for _ in 0..3000 {
+            let hangs = *FILE_READ_HANGS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if hangs != Some(read) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Let the abandoned call [`park_claim_after`] left behind return, which releases the claim.
+    #[cfg(test)]
+    pub(crate) fn release_parked_claim() {
+        let claim = PARKED_CLAIM
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        drop(claim);
+    }
+
+    /// Clear the hooks that make the stub engine slow, stuck or its file reads hang, and the
+    /// record of the budgets it was given.
+    #[cfg(test)]
+    pub(crate) fn clear_fault_hooks() {
+        *ENGINE_CALL_DELAY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        *ENGINE_CALL_TIMES_OUT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        set_file_read_hangs(None);
+        *SPEND_AFTER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        take_engine_call_budgets();
+        take_facade_calls();
+    }
+
+    /// Clear every hook the adapter fallback tests set.
+    #[cfg(test)]
+    pub(crate) fn reset_fallback_hooks() {
+        *PARK_CLAIM_AFTER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        release_parked_claim();
+        clear_fault_hooks();
+        set_protection_wanted(false);
+        set_collected_adapters(Vec::new());
+        set_offline_registry(Vec::new());
+        set_offline_registry_unreadable(Vec::new());
+        set_effective_dns(Vec::new());
+        set_effective_dns_unreadable(Vec::new());
+        set_effective_dns_fails(false);
+        set_reset_does_not_land(false);
+        set_live_dns_on_loopback(false);
+        take_last_automatic_reset();
+        take_automatic_resets();
+        take_encrypted_restores();
+        take_nrpt_sweeps();
+    }
+
     static LIVE_DNS_ON_LOOPBACK: AtomicBool = AtomicBool::new(false);
 
     pub(crate) fn live_dns_is_on_loopback() -> bool {
@@ -280,6 +623,122 @@ pub(crate) mod test_hooks {
     /// that cannot read its snapshot is genuinely unprovable.
     pub(crate) fn set_live_dns_on_loopback(on_loopback: bool) {
         LIVE_DNS_ON_LOOPBACK.store(on_loopback, Ordering::Relaxed);
+    }
+
+    static EFFECTIVE_DNS: LazyLock<Mutex<Vec<(String, Vec<std::net::IpAddr>)>>> =
+        LazyLock::new(|| Mutex::new(Vec::new()));
+
+    pub(crate) fn effective_dns() -> Vec<(String, Vec<std::net::IpAddr>)> {
+        EFFECTIVE_DNS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// An automatic (DHCP) reset that lands also takes these adapters' effective lists off
+    /// the Tono endpoint.
+    pub(crate) fn forget_effective_dns(guids: &[String]) {
+        EFFECTIVE_DNS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|(guid, _)| !guids.iter().any(|reset| reset.eq_ignore_ascii_case(guid)));
+    }
+
+    /// A per-family reset that lands: for each `(adapter, ipv4, ipv6)` the registry values of
+    /// the reset families go back to automatic (absent) and the effective list loses that
+    /// family's servers. The other family keeps what it had.
+    pub(crate) fn land_reset(resets: &[(String, bool, bool)]) {
+        {
+            let mut collected = COLLECTED_ADAPTERS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut offline = OFFLINE_REGISTRY
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for adapter in collected.iter_mut().chain(offline.iter_mut()) {
+                let Some((_, v4, v6)) = resets
+                    .iter()
+                    .find(|(guid, _, _)| guid.eq_ignore_ascii_case(&adapter.interface_guid))
+                else {
+                    continue;
+                };
+                if *v4 {
+                    adapter.ipv4_name_server = None;
+                    adapter.ipv4_profile_name_server = None;
+                }
+                if *v6 {
+                    adapter.ipv6_name_server = None;
+                    adapter.ipv6_profile_name_server = None;
+                }
+            }
+        }
+        let mut effective = EFFECTIVE_DNS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for (guid, servers) in effective.iter_mut() {
+            let Some((_, v4, v6)) = resets
+                .iter()
+                .find(|(reset, _, _)| reset.eq_ignore_ascii_case(guid))
+            else {
+                continue;
+            };
+            servers.retain(|server| !(if server.is_ipv6() { *v6 } else { *v4 }));
+        }
+    }
+
+    pub(crate) fn effective_dns_unreadable() -> Vec<String> {
+        EFFECTIVE_DNS_UNREADABLE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub(crate) fn effective_dns_fails() -> bool {
+        EFFECTIVE_DNS_FAILS.load(Ordering::Relaxed)
+    }
+
+    /// What the DNS Client resolves through per active adapter right now (the effective list
+    /// `GetAdaptersAddresses` reports), as opposed to the registry values `collected_adapters`
+    /// stands for. The two differ exactly when a restore wrote the registry back but its live
+    /// apply failed.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_effective_dns(adapters: Vec<(String, Vec<std::net::IpAddr>)>) {
+        *EFFECTIVE_DNS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = adapters;
+    }
+
+    static EFFECTIVE_DNS_UNREADABLE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    /// Adapters that are active but whose effective resolver list cannot be read (one adapter's
+    /// DNS record failing to parse), while the others answer.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_effective_dns_unreadable(guids: Vec<String>) {
+        *EFFECTIVE_DNS_UNREADABLE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = guids;
+    }
+
+    static EFFECTIVE_DNS_FAILS: AtomicBool = AtomicBool::new(false);
+
+    /// The whole effective-DNS read fails (`GetAdaptersAddresses` errors).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_effective_dns_fails(fails: bool) {
+        EFFECTIVE_DNS_FAILS.store(fails, Ordering::Relaxed);
+    }
+
+    static RESET_DOES_NOT_LAND: AtomicBool = AtomicBool::new(false);
+
+    pub(crate) fn reset_does_not_land() -> bool {
+        RESET_DOES_NOT_LAND.load(Ordering::Relaxed)
+    }
+
+    /// Simulate an automatic (DHCP) reset that reports success while the machine keeps
+    /// resolving through the Tono endpoint: the registry write and the CIM call returned, the
+    /// DNS Client has not adopted it.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_reset_does_not_land(does_not_land: bool) {
+        RESET_DOES_NOT_LAND.store(does_not_land, Ordering::Relaxed);
     }
 
     static LIVE_APPLY_FAILS: AtomicBool = AtomicBool::new(false);
@@ -332,6 +791,20 @@ pub(crate) mod test_hooks {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn set_nrpt_sweep_hangs(hangs: bool) {
         NRPT_SWEEP_HANGS.store(hangs, Ordering::Relaxed);
+    }
+
+    /// How many times the stubbed NRPT removal (the emergency disarm's resolver-rule sweep) ran.
+    #[cfg(test)]
+    static NRPT_SWEEPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    #[cfg(test)]
+    pub(crate) fn note_nrpt_sweep() {
+        NRPT_SWEEPS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_nrpt_sweeps() -> usize {
+        NRPT_SWEEPS.swap(0, Ordering::Relaxed)
     }
 
     static SNAPSHOT_DELETE_FAILS: AtomicBool = AtomicBool::new(false);
@@ -418,9 +891,30 @@ pub(crate) mod test_hooks {
     #[cfg(test)]
     static AUTOMATIC_RESETS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
+    /// The adapters named by the last automatic (DHCP) reset, so a test can prove which ones the
+    /// reset touched and which it left alone.
     #[cfg(test)]
-    pub(crate) fn note_automatic_reset() {
+    static LAST_AUTOMATIC_RESET: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    #[cfg(test)]
+    pub(crate) fn note_automatic_reset(snapshot: &super::DnsSnapshot) {
         AUTOMATIC_RESETS.fetch_add(1, Ordering::Relaxed);
+        *LAST_AUTOMATIC_RESET
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot
+            .adapters
+            .iter()
+            .map(|adapter| adapter.interface_guid.clone())
+            .collect();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_last_automatic_reset() -> Vec<String> {
+        std::mem::take(
+            &mut *LAST_AUTOMATIC_RESET
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
     }
 
     #[cfg(test)]

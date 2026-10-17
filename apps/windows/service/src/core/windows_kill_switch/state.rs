@@ -622,6 +622,29 @@ pub(super) const DNS_RESTORE_STALLED_PREFIX: &str = "TONO_DNS_RESTORE_STALLED";
 /// also stays under the IPC handler's 60 s budget, so the refusal still reaches the client.
 pub(super) const DNS_RESTORE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(40);
 
+/// The exact DNS restore's bound on the non-uninstall emergency path when the caller passes a
+/// deadline (the release worker, whose whole cleanup is 45 s). The restore is abandoned at this
+/// point, WFP is removed, and the adapters are put back on automatic (DHCP) by the one attempt in
+/// `emergency_disarm_with` or, if the engine is still busy, by the restarted Service.
+pub(super) const EMERGENCY_RESTORE_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The exact restore on the emergency path is never cut shorter than this, whatever the deadline.
+pub(super) const EMERGENCY_MIN_RESTORE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The budget of the exact DNS restore on the emergency path, given the time `remaining` before
+/// the caller's deadline (`None`: the caller has no deadline and keeps [`DNS_RESTORE_TIMEOUT`]).
+pub(super) fn emergency_restore_budget(remaining: Option<std::time::Duration>) -> std::time::Duration {
+    match remaining {
+        None => DNS_RESTORE_TIMEOUT,
+        Some(remaining) => EMERGENCY_RESTORE_BUDGET.min(remaining.max(EMERGENCY_MIN_RESTORE)),
+    }
+}
+
+/// Marks the note the emergency disarm appends to its DNS error about the adapter reset that
+/// follows an unproven exact restore. The note is information only: the error it rides on is still
+/// the exact restore's, so no caller may read it as "restored".
+pub(super) const DNS_FALLBACK_NOTE_PREFIX: &str = "TONO_DNS_FALLBACK";
+
 /// SCM `StopPending` hint posted by the service. Stop is accepted before startup
 /// finishes, and startup can still be inside this DNS budget — twice, when an
 /// unverified barrier is retired. One post of the hint does not cover that.
@@ -687,6 +710,61 @@ pub(super) fn armed_guard() -> std::sync::MutexGuard<'static, Option<Armed>> {
 }
 
 pub(super) static STARTUP_RELEASE_RETRY_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// A startup release path could not restore the DNS exactly and asked for the adapter fallback
+/// (`request_startup_dns_fallback`). It is only a request: the task starts at the Service
+/// binary's spawn point, after the DNS status cache and the watchdogs exist.
+pub(super) static STARTUP_DNS_FALLBACK_WANTED: AtomicBool = AtomicBool::new(false);
+
+/// The Service reached that spawn point (`spawn_startup_dns_fallback_if_wanted`). From then on a
+/// request starts the task itself, which is how the detached release retry (it runs on a timer,
+/// possibly long after startup) gets its fallback.
+pub(super) static STARTUP_DNS_FALLBACK_OPEN: AtomicBool = AtomicBool::new(false);
+
+/// An adapter-fallback attempt (the startup task or the emergency disarm's single attempt) is
+/// running, or has just left an engine writer behind. Set under `WFP_OPERATION` after the attempt
+/// checked that nothing is armed and DNS protection is not wanted, cleared when the attempt
+/// returns whatever its outcome. The attempt itself does not hold `WFP_OPERATION`, so this is the
+/// fence an arm checks (`arm_bootstrap_waiting`); the writer an attempt abandoned at an engine
+/// deadline is fenced by the DNS engine's claim (`dns::engine_claim_is_held`) instead.
+pub(super) static DNS_FALLBACK_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+/// Sets [`DNS_FALLBACK_IN_PROGRESS`] for as long as it lives; dropping it clears it, whatever way
+/// the attempt ended (an error, a panic, a cancelled task).
+pub(super) struct DnsFallbackMarker;
+
+impl DnsFallbackMarker {
+    pub(super) fn set() -> Self {
+        DNS_FALLBACK_IN_PROGRESS.store(true, Ordering::Release);
+        Self
+    }
+}
+
+impl Drop for DnsFallbackMarker {
+    fn drop(&mut self) {
+        DNS_FALLBACK_IN_PROGRESS.store(false, Ordering::Release);
+    }
+}
+
+/// The startup retirement of an unverified barrier could not restore the DNS exactly and has not
+/// yet registered the adapter fallback, because its WFP removal failed first: the machine is still
+/// blocked, and the retry (`release_unproven_wanted_session_unlocked`, from the core-window
+/// reconcile) owes the request once its own removal succeeds. Cleared when the request is
+/// registered, when a later restore proves, and by a fresh arm; no other release consults it.
+pub(super) static STARTUP_RETIREMENT_OWES_DNS_FALLBACK: AtomicBool = AtomicBool::new(false);
+
+/// Marks the error of an arm that was refused because a network restore is still writing DNS.
+/// The App keeps the raw text of an arm refusal (only BFE/WFP markers are rewritten), so the
+/// user sees it as the connect failure and retries by hand.
+pub(crate) const NETWORK_RESTORE_IN_PROGRESS_PREFIX: &str = "TONO_NETWORK_RESTORE_IN_PROGRESS";
+
+/// How long an arm waits for the fence above before it is refused.
+pub(super) const ARM_FENCE_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Tests drive the startup residual-filter probe: `Some(Ok(present))` or `Some(Err(()))` (the
+/// probe itself failed). `None` is a machine with no filters.
+#[cfg(test)]
+pub(super) static TEST_RESIDUAL_PROBE: Mutex<Option<std::result::Result<bool, ()>>> = Mutex::new(None);
 #[cfg(test)]
 pub(super) static TEST_REMOVE_FAILURE: AtomicBool = AtomicBool::new(false);
 #[cfg(test)]

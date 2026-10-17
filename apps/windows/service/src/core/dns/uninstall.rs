@@ -334,3 +334,504 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
         }
     }
 }
+
+/// What the DNS Client resolves through for one adapter, as far as it could be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum EffectiveDns {
+    /// The adapter is not active, so there is no running resolver to prove.
+    NotActive,
+    /// The adapter's effective servers, both families.
+    Servers(Vec<std::net::IpAddr>),
+    /// The adapter is active but its servers could not be read. Unknown is never "empty": it can
+    /// neither prove the adapter off Tono nor leave it out of the verification.
+    Unknown,
+}
+
+/// The address families of one adapter to put back on automatic (DHCP).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct FamilyReset {
+    pub(super) v4: bool,
+    pub(super) v6: bool,
+}
+
+impl FamilyReset {
+    pub(super) fn any(self) -> bool {
+        self.v4 || self.v6
+    }
+}
+
+/// What the emergency reset has to do about one adapter, and whether it can be proven.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct Assessment {
+    /// The families still on a Tono resolver that nothing will answer.
+    pub(super) reset: FamilyReset,
+    /// The adapter is recorded in the snapshot or reads as Tono in the registry, and its
+    /// effective servers are unknown: nothing proves it off Tono.
+    pub(super) unproven: bool,
+}
+
+/// Whether, per address family, an adapter is still pointed at a Tono resolver that nothing will
+/// answer, so the emergency reset has to put that family on automatic (DHCP).
+///
+/// `adapter` is the registry as it reads now, `recorded` the adapter's entry in the saved
+/// snapshot (the user's originals), `effective` the DNS Client's own resolver list. The registry
+/// alone is not enough: the exact restore writes the user's registry values back even when its
+/// live apply failed, so a family can read as restored in the registry while it still resolves
+/// through Tono.
+///
+/// * The Tono-only endpoint (`198.18.0.2`) in either view is Tono's by itself: no user owns that
+///   address, whatever the saved original was.
+/// * A plain loopback (`127.0.0.1` / `::1`, what an older build wrote) is Tono's only for an
+///   adapter the snapshot recorded, and a family stays exempt only while the user's own saved
+///   loopback is what both its registry and its effective list still hold. On an adapter the
+///   snapshot never recorded it is the user's own local resolver (Pi-hole, Acrylic).
+/// * An unreadable effective list leaves a family that reads as the user's own where it is, but
+///   marks the adapter `unproven`: unknown is never evidence of a clean machine.
+/// * An IPv6 family with no static server follows an IPv4 family that is reset, as the uninstall
+///   ladder resets both, so a protected-empty IPv6 does not stay behind.
+pub(super) fn assess_adapter(
+    adapter: &AdapterDnsSnapshot,
+    recorded: Option<&AdapterDnsSnapshot>,
+    effective: &EffectiveDns,
+) -> Assessment {
+    let servers = match effective {
+        EffectiveDns::Servers(servers) => Some(servers.as_slice()),
+        EffectiveDns::NotActive | EffectiveDns::Unknown => None,
+    };
+    let mut reset = FamilyReset::default();
+    for ipv6 in [false, true] {
+        let (name, profile) = if ipv6 {
+            (&adapter.ipv6_name_server, &adapter.ipv6_profile_name_server)
+        } else {
+            (&adapter.ipv4_name_server, &adapter.ipv4_profile_name_server)
+        };
+        let live: Vec<std::net::IpAddr> = servers
+            .map(|servers| servers.iter().copied().filter(|ip| ip.is_ipv6() == ipv6).collect())
+            .unwrap_or_default();
+        let found = classify_effective_servers(&live);
+        let registry_endpoint = contains_current_protected_v4(name.as_deref())
+            || contains_current_protected_v4(profile.as_deref());
+        let on_tono = if registry_endpoint || found.endpoint {
+            true
+        } else if is_tono_dns_value(name.as_deref())
+            || is_tono_dns_value(profile.as_deref())
+            || found.tono_owned_family
+        {
+            // A plain loopback: Tono's only where the snapshot says the user did not have it.
+            recorded.is_some_and(|saved| !family_is_users_own_loopback(saved, name, profile, &live, effective, ipv6))
+        } else {
+            false
+        };
+        if on_tono {
+            if ipv6 {
+                reset.v6 = true;
+            } else {
+                reset.v4 = true;
+            }
+        }
+    }
+    let no_static_v6 = parse_name_server_list(adapter.ipv6_name_server.as_deref().unwrap_or_default()).is_empty()
+        && parse_name_server_list(adapter.ipv6_profile_name_server.as_deref().unwrap_or_default()).is_empty();
+    if reset.v4 && no_static_v6 {
+        reset.v6 = true;
+    }
+    Assessment {
+        reset,
+        unproven: matches!(effective, EffectiveDns::Unknown)
+            && (recorded.is_some() || adapter_reads_as_tono_dns(adapter)),
+    }
+}
+
+/// Whether one family still holds the user's own saved local resolver in both views: the saved
+/// original is a loopback, the registry equals it, and the effective list (when it was read and
+/// has servers in this family) is exactly it.
+fn family_is_users_own_loopback(
+    saved: &AdapterDnsSnapshot,
+    name: &Option<String>,
+    profile: &Option<String>,
+    live: &[std::net::IpAddr],
+    effective: &EffectiveDns,
+    ipv6: bool,
+) -> bool {
+    let (saved_name, saved_profile) = if ipv6 {
+        (&saved.ipv6_name_server, &saved.ipv6_profile_name_server)
+    } else {
+        (&saved.ipv4_name_server, &saved.ipv4_profile_name_server)
+    };
+    let saved_loopback =
+        is_loopback_value(saved_name.as_deref()) || is_loopback_value(saved_profile.as_deref());
+    if !saved_loopback || name != saved_name || profile != saved_profile {
+        return false;
+    }
+    match effective {
+        EffectiveDns::NotActive | EffectiveDns::Unknown => true,
+        EffectiveDns::Servers(_) => {
+            // The profile value overrides the name value when it is set.
+            let saved_list = parse_name_server_list(
+                saved_profile
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+                    .or(saved_name.as_deref())
+                    .unwrap_or_default(),
+            );
+            let saved_servers: std::collections::BTreeSet<std::net::IpAddr> =
+                saved_list.iter().filter_map(|server| server.parse().ok()).collect();
+            let live_servers: std::collections::BTreeSet<std::net::IpAddr> = live.iter().copied().collect();
+            live_servers.is_empty() || live_servers == saved_servers
+        }
+    }
+}
+
+/// What the emergency reset reads and verifies: the candidate adapters as the registry reads
+/// them, each with its effective state, and the snapshot adapters whose registry could not be
+/// read at all.
+struct DnsState {
+    adapters: Vec<(AdapterDnsSnapshot, EffectiveDns)>,
+    unreadable: Vec<String>,
+}
+
+/// The candidate adapters are the snapshot's adapters together with the currently active ones.
+/// The active enumeration alone is not enough: an adapter that is offline (disabled, unplugged)
+/// is absent from it while its registry still holds whatever the exact restore failed to
+/// replace, and it resolves through that the moment it returns. A snapshot adapter that is not
+/// active is read from the registry by GUID (registry only: it has no effective list), and one
+/// whose registry cannot be read is `unreadable`, never "restored". An effective read that fails
+/// as a whole makes every adapter's state unknown. A read the engine refused because an earlier
+/// call still holds its claim is none of these: it is returned as an error that
+/// [`is_engine_busy_refusal`] recognises, whichever read it was.
+async fn read_dns_state(snapshot: Option<&DnsSnapshot>) -> Result<DnsState> {
+    let mut adapters = collect_dns_adapters().await?;
+    let mut unreadable = Vec::new();
+    if let Some(snapshot) = snapshot {
+        let absent: Vec<String> = snapshot
+            .adapters
+            .iter()
+            .map(|saved| saved.interface_guid.clone())
+            .filter(|guid| !adapters.iter().any(|active| same_adapter_guid(&active.interface_guid, guid)))
+            .collect();
+        if !absent.is_empty() {
+            match engine_read_registry_adapters(&absent).await {
+                Ok(read) => {
+                    for (guid, adapter) in read {
+                        match adapter {
+                            Some(adapter) => adapters.push(adapter),
+                            None => unreadable.push(guid),
+                        }
+                    }
+                }
+                // A refused call is "the engine is busy" and a spent attempt deadline is "out of
+                // time"; the caller retries both. Neither is evidence about these adapters and
+                // must not end up as "registry unreadable".
+                Err(error) if is_fallback_retryable(&error) => return Err(error),
+                Err(error) => {
+                    tracing::warn!("dns: the registry DNS values of the inactive snapshot adapters could not be read: {error:#}");
+                    unreadable = absent;
+                }
+            }
+        }
+    }
+    // Same for the effective list: a busy engine, or a spent deadline, is returned as such, not
+    // read as "unknown".
+    let effective = match engine_effective_dns(&adapters).await {
+        Err(error) if is_fallback_retryable(&error) => return Err(error),
+        other => other,
+    };
+    if let Err(error) = &effective {
+        tracing::warn!("dns: the effective DNS of the adapters could not be read: {error:#}");
+    }
+    let adapters = adapters
+        .into_iter()
+        .map(|adapter| {
+            let state = match &effective {
+                Err(_) => EffectiveDns::Unknown,
+                Ok(read) => match read
+                    .iter()
+                    .find(|(guid, _)| same_adapter_guid(guid, &adapter.interface_guid))
+                {
+                    None => EffectiveDns::NotActive,
+                    Some((_, None)) => EffectiveDns::Unknown,
+                    Some((_, Some(servers))) => EffectiveDns::Servers(servers.clone()),
+                },
+            };
+            (adapter, state)
+        })
+        .collect();
+    Ok(DnsState { adapters, unreadable })
+}
+
+/// The adapter reset that answers a failed exact DNS restore, shared by its two callers: the
+/// non-uninstall emergency disarm (one attempt, after WFP is gone, under the `WFP_OPERATION` it
+/// already holds) and the freshly started main Service (which retries it while the engine is
+/// busy; an attempt holds `WFP_OPERATION` only to start, and is fenced against a Connect by the
+/// in-progress marker and the engine's claim instead). `--emergency-disarm` and the Start-Menu
+/// entry run the uninstall ladder instead and never reach this.
+///
+/// Owner rule: a released machine resolves through the home broadband's DNS, never through a
+/// dead Tono resolver. So, like rung 2 of the uninstall ladder, the address families that still
+/// read as a Tono target are put back on automatic (DHCP), and then the machine-wide resolver
+/// policy (the NRPT catch-all and the Encrypted DNS pin) is removed. Differences from the
+/// ladder, on purpose:
+///
+/// * Only families that are on a Tono target *right now* are touched, by registry and by the
+///   DNS Client's effective list together ([`assess_adapter`]). The snapshot may list adapters
+///   an earlier partial restore already put back exactly; resetting those to DHCP would destroy
+///   the static servers the user chose.
+/// * The reset is verified like the ladder's rung 2, over *every* candidate and not just the
+///   reset subset: every adapter recorded in the snapshot and every adapter on a Tono target by
+///   registry or effective list is read again. Any that still reads as a Tono target, or whose
+///   effective state is unknown, fails the fallback ("could not be proven"), whatever the apply
+///   reported. An empty selection is only a success when every candidate was actually read.
+/// * The snapshot file is kept under its own name, so a later exact restore can still replay the
+///   user's saved servers.
+///
+/// It never waits for the engine. A restore that timed out leaves its engine call running on a
+/// blocking thread with the single-writer claim, which can be held for an unbounded time, so
+/// every engine call is then refused at once; this function returns that refusal immediately
+/// (check it with [`is_engine_busy_refusal`]) and leaves it to the caller to try again later.
+///
+/// It is also bounded in time. With a `deadline`, every engine call inside is given the smaller of
+/// its own budget and what is left of it, the wait for the DNS lock ends at it, and a call that
+/// cannot start in time is an error that [`is_fallback_timeout`] recognises (nothing is half done:
+/// the attempt is simply retried). Each of the two file reads (the snapshot and its retirement
+/// record) gets [`DNS_FALLBACK_FILE_READ_TIMEOUT`]; a read that does not return is an ordinary
+/// error, which ends the attempt. A call that overruns its own budget is abandoned on its blocking
+/// thread holding the engine's claim ([`engine_claim_is_held`]); the caller must keep a Connect
+/// from arming until that thread has returned.
+///
+/// The adapter reset and the policy restore are independent: a failure of one does not skip the
+/// other (unless the engine is busy, which refuses both), and the first error is returned. The
+/// strict `restore_protected` / `ensure_restored` / `disarm_unlocked` gate is untouched.
+pub(crate) async fn reset_redirected_adapters_to_automatic(
+    deadline: Option<std::time::Instant>,
+) -> Result<Vec<String>> {
+    reset_redirected_adapters_to_automatic_with_file_timeout(deadline, DNS_FALLBACK_FILE_READ_TIMEOUT).await
+}
+
+/// [`reset_redirected_adapters_to_automatic`] with the time one file read may take injected, so a
+/// test models the 5 s in milliseconds.
+pub(crate) async fn reset_redirected_adapters_to_automatic_with_file_timeout(
+    deadline: Option<std::time::Instant>,
+    file_timeout: std::time::Duration,
+) -> Result<Vec<String>> {
+    match deadline {
+        // The deadline travels with the task so that every engine call below, however deep, is cut
+        // to what is left of it (`bounded_dns_call`).
+        Some(deadline) => {
+            DNS_ATTEMPT_DEADLINE
+                .scope(deadline, reset_adapters_within(Some(deadline), file_timeout))
+                .await
+        }
+        None => reset_adapters_within(None, file_timeout).await,
+    }
+}
+
+async fn reset_adapters_within(
+    deadline: Option<std::time::Instant>,
+    file_timeout: std::time::Duration,
+) -> Result<Vec<String>> {
+    if !SUPPORTED {
+        return Ok(Vec::new());
+    }
+    let _operation = match deadline {
+        Some(deadline) => tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), DNS_OPERATION.lock())
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "{DNS_FALLBACK_TIMEOUT_PREFIX}: the adapter fallback attempt used up its time \
+                     budget waiting for the DNS lock; nothing was changed and the next attempt \
+                     starts afresh"
+                )
+            })?,
+        None => DNS_OPERATION.lock().await,
+    };
+    // Read again now that the lock is held: whoever waited for it may have been overtaken by an
+    // enable. Protection that is wanted again owns the redirect, and neither the reset nor the
+    // policy removal below may undo it. (A caller that must also keep WFP from being armed holds
+    // `WFP_OPERATION` around the whole call, and takes it before this lock.)
+    if PROTECTION_WANTED.load(Ordering::Acquire) {
+        bail!(
+            "{DNS_FALLBACK_SUPERSEDED_PREFIX}: DNS protection was wanted again before the adapter \
+             reset could start, so the redirect is the new session's and was left alone"
+        );
+    }
+    let reset = reset_adapters_still_on_tono_dns(file_timeout).await;
+    if let Err(error) = &reset {
+        if is_fallback_retryable(error) {
+            return reset;
+        }
+    }
+    let policy = restore_resolver_policy().await;
+    if let Err(error) = &policy {
+        tracing::error!("dns: the resolver policy could not be removed after a failed restore: {error:#}");
+    }
+    if let Ok(Some(note)) = &policy {
+        tracing::warn!("dns: {note}");
+    }
+    match (reset, policy) {
+        (Ok(adapters), Ok(_)) => Ok(adapters),
+        // A refused or out-of-time policy leg makes the attempt "busy" (or the timeout) whatever
+        // the adapter leg ended with: the caller retries on both, and an ordinary error from the
+        // other leg must not hide that.
+        (_, Err(error)) if is_fallback_retryable(&error) => Err(error),
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+    }
+}
+
+/// Marks the error of an attempt that found DNS protection wanted again once it held the DNS
+/// lock: nothing was changed, and it is not worth retrying.
+pub(crate) const DNS_FALLBACK_SUPERSEDED_PREFIX: &str = "TONO_DNS_FALLBACK_SUPERSEDED";
+
+/// `true` for the error of an attempt that [`DNS_FALLBACK_SUPERSEDED_PREFIX`] marks.
+pub(crate) fn is_fallback_superseded(error: &anyhow::Error) -> bool {
+    format!("{error:#}").contains(DNS_FALLBACK_SUPERSEDED_PREFIX)
+}
+
+/// `true` for an error the fallback's caller retries: the engine refused because an abandoned
+/// call holds its claim ([`is_engine_busy_refusal`]), or the attempt used up its deadline
+/// ([`is_fallback_timeout`]). Every place that preserves "busy" through a read or a merge
+/// preserves both, or the loop would take the other for an answer and stop.
+pub(crate) fn is_fallback_retryable(error: &anyhow::Error) -> bool {
+    is_engine_busy_refusal(error) || is_fallback_timeout(error)
+}
+
+/// How long one fallback attempt may take in all: every engine call inside it is bounded by what
+/// is left of this, not only by its own budget.
+pub(crate) const DNS_FALLBACK_ATTEMPT_BUDGET: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// How long one of the attempt's two file reads (the snapshot and its retirement record) may take.
+pub(crate) const DNS_FALLBACK_FILE_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Marks the error of an attempt that ran out of its [`DNS_FALLBACK_ATTEMPT_BUDGET`] before the
+/// next engine call could start. Nothing is half done; the next attempt starts afresh.
+pub(crate) const DNS_FALLBACK_TIMEOUT_PREFIX: &str = "TONO_DNS_FALLBACK_ATTEMPT_TIMEOUT";
+
+/// `true` for the error of an attempt that [`DNS_FALLBACK_TIMEOUT_PREFIX`] marks.
+pub(crate) fn is_fallback_timeout(error: &anyhow::Error) -> bool {
+    format!("{error:#}").contains(DNS_FALLBACK_TIMEOUT_PREFIX)
+}
+
+/// The adapters of `state` that still need a reset or cannot be proven off Tono, as
+/// `(guid, assessment)`. A snapshot adapter whose registry could not be read is unproven.
+fn unresolved_adapters(state: &DnsState, snapshot: Option<&DnsSnapshot>) -> Vec<(String, Assessment)> {
+    let mut unresolved: Vec<(String, Assessment)> = state
+        .adapters
+        .iter()
+        .filter_map(|(adapter, effective)| {
+            let recorded = snapshot.and_then(|snapshot| {
+                snapshot
+                    .adapters
+                    .iter()
+                    .find(|saved| same_adapter_guid(&saved.interface_guid, &adapter.interface_guid))
+            });
+            let assessment = assess_adapter(adapter, recorded, effective);
+            (assessment.reset.any() || assessment.unproven)
+                .then(|| (adapter.interface_guid.clone(), assessment))
+        })
+        .collect();
+    unresolved.extend(
+        state
+            .unreadable
+            .iter()
+            .map(|guid| (guid.clone(), Assessment { unproven: true, ..Assessment::default() })),
+    );
+    unresolved
+}
+
+/// One of the attempt's two file reads, bounded. These are plain reads: a read that never returns
+/// (a filter driver, a share) only keeps a blocking thread of the runtime's pool busy, it writes
+/// nothing, so giving up on it is safe where giving up on an engine writer is not. The error is
+/// an ordinary one on purpose: the attempt cannot say what the snapshot holds, so it ends
+/// without touching any adapter instead of being retried.
+async fn fallback_file_read<T>(
+    what: &str,
+    file_timeout: std::time::Duration,
+    read: impl std::future::Future<Output = T>,
+) -> Result<T> {
+    let limit = current_call_budget(file_timeout)?;
+    tokio::time::timeout(limit, read).await.map_err(|_| {
+        anyhow::anyhow!(
+            "reading the {what} did not return within {limit:?}; the adapter fallback ends without \
+             touching any adapter"
+        )
+    })
+}
+
+async fn reset_adapters_still_on_tono_dns(file_timeout: std::time::Duration) -> Result<Vec<String>> {
+    let read = fallback_file_read("DNS snapshot", file_timeout, async {
+        #[cfg(test)]
+        test_hooks::file_read_gate("snapshot").await;
+        tokio::fs::read(snapshot_path()).await
+    })
+    .await?;
+    let (snapshot, retired) = match read {
+        Ok(bytes) => {
+            let retired = fallback_file_read("DNS snapshot retirement record", file_timeout, async {
+                #[cfg(test)]
+                test_hooks::file_read_gate("retirement").await;
+                snapshot_was_restored(&bytes).await
+            })
+            .await?;
+            (parse_snapshot(&bytes).ok(), retired)
+        }
+        Err(_) => (None, false),
+    };
+    // A snapshot whose restore already committed (the file survives only because its delete
+    // failed) is no longer the user's current configuration: the user may have set a local
+    // resolver since. It still names which adapters to look at, so it scopes the reads, but it
+    // is not evidence of what is Tono's: ownership of a plain loopback is judged without it, and
+    // only Tono's own endpoint (198.18.0.2) then marks a family as Tono's.
+    let ownership = if retired { None } else { snapshot.as_ref() };
+    let before = read_dns_state(snapshot.as_ref()).await?;
+    let resets: Vec<(AdapterDnsSnapshot, FamilyReset)> = before
+        .adapters
+        .iter()
+        .filter_map(|(adapter, effective)| {
+            let recorded = ownership.and_then(|snapshot| {
+                snapshot
+                    .adapters
+                    .iter()
+                    .find(|saved| same_adapter_guid(&saved.interface_guid, &adapter.interface_guid))
+            });
+            let reset = assess_adapter(adapter, recorded, effective).reset;
+            reset.any().then(|| (adapter.clone(), reset))
+        })
+        .collect();
+    let applied: Vec<String> = resets.iter().map(|(adapter, _)| adapter.interface_guid.clone()).collect();
+    let after = if resets.is_empty() {
+        // Nothing to write, so what was just read is the state to verify.
+        before
+    } else {
+        let results = engine_reset_families(&resets).await?;
+        if let Some((guid, _)) = results.iter().find(|(_, ok)| !*ok) {
+            tracing::warn!("dns: the automatic (DHCP) DNS reset reported a failure for adapter {guid}");
+        }
+        if let Err(error) = engine_flush_cache().await {
+            tracing::warn!("DNS cache flush after the DHCP reset failed: {error:#}");
+        }
+        // The read-back, not the apply report, is the proof: the registry write and the live
+        // apply are independent, and a reset the DNS Client has not adopted leaves the machine on
+        // the dead resolver.
+        read_dns_state(snapshot.as_ref()).await?
+    };
+    let unresolved = unresolved_adapters(&after, ownership);
+    if unresolved.is_empty() {
+        return Ok(applied);
+    }
+    let named = unresolved
+        .iter()
+        .map(|(guid, assessment)| {
+            let reason = if assessment.reset.any() {
+                "still on Tono's DNS"
+            } else if after.unreadable.iter().any(|unreadable| same_adapter_guid(unreadable, guid)) {
+                "registry unreadable"
+            } else {
+                "effective DNS unknown"
+            };
+            format!("{guid} ({reason})")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    tracing::error!("dns: the automatic (DHCP) fallback could not be proven: {named}");
+    bail!("the automatic (DHCP) fallback could not be proven off Tono's DNS target: {named}")
+}

@@ -66,6 +66,100 @@ pub(super) fn dns_call_in_flight() -> Option<DnsCallInFlight> {
     *dns_call_slot()
 }
 
+/// The stub engine's stand-in for [`bounded_dns_call`]'s fail-fast refusal while an earlier call
+/// still holds the single-writer claim, so a test can model an abandoned engine call.
+#[cfg(test)]
+pub(super) fn refuse_while_claimed(operation: &'static str) -> Result<()> {
+    match *dns_call_slot() {
+        Some(wedged) => Err(wedged_dns_error(operation, wedged)),
+        None => Ok(()),
+    }
+}
+
+/// `true` while a DNS engine call holds the single-writer claim: in flight, or abandoned by a
+/// caller that gave up on it and still running on its blocking thread. Compiled on every target
+/// (it is `false` where there is no engine claim) because the kill-switch arm checks it.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn engine_claim_is_held() -> bool {
+    #[cfg(any(all(windows, not(feature = "test")), test))]
+    {
+        dns_call_slot().is_some()
+    }
+    #[cfg(not(any(all(windows, not(feature = "test")), test)))]
+    {
+        false
+    }
+}
+
+tokio::task_local! {
+    /// The cumulative deadline of the adapter-fallback attempt running on this task, if any.
+    /// Every engine call made under it is bounded by what is left of it, not only by its own
+    /// budget (see [`call_budget`]).
+    pub(super) static DNS_ATTEMPT_DEADLINE: std::time::Instant;
+}
+
+/// The budget an engine call may use: its own, or what is left of the attempt's deadline if that
+/// is less. An attempt whose deadline has passed starts no further call and returns an error that
+/// [`is_fallback_timeout`] recognises.
+pub(super) fn call_budget(
+    own: std::time::Duration,
+    deadline: Option<std::time::Instant>,
+) -> Result<std::time::Duration> {
+    let Some(deadline) = deadline else {
+        return Ok(own);
+    };
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    if remaining.is_zero() {
+        bail!(
+            "{DNS_FALLBACK_TIMEOUT_PREFIX}: the adapter fallback attempt used up its time budget \
+             ({DNS_FALLBACK_ATTEMPT_BUDGET:?}), so no further DNS engine call was started; nothing \
+             was left half done and the next attempt starts afresh"
+        );
+    }
+    Ok(own.min(remaining))
+}
+
+/// [`call_budget`] for the attempt running on this task.
+pub(super) fn current_call_budget(own: std::time::Duration) -> Result<std::time::Duration> {
+    call_budget(own, DNS_ATTEMPT_DEADLINE.try_with(|deadline| *deadline).ok())
+}
+
+/// The budget the stub engine gives one call, standing in for the real `DNS_*_TIMEOUT`s.
+#[cfg(test)]
+const STUB_CALL_BUDGET: std::time::Duration = std::time::Duration::from_secs(25);
+
+/// What `bounded_dns_call` does around a real engine call, for the stub engine: refuse while the
+/// claim is held, take the budget the attempt's deadline leaves, and model a call that is slow
+/// (`set_engine_call_delay`) or that never returns in time (`set_engine_call_times_out`) — the
+/// latter leaves an abandoned call holding the claim and reports the busy error, as the real
+/// timeout does.
+#[cfg(test)]
+async fn stub_engine_call(operation: &'static str) -> Result<()> {
+    // Record the entry before the deadline check, so a call that is refused because the attempt
+    // is out of time is still visible. The offline-registry test needs that to show the effective
+    // read did not follow.
+    test_hooks::record_facade_call(operation);
+    refuse_while_claimed(operation)?;
+    let budget = current_call_budget(STUB_CALL_BUDGET)?;
+    test_hooks::record_engine_call_budget(operation, budget);
+    let delay = test_hooks::engine_call_delay(operation);
+    let stuck = test_hooks::engine_call_times_out(operation) || delay.is_some_and(|delay| delay >= budget);
+    if stuck {
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay.min(budget)).await;
+        }
+        test_hooks::park_claim_now().await;
+        return Err(wedged_dns_error(
+            operation,
+            dns_call_in_flight().expect("the parked call holds the claim"),
+        ));
+    }
+    if let Some(delay) = delay {
+        tokio::time::sleep(delay).await;
+    }
+    Ok(())
+}
+
 /// Refusal for a caller that wants to start an engine call while an earlier one is still
 /// inside the loader/registry/Dnscache. Fail-closed: nothing is applied, nothing is restored,
 /// nothing is deleted, and the machine keeps whatever the last completed call left behind —
@@ -81,6 +175,14 @@ pub(super) fn wedged_dns_error(operation: &str, wedged: DnsCallInFlight) -> anyh
         wedged.operation,
         wedged.started_at.elapsed(),
     )
+}
+
+/// `true` when `error` is the engine's marker that a DNS engine call is, or was, stuck: either a
+/// call refused because an earlier one still holds the single-writer claim, or a call that ran and
+/// hit its own deadline (which leaves its claim standing too). Both mean "the engine is busy
+/// now". A plain text match, because the error crosses `anyhow` contexts.
+pub(crate) fn is_engine_busy_refusal(error: &anyhow::Error) -> bool {
+    format!("{error:#}").contains(DNS_ENGINE_WEDGED_PREFIX)
 }
 
 /// Dropped on the blocking thread the instant the engine call returns — on time, or hours
@@ -120,6 +222,19 @@ pub(super) fn dns_call_is_periodic(operation: &str) -> bool {
     operation == "collect" || operation == "verify protected DNS"
 }
 
+/// [`bounded_dns_call_exact`] with the budget cut to what is left of the adapter-fallback
+/// attempt's cumulative deadline, when the calling task runs one (see [`call_budget`]); an
+/// attempt that is out of time starts no call. Every other caller gets exactly `budget`.
+#[cfg(any(all(windows, not(feature = "test")), test))]
+pub(super) async fn bounded_dns_call<T: Send + 'static>(
+    budget: std::time::Duration,
+    operation: &'static str,
+    call: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    let budget = current_call_budget(budget)?;
+    bounded_dns_call_exact(budget, operation, call).await
+}
+
 /// Run one DNS engine operation on a blocking thread under a hard deadline, holding the
 /// single-writer claim described on [`DnsCallInFlight`].
 ///
@@ -145,7 +260,7 @@ pub(super) fn dns_call_is_periodic(operation: &str) -> bool {
 /// The machinery is compiled off Windows too, so those ownership rules stay unit-testable;
 /// only the closures handed to it are Windows-only.
 #[cfg(any(all(windows, not(feature = "test")), test))]
-pub(super) async fn bounded_dns_call<T: Send + 'static>(
+pub(super) async fn bounded_dns_call_exact<T: Send + 'static>(
     budget: std::time::Duration,
     operation: &'static str,
     call: impl FnOnce() -> Result<T> + Send + 'static,
@@ -236,7 +351,12 @@ pub(super) async fn engine_collect() -> Result<Vec<AdapterDnsSnapshot>> {
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
-        Ok(test_hooks::collected_adapters())
+        #[cfg(test)]
+        stub_engine_call("collect").await?;
+        let collected = test_hooks::collected_adapters();
+        #[cfg(test)]
+        test_hooks::engine_call_returned("collect").await;
+        Ok(collected)
     }
 }
 
@@ -263,6 +383,48 @@ pub(super) async fn engine_collect_interface_keys() -> Result<Vec<AdapterDnsSnap
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
         Ok(test_hooks::collected_adapters())
+    }
+}
+
+/// The registry DNS values of exactly these interfaces by GUID, active or not; `None` for one
+/// whose values could not be read. Used for snapshot adapters that are absent from the active
+/// enumeration (disabled, unplugged): absence there is never "restored".
+pub(super) async fn engine_read_registry_adapters(
+    guids: &[String],
+) -> Result<Vec<(String, Option<AdapterDnsSnapshot>)>> {
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        let guids = guids.to_vec();
+        bounded_dns_call(DNS_CALL_TIMEOUT, "read registry adapters", move || {
+            Ok(engine::read_registry_adapters(&guids))
+        })
+        .await
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        #[cfg(test)]
+        stub_engine_call("read registry adapters").await?;
+        let unreadable = test_hooks::offline_registry_unreadable();
+        let offline = test_hooks::offline_registry();
+        let active = test_hooks::collected_adapters();
+        Ok(guids
+            .iter()
+            .map(|guid| {
+                if guid_listed(&unreadable, guid) {
+                    return (guid.clone(), None);
+                }
+                let known = offline
+                    .iter()
+                    .chain(active.iter())
+                    .find(|adapter| adapter.interface_guid.eq_ignore_ascii_case(guid))
+                    .cloned()
+                    .unwrap_or_else(|| AdapterDnsSnapshot {
+                        interface_guid: guid.clone(),
+                        ..Default::default()
+                    });
+                (guid.clone(), Some(known))
+            })
+            .collect())
     }
 }
 
@@ -393,8 +555,16 @@ pub(super) async fn engine_apply_snapshot(snapshot: &DnsSnapshot) -> Result<Vec<
         // even though its live apply keeps failing.
         if ok && is_automatic_reset(snapshot) {
             #[cfg(test)]
-            test_hooks::note_automatic_reset();
-            test_hooks::set_live_dns_on_loopback(false);
+            test_hooks::note_automatic_reset(snapshot);
+            if !test_hooks::reset_does_not_land() {
+                test_hooks::set_live_dns_on_loopback(false);
+                let reset: Vec<String> = snapshot
+                    .adapters
+                    .iter()
+                    .map(|adapter| adapter.interface_guid.clone())
+                    .collect();
+                test_hooks::forget_effective_dns(&reset);
+            }
         }
         Ok(snapshot
             .adapters
@@ -459,11 +629,126 @@ pub(super) async fn engine_any_loopback(adapters: &[AdapterDnsSnapshot]) -> Resu
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
-        let _ = adapters;
         // Without this hook the stub would always answer "not on loopback", which makes the
         // unproven-restore branch — the fail-closed half of the corrupt-snapshot contract —
         // unreachable in every test build. A test that cannot fail is worse than none.
-        Ok(test_hooks::live_dns_is_on_loopback())
+        let effective_on_tono = test_hooks::effective_dns().iter().any(|(guid, servers)| {
+            adapters
+                .iter()
+                .any(|adapter| adapter.interface_guid.eq_ignore_ascii_case(guid))
+                && {
+                    let found = classify_effective_servers(servers);
+                    found.endpoint || found.tono_owned_family
+                }
+        });
+        Ok(test_hooks::live_dns_is_on_loopback() || effective_on_tono)
+    }
+}
+
+/// The effective resolver list (what the DNS Client resolves through, not the registry) of every
+/// active adapter among `adapters`; `None` for an active adapter whose list could not be read.
+/// The registry alone cannot tell an adapter whose restore landed from one whose registry was
+/// written back while its live apply failed. A whole-read failure is the `Err`.
+pub(super) async fn engine_effective_dns(
+    adapters: &[AdapterDnsSnapshot],
+) -> Result<Vec<(String, Option<Vec<std::net::IpAddr>>)>> {
+    let guids = adapters
+        .iter()
+        .map(|adapter| adapter.interface_guid.clone())
+        .collect::<Vec<_>>();
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        return bounded_dns_call(DNS_CALL_TIMEOUT, "read effective DNS", move || {
+            engine::effective_dns_servers(&guids)
+        })
+        .await;
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        #[cfg(test)]
+        stub_engine_call("read effective DNS").await?;
+        if test_hooks::effective_dns_fails() {
+            bail!("the effective DNS of the adapters could not be read");
+        }
+        let unreadable = test_hooks::effective_dns_unreadable();
+        let mut read: Vec<(String, Option<Vec<std::net::IpAddr>>)> = test_hooks::effective_dns()
+            .into_iter()
+            .filter(|(guid, _)| guid_listed(&guids, guid))
+            .map(|(guid, servers)| (guid, Some(servers)))
+            .collect();
+        read.extend(
+            unreadable
+                .into_iter()
+                .filter(|guid| guid_listed(&guids, guid))
+                .map(|guid| (guid, None)),
+        );
+        #[cfg(test)]
+        test_hooks::engine_call_returned("read effective DNS").await;
+        Ok(read)
+    }
+}
+
+#[cfg(not(all(windows, not(feature = "test"))))]
+fn guid_listed(guids: &[String], guid: &str) -> bool {
+    guids.iter().any(|listed| listed.eq_ignore_ascii_case(guid))
+}
+
+/// Put the listed families of the listed adapters back on automatic (DHCP), leaving every other
+/// value as the caller passed it. Each entry is the adapter as the registry reads now plus which
+/// families to reset. This is the ordinary restore path applied to a deliberately empty
+/// original, per family: a `None` value is what the engine turns into a registry delete and a
+/// DHCP live apply, and a kept value is written back unchanged.
+pub(super) async fn engine_reset_families(
+    resets: &[(AdapterDnsSnapshot, FamilyReset)],
+) -> Result<Vec<(String, bool)>> {
+    let snapshot = DnsSnapshot {
+        version: SNAPSHOT_VERSION,
+        taken_at: now_unix(),
+        adapters: resets
+            .iter()
+            .map(|(adapter, reset)| AdapterDnsSnapshot {
+                interface_guid: adapter.interface_guid.clone(),
+                ipv4_name_server: (!reset.v4).then(|| adapter.ipv4_name_server.clone()).flatten(),
+                ipv4_profile_name_server: (!reset.v4)
+                    .then(|| adapter.ipv4_profile_name_server.clone())
+                    .flatten(),
+                ipv6_name_server: (!reset.v6).then(|| adapter.ipv6_name_server.clone()).flatten(),
+                ipv6_profile_name_server: (!reset.v6)
+                    .then(|| adapter.ipv6_profile_name_server.clone())
+                    .flatten(),
+                ..Default::default()
+            })
+            .collect(),
+    };
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        return engine_apply_snapshot(&snapshot).await;
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        // The stub models "the reset lands completely or not at all", per family: the registry
+        // values and the effective list of the reset families stop reading as Tono's.
+        #[cfg(test)]
+        stub_engine_call("reset families").await?;
+        let _self_write = SelfWriteWindow::open();
+        let ok = !test_hooks::live_apply_fails();
+        if ok {
+            #[cfg(test)]
+            test_hooks::note_automatic_reset(&snapshot);
+            if !test_hooks::reset_does_not_land() {
+                test_hooks::set_live_dns_on_loopback(false);
+                let landed: Vec<(String, bool, bool)> = resets
+                    .iter()
+                    .map(|(adapter, reset)| (adapter.interface_guid.clone(), reset.v4, reset.v6))
+                    .collect();
+                test_hooks::land_reset(&landed);
+            }
+        }
+        Ok(snapshot
+            .adapters
+            .iter()
+            .map(|adapter| (adapter.interface_guid.clone(), ok))
+            .collect())
     }
 }
 
@@ -474,6 +759,8 @@ pub(super) async fn engine_flush_cache() -> Result<()> {
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
+        #[cfg(test)]
+        stub_engine_call("flush").await?;
         Ok(())
     }
 }
@@ -508,6 +795,8 @@ pub(super) async fn engine_restore_encrypted_dns() -> Result<bool> {
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
+        #[cfg(test)]
+        stub_engine_call("restore encrypted DNS").await?;
         #[cfg(test)]
         test_hooks::note_encrypted_restore();
         if test_hooks::encrypted_restore_fails() {
