@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tono sun-on-the-horizon mark. Geometry: raydocs/tono@59082acf (PR #1584, 2cf98bbc9)
+     apps/windows/app/src/dev/sea-shell/brand/icons/tono-256.svg, scaled into the adaptive-icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateX="18" android:translateY="18" android:scaleX="0.28125" android:scaleY="0.28125">
+        <path android:fillColor="#FF000000" android:pathData="M64,131 A64,64 0 0 1 192,131 Z M32.0,141 H223.0 A2.0,2.0 0 0 1 223.0,145 H32.0 A2.0,2.0 0 0 1 32.0,141 Z M75.0,153 H181.0 A2.0,2.0 0 0 1 181.0,157 H75.0 A2.0,2.0 0 0 1 75.0,153 Z M104.0,165 H151.0 A2.0,2.0 0 0 1 151.0,169 H104.0 A2.0,2.0 0 0 1 104.0,165 Z"/>
+    </group>
+</vector>

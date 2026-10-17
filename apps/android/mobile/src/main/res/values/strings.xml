@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Tono</string>
+    <string name="notification_channel">Tunnel status</string>
+    <string name="action_disconnect">Disconnect</string>
+
+    <string name="state_signed_out">Sign in</string>
+    <string name="state_idle">Not connected</string>
+    <string name="state_permission">Needs permission</string>
+    <string name="state_preparing">Connecting</string>
+    <string name="state_connecting">Connecting</string>
+    <string name="state_connected">Connected</string>
+    <string name="state_degraded">Partly working</string>
+    <string name="state_disconnecting">Disconnecting</string>
+    <string name="state_failed">Didn\'t connect</string>
+
+    <string name="sentence_idle">Pick a line and switch on.</string>
+    <string name="sentence_preparing">Checking account and lines…</string>
+    <string name="sentence_connecting">Building the encrypted route…</string>
+    <string name="sentence_connected_three_tier">AI goes home · video via cloud · the rest stays local</string>
+    <string name="sentence_connected_stable">AI goes home · everything else via cloud</string>
+    <string name="sentence_connected_no_home">AI and video via cloud · the rest stays local</string>
+    <string name="sentence_connected_stable_no_home">Everything public via cloud · LAN stays local</string>
+
+    <string name="line_pick">Choose a line</string>
+    <string name="line_untested">not tested</string>
+    <string name="latency_ms">%1$d ms</string>
+    <string name="lines_title">Lines</string>
+    <string name="lines_test">Test latency</string>
+    <string name="lines_in_use">In use</string>
+    <string name="lines_cached">Offline copy of your lines (could not reach Tono)</string>
+
+    <string name="lane_ai">AI &amp; named services</string>
+    <string name="lane_video">Video</string>
+    <string name="lane_other">Other apps</string>
+    <string name="lane_home">Home broadband</string>
+    <string name="lane_home_node">Home · %1$s</string>
+    <string name="lane_cloud">Cloud</string>
+    <string name="lane_cloud_no_home">Cloud (no Home)</string>
+    <string name="lane_local">Local direct</string>
+    <string name="lane_checking">checking</string>
+    <string name="lane_down">unreachable</string>
+
+    <string name="speed_line">↓ %1$s · ↑ %2$s</string>
+
+    <string name="reason_HOME_UNAVAILABLE">Your assigned Home exit is unavailable right now. Tono won\'t quietly send AI elsewhere; try again later.</string>
+    <string name="reason_NETWORK">Can\'t reach Tono. Check the network and retry.</string>
+    <string name="reason_RATE_LIMITED">Too many attempts. Wait a moment.</string>
+    <string name="reason_CORE_START">The tunnel core didn\'t start. Retry; if it keeps failing, restart the phone.</string>
+    <string name="reason_CLOUD_UNREACHABLE">The cloud exit isn\'t answering. Matched traffic is held, not sent direct. Try another line.</string>
+    <string name="reason_HOME_UNREACHABLE">Home isn\'t answering. AI traffic is held, not sent direct. Other apps still work.</string>
+    <string name="reason_REVOKED">Another VPN took over or the permission was removed.</string>
+    <string name="reason_DENIED">VPN permission was declined.</string>
+    <string name="reason_SESSION_ENDED">Your sign-in ended. Please sign in again.</string>
+    <string name="reason_CATALOG_ROLLBACK">The line list looked older than before and was refused.</string>
+    <string name="reason_CORE_STOPPED">The tunnel stopped.</string>
+    <string name="reason_generic">Something went wrong (%1$s). Retry.</string>
+
+    <string name="action_retry">Retry</string>
+    <string name="action_recheck">Check again</string>
+
+    <string name="signin_title">Sign in to Tono</string>
+    <string name="signin_intro">Sign in with a one-time email code. No password.</string>
+    <string name="signin_email">Email</string>
+    <string name="signin_send">Send a sign-in code</string>
+    <string name="signin_sending">Sending…</string>
+    <string name="signin_code_sent">If this email is enabled for Tono, a code is on its way to %1$s. Check spam too.</string>
+    <string name="signin_code">6-digit code</string>
+    <string name="signin_verify">Sign in</string>
+    <string name="signin_verifying">Verifying…</string>
+    <string name="signin_change">Use another email</string>
+    <string name="signin_privacy">Email is only for sign-in. Codes are valid for 10 minutes.</string>
+    <string name="signin_error_INVALID_EMAIL">Enter a valid email.</string>
+    <string name="signin_error_INVALID_CODE">Enter the 6-digit code.</string>
+    <string name="signin_error_INVALID_OR_EXPIRED_CODE">Wrong or expired code. Get a new one.</string>
+    <string name="signin_error_NETWORK">Can\'t reach Tono\'s sign-in servers.</string>
+    <string name="signin_error_RATE_LIMITED">Too many attempts. Try again later.</string>
+    <string name="signin_error_DEVICE_LIMIT">This account is on its device limit. Remove a device on another signed-in device.</string>
+    <string name="signin_error_generic">Sign-in didn\'t finish (%1$s).</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_back">Back</string>
+    <string name="settings_routing">Routing mode</string>
+    <string name="mode_three_tier">Three-tier (default)</string>
+    <string name="mode_three_tier_short">Three-tier</string>
+    <string name="mode_three_tier_desc">AI and the approved Home list → cloud → your Home broadband. Video → cloud. Chinese apps, browsing, LAN and everything else use your own network directly.</string>
+    <string name="mode_stable">Stable — everything via cloud</string>
+    <string name="mode_stable_short">Stable</string>
+    <string name="mode_stable_desc">AI → Home as above; every other public destination leaves through the cloud. LAN stays local.</string>
+    <string name="mode_applies">Changes apply immediately to the running tunnel.</string>
+    <string name="routing_scope_title">What Tono can and cannot recognise</string>
+    <string name="routing_scope">Order: 21 cloud video exceptions → 166 AI / named Home entries (plus the Anthropic address range and the Claude, ChatGPT and Grok apps) → explicit cloud list → everything else direct. Matched traffic that fails is blocked, never retried directly; matched UDP/QUIC is refused so apps fall back to TCP. Apps using ECH, their own DNS-over-HTTPS, or cached addresses can hide an AI service; that traffic then goes direct. Unrecognised AI is not guaranteed to use Home.</string>
+    <string name="routing_platform">On Android all apps, all TCP/UDP ports, IPv4 and IPv6 enter the tunnel. LAN, link-local and multicast stay outside. DNS for direct names uses your network\'s resolver; matched names never reach it. Hotspot clients and apps you exclude below bypass Tono entirely.</string>
+    <string name="settings_apps">Apps that bypass Tono</string>
+    <string name="settings_apps_none">None — every app uses Tono\'s rules</string>
+    <plurals name="settings_apps_count">
+        <item quantity="one">%1$d app bypasses Tono (including any AI in it)</item>
+        <item quantity="other">%1$d apps bypass Tono (including any AI in them)</item>
+    </plurals>
+    <string name="apps_search">Search apps</string>
+    <string name="apps_done">Done</string>
+    <string name="settings_check">Where does a site go?</string>
+    <string name="check_hint">e.g. claude.ai</string>
+    <string name="check_go">Check</string>
+    <string name="check_result">TCP → %1$s · UDP → %2$s</string>
+    <string name="verdict_HOME">Home</string>
+    <string name="verdict_CLOUD">Cloud</string>
+    <string name="verdict_DIRECT">Direct</string>
+    <string name="verdict_BLOCKED">Blocked</string>
+    <string name="verdict_DNS">DNS</string>
+    <string name="settings_system">Android VPN protection</string>
+    <string name="system_on">Always-on VPN is on%1$s.</string>
+    <string name="system_lockdown">, with \"block connections without VPN\"</string>
+    <string name="system_off">Not always-on: if Tono stops, apps go out directly. Turn on Always-on VPN in Android settings.</string>
+    <string name="system_open">Open VPN settings</string>
+    <string name="settings_account">Account</string>
+    <string name="settings_sign_out">Sign out</string>
+    <string name="settings_about">About</string>
+    <string name="about_version">Tono %1$s · test build</string>
+    <string name="about_core">Core: sing-box %1$s (GPL-3.0-or-later; source: github.com/SagerNet/sing-box)</string>
+    <string name="about_contract">Routing contract: raydocs/tono@%1$s</string>
+    <string name="about_test">Test build for evaluation. Not a store release.</string>
+    <string name="about_licenses">Licences and source</string>
+    <string name="ipv6_on">IPv6 on this network: yes</string>
+    <string name="ipv6_off">IPv6 on this network: no (direct names answer IPv4 only)</string>
+
+    <string name="action_connect">Connect</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_allow_vpn">Allow VPN</string>
+    <string name="action_disconnecting">Disconnecting…</string>
+    <string name="a11y_cancel_connect">Cancel connecting</string>
+    <string name="a11y_connected_for">Connected for %1$s</string>
+    <string name="details">Details</string>
+    <string name="details_routes">Where traffic goes</string>
+    <string name="details_mode">Routing mode</string>
+    <string name="details_why">What happened</string>
+    <string name="details_speed">Speed</string>
+    <string name="details_scope_more">What Tono can and cannot recognise</string>
+    <string name="status_exit_both">Cloud %1$s · Home %2$s</string>
+    <string name="status_exit_cloud">Cloud %1$s</string>
+    <string name="status_protected">Protected</string>
+    <string name="short_HOME_UNAVAILABLE">Home exit unavailable</string>
+    <string name="short_NETWORK">Can\'t reach Tono</string>
+    <string name="short_RATE_LIMITED">Too many attempts</string>
+    <string name="short_CORE_START">Core didn\'t start</string>
+    <string name="short_CLOUD_UNREACHABLE">Cloud not answering · matched traffic held</string>
+    <string name="short_HOME_UNREACHABLE">Home not answering · AI held</string>
+    <string name="short_REVOKED">Another VPN took over</string>
+    <string name="short_DENIED">VPN permission needed</string>
+    <string name="short_SESSION_ENDED">Sign in again</string>
+    <string name="short_CATALOG_ROLLBACK">Line list refused</string>
+    <string name="short_CORE_STOPPED">Tunnel stopped</string>
+    <string name="short_generic">Didn\'t finish (%1$s)</string>
+    <string name="sentence_permission_short">Allow VPN once to start</string>
+    <string name="settings_mode_hint">Tap a mode to switch; it applies right away.</string>
+</resources>

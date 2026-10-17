@@ -1,0 +1,17 @@
+Tono mobile test build — corresponding source for the bundled sing-box library (libbox)
+
+Component:   sing-box libbox 1.15.0-alpha.12
+License:     GPL-3.0-or-later, with the upstream additional term that no derivative work may use
+             the name or imply association with sing-box without prior consent (see
+             sing-box-LICENSE.txt). Tono does not use the sing-box name for its product; it is
+             credited here as the bundled core.
+Upstream:    https://github.com/SagerNet/sing-box/tree/v1.15.0-alpha.12
+             commit 25b0d5ea3e466d246c708ac0f20d0448110e566c (unmodified)
+Build:       supply-chain/sing-box/build-libbox.sh in the Tono-droid repository reproduces
+             libbox.aar from that commit with Go 1.26.8, sagernet/gomobile v0.1.13 and NDK r28;
+             exact pins in supply-chain/sing-box/sing-box.pin, expected AAR SHA-256 in
+             supply-chain/sing-box/libbox.aar.sha256 (also sing-box-provenance.json here).
+
+On request during the test programme, the complete corresponding source of this build (Tono
+application source at the build commit plus the unmodified upstream source above) is provided
+under the terms of the GPL. This file is an engineering record, not legal advice.
