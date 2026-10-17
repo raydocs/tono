@@ -132,14 +132,29 @@ Dir.mktmpdir('tono-candidate-manifest-') do |directory|
     </dict></plist>
   PLIST
   File.write(File.join(contents, 'Info.plist'), plist)
-  manifest_env = environment.merge('RUNNER_TEMP' => directory, 'ARTIFACT_NAME' => name)
+  stamp_path = File.join(contents, 'Resources/tono-build-source.json')
+  stamp = { 'commit' => source, 'dirty' => false, 'configuration' => 'Release', 'releaseSequence' => 7702 }
+  File.write(stamp_path, JSON.generate(stamp))
+  manifest_env = environment.merge('RUNNER_TEMP' => directory, 'ARTIFACT_NAME' => name,
+                                   'TONO_UPDATE_RELEASE_SEQUENCE' => '7702')
   output, status = Open3.capture2e(manifest_env, '/bin/bash', '-c', manifest_step.fetch('run'))
   abort "0.0.77 artifact must pass the candidate manifest boundary:\n#{output}" unless status.success?
   report = JSON.parse(File.read(File.join(release, 'candidate-manifest.json')))
   abort 'manifest must describe actual 0.0.77/build78 bytes and source' unless report.values_at('version', 'build', 'source') == ['0.0.77', 78, source]
+  abort 'manifest must bind the sealed installed floor' unless report['releaseSequence'] == 7702
   abort 'candidate must not claim release or Sparkle authority' unless report.values_at('candidateOnly', 'releaseAccepted', 'sparkleSigned') == [true, false, false]
   expected_files = files.map { |relative| { 'name' => relative, 'sha256' => Digest::SHA256.file(File.join(release, relative)).hexdigest } }
   abort 'candidate manifest must fingerprint every shipped component' unless report['files'] == expected_files
+  File.write(stamp_path, JSON.generate(stamp.merge('dirty' => true)))
+  _, status = Open3.capture2e(manifest_env, '/bin/bash', '-c', manifest_step.fetch('run'))
+  abort 'candidate manifest accepted a dirty sealed source stamp' if status.success?
+  File.write(stamp_path, JSON.generate(stamp.merge('commit' => '0' * 40)))
+  _, status = Open3.capture2e(manifest_env, '/bin/bash', '-c', manifest_step.fetch('run'))
+  abort 'candidate manifest accepted another sealed source' if status.success?
+  File.write(stamp_path, JSON.generate(stamp.merge('releaseSequence' => 7701)))
+  _, status = Open3.capture2e(manifest_env, '/bin/bash', '-c', manifest_step.fetch('run'))
+  abort 'candidate manifest accepted another sealed installed floor' if status.success?
+  File.write(stamp_path, JSON.generate(stamp))
   # Signing is NOT exercised here. Old bundle identity must fail before a new receipt is written.
   File.write(File.join(contents, 'Info.plist'), plist.sub('0.0.77', '0.0.76').sub('>78<', '>77<'))
   _, status = Open3.capture2e(manifest_env, '/bin/bash', '-c', manifest_step.fetch('run'))
