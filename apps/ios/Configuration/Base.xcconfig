@@ -1,0 +1,20 @@
+// Tono iOS build settings shared by the app and the packet tunnel.
+// Signing identity and identifiers live in Local.xcconfig (gitignored); copy
+// Local.example.xcconfig and set your Apple Developer team before building for a device.
+
+TONO_BUNDLE_ID = com.raydocs.tono.ios
+TONO_APP_GROUP = group.com.raydocs.tono.ios
+DEVELOPMENT_TEAM =
+CODE_SIGN_STYLE = Automatic
+
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+IPHONEOS_DEPLOYMENT_TARGET = 16.0
+SWIFT_VERSION = 5.0
+TARGETED_DEVICE_FAMILY = 1
+
+// libbox (gomobile) is a static framework with Go runtime code; it carries no bitcode and needs libresolv.
+ENABLE_BITCODE = NO
+OTHER_LDFLAGS = $(inherited) -lresolv
+
+#include? "Local.xcconfig"

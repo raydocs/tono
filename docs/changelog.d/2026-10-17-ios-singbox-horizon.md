@@ -1,0 +1,14 @@
+## 2026-10-17 · iOS 客户端：sing-box 隧道 + Horizon 界面（测试阶段，未合入）
+- 归属：不在 SHIP_PLAN 0.0.75（§1 明确不进这一发）；ops 计划 §P2「Android / iOS 客户端」。平台：iOS（`apps/ios/`，新目录）。
+- 来源：基线 origin/main `59082acfb` → 分支 `feat/ios-singbox-horizon`（Draft PR，见 PR 正文）；未合 main。旧分支 `feat/ios-native-companion`（#204 已关闭、Issue #210）未改动、未复用其 alpha.3 补丁运行时。
+- 缺陷修复：无（新客户端）。
+- 新增/优化：
+  - TonoKit（无 Apple 依赖的 Swift 包）：目录准入（受限 YAML、仅 Reality、公网 IPv4、剥离 hy2）、与 Android 相同的 sing-box 1.15 路由图（21 视频例外 → 166 Home + Anthropic 网段 → 明确云列表 → 其余直连；命中失败拒绝不回落直连）、路由解释器、控制面客户端（系统 DNS → 三个 API 中继）、邮箱登录 / 令牌轮换 / 目录回滚拒绝与 7 天离线缓存、连接阶段推导。
+  - PacketTunnel：`NEPacketTunnelProvider` + 官方 libbox（v1.15.0-alpha.12 `25b0d5ea`，与 Android 同一版本），TUN/DNS/IPv4/IPv6/UDP/LAN 排除、IPv6 变化重建、睡眠/唤醒、屏幕状态；扩展不持有令牌，自行重新准入目录。
+  - App：SwiftUI Horizon 界面（海面天色随状态、太阳开关、线路、三条通道、速率），登录、线路、设置（模式、边界说明、路由检查、iOS 系统保护、账号、关于）；中英文案沿用 Android 键；品牌采用已批准的「海平线上的太阳」（决定 095，同一生成器绘制），不再用旧紫色 TO。
+  - 供应链：`supply-chain/build-libbox-apple.sh` 从固定源码构建 Libbox.xcframework（Go 归档、源码提交、iOS Go 补丁均校验）。
+  - 决定 129（provisional）：令牌只在 App 钥匙串；includeAllNetworks 默认开；按需连接随连接/断开开关；App Store 发布等所有者/法务对 GPL 的结论。
+- 工程与测试：新增 `.github/workflows/ios-ci.yml`（只在 `feat/ios-**` 推送与手动触发时运行，GitHub 托管 runner，不接入 ci-gate）。
+- 验证：见 PR 验证评论（Linux：TonoKit `swift test`、路由名单同步检查、sing-box CLI check + 真实内核路由 harness；托管 macOS：libbox 构建、未签名真机/模拟器 xcodebuild、模拟器设计预览截图）。
+- 候选/发布：无安装包；无 IPA、无 TestFlight、无签名。
+- 剩余限制：未在真机运行隧道（需要 Apple 开发者团队、Network Extension 与 App Group 能力、真机）；未验证真实目录下的连接、DNS/IPv6/UDP、按需连接恢复与 50 MB 内存上限；App Store 发布受 GPL 许可问题约束，待所有者决定。
