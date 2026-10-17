@@ -8,7 +8,7 @@ import TonoKit
 struct SeaScene: View {
     let sky: SkyState
     var horizon: CGFloat = 0.44
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.tonoReduceMotion) private var reduceMotion
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { timeline in

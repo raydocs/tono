@@ -134,4 +134,5 @@
 "details_routes" = "Where traffic goes";
 "details_why" = "What happened";
 "details_mode" = "Routing mode";
+"settings_close" = "Close settings";
 "a11y_connected_for" = "Connected for %1$@";

@@ -155,7 +155,7 @@ struct Banner: View {
     var body: some View {
         HStack(spacing: 10) {
             StatusDot(color: tone)
-            Text(text).tonoFont(14, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary).frame(maxWidth: .infinity, alignment: .leading)
+            Text(text).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary).frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.updatesFrequently)
             if let action { QuietButton(title: action, color: tone, action: onAction) }

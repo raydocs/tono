@@ -23,10 +23,12 @@ xcrun simctl list devices | grep "$UDID" > "$OUT/device.txt"
   echo "container: $(xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" app)"
   /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' -c 'Print :CFBundleVersion' "$APP/Info.plist"
 } > "$OUT/install.txt"
-shot() { # <name> <lang> <phase> [sheet]
+shot() { # <name> <lang> <phase> [sheet] [extra launch args...]
   local name="$1" lang="$2" phase="$3" sheet="${4:-}"
+  shift 4 2>/dev/null || shift $#
   local args=(-TonoPreview "$phase" -AppleLanguages "($lang)" -AppleLocale "$([[ $lang == zh-Hans ]] && echo zh_CN || echo en_US)")
   [[ -n "$sheet" ]] && args+=(-TonoPreviewSheet "$sheet")
+  args+=("$@")
   xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
   echo "$name: $(xcrun simctl launch "$UDID" "$BUNDLE_ID" "${args[@]}")" >> "$OUT/launches.txt"   # "<bundle>: <pid>"
   sleep 4
@@ -41,22 +43,14 @@ sleep 20
 xcrun simctl ui "$UDID" content_size accessibility-large
 shot "a11y-large-text-connected" zh-Hans CONNECTED
 shot "a11y-large-text-signin" zh-Hans SIGNED_OUT
+shot "a11y-large-text-details" zh-Hans DEGRADED details
 xcrun simctl ui "$UDID" content_size large
 xcrun simctl ui "$UDID" increase_contrast enabled || true
 shot "a11y-increase-contrast-connected" zh-Hans CONNECTED
 xcrun simctl ui "$UDID" increase_contrast disabled || true
-
-# Motion: one recorded walk through the service states (idle → connecting → connected → degraded →
-# connected → disconnecting → idle → connecting → failed), Chinese copy.
-xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
-xcrun simctl launch "$UDID" "$BUNDLE_ID" -TonoPreviewCycle -AppleLanguages "(zh-Hans)" -AppleLocale zh_CN >/dev/null
-sleep 1
-xcrun simctl io "$UDID" recordVideo --codec=h264 --force "$OUT/state-cycle.mp4" &
-REC=$!
-sleep 32  # one full 23 s loop plus recorder start-up lag
-kill -INT "$REC"
-wait "$REC" || true
-echo "recorded state-cycle.mp4"
+# Reduce Transparency (simctl cannot toggle it; the DEBUG flag feeds the same code path as the setting).
+shot "a11y-reduce-transparency-connected" zh-Hans CONNECTED "" -TonoReduceTransparency
+shot "a11y-reduce-transparency-details" zh-Hans DEGRADED details -TonoReduceTransparency
 
 for lang in zh-Hans en; do
   shot "$lang-01-signin" "$lang" SIGNED_OUT
@@ -71,12 +65,46 @@ for lang in zh-Hans en; do
   shot "$lang-08-settings" "$lang" CONNECTED settings
   shot "$lang-09-details" "$lang" DEGRADED details
 done
+
+record() { # <file> <seconds> <launch args...>
+  local file="$1" seconds="$2"; shift 2
+  xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
+  echo "$file: $(xcrun simctl launch "$UDID" "$BUNDLE_ID" "$@")" >> "$OUT/launches.txt"
+  sleep 1
+  xcrun simctl io "$UDID" recordVideo --codec=h264 --force "$OUT/$file" &
+  local rec=$!
+  sleep "$seconds"
+  kill -INT "$rec"
+  wait "$rec" || true
+  echo "recorded $file"
+}
+# Motion: the service states the way a session moves through them (idle → preparing → connecting →
+# connected → degraded → connected → disconnecting → idle → connecting → failed, 23 s loop), then
+# the same loop under Reduce Motion (cross-fades only, still sea, no fill sweep or shake).
+record state-cycle.mp4 32 -TonoPreviewCycle -AppleLanguages "(zh-Hans)" -AppleLocale zh_CN
+record state-cycle-reduce-motion.mp4 28 -TonoPreviewCycle -TonoReduceMotion -AppleLanguages "(zh-Hans)" -AppleLocale zh_CN
+
+# Cost of the live sea on the runner's simulator (host CPU %, RSS KB of the app process; a Mac
+# simulator, not an iPhone: only the relative difference means anything).
+sample() { # <label> <launch args...>
+  local label="$1"; shift
+  xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
+  local pid; pid="$(xcrun simctl launch "$UDID" "$BUNDLE_ID" "$@" | awk '{print $NF}')"
+  sleep 6
+  for _ in 1 2 3 4 5; do echo "$label pid=$pid $(ps -o %cpu=,rss= -p "$pid")"; sleep 1; done >> "$OUT/perf.txt"
+}
+sample connected-live -TonoPreview CONNECTED
+sample connected-reduce-motion -TonoPreview CONNECTED -TonoReduceMotion
+sample idle-live -TonoPreview IDLE
+xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
 cat > "$OUT/README.txt" <<EOF
 Tono iOS design preview, captured by apps/ios/tools/preview-screenshots.sh on a GitHub-hosted runner.
 Commit: ${GITHUB_SHA:-local}  Run: ${GITHUB_RUN_ID:-local}
 The Debug simulator build of Tono.app was installed (install.txt) and launched once per capture
 (launches.txt: bundle id and process id) on the simulator in device.txt.
 Every screen runs with -TonoPreview: fixture lines and probe results, NO account, NO tunnel, no
-network. The yellow badge on each capture says so. These images show layout, copy and motion only;
+network. The yellow badge on each capture says so. -TonoReduceMotion / -TonoReduceTransparency
+feed the same code path as the iOS settings (simctl cannot toggle them). perf.txt is host CPU/RSS
+of the simulator process on a Mac runner, not iPhone performance. These images show layout, copy and motion only;
 they are not evidence of sign-in, connectivity or routing.
 EOF

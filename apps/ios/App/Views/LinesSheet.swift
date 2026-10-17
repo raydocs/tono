@@ -52,7 +52,7 @@ struct LinesSheet: View {
                 }
                 Spacer(minLength: 0)
                 Text(line.latencyMS.map { L.t("latency_ms", $0) } ?? L.t("line_untested"))
-                    .tonoFont(14, .medium, relativeTo: .subheadline).monospacedDigit().foregroundStyle(TonoColor.textSecondary)
+                    .tonoFont(15, .medium, relativeTo: .subheadline).monospacedDigit().foregroundStyle(TonoColor.textSecondary)
                 if selected {
                     Text(L.t("lines_in_use")).tonoFont(12, .medium, relativeTo: .caption).foregroundStyle(TonoColor.accent)
                 }
@@ -69,7 +69,7 @@ struct LinesSheet: View {
 
 /// iOS 26 gives sheets Liquid Glass; earlier systems get the smoked surface.
 struct SheetSurface: ViewModifier {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.tonoReduceTransparency) private var reduceTransparency
 
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *), !reduceTransparency {

@@ -64,13 +64,32 @@ targets:
       - sdk: libresolv.tbd
       # libbox's Go code calls UIDevice; the extension imports no UIKit itself, so link it explicitly.
       - sdk: UIKit.framework
+  # Simulator-only UI tests of the DEBUG design preview (fixture data, no tunnel): interaction
+  # wiring, VoiceOver labels, Apple's accessibility audit. Not shipped.
+  TonoUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(TONO_BUNDLE_ID).uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Tono
+    dependencies:
+      - target: Tono
 schemes:
   Tono:
     build:
       targets:
         Tono: all
         PacketTunnel: all
+        TonoUITests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - TonoUITests
     archive:
       config: Release

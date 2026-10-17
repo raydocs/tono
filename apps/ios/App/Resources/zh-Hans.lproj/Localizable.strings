@@ -134,4 +134,5 @@
 "details_routes" = "流量去向";
 "details_why" = "发生了什么";
 "details_mode" = "路由模式";
+"settings_close" = "关闭设置";
 "a11y_connected_for" = "已连接 %1$@";

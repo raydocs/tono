@@ -99,6 +99,27 @@ jobs:
           apps/ios/tools/preview-screenshots.sh \
             "$RUNNER_TEMP/dd-sim/Build/Products/Debug-iphonesimulator/Tono.app" "$RUNNER_TEMP/ios-preview"
           cp apps/ios/Frameworks/Libbox.provenance.json "$RUNNER_TEMP/ios-preview/"
+      # XCUITest on the same simulator, still the DEBUG fixture preview (no account, no tunnel):
+      # taps connect / cancel / fail→retry / permission / disconnect, sheets and settings, checks the
+      # VoiceOver labels and runs Apple's accessibility audit on every screen. Recorded on video.
+      - name: UI tests + accessibility audit (simulator, fixture preview)
+        working-directory: apps/ios
+        run: |
+          UDID="$(xcrun simctl list devices booted -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for v in d.values() for x in v))')"
+          OUT="$RUNNER_TEMP/ios-preview"
+          set -o pipefail
+          xcodebuild build-for-testing -project Tono.xcodeproj -scheme Tono -destination "id=$UDID" \
+            -derivedDataPath "$RUNNER_TEMP/dd-test" CODE_SIGNING_ALLOWED=NO | tail -n 20
+          xcrun simctl io "$UDID" recordVideo --codec=h264 --force "$OUT/ui-tests.mp4" &
+          REC=$!
+          set +e
+          xcodebuild test-without-building -project Tono.xcodeproj -scheme Tono -destination "id=$UDID" \
+            -derivedDataPath "$RUNNER_TEMP/dd-test" -resultBundlePath "$RUNNER_TEMP/ui-tests.xcresult" \
+            CODE_SIGNING_ALLOWED=NO > "$OUT/ui-tests.log" 2>&1
+          STATUS=$?
+          kill -INT "$REC"; wait "$REC"
+          grep -E "Test Case|AUDIT|error:|Executed|\*\* TEST" "$OUT/ui-tests.log" | tail -n 200
+          exit $STATUS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:

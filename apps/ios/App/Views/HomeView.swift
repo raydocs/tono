@@ -11,6 +11,7 @@ struct HomeView: View {
     @State private var showDetails = false
     @State private var showSettings = false
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.tonoReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -33,8 +34,10 @@ struct HomeView: View {
                 }
             }
         }
-        .sheet(isPresented: $showLines) { LinesSheet().environmentObject(model) }
-        .sheet(isPresented: $showDetails) { DetailsSheet().environmentObject(model) }
+        .sheet(isPresented: $showLines) { LinesSheet().environmentObject(model).tonoAccessibility() }
+        .sheet(isPresented: $showDetails) {
+            DetailsSheet(onSettings: openSettingsFromDetails).environmentObject(model).tonoAccessibility()
+        }
         #if DEBUG
         .onAppear {
             // Design preview only: `-TonoPreviewSheet lines|details|settings` opens a surface for screenshots.
@@ -46,8 +49,21 @@ struct HomeView: View {
             }
         }
         #endif
-        .fullScreenCover(isPresented: $showSettings) { SettingsView().environmentObject(model) }
+        // A sheet, not a full-screen cover: swipe down closes it with the thumb.
+        .sheet(isPresented: $showSettings) { SettingsView().environmentObject(model).tonoAccessibility() }
         .onChange(of: model.phase) { StateFeedback.arrived(at: $0) }
+        // VoiceOver magic tap (two-finger double tap) runs the primary action from anywhere.
+        .accessibilityAction(.magicTap) {
+            if let want = PrimaryAction(model.phase).wantsTunnel { model.toggle(want) }
+        }
+    }
+
+    private func openSettingsFromDetails() {
+        showDetails = false
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            showSettings = true
+        }
     }
 
     private var topBar: some View {
@@ -63,6 +79,7 @@ struct HomeView: View {
             }
             .buttonStyle(PressScale())
             .accessibilityLabel(L.t("settings_title"))
+            .accessibilityIdentifier("settingsButton")
         }
         .padding(.leading, 22).padding(.trailing, 16).padding(.top, 4)
     }
@@ -77,13 +94,17 @@ struct HomeView: View {
                     .tonoFont(40, .light, relativeTo: .largeTitle)
                     .foregroundStyle(TonoColor.textPrimary)
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("stateTitle")
                     .id(model.phase)
-                    .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .opacity))
+                    .transition(reduceMotion ? AnyTransition.opacity
+                                : AnyTransition.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .opacity))
             }
             ZStack(alignment: .leading) { statusLine }
-                .padding(.top, 6)
-                .padding(.bottom, 20)
+                .frame(minHeight: 32, alignment: .topLeading)
+                .padding(.top, 4)
+                .padding(.bottom, 10)
             ActionCapsule(phase: model.phase, connectedSince: model.connectedSince) { model.toggle($0) }
+                .accessibilityIdentifier("primaryAction")
             exitCapsule.padding(.top, 10)
             let footer = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout())
             footer {
@@ -98,7 +119,7 @@ struct HomeView: View {
                 if !typeSize.isAccessibilitySize { Spacer() }
                 Button { showDetails = true } label: {
                     HStack(spacing: 4) {
-                        Text(L.t("details")).tonoFont(14, .medium, relativeTo: .subheadline)
+                        Text(L.t("details")).tonoFont(15, .medium, relativeTo: .subheadline)
                         GlyphIcon(glyph: .chevronUp, tint: TonoColor.textSecondary, size: 14)
                     }
                     .foregroundStyle(TonoColor.textSecondary)
@@ -107,6 +128,7 @@ struct HomeView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("detailsButton")
             }
             .padding(.top, 4)
         }
@@ -120,17 +142,24 @@ struct HomeView: View {
     @ViewBuilder private var statusLine: some View {
         let reason = model.reason
         if let reason, BannerAction.showsBanner(model.phase, reason: reason) {
-            HStack(spacing: 8) {
-                StatusDot(color: model.phase == .failed ? TonoColor.error : TonoColor.warning, size: 7)
-                Text(PhaseText.short(reason)).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
+            // The short reason opens Details (full reason + its one action); 44 pt tall for the thumb.
+            Button { showDetails = true } label: {
+                HStack(spacing: 8) {
+                    StatusDot(color: model.phase == .failed ? TonoColor.error : TonoColor.warning, size: 7)
+                    Text(PhaseText.short(reason)).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
+                    GlyphIcon(glyph: .chevronRight, tint: TonoColor.textSecondary, size: 12)
+                }
+                .frame(minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .onTapGesture { showDetails = true }
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isButton)
+            .buttonStyle(.plain)
             .accessibilityHint(PhaseText.reason(reason))
+            .accessibilityIdentifier("reasonLine")
         } else if let text = PhaseText.status(model) {
             Text(text).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
+                .frame(minHeight: 44, alignment: .leading)
                 .accessibilityHint(PhaseText.sentence(model) ?? "")
+                .accessibilityIdentifier("statusLine")
         }
     }
 
@@ -148,7 +177,7 @@ struct HomeView: View {
                     }
                 }
                 Spacer(minLength: 0)
-                Text(latency).tonoFont(14, .medium, relativeTo: .subheadline).monospacedDigit().foregroundStyle(TonoColor.textSecondary)
+                Text(latency).tonoFont(15, .medium, relativeTo: .subheadline).monospacedDigit().foregroundStyle(TonoColor.textSecondary)
                 GlyphIcon(glyph: .chevronDown, tint: TonoColor.textTertiary, size: 14)
             }
             .padding(.horizontal, 18)
@@ -158,6 +187,7 @@ struct HomeView: View {
         }
         .buttonStyle(PressScale())
         .accessibilityLabel("\(L.t("lines_title")): \(name), \(latency)")
+        .accessibilityIdentifier("exitCapsule")
     }
 }
 
@@ -168,7 +198,7 @@ struct ActionCapsule: View {
     let phase: Phase
     let connectedSince: Date?
     let onToggle: (Bool) -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.tonoReduceMotion) private var reduceMotion
     @State private var fill: Double = 0
     @State private var fillOpacity: Double = 1
     @State private var shake: CGFloat = 0
@@ -239,7 +269,7 @@ struct ActionCapsule: View {
         } else if phase.tunnelUp, let connectedSince {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 Text(PhaseText.clock(since: connectedSince, now: context.date))
-                    .tonoFont(14, .medium, relativeTo: .subheadline).monospacedDigit()
+                    .tonoFont(15, .medium, relativeTo: .subheadline).monospacedDigit()
                     .foregroundStyle(TonoColor.textSecondary)
                     .accessibilityLabel(L.t("a11y_connected_for", PhaseText.clock(since: connectedSince, now: context.date)))
             }
@@ -350,13 +380,18 @@ enum PhaseText {
         case .preparing: return L.t("sentence_preparing")
         case .connecting: return L.t("sentence_connecting")
         case .connected, .degraded:
-            let cloud = m.cloudProbe.state == .ok ? m.cloudProbe.location : nil
-            let home = m.homeKind == .none ? nil : (m.homeProbe.state == .ok ? m.homeProbe.location : nil)
+            let cloud = m.cloudProbe.state == .ok ? m.cloudProbe.location.map(region) : nil
+            let home = m.homeKind == .none ? nil : (m.homeProbe.state == .ok ? m.homeProbe.location.map(region) : nil)
             if let cloud, let home { return L.t("status_exit_both", cloud, home) }
             if let cloud { return L.t("status_exit_cloud", cloud) }
             return L.t("status_protected")
         default: return nil
         }
+    }
+
+    /// "JP" → "日本" / "Japan" (the probe reports an ISO region code); unknown codes stay as they are.
+    static func region(_ code: String) -> String {
+        Locale(identifier: L.isChinese ? "zh-Hans" : "en").localizedString(forRegionCode: code) ?? code
     }
 
     static func short(_ code: String) -> String {

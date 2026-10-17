@@ -68,6 +68,8 @@ final class AppModel: ObservableObject {
     private var probeTask: Task<Void, Never>?
     #if DEBUG
     fileprivate var previewPhase: (Phase, String?)?
+    fileprivate var previewRun: Task<Void, Never>?
+    fileprivate var previewFailuresLeft = 0
     #endif
 
     static var appVersion: String {
@@ -165,6 +167,7 @@ final class AppModel: ObservableObject {
     func changeEmail() { login.challengeID = nil; login.errorCode = nil }
 
     func signOut() async {
+        if isPreview { return }
         probeTask?.cancel()
         traffic.stop()
         userStopping = true
@@ -220,30 +223,45 @@ final class AppModel: ObservableObject {
 
     func toggle(_ on: Bool) {
         #if DEBUG
-        if previewPhase != nil { return }
+        if previewPhase != nil { previewToggle(on); return }
         #endif
         Task { on ? await connect() : await disconnect() }
     }
 
-    func recheck() { runProbes() }
+    func recheck() {
+        if isPreview { return }
+        runProbes()
+    }
+
+    /// DEBUG design preview: fixture data, nothing persisted, no network, no tunnel.
+    var isPreview: Bool {
+        #if DEBUG
+        return previewPhase != nil
+        #else
+        return false
+        #endif
+    }
 
     // MARK: - Lines and mode
 
     func select(_ name: String) async {
         guard lines.contains(where: { $0.name == name }) else { return }
         selectedNode = name
+        if isPreview { return }
         Preferences.selectedNode = name
         await pushInputs()
     }
 
     func setMode(_ newMode: RoutingMode) async {
         mode = newMode
+        if isPreview { return }
         Preferences.mode = newMode
         await pushInputs()
     }
 
     func setIncludeAllNetworks(_ on: Bool) async {
         includeAllNetworks = on
+        if isPreview { return }
         Preferences.includeAllNetworks = on
         guard tunnel.manager != nil else { return }
         // Takes effect on the next start; iOS does not apply protocol options to a running tunnel.
@@ -251,6 +269,7 @@ final class AppModel: ObservableObject {
     }
 
     func measureLatency() async {
+        if isPreview { return }
         let results: [String: Int?]
         if tunnelStatus.isUp, let data = await tunnel.send(.measure), let json = try? JSON.parse(data), let obj = json.object {
             var r: [String: Int?] = [:]
@@ -430,6 +449,7 @@ extension AppModel {
         m.apply(LoadedCatalog(catalog: SampleCatalog.catalog(), body: "", fromCache: false))
         m.lines = m.lines.enumerated().map { var l = $0.element; l.latencyMS = [86, 231][$0.offset % 2]; return l }
         m.email = "preview@example.com"
+        m.previewFailuresLeft = CommandLine.arguments.contains("-TonoPreviewFailFirst") ? 1 : 0
         m.show(phase)
         return m
     }
@@ -449,6 +469,35 @@ extension AppModel {
             }
         }
         return m
+    }
+
+    /// Interactive preview (DEBUG): the primary capsule walks the same phases a real start/stop does,
+    /// with fixture timings and no tunnel, so UI tests can tap through connect, cancel, fail/retry and
+    /// disconnect. `-TonoPreviewFailFirst` makes the first start fail (Home exit unavailable).
+    fileprivate func previewToggle(_ on: Bool) {
+        previewRun?.cancel()
+        let steps: [(Phase, Double)]
+        if on {
+            if previewFailuresLeft > 0 {
+                previewFailuresLeft -= 1
+                steps = [(.preparing, 0.8), (.connecting, 1.4), (.failed, 0)]
+            } else {
+                steps = [(.preparing, 0.8), (.connecting, 1.6), (.connected, 0)]
+            }
+        } else {
+            steps = [(.disconnecting, phase.tunnelUp ? 0.9 : 0.5), (.idle, 0)]
+        }
+        // `-TonoPreviewSlow` stretches the walk so a UI test can tap Cancel mid-start without racing it.
+        let pace = CommandLine.arguments.contains("-TonoPreviewSlow") ? 3.0 : 1.0
+        previewRun = Task { @MainActor [weak self] in
+            for (next, base) in steps {
+                let seconds = base * pace
+                guard let self, !Task.isCancelled else { return }
+                if next == .connected { self.connectedSince = Date() }
+                self.show(next)
+                if seconds > 0 { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+            }
+        }
     }
 
     private func show(_ phase: Phase) {

@@ -47,6 +47,7 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.35), value: model.phase == .signedOut)
         .previewBadge()
+        .tonoAccessibility()
     }
 }
 
@@ -57,13 +58,14 @@ extension View {
         #if DEBUG
         if CommandLine.arguments.contains(where: { $0.hasPrefix("-TonoPreview") }) {
             overlay(alignment: .top) {
-                Text(L.isChinese ? "预览 · 夹具数据 · 无账号/隧道" : "Preview · fixture data · no account/tunnel")
+                Text(L.isChinese ? "预览 · 夹具 · 无账号/隧道" : "Preview · fixtures · no account/tunnel")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Color.black)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(Color.yellow, in: Capsule())
                     .padding(.top, 2)
                     .allowsHitTesting(false)
+                    .accessibilityIdentifier("previewBadge")
             }
         } else {
             self

@@ -7,6 +7,12 @@ import TonoKit
 struct DetailsSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    /// Settings from inside the sheet, so the thumb never has to reach the top-right gear.
+    private let onSettings: () -> Void
+
+    init(onSettings: @escaping () -> Void = {}) {
+        self.onSettings = onSettings
+    }
 
     var body: some View {
         ScrollView {
@@ -22,6 +28,20 @@ struct DetailsSheet: View {
                 }
                 section(L.t("details_routes")) { lanes }
                 section(L.t("details_mode")) { modePicker }
+                Button(action: onSettings) {
+                    HStack(spacing: 12) {
+                        GlyphIcon(glyph: .gear, tint: TonoColor.textSecondary, size: 20)
+                        Text(L.t("settings_title")).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
+                        Spacer(minLength: 0)
+                        GlyphIcon(glyph: .chevronRight, tint: TonoColor.textSecondary, size: 14)
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 52)
+                    .glassSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressScale())
+                .accessibilityIdentifier("detailsSettings")
             }
             .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 20)
         }
@@ -118,7 +138,7 @@ private struct Lane: View {
         HStack(spacing: 10) {
             GlyphIcon(glyph: glyph, tint: live ? TonoColor.accent : TonoColor.textTertiary)
             VStack(alignment: .leading, spacing: 2) {
-                Text(name).tonoFont(14, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
+                Text(name).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
                 HStack(spacing: 6) {
                     Text(dest).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.textSecondary)
                     if live, let probe, let color = probeColor(probe) {

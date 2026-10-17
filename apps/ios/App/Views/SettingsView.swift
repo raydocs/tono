@@ -5,6 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var confirmSignOut = false
+    @State private var showScope = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,12 +23,23 @@ struct SettingsView: View {
                         Text(L.t("mode_applies")).tonoFont(11, relativeTo: .caption2).foregroundStyle(TonoColor.textTertiary)
                     }
 
-                    SectionLabel(text: L.t("routing_scope_title"))
+                    // The routing boundaries stay one tap away instead of a wall of text on open.
                     SmokeCard {
-                        para(L.t("routing_scope"))
-                        para(L.t("routing_platform"))
-                        Text(L.t(model.underlyingIPv6 ? "ipv6_on" : "ipv6_off")).tonoFont(12, .medium, relativeTo: .caption).foregroundStyle(TonoColor.textTertiary)
+                        DisclosureGroup(isExpanded: $showScope) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                para(L.t("routing_scope"))
+                                para(L.t("routing_platform"))
+                                Text(L.t(model.underlyingIPv6 ? "ipv6_on" : "ipv6_off")).tonoFont(12, .medium, relativeTo: .caption).foregroundStyle(TonoColor.textTertiary)
+                            }
+                            .padding(.top, 8)
+                        } label: {
+                            Text(L.t("routing_scope_title")).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
+                                .frame(minHeight: 44, alignment: .leading)
+                        }
+                        .tint(TonoColor.textSecondary)
+                        .accessibilityIdentifier("scopeDisclosure")
                     }
+                    .padding(.top, 16)
 
                     SectionLabel(text: L.t("settings_check"))
                     SmokeCard { RouteCheck() }
@@ -51,7 +63,7 @@ struct SettingsView: View {
 
                     SectionLabel(text: L.t("settings_about"))
                     SmokeCard {
-                        Text(L.t("about_version", AppModel.appVersion)).tonoFont(14, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
+                        Text(L.t("about_version", AppModel.appVersion)).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
                         small(L.t("about_core", model.coreVersion.isEmpty ? "—" : model.coreVersion))
                         small(L.t("about_contract", String(DesktopRoutingContract.sourceDigest.prefix(12))))
                         Text(L.t("about_test")).tonoFont(12, relativeTo: .caption).foregroundStyle(TonoColor.textTertiary)
@@ -61,6 +73,7 @@ struct SettingsView: View {
             }
         }
         .background(TonoColor.night.ignoresSafeArea())
+        .presentationDragIndicator(.visible)
         .confirmationDialog(L.t("settings_sign_out"), isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button(L.t("settings_sign_out"), role: .destructive) {
                 Task { await model.signOut() }
@@ -72,19 +85,24 @@ struct SettingsView: View {
 
     private var header: some View {
         HStack(spacing: 2) {
-            Button { dismiss() } label: {
-                GlyphIcon(glyph: .back, tint: TonoColor.textPrimary).frame(width: 48, height: 48).contentShape(Circle())
-            }
-            .accessibilityLabel(L.t("settings_back"))
             Text(L.t("settings_title")).tonoFont(22, .medium, relativeTo: .title2).foregroundStyle(TonoColor.textPrimary)
                 .accessibilityAddTraits(.isHeader)
+                .padding(.leading, 14)
             Spacer()
+            // Presented as a sheet: swipe down closes it; the button is for VoiceOver and two-handed use.
+            Button { dismiss() } label: {
+                GlyphIcon(glyph: .chevronDown, tint: TonoColor.textPrimary, size: 18).frame(width: 44, height: 44)
+                    .glassSurface(Circle()).contentShape(Circle())
+            }
+            .buttonStyle(PressScale())
+            .accessibilityLabel(L.t("settings_close"))
+            .accessibilityIdentifier("settingsClose")
         }
-        .padding(.horizontal, 6).padding(.vertical, 4)
+        .padding(.horizontal, 8).padding(.top, 18).padding(.bottom, 4)
     }
 
     private func para(_ text: String) -> some View {
-        Text(text).tonoFont(14, relativeTo: .subheadline).lineSpacing(2).foregroundStyle(TonoColor.textSecondary).fixedSize(horizontal: false, vertical: true)
+        Text(text).tonoFont(15, relativeTo: .subheadline).lineSpacing(2).foregroundStyle(TonoColor.textSecondary).fixedSize(horizontal: false, vertical: true)
     }
 
     private func small(_ text: String) -> some View {

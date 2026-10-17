@@ -56,7 +56,7 @@ struct SignInView: View {
                 PrimaryButton(title: L.t(model.login.busy ? "signin_sending" : "signin_send"),
                               enabled: !model.login.busy && !email.trimmingCharacters(in: .whitespaces).isEmpty, action: send)
             } else {
-                Text(L.t("signin_code_sent", model.login.email)).tonoFont(14, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
+                Text(L.t("signin_code_sent", model.login.email)).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
                 TonoField(title: L.t("signin_code"), text: $code, large: true)
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)
@@ -74,10 +74,10 @@ struct SignInView: View {
                     .frame(maxWidth: .infinity).frame(minHeight: 44)
             }
             if model.reason == "SESSION_ENDED", model.login.errorCode == nil {
-                Text(PhaseText.reason("SESSION_ENDED")).tonoFont(14, relativeTo: .subheadline).foregroundStyle(TonoColor.warning)
+                Text(PhaseText.reason("SESSION_ENDED")).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.warning)
             }
             if let error = model.login.errorCode {
-                Text(PhaseText.signInError(error)).tonoFont(14, relativeTo: .subheadline).foregroundStyle(TonoColor.error)
+                Text(PhaseText.signInError(error)).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.error)
                     .accessibilityAddTraits(.updatesFrequently)
             }
             Text(L.t("signin_privacy")).tonoFont(11, relativeTo: .caption2).foregroundStyle(TonoColor.textTertiary)

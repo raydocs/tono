@@ -12,7 +12,7 @@ enum TonoColor {
     static let hairline = Color.white.opacity(0.12)
     static let textPrimary = Color(hex: 0xF7F3EE)
     static let textSecondary = Color(hex: 0xF7F3EE, opacity: 0.66)
-    static let textTertiary = Color(hex: 0xF7F3EE, opacity: 0.44)
+    static let textTertiary = Color(hex: 0xF7F3EE, opacity: 0.58)  // ≥ 4.5:1 on the night surfaces
 
     static let sunCore = Color(hex: 0xFFE2A8)
     static let sunMid = Color(hex: 0xFFB46A)
@@ -98,12 +98,70 @@ private struct TonoFont: ViewModifier {
     func body(content: Content) -> some View { content.font(.system(size: size, weight: weight, design: design)) }
 }
 
+/// The iOS text style whose default (Large) size is this design size, if any. Those sizes use the
+/// system text style itself, so Dynamic Type and the accessibility audit see a native text style;
+/// other sizes (display titles, the code field) scale through `@ScaledMetric`.
+private func textStyle(forDesignSize size: CGFloat) -> Font.TextStyle? {
+    switch size {
+    case 34: return .largeTitle
+    case 28: return .title
+    case 22: return .title2
+    case 20: return .title3
+    case 17: return .body
+    case 16: return .callout
+    case 15: return .subheadline
+    case 13: return .footnote
+    case 12: return .caption
+    case 11: return .caption2
+    default: return nil
+    }
+}
+
+/// Reduce Motion / Reduce Transparency as Tono's views read them: the system settings, or in DEBUG
+/// builds the `-TonoReduceMotion` / `-TonoReduceTransparency` launch arguments, so CI can capture
+/// both variants in a simulator (simctl cannot toggle them). Apply `tonoAccessibility()` at every
+/// presentation root (app root, sheets, covers).
+private struct TonoReduceMotionKey: EnvironmentKey { static let defaultValue = false }
+private struct TonoReduceTransparencyKey: EnvironmentKey { static let defaultValue = false }
+
+extension EnvironmentValues {
+    var tonoReduceMotion: Bool {
+        get { self[TonoReduceMotionKey.self] }
+        set { self[TonoReduceMotionKey.self] = newValue }
+    }
+    var tonoReduceTransparency: Bool {
+        get { self[TonoReduceTransparencyKey.self] }
+        set { self[TonoReduceTransparencyKey.self] = newValue }
+    }
+}
+
+enum DebugAccessibility {
+    #if DEBUG
+    static let reduceMotion = CommandLine.arguments.contains("-TonoReduceMotion")
+    static let reduceTransparency = CommandLine.arguments.contains("-TonoReduceTransparency")
+    #else
+    static let reduceMotion = false
+    static let reduceTransparency = false
+    #endif
+}
+
+private struct TonoAccessibilityRoot: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var systemReduceTransparency
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.tonoReduceMotion, systemReduceMotion || DebugAccessibility.reduceMotion)
+            .environment(\.tonoReduceTransparency, systemReduceTransparency || DebugAccessibility.reduceTransparency)
+    }
+}
+
 /// Liquid Glass where the system has it (iOS 26), a dark material before that, and an opaque smoke
 /// surface when Reduce Transparency is on. The tint keeps text contrast over a bright sky.
 private struct GlassSurface<S: Shape>: ViewModifier {
     let shape: S
     let tint: Color?
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.tonoReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
     func body(content: Content) -> some View {
@@ -123,9 +181,16 @@ private struct GlassSurface<S: Shape>: ViewModifier {
 }
 
 extension View {
+    func tonoAccessibility() -> some View { modifier(TonoAccessibilityRoot()) }
+
+    @ViewBuilder
     func tonoFont(_ size: CGFloat, _ weight: Font.Weight = .regular, relativeTo style: Font.TextStyle = .body,
                   design: Font.Design = .default) -> some View {
-        modifier(TonoFont(size: size, weight: weight, design: design, relativeTo: style))
+        if let native = textStyle(forDesignSize: size) {
+            font(.system(native, design: design, weight: weight))
+        } else {
+            modifier(TonoFont(size: size, weight: weight, design: design, relativeTo: style))
+        }
     }
 
     func glassSurface<S: Shape>(_ shape: S, tint: Color? = nil) -> some View {
