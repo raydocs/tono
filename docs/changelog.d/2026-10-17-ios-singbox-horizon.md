@@ -9,6 +9,9 @@
   - 供应链：`supply-chain/build-libbox-apple.sh` 从固定源码构建 Libbox.xcframework（Go 归档、源码提交、iOS Go 补丁均校验）。
   - 决定 129（provisional）：令牌只在 App 钥匙串；includeAllNetworks 默认开；按需连接随连接/断开开关；App Store 发布等所有者/法务对 GPL 的结论。
 - 工程与测试：新增 `.github/workflows/ios-ci.yml`（只在 `feat/ios-**` 推送与手动触发时运行，GitHub 托管 runner，不接入 ci-gate）。
+- 构建：托管 macos-26（Xcode 26.6，iPhoneOS 26.5 SDK）运行 39057008451 @ `e0f5586` 全绿：libbox 源码构建、未签名 Release 真机构建（含 PacketTunnel.appex）、Debug 模拟器构建、在 iPhone 17 Pro 模拟器安装并启动 App 截图 23 张 + 状态循环录像（artifact `ios-preview-screenshots`，保留 14 天至 2026-10-31）。截图为 DEBUG 夹具预览，每张带黄色「预览 · 夹具数据 · 无账号/隧道」标记，不是网络证据。修过的构建错误：libbox 引用 UIDevice 需链接 UIKit；Localizable.strings 注释被 `*/` 提前截断；`HTTP1.Failure` 初始化器需 public。
+- UI 自查：两轮（上限）。第 2 轮修复大字号布局、iOS 26 sheet 透出、已连接⇄部分可用填充闪烁、标题叠影；自评 77/100，未达 85 通过线（状态动效 10/15 低于 70%，真机/VoiceOver/减少动态效果/降低透明度未验证）。
 - 验证：见 PR 验证评论（Linux：TonoKit `swift test`、路由名单同步检查、sing-box CLI check + 真实内核路由 harness；托管 macOS：libbox 构建、未签名真机/模拟器 xcodebuild、模拟器设计预览截图）。
 - 候选/发布：无安装包；无 IPA、无 TestFlight、无签名。
+- TestFlight 需所有者提供：组织类开发者账号与 Team ID、两个 App ID（含 Network Extensions + App Groups）、App Group、Apple Distribution 证书与两个 App Store 描述文件（或自动签名 + App Store Connect API 密钥存为仓库 secret）、App Store Connect 记录与出口合规回答；packet-tunnel-provider 无需额外审批（清单见 `apps/ios/README.md`）。
 - 剩余限制：未在真机运行隧道（需要 Apple 开发者团队、Network Extension 与 App Group 能力、真机）；未验证真实目录下的连接、DNS/IPv6/UDP、按需连接恢复与 50 MB 内存上限；App Store 发布受 GPL 许可问题约束，待所有者决定。
