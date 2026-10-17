@@ -57,6 +57,7 @@ Living operator docs. The current ops backlog is
 | [ops/transport-hy2.md](ops/transport-hy2.md) | hy2 transport |
 | [ops/api-relay.md](ops/api-relay.md) | API relay outside Cloudflare (decision 077) |
 | [ops/cn-acceptance.md](ops/cn-acceptance.md) | One-command network acceptance run from a mainland China machine |
+| [ops/windows-install-recovery.md](ops/windows-install-recovery.md) | Windows adapter/version install refusals: read-only evidence without logs and data-preserving recovery boundaries |
 | [ops/billing-model-proposal.md](ops/billing-model-proposal.md) | Billing proposal (undecided) |
 
 ## Screenshots
