@@ -39,6 +39,21 @@ shot() { # <name> <lang> <phase> [sheet] [extra launch args...]
 # in the first minutes; let them come and go before any capture.
 xcrun simctl launch "$UDID" "$BUNDLE_ID" -TonoPreview IDLE >/dev/null
 sleep 20
+for lang in zh-Hans en; do
+  shot "$lang-01-signin" "$lang" SIGNED_OUT
+  shot "$lang-02-idle" "$lang" IDLE
+  shot "$lang-02b-permission" "$lang" NEEDS_PERMISSION
+  shot "$lang-03a-preparing" "$lang" PREPARING
+  shot "$lang-03-connecting" "$lang" CONNECTING
+  shot "$lang-04-connected" "$lang" CONNECTED
+  shot "$lang-05-degraded" "$lang" DEGRADED
+  shot "$lang-06-failed" "$lang" FAILED
+  shot "$lang-07-lines" "$lang" CONNECTED lines
+  shot "$lang-08-settings" "$lang" CONNECTED settings
+  shot "$lang-09-details" "$lang" DEGRADED details
+done
+
+# Accessibility captures come after the main set (later after boot, away from the system banners).
 # Large text (Dynamic Type accessibility L) and increased contrast, Chinese, the two busiest screens.
 xcrun simctl ui "$UDID" content_size accessibility-large
 shot "a11y-large-text-connected" zh-Hans CONNECTED
@@ -57,20 +72,6 @@ xcrun simctl ui "$UDID" increase_contrast disabled || true
 # Reduce Transparency (simctl cannot toggle it; the DEBUG flag feeds the same code path as the setting).
 shot "a11y-reduce-transparency-connected" zh-Hans CONNECTED "" -TonoReduceTransparency
 shot "a11y-reduce-transparency-details" zh-Hans DEGRADED details -TonoReduceTransparency
-
-for lang in zh-Hans en; do
-  shot "$lang-01-signin" "$lang" SIGNED_OUT
-  shot "$lang-02-idle" "$lang" IDLE
-  shot "$lang-02b-permission" "$lang" NEEDS_PERMISSION
-  shot "$lang-03a-preparing" "$lang" PREPARING
-  shot "$lang-03-connecting" "$lang" CONNECTING
-  shot "$lang-04-connected" "$lang" CONNECTED
-  shot "$lang-05-degraded" "$lang" DEGRADED
-  shot "$lang-06-failed" "$lang" FAILED
-  shot "$lang-07-lines" "$lang" CONNECTED lines
-  shot "$lang-08-settings" "$lang" CONNECTED settings
-  shot "$lang-09-details" "$lang" DEGRADED details
-done
 
 record() { # <file> <seconds> <launch args...>
   local file="$1" seconds="$2"; shift 2

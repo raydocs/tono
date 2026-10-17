@@ -191,6 +191,7 @@ final class TonoUITests: XCTestCase {
         sleep(2)
         var found: [String] = []
         var unattributed: [String] = []
+        var offscreen: [(String, XCUIElement)] = []
         var dumped = false
         do {
             try app.performAccessibilityAudit { issue in
@@ -202,6 +203,13 @@ final class TonoUITests: XCTestCase {
                 // Apple's contrast check misreads text over gradients and glass (it flags 17:1 white on
                 // near-black). Each contrast flag is re-measured from the element's own pixels; only a
                 // measured ratio under WCAG AA 4.5:1 counts as a failure, and every flag stays in the log.
+                // An element past the screen edge has no pixels to measure yet: it is scrolled into
+                // view and measured after the audit.
+                if issue.auditType == .contrast, let element, !app.windows.firstMatch.frame.contains(element.frame) {
+                    print(line + " | off screen; measured after scrolling")
+                    offscreen.append((line, element))
+                    return true
+                }
                 if issue.auditType == .contrast, let element, let ratio = Self.measuredContrast(element) {
                     let verdict = ratio >= 4.5 ? "PASSES" : "FAILS"
                     print(line + String(format: " | measured %.1f:1 %@ WCAG AA", ratio, verdict))
@@ -234,6 +242,17 @@ final class TonoUITests: XCTestCase {
                   + "\(sweep.failures.count) below 4.5:1 or under 44x44 pt")
             sweep.failures.forEach { print($0) }
             found += sweep.failures
+        }
+        for (line, element) in offscreen {
+            let window = app.windows.firstMatch.frame
+            for _ in 0..<4 where !window.contains(element.frame) {
+                app.swipeUp(velocity: .slow)
+            }
+            let ratio = window.contains(element.frame) ? Self.measuredContrast(element) : nil
+            let result = ratio.map { String(format: "measured %.1f:1 %@ WCAG AA", $0, $0 >= 4.5 ? "PASSES" : "FAILS") }
+                ?? "could not scroll into view"
+            print(line + " | " + result)
+            if (ratio ?? 0) < 4.5 { found.append(line + " | " + result) }
         }
         return found
     }
