@@ -48,6 +48,8 @@ shot "a11y-large-text-details" zh-Hans DEGRADED details
 xcrun simctl ui "$UDID" content_size accessibility-extra-extra-extra-large
 shot "a11y-largest-text-en-connected" en CONNECTED
 shot "a11y-largest-text-en-details" en DEGRADED details
+shot "a11y-largest-text-en-settings" en DEGRADED settings
+shot "a11y-largest-text-en-idle" en IDLE
 xcrun simctl ui "$UDID" content_size large
 xcrun simctl ui "$UDID" increase_contrast enabled || true
 shot "a11y-increase-contrast-connected" zh-Hans CONNECTED

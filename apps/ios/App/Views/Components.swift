@@ -139,8 +139,8 @@ struct SmokeCard<Content: View>: View {
 struct SectionLabel: View {
     let text: String
     var body: some View {
+        // No extra tracking: the audit read tracked caps as clipped text.
         Text(text.uppercased())
-            .tracking(0.6)
             .tonoFont(12, .medium, relativeTo: .caption)
             .foregroundStyle(TonoColor.textTertiary)
             .fixedSize(horizontal: false, vertical: true)

@@ -177,25 +177,46 @@ struct HomeView: View {
         let line = model.lines.first { $0.name == model.selectedNode } ?? model.lines.first
         let name = line.map { Format.city($0.city, chinese: L.isChinese) + ($0.label.isEmpty ? "" : " · \($0.label)") } ?? L.t("line_pick")
         let latency = line?.latencyMS.map { L.t("latency_ms", $0) } ?? L.t("line_untested")
+        let ax = typeSize.isAccessibilitySize
+        let nameText = Text(name).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
+        let cached = Text(L.t("lines_cached")).tonoFont(12, relativeTo: .caption).foregroundStyle(TonoColor.warning)
+        let latencyText = Text(latency).tonoFont(15, .medium, relativeTo: .subheadline).monospacedDigit()
+            .foregroundStyle(TonoColor.textSecondary)
+        let chevron = GlyphIcon(glyph: .chevronDown, tint: TonoColor.textTertiary, size: 14)
         return Button { showLines = true } label: {
-            HStack(spacing: 12) {
-                StatusDot(color: LatencyLevelColor.color(line?.latencyMS))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(name).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
-                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
-                    if model.usingCachedCatalog {
-                        Text(L.t("lines_cached")).tonoFont(12, relativeTo: .caption).foregroundStyle(TonoColor.warning).lineLimit(2)
+            Group {
+                if ax {
+                    // Accessibility sizes: the name gets the full width on its own lines (a capsule row
+                    // broke "Tokyo" mid-word), latency and the chevron sit under it.
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            StatusDot(color: LatencyLevelColor.color(line?.latencyMS))
+                            nameText.fixedSize(horizontal: false, vertical: true)
+                        }
+                        if model.usingCachedCatalog { cached.fixedSize(horizontal: false, vertical: true) }
+                        HStack { latencyText; Spacer(minLength: 8); chevron }
                     }
+                    .padding(.horizontal, 20).padding(.vertical, 14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .glassSurface(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                } else {
+                    HStack(spacing: 12) {
+                        StatusDot(color: LatencyLevelColor.color(line?.latencyMS))
+                        VStack(alignment: .leading, spacing: 2) {
+                            nameText.lineLimit(1)
+                            if model.usingCachedCatalog { cached.lineLimit(2) }
+                        }
+                        Spacer(minLength: 0)
+                        latencyText.fixedSize()
+                        chevron
+                    }
+                    .padding(.horizontal, 18)
+                    .frame(minHeight: 52)
+                    .glassSurface(Capsule())
+                    .contentShape(Capsule())
                 }
-                Spacer(minLength: 0)
-                Text(latency).tonoFont(15, .medium, relativeTo: .subheadline).monospacedDigit().foregroundStyle(TonoColor.textSecondary)
-                    .fixedSize()
-                GlyphIcon(glyph: .chevronDown, tint: TonoColor.textTertiary, size: 14)
             }
-            .padding(.horizontal, 18)
-            .frame(minHeight: 52)
-            .glassSurface(Capsule())
-            .contentShape(Capsule())
             .accessibilityElement(children: .ignore)
         }
         .buttonStyle(PressScale())
