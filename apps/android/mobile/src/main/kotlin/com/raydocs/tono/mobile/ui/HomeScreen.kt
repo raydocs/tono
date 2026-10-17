@@ -278,10 +278,13 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
                 .padding(horizontal = 24.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            AnimatedContent(label, transitionSpec = { crossRise() }, label = "capsuleLabel", modifier = Modifier.weight(1f)) { t ->
-                Text(t, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = labelColor)
+            // Label and arrow change together, so "Cancel" never shows the connect arrow mid-transition.
+            AnimatedContent(label to warm, transitionSpec = { crossRise() }, label = "capsuleLabel", modifier = Modifier.weight(1f)) { (t, arrow) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(t, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = labelColor, modifier = Modifier.weight(1f))
+                    if (arrow) GlyphIcon(Glyph.ARROW, labelColor, size = 20.dp)
+                }
             }
-            if (warm) GlyphIcon(Glyph.ARROW, labelColor, size = 20.dp)
             // The timer arrives after the label has become “Disconnect”, never beside “Cancel”.
             AnimatedVisibility(s.tunnelUp && s.connectedSinceMs > 0, enter = fadeIn(tween(220, delayMillis = 240)), exit = fadeOut(tween(120))) {
                 ConnectedTimer(s.connectedSinceMs)

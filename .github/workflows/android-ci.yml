@@ -100,7 +100,7 @@ jobs:
   emulator:
     needs: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    timeout-minutes: 95
     defaults:
       run:
         working-directory: .
@@ -123,6 +123,8 @@ jobs:
           cat > evidence.sh <<'SH'
           set -euxo pipefail
           APP=com.raydocs.tono.mobile.test
+          # A retry keeps the first attempt's evidence next to the second's.
+          if [ -d evidence ]; then mv evidence "evidence-attempt-$(date +%s)"; fi
           mkdir -p evidence
           adb shell getprop ro.build.fingerprint | tee evidence/device.txt
           adb shell getprop ro.product.cpu.abi | tee -a evidence/device.txt
@@ -153,11 +155,26 @@ jobs:
           grep -q '^OK (' evidence/instrumentation.txt
           SH
       - name: Install and run on an Android 14 x86_64 emulator
+        id: attempt1
+        continue-on-error: true
         timeout-minutes: 42
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 34
-          target: google_apis
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash evidence.sh
+      # One bounded retry: software-GPU emulators on hosted runners occasionally die mid-run.
+      - name: Retry once on a fresh emulator
+        if: steps.attempt1.outcome == 'failure'
+        timeout-minutes: 42
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 34
+          target: default
           arch: x86_64
           profile: pixel_6
           disable-animations: false
@@ -167,6 +184,8 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: android-emulator-evidence
-          path: evidence/
+          path: |
+            evidence/
+            evidence-attempt-*/
           retention-days: 90
           if-no-files-found: warn

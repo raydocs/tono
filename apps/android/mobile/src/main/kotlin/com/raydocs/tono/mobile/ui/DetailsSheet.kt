@@ -47,7 +47,7 @@ fun DetailsSheet(s: EngineSnapshot, onRecheck: () -> Unit, onOpenLines: () -> Un
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = TonoColors.Smoke.copy(alpha = 0.97f),
+        containerColor = TonoColors.Smoke, // opaque: device renders showed home text through a 97% sheet
         scrimColor = TonoColors.NightDeep.copy(alpha = 0.45f),
     ) { DetailsContent(s, onRecheck, onOpenLines, onOpenSettings) }
 }
