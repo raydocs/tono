@@ -9,6 +9,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=sing-box.pin
 source "$HERE/sing-box.pin"
 OUT="${1:?usage: build-libbox.sh <output-dir>}"
+mkdir -p "$OUT" && OUT="$(cd "$OUT" && pwd)"  # absolute: gomobile runs from the source tree
 WORK="${TONO_SB_WORK:-$HOME/.tono-tools/sing-box-build}"
 ANDROID_HOME="${ANDROID_HOME:-$HOME/.android-sdk}"
 JAVA_HOME="${JAVA_HOME:-$HOME/.tono-tools/jdk-17}"
