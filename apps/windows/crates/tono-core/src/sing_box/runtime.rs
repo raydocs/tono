@@ -632,8 +632,47 @@ mod tests {
         // This unconditional supported-port rule also accepts a new ordinary
         // hostname or public cached IP: no country list admission is needed.
         assert_eq!(rules[ordinary], json!({"network":"tcp","port":[80,443],"action":"route","outbound":"Tono-ThreeTier-Direct"}));
-        assert_eq!(rules[ordinary - 2], json!({"network":"tcp","port":[80,443],"action":"resolve","server":"Tono-ThreeTier-China-DNS","strategy":"ipv4_only"}));
-        assert_eq!(rules[ordinary - 1]["action"], "reject", "reject private answers after ordinary resolution too");
+        assert_eq!(rules[ordinary - 3], json!({"network":"tcp","port":[80,443],"action":"resolve","server":"Tono-ThreeTier-China-DNS","strategy":"ipv4_only"}));
+        assert_eq!(rules[ordinary - 2]["action"], "reject", "reject private answers after ordinary resolution too");
+        // A sequential graph interpreter with injected DNS answers, not a
+        // network/Core test: resolve enriches metadata and never rewinds to
+        // an earlier CIDR rule. Start with a fake-IP-restored hostname only.
+        let routed = |host: &str, answer: Ipv4Addr| -> String {
+            let mut destination: Option<Ipv4Addr> = None;
+            for rule in rules {
+                if rule.get("ip_version").is_some_and(|value| value != 4)
+                    || rule.get("inbound").is_some_and(|value| !value.as_array().unwrap().contains(&json!("Tono-TUN")))
+                    || rule.get("network").is_some_and(|value| value != "tcp" && !value.as_array().is_some_and(|items| items.contains(&json!("tcp"))))
+                    || rule.get("port").is_some_and(|value| !value.as_array().unwrap().contains(&json!(443)))
+                    || rule.get("domain").is_some_and(|value| !value.as_array().unwrap().contains(&json!(host)))
+                    || rule.get("domain_suffix").is_some_and(|value| !value.as_array().unwrap().iter().any(|suffix| {
+                        let suffix = suffix.as_str().unwrap();
+                        host == suffix || host.ends_with(&format!(".{suffix}"))
+                    }))
+                    || rule.get("ip_cidr").is_some_and(|value| !destination.is_some_and(|ip| value.as_array().unwrap().iter().any(|cidr| {
+                        let (network, bits) = cidr.as_str().unwrap().split_once('/').unwrap();
+                        let mask = u32::MAX << (32 - bits.parse::<u32>().unwrap());
+                        u32::from(ip) & mask == u32::from(network.parse::<Ipv4Addr>().unwrap()) & mask
+                    }))) {
+                    continue;
+                }
+                match rule["action"].as_str().unwrap() {
+                    "resolve" => destination = Some(answer),
+                    "route" => return rule["outbound"].as_str().unwrap().to_owned(),
+                    "reject" => return "reject".into(),
+                    other => panic!("unexpected action for this TCP fixture: {other}"),
+                }
+            }
+            panic!("TCP fixture did not terminate")
+        };
+        assert_eq!(routed("unlisted.example", Ipv4Addr::new(160, 79, 104, 10)), "Tono-Home-Residential");
+        assert_eq!(routed("www.bilibili.com", Ipv4Addr::new(160, 79, 111, 255)), "Tono-Home-Residential");
+        assert_eq!(routed("unlisted.example", Ipv4Addr::new(160, 79, 103, 255)), "Tono-ThreeTier-Direct");
+        assert_eq!(routed("unlisted.example", Ipv4Addr::new(160, 79, 112, 0)), "Tono-ThreeTier-Direct");
+        assert_eq!(routed("www.bilibili.com", Ipv4Addr::new(9, 9, 9, 9)), "Tono-ThreeTier-Direct");
+        assert_eq!(routed("unlisted.example", Ipv4Addr::new(10, 2, 3, 4)), "reject");
+        assert_eq!(routed("youtubei.googleapis.com", Ipv4Addr::new(160, 79, 104, 10)), "Tono-Exit");
+        assert_eq!(routed("www.wikipedia.org", Ipv4Addr::new(160, 79, 104, 10)), "Tono-Exit");
         assert_eq!(document["route"]["final"], "Tono-ThreeTier-Direct");
         assert_eq!(rules.first().unwrap()["ip_version"], 6);
         assert_eq!(rules.last().unwrap(), &json!({"action":"reject","no_drop":true}));

@@ -597,8 +597,12 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertEqual(rules[cloud]["outbound"] as? String, "Tono-Exit")
         XCTAssertTrue(NSDictionary(dictionary: rules[ordinary]).isEqual(to: ["network": "tcp", "port": [80, 443], "action": "route", "outbound": "Tono-ThreeTier-Direct"]),
                       "Unlisted ordinary hosts and public cached IPs use DIRECT without a country-list match")
-        XCTAssertEqual(rules[ordinary - 2]["server"] as? String, "Tono-ThreeTier-China-DNS")
-        XCTAssertEqual(rules[ordinary - 1]["action"] as? String, "reject", "Private DNS answers cannot escape the default path")
+        XCTAssertEqual(rules[ordinary - 3]["server"] as? String, "Tono-ThreeTier-China-DNS")
+        XCTAssertEqual(rules[ordinary - 2]["action"] as? String, "reject", "Private DNS answers cannot escape the default path")
+        XCTAssertTrue(NSDictionary(dictionary: rules[ordinary - 1]).isEqual(to: ["network": "tcp", "ip_cidr": ["160.79.104.0/21"], "action": "route", "outbound": "Tono-Home-Residential"]),
+                      "Late ordinary answers must recheck Home CIDRs before DIRECT")
+        XCTAssertTrue(NSDictionary(dictionary: rules[domestic - 1]).isEqual(to: rules[ordinary - 1]),
+                      "An explicit domestic hostname cannot bypass a resolved Home CIDR either")
         XCTAssertEqual((document["route"] as? [String: Any])?["final"] as? String, "Tono-ThreeTier-Direct")
         XCTAssertEqual(rules.last?["action"] as? String, "reject")
         let dns = try XCTUnwrap(document["dns"] as? [String: Any])

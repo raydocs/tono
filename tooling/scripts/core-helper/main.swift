@@ -310,7 +310,7 @@ func ownedRuntimeConfigIsSafe(_ contents: String) -> Bool {
           let parsed = try? JSONSerialization.jsonObject(with: Data(contents.utf8)),
           let object = goFoldedJSONKeys(parsed) as? [String: Any],
           Set(object.keys).isSubset(of: ["log", "dns", "inbounds", "outbounds", "route", "experimental"]),
-          let route = object["route"] as? [String: Any], route["final"] as? String == "Tono-Exit",
+          let route = object["route"] as? [String: Any],
           route["rule_set"] == nil,
           let experimental = object["experimental"] as? [String: Any],
           Set(experimental.keys).isSubset(of: ["clash_api", "cache_file"]),
@@ -363,7 +363,9 @@ func ownedRuntimeConfigIsSafe(_ contents: String) -> Bool {
         return true
     }
     return safe(object)
-        && (!ThreeTierRoutingContract.isThreeTierRuntime(object) || ThreeTierRoutingContract.admits(object))
+        && (ThreeTierRoutingContract.isThreeTierRuntime(object)
+            ? ThreeTierRoutingContract.admits(object)
+            : route["final"] as? String == "Tono-Exit")
 }
 
 /// The refusal matrix that keeps an unprivileged user from getting root to run a
@@ -864,6 +866,14 @@ func runOwnedRuntimeContractSelfTests() -> Bool {
               !ownedRuntimeConfigIsSafe(String(decoding: try JSONSerialization.data(withJSONObject: runtime), as: UTF8.self)) else { return false }
     } catch { return false }
     return ownedRuntimeConfigIsSafe(valid)
+        // DIRECT final is only legal inside the exact protected three-tier
+        // graph, never as a shortcut around stable's cloud final gate.
+        && !ownedRuntimeConfigIsSafe(
+            valid.replacingOccurrences(
+                of: #""final":"Tono-Exit""#,
+                with: #""final":"Tono-ThreeTier-Direct""#
+            )
+        )
         && !ownedRuntimeConfigIsSafe(
             valid.replacingOccurrences(
                 of: #""listen":"127.0.0.1""#,

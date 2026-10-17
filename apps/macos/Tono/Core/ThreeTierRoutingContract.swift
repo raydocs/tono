@@ -541,6 +541,14 @@ nonisolated enum ThreeTierRoutingContract {
             "no_drop": true
           },
           {
+            "network": "tcp",
+            "ip_cidr": [
+              "160.79.104.0/21"
+            ],
+            "action": "route",
+            "outbound": "$home_target"
+          },
+          {
             "domain": [
               "www.12306.cn",
               "kyfw.12306.cn",
@@ -621,6 +629,14 @@ nonisolated enum ThreeTierRoutingContract {
             ],
             "action": "reject",
             "no_drop": true
+          },
+          {
+            "network": "tcp",
+            "ip_cidr": [
+              "160.79.104.0/21"
+            ],
+            "action": "route",
+            "outbound": "$home_target"
           },
           {
             "network": "tcp",

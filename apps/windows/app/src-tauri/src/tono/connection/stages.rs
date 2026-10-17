@@ -53,12 +53,8 @@ pub(super) struct Prefetched {
 ///    must not depend on the system resolver once blocking starts, and the app's own API
 ///    client is pinned to the same addresses (see `tono::bootstrap` / `tono::transport`).
 ///  - The sing-box image proof, which only chooses the core for this start.
-pub(super) async fn ready_service_and_prefetch(state: &TonoState) -> Result<Prefetched, String> {
-    let preferences = crate::config::Config::preferences().await.data_arc();
-    preferences
-        .require_available_desktop_routing_mode()
-        .map_err(|error| error.to_string())?;
-    let three_tier = preferences.desktop_routing_mode.as_deref() == Some("three-tier");
+pub(super) async fn ready_service_and_prefetch(state: &TonoState, three_tier: bool) -> Result<Prefetched, String> {
+    // Immutable admission snapshot, never the mutable next-session preference.
     // A protected re-entry resolves through the protected resolver, which is down until this
     // attempt's Core answers; its bootstrap lookup gets a short budget.
     let armed = state.lock().await.fsm.kill_switch_armed();
@@ -278,7 +274,6 @@ pub(super) async fn run_stages(
     {
         let mut inner = state.lock().await;
         inner.sing_box_core = prepared.sing_box;
-        inner.three_tier_routing = three_tier;
     }
     let bundle = RuntimeBundle {
         yaml: prepared.document,

@@ -485,7 +485,10 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.55 → 4.52.56: graph v2 routes unmatched supported ordinary
     ///   traffic DIRECT, with protected Home/cloud matches and fixed DNS
     ///   taking priority. Old unknown-reject helpers cannot admit this graph.
-    static let current = "4.52.56"
+    /// - 4.52.56 → 4.52.57: exact three-tier admission accepts its DIRECT
+    ///   final and rechecks protected Home CIDRs after ordinary resolution.
+    ///   Stable still requires the cloud final.
+    static let current = "4.52.57"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

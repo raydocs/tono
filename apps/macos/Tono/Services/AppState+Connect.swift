@@ -16,17 +16,7 @@ extension AppState {
 
     func connect(preservingUnarmedBackoff: Bool) {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
-        let capturedRoutingMode: String
-        do {
-            capturedRoutingMode = try DesktopRoutingModeAdmission.capture(
-                AppProfile.defaults.object(forKey: SettingsKey.desktopRoutingMode)
-            )
-        } catch {
-            // Refuse before admitting a generation or touching PF/DNS/Core.
-            // Explicit Disconnect/Restore remain independent of this opt-in.
-            errorMessage = error.localizedDescription
-            return
-        }
+        var capturedRoutingMode = "stable"
         if !preservingUnarmedBackoff { unarmedReconnectAttempt = 0 }
         connectionCoordinator.executeConnect(
             isDisconnecting: isDisconnecting,
@@ -97,6 +87,18 @@ extension AppState {
                     return (false, UUID())
                 }
                 do {
+                    // Recovery belongs to the admitted session, not the next
+                    // preference saved in Settings. A fresh boot without held
+                    // strict intent still uses the saved mode as before.
+                    capturedRoutingMode = try DesktopRoutingModeAdmission.capture(
+                        self.connectionCoordinator.capturedRoutingMode.map { $0 as Any }
+                            ?? AppProfile.defaults.object(forKey: SettingsKey.desktopRoutingMode)
+                    )
+                } catch {
+                    self.errorMessage = error.localizedDescription
+                    return (false, UUID())
+                }
+                do {
                     // A session must not reach PF/Core while its restart-loop
                     // guard exists only in asynchronously flushed preferences.
                     try self.recordConnectBootSession()
@@ -105,6 +107,9 @@ extension AppState {
                     self.errorMessage = String(localized: "Tono could not save its restart safety record, so the connection was not started. Check available disk space and retry. \(error.localizedDescription)")
                     return (false, UUID())
                 }
+                // Capture before the first asynchronous operation can fail;
+                // do not mutate the live runtime writer during admission.
+                self.connectionCoordinator.capturedRoutingMode = capturedRoutingMode
                 self.isProtectionBlocked = false
                 self.connectionStage = .preparing
                 self.completedConnectionStages = []

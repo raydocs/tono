@@ -57,3 +57,9 @@
 - 回归扩展默认路由/DNS与保护组优先、缺Home/弱化图拒绝/稳定编译不变；Windows单条故障回归覆盖WFP成功移除后marker清除失败的错误报告、撤live/TUN证据、重启Blocked和显式重试。UI回归覆盖保存/回读不明/重载/导航/旧外观；新增Mac实际SettingsView双语双外观及保留会话渲染证据入口。
 - 本地验证和准确新head原生CI/独立high delta审查以PR回执为准，旧725ba绿灯不覆盖本轮；新增故障回归旧代码Red未执行。Windows实际生产组件+synthetic IO截图/指针演示非native持久化或网络证明；Mac渲染须托管WindowServer执行。
 - 交付仍Draft #1571；未合并/出包/发版/改feeds/移动端。设备真实DNS/第二跳身份/换云、Core/daemon故障、睡眠/网络变化/重启、升级回退/G0与试用未验收，#1071/#1504/#1605/#1643不称解决。
+
+### 2026-10-17 续记 · 默认DIRECT增量的集中修正
+- 准确head [6791167fc](https://github.com/raydocs/tono/commit/6791167fc7ee10c45b7ba18e997eb7fd5cd3f742) 的 [CI39023011077](https://github.com/raydocs/tono/actions/runs/39023011077) 因Helper自测失败，总门禁失败；Windows/services/sing-box/Mac policy通过，Mac build/unit/privileged跳过。Helper旧云final门与新图冲突：改为stable仍要求云final、三层须精确整图准入，协议4.52.57；不概括放开DIRECT。
+- 独立high增量发现两项源码Major并各记finding：晚解析Home CIDR与自动恢复重新消费下一次模式。共享图在国内/普通解析后、DIRECT前重检Home CIDR；既有编译器回归注入保护CIDR/普通公网/私网答案，并保留视频/明确云优先。双端将模式锁在准入会话，自动恢复不读取新偏好，显式结束后才采纳，覆盖stable→三层及反向恢复。
+- 原生Red、真实DNS/第二跳身份、PF/WFP设备故障、升级回退与试用未执行；顺序图注入测试不冒充真实Core/网络。准确修复head的本地检查、新CI与独立增量复核以PR回执为准，不沿用679的绿灯或称两个finding已合main。
+- 继续原Draft，不合并、不出包、不改候选/feeds。Windows设置截图/指针演示为真实组件+synthetic IO；Mac SettingsView渲染待新原生CI执行和图像核验。

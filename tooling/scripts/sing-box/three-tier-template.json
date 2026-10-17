@@ -36,11 +36,13 @@
         {"network": ["udp", "icmp"], "action": "reject", "no_drop": true},
         {"domain": "$domestic_full", "network": "tcp", "port": [80, 443], "action": "resolve", "server": "Tono-ThreeTier-China-DNS", "strategy": "ipv4_only"},
         {"ip_cidr": ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/3"], "action": "reject", "no_drop": true},
+        {"network": "tcp", "ip_cidr": "$home_cidrs", "action": "route", "outbound": "$home_target"},
         {"domain": "$domestic_full", "network": "tcp", "port": [80, 443], "action": "route", "outbound": "Tono-ThreeTier-Direct"},
         {"domain": "$overseas_full", "network": "tcp", "action": "resolve", "server": "Tono-DoH", "strategy": "ipv4_only"},
         {"domain": "$overseas_full", "network": "tcp", "action": "route", "outbound": "Tono-Exit"},
         {"network": "tcp", "port": [80, 443], "action": "resolve", "server": "Tono-ThreeTier-China-DNS", "strategy": "ipv4_only"},
         {"ip_cidr": ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/3"], "action": "reject", "no_drop": true},
+        {"network": "tcp", "ip_cidr": "$home_cidrs", "action": "route", "outbound": "$home_target"},
         {"network": "tcp", "port": [80, 443], "action": "route", "outbound": "Tono-ThreeTier-Direct"},
         {"action": "reject", "no_drop": true}
       ]
