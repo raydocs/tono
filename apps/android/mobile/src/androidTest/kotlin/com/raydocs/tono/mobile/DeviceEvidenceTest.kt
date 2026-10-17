@@ -241,10 +241,8 @@ class DeviceEvidenceTest {
         }
     }
 
+    /** Drives the fixture through a connect/disconnect/fail cycle; CI records the screen from the host. */
     @Test fun b2_fixtureMotionRecordedOnDevice() = withFixtureHost { set, _ ->
-        val video = "/sdcard/Download/tono-fixture-motion.mp4"
-        instrumentation.uiAutomation.executeShellCommand("rm -f $video").close()
-        val rec = instrumentation.uiAutomation.executeShellCommand("screenrecord --time-limit 30 --bit-rate 8000000 $video")
         Thread.sleep(1_200)
         val steps = listOf(
             900L to idle,
@@ -257,7 +255,5 @@ class DeviceEvidenceTest {
             2_400L to idle.copy(phase = Phase.FAILED, reasonCode = "HOME_UNAVAILABLE"),
         )
         for ((ms, s) in steps) { set(s); Thread.sleep(ms) }
-        Thread.sleep(16_000) // let screenrecord reach its time limit and finalise the file
-        rec.close()
     }
 }

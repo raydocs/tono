@@ -147,8 +147,15 @@ jobs:
           for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog \
                    a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig \
                    b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale; do
+            rec=""
+            if [ "$t" = b2_fixtureMotionRecordedOnDevice ]; then
+              # Recorded from the host: a screenrecord started inside the test kept the run open.
+              adb shell screenrecord --time-limit 25 --bit-rate 8000000 /sdcard/Download/tono-fixture-motion.mp4 &
+              rec=$!
+            fi
             timeout 600 adb shell am instrument -w -r -e class "com.raydocs.tono.mobile.DeviceEvidenceTest#$t" \
               $APP.test/androidx.test.runner.AndroidJUnitRunner > "evidence/instrument-$t.txt"
+            [ -n "$rec" ] && timeout 60 tail --pid="$rec" -f /dev/null
             grep -q '^OK (' "evidence/instrument-$t.txt" && echo "PASS $t" >> evidence/summary.txt || { echo "FAIL $t" >> evidence/summary.txt; failed="$failed $t"; }
             timeout 120 adb pull /sdcard/Android/data/$APP/files/evidence/. evidence/
             [ "$t" = b2_fixtureMotionRecordedOnDevice ] && timeout 120 adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4
