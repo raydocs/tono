@@ -43,7 +43,7 @@ final class TrafficMonitor: NSObject, LibboxCommandClientHandlerProtocol, @unche
     func initializeClashMode(_ modeList: (any LibboxStringIteratorProtocol)?, currentMode: String?) {}
     func setDefaultLogLevel(_ level: Int32) {}
     func updateClashMode(_ newMode: String?) {}
-    func writeConnectionEvents(_ events: LibboxConnectionEvents?) {}
+    func write(_ events: LibboxConnectionEvents?) {}
     func writeGroups(_ message: (any LibboxOutboundGroupIteratorProtocol)?) {}
     func writeLogs(_ messageList: (any LibboxLogIteratorProtocol)?) {}
     func writeOutbounds(_ message: (any LibboxOutboundGroupItemIteratorProtocol)?) {}

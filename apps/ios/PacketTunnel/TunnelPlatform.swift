@@ -6,7 +6,8 @@ import os.log
 
 /// libbox's view of iOS: turns sing-box's TUN request into NEPacketTunnelNetworkSettings, hands
 /// back the utun descriptor, and reports the underlying network. Method set and Swift names follow
-/// the gobind header of libbox at sing-box 25b0d5ea (v1.15.0-alpha.12); features Tono does not use
+/// the gobind header of libbox at sing-box 25b0d5ea (v1.15.0-alpha.12) as Swift imports it (e.g.
+/// `autoDetectInterfaceControl:` becomes `autoDetectControl(_:)`); features Tono does not use
 /// (shell, bridge, auto-redirect, notifications, Wi-Fi state) refuse explicitly.
 final class TunnelPlatform: NSObject, LibboxPlatformInterfaceProtocol, LibboxCommandServerHandlerProtocol {
     private unowned let provider: PacketTunnelProvider
@@ -100,9 +101,9 @@ final class TunnelPlatform: NSObject, LibboxPlatformInterfaceProtocol, LibboxCom
 
     // MARK: Underlying network
 
-    func usePlatformAutoDetectInterfaceControl() -> Bool { false }
+    func usePlatformAutoDetectControl() -> Bool { false }
 
-    func autoDetectInterfaceControl(_ fd: Int32) throws {}
+    func autoDetectControl(_ fd: Int32) throws {}
 
     func startDefaultInterfaceMonitor(_ listener: (any LibboxInterfaceUpdateListenerProtocol)?) throws {
         guard let listener else { return }
@@ -118,7 +119,7 @@ final class TunnelPlatform: NSObject, LibboxPlatformInterfaceProtocol, LibboxCom
         _ = first.wait(timeout: .now() + 5)
     }
 
-    private func publish(_ path: NWPath, to listener: any LibboxInterfaceUpdateListenerProtocol) {
+    private func publish(_ path: Network.NWPath, to listener: any LibboxInterfaceUpdateListenerProtocol) {
         let description = UnderlyingNetwork.describe(path)
         listener.updateNetworkPath(description)
         guard description != lastPath else { return }
