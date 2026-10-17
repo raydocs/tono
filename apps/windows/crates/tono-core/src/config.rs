@@ -34,7 +34,8 @@ pub const DIRECT_GROUP_NAME: &str = "Tono-China-Direct";
 pub const WEB_DIRECT_GROUP_NAME: &str = "Tono-China-Web-Direct";
 pub use crate::direct_domains::{
     ADDRESS_FREE_WEB_SUFFIXES, CLAUDE_HOME_DOMAINS, CLAUDE_HOME_IPV4_CIDRS,
-    ALWAYS_ADDRESS_FREE_WEB_SUFFIXES, DEDICATED_MODEL_API_SUFFIXES, is_address_free_web_suffix,
+    ALWAYS_ADDRESS_FREE_WEB_SUFFIXES, CLOUD_VIDEO_DOMAINS, DEDICATED_MODEL_API_SUFFIXES,
+    is_address_free_web_suffix,
 };
 
 /// Main and known helper executables for the three reviewed China-office
@@ -879,6 +880,13 @@ fn runtime_value(
         .iter()
         .map(|rule| rule.to_string())
         .collect();
+    // Specific video/API exceptions precede Google parents and every
+    // Home/DIRECT process rule. Keep the same TCP-only contract without a
+    // Home hop or DIRECT plan, including when the cloud exit supports HY2 UDP.
+    for domain in CLOUD_VIDEO_DOMAINS {
+        rules.push(format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{EXIT_GROUP_NAME}"));
+        rules.push(format!("AND,((NETWORK,UDP),(DOMAIN-SUFFIX,{domain})),REJECT"));
+    }
     if home.node.is_some() || home.socks5.is_some() {
         // TCP-scoped on purpose: these pins sit ahead of the UDP REJECT rows,
         // and a network-agnostic Claude pin would swallow UDP into a group
@@ -1317,15 +1325,7 @@ reality-opts:
             .iter()
             .map(|rule| rule.as_str().unwrap())
             .collect();
-        assert_eq!(
-            rules,
-            [
-                "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
-                "IP-CIDR6,::1/128,DIRECT,no-resolve",
-                "AND,((NETWORK,UDP)),REJECT",
-                "MATCH,Tono-Exit"
-            ]
-        );
+        assert_eq!(rules, expected_cloud_only_rules(true));
         let raw = build().yaml().to_string();
         assert!(!raw.contains("GEOIP"), "no GEOIP rules may leak in");
     }
@@ -1453,7 +1453,7 @@ reality-opts:
             .iter()
             .map(|rule| rule.as_str().unwrap())
             .collect();
-        assert_eq!(rules, [RULES[0], RULES[1], "AND,((NETWORK,UDP)),REJECT", RULES[2]]);
+        assert_eq!(rules, expected_cloud_only_rules(true));
         assert_eq!(get(&redacted, &["proxies"]).as_sequence().unwrap().len(), 3);
         let groups = get(&redacted, &["proxy-groups"]).as_sequence().unwrap();
         assert_eq!(groups.len(), 1);
@@ -1521,6 +1521,23 @@ reality-opts:
         rules
     }
 
+    fn expected_cloud_video_rules() -> Vec<String> {
+        CLOUD_VIDEO_DOMAINS.iter().flat_map(|domain| [
+            format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),Tono-Exit"),
+            format!("AND,((NETWORK,UDP),(DOMAIN-SUFFIX,{domain})),REJECT"),
+        ]).collect()
+    }
+
+    fn expected_cloud_only_rules(reject_udp: bool) -> Vec<String> {
+        let mut rules = vec![RULES[0].to_string(), RULES[1].to_string()];
+        rules.extend(expected_cloud_video_rules());
+        if reject_udp {
+            rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
+        }
+        rules.push(RULES[2].to_string());
+        rules
+    }
+
     /// Mirrors the emission order in `runtime_value`: the resolved TCP pins in plan order,
     /// then the UDP media rules. TCP is pinned rather than process-scoped because only a
     /// pinned endpoint has a matching WFP permit.
@@ -1558,6 +1575,8 @@ reality-opts:
             "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve".to_string(),
             "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
         ];
+        rules.extend(expected_cloud_video_rules());
+        let home_start = rules.len();
         for domain in CLAUDE_HOME_DOMAINS {
             rules.push(format!(
                 "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{CLAUDE_HOME_GROUP_NAME}"
@@ -1569,7 +1588,7 @@ reality-opts:
             ));
         }
         rules.extend(expected_home_process_rules(CLAUDE_HOME_GROUP_NAME));
-        let udp_rules: Vec<String> = rules[2..]
+        let udp_rules: Vec<String> = rules[home_start..]
             .iter()
             .map(|rule| {
                 rule.replace("(NETWORK,TCP)", "(NETWORK,UDP)")
@@ -1587,6 +1606,8 @@ reality-opts:
             "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve".to_string(),
             "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
         ];
+        rules.extend(expected_cloud_video_rules());
+        let home_start = rules.len();
         for domain in CLAUDE_HOME_DOMAINS {
             rules.push(format!(
                 "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{CLAUDE_HOME_GROUP_NAME}"
@@ -1598,7 +1619,7 @@ reality-opts:
             ));
         }
         rules.extend(expected_home_process_rules(CLAUDE_HOME_GROUP_NAME));
-        let udp_rules: Vec<String> = rules[2..]
+        let udp_rules: Vec<String> = rules[home_start..]
             .iter()
             .map(|rule| {
                 rule.replace("(NETWORK,TCP)", "(NETWORK,UDP)")
@@ -1617,7 +1638,7 @@ reality-opts:
     }
 
     #[test]
-    fn no_direct_build_is_byte_identical_to_before() {
+    fn no_direct_build_contains_only_cloud_routes() {
         let without =
             build_owned_runtime(&three_nodes(), "JP Reality 02", "test-secret", None).unwrap();
         let value = parsed(&without);
@@ -1632,7 +1653,7 @@ reality-opts:
             .iter()
             .map(|rule| rule.as_str().unwrap())
             .collect();
-        assert_eq!(rules, [RULES[0], RULES[1], "AND,((NETWORK,UDP)),REJECT", RULES[2]]);
+        assert_eq!(rules, expected_cloud_only_rules(true));
         let proxies = get(&value, &["proxies"]).as_sequence().unwrap();
         assert_eq!(proxies.len(), 3);
         assert!(
@@ -1734,6 +1755,7 @@ reality-opts:
             "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve".to_string(),
             "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
         ];
+        expected.extend(expected_cloud_video_rules());
         expected.extend(expected_home_process_rules("Tono-Exit"));
         // The shared helper, not a second hand-written copy: this test and
         // `expected_direct_rules` drifted apart exactly once already.
@@ -1746,8 +1768,9 @@ reality-opts:
             expected.iter().map(String::as_str).collect::<Vec<_>>()
         );
         let home_rules = expected_home_process_rules("Tono-Exit");
+        let home_start = 2 + 2 * CLOUD_VIDEO_DOMAINS.len();
         assert_eq!(
-            &rules[2..2 + home_rules.len()],
+            &rules[home_start..home_start + home_rules.len()],
             home_rules
                 .iter()
                 .map(String::as_str)
@@ -1982,7 +2005,7 @@ reality-opts:
             .iter()
             .map(|rule| rule.as_str().unwrap())
             .collect();
-        assert_eq!(rules, [RULES[0], RULES[1], "AND,((NETWORK,UDP)),REJECT", RULES[2]]);
+        assert_eq!(rules, expected_cloud_only_rules(true));
     }
 
     /// The Windows Service admits exactly these strings (`direct_admission` tests carry the same
@@ -2071,7 +2094,10 @@ reality-opts:
     }
 
     #[test]
-    fn home_domains_cover_reviewed_assistants_without_google_at_large() {
+    fn home_domains_cover_owner_destinations_with_cloud_video_exceptions() {
+        let socks5 = home_socks5();
+        let runtime = build_with_home_socks5(Some(&socks5));
+        let yaml = runtime.yaml();
         for required in [
             "stripe.com", "stripecdn.com", "link.com", "hcaptcha.com", "statsig.com",
             "openai.com",
@@ -2109,24 +2135,53 @@ reality-opts:
             "instagram.com",
             "gmail.com",
             "accounts.google.com",
+            "cdn.usefathom.com", "g.ai", "dify.ai", "poe.com", "groq.com",
+            "sora.com", "cursor.sh", "jasper.ai", "openart.ai", "clipdrop.co",
+            "chatgpt.site", "deepmind.com", "ai.google.dev", "gemini.google",
+            "openrouter.ai", "api.github.com", "deepmind.google", "api.jetbrains.ai",
+            "jules.google.com", "notebooklm.google", "antigravity.google",
+            "aida.googleapis.com", "generativeai.google", "makersuite.google.com",
+            "antigravity-unleash.goog", "geller-pa.googleapis.com", "gateway.ai.cloudflare.com",
+            "aisandbox-pa.googleapis.com", "cloudcode-pa.googleapis.com",
+            "robinfrontend-pa.googleapis.com", "alkalicore-pa.clients6.google.com",
+            "daily-cloudcode-pa.googleapis.com", "proactivebackend-pa.googleapis.com",
+            "alkalimakersuite-pa.clients6.google.com",
+            "google.com", "googleapis.com", "github.com", "githubusercontent.com", "githubassets.com",
+            "reddit.com", "redd.it", "redditmedia.com", "redditstatic.com", "reddit.map.fastly.net",
+            "tiktok.com", "tiktokv.com", "tiktokcdn.com", "tiktokcdn-us.com", "ttlivecdn.com",
         ] {
             assert!(
                 CLAUDE_HOME_DOMAINS.contains(&required),
                 "{required} must leave through the home hop"
             );
+            assert!(
+                yaml.contains(&format!(
+                    "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{required})),Tono-Claude-Home"
+                )),
+                "{required} must route to the residential hop in the public runtime"
+            );
+            assert!(
+                yaml.contains(&format!(
+                    "AND,((NETWORK,UDP),(DOMAIN-SUFFIX,{required})),REJECT"
+                )),
+                "{required} must not escape over cloud UDP"
+            );
         }
         for forbidden in [
-            "google.com",
-            "googleapis.com",
             "gstatic.com",
             "youtube.com",
             "googlevideo.com",
-            "drive.google.com",
+            "google.dev",
+            "cloudflare.com",
+            "bytedance.com", "ibyteimg.com", "fastly.net", "akamaized.net", "edgesuite.net",
         ] {
             assert!(
                 !CLAUDE_HOME_DOMAINS.contains(&forbidden),
                 "{forbidden} would pull unrelated traffic onto the home hop"
             );
+            assert!(!yaml.contains(&format!(
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{forbidden})),Tono-Claude-Home"
+            )));
         }
         assert!(
             CLAUDE_HOME_IPV4_CIDRS.contains(&"160.79.104.0/21"),
@@ -2138,9 +2193,6 @@ reality-opts:
                 "{forbidden} is Tono's own probe or a wildcard, not Claude"
             );
         }
-        let socks5 = home_socks5();
-        let runtime = build_with_home_socks5(Some(&socks5));
-        let yaml = runtime.yaml();
         assert!(
             yaml.contains("AND,((NETWORK,TCP),(IP-CIDR,160.79.104.0/21,no-resolve)),Tono-Claude-Home"),
             "Anthropic IPv4 must ride the home hop by IP"
@@ -2157,6 +2209,15 @@ reality-opts:
             .iter()
             .map(|rule| rule.as_str().unwrap())
             .collect();
+        let home = rules.iter().position(|rule| rule.ends_with(",Tono-Claude-Home")).unwrap();
+        for host in ["youtube.com", "googlevideo.com", "youtubei.googleapis.com", "youtube-ui.l.google.com", "pornhub.com", "phncdn.com"] {
+            let cloud = format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{host})),Tono-Exit");
+            let index = rules.iter().position(|rule| *rule == cloud).expect(host);
+            assert!(index < home, "{host} must override Home domain/process rules");
+            assert!(rules.contains(&format!("AND,((NETWORK,UDP),(DOMAIN-SUFFIX,{host})),REJECT").as_str()),
+                "{host} UDP must be rejected, not sent to a potentially unsupported exit");
+            assert!(crate::direct_domains::is_protected_from_direct(host));
+        }
         for domain in [
             "storage.googleapis.com",
             "registry.npmjs.org",
@@ -2280,9 +2341,9 @@ reality-opts:
     /// Rule shadowing is not hypothetical in this codebase; it has already happened in this
     /// very function.
     ///
-    /// So: every UDP rule that precedes the REJECT must narrow the flow to something
-    /// reviewed — a process identity or a pinned address. An unconditional one is refused
-    /// here rather than in production.
+    /// So: every rule that admits UDP before the REJECT must narrow the flow to
+    /// something reviewed — a process identity or a pinned address. Earlier REJECT
+    /// rules deny traffic and cannot open a ruleless dial.
     #[test]
     fn no_unconditional_udp_rule_may_precede_the_reject() {
         let mut plan = direct_plan();
@@ -2309,6 +2370,12 @@ reality-opts:
                 // through `AND,((DST-PORT,443)),Tono-China-Direct`, which is unconditional for
                 // UDP in everything but name. Only a rule that names TCP is out of scope.
                 if rule.contains("(NETWORK,TCP)") {
+                    continue;
+                }
+                // Cloud-video UDP denials terminate the flow; only forwarding
+                // rules can bypass the final rejection. Their targets remain
+                // checked by the exact graph and Home/video regressions.
+                if rule.ends_with(",REJECT") {
                     continue;
                 }
                 // Bare rules (`IP-CIDR,127.0.0.0/8,DIRECT,no-resolve`) carry no parenthesis,
@@ -2795,7 +2862,7 @@ fingerprint: "1e5374a79bdb83b04c3d3c84722c03211d1c941c2de9f92431d2198ba7212cad"
         let home_rows = CLAUDE_HOME_DOMAINS.len() + CLAUDE_HOME_IPV4_CIDRS.len()
             + HOME_PROCESS_NAMES.len() + home_process_path_regexes().len();
         assert_eq!(tcp_home_rules.len(), home_rows);
-        let first_udp = 2 + home_rows;
+        let first_udp = 2 + 2 * CLOUD_VIDEO_DOMAINS.len() + home_rows;
         for (offset, tcp_rule) in tcp_home_rules.iter().enumerate() {
             let udp_rule = tcp_rule.replace("(NETWORK,TCP)", "(NETWORK,UDP)")
                 .replace(CLAUDE_HOME_GROUP_NAME, "REJECT");
@@ -2837,7 +2904,9 @@ fingerprint: "1e5374a79bdb83b04c3d3c84722c03211d1c941c2de9f92431d2198ba7212cad"
             .map(|rule| rule.as_str().unwrap())
             .collect();
         assert!(!rules.contains(&"AND,((NETWORK,UDP)),REJECT"));
-        assert_eq!(rules, [RULES[0], RULES[1], RULES[2]]);
+        assert_eq!(rules, expected_cloud_only_rules(false));
+        assert!(rules.contains(&"AND,((NETWORK,TCP),(DOMAIN-SUFFIX,youtubei.googleapis.com)),Tono-Exit"));
+        assert!(rules.contains(&"AND,((NETWORK,UDP),(DOMAIN-SUFFIX,youtubei.googleapis.com)),REJECT"));
     }
 
 }

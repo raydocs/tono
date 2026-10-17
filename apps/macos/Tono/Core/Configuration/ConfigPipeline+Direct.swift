@@ -26,8 +26,9 @@ nonisolated extension ConfigPipeline {
 
     // The explicit list above is a cross-platform contract; also guard the
     // residential route list so a signed direct policy cannot bypass OpenAI or
-    // another assistant when that list grows.
-    static let managedDirectGuardSuffixes = managedDirectProtectedSuffixes + assistantHomeDomainSuffixes
+    // another assistant, or cloud-only video, when those lists grow.
+    static let managedDirectGuardSuffixes = managedDirectProtectedSuffixes
+        + assistantHomeDomainSuffixes + cloudVideoDomainSuffixes
 
     static func isProtectedFromDirect(_ host: String) -> Bool {
         managedDirectGuardSuffixes.contains {

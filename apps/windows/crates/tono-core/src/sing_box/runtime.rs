@@ -316,6 +316,11 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
     } else {
         home.map(|n| n.name.as_str())
     };
+    // YouTube API children override Google Home; video overrides process
+    // fallbacks too. Match macOS even without Home/DIRECT: HY2 must not turn
+    // the reviewed TCP-only video contract into a UDP forwarding exception.
+    rules.push(json!({"network":"tcp","domain_suffix":config::CLOUD_VIDEO_DOMAINS.to_vec(),"action":"route","outbound":"Tono-Exit"}));
+    rules.push(json!({"network":"udp","domain_suffix":config::CLOUD_VIDEO_DOMAINS.to_vec(),"action":"reject"}));
     if let Some(target) = home_target {
         rules.push(json!({"network":"tcp","domain_suffix":config::CLAUDE_HOME_DOMAINS.to_vec(),"action":"route","outbound":target}));
         rules.push(json!({"network":"tcp","ip_cidr":config::CLAUDE_HOME_IPV4_CIDRS.to_vec(),"action":"route","outbound":target}));
@@ -734,10 +739,17 @@ mod tests {
         let runtime = build_runtime(input(&nodes, &routing)).unwrap();
         let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
         assert_eq!(value["outbounds"][3]["detour"], "Tono-Exit");
-        assert_eq!(
-            value["route"]["rules"][4]["outbound"],
-            "Tono-Home-Residential"
-        );
+        let rules = value["route"]["rules"].as_array().unwrap();
+        let home = rules.iter().position(|rule| rule["outbound"] == "Tono-Home-Residential").unwrap();
+        for host in ["google.com", "github.com", "reddit.com", "redd.it", "tiktok.com", "tiktokv.com", "tiktokcdn.com"] {
+            assert!(rules[home]["domain_suffix"].as_array().unwrap().contains(&json!(host)), "{host}");
+        }
+        for host in ["youtubei.googleapis.com", "youtube-ui.l.google.com", "googlevideo.com", "pornhub.com", "phncdn.com"] {
+            let cloud = rules.iter().position(|rule| rule["network"] == "tcp"
+                && rule["outbound"] == "Tono-Exit"
+                && rule["domain_suffix"].as_array().is_some_and(|domains| domains.contains(&json!(host)))).unwrap();
+            assert!(cloud < home, "{host} must override broad Google and process Home rules");
+        }
         assert_eq!(runtime.dial_endpoints().len(), 1);
         assert!(!runtime.redacted_json().contains("sensitive-home-secret"));
         let routing = CatalogRouting {
@@ -802,6 +814,17 @@ mod tests {
         assert!(!selected.runtime_json().contains("disable_chrome_parrot"));
         assert!(!selected.runtime_json().contains("insecure"));
         assert_eq!(selected.unavailable_nodes(), &[2]);
+        // No Home binding or DIRECT plan: video still uses cloud TCP, while
+        // ordinary HY2 UDP remains supported (no unconditional UDP rejection).
+        let value: Value = serde_json::from_str(selected.runtime_json()).unwrap();
+        let rules = value["route"]["rules"].as_array().unwrap();
+        assert!(rules.iter().any(|rule| rule["network"] == "tcp" && rule["action"] == "route"
+            && rule["outbound"] == "Tono-Exit"
+            && rule["domain_suffix"].as_array().is_some_and(|hosts| hosts.contains(&json!("youtubei.googleapis.com")))));
+        assert!(rules.iter().any(|rule| rule["network"] == "udp" && rule["action"] == "reject"
+            && rule["domain_suffix"].as_array().is_some_and(|hosts| hosts.contains(&json!("youtubei.googleapis.com")))));
+        assert!(!rules.iter().any(|rule| rule["network"] == "udp" && rule["action"] == "reject"
+            && rule.get("domain_suffix").is_none() && rule.get("ip_cidr").is_none()));
         nodes[2].tls_fingerprint = None;
         assert_eq!(
             build_runtime(input(&nodes, &routing)).unwrap_err(),
@@ -991,7 +1014,43 @@ mod tests {
         let yaml = runtime.yaml();
         assert!(yaml.contains("fake-ip-range: 198.18.0.1/16"));
         assert!(!yaml.contains("198.18.16.0/20"));
-        let digest = Sha256::digest(yaml.as_bytes());
+        // Pin the approved addition independently of the compiler's domain constant;
+        // every other byte must still match the original fallback document below.
+        let video_rules: Vec<String> = [
+            "youtube.com", "youtube-nocookie.com", "youtu.be", "googlevideo.com", "ytimg.com",
+            "youtube.googleapis.com", "youtubei.googleapis.com", "youtubeembeddedplayer.googleapis.com",
+            "youtube-ui.l.google.com", "wide-youtube.l.google.com", "yt3.googleusercontent.com", "ggpht.com",
+            "pornhub.com", "pornhub.org", "pornhubpremium.com", "phncdn.com", "phprcdn.com",
+            "porngub.com", "pornhub-deutsch.net", "pornhubapparel.com", "gaytube.com",
+        ]
+        .iter()
+        .flat_map(|domain| [
+            format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),Tono-Exit"),
+            format!("AND,((NETWORK,UDP),(DOMAIN-SUFFIX,{domain})),REJECT"),
+        ])
+        .collect();
+        let mut expected = vec![
+            "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve".to_string(),
+            "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
+        ];
+        expected.extend(video_rules.iter().cloned());
+        expected.push("AND,((NETWORK,UDP)),REJECT".to_string());
+        expected.push("MATCH,Tono-Exit".to_string());
+        let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let rules: Vec<_> = parsed["rules"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        assert_eq!(rules, expected);
+        let mut unchanged_yaml = yaml.to_owned();
+        for rule in video_rules {
+            let line = format!("- {rule}\n");
+            assert_eq!(unchanged_yaml.matches(&line).count(), 1);
+            unchanged_yaml = unchanged_yaml.replacen(&line, "", 1);
+        }
+        let digest = Sha256::digest(unchanged_yaml.as_bytes());
         let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
         assert_eq!(hex, PINNED_YAML_SHA256);
     }

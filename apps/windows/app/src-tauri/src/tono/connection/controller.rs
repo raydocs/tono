@@ -380,7 +380,7 @@ pub(super) async fn wait_controller(secret: &str, controller_port: u16) -> Resul
                     };
                     let url = controller_url(
                         controller_port,
-                        "/dns/query?name=www.google.com&type=A",
+                        "/dns/query?name=www.gstatic.com&type=A",
                     );
                     let _ = prefetch.get(url).bearer_auth(prefetch_secret).send().await;
                 });

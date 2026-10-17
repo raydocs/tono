@@ -1187,8 +1187,9 @@ pub(super) fn controller_direct_graph_is_active(
     } else if assistant_shield {
         home_rows += config::CLAUDE_HOME_DOMAINS.len() + config::CLAUDE_HOME_IPV4_CIDRS.len();
     }
+    let cloud_rows = 2 * config::CLOUD_VIDEO_DOMAINS.len();
     // + 4 = two loopback rows, the UDP REJECT row, and the final MATCH.
-    let expected_len = expected_direct_rules.len() + 3 + home_rows + 1;
+    let expected_len = expected_direct_rules.len() + 3 + cloud_rows + home_rows + 1;
     if rules.len() != expected_len {
         return Err(format!(
             "controller runtime returned {} rules, expected the exact {expected_len}-rule graph",
@@ -1200,6 +1201,16 @@ pub(super) fn controller_direct_graph_is_active(
     // Home pins are TCP-scoped ANDs so assistant UDP falls through to the REJECT
     // row instead of matching a group that cannot carry it and leaking DIRECT.
     let mut index = 2;
+    // The cloud video prefix is part of the exact staged graph, not an
+    // exception to cardinality/order checking.
+    for domain in config::CLOUD_VIDEO_DOMAINS {
+        expect_rule(rules.get(index), index, "AND",
+            &format!("((Network,tcp) && (DomainSuffix,{domain}))"), EXIT_GROUP_NAME)?;
+        index += 1;
+        expect_rule(rules.get(index), index, "AND",
+            &format!("((Network,udp) && (DomainSuffix,{domain}))"), "REJECT")?;
+        index += 1;
+    }
     if claude_home || assistant_shield {
         let domain_proxy = if claude_home {
             config::CLAUDE_HOME_GROUP_NAME
