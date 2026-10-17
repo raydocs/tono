@@ -123,36 +123,59 @@ final class TonoUITests: XCTestCase {
     }
 
     // MARK: - Apple accessibility audit (contrast, hit regions, Dynamic Type, labels, clipping)
+    // Every screen is audited even after an earlier one fails, so one CI run lists every issue.
 
     @MainActor func testAccessibilityAuditHomeStates() throws {
-        for phase in ["SIGNED_OUT", "IDLE", "CONNECTING", "CONNECTED", "DEGRADED", "FAILED"] {
-            try audit(launch(phase), name: "home-\(phase)")
+        var failures: [String] = []
+        for phase in ["SIGNED_OUT", "IDLE", "NEEDS_PERMISSION", "CONNECTING", "CONNECTED", "DEGRADED", "FAILED"] {
+            failures += try audit(launch(phase), name: "home-\(phase)")
         }
+        XCTAssertTrue(failures.isEmpty, failures.joined(separator: "\n"))
     }
 
     @MainActor func testAccessibilityAuditSheets() throws {
+        var failures: [String] = []
         for sheet in ["lines", "details", "settings"] {
-            try audit(launch("DEGRADED", ["-TonoPreviewSheet", sheet]), name: "sheet-\(sheet)")
+            failures += try audit(launch("DEGRADED", ["-TonoPreviewSheet", sheet]), name: "sheet-\(sheet)")
         }
+        XCTAssertTrue(failures.isEmpty, failures.joined(separator: "\n"))
     }
 
     @MainActor func testAccessibilityAuditLargestText() throws {
-        try audit(launch("CONNECTED", ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]),
-                  name: "largest-text-connected")
-        try audit(launch("SIGNED_OUT", ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]),
-                  name: "largest-text-signin")
+        let largest = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        var failures: [String] = []
+        failures += try audit(launch("CONNECTED", largest), name: "largest-text-connected")
+        failures += try audit(launch("FAILED", largest), name: "largest-text-failed")
+        failures += try audit(launch("SIGNED_OUT", largest), name: "largest-text-signin")
+        failures += try audit(launch("DEGRADED", largest + ["-TonoPreviewSheet", "details"]), name: "largest-text-details")
+        XCTAssertTrue(failures.isEmpty, failures.joined(separator: "\n"))
     }
 
-    @MainActor private func audit(_ app: XCUIApplication, name: String) throws {
+    /// Runs Apple's audit and returns one line per issue (empty when the screen is clean).
+    @MainActor private func audit(_ app: XCUIApplication, name: String) throws -> [String] {
         guard #available(iOS 17.0, *) else { throw XCTSkip("performAccessibilityAudit needs an iOS 17+ runtime") }
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         sleep(2)
-        try app.performAccessibilityAudit { issue in
-            let element = issue.element
-            // The yellow DEBUG badge is not part of the product (compiled out of Release).
-            if element?.identifier == "previewBadge" { return true }
-            print("AUDIT \(name): [\(issue.auditType)] \(issue.compactDescription) — \(element?.debugDescription.prefix(200) ?? "no element")")
-            return false
+        var found: [String] = []
+        var dumped = false
+        do {
+            try app.performAccessibilityAudit { issue in
+                let element = issue.element
+                // The yellow DEBUG badge is not part of the product (compiled out of Release).
+                if element?.identifier == "previewBadge" { return true }
+                let line = "AUDIT \(name): [\(issue.auditType.rawValue)] \(issue.compactDescription) | \(issue.detailedDescription) | "
+                    + (element.map { "\($0.elementType.rawValue) id=\($0.identifier) label=\($0.label) frame=\($0.frame)" } ?? "no element")
+                print(line)
+                found.append(line)
+                if element == nil && !dumped {
+                    dumped = true
+                    print("TREE \(name):\n\(app.debugDescription)")
+                }
+                return true
+            }
+        } catch {
+            found.append("AUDIT \(name): audit error \(error)")
         }
+        return found
     }
 }

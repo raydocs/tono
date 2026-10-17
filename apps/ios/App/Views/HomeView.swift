@@ -19,8 +19,11 @@ struct HomeView: View {
             SeaScene(sky: SkyState(model.phase), horizon: 0.42)
             // Legibility scrim behind the lower controls; the sea stays visible above it.
             // Large text pushes the controls up over the sky, so the scrim starts higher there.
-            LinearGradient(colors: [.clear, TonoColor.nightDeep.opacity(0.55), TonoColor.nightDeep.opacity(0.85)],
-                           startPoint: UnitPoint(x: 0.5, y: typeSize.isAccessibilitySize ? 0.08 : 0.45), endPoint: .bottom)
+            // At accessibility sizes the text sits on the sky itself, so the scrim is near-opaque there.
+            LinearGradient(colors: typeSize.isAccessibilitySize
+                               ? [TonoColor.nightDeep.opacity(0.35), TonoColor.nightDeep.opacity(0.9), TonoColor.nightDeep.opacity(0.95)]
+                               : [.clear, TonoColor.nightDeep.opacity(0.55), TonoColor.nightDeep.opacity(0.85)],
+                           startPoint: UnitPoint(x: 0.5, y: typeSize.isAccessibilitySize ? 0.0 : 0.45), endPoint: .bottom)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
@@ -73,7 +76,7 @@ struct HomeView: View {
             Spacer()
             Button { showSettings = true } label: {
                 GlyphIcon(glyph: .gear, tint: TonoColor.textPrimary, size: 20)
-                    .frame(width: 44, height: 44)
+                    .frame(width: 48, height: 48)
                     .glassSurface(Circle())
                     .contentShape(Circle())
             }
@@ -123,7 +126,7 @@ struct HomeView: View {
                         GlyphIcon(glyph: .chevronUp, tint: TonoColor.textSecondary, size: 14)
                     }
                     .foregroundStyle(TonoColor.textSecondary)
-                    .frame(minHeight: 44)
+                    .frame(minWidth: 64, minHeight: 48)
                     .padding(.horizontal, 6)
                     .contentShape(Rectangle())
                 }
@@ -171,13 +174,15 @@ struct HomeView: View {
             HStack(spacing: 12) {
                 StatusDot(color: LatencyLevelColor.color(line?.latencyMS))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(name).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary).lineLimit(1)
+                    Text(name).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
+                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                     if model.usingCachedCatalog {
                         Text(L.t("lines_cached")).tonoFont(11, relativeTo: .caption2).foregroundStyle(TonoColor.warning).lineLimit(2)
                     }
                 }
                 Spacer(minLength: 0)
                 Text(latency).tonoFont(15, .medium, relativeTo: .subheadline).monospacedDigit().foregroundStyle(TonoColor.textSecondary)
+                    .fixedSize()
                 GlyphIcon(glyph: .chevronDown, tint: TonoColor.textTertiary, size: 14)
             }
             .padding(.horizontal, 18)
@@ -213,7 +218,9 @@ struct ActionCapsule: View {
             onToggle(want)
         } label: {
             HStack {
+                // One line at every text size: shrink rather than hyphenate ("Dis-con-nect") at AX sizes.
                 Text(title).tonoFont(17, .semibold, relativeTo: .body)
+                    .lineLimit(1).minimumScaleFactor(0.6)
                 Spacer(minLength: 8)
                 trailing
             }
@@ -271,6 +278,7 @@ struct ActionCapsule: View {
                 Text(PhaseText.clock(since: connectedSince, now: context.date))
                     .tonoFont(15, .medium, relativeTo: .subheadline).monospacedDigit()
                     .foregroundStyle(TonoColor.textSecondary)
+                    .lineLimit(1).fixedSize()
                     .accessibilityLabel(L.t("a11y_connected_for", PhaseText.clock(since: connectedSince, now: context.date)))
             }
         }

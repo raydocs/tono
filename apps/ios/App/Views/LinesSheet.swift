@@ -45,16 +45,18 @@ struct LinesSheet: View {
             HStack(spacing: 12) {
                 StatusDot(color: LatencyLevelColor.color(line.latencyMS))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(Format.city(line.city, chinese: L.isChinese)).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary).lineLimit(1)
+                    Text(Format.city(line.city, chinese: L.isChinese)).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
                     if !line.label.isEmpty {
-                        Text(line.label).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.textSecondary).lineLimit(1)
+                        Text(line.label).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.textSecondary)
                     }
                 }
                 Spacer(minLength: 0)
                 Text(line.latencyMS.map { L.t("latency_ms", $0) } ?? L.t("line_untested"))
                     .tonoFont(15, .medium, relativeTo: .subheadline).monospacedDigit().foregroundStyle(TonoColor.textSecondary)
+                    .fixedSize()
                 if selected {
                     Text(L.t("lines_in_use")).tonoFont(12, .medium, relativeTo: .caption).foregroundStyle(TonoColor.accent)
+                        .fixedSize()
                 }
             }
             .padding(.horizontal, 16)
