@@ -183,3 +183,17 @@ struct TonoField: View {
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(TonoColor.hairline, lineWidth: 1))
     }
 }
+
+/// Scrolls at accessibility text sizes but keeps short content on the bottom edge (the thumb zone,
+/// over the scrim) instead of floating it to the top over the sky.
+struct BottomScroll<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        GeometryReader { geo in
+            ScrollView {
+                content.frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .bottom)
+            }
+        }
+    }
+}

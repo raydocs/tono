@@ -28,6 +28,10 @@ shot() { # <name> <lang> <phase> [sheet]
   xcrun simctl io "$UDID" screenshot --type=png "$OUT/$name.png" >/dev/null
   echo "captured $name"
 }
+# Warm-up launch: a freshly booted simulator posts its own system banners (e.g. Apple Intelligence)
+# in the first minutes; let them come and go before any capture.
+xcrun simctl launch "$UDID" "$BUNDLE_ID" -TonoPreview IDLE >/dev/null
+sleep 20
 # Large text (Dynamic Type accessibility L) and increased contrast, Chinese, the two busiest screens.
 xcrun simctl ui "$UDID" content_size accessibility-large
 shot "a11y-large-text-connected" zh-Hans CONNECTED
@@ -44,7 +48,7 @@ xcrun simctl launch "$UDID" "$BUNDLE_ID" -TonoPreviewCycle -AppleLanguages "(zh-
 sleep 1
 xcrun simctl io "$UDID" recordVideo --codec=h264 --force "$OUT/state-cycle.mp4" &
 REC=$!
-sleep 24
+sleep 32  # one full 23 s loop plus recorder start-up lag
 kill -INT "$REC"
 wait "$REC" || true
 echo "recorded state-cycle.mp4"

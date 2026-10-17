@@ -17,15 +17,16 @@ struct HomeView: View {
             TonoColor.night.ignoresSafeArea()
             SeaScene(sky: SkyState(model.phase), horizon: 0.42)
             // Legibility scrim behind the lower controls; the sea stays visible above it.
+            // Large text pushes the controls up over the sky, so the scrim starts higher there.
             LinearGradient(colors: [.clear, TonoColor.nightDeep.opacity(0.55), TonoColor.nightDeep.opacity(0.85)],
-                           startPoint: UnitPoint(x: 0.5, y: 0.45), endPoint: .bottom)
+                           startPoint: UnitPoint(x: 0.5, y: typeSize.isAccessibilitySize ? 0.08 : 0.45), endPoint: .bottom)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             VStack(spacing: 0) {
                 topBar
                 if typeSize.isAccessibilitySize {
-                    ScrollView { controls.padding(.top, 24) }
+                    BottomScroll { controls.padding(.top, 24) }
                 } else {
                     Spacer(minLength: 0)
                     controls
@@ -69,19 +70,23 @@ struct HomeView: View {
     /// Everything the thumb needs, at the bottom: state, one line, one action, the exit, details.
     private var controls: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(PhaseText.title(model.phase))
-                .tracking(0.5)
-                .tonoFont(40, .light, relativeTo: .largeTitle)
-                .foregroundStyle(TonoColor.textPrimary)
-                .accessibilityAddTraits(.isHeader)
-                .id(model.phase)
-                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .opacity))
-            statusLine
+            // Old and new titles cross-fade in place (a ZStack, so they never stack during the change).
+            ZStack(alignment: .leading) {
+                Text(PhaseText.title(model.phase))
+                    .tracking(0.5)
+                    .tonoFont(40, .light, relativeTo: .largeTitle)
+                    .foregroundStyle(TonoColor.textPrimary)
+                    .accessibilityAddTraits(.isHeader)
+                    .id(model.phase)
+                    .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .opacity))
+            }
+            ZStack(alignment: .leading) { statusLine }
                 .padding(.top, 6)
                 .padding(.bottom, 20)
             ActionCapsule(phase: model.phase, connectedSince: model.connectedSince) { model.toggle($0) }
             exitCapsule.padding(.top, 10)
-            HStack {
+            let footer = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout())
+            footer {
                 if model.phase.tunnelUp {
                     Text(L.t("speed_line", Format.rate(model.rx), Format.rate(model.tx)))
                         .tonoFont(12, .medium, relativeTo: .caption).monospacedDigit()
@@ -90,7 +95,7 @@ struct HomeView: View {
                         .animation(TonoMotion.state, value: model.rx)
                         .transition(.opacity)
                 }
-                Spacer()
+                if !typeSize.isAccessibilitySize { Spacer() }
                 Button { showDetails = true } label: {
                     HStack(spacing: 4) {
                         Text(L.t("details")).tonoFont(14, .medium, relativeTo: .subheadline)
@@ -167,6 +172,7 @@ struct ActionCapsule: View {
     @State private var fill: Double = 0
     @State private var fillOpacity: Double = 1
     @State private var shake: CGFloat = 0
+    @State private var shownPhase: Phase?
 
     private var action: PrimaryAction { PrimaryAction(phase) }
 
@@ -193,8 +199,12 @@ struct ActionCapsule: View {
         .buttonStyle(PressScale())
         .disabled(action.wantsTunnel == nil)
         .modifier(Shake(amount: shake))
-        .onAppear { fill = PrimaryAction.progress(phase); fillOpacity = phase.tunnelUp ? 0 : 1 }
+        .onAppear { fill = PrimaryAction.progress(phase); fillOpacity = phase.tunnelUp ? 0 : 1; shownPhase = phase }
         .onChange(of: phase) { next in
+            let wasUp = shownPhase?.tunnelUp == true
+            shownPhase = next
+            // Connected ⇄ partly working keeps the warm edge; the sunrise plays only on the way up.
+            if wasUp && next.tunnelUp { return }
             let target = PrimaryAction.progress(next)
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.9)) { fill = target; if target > 0 { fillOpacity = 1 } }
             if next.tunnelUp {

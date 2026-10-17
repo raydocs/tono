@@ -16,7 +16,7 @@ struct SignInView: View {
             TonoColor.night.ignoresSafeArea()
             SeaScene(sky: .night, horizon: 0.44)
             if typeSize.isAccessibilitySize {
-                ScrollView { VStack(alignment: .leading, spacing: 16) { intro; form } }
+                BottomScroll { VStack(alignment: .leading, spacing: 16) { intro; form } }
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     intro
