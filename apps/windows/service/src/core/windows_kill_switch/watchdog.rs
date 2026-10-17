@@ -119,8 +119,8 @@ pub(super) async fn reconcile_direct_watchdog_invalidation_unlocked(
 /// permit when that window ends, the tick releases WFP and restores DNS instead of
 /// reinstalling the block. An explicit strict kill switch does not start the window.
 /// An unhealthy tick does not reinstall unless that opt-in is set. Without it, general
-/// traffic is released after [`UNHEALTHY_RELEASE_TICKS`]. Strict mode repairs until
-/// [`STRICT_UNHEALTHY_RELEASE_TICKS`], then releases too. Persistent failures are
+/// traffic is released after [`UNHEALTHY_RELEASE_TICKS`]. Strict mode retracts grants
+/// and repairs the permanent floor indefinitely. Persistent failures are
 /// log-throttled — one error per minute, the rest at debug — so a broken engine cannot
 /// flood the service log.
 pub fn spawn_windows_kill_switch_watchdog() {
@@ -228,7 +228,7 @@ pub fn spawn_windows_kill_switch_watchdog() {
                         );
                     }
                     UnhealthyWatchdogAction::Reinstall => {
-                        if let Err(error) = install_unlocked_for(&armed, current_core).await {
+                        if let Err(error) = transition_direct_to_blocked_unlocked(armed, current_core, None).await {
                             *last_error_guard() = Some(format!("{error:#}"));
                             if last_error_log.is_none_or(|at| at.elapsed() >= ERROR_LOG_INTERVAL) {
                                 tracing::error!(

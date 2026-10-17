@@ -53,6 +53,10 @@ actor PrivilegedRuntimeCoordinator {
         try HelperManager.installIfNeeded()
     }
 
+    func bindRuntime(configDirectory: String, digest: String, mode: String) throws {
+        try HelperManager.bindRuntime(configDir: configDirectory, configSHA256: digest, routingMode: mode)
+    }
+
     /// Decision 086: re-read the helper's tunnel state after it armed on its
     /// own (native update preparation), so control-plane routing follows it.
     func reconcileKillSwitchTunnelState() {
@@ -83,11 +87,13 @@ actor PrivilegedRuntimeCoordinator {
     func installAndStartCore(
         configDirectory: String,
         configSHA256: String,
+        routingMode: String = "stable",
         helperPrepared: Bool = false
     ) throws {
         if !helperPrepared {
             try HelperManager.installIfNeeded()
         }
+        try HelperManager.bindRuntime(configDir: configDirectory, configSHA256: configSHA256, routingMode: routingMode)
         try HelperManager.startCore(
             configDir: configDirectory,
             configSHA256: configSHA256

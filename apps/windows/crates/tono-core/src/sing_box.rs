@@ -36,7 +36,7 @@ mod runtime;
 mod select;
 pub use clash_rules::{ClashRuleProof, expected_clash_api_rules};
 pub use flag::{PreferredCore, controller_delay_allowed, enabled_for, preferred_core};
-pub use runtime::{DialEndpoint, OwnedSingBoxRuntime, RuntimeInput, Transport, build_runtime};
+pub use runtime::{DialEndpoint, OwnedSingBoxRuntime, RuntimeInput, Transport, build_runtime, build_three_tier_runtime};
 pub use select::{
     CoreChoice, CoreSelection, SingBoxBinaryProof, prove_sing_box_binary, resolve,
     sing_box_pin_from_env_or_file,

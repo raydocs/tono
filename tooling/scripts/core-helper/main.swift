@@ -363,6 +363,7 @@ func ownedRuntimeConfigIsSafe(_ contents: String) -> Bool {
         return true
     }
     return safe(object)
+        && (!ThreeTierRoutingContract.isThreeTierRuntime(object) || ThreeTierRoutingContract.admits(object))
 }
 
 /// The refusal matrix that keeps an unprivileged user from getting root to run a
@@ -794,6 +795,29 @@ let coreLifecycleTestJSON = #"""
 
 func runOwnedRuntimeContractSelfTests() -> Bool {
     let valid = coreLifecycleTestJSON
+    do {
+        let graph = try ThreeTierRoutingContract.graph(home: "Tono-Home-Residential",
+            physicalInterface: "en0", fakeRange: "198.18.176.0/20")
+        var runtime = try JSONSerialization.jsonObject(with: Data(valid.utf8)) as! [String: Any]
+        runtime["route"] = graph["route"]
+        runtime["dns"] = graph["dns"]
+        runtime["outbounds"] = [
+            ["type": "vless", "tag": "Fixture Cloud", "server": "203.0.113.7", "server_port": 443],
+            ["type": "selector", "tag": "Tono-Exit", "outbounds": ["Fixture Cloud"], "default": "Fixture Cloud"],
+            ["type": "socks", "tag": "Tono-Home-Residential", "server": "203.0.113.60", "server_port": 11080,
+             "version": "5", "username": "fixture-user", "password": "fixture-password", "network": "tcp", "detour": "Tono-Exit"],
+            graph["direct_outbound"] as! [String: Any],
+        ]
+        guard ThreeTierRoutingContract.admits(runtime),
+              ownedRuntimeConfigIsSafe(String(decoding: try JSONSerialization.data(withJSONObject: runtime), as: UTF8.self)) else { return false }
+        var route = runtime["route"] as! [String: Any]
+        var rules = route["rules"] as! [[String: Any]]
+        rules[rules.count - 1] = ["action": "route", "outbound": "Tono-ThreeTier-Direct"]
+        route["rules"] = rules
+        runtime["route"] = route
+        guard !ThreeTierRoutingContract.admits(runtime),
+              !ownedRuntimeConfigIsSafe(String(decoding: try JSONSerialization.data(withJSONObject: runtime), as: UTF8.self)) else { return false }
+    } catch { return false }
     return ownedRuntimeConfigIsSafe(valid)
         && !ownedRuntimeConfigIsSafe(
             valid.replacingOccurrences(

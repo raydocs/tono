@@ -119,6 +119,7 @@ fn emergency_armed() -> Armed {
             updated_at: now_unix(),
             owner_key: None,
             strict_kill_switch: true,
+            strict_contract: None,
             reconnect_after_release: false,
             reconnect_owner_key: None,
             apply_narrow_after_release: None,
@@ -155,6 +156,12 @@ pub async fn restore_on_service_start() -> Result<()> {
     match tokio::fs::read(intent_path()).await {
         Ok(bytes) => match serde_json::from_slice::<IntentRecord>(&bytes) {
             Ok(intent) if intent_is_valid(&intent) => {
+                // A strict recovery restores only the permanent floor. The previous session's
+                // token/generation cannot authorize this boot's tunnel or physical grants.
+                let mut intent = intent;
+                if let Some(contract) = intent.strict_contract.as_mut() {
+                    contract.generation = None;
+                }
                 if !intent.is_verified() {
                     // Do not open the machine yet. Startup reconciliation runs immediately after
                     // this function and must first prove that any previous Core is gone. It then
@@ -214,7 +221,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                     armed.intent.verified = Some(true);
                     armed.intent.mode = KillSwitchStatusMode::Blocked;
                     armed.intent.updated_at = now_unix();
-                    RESTORE_WAS_LOCKED.store(true, Ordering::Release);
+                    RESTORE_WAS_LOCKED.store(!armed.intent.strict_kill_switch, Ordering::Release);
                 }
                 // Published before the install so the watchdog keeps retrying a failed one, but
                 // not yet proof of a live barrier for the Remote Desktop exception.

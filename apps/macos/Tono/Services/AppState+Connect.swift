@@ -16,6 +16,17 @@ extension AppState {
 
     func connect(preservingUnarmedBackoff: Bool) {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
+        let capturedRoutingMode: String
+        do {
+            capturedRoutingMode = try DesktopRoutingModeAdmission.capture(
+                AppProfile.defaults.object(forKey: "desktopRoutingMode")
+            )
+        } catch {
+            // Refuse before admitting a generation or touching PF/DNS/Core.
+            // Explicit Disconnect/Restore remain independent of this opt-in.
+            errorMessage = error.localizedDescription
+            return
+        }
         if !preservingUnarmedBackoff { unarmedReconnectAttempt = 0 }
         connectionCoordinator.executeConnect(
             isDisconnecting: isDisconnecting,
@@ -254,6 +265,7 @@ extension AppState {
                     physicalInterface = await PrivilegedRuntimeCoordinator.shared
                         .primaryNetworkInterface()
                 }
+                try coreRuntime.captureRoutingMode(capturedRoutingMode, physicalInterface: physicalInterface)
                 let policyIsEmpty = trafficPolicy.domains.isEmpty
                     && trafficPolicy.webDomains.isEmpty
                     && trafficPolicy.directSuffixes.isEmpty
@@ -317,6 +329,12 @@ extension AppState {
                     throw error
                 }
                 try Task.checkCancellation()
+                let digest = try await runtimeDigest
+                try await PrivilegedRuntimeCoordinator.shared.bindRuntime(
+                    configDirectory: coreRuntime.configDirectory.path,
+                    digest: digest, mode: capturedRoutingMode
+                )
+                AppProfile.defaults.set(capturedRoutingMode == "three-tier", forKey: "strictRoutingSessionIntent")
                 let protectedDNSState =
                     await PrivilegedRuntimeCoordinator.shared.protectedDNSStatus()
                 // System resolution is allowed only on a clean, unprotected
@@ -355,7 +373,6 @@ extension AppState {
                     reviewedBundleDirect: false
                 )
                 try Task.checkCancellation()
-                let digest = try await runtimeDigest
                 self.connectionStage = .startingTunnel
                 try await CoreStartupReadiness.wait(
                     start: {
@@ -505,6 +522,7 @@ extension AppState {
                     rounds: ProtectedConnectivity.postLockVerifyRounds
                 )
                 try Task.checkCancellation()
+                var domesticOnly = false
                 switch verdict {
                 case .connected(let advisory):
                     SingBoxDelayGate.prove()
@@ -523,10 +541,17 @@ extension AppState {
                     }
                 case .failed(let failure):
                     self.lastClassifiedFailure = failure
-                    throw CoreControllerError.protectionFailed(failure.userMessage)
+                    domesticOnly = await self.proveIndependentDomesticPath(
+                        enabled: capturedRoutingMode == "three-tier"
+                    )
+                    try Task.checkCancellation()
+                    guard generation == self.connectionCoordinator.protectionOperationGeneration else { return }
+                    guard domesticOnly else {
+                        throw CoreControllerError.protectionFailed(failure.userMessage)
+                    }
                 }
                 LocalTrafficAudit.shared.recordEvent(
-                    "system_data_plane_verified",
+                    domesticOnly ? "domestic_data_plane_verified" : "system_data_plane_verified",
                     details: self.auditProtectionDetails()
                 )
                 self.activeDirectPolicy = committedDirectPolicy
@@ -534,12 +559,14 @@ extension AppState {
                 // the root-owned runtime directory before launching Mihomo.
                 // Reloading that identical file here added another helper/API
                 // round trip and could interrupt a healthy first connection.
-                let committed = await self.onCoreStarted(api: api)
+                let committed = await self.onCoreStarted(api: api, domesticOnly: domesticOnly)
                 guard committed else { return }
                 // Only past the same readiness checks as any attempt.
-                self.hy2AutoSwitch.noteConnected(dialed: selectedExitName, now: Date())
-                self.recordVerifiedRouteSuccess(selectedExitName, owner: routeOwner, generation: generation,
-                                                catalogDigest: routeCatalogDigest)
+                if !domesticOnly {
+                    self.hy2AutoSwitch.noteConnected(dialed: selectedExitName, now: Date())
+                    self.recordVerifiedRouteSuccess(selectedExitName, owner: routeOwner, generation: generation,
+                                                    catalogDigest: routeCatalogDigest)
+                }
                 // Pins are for the *next* fail-closed window, not this
                 // Connected commit. Resolving them here used to hold the UI
                 // on Connecting after the real TUN path was already proven.
@@ -875,6 +902,11 @@ extension AppState {
                 "preemptive_release_unavailable",
                 details: ["error": error.localizedDescription]
             )
+            if AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent") {
+                isProtectionBlocked = true
+                errorMessage = "Strict protection remains active. Restore internet could not be confirmed; retry Restore internet."
+                return
+            }
             disconnect(releaseKillSwitch: true)
             return
         }
@@ -893,6 +925,7 @@ extension AppState {
         if updateWasPending { RuntimeCleanup.nativeUpdateBlocksConnect = true }
         switch outcome.outcome {
         case "restored":
+            AppProfile.defaults.removeObject(forKey: "strictRoutingSessionIntent")
             isProtectionBlocked = false
             isProtectionUnconfirmed = false
             protectedDNSService = nil
@@ -1066,6 +1099,18 @@ extension AppState {
         automaticFailureRelease: Bool = false,
         ordinaryQuit: Bool = false
     ) {
+        // Internal failure and Quit are not the user's explicit release.
+        // Persisted session intent (not the mutable mode preference) covers
+        // relaunches before the helper has answered its first status read.
+        let releaseKillSwitch = releaseKillSwitch && !(
+            AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent")
+                && (ordinaryQuit || automaticFailureRelease || afterUnarmedConnectFailure)
+        )
+        if releaseKillSwitch, !ordinaryQuit, !automaticFailureRelease, !afterUnarmedConnectFailure,
+           AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent"), HelperManager.releaseServiceInstalled {
+            restoreInternetPreemptively()
+            return
+        }
         // A29: while a protected fault holds, no automatic release runs; the
         // user's own Disconnect (or Restore internet, or Quit) proceeds and
         // ends the fault.
@@ -1382,7 +1427,7 @@ extension AppState {
         await self.connectionCoordinator.finishPendingDisconnect()
     }
 
-    func onCoreStarted(api: CoreControllerClient) async -> Bool {
+    func onCoreStarted(api: CoreControllerClient, domesticOnly: Bool = false) async -> Bool {
         guard isConnecting, !Task.isCancelled else { return false }
         let generation = connectionCoordinator.protectionOperationGeneration
         // Disconnect and the native-update suspend both bump the generation
@@ -1419,7 +1464,8 @@ extension AppState {
         lastUplinkSnapshot = capturedUplink.isConcrete ? capturedUplink : nil
         isProtectionBlocked = false
         isRecoveringProtectedConnection = false
-        isProxyDegraded = proxyFailed
+        isProxyDegraded = proxyFailed || domesticOnly
+        if domesticOnly { errorMessage = Self.domesticOnlyNotice }
         healthCounters = ProtectedHealthCounters()
         // The exit delay measured on the way in, so the customer timeline can
         // say how far away this node was at the moment it connected.
@@ -1726,6 +1772,7 @@ extension AppState {
     /// update, are not owned here.
     private func healthMonitorOwns(_ message: String?) -> Bool {
         guard let message else { return false }
+        if message == Self.domesticOnlyNotice { return true }
         if message == String(localized: "Recovering protected connection…") {
             return true
         }
@@ -1737,7 +1784,18 @@ extension AppState {
     /// seam; the loop itself only owns sleeping and exit. Every `continue` the
     /// loop used to execute is a `.continueMonitoring` return here, and every
     /// `return` a `.stopMonitoring`.
-    func runCoreMonitorTick(state: inout CoreMonitorState) async -> CoreMonitorTickOutcome {
+    func runCoreMonitorTick(
+        state: inout CoreMonitorState,
+        domesticProbe: @escaping @MainActor () async -> Bool = {
+            let result = await ProtectedConnectivityVerifier.probe(
+                origin: ProtectedProbeOrigin(
+                    label: "Domestic", url: "https://www.12306.cn/", expectedStatus: 200
+                ),
+                timeoutSeconds: 6, proxyPort: nil
+            )
+            return result.succeeded
+        }
+    ) async -> CoreMonitorTickOutcome {
         if self.config.tunEnabled {
             let tunExists = self.tunInterfaceExists(ConfigPipeline.tonoTunInterface)
             if tunExists {
@@ -2111,6 +2169,29 @@ extension AppState {
             }
             return .continueMonitoring
         case .retry(let failure):
+            // A cloud failure is not evidence that the independent DIRECT leg
+            // died. Require protected fake-IP DNS and certificate-checked TLS,
+            // never controller/IPC success, before sparing this live Core.
+            let domesticAlive = await self.proveIndependentDomesticPath(
+                enabled: AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent"),
+                probe: domesticProbe
+            )
+            guard !Task.isCancelled, self.isConnected else { return .stopMonitoring }
+            guard self.connectionCoordinator.protectionOperationGeneration == observedProtectionGeneration,
+                  self.connectionCoordinator.routeOperationGeneration == observedRouteGeneration,
+                  self.switchingNodeId == nil,
+                  self.connectionCoordinator.configReloadTask == nil else { return .continueMonitoring }
+            if domesticAlive {
+                self.lastClassifiedFailure = failure
+                state.consecutiveHealthFailures = 0
+                state.tunRouteRearmAttempts = 0
+                self.isProxyDegraded = true
+                self.isRecoveringProtectedConnection = false
+                if self.errorMessage == nil || self.healthMonitorOwns(self.errorMessage) {
+                    self.errorMessage = Self.domesticOnlyNotice
+                }
+                return .continueMonitoring
+            }
             self.lastClassifiedFailure = failure
             let controllerFailed: Bool
             if case .failed = controller {
@@ -2239,6 +2320,26 @@ extension AppState {
             )
             return .stopMonitoring
         }
+    }
+
+    private static let domesticOnlyNotice = String(localized: "Domestic routing is available. Cloud/Home connectivity is not verified; unavailable routes remain blocked.")
+
+    /// This exact host is already in domestic10. The ordinary client socket
+    /// reaches its fake IP through Core; no mixed proxy or real-IP bypass.
+    private func proveIndependentDomesticPath(
+        enabled: Bool,
+        probe: @MainActor () async -> Bool = {
+            let result = await ProtectedConnectivityVerifier.probe(
+                origin: ProtectedProbeOrigin(
+                    label: "Domestic", url: "https://www.12306.cn/", expectedStatus: 200
+                ),
+                timeoutSeconds: 6, proxyPort: nil
+            )
+            return result.succeeded
+        }
+    ) async -> Bool {
+        guard enabled, config.tunEnabled, !Task.isCancelled else { return false }
+        return await probe()
     }
 
     /// Switch to one alternate validated managed cloud exit without releasing
@@ -2555,7 +2656,9 @@ extension AppState {
             holdProtectedFault()
             return
         }
-        let releases = ExhaustedFailureNetwork.afterFailure(strictKillSwitchExplicit: false)
+        let releases = ExhaustedFailureNetwork.afterFailure(
+            strictKillSwitchExplicit: AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent")
+        )
             .releasesSystemNetwork
         let preferred = selectedExitNode()?.name ?? ConfigPipeline.homeNodeName
         var session = ExitHeal.Session.forPreferred(preferred, residentialId: "catalog")

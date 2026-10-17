@@ -5,16 +5,25 @@ use super::*;
 /// The rule model's view of an armed session, given who the running core is. Pure, so the
 /// tunnel-permit lifetime rule is testable without a core.
 pub(super) fn rule_config_for(armed: &Armed, current_core: Option<CoreInstance>) -> RuleConfig {
-    let tun_luid = tunnel_permit_luid(armed, current_core);
+    let mut tun_luid = tunnel_permit_luid(armed, current_core);
+    if armed.intent.strict_kill_switch
+        && !armed.intent.strict_contract.as_ref().is_some_and(|contract| contract.generation.is_some()) {
+        tun_luid = None;
+    }
+    let strict_grants = armed.intent.strict_kill_switch
+        && armed.intent.strict_contract.as_ref().is_some_and(|contract| contract.generation.is_some())
+        && armed.intent.mode == KillSwitchStatusMode::Locked && tun_luid.is_some();
     RuleConfig {
         mode: armed.intent.mode,
-        endpoints: armed.intent.endpoints.clone(),
-        api_host_ips: armed
+        endpoints: if armed.intent.strict_kill_switch && armed.intent.mode == KillSwitchStatusMode::Blocked {
+            Vec::new()
+        } else { armed.intent.endpoints.clone() },
+        api_host_ips: if armed.intent.strict_kill_switch { Vec::new() } else { armed
             .intent
             .api_host_ips
             .iter()
             .filter_map(|ip| ip.parse::<IpAddr>().ok())
-            .collect(),
+            .collect() },
         tun_luid,
         app_path: armed.intent.app_path.clone(),
         tono_app_path: installed_tono_app_path(),
@@ -22,14 +31,16 @@ pub(super) fn rule_config_for(armed: &Armed, current_core: Option<CoreInstance>)
         // changed core identity retracts both grants in the same expected-set transaction.
         direct_endpoints: if armed.intent.mode == KillSwitchStatusMode::Locked && tun_luid.is_some()
         {
-            armed.direct_endpoints.clone()
+            if strict_grants {
+                vec![ProxyEndpoint { ip: "223.5.5.5".into(), port: 443, protocol: crate::ProxyProtocol::Tcp }]
+            } else { armed.direct_endpoints.clone() }
         } else {
             Vec::new()
         },
         reviewed_direct_ports: if armed.intent.mode == KillSwitchStatusMode::Locked
             && tun_luid.is_some()
         {
-            armed.reviewed_direct_ports.clone()
+            if strict_grants { vec![80, 443] } else { armed.reviewed_direct_ports.clone() }
         } else {
             Vec::new()
         },

@@ -112,6 +112,7 @@ pub(super) fn disarmed_tombstone() -> IntentRecord {
         updated_at: now_unix(),
         owner_key: None,
         strict_kill_switch: false,
+        strict_contract: None,
         reconnect_after_release: false,
         reconnect_owner_key: None,
         apply_narrow_after_release: Some(false),

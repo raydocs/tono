@@ -234,6 +234,11 @@ pub async fn patch_preferences(patch: &TonoPreferences, not_save_file: bool) -> 
 
 /// Apply a patch and nothing else. For callers that are themselves a reconciliation.
 pub(super) async fn apply_preferences_patch(patch: &TonoPreferences, not_save_file: bool) -> Result<()> {
+    if patch.desktop_routing_mode.is_some() {
+        patch.require_available_desktop_routing_mode()?;
+        // Next-connect intent only. The current connection owns its captured mode;
+        // Service refuses replacing a strict session until explicit disconnect settles it.
+    }
     #[cfg(target_os = "macos")]
     let mut normalized_patch = patch.clone();
     #[cfg(target_os = "macos")]

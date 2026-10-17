@@ -2,6 +2,32 @@ import XCTest
 @testable import Tono
 
 final class RuntimeConfigTests: XCTestCase {
+    @MainActor
+    func testRuntimeWriterKeepsCapturedStrictModeWhenPreferenceChanges() async throws {
+        let defaults = AppProfile.defaults
+        let previous = defaults.object(forKey: "desktopRoutingMode")
+        defer {
+            if let previous { defaults.set(previous, forKey: "desktopRoutingMode") }
+            else { defaults.removeObject(forKey: "desktopRoutingMode") }
+        }
+        let runtime = CoreRuntimeManager()
+        defaults.set("three-tier", forKey: "desktopRoutingMode")
+        let mode = try DesktopRoutingModeAdmission.capture(defaults.object(forKey: "desktopRoutingMode"))
+        try runtime.captureRoutingMode(mode, physicalInterface: nil)
+        defaults.set("stable", forKey: "desktopRoutingMode")
+        do {
+            _ = try await runtime.writeRuntimeConfig(overlay: .init())
+            XCTFail("A strict writer without an interface must not compile stable after a preference change")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("No physical interface for strict routing"))
+        }
+        XCTAssertNil(runtime.runtimeConfigSHA256)
+        XCTAssertEqual(runtime.routingMode, "three-tier")
+        XCTAssertThrowsError(try DesktopRoutingModeAdmission.capture("Three-Tier"))
+        XCTAssertNoThrow(try DesktopRoutingModeAdmission.requireAvailable(nil))
+        XCTAssertNoThrow(try DesktopRoutingModeAdmission.requireAvailable("stable"))
+    }
+
     func testPersistedJSONStillUsesClashYAMLKeysAfterTheTypeRename() throws {
         let data = try JSONEncoder().encode(RuntimeConfig())
         let decoded = try JSONDecoder().decode(RuntimeConfig.self, from: data)

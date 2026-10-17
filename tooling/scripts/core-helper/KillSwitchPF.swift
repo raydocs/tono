@@ -8,6 +8,8 @@ extension KillSwitchManager {
         allowedUID: uid_t,
         physicalInterfaces: [String]? = nil
     ) throws -> String {
+        var state = state
+        if strictIntentActive { state.strictBlocking = true }
         let rules = physicalInterfaces.map {
             renderRules(state: state, allowedUID: allowedUID, physicalInterfaces: $0)
         } ?? renderRules(state: state, allowedUID: allowedUID)
@@ -182,6 +184,31 @@ extension KillSwitchManager {
         allowedUID: uid_t,
         physicalInterfaces: [String] = KillSwitchManager.physicalEgressInterfaces()
     ) -> String {
+        if state.strictBlocking {
+            var rules = [
+                "# Managed by Tono strict routing",
+                "pass in quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
+                "pass out quick on lo0 all no state label \"tono-loopback\"",
+            ]
+            if let proof = state.strictProof {
+                let nic = proof.interface
+                // Deny non-public destinations before the address-free Core
+                // web grant. No IPv6, UDP, QUIC, LAN or all-process permit.
+                rules.append("block drop out quick on \(nic) inet to { 0.0.0.0/8, 10.0.0.0/8, 127.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 224.0.0.0/3 } label \"tono-strict-local\"")
+                for endpoint in proof.exits {
+                    rules.append("pass out quick on \(nic) inet proto tcp to \(endpoint.address) port \(endpoint.port) user root keep state (if-bound) label \"tono-exit\"")
+                }
+                rules.append("pass out quick on \(nic) inet proto tcp to 223.5.5.5 port 443 user root keep state (if-bound) label \"tono-direct\"")
+                if !state.tunnelInterfaces.isEmpty {
+                    rules.append("pass out quick on \(nic) inet proto tcp from any to any port { 80, 443 } user root keep state (if-bound) label \"tono-bundle\"")
+                    for tun in state.tunnelInterfaces {
+                        rules.append("pass out quick on \(tun) inet all keep state (if-bound) label \"tono-tunnel\"")
+                    }
+                }
+            }
+            rules.append("block drop out quick all label \"tono-block\"")
+            return rules.joined(separator: "\n") + "\n"
+        }
         var lines = [
             "# Managed by Tono Kill Switch — do not edit",
             // Mihomo's controller is loopback-only. Both directions must pass

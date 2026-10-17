@@ -1053,6 +1053,23 @@ pub(crate) fn emergency_disarm() -> Result<()> {
 
 /// Resolve a network interface alias (e.g. `Tono`) to its LUID, and prove the result is
 /// really a tunnel device.
+pub(crate) fn validate_physical_interface(name: &str) -> Result<()> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211};
+    use windows_sys::Win32::NetworkManagement::Ndis::IfOperStatusUp;
+    let mut luid = NET_LUID_LH::default();
+    let status = unsafe { ConvertInterfaceAliasToLuid(wide(name).as_ptr(), &mut luid) };
+    if status != 0 { bail!("strict physical alias is unavailable: {status}"); }
+    let mut row = MIB_IF_ROW2 { InterfaceLuid: luid, ..Default::default() };
+    let status = unsafe { GetIfEntry2(&mut row) };
+    if status != 0 || row.OperStatus != IfOperStatusUp
+        || row.InterfaceAndOperStatusFlags._bitfield & 1 == 0
+        || !matches!(row.Type, IF_TYPE_ETHERNET_CSMACD | IF_TYPE_IEEE80211)
+    {
+        bail!("strict interface must be an up hardware Ethernet/Wi-Fi adapter");
+    }
+    Ok(())
+}
+
 pub(crate) fn luid_for_interface(name: &str) -> Result<u64> {
     let wide = wide(name);
     let mut luid = NET_LUID_LH::default();

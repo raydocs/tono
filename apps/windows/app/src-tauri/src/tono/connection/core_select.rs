@@ -60,6 +60,7 @@ pub(super) async fn prepare_owned_core(
     ports: RuntimePorts,
     mihomo_path: &Path,
     image: Option<SingBoxImage>,
+    strict_interface: Option<&str>,
 ) -> Result<PreparedCore, StageFailure> {
     let installation_id = state.lock().await.installation_id.clone();
     let preferred = preferred_core(&preference_path(), &installation_id);
@@ -72,6 +73,22 @@ pub(super) async fn prepare_owned_core(
     let service_can_run = matches!(service_probe, ServiceSingBoxProbe::Supported);
     let home_proxy = routing.and_then(|routing| routing.home_proxy.as_deref());
     let home_socks5 = routing.and_then(|routing| routing.home_socks5.as_ref());
+    if let Some(interface) = strict_interface {
+        if !matches!(resolve(tono_core::sing_box::PreferredCore::SingBox, proof, true, service_can_run), CoreSelection::Run(CoreChoice::SingBox)) {
+            return Err(StageFailure::error("three-tier requires authenticated sing-box and a supporting Service; fallback is forbidden"));
+        }
+        let routing = routing.cloned().unwrap_or_default();
+        let input = RuntimeInput {
+            nodes, selected, controller_secret: secret, direct_plan: None,
+            routing: &routing, platform: "windows-amd64-v2", ports,
+            required_capabilities: &[], home_process_names: &[],
+            home_process_path_regexes: &[], direct_process_names: &[],
+            fake_ip_slot: next_fake_ip_slot(state),
+        };
+        let runtime = tono_core::sing_box::build_three_tier_runtime(input, interface)
+            .map_err(|error| StageFailure::error(error.to_string()))?;
+        return Ok(PreparedCore { document: runtime.runtime_json().to_owned(), core_path: binary, sing_box: true });
+    }
     match resolve(preferred, proof, protection_armed, service_can_run) {
         CoreSelection::Run(CoreChoice::SingBox) => compile_sing_box(
             nodes,

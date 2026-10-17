@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "scope": "bounded-service-classification-not-IP-geolocation",
+  "provenance": {
+    "domestic": "Narrow exact-host subset of Tono ADDRESS_FREE_WEB_SUFFIXES at b3c6185309bcba13627038ccaaf60de596db829d; excludes shared cloud, AI and general CDN parents",
+    "overseas": "Explicit public web endpoints, not their provider trees: Wikipedia, Mozilla, Linux, GNU, Debian, Microsoft and Cloudflare; includes the three existing Tono cloud-path connectivity origins (gstatic, cp.cloudflare, Apple)",
+    "updates": "Bundled source only; changes require source review and a new client/privileged-component build. No latest.dat, user file or remote rule_set."
+  },
+  "domestic_full": [
+    "www.12306.cn", "kyfw.12306.cn", "www.bilibili.com", "api.bilibili.com",
+    "www.jd.com", "www.taobao.com", "www.tmall.com", "www.meituan.com",
+    "www.dianping.com", "www.amap.com"
+  ],
+  "overseas_full": [
+    "www.wikipedia.org", "en.wikipedia.org", "www.mozilla.org", "www.kernel.org",
+    "www.gnu.org", "www.debian.org", "www.microsoft.com", "www.cloudflare.com",
+    "www.gstatic.com", "cp.cloudflare.com", "www.apple.com"
+  ],
+  "graph": {
+    "route": {
+      "auto_detect_interface": true,
+      "default_domain_resolver": {"server": "Tono-DoH", "strategy": "ipv4_only"},
+      "final": "Tono-Exit",
+      "rules": [
+        {"ip_version": 6, "action": "reject", "no_drop": true},
+        {"inbound": ["Tono-DNS"], "action": "hijack-dns"},
+        {"port": [53], "action": "hijack-dns"},
+        {"ip_cidr": ["198.18.128.0/17", "198.18.16.0/20"], "action": "reject", "no_drop": true},
+        {"ip_cidr": ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/3"], "action": "reject", "no_drop": true},
+        {"network": "tcp", "domain_suffix": "$video_suffixes", "action": "resolve", "server": "Tono-DoH", "strategy": "ipv4_only"},
+        {"network": "tcp", "domain_suffix": "$video_suffixes", "action": "route", "outbound": "Tono-Exit"},
+        {"network": "udp", "domain_suffix": "$video_suffixes", "action": "reject"},
+        {"network": "tcp", "domain_suffix": "$home_suffixes", "action": "resolve", "server": "Tono-ThreeTier-Home-DNS", "strategy": "ipv4_only"},
+        {"network": "tcp", "domain_suffix": "$home_suffixes", "action": "route", "outbound": "$home_target"},
+        {"network": "tcp", "ip_cidr": "$home_cidrs", "action": "route", "outbound": "$home_target"},
+        {"network": ["udp", "icmp"], "action": "reject", "no_drop": true},
+        {"domain": "$domestic_full", "network": "tcp", "port": [80, 443], "action": "resolve", "server": "Tono-ThreeTier-China-DNS", "strategy": "ipv4_only"},
+        {"ip_cidr": ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/3"], "action": "reject", "no_drop": true},
+        {"domain": "$domestic_full", "network": "tcp", "port": [80, 443], "action": "route", "outbound": "Tono-ThreeTier-Direct"},
+        {"domain": "$overseas_full", "network": "tcp", "action": "resolve", "server": "Tono-DoH", "strategy": "ipv4_only"},
+        {"domain": "$overseas_full", "network": "tcp", "action": "route", "outbound": "Tono-Exit"},
+        {"action": "reject", "no_drop": true}
+      ]
+    },
+    "dns": {
+      "strategy": "ipv4_only",
+      "final": "Tono-DoH",
+      "servers": [
+        {"type": "fakeip", "tag": "Tono-FakeIP", "inet4_range": "$fake_ipv4_range"},
+        {"type": "https", "tag": "Tono-DoH", "server": "1.1.1.1", "server_port": 443, "path": "/dns-query", "tls": {"enabled": true, "server_name": "1.1.1.1", "alpn": ["h2"]}, "detour": "Tono-Exit"},
+        {"type": "https", "tag": "Tono-ThreeTier-Home-DNS", "server": "1.1.1.1", "server_port": 443, "path": "/dns-query", "tls": {"enabled": true, "server_name": "1.1.1.1", "alpn": ["h2"]}, "detour": "$home_target"},
+        {"type": "https", "tag": "Tono-ThreeTier-China-DNS", "server": "223.5.5.5", "server_port": 443, "path": "/dns-query", "tls": {"enabled": true, "server_name": "223.5.5.5", "alpn": ["h2"]}, "detour": "Tono-ThreeTier-Direct"}
+      ],
+      "rules": [
+        {"query_type": ["AAAA"], "action": "predefined", "rcode": "NOERROR"},
+        {"inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"], "query_type": ["A"], "domain_suffix": "$video_suffixes", "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30},
+        {"inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"], "query_type": ["A"], "domain_suffix": "$home_suffixes", "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30},
+        {"inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"], "query_type": ["A"], "domain": "$domestic_full", "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30},
+        {"inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"], "query_type": ["A"], "domain": "$overseas_full", "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30},
+        {"domain_suffix": "$video_suffixes", "action": "route", "server": "Tono-DoH"},
+        {"domain_suffix": "$home_suffixes", "action": "route", "server": "Tono-ThreeTier-Home-DNS"},
+        {"domain": "$domestic_full", "action": "route", "server": "Tono-ThreeTier-China-DNS"},
+        {"domain": "$overseas_full", "action": "route", "server": "Tono-DoH"},
+        {"action": "reject"}
+      ]
+    },
+    "direct_outbound": {
+      "type": "direct", "tag": "Tono-ThreeTier-Direct", "bind_interface": "$physical_interface",
+      "domain_resolver": {"server": "Tono-ThreeTier-China-DNS", "strategy": "ipv4_only"}
+    }
+  }
+}

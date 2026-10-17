@@ -62,12 +62,53 @@ try {
   replace('dedicatedModelAPISuffixes', model)
   replace('assistantHomeDomainSuffixes', home.slice(model.length), 'dedicatedModelAPISuffixes + ')
   replace('cloudVideoDomainSuffixes', video)
+
+  const snapshot = JSON.parse(readFileSync(path.join(root, 'tooling/scripts/sing-box/three-tier-template.json'), 'utf8'))
+  if (snapshot.version !== 1 || snapshot.scope !== 'bounded-service-classification-not-IP-geolocation') {
+    throw new Error('unrecognized three-tier snapshot contract')
+  }
+  const countryHosts = [...snapshot.domestic_full, ...snapshot.overseas_full]
+  if (!snapshot.domestic_full.length || !snapshot.overseas_full.length || countryHosts.length > 512 ||
+      new Set(countryHosts).size !== countryHosts.length || countryHosts.some(host =>
+        typeof host !== 'string' || host.length > 253 || !host.includes('.') ||
+        host.split('.').some(label => label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label)) ||
+        [...home, ...video].some(suffix => host === suffix || host.endsWith(`.${suffix}`)))) {
+    throw new Error('invalid, duplicate or protected geographic full host')
+  }
+  const cidr = /pub const CLAUDE_HOME_IPV4_CIDRS: \[&str; 1\] = \["(160\.79\.104\.0\/21)"\];/.exec(rust)
+  if (!cidr) throw new Error('unrecognized protected Home CIDR contract')
+  const fixed = {
+    $home_suffixes: home, $home_cidrs: [cidr[1]], $video_suffixes: video,
+    $domestic_full: snapshot.domestic_full, $overseas_full: snapshot.overseas_full,
+  }
+  function expand(value) {
+    if (typeof value === 'string' && value.startsWith('$')) {
+      if (Object.hasOwn(fixed, value)) return fixed[value]
+      if (!['$home_target', '$physical_interface', '$fake_ipv4_range'].includes(value)) {
+        throw new Error(`unknown routing graph binding: ${value}`)
+      }
+    }
+    if (Array.isArray(value)) return value.map(expand)
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, expand(v)]))
+    return value
+  }
+  const contractTarget = path.join(root, 'apps/macos/Tono/Core/ThreeTierRoutingContract.swift')
+  const contractOriginal = readFileSync(contractTarget, 'utf8')
+  const section = /    private static let templateJSON = #"""[\s\S]*?\n    """#/g
+  if ([...contractOriginal.matchAll(section)].length !== 1) throw new Error('expected one shared Swift graph template')
+  const graphJSON = JSON.stringify(expand(snapshot.graph), null, 2)
+  if (graphJSON.includes('"""#')) throw new Error('unsafe generated Swift delimiter')
+  const contractUpdated = contractOriginal.replace(section,
+    `    private static let templateJSON = #"""\n${graphJSON.split('\n').map(line => `    ${line}`).join('\n')}\n    """#`)
+  // Validate and render both targets before either write. CI --check also
+  // catches a partially interrupted generation across the two output files.
   if (args[0] === '--write') {
     if (updated !== original) writeFileSync(target, updated)
-  } else if (updated !== original) {
-    throw new Error('macOS routing domains drifted; run node tooling/scripts/sync-routing-domains.mjs --write')
+    if (contractUpdated !== contractOriginal) writeFileSync(contractTarget, contractUpdated)
+  } else if (updated !== original || contractUpdated !== contractOriginal) {
+    throw new Error('macOS routing domains/graph drifted; run node tooling/scripts/sync-routing-domains.mjs --write')
   }
-  console.log(`routing domains: ${model.length} Model API, ${home.length} Home, ${video.length} cloud-video suffixes; ordered macOS/Core/Service parity`)
+  console.log(`routing domains: ${model.length} Model API, ${home.length} Home, ${video.length} cloud-video suffixes; ordered macOS/Core/Service parity; three-tier full hosts ${snapshot.domestic_full.length} CN/${snapshot.overseas_full.length} overseas`)
 } catch (error) {
   console.error(`routing-domains: ${error.message}`)
   process.exitCode = 1

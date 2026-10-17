@@ -41,6 +41,7 @@ use crate::{
 pub(super) struct Prefetched {
     bootstrap_api_hosts: Vec<String>,
     sing_box: Option<SingBoxImage>,
+    three_tier: bool,
 }
 
 /// WIN-TCP-PROOF-SERIAL: the unarmed TCP proof of the exit ran beside the Service readiness
@@ -53,6 +54,11 @@ pub(super) struct Prefetched {
 ///    client is pinned to the same addresses (see `tono::bootstrap` / `tono::transport`).
 ///  - The sing-box image proof, which only chooses the core for this start.
 pub(super) async fn ready_service_and_prefetch(state: &TonoState) -> Result<Prefetched, String> {
+    let preferences = crate::config::Config::preferences().await.data_arc();
+    preferences
+        .require_available_desktop_routing_mode()
+        .map_err(|error| error.to_string())?;
+    let three_tier = preferences.desktop_routing_mode.as_deref() == Some("three-tier");
     // A protected re-entry resolves through the protected resolver, which is down until this
     // attempt's Core answers; its bootstrap lookup gets a short budget.
     let armed = state.lock().await.fsm.kill_switch_armed();
@@ -69,7 +75,7 @@ pub(super) async fn ready_service_and_prefetch(state: &TonoState) -> Result<Pref
     )
     .await?;
     // After the learned pins were read from the Service: the merge puts them in the permit set.
-    Ok(Prefetched { bootstrap_api_hosts: bootstrap::merge_bootstrap_hosts(&addresses), sing_box })
+    Ok(Prefetched { bootstrap_api_hosts: bootstrap::merge_bootstrap_hosts(&addresses), sing_box, three_tier })
 }
 
 /// The learned pins come from the Service, so they are read once it is ready; the two local
@@ -108,7 +114,7 @@ pub(super) async fn run_stages(
     route_owner: Option<&crate::tono::route_preferences::PreferenceContext>,
     prefetched: Prefetched,
 ) -> Result<(), StageFailure> {
-    let Prefetched { bootstrap_api_hosts, sing_box } = prefetched;
+    let Prefetched { bootstrap_api_hosts, sing_box, three_tier } = prefetched;
     // §6.2: proxy endpoints (public IPv4/port/TCP) from the selected node;
     // the bootstrap API hosts are the only control-plane recovery channel.
     // When the catalog binds a home-broadband exit, its endpoint joins the
@@ -160,8 +166,8 @@ pub(super) async fn run_stages(
             document,
         })
     };
-    let needs_physical_interface = WINDOWS_OPTIONAL_DIRECT_ENABLED
-        && traffic_policy.as_ref().is_some_and(|policy| policy.has_direct_content());
+    let needs_physical_interface = three_tier || (WINDOWS_OPTIONAL_DIRECT_ENABLED
+        && traffic_policy.as_ref().is_some_and(|policy| policy.has_direct_content()));
 
     // The preparation probes are independent of each other and all read-only /
     // cancellation-safe (the two port binds are released immediately; the core-path query is a
@@ -253,6 +259,9 @@ pub(super) async fn run_stages(
     // account's exit credentials. The App never writes it to the user profile;
     // it reaches the Service over IPC.
     let secret = generate_controller_secret();
+    let strict_interface = if three_tier {
+        Some(physical_interface.as_deref().ok_or_else(|| StageFailure::error("three-tier requires a proven physical interface"))?)
+    } else { None };
     let prepared = prepare_owned_core(
         state,
         active_runtime_resume.is_some(),
@@ -263,11 +272,13 @@ pub(super) async fn run_stages(
         runtime_ports,
         &core_path,
         sing_box,
+        strict_interface,
     )
     .await?;
     {
         let mut inner = state.lock().await;
         inner.sing_box_core = prepared.sing_box;
+        inner.three_tier_routing = three_tier;
     }
     let bundle = RuntimeBundle {
         yaml: prepared.document,
@@ -350,13 +361,22 @@ pub(super) async fn run_stages(
         )
         .await??;
     ensure_fresh(state, generation).await?;
-    transaction
-        .wait("fake-IP verification", verify_fake_ip())
-        .await?
-        .map_err(StageFailure::error)?;
+    if !three_tier {
+        transaction
+            .wait("fake-IP verification", verify_fake_ip())
+            .await?
+            .map_err(StageFailure::error)?;
+    }
 
     // §6.8 + §6.9: checkingExit → verifyingTraffic, as one retryable verification group (C3).
-    let mut kill_status = verify_post_lock(
+    let mut kill_status = if three_tier {
+        set_stage(state, app, ConnectStage::CheckingExit, generation, started).await?;
+        set_stage(state, app, ConnectStage::VerifyingTraffic, generation, started).await?;
+        let status = super::probes::verify_locked().await.map_err(StageFailure::error)?;
+        transaction.wait("three-tier protected fake-IP/TLS verification", super::probes::verify_three_tier_data_plane())
+            .await?.map_err(StageFailure::error)?;
+        status
+    } else { verify_post_lock(
         state,
         app,
         &secret,
@@ -366,7 +386,7 @@ pub(super) async fn run_stages(
         started,
         transaction,
     )
-    .await?;
+    .await? };
 
     // The durable logical-session latch is committed only after every existing check and a
     // final generation guard. A failure remains an ordinary connect failure.
@@ -465,11 +485,16 @@ pub(super) async fn run_stages(
         transport: node.catalog_transport(),
     });
     spawn_network_monitor(state, app).await;
-    if deferred_catalog_rebuild {
+    if deferred_catalog_rebuild && !three_tier {
         super::switch::spawn_deferred_catalog_rebuild(state, app, generation);
         return Ok(());
     }
     spawn_exit_identity_lookup(state, app, generation);
+    // Strict graphs are immutable. Stable's optional overlay, selected-exit writers and
+    // policy refresh must never replace them with a full-tunnel/stable document.
+    if three_tier {
+        return Ok(());
+    }
     let residential_target = if home_socks5.is_some() {
         Some(config::HOME_SOCKS5_OUTBOUND_NAME.to_owned())
     } else {

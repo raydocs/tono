@@ -38,7 +38,7 @@ use super::{
 use super::direct::dns_query_a;
 use super::reconnect::schedule_reconnect_for_generation;
 use super::controller::{CONTROLLER_HTTP_TIMEOUT, controller_client, controller_url, fetch_connections};
-use super::probes::{verify_locked, verify_tun_data_plane};
+use super::probes::{verify_locked, verify_session_data_plane, verify_session_health};
 use super::platform::{uplinks_may_have_changed, usable_physical_uplinks};
 
 /// `lookup_host` delegates to the OS resolver and has no Tokio timeout of its own. Bound every
@@ -819,14 +819,24 @@ mod protection_resync_tests {
     }
 }
 
-/// F2 leg 2: periodically repeat the same authoritative multi-origin real App request used at
-/// Connect. The controller delay API is deliberately excluded: under `unified-delay` it is a
-/// doubled measurement and persistent 504s on distant Reality exits do not prove user traffic is
-/// dead. A single public origin is likewise insufficient: every independent TLS target must fail
-/// before this leg reports failure.
+/// F2 leg 2: a real App request, never controller IPC as traffic proof. Strict
+/// health may retain domestic-only service, but admission still requires cloud.
 pub(super) async fn periodic_data_plane_probe_failed(state: &Arc<TonoState>, app: &AppHandle) -> bool {
-    match verify_tun_data_plane().await {
-        Ok(()) => false,
+    match verify_session_health(state).await {
+        Ok(None) => false,
+        Ok(Some(error)) => {
+            // Keep the live strict session, not a success claim for its failed
+            // cloud/Home leg. Feed the existing route-instability signal and
+            // retain a distinct diagnostic on every fresh domestic-only proof.
+            logging!(warn, Type::Service,
+                "Tono: strict health degraded: cloud unproven; domestic DNS/TLS passed; keeping Core (Home not verified)");
+            state.audit().log(AuditEvent::HealthProbeFail {
+                probe: "threeTierCloudDegradedDomesticProven",
+                error,
+            });
+            note_route_probe_failure(state, app).await;
+            false
+        }
         Err(err) => {
             state.audit().log(AuditEvent::HealthProbeFail {
                 probe: "tunDataPlane",
@@ -1665,8 +1675,18 @@ pub(super) async fn handle_network_change_inner(
     // Sleep/Wi-Fi flaps used to stop the core unconditionally, then burn the
     // first reconnect on "DNS 53 busy" because the just-killed listener was
     // the one we needed.
+    let in_place_proven = if allow_in_place {
+        let strict = state.lock().await.three_tier_routing;
+        if strict {
+            !periodic_data_plane_probe_failed(state, app).await
+        } else {
+            verify_session_data_plane(state).await.is_ok()
+        }
+    } else {
+        false
+    };
     if allow_in_place
-        && may_keep_session_in_place(state, verify_tun_data_plane().await.is_ok()).await != InPlaceVerdict::Rebuild
+        && may_keep_session_in_place(state, in_place_proven).await != InPlaceVerdict::Rebuild
     {
         let inner = state.lock().await;
         if inner.connect_generation != generation || !inner.fsm.status().is_connected {
@@ -1683,7 +1703,7 @@ pub(super) async fn handle_network_change_inner(
     // release the barrier and probe without a tunnel. A policy rebuild and an
     // explicit strict kill switch keep the protected reconnect below.
     let policy_rebuild = POLICY_REBUILD.try_with(|_| ()).is_ok();
-    let strict = tono_core::strict_kill_switch_explicit(None);
+    let strict = state.lock().await.three_tier_routing;
     let health_guard = if tono_core::unarmed_probe::health_monitor_releases(strict, policy_rebuild) {
         match admit_health_release(state, generation, selected_node.as_deref(), switch_task, allow_in_place).await {
             Ok(guards) => Some(guards),

@@ -274,6 +274,9 @@ async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
 /// Filter removal failure leaves `ARMED` set so the next tick retries. A tombstone failure
 /// after the filters are gone does not reinstall them.
 pub(super) async fn release_unproven_wanted_session_unlocked() -> Result<()> {
+    if strict_kill_switch_enabled() {
+        return restrict_bootstrap_unlocked().await;
+    }
     // Held until WFP removal commits: no update writer can start under this release (#1292).
     let update_fence = update_release_fence()?;
     if let Err(error) = bounded_dns_call(
@@ -529,6 +532,11 @@ pub(crate) async fn release_applying_narrow_if_owed() -> Result<KillSwitchStatus
     ensure_supported()?;
     {
         let _operation = WFP_OPERATION.lock().await;
+        if strict_kill_switch_enabled() {
+            restrict_bootstrap_unlocked().await?;
+            drop(_operation);
+            return Ok(status().await);
+        }
         let owed = ai_hold_owed().await;
         disarm_unlocked_with_narrow(owed.then_some(true)).await?;
         note_explicit_release();
@@ -564,8 +572,12 @@ async fn release_with(apply_narrow: bool) -> Result<KillSwitchStatus> {
     ensure_supported()?;
     {
         let _operation = WFP_OPERATION.lock().await;
-        disarm_unlocked(apply_narrow).await?;
-        note_explicit_release();
+        if apply_narrow && strict_kill_switch_enabled() {
+            restrict_bootstrap_unlocked().await?;
+        } else {
+            disarm_unlocked(apply_narrow).await?;
+            note_explicit_release();
+        }
     }
     Ok(status().await)
 }
@@ -590,6 +602,9 @@ pub(crate) async fn transition_after_stop(release_requested: bool) -> Result<()>
 /// The caller decides whether the on-disk intent bytes stay (corrupt evidence) or are
 /// replaced by a disarmed tombstone (a live session the watchdog gave up on).
 pub(super) async fn release_general_traffic_unlocked(reason: &str, replace_intent: bool) -> Result<()> {
+    if strict_kill_switch_enabled() {
+        return restrict_bootstrap_unlocked().await;
+    }
     tracing::warn!("wfp: {reason}; releasing general traffic and restoring DNS");
     if let Err(error) = bounded_dns_call(reason, crate::core::dns::ensure_restored()).await {
         tracing::warn!("wfp: DNS restore during {reason} failed; still releasing WFP: {error:#}");

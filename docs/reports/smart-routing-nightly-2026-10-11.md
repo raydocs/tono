@@ -1,12 +1,22 @@
 # 下一版智能分流 nightly：Home 链路与 DNS 防护设计提案
 
-日期：2026-10-11；三层合同续记：2026-10-17。状态：**#1572 已合并；owner 已授权 #1571 桌面实施和测试，未授权本 PR 合并或发布。新目标为 AI/具名 Home 组 → Home、其余确认非 AI 国内 → DIRECT、海外 → 云，取代旧默认 DIRECT。Owner 已确认保留原 Home 例外；产品模式尚未实现。**
+日期：2026-10-11；三层合同续记：2026-10-17。状态：**#1572 已合并；#1571 已增加双端有界三层运行时、DNS 和严格会话源码，正在准确 head CI/独立审查，尚未设备验收或完成客户可用性资格。Owner 已授权实施和测试，未授权本 PR 合并或发布。AI/具名 Home 组 → Home、其余确认非 AI 国内 → DIRECT、海外 → 云，取代旧默认 DIRECT。**
 
 归属：[SHIP_PLAN](../SHIP_PLAN.md) G1/G2 的后续桌面版本；保持现有 0.0.76 客户 RC 和正式 feeds 不变，不修改 G1–G3 勾选。具体产品版本由 owner 另定。
 
 原始源码参照：[main a8b0be2d](https://github.com/raydocs/tono/commit/a8b0be2d5701dbabdb644699547398bdefb99a26)；本次并入 [origin/main b3c61853（#1572 合并）](https://github.com/raydocs/tono/commit/b3c6185309bcba13627038ccaaf60de596db829d)。§3 原始行号属于旧参照，不冒充当前行号。现有 [0.0.76 RC](https://github.com/raydocs/tono/releases/tag/tono-desktop-0.0.76-rc.20261016.1) 是客户测试候选，不包含 #1572 或本模式，也不是稳定资格或可直接覆盖任意旧版本的证明。
 
-本次在原 PR 继续合同及实现：先统一现有名单来源，保留原条目和顺序；尚未增加三层模式运行时、IPC 或生产状态。实施、定点测试、独立审查可继续；合并、打包、签名、部署、发布或客户扩量未获授权。A13 / #1504 仍不恢复；#1569 已合入，不能再称未合依赖，但其存在不等于本模式的恢复/设备验收通过。移动端仅考虑复用合同，本轮不实现 iOS/Android，不改 rw8/Tono-droid。
+本次在原 PR 继续合同及实现，保留原名单条目和顺序。以下 §0.1 记录本轮实际源码与限制；后文设计目标不自动变成已实现或已验证能力。实施、定点测试、独立审查可继续；合并、打包、签名、部署、发布或客户扩量未获授权。A13 / #1504 仍不恢复；#1569 已合入，不能再称未合依赖，但其存在不等于本模式的恢复/设备验收通过。移动端仅考虑复用合同，本轮不实现 iOS/Android，不改 rw8/Tono-droid。
+
+### 0.1 本轮可执行源码与明确支持面
+
+- 同源快照：`tooling/scripts/sing-box/three-tier-template.json` v1，现有4 Model API/166 Home/21视频不变；地域部分仅 **10个国内、11个海外完整主机名**。国内取既有国内白名单的窄子集；海外为具名公共网站及三个现有云路径探测源。不是全量地理库，不是“所有国内/海外可用”；页面CDN、登录依赖或游戏未分类时照常拒绝。新增分类需源码评审和重建客户端/特权组件，不加载 latest、用户文件或远程规则集。
+- 两端编译并由 Helper/Service 精确准入同一内联 route/DNS 图。21视频先于166 Home；受支持国内TCP80/443 DIRECT，具名海外TCP云，Home TCP经云→原assigned Home。未知、IPv6、非DNS UDP/QUIC、LAN和未分类raw-IP拒绝；保留原Home IPv4 CIDR保护。仅公开字面IPv4 VLESS/TCP云出口及具名SOCKS5 Home，缺Home/云不准入；本单元不支持HY2或普通游戏任意UDP。
+- 每类在Core内部显式真实解析：Home固定1.1.1.1 DoH经云→Home，海外经云，国内固定223.5.5.5 TLS DoH绑定物理NIC；客户端取得fake-IP。显式resolve后再转发已解析IP，避免SOCKS供应商的域名解析替代批准DoH。DNS答案和真实第二跳仍需抓包/受控接收端验证。
+- 模式默认`stable`，高级本地意图键为Mac `desktopRoutingMode` / Windows `desktop_routing_mode`，值`three-tier`。只在Connect捕获，不加客户UI入口或远程开关；当前会话不读取后改偏好。模式/快照/选云改变须显式Disconnect/Restore结束旧保护后重新Connect，不能热切换；Home凭据不自行重分配。
+- Windows持久化运行时SHA、owner/token/generation、release generation和派生云端点，原Service DIRECT gate不撤；仅live受绑定Core/TUN可得TCP80/443许可，恢复只装block。Mac复用root快照/release authority绑定SHA，原生许可限定物理NIC及root UID，不冒充PID级隔离；Helper重启后重新装block，不承诺Helper启动前开机零流量。Core/特权故障、自动失败/Quit不结束strict意图，显式带栅栏release仍可恢复网络。
+- 健康检测：云证明失败后，受保护国内DNS/TLS可让健康Core继续服务国内，明确降级且不计为Home/云成功。Mac启动也可降级；Windows初始准入仍要求云证明，不能声称两端冷启动云故障可用性完全一致。单一国内探测站故障仍保守恢复。主机/网络实际变化、Core死亡或双路径失败保持严格保护。
+- 回归源码覆盖编译顺序/域名身份/缺Home、DNS及未知拒绝、准入负例、捕获模式、永久strict watchdog、重启无旧grant、显式release及Mac国内降级。Linux只执行便携检查；原生CI、设备/G0、升级/回退、换云后Home出口连续性和一周试用各自单列，不能互相替代。#1071/#1504、#1605/#1643不由本单元宣称解决。
 
 ## 0. 实施入口：先完成有共识的范围，再闭合产品取舍
 
@@ -87,7 +97,7 @@ Owner 的补充目标：云节点故障、节点供应商流量耗尽或不稳�
 
 “DNS保持一致”在这里指同一受保护解析合同和Home末端路径，不只是resolver名字一样；网站主要看到的是业务连接的最终出口。当前数据面绑定分离已有基础，但Home完整链DNS及出口连续性资格仍是待实现/验证项。
 
-### 2.2 分类数据、编译与特权准入的同一合同（待实现）
+### 2.2 分类数据、编译与特权准入的同一合同（目标；实际有界实现见 §0.1）
 
 新三层模式仍为显式可选，稳定模式保持现有默认云出口；**不再实现“其余默认 DIRECT”**。国内/海外指经审阅的服务类别及其受支持端点，不单凭 IP 国家猜服务身份。国内 AI 即使回答 CN 地址也进 Home；同父域的普通服务才有资格按地域匹配。未识别目的地拒绝，不能为了“所有网站可用”伪造分类覆盖率。
 
@@ -101,7 +111,7 @@ Owner 的补充目标：云节点故障、节点供应商流量耗尽或不稳�
 | DIRECT 授权 | Windows `direct_admission.rs` 绑定签名策略与既有形状，Mac 有 endpoint/受审应用许可 | 新模式能力版本+精确 country-DIRECT 形状、AI/视频前置保护、快照成员关系与端口/端点限制一起验证；不把 geosite 行作为签名即安全，也不借 process DIRECT 绕过目标分类 |
 | 路由末尾 | 旧模式 `final=Tono-Exit` 保留 | 新模式显式 AI/Home、国内、海外规则后 terminal reject；Helper/Service 按明确模式分别验证末尾和 DNS 合同，不删旧 final 检查来兼容任意 JSON |
 
-**已实施的准备单元：** `direct_domains.rs` 保持现有4个 Model API、166个 Home、21个视频后缀的唯一手写来源；Windows Core/Service继续直接共用该文件，`tooling/scripts/sync-routing-domains.mjs --write` 只生成 Mac 的原三份数组。`--check` 与 CLI 回归进入 ci-gate 的无条件 changes job，Rust-only 编辑也不能跳过跨端漂移检查。生成前后条目、顺序及数组外代码已对 main b3c61853 独立比对；此单元不增加地域数据、不更改任何规则或旧模式行为，也不等于三层准入已实现。
+**已实施的同源单元：** `direct_domains.rs` 保持现有4个 Model API、166个 Home、21个视频后缀的唯一手写来源；Windows Core/Service共用该文件和三层图，`tooling/scripts/sync-routing-domains.mjs --write` 生成Mac原三数组及App/Helper共用的 `ThreeTierRoutingContract.swift` 图。`--check` 与CLI回归进入ci-gate无条件changes job，Rust-only编辑不能跳过漂移检查。三层模式现有地域覆盖和原生准入见§0.1，不扩大到全量国家库或所有App。
 
 Windows `prebuild.mjs` 的 MetaCubeX `latest` 下载/按 mtime 复制，以及 Mac 已有 `geoip.dat/geosite.dat` 资源，**不是现有受信任更新通道**。首版不新增远端分类更新；以后需要更新时，签名来源/版本、内容摘要、大小/语法限制、旧版本拒绝、跨账号/模式缓存失效与恢复必须在同一授权更新事务里验证，不重解释旧 v1–v4 DIRECT 策略。最后已验收快照只在同账户/绑定/合同且仍有效时可继续用；缺失、损坏或无有效快照则拒绝模式准入，不退到全直连。
 

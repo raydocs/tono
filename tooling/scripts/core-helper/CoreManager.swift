@@ -4,6 +4,38 @@ import CryptoKit
 import IOKit
 import IOKit.pwr_mgt
 
+/// Ephemeral grants derived only from the admitted root snapshot, never IPC
+/// endpoint lists or persisted tunnel names. PF's existing Core identity is root.
+struct StrictRuntimeProof {
+    let interface: String
+    let exits: [KillSwitchEndpoint]
+    let generation: UInt64
+    let digest: String
+
+    init(_ object: [String: Any], generation: UInt64, digest: String) throws {
+        self.generation = generation
+        self.digest = digest
+        guard ThreeTierRoutingContract.admits(object),
+              let outbounds = object["outbounds"] as? [[String: Any]],
+              let direct = outbounds.first(where: { $0["type"] as? String == "direct" }),
+              let interface = direct["bind_interface"] as? String,
+              KillSwitchManager.physicalEgressInterfaces().contains(interface) else {
+            throw HelperFailure.invalid("Strict runtime has no admitted physical interface.")
+        }
+        self.interface = interface
+        exits = try outbounds.filter { ["vless", "hysteria2"].contains($0["type"] as? String ?? "") }.map {
+            guard $0["type"] as? String == "vless",
+                  let address = $0["server"] as? String, !address.contains(":"),
+                  KillSwitchManager.canonicalPublicAddress(address) == address,
+                  let port = $0["server_port"] as? Int, let bounded = UInt16(exactly: port), bounded > 0 else {
+                throw HelperFailure.invalid("Initial strict graph requires public literal IPv4 TCP exits.")
+            }
+            return KillSwitchEndpoint(address: address, transport: "tcp", port: bounded)
+        }
+        guard !exits.isEmpty else { throw HelperFailure.invalid("Strict runtime has no exit.") }
+    }
+}
+
 final class CoreManager {
     private let lock = NSLock()
     private let diagnosticLock = NSLock()
@@ -46,7 +78,7 @@ final class CoreManager {
         return requestedPath
     }
 
-    private func snapshot(_ requested: String, expectedSHA256: String) throws -> String {
+    private func snapshot(_ requested: String, expectedSHA256: String, binding: Bool = false) throws -> String {
         let source = try validateConfigDirectory(requested)
         // The owned Tono runtime has no GEOIP/GEOSITE/MMDB references. Never copy
         // user-owned parser inputs into a root process merely because legacy
@@ -63,8 +95,49 @@ final class CoreManager {
         guard ownedRuntimeConfigIsSafe(contents) else {
             throw HelperFailure.invalid("Runtime config is not an owned Tono config.")
         }
+        let parsed = try JSONSerialization.jsonObject(with: Data(contents.utf8))
+        guard let object = goFoldedJSONKeys(parsed) as? [String: Any] else {
+            throw HelperFailure.invalid("Invalid runtime object.")
+        }
+        if !binding {
+            let record = try ReleaseAuthority().load()
+            let strict = ThreeTierRoutingContract.isThreeTierRuntime(object)
+            guard strict == (record.mode == .secured && record.strictRuntimeDigest != nil),
+                  !strict || record.strictRuntimeDigest == expectedSHA256 else {
+                throw HelperFailure.invalid("Runtime does not match the admitted strict session.")
+            }
+        }
         try checkConfiguration()
         return runtimeConfigPath
+    }
+
+    /// Validate the root snapshot before binding any intent or PF grants.
+    func bindRuntime(configDirectory: String, digest: String, generation: UInt64?, mode: String?) throws -> StrictRuntimeProof? {
+        lock.lock(); defer { lock.unlock() }
+        let existing = try ReleaseAuthority().load()
+        guard !existing.strictIntent || existing.strictRuntimeDigest == digest else {
+            throw HelperFailure.invalid("Strict runtime is immutable. Explicitly disconnect before changing it.")
+        }
+        _ = try snapshot(configDirectory, expectedSHA256: digest, binding: true)
+        let data = try Data(contentsOf: URL(fileURLWithPath: runtimeConfigPath))
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw HelperFailure.invalid("Invalid runtime.")
+        }
+        let strict = ThreeTierRoutingContract.isThreeTierRuntime(object)
+        guard mode == nil || mode == (strict ? "three-tier" : "stable") else {
+            throw HelperFailure.invalid("Routing mode/runtime mismatch.")
+        }
+        guard let generation else {
+            let record = try ReleaseAuthority().load()
+            guard !strict, !record.strictIntent, record.mode == .secured else {
+                throw HelperFailure.invalid("Strict runtime binding requires an admitted generation.")
+            }
+            return nil // Preserve the legacy stable/headerless path.
+        }
+        let proof = strict ? try StrictRuntimeProof(object, generation: generation, digest: digest) : nil
+        try ReleaseAuthority().bindRuntime(generation: generation, digest: digest,
+            strict: strict, requestedMode: mode)
+        return proof
     }
 
     /// Parsing is bounded and runs against the root snapshot, never the

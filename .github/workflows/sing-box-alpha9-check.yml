@@ -52,6 +52,27 @@ jobs:
             --go "$(command -v go)" --target linux-amd64-v2 \
             --binary "$work/linux/sing-box" --manifest "$work/linux/manifest.json" \
             --manifest-sha256 "$manifest_sha"
+          # Parse the same expanded graph embedded in App/Helper, not only
+          # legacy fixtures. The always-run changes job checks its generation.
+          python3 - "$work/three-tier.json" <<'PY'
+          import json, pathlib, re, sys
+          root = pathlib.Path('.')
+          swift = (root / 'apps/macos/Tono/Core/ThreeTierRoutingContract.swift').read_text()
+          graph = json.loads(re.search(r'private static let templateJSON = #"""\n(.*?)\n    """#', swift, re.S)[1])
+          bindings = {'$home_target': 'Tono-Home-Residential', '$physical_interface': 'eth0', '$fake_ipv4_range': '198.18.176.0/20'}
+          def render(value):
+              if isinstance(value, str): return bindings.get(value, value)
+              if isinstance(value, list): return [render(item) for item in value]
+              if isinstance(value, dict): return {key: render(item) for key, item in value.items()}
+              return value
+          graph = render(graph)
+          runtime = json.loads((root / 'docs/reports/sing-box-evaluation/migration-m0/reference.json').read_text())['windows_runtime']
+          runtime['route'], runtime['dns'] = graph['route'], graph['dns']
+          runtime['outbounds'] += [graph['direct_outbound'], {'type': 'socks', 'tag': 'Tono-Home-Residential',
+              'server': '203.0.113.60', 'server_port': 11080, 'version': '5', 'network': 'tcp',
+              'username': 'fixture-user', 'password': 'fixture-password', 'detour': 'Tono-Exit'}]
+          pathlib.Path(sys.argv[1]).write_text(json.dumps(runtime))
+          PY
           python3 tooling/scripts/sing-box/certify.py check \
             --candidate "$cand" \
             --go "$(command -v go)" --target linux-amd64-v2 \
@@ -60,5 +81,6 @@ jobs:
             --fixture docs/reports/sing-box-evaluation/migration-m0/reference.json \
             --emitted tooling/scripts/sing-box/fixtures/macos-product-shape.json \
             --emitted tooling/scripts/sing-box/fixtures/hy2-certificate-sha256.json \
+            --emitted "$work/three-tier.json" \
             --output "$work/check"
           cmp "$work/linux/manifest.json" tooling/scripts/sing-box/manifests/alpha9/linux-amd64-v2.json

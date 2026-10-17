@@ -68,6 +68,10 @@ struct ReleaseAuthority {
         /// proven loaded again (R-F6).
         var daemonBootedOut: Bool?
         var daemonRecoveryFailure: String?
+        /// Strict intent survives daemon death and reboot. Admission cannot
+        /// downgrade it; only the authenticated release worker retires it.
+        var strictRuntimeDigest: String?
+        var strictIntent: Bool { mode == .secured && strictRuntimeDigest != nil }
     }
 
     /// One release worker and the session/process group it ran its effects in.
@@ -279,6 +283,7 @@ struct ReleaseAuthority {
                 if wasReleased, let reason = processes.unretiredReason(record) {
                     throw AdmissionRefusal.releaseUnfinished(reason)
                 }
+                if wasReleased { record.strictRuntimeDigest = nil }
                 record.mode = .secured
                 record.generation = Self.nextGeneration(after: record.generation)
                 var executorWasQuarantined = false
@@ -308,6 +313,20 @@ struct ReleaseAuthority {
             throw refusal
         } catch {
             throw AdmissionRefusal.unavailable(String(describing: error))
+        }
+    }
+
+    /// Called only after validation of the root snapshot and its bounded graph.
+    func bindRuntime(generation: UInt64, digest: String, strict: Bool, requestedMode: String?) throws {
+        try withLock(timeout: 1.5) { _ in
+            var record = try load()
+            guard requestedMode == nil || requestedMode == (strict ? "three-tier" : "stable"),
+                  generation == record.generation, record.mode == .secured,
+                  record.strictRuntimeDigest == nil || (strict && record.strictRuntimeDigest == digest) else {
+                throw Failure.unsafe("Routing mode/runtime mismatch or strict session downgrade. Explicitly disconnect first.")
+            }
+            if strict { record.strictRuntimeDigest = digest }
+            try save(record)
         }
     }
 

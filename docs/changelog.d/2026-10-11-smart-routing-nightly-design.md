@@ -34,3 +34,12 @@
 - 已运行（Linux Orb）：`bash tooling/scripts/test-policy-signing-contract.sh` exit0，CLI回归1 passed/0 failed、域名4/166/21一致，原签名合同5/5；随后将同步门移至ci-gate独立步骤，签名脚本恢复原状。独立Python比对main b3c61853→工作树：三数组值/顺序不变，数组外Swift无行为变化，Rust仅说明注释，`git diff --check`通过。最终head的检查/独立审查及CI以PR回执为准，不将本地源码比较冒充原生执行。
 - 未执行：三层国内/海外编译与准入、国内独立DNS/Home固定DoH、模式生命周期、原生/设备/G0、DNS/IPv6/UDP/QUIC、换云/恢复/升级和一周试用。#1071/#1504、#1605/#1643保持独立；不沿用旧head审查定罪新head，不称本PR解决它们。
 - 候选/发布：仅源码准备；0.0.76 RC、稳定feeds、版本/标签不变，无新包或移动端改动。下一单元为同源地域快照及客户端/特权端同一有界合同，不以客户端final修改或放宽旧Service gate替代。
+
+### 2026-10-17 续记 · 双端有界三层运行时与严格会话
+- 归属：SHIP_PLAN G1/G2 后续桌面版，继续原 Draft #1571。以上各日期“设计/准备-only”描述仅对应当时提交，本轮已增加运行时代码；未合并/发布。
+- 双端编译器与Mac Helper/Windows Service共用精确route/DNS图，保留21视频→166 Home→国内/海外→未知拒绝顺序；Home固定DoH经云→Home，海外经云，国内固定DoH绑定物理NIC。分类快照v1仅10国内/11海外完整主机名，不冒充全量地域覆盖；IPv6、业务UDP/QUIC、LAN及未分类流拒绝，不扩大Home/视频表。
+- Windows strict合同持久化运行时摘要、owner/token/generation与release generation，云物理端点由准入图派生，拒绝稳定模式stage/DIRECT覆盖，watchdog不再30tick自动释放strict。Mac Helper绑定root快照摘要、generation及strict意图，重启/Core死亡只恢复block；root UID/NIC许可不冒充Core PID隔离或Helper启动前开机保护。显式带栅栏release仍可恢复网络。
+- 模式默认关闭、Connect一次捕获；没有客户UI开关。变更模式/规则/云节点须先显式Disconnect，旧会话不能被后改偏好替换。健康Core在云证明失败但国内受保护DNS/TLS证明成功时保留国内能力并报告降级，不把它记为Home/云通过；Windows冷启动仍要求云路径证明。
+- 回归源码覆盖顺序/身份/协议/DNS、缺Home拒绝、旧稳定编译不变、严格准入负例、捕获模式、持久化重启无旧grant及显式release、Mac国内降级。准确head的本地检查、原生CI和独立high结果以PR验证回执为准；没有执行结果的原生/Red/设备测试不记通过。
+- 剩余：不是所有国内/海外业务可用；页面依赖/游戏/自带DoH/未知IP仍可能拒绝。设备DNS真实路径、第二跳出口/固定身份、模式切换恢复、网络变化/睡眠/重启、升级/回退、G0及一周试用未验收。#1071/#1504、#1605/#1643独立保留，不称解决。
+- 候选/发布：0.0.76 RC、feeds、版本/标签、移动端不变；仅源码Draft，未新建包、合并或客户推送。

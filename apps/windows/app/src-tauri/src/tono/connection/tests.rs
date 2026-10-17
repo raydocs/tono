@@ -1234,7 +1234,7 @@ fn failure_plan_is_exhaustive() {
             selective_ai_hold: false,
         }
     );
-    // Initial post-arm failure has not crossed the verification barrier: full release.
+    // Initial stable post-arm failure has not crossed the verification barrier: full release.
     assert_eq!(
         plan_failure(true, false, false, false),
         FailurePlan {
@@ -1243,6 +1243,16 @@ fn failure_plan_is_exhaustive() {
             restrict_bootstrap: false,
             selective_ai_hold: false,
         }
+    );
+    assert_eq!(
+        plan_failure(true, false, false, true),
+        FailurePlan {
+            mark_armed: true,
+            stop_core: Some(false),
+            restrict_bootstrap: true,
+            selective_ai_hold: false,
+        },
+        "captured strict intent holds even before the first verification barrier"
     );
     // A raced disconnect owns the release end to end; the failing
     // transaction does nothing, whatever the arm state. Strict does not

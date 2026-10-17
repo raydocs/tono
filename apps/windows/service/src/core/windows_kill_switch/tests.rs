@@ -125,6 +125,7 @@ fn valid_intent(mode: KillSwitchStatusMode, wanted: bool) -> IntentRecord {
         updated_at: 1,
         owner_key: None,
         strict_kill_switch: false,
+        strict_contract: None,
         reconnect_after_release: false,
         reconnect_owner_key: None,
         apply_narrow_after_release: None,
@@ -1915,16 +1916,62 @@ fn unhealthy_watchdog_releases_without_a_strict_opt_in() {
 }
 
 #[test]
-fn strict_kill_switch_repairs_then_releases() {
+fn strict_kill_switch_repairs_indefinitely() {
     assert!(!crash_recovery_releases_network(true));
     assert_eq!(
         unhealthy_watchdog_action(true, 1),
         UnhealthyWatchdogAction::Reinstall
     );
     assert_eq!(
-        unhealthy_watchdog_action(true, STRICT_UNHEALTHY_RELEASE_TICKS),
-        UnhealthyWatchdogAction::Release
+        unhealthy_watchdog_action(true, u32::MAX),
+        UnhealthyWatchdogAction::Reinstall
     );
+}
+
+#[tokio::test]
+#[serial]
+async fn strict_start_binds_the_session_and_only_explicit_release_opens_it() -> Result<()> {
+    cleanup().await;
+    let contract = StrictContract {
+        runtime_sha256: strict_runtime_digest("admitted graph"),
+        config_path: None,
+        session_token_hash: "token-hash".into(),
+        generation: None,
+        release_generation: 0,
+        physical_interface: "Ethernet 7".into(),
+        exit_endpoints: vec![ProxyEndpoint { ip: "9.9.9.9".into(), port: 8443, protocol: ProxyProtocol::Tcp }],
+    };
+    arm_bootstrap_bound(&test_config(), "/opt/tono/sing-box", "owner-alice", Some(contract.clone())).await?;
+    let mut active = crate::core::desired::ActiveOwnerState {
+        owner_key: "owner-alice".into(),
+        identity: crate::OwnerIdentity::Windows { sid: "S-1-5-21-test".into() },
+        app_data_root: String::new(), generation: 17, session_token_hash: "wrong-token".into(),
+    };
+    assert!(bind_strict_session(&active).await.is_err(), "another session cannot adopt the graph");
+    active.session_token_hash = contract.session_token_hash;
+    bind_strict_session(&active).await?;
+    let disk: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+    assert!(disk.strict_kill_switch);
+    assert_eq!(disk.endpoints, contract.exit_endpoints, "physical permits derive from the admitted graph, not the caller");
+    assert!(disk.api_host_ips.is_empty(), "no stable recovery relay can bypass the strict graph");
+    assert_eq!(disk.strict_contract.unwrap().generation, Some(17));
+    assert!(arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await.is_err());
+    assert!(begin_direct_runtime_reload(17).await.is_err());
+    release_applying_narrow().await?;
+    assert!(status().await.wanted, "automatic failure must not release strict intent");
+    restore_on_service_start().await?;
+    assert!(status().await.wanted, "restart must retain the floor");
+    assert!(!status().await.tunnel_permit_rendered);
+    assert!(armed_guard().as_ref().unwrap().intent.strict_contract.as_ref().unwrap().generation.is_none());
+    {
+        let _operation = WFP_OPERATION.lock().await;
+        release_unproven_wanted_session_unlocked().await?;
+    }
+    assert!(status().await.wanted, "the old proof-window escape must not open strict protection");
+    release().await?;
+    assert!(!status().await.wanted, "authenticated explicit disconnect remains available");
+    cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]
@@ -1989,6 +2036,7 @@ fn apply_learned_bootstrap_pins_reads_the_programdata_file() {
         updated_at: 0,
         owner_key: None,
         strict_kill_switch: false,
+        strict_contract: None,
         reconnect_after_release: false,
         reconnect_owner_key: None,
         apply_narrow_after_release: None,

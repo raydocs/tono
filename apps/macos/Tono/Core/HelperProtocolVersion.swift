@@ -479,7 +479,10 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.53 → 4.52.54: `--emergency-reset` keeps the helper, and prints
     ///   what is left, while the AI-service layer (resolver sinkhole, blackhole
     ///   routes) is not proven gone, as it already did for a DNS restore failure.
-    static let current = "4.52.54"
+    /// - 4.52.54 → 4.52.55: three-tier graph admission is shared with the
+    ///   helper; execution refuses until generation-bound strict lifecycle
+    ///   ownership is installed. Stable release behavior is unchanged.
+    static let current = "4.52.55"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

@@ -569,6 +569,62 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertEqual(on.count, off.count - 1 - 2 * nameMatchedDirect, "on is main's document")
     }
 
+    func testThreeTierSnapshotCompilesFixedDNSAndPassesThePackagedParser() throws {
+        let values = try nodes()
+        var overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta", claudeHomeSocks5: .init(
+                host: "203.0.113.60", port: 11080, username: "fixture-user", password: "fixture-password"))
+        let stable = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values, directPlan: nil)
+        let result = try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values, physicalInterface: "en0", fakeIPSlot: 3)
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        XCTAssertTrue(ThreeTierRoutingContract.admits(document))
+        let rules = try XCTUnwrap((document["route"] as? [String: Any])?["rules"] as? [[String: Any]])
+        let video = try XCTUnwrap(rules.firstIndex { ($0["domain_suffix"] as? [String])?.contains("youtubei.googleapis.com") == true && $0["action"] as? String == "route" })
+        let home = try XCTUnwrap(rules.firstIndex { ($0["domain_suffix"] as? [String])?.contains("googleapis.com") == true && $0["action"] as? String == "route" })
+        let domestic = try XCTUnwrap(rules.firstIndex { $0["outbound"] as? String == "Tono-ThreeTier-Direct" })
+        XCTAssertLessThan(video, home)
+        XCTAssertLessThan(home, domestic)
+        XCTAssertEqual(rules[video]["outbound"] as? String, "Tono-Exit")
+        XCTAssertEqual(rules[home]["outbound"] as? String, "Tono-Home-Residential")
+        XCTAssertTrue((rules[domestic]["domain"] as? [String])?.contains("www.bilibili.com") == true)
+        XCTAssertNil(rules[domestic]["domain_suffix"])
+        XCTAssertEqual(rules[domestic]["network"] as? String, "tcp")
+        XCTAssertEqual(rules.last?["action"] as? String, "reject")
+        let dns = try XCTUnwrap(document["dns"] as? [String: Any])
+        let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
+        XCTAssertEqual(servers[0]["inet4_range"] as? String, "198.18.176.0/20")
+        XCTAssertEqual(servers[2]["detour"] as? String, "Tono-Home-Residential")
+        XCTAssertEqual(servers[2]["server"] as? String, "1.1.1.1")
+        XCTAssertEqual(servers[3]["detour"] as? String, "Tono-ThreeTier-Direct")
+        XCTAssertTrue(rules[..<home].contains { $0["action"] as? String == "resolve" && $0["server"] as? String == "Tono-ThreeTier-Home-DNS" })
+        var bad = document
+        var wrongDNS = dns
+        var wrongServers = servers
+        wrongServers[2]["detour"] = "Tono-Exit"
+        wrongDNS["servers"] = wrongServers
+        bad["dns"] = wrongDNS
+        XCTAssertFalse(ThreeTierRoutingContract.admits(bad))
+        XCTAssertThrowsError(try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values, physicalInterface: "utun199"))
+        XCTAssertEqual(try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values, directPlan: nil).runtimeJSON, stable.runtimeJSON)
+        overlay.claudeHomeSocks5 = nil
+        XCTAssertThrowsError(try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values, physicalInterface: "en0"))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tono-three-tier-check-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let config = directory.appendingPathComponent("config.json")
+        try result.runtimeJSON.write(to: config)
+        let process = Process()
+        process.executableURL = try XCTUnwrap(CoreRuntimeManager().findBinary())
+        process.arguments = ["check", "-D", directory.path, "-c", config.path]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0, String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+    }
+
     /// The off document, with the reviewed app and web-direct routes it
     /// rewrites, is one the packaged sing-box accepts (`sing-box check`,
     /// what the helper runs before it starts the Core).

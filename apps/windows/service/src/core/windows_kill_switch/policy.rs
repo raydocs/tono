@@ -2,7 +2,6 @@
 
 use super::*;
 
-#[cfg(any(windows, test))]
 pub(crate) fn strict_kill_switch_enabled() -> bool {
     armed_guard()
         .as_ref()
@@ -17,8 +16,6 @@ pub(super) fn crash_recovery_releases_network(strict_kill_switch_enabled: bool) 
 
 /// Non-strict unhealthy ticks wait, then release. They do not reinstall a block.
 pub(super) const UNHEALTHY_RELEASE_TICKS: u32 = 3;
-/// Strict mode keeps repairing, then releases so a wedged engine cannot stay closed forever.
-pub(super) const STRICT_UNHEALTHY_RELEASE_TICKS: u32 = 30;
 
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(super) fn release_on_service_stop(strict_kill_switch_enabled: bool, lifecycle_owned: bool) -> bool {
@@ -52,8 +49,6 @@ pub(super) fn unhealthy_watchdog_action(
         } else {
             UnhealthyWatchdogAction::Wait
         }
-    } else if consecutive_unhealthy >= STRICT_UNHEALTHY_RELEASE_TICKS {
-        UnhealthyWatchdogAction::Release
     } else {
         UnhealthyWatchdogAction::Reinstall
     }

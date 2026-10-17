@@ -920,6 +920,13 @@ nonisolated struct HelperManager {
 
     // MARK: - Core management
 
+    static func bindRuntime(configDir: String, configSHA256: String, routingMode: String) throws {
+        let result = try sendJSON(method: "POST", path: "/session/bind-runtime", object: [
+            "configDir": configDir, "configSHA256": configSHA256, "routingMode": routingMode,
+        ])
+        try requireSuccess(result, operation: "bind runtime")
+    }
+
     static func startCore(configDir: String, configSHA256: String) throws {
         let result = try sendJSON(
             method: "POST",
@@ -1603,6 +1610,7 @@ nonisolated struct HelperManager {
     /// helper's own table (SocketServer.releaseRequestKind).
     static func sessionRequestKind(method: String, path: String) -> SessionRequestKind? {
         switch (method, path) {
+        case ("POST", "/session/bind-runtime"): return .protective
         case ("POST", "/core/start"), ("POST", "/core/sync"), ("POST", "/killswitch/arm"), ("POST", "/dns/enable"):
             return .protective
         case ("DELETE", "/core/stop"), ("POST", "/killswitch/quit"), ("POST", "/killswitch/disarm"),
