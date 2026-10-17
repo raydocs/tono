@@ -25,3 +25,12 @@
 - 实施顺序：先完成 #1572 的 Home 扩域、视频例外与跨端回归；owner 确认 Core 故障可用性、未分类流量、Home resolver 三个取舍后，锁同一模式合同，再做双端编译/特权 DNS及物理许可、恢复生命周期、G0设备与试用。推荐不是已批准政策，默认 DIRECT 模式尚未实现。
 - 当前 Windows final/DNS detour 准入与普通 DNS 依赖云路径是必须实施的新合同边界；ATYP=domain 只证明委托解析，不证明 Home resolver。#1071/#1504 和 #1605 收尾保持独立，旧 head 的 major 或 CI 不能充当当前结论。
 - 验证：本轮仅文档链接/范围/whitespace检查，准确 head 回执见 PR；产品、设备、DNS/QUIC、故障/升级/回退和一周试用未执行。设计阻断仍按提案 §0 交 owner 具体选择，不用新功能掩盖旧恢复风险。
+
+### 2026-10-17 · 三层合同与同源名单准备
+- 归属：SHIP_PLAN G1/G2 的后续桌面版本；继续原 Draft #1571，不合并或发布。并入 [main b3c61853 / #1572](https://github.com/raydocs/tono/commit/b3c6185309bcba13627038ccaaf60de596db829d)，#1572 已准确 head CI/独立审查后合入，不再作为未合依赖。
+- 最新 owner 政策取代历史默认 DIRECT：原21视频云例外先于Home；AI及原166项具名Home组→云→assigned Home，其余确认非AI国内→DIRECT、海外→云，未知拒绝。Owner选择A保留原Google/Gmail、GitHub、Reddit/TikTok及具名依赖，不把这些服务事实归类为AI，也不扩共享父域。游戏按地域和已支持协议，不一概直连。
+- 新增/优化：[决定128](../decisions/128-2026-10-17-desktop-three-tier-routing-boundaries.md)保留严格fail-closed、未知拒绝与固定已审DoH边界，不把未回答的三个安全取舍冒充owner批准。当前无新的产品问答阻止继续桌面实施。
+- 工程与测试：Windows Core/Service既有共用`direct_domains.rs`成为三端名单的唯一手写来源；新增生成/校验CLI及一条公有CLI回归，只同步Mac原数组。ci-gate无条件changes任务检查漂移，Rust-only名单编辑也覆盖；保持原4 Model API、166 Home、21视频的精确值和顺序。未新增country列表、三层模式开关、运行时/特权协议或物理许可。
+- 已运行（Linux Orb）：`bash tooling/scripts/test-policy-signing-contract.sh` exit0，CLI回归1 passed/0 failed、域名4/166/21一致，原签名合同5/5；随后将同步门移至ci-gate独立步骤，签名脚本恢复原状。独立Python比对main b3c61853→工作树：三数组值/顺序不变，数组外Swift无行为变化，Rust仅说明注释，`git diff --check`通过。最终head的检查/独立审查及CI以PR回执为准，不将本地源码比较冒充原生执行。
+- 未执行：三层国内/海外编译与准入、国内独立DNS/Home固定DoH、模式生命周期、原生/设备/G0、DNS/IPv6/UDP/QUIC、换云/恢复/升级和一周试用。#1071/#1504、#1605/#1643保持独立；不沿用旧head审查定罪新head，不称本PR解决它们。
+- 候选/发布：仅源码准备；0.0.76 RC、稳定feeds、版本/标签不变，无新包或移动端改动。下一单元为同源地域快照及客户端/特权端同一有界合同，不以客户端final修改或放宽旧Service gate替代。

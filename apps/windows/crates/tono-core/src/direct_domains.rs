@@ -2,6 +2,8 @@
 //!
 //! The product compilers use them to build rules, and the Service compiles this
 //! same file by path to admit only those rules. Keep it std-only.
+//! The Model API/Home/cloud-video arrays also generate the macOS declarations:
+//! `node tooling/scripts/sync-routing-domains.mjs --write` (CI checks parity).
 
 /// Web suffixes that may use an address-free DIRECT rule on Windows.
 ///
