@@ -24,10 +24,18 @@
   `node --test --test-name-pattern='NSIS names every gate refusal|existing-install refusals distinguish' apps/windows/app/scripts/windows-packaging.test.mjs`，
   exit 1：默认日志路径与无区分代码分别触发断言失败。中间完整检查 40/41，守住已有孤儿
   恢复分支的顺序断言，调整保护位置后完整检查 42/42；最终源码结果见 PR 验证评论。
-- 未执行：Windows 编译/NSIS 对话框渲染、客户“32→保留数据卸载→76”安装重放、WFP/DNS/
-  设备真实状态验证；Linux 无 makensis/wine/pwsh。模板检查不是 Windows 安装成功证明。
-- 候选/发布：仅源码，无新包；未触发候选构建、未修改发布页或更新源。
-  不发布候选与 smoke 的精确命令、哈希核对和剩余实机清单见恢复指引末节。
+- 验证续报：按所有者“新版正常安装/卸载/再安装”的目标执行
+  [候选构建](https://github.com/raydocs/tono/actions/runs/39031345192) 和
+  [实际安装 smoke](https://github.com/raydocs/tono/actions/runs/39033567105)，均通过。
+  来源 [d7d7f8fda](https://github.com/raydocs/tono/commit/d7d7f8fda7241011d09f15d91083db070213c8eb)；
+  Windows Server 2025 管理员静默安装/修复、清理失败保留、部分删除后缺 helper 重试、
+  卸载→重装→最终卸载和数据/DNS 保留均已实际执行；32 布局/无记录文件仍拒绝覆盖。
+  另核对 service CI 原始日志，网卡三状态与不可写日志原生回归通过。
+- 未执行：NSIS 可见对话框/Win11 UAC、客户“32→保留数据卸载→76”真实包重放及活跃
+  设备/WFP/DNS/重启场景；hosted 不代替这些验收。模板检查不是 Windows 安装成功证明。
+- 候选/发布：已有仅测试 0.0.76 候选，安装包 SHA-256
+  `9b83e811dc0510b101f8890a4ac50fe515d3c5780bc7d811b56d018920352e9a`，独立下载核对一致。
+  候选未签名、未验收发布；未合并、未修改发布页/更新源，恢复指引记录证据和剩余实机清单。
 - 剩余限制：客户说 32 可装、卸载后 76 不可装；三条输出来自重装 32 后，不能证明旧卸载
   残留。原报错网卡 Down，重装后同 GUID Up 也不证明卸载失败。确切新包身份与卸载后
   网卡/SCM/文件/卸载项证据仍缺；不声称已找到客户机器根因或恢复成功。InstallLocation

@@ -2,7 +2,7 @@
 
 归属：SHIP_PLAN G1 / §2 item 10。适用于 `TONO_INSTALL_TONO_ADAPTER_PRESENT`
 及“无法安全确认现有版本”。**这不是跳过门禁的操作手册，也不表示客户已恢复。**
-本次源码交付包含卸载重试/记录一致性修复，不只是修改弹窗；未合并、未发布新包。
+本次包含卸载重试/记录一致性修复，已构建仅测试候选并通过 hosted 安装验证；未合并、未发布。
 
 ## 本次客户的时间线（2026-10-17 更正）
 
@@ -147,7 +147,23 @@ tono-core）、无卸载项文件拒绝、helper 清理 result 2、锁定历史 
 删去已安装 helper 后重试、再次安装、账户数据哨兵保留和错误 `_?=` 目录拒绝。
 它只允许一次性 GitHub-hosted Windows 管理员 runner，不能给客户机器运行。
 
-尚需执行：Windows 编译/NSIS 对话框渲染/上述 smoke；真实、已核对哈希的 0.0.32 正常
+2026-10-17 已执行（Windows Server 2025、管理员、UAC disabled、静默模式）：
+
+- [候选构建 39031345192](https://github.com/raydocs/tono/actions/runs/39031345192) 成功，
+  包 `Tono_0.0.76_x64-setup.exe` 来源为
+  [d7d7f8fda](https://github.com/raydocs/tono/commit/d7d7f8fda7241011d09f15d91083db070213c8eb)，
+  安装包 SHA-256 `9b83e811dc0510b101f8890a4ac50fe515d3c5780bc7d811b56d018920352e9a`。
+  下载后在 Orb 独立计算哈希，与 manifest 一致；NSIS 编译、payload 校验及构建证明均通过。
+- [同源安装 smoke 39033567105](https://github.com/raydocs/tono/actions/runs/39033567105)
+  实际执行此包：旧32布局/无记录文件不覆盖，干净安装、同版本修复、服务清理失败保留、
+  锁文件部分卸载后重试、缺少已安装 helper 后继续卸载、卸载后再安装、最终卸载均通过。
+  报告 `freshInstall/sameVersionRepair/cleanupFailureRetained/partialUninstallRetry/uninstall`
+  和 `dataPreserved/dnsUnchanged` 均为 `true`，`physicalUpgradeQualified:false`。
+- [原生 service CI](https://github.com/raydocs/tono/actions/runs/39025430164/job/117375510537)
+  日志确认网卡三状态和不可写日志回归 `... ok`。它检出 PR merge ref
+  `4862c368d28a1dca0166ddf64c62c8ee2f19d617`；已比较 service 树与上述源码一致。
+
+尚需执行：NSIS 可见对话框/Windows 11 UAC 交互；真实、已核对哈希的 0.0.32 正常
 安装→断开→保留数据卸载→新候选安装；重启前后设备 Up/Down/NotPresent（以及其他软件的
 同名设备）实机验证；无原因文件/空日志行/不可写日志的可见提示。**fixture 不等于旧包实测。**
 合并前还需按 AGENTS 做精确头部 SHA 的高风险独立审查；本轮未合并，未把审查当作通过。
@@ -166,5 +182,6 @@ RUN_ID / SOURCE_SHA 需替换为该次真实结果；smoke 会校验候选与脚
 包内 `candidate-manifest.json` 记录 source、每个文件 SHA-256 及 `candidateOnly:true`、
 `releaseAccepted:false`、`updaterSigned:false`、`authenticodeSigned:false`。先通过隔离
 Windows 验证和安全审查，再由支持与客户约定保留数据验证；不要让客户关闭防护绕过签名
-警告。此命令不更新客户源、不创建 Release/tag；本次尚未触发构建或取得新包/哈希。
-没有客户卸载后的输出和 Windows 安装实测，不能声称客户根因确认、候选可发布或已恢复。
+警告。此命令不更新客户源、不创建 Release/tag；上述候选和 smoke 已实际完成，不需为了
+重复等待而重建。hosted 证明新版在已测环境的安装/卸载/重装与故障重试，不是对所有客户
+机器的保证。没有客户卸载后的输出和旧包重放，不能声称客户根因确认、候选可发布或已恢复。
