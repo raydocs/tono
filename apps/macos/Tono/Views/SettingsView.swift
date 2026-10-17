@@ -138,11 +138,11 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     AccountSettingsCard(session: accountSession)
-                    routingCard
                     if seaEnabled {
                         SettingsCard(icon: "gearshape", title: "General") {
                             generalRows
                         }
+                        routingCard
                         SettingsCard(icon: "paintbrush", title: "Appearance") {
                             appearanceRows
                         }
@@ -154,6 +154,7 @@ struct SettingsView: View {
                         }
                         aboutCard
                     } else {
+                        routingCard
                         Grid(horizontalSpacing: 20, verticalSpacing: 20) {
                             GridRow {
                                 preferencesCard

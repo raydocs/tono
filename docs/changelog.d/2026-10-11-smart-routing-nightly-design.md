@@ -64,3 +64,4 @@
 - 原生Red、真实DNS/第二跳身份、PF/WFP设备故障、升级回退与试用未执行；顺序图注入测试不冒充真实Core/网络。准确修复head的本地检查、新CI与独立增量复核以PR回执为准，不沿用679的绿灯或称两个finding已合main。
 - 继续原Draft，不合并、不出包、不改候选/feeds。Windows设置截图/指针演示为真实组件+synthetic IO；Mac SettingsView渲染待新原生CI执行和图像核验。
 - 修复head [63f7e9149](https://github.com/raydocs/tono/commit/63f7e91495b27716b4dab3417c1d7c84517e0050) 独立high增量源码PASS；[CI39024073099](https://github.com/raydocs/tono/actions/runs/39024073099) 中Helper/privileged通过，Mac单测因新增渲染fixture缺`ServiceManagement`导入而编译失败。只补模块导入，不删除渲染/恢复断言；后续head重新执行，不把此编译错误当native Red。
+- 后续head [975f59343](https://github.com/raydocs/tono/commit/975f593433ef03c0be59220ce74e2369c5385bcf) 的 [CI39024639813](https://github.com/raydocs/tono/actions/runs/39024639813) 中Windows全项及Mac build/Helper/privileged通过，735项Mac测试仅既有760×820 Sea设置页布局断言失败（1可选skip）；新双向恢复/12态设置渲染通过。原生图与OCR确认新路由卡将General推至首屏外，因此只把Sea顺序调为Account→General→Routing，经典外观不变，安全说明、测试断言与阈值均保留；须新head复验并检查新图。
