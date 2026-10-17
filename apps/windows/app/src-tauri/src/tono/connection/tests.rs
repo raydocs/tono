@@ -577,13 +577,16 @@ fn tun_probe_origins_are_staggered_not_bursted() {
 }
 
 #[test]
-fn real_data_plane_probes_only_google_homepage() {
+fn real_data_plane_probes_the_cloud_path_not_home_google() {
     assert_eq!(TUN_DATA_PLANE_PROBES.len(), 1);
-    assert_eq!(TUN_DATA_PLANE_PROBES[0].url, "https://www.google.com");
-    assert_eq!(TUN_DATA_PLANE_PROBES[0].expected_status, 200);
-    assert_eq!(super::probes::EXIT_PROBE_URL, "https://www.google.com");
-    assert_eq!(super::probes::FAKE_IP_LOOKUP_HOST, "www.google.com");
+    assert_eq!(TUN_DATA_PLANE_PROBES[0].url, "https://www.gstatic.com/generate_204");
+    assert_eq!(TUN_DATA_PLANE_PROBES[0].expected_status, 204);
+    assert_eq!(super::probes::EXIT_PROBE_URL, "https://www.gstatic.com/generate_204");
+    assert_eq!(super::probes::FAKE_IP_LOOKUP_HOST, "www.gstatic.com");
     assert_eq!(TUN_DATA_PLANE_PROBES, crate::tono::protected_probe::PROBE_ORIGINS);
+    assert!(!tono_core::config::CLAUDE_HOME_DOMAINS.iter().any(|suffix| {
+        "www.gstatic.com" == *suffix || "www.gstatic.com".ends_with(&format!(".{suffix}"))
+    }));
 }
 
 #[test]
@@ -2043,6 +2046,13 @@ fn home_controller_rules(proxy: &str, include_domains: bool) -> Vec<serde_json::
     rules
 }
 
+fn cloud_video_controller_rules() -> Vec<serde_json::Value> {
+    tono_core::config::CLOUD_VIDEO_DOMAINS.iter().flat_map(|domain| [
+        serde_json::json!({"type": "AND", "payload": format!("((Network,tcp) && (DomainSuffix,{domain}))"), "proxy": "Tono-Exit"}),
+        serde_json::json!({"type": "AND", "payload": format!("((Network,udp) && (DomainSuffix,{domain}))"), "proxy": "REJECT"}),
+    ]).collect()
+}
+
 fn controller_rules_graph(
     home_proxy: &str,
     include_home_domains: bool,
@@ -2052,6 +2062,7 @@ fn controller_rules_graph(
         serde_json::json!({"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"}),
         serde_json::json!({"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"}),
     ];
+    rules.extend(cloud_video_controller_rules());
     rules.extend(home_controller_rules(home_proxy, include_home_domains));
     if include_home_domains {
         for mut rule in home_controller_rules("REJECT", true) {
@@ -2074,6 +2085,7 @@ fn controller_rules_with_assistant_shield(extra: Vec<serde_json::Value>) -> serd
         serde_json::json!({"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"}),
         serde_json::json!({"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"}),
     ];
+    rules.extend(cloud_video_controller_rules());
     rules.extend(home_controller_rules("Tono-Exit", true));
     rules.extend(extra);
     rules.push(serde_json::json!({"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"}));
@@ -2155,7 +2167,7 @@ fn controller_readback_requires_the_exact_direct_graph_and_exit_order() {
     );
 
     let home_len = home_controller_rules("Tono-Exit", false).len();
-    let first_direct = 2 + home_len;
+    let first_direct = 2 + cloud_video_controller_rules().len() + home_len;
     let last = rules["rules"].as_array().unwrap().len() - 1;
     let mut wrong_order = rules.clone();
     wrong_order["rules"].as_array_mut().unwrap().swap(first_direct - 1, first_direct);
@@ -2241,13 +2253,17 @@ fn controller_readback_accepts_the_claude_home_split_graph() {
         "split rules without the Tono-Claude-Home group must fail"
     );
 
-    let domain_index = 2 + home_controller_rules("Tono-Claude-Home", false).len();
+    let domain_index = 2 + cloud_video_controller_rules().len() + home_controller_rules("Tono-Claude-Home", false).len();
     let mut wrong_target = split_rules.clone();
     wrong_target["rules"][domain_index]["proxy"] = serde_json::json!("Tono-Exit");
     assert!(
         controller_direct_graph_is_active(&wrong_target, &proxies, &expected, "Ethernet 2", true, false, true).is_err(),
         "a Claude domain leaking to Tono-Exit must fail"
     );
+    let mut video_on_home = split_rules.clone();
+    video_on_home["rules"][2]["proxy"] = serde_json::json!("Tono-Claude-Home");
+    assert!(controller_direct_graph_is_active(&video_on_home, &proxies, &expected,
+        "Ethernet 2", true, false, true).is_err(), "cloud video must not be accepted on Home");
 }
 
 #[test]

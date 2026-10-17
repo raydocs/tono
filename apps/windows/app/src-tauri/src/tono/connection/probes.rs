@@ -31,7 +31,7 @@ use super::transaction::ConnectTransaction;
 pub(super) const EXIT_PROBE_URL: &str = crate::tono::protected_probe::PROBE_ORIGINS[0].url;
 
 /// §6.8: the probe also proves fake-ip DNS via this lookup.
-pub(super) const FAKE_IP_LOOKUP_HOST: &str = "www.google.com";
+pub(super) const FAKE_IP_LOOKUP_HOST: &str = "www.gstatic.com";
 
 /// §6.7 DNS verification retry count.
 pub(super) const VERIFY_ATTEMPTS: u32 = 3;
@@ -77,7 +77,7 @@ pub(super) const TUN_DATA_PLANE_TIMEOUT: Duration = Duration::from_secs(18);
 /// Retained probe scheduling interval; the single Google target starts immediately.
 pub(super) const TUN_PROBE_STAGGER: Duration = Duration::from_millis(100);
 
-/// TUN and diagnostic loopback requests share the same Google HTTPS 200 contract.
+/// TUN and diagnostic loopback requests share the same gstatic HTTPS 204 contract.
 /// WFP must still be Locked; a physical-interface fallback is not accepted.
 pub(super) use crate::tono::protected_probe::{
     ProbeOrigin as TunDataPlaneProbe, PROBE_ORIGINS as TUN_DATA_PLANE_PROBES,

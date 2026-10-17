@@ -357,11 +357,10 @@ struct MultiExitPolicyTests {
             throw TestFailure("homeSocks5 Claude chain was not fail-closed and TCP-scoped")
         }
 
-        // Every named assistant provider must ride the residential hop, and the
-        // Unrelated shared infrastructure must stay off home; reviewed payment
-        // dependencies are now an explicit browser-independent exception:
-        // gstatic.com in particular is this group's own liveness probe, so
-        // routing it here would test the hop through itself.
+        // Home includes the owner's explicit Google/GitHub expansion, not just
+        // assistant-specific children. Other shared parents remain excluded;
+        // gstatic.com is also the independent cloud-path probe. Specific cloud
+        // video children must win before the broader Google Home rules.
         for provider in ConfigPipeline.assistantHomeDomainSuffixes {
             guard claudeSocks5Runtime.contains(
                 "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(provider))),\(ConfigPipeline.claudeHomeGroupName)"
@@ -379,7 +378,33 @@ struct MultiExitPolicyTests {
         guard !claudeSocks5Runtime.contains("2607:6bc0") else {
             throw TestFailure("IPv6 home CIDRs must not ship while the runtime is ipv6: false")
         }
-        for shared in ["gstatic.com", "auth0.com", "googleapis.com", "x.com"] {
+        for approved in ["google.com", "googleapis.com", "github.com", "githubusercontent.com", "githubassets.com"] {
+            guard claudeSocks5Runtime.contains(
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(approved))),\(ConfigPipeline.claudeHomeGroupName)"
+            ) else {
+                throw TestFailure("owner-approved parent \(approved) must use the residential hop")
+            }
+        }
+        guard let googleHome = claudeSocks5Runtime.range(of:
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,googleapis.com)),\(ConfigPipeline.claudeHomeGroupName)"
+        ), let processHome = claudeSocks5Runtime.range(of:
+            "AND,((NETWORK,TCP),(PROCESS-NAME,Claude)),\(ConfigPipeline.claudeHomeGroupName)"
+        ) else {
+            throw TestFailure("Google parent and Home process rules must be present")
+        }
+        for video in ["youtubei.googleapis.com", "youtube-ui.l.google.com", "googlevideo.com", "pornhub.com"] {
+            guard let cloud = claudeSocks5Runtime.range(of:
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(video))),\(ConfigPipeline.exitGroupName)"
+            ), cloud.lowerBound < googleHome.lowerBound,
+               cloud.lowerBound < processHome.lowerBound,
+               claudeSocks5Runtime.contains(
+                   "AND,((NETWORK,UDP),(DOMAIN-SUFFIX,\(video))),REJECT"
+               ) else {
+                throw TestFailure("cloud video \(video) must override Home parents/processes and reject UDP")
+            }
+        }
+        for shared in ["gstatic.com", "auth0.com", "x.com", "cloudflare.com", "fastly.net",
+                       "akamaized.net", "edgesuite.net", "ibyteimg.com", "bytedance.com"] {
             guard !claudeSocks5Runtime.contains(
                 "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(shared))),\(ConfigPipeline.claudeHomeGroupName)"
             ) else {

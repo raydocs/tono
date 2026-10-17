@@ -122,13 +122,12 @@ pub const DEDICATED_MODEL_API_SUFFIXES: [&str; 4] = [
     "maas.aliyuncs.com",
 ];
 
-/// First-party assistant domains pinned to the home-broadband exit when
+/// Owner-selected domains pinned to the home-broadband exit when
 /// `homeProxy` / `homeSocks5` is in force. These are DOMAIN-SUFFIX rules
 /// with no process constraint, so Chrome / Edge / Arc count the same as
-/// the desktop apps. `google.com`, `googleapis.com`, and `gstatic.com`
-/// stay out: they are shared by Search, YouTube, Gmail, and Tono's own
-/// exit probe. Gemini is pinned by its product hostnames instead.
-pub const CLAUDE_HOME_DOMAINS: [&str; 84] = [
+/// the desktop apps. Cloud video exceptions precede Google and process
+/// fallbacks. Shared CDN/ByteDance parents and gstatic remain excluded.
+pub const CLAUDE_HOME_DOMAINS: [&str; 166] = [
     DEDICATED_MODEL_API_SUFFIXES[0],
     DEDICATED_MODEL_API_SUFFIXES[1],
     DEDICATED_MODEL_API_SUFFIXES[2],
@@ -160,6 +159,7 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 84] = [
     "statsigapi.net",
     "featuregates.org",
     "growthbook.io",
+    "cdn.usefathom.com",
     "stripe.com",
     "stripecdn.com",
     "link.com",
@@ -179,6 +179,7 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 84] = [
     "ai.com",
     "oaistatic.com",
     "oaiusercontent.com",
+    "sora.com",
     "grok.com",
     "grok.x.com",
     "grokipedia.com",
@@ -191,6 +192,41 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 84] = [
     "aistudio.google.com",
     "generativelanguage.googleapis.com",
     "notebooklm.google.com",
+    "ai.google.dev",
+    "gemini.google",
+    "deepmind.com",
+    "deepmind.google",
+    "notebooklm.google",
+    "antigravity.google",
+    "generativeai.google",
+    "makersuite.google.com",
+    "jules.google.com",
+    "antigravity-unleash.goog",
+    "aida.googleapis.com",
+    "geller-pa.googleapis.com",
+    "aisandbox-pa.googleapis.com",
+    "cloudcode-pa.googleapis.com",
+    "robinfrontend-pa.googleapis.com",
+    "alkalicore-pa.clients6.google.com",
+    "daily-cloudcode-pa.googleapis.com",
+    "proactivebackend-pa.googleapis.com",
+    "alkalimakersuite-pa.clients6.google.com",
+    // Owner-selected AI services and dependency hosts. This is a routing
+    // choice, not an assertion of provider affiliation. Specific host
+    // suffixes include their children, not the shared parent namespace.
+    "g.ai",
+    "dify.ai",
+    "poe.com",
+    "groq.com",
+    "cursor.sh",
+    "jasper.ai",
+    "openart.ai",
+    "clipdrop.co",
+    "chatgpt.site",
+    "openrouter.ai",
+    "api.github.com",
+    "api.jetbrains.ai",
+    "gateway.ai.cloudflare.com",
     // Meta Muse
     "muse.ai",
     "meta.ai",
@@ -220,6 +256,33 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 84] = [
     "oauth2.googleapis.com",
     "mail-pa.clients6.google.com",
     "gmail.googleapis.com",
+    // Owner-approved expansion; shared downloads/APIs also use Home.
+    "google.com", "googleapis.com", "github.com",
+    "githubusercontent.com", "githubassets.com",
+    // Dedicated Reddit/TikTok hosts, including their media. Selected from
+    // v2fly/domain-list-community c6adacf29; never the shared CDN parents.
+    "redd.it", "reddit.app.link", "reddit.com", "redditblog.com",
+    "reddithelp.com", "redditinc.com", "redditmail.com", "redditmedia.com",
+    "redditspace.com", "redditstatic.com", "redditstatus.com", "reddit.map.fastly.net",
+    "muscdn.com", "musical.ly", "tik-tokapi.com", "tiktok-minis.com",
+    "tiktok-row.net", "tiktok.com", "tiktokcdn-eu.com", "tiktokcdn-us.com",
+    "tiktokcdn.com", "tiktokd.net", "tiktokd.org", "tiktokeu-cdn.com",
+    "tiktokglobalshopv.com", "tiktokminis.us", "tiktokrow-cdn.com",
+    "tiktokv.com", "tiktokv.eu", "tiktokv.us", "tiktokw.eu", "tiktokw.us",
+    "ttcdn-us.com", "ttlivecdn.com", "ttoverseaus.net", "ttwstatic.com",
+    "tiktokcdn-us.com.edgesuite.net", "tiktokcdn.com.akamaized.net",
+    "tiktokcdn.com.edgesuite.net", "tiktokv.com.edgekey.net", "tiktokv.com.edgesuite.net",
+    "p16-tiktokcdn-com.akamaized.net", "p16-tiktok-dm-sticker-sign-sg.ibyteimg.com",
+];
+
+/// Cloud-only video sites/media/APIs, even inside a Home-pinned process.
+/// TCP pins plus UDP rejection avoid a SOCKS/Reality UDP DIRECT fallback.
+pub const CLOUD_VIDEO_DOMAINS: [&str; 21] = [
+    "youtube.com", "youtube-nocookie.com", "youtu.be", "googlevideo.com", "ytimg.com",
+    "youtube.googleapis.com", "youtubei.googleapis.com", "youtubeembeddedplayer.googleapis.com",
+    "youtube-ui.l.google.com", "wide-youtube.l.google.com", "yt3.googleusercontent.com", "ggpht.com",
+    "pornhub.com", "pornhub.org", "pornhubpremium.com", "phncdn.com", "phprcdn.com",
+    "porngub.com", "pornhub-deutsch.net", "pornhubapparel.com", "gaytube.com",
 ];
 /// Anthropic's own unicast range (ARIN AP-2440 / AS399358). Customer audits
 /// only ever show `160.79.104.10:443` as a raw dest, which skips every
@@ -278,6 +341,7 @@ pub fn is_protected_from_direct(host: &str) -> bool {
     PROTECTED_DIRECT_SUFFIXES
         .iter()
         .chain(CLAUDE_HOME_DOMAINS.iter())
+        .chain(CLOUD_VIDEO_DOMAINS.iter())
         .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
 }
 
@@ -286,6 +350,7 @@ pub fn direct_suffix_overlaps_protected(host: &str) -> bool {
         || PROTECTED_DIRECT_SUFFIXES
             .iter()
             .chain(CLAUDE_HOME_DOMAINS.iter())
+            .chain(CLOUD_VIDEO_DOMAINS.iter())
             .any(|protected| {
                 protected.ends_with(&format!(".{host}"))
                 // Only these reviewed assistant children run ahead of the
