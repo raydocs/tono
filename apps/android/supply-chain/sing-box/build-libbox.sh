@@ -27,7 +27,8 @@ export PATH="$GOROOT/bin:$GOPATH/bin:$JAVA_HOME/bin:$PATH"
 [[ "$(go env GOVERSION)" == "go${GO_VERSION}" ]] || { echo "unexpected Go version" >&2; exit 1; }
 
 if [[ ! -f "$ANDROID_HOME/ndk/$NDK_REVISION/source.properties" ]]; then
-  yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$NDK_PACKAGE" >/dev/null
+  # Licence answers via process substitution: `yes |` dies of SIGPIPE, which pipefail turns into a failure.
+  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "$NDK_PACKAGE" < <(yes) >/dev/null
 fi
 grep -q "Pkg.Revision = $NDK_REVISION" "$ANDROID_HOME/ndk/$NDK_REVISION/source.properties"
 export ANDROID_HOME ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_REVISION"
