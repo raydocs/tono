@@ -135,12 +135,17 @@ private fun Lane(glyph: Glyph, name: String, dest: String, probe: ExitProbe?, li
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         GlyphIcon(glyph, tint, size = 22.dp)
-        Text(name, style = MaterialTheme.typography.bodyMedium, color = TonoColors.TextPrimary, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        GlyphIcon(Glyph.ARROW, TonoColors.TextTertiary, size = 14.dp)
-        Text(dest, style = MaterialTheme.typography.bodyMedium, color = TonoColors.TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (probeColor != null) {
-            StatusDot(probeColor, size = 7)
-            if (!status.isNullOrEmpty()) Text(status, style = MaterialTheme.typography.labelSmall, color = TonoColors.TextTertiary)
+        // Two lines, so neither the lane nor its destination is cut off at large font sizes.
+        Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+            Text(name, style = MaterialTheme.typography.bodyMedium, color = TonoColors.TextPrimary)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                GlyphIcon(Glyph.ARROW, TonoColors.TextTertiary, size = 12.dp)
+                Text(dest, style = MaterialTheme.typography.labelMedium, color = TonoColors.TextSecondary, modifier = Modifier.weight(1f, fill = false))
+                if (probeColor != null) {
+                    StatusDot(probeColor, size = 6)
+                    if (!status.isNullOrEmpty()) Text(status, style = MaterialTheme.typography.labelMedium, color = TonoColors.TextTertiary)
+                }
+            }
         }
     }
 }

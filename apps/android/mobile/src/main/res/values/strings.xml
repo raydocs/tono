@@ -60,7 +60,7 @@
     <string name="action_recheck">Check again</string>
 
     <string name="signin_title">Sign in to Tono</string>
-    <string name="signin_intro">Sign in with a one-time email code. No password.</string>
+    <string name="signin_intro">Sign in with an email code — no password.</string>
     <string name="signin_email">Email</string>
     <string name="signin_send">Send a sign-in code</string>
     <string name="signin_sending">Sending…</string>

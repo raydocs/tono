@@ -12,6 +12,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Configurator
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import com.raydocs.tono.mobile.engine.EngineSnapshot
@@ -60,6 +61,12 @@ class DeviceEvidenceTest {
     private val device = UiDevice.getInstance(instrumentation)
     private val out = File(context.getExternalFilesDir(null), "evidence").apply { mkdirs() }
 
+    init {
+        // The scene animates continuously, so the UI is never "idle"; UiAutomator's default 10 s idle
+        // wait before every lookup would otherwise dominate the run.
+        Configurator.getInstance().waitForIdleTimeout = 300
+    }
+
     /**
      * CI emulators sometimes raise a system "isn't responding" dialog for another app (e.g. the
      * launcher right after boot). It is not ours; answer "Wait" so it does not cover the evidence.
@@ -81,7 +88,7 @@ class DeviceEvidenceTest {
 
     private fun shot(name: String) {
         dismissForeignAnr()
-        device.waitForIdle(2_000)
+        Thread.sleep(400)
         assertTrue("screenshot $name", device.takeScreenshot(File(out, "$name.png")))
     }
 
@@ -102,11 +109,11 @@ class DeviceEvidenceTest {
     @Test fun a2_realSystemVpnConsentDialog() {
         val prepare = VpnService.prepare(context)
         assertNotNull("fresh install must need consent", prepare)
-        // Launched from the app's own foreground activity, as its Connect does: Android blocks
-        // activity starts from a process with no visible window.
+        // Started for a result from the app's own foreground activity, exactly as its Connect does:
+        // the system dialog needs a calling package and Android blocks background activity starts.
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             assertNotNull(find(By.text(text(R.string.signin_title)), 20_000))
-            scenario.onActivity { it.startActivity(prepare) }
+            @Suppress("DEPRECATION") scenario.onActivity { it.startActivityForResult(prepare, 1) }
             consentDialog()
         }
     }
@@ -210,6 +217,26 @@ class DeviceEvidenceTest {
         details!!.click()
         Thread.sleep(1_200)
         shot("fixture-06-details-sheet")
+    }
+
+    @Test fun b3_fixtureAtLargeFontScale() {
+        val shell = instrumentation.uiAutomation
+        shell.executeShellCommand("settings put system font_scale 1.3").close()
+        Thread.sleep(1_500)
+        try {
+            withFixtureHost { set, _ ->
+                set(connected().copy(phase = Phase.DEGRADED, reasonCode = "HOME_UNREACHABLE", homeProbe = ExitProbe(ProbeState.FAILED)))
+                Thread.sleep(2_000)
+                shot("fixture-07-font-1.3-home")
+                val details = find(By.text(text(R.string.details)), 5_000)
+                assertNotNull("details", details)
+                details!!.click()
+                Thread.sleep(1_200)
+                shot("fixture-08-font-1.3-details")
+            }
+        } finally {
+            shell.executeShellCommand("settings put system font_scale 1.0").close()
+        }
     }
 
     @Test fun b2_fixtureMotionRecordedOnDevice() = withFixtureHost { set, _ ->
