@@ -18,12 +18,17 @@ xcrun simctl bootstatus "$UDID" -b
 xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 || true
 xcrun simctl install "$UDID" "$APP"
 xcrun simctl list devices | grep "$UDID" > "$OUT/device.txt"
+# Evidence that the built app is installed on this simulator (container path + bundle version).
+{ echo "bundle: $BUNDLE_ID"
+  echo "container: $(xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" app)"
+  /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' -c 'Print :CFBundleVersion' "$APP/Info.plist"
+} > "$OUT/install.txt"
 shot() { # <name> <lang> <phase> [sheet]
   local name="$1" lang="$2" phase="$3" sheet="${4:-}"
   local args=(-TonoPreview "$phase" -AppleLanguages "($lang)" -AppleLocale "$([[ $lang == zh-Hans ]] && echo zh_CN || echo en_US)")
   [[ -n "$sheet" ]] && args+=(-TonoPreviewSheet "$sheet")
   xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
-  xcrun simctl launch "$UDID" "$BUNDLE_ID" "${args[@]}" >/dev/null
+  echo "$name: $(xcrun simctl launch "$UDID" "$BUNDLE_ID" "${args[@]}")" >> "$OUT/launches.txt"   # "<bundle>: <pid>"
   sleep 4
   xcrun simctl io "$UDID" screenshot --type=png "$OUT/$name.png" >/dev/null
   echo "captured $name"
@@ -66,3 +71,12 @@ for lang in zh-Hans en; do
   shot "$lang-08-settings" "$lang" CONNECTED settings
   shot "$lang-09-details" "$lang" DEGRADED details
 done
+cat > "$OUT/README.txt" <<EOF
+Tono iOS design preview, captured by apps/ios/tools/preview-screenshots.sh on a GitHub-hosted runner.
+Commit: ${GITHUB_SHA:-local}  Run: ${GITHUB_RUN_ID:-local}
+The Debug simulator build of Tono.app was installed (install.txt) and launched once per capture
+(launches.txt: bundle id and process id) on the simulator in device.txt.
+Every screen runs with -TonoPreview: fixture lines and probe results, NO account, NO tunnel, no
+network. The yellow badge on each capture says so. These images show layout, copy and motion only;
+they are not evidence of sign-in, connectivity or routing.
+EOF

@@ -67,6 +67,7 @@ struct SettingsView: View {
                 dismiss()
             }
         }
+        .previewBadge()
     }
 
     private var header: some View {
