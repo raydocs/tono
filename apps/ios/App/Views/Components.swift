@@ -151,13 +151,19 @@ struct Banner: View {
     let tone: Color
     let action: String?
     let onAction: () -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(spacing: 10) {
-            StatusDot(color: tone)
-            Text(text).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary).frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.updatesFrequently)
+        // The action goes under the text at accessibility sizes instead of squeezing it.
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+                                                  : AnyLayout(HStackLayout(spacing: 10))
+        layout {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                StatusDot(color: tone)
+                Text(text).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary).frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.updatesFrequently)
+            }
             if let action { QuietButton(title: action, color: tone, action: onAction) }
         }
         .padding(.leading, 14).padding(.trailing, 8).padding(.vertical, 10)

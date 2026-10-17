@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 /// Taps through the DEBUG design preview on a simulator: fixture data, no account, no network and
@@ -151,6 +152,33 @@ final class TonoUITests: XCTestCase {
         XCTAssertTrue(failures.isEmpty, failures.joined(separator: "\n"))
     }
 
+    /// WCAG contrast of an element's text against its own background, from a screenshot of the
+    /// element: text = the 3% of pixels furthest from the background (light or dark text alike),
+    /// background = the median pixel.
+    @MainActor static func measuredContrast(_ element: XCUIElement) -> Double? {
+        guard let cg = element.screenshot().image.cgImage else { return nil }
+        let w = cg.width, h = cg.height
+        guard w > 0, h > 0 else { return nil }
+        var bytes = [UInt8](repeating: 0, count: w * h * 4)
+        guard let ctx = CGContext(data: &bytes, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        func lin(_ c: UInt8) -> Double {
+            let v = Double(c) / 255
+            return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        }
+        var lum: [Double] = []
+        lum.reserveCapacity(w * h)
+        for i in stride(from: 0, to: bytes.count, by: 4) {
+            lum.append(0.2126 * lin(bytes[i]) + 0.7152 * lin(bytes[i + 1]) + 0.0722 * lin(bytes[i + 2]))
+        }
+        lum.sort()
+        let background = lum[lum.count / 2]
+        let text = background < 0.18 ? lum[lum.count * 97 / 100] : lum[lum.count * 3 / 100]
+        return (max(text, background) + 0.05) / (min(text, background) + 0.05)
+    }
+
     /// Runs Apple's audit and returns one line per issue (empty when the screen is clean).
     @MainActor private func audit(_ app: XCUIApplication, name: String) throws -> [String] {
         guard #available(iOS 17.0, *) else { throw XCTSkip("performAccessibilityAudit needs an iOS 17+ runtime") }
@@ -165,6 +193,14 @@ final class TonoUITests: XCTestCase {
                 if element?.identifier == "previewBadge" { return true }
                 let line = "AUDIT \(name): [\(issue.auditType.rawValue)] \(issue.compactDescription) | \(issue.detailedDescription) | "
                     + (element.map { "\($0.elementType.rawValue) id=\($0.identifier) label=\($0.label) frame=\($0.frame)" } ?? "no element")
+                // Apple's contrast check misreads text over gradients and glass (it flags 17:1 white on
+                // near-black). Each contrast flag is re-measured from the element's own pixels; only a
+                // measured ratio under WCAG AA 4.5:1 counts as a failure, and every flag stays in the log.
+                if issue.auditType == .contrast, let element, let ratio = Self.measuredContrast(element) {
+                    let verdict = ratio >= 4.5 ? "PASSES" : "FAILS"
+                    print(line + String(format: " | measured %.1f:1 %@ WCAG AA", ratio, verdict))
+                    if ratio >= 4.5 { return true }
+                }
                 print(line)
                 found.append(line)
                 if element == nil && !dumped {

@@ -161,7 +161,6 @@ struct HomeView: View {
         } else if let text = PhaseText.status(model) {
             Text(text).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
                 .frame(minHeight: 44, alignment: .leading)
-                .accessibilityHint(PhaseText.sentence(model) ?? "")
                 .accessibilityIdentifier("statusLine")
         }
     }
@@ -177,7 +176,7 @@ struct HomeView: View {
                     Text(name).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
                         .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                     if model.usingCachedCatalog {
-                        Text(L.t("lines_cached")).tonoFont(11, relativeTo: .caption2).foregroundStyle(TonoColor.warning).lineLimit(2)
+                        Text(L.t("lines_cached")).tonoFont(12, relativeTo: .caption).foregroundStyle(TonoColor.warning).lineLimit(2)
                     }
                 }
                 Spacer(minLength: 0)
@@ -253,7 +252,14 @@ struct ActionCapsule: View {
             }
         }
         .accessibilityLabel(action == .cancel ? L.t("a11y_cancel_connect") : title)
-        .accessibilityValue(PhaseText.title(phase))
+        .accessibilityValue(accessibilityValue)
+    }
+
+    private var accessibilityValue: String {
+        if phase.tunnelUp, let connectedSince {
+            return PhaseText.title(phase) + ", " + L.t("a11y_connected_for", PhaseText.clock(since: connectedSince, now: Date()))
+        }
+        return PhaseText.title(phase)
     }
 
     private var filled: Bool { action == .connect || action == .retry || action == .allowVPN }
@@ -279,7 +285,9 @@ struct ActionCapsule: View {
                     .tonoFont(15, .medium, relativeTo: .subheadline).monospacedDigit()
                     .foregroundStyle(TonoColor.textSecondary)
                     .lineLimit(1).fixedSize()
-                    .accessibilityLabel(L.t("a11y_connected_for", PhaseText.clock(since: connectedSince, now: context.date)))
+                    // Read as the capsule's value; a separate small element inside the button would be a
+                    // hit target of its own (accessibility audit: hit area too small).
+                    .accessibilityHidden(true)
             }
         }
     }
@@ -357,19 +365,6 @@ enum PhaseText {
         case .degraded: return L.t("state_degraded")
         case .disconnecting: return L.t("state_disconnecting")
         case .failed: return L.t("state_failed")
-        }
-    }
-
-    @MainActor static func sentence(_ m: AppModel) -> String? {
-        switch m.phase {
-        case .idle: return L.t("sentence_idle")
-        case .needsPermission: return L.t("sentence_permission")
-        case .preparing: return L.t("sentence_preparing")
-        case .connecting: return L.t("sentence_connecting")
-        case .connected:
-            if m.homeKind == .none { return L.t(m.mode == .stable ? "sentence_connected_stable_no_home" : "sentence_connected_no_home") }
-            return L.t(m.mode == .stable ? "sentence_connected_stable" : "sentence_connected_three_tier")
-        default: return nil
         }
     }
 

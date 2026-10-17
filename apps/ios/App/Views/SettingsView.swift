@@ -20,7 +20,7 @@ struct SettingsView: View {
                         ModeRow(title: L.t("mode_stable"), desc: L.t("mode_stable_desc"), selected: model.mode == .stable) {
                             Task { await model.setMode(.stable) }
                         }
-                        Text(L.t("mode_applies")).tonoFont(11, relativeTo: .caption2).foregroundStyle(TonoColor.textTertiary)
+                        Text(L.t("mode_applies")).tonoFont(12, relativeTo: .caption).foregroundStyle(TonoColor.textTertiary)
                     }
 
                     // The routing boundaries stay one tap away instead of a wall of text on open.

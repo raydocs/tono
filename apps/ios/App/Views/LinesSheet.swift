@@ -6,13 +6,16 @@ struct LinesSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var testing = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
+        let ax = typeSize.isAccessibilitySize
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
+            // At accessibility sizes title and button stack, and each row stacks, so nothing truncates.
+            (ax ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout())) {
                 Text(L.t("lines_title")).tonoFont(22, .semibold, relativeTo: .title2).foregroundStyle(TonoColor.textPrimary)
                     .accessibilityAddTraits(.isHeader)
-                Spacer()
+                if !ax { Spacer() }
                 QuietButton(title: L.t("lines_test")) {
                     guard !testing else { return }
                     testing = true
@@ -32,7 +35,7 @@ struct LinesSheet: View {
         .padding(.horizontal, 20).padding(.top, 22)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .modifier(SheetSurface())
-        .presentationDetents([.medium, .large])
+        .presentationDetents(ax ? [.large] : [.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
@@ -42,24 +45,31 @@ struct LinesSheet: View {
             Task { await model.select(line.name) }
             dismiss()
         } label: {
-            HStack(spacing: 12) {
+            let ax = typeSize.isAccessibilitySize
+            let latency = Text(line.latencyMS.map { L.t("latency_ms", $0) } ?? L.t("line_untested"))
+                .tonoFont(15, .medium, relativeTo: .subheadline).monospacedDigit().foregroundStyle(TonoColor.textSecondary)
+            let inUse = Text(L.t("lines_in_use")).tonoFont(12, .medium, relativeTo: .caption).foregroundStyle(TonoColor.accent)
+            HStack(alignment: ax ? .top : .center, spacing: 12) {
                 StatusDot(color: LatencyLevelColor.color(line.latencyMS))
+                    .padding(.top, ax ? 10 : 0)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(Format.city(line.city, chinese: L.isChinese)).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
                     if !line.label.isEmpty {
                         Text(line.label).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.textSecondary)
                     }
+                    if ax {
+                        latency
+                        if selected { inUse }
+                    }
                 }
-                Spacer(minLength: 0)
-                Text(line.latencyMS.map { L.t("latency_ms", $0) } ?? L.t("line_untested"))
-                    .tonoFont(15, .medium, relativeTo: .subheadline).monospacedDigit().foregroundStyle(TonoColor.textSecondary)
-                    .fixedSize()
-                if selected {
-                    Text(L.t("lines_in_use")).tonoFont(12, .medium, relativeTo: .caption).foregroundStyle(TonoColor.accent)
-                        .fixedSize()
+                if !ax {
+                    Spacer(minLength: 8)
+                    latency.layoutPriority(1)
+                    if selected { inUse.layoutPriority(1) }
                 }
+                if ax { Spacer(minLength: 0) }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 16).padding(.vertical, ax ? 12 : 0)
             .frame(minHeight: 56)
             .background((selected ? TonoColor.accent.opacity(0.14) : TonoColor.smokeHigh.opacity(0.6)),
                         in: RoundedRectangle(cornerRadius: 16, style: .continuous))

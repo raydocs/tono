@@ -7,6 +7,7 @@ import TonoKit
 struct DetailsSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// Settings from inside the sheet, so the thumb never has to reach the top-right gear.
     private let onSettings: () -> Void
 
@@ -47,7 +48,7 @@ struct DetailsSheet: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .modifier(SheetSurface())
-        .presentationDetents([.medium, .large])
+        .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
