@@ -15,3 +15,10 @@
 - 候选/发布：无安装包；无 IPA、无 TestFlight、无签名。
 - TestFlight 需所有者提供：组织类开发者账号与 Team ID、两个 App ID（含 Network Extensions + App Groups）、App Group、Apple Distribution 证书与两个 App Store 描述文件（或自动签名 + App Store Connect API 密钥存为仓库 secret）、App Store Connect 记录与出口合规回答；packet-tunnel-provider 无需额外审批（清单见 `apps/ios/README.md`）。
 - 剩余限制：未在真机运行隧道（需要 Apple 开发者团队、Network Extension 与 App Group 能力、真机）；未验证真实目录下的连接、DNS/IPv6/UDP、按需连接恢复与 50 MB 内存上限；App Store 发布受 GPL 许可问题约束，待所有者决定。
+- 续记（2026-10-17，UI 第 3 轮，所有者不接受 77/100）：
+  - 交互：DEBUG 预览可真实点按（准备 → 连接中 → 已连接 / 失败、取消、断开，`-TonoPreviewSlow`、`-TonoPreviewFailFirst`）；设置改为可下滑关闭的 sheet，并可从「详情」进入；魔法轻点执行主操作。6 个 XCUITest 交互流程在托管模拟器上通过（连接/断开、连接中取消、失败 → 原因 → 详情 → 重试、允许 VPN、详情进设置并关闭、选线路）。
+  - 可访问性：Apple `performAccessibilityAudit` 覆盖首页 7 个状态、3 个 sheet（大档位）、最大字号（AX5）5 个界面；命中区 ≥44 pt；按钮为单一无障碍元素（计时读入值）；对比度标记按元素像素复测（WCAG AA 4.5:1），无法归属元素的标记改为逐个检查屏上全部文本与控件；AX5 英文截图发现并修复出口胶囊把「Tokyo」拆字截断；区域名替代国家代码；降低透明度 / 减少动态效果有对应截图与录像。
+  - 动效：减少动态效果时日出填充改为跳变、海面静止（模拟器宿主 CPU 约 6% → 0.3%，Mac 宿主数据，非 iPhone）。
+  - 构建：托管 macos-26 运行 39078716807 @ `63066f0` 全绿（libbox、未签名 Release 真机、Debug 模拟器、9 个 XCUITest：6 交互 + 3 审计、46 张截图、3 段录像 + perf.txt；artifact `ios-preview-screenshots` 保留至 2026-10-31）。红：同一审计在 39071414305 @ `9a097b6`、39074124929 @ `f8b589f` 失败。
+  - 自评 86/100（模拟器夹具证据；真实性/性能 4/5 仅凭 Mac 宿主数据，若要求真机数据则为 3/5，低于 70% 线）。
+  - 未验证：真机、VoiceOver 实操、触感、真实隧道与网络、签名 / TestFlight（等待所有者）。
