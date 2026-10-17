@@ -322,6 +322,18 @@ pub(super) fn dispatch() -> Result<bool, Error> {
         std::process::exit(finish_gate(&mode, &report, outcome));
     }
     match args.as_slice() {
+        [mode, root] if mode == "--verify-uninstall-root" => {
+            // Read-only, no ARP dependency: a partially removed install must still be removable.
+            // Never let _?= or a copied uninstaller redirect privileged deletion elsewhere.
+            let root = Path::new(root);
+            let expected = native::program_files()?.join("Tono");
+            ensure!(
+                root.canonicalize()? == expected.canonicalize()?,
+                "uninstall target is not the fixed Program Files Tono directory"
+            );
+            native::verify_tree(root, 0)?;
+            Ok(true)
+        }
         [mode, package] if mode == "--update-unpack-gate" => {
             native::unpack_gate(Path::new(package))?;
             Ok(true)
