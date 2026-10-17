@@ -107,8 +107,9 @@ Not a capability request, but blocks distribution:
 - The GPL-3.0 / sing-box name-clause answer ([decision 129](../../docs/decisions/129-2026-10-17-ios-client-tunnel-defaults.md)).
 - VPN apps are not available on the China mainland App Store; whether TestFlight testers there can
   install is unverified.
-- No extra Apple approval is needed for this packet tunnel. Content filters, DNS proxies, app
-  proxies for unsupervised devices and per-app VPN (MDM) would be different; Tono uses none.
+- No extra Apple approval is needed for this packet tunnel. Other Network Extension types
+  (content filter, DNS proxy, app proxy / per-app VPN) have their own rules; Tono uses only
+  `packet-tunnel-provider`.
 
 ## Licence
 
