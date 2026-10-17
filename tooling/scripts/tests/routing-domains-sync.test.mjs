@@ -15,7 +15,7 @@ test('the CLI preserves ordered policy, detects drift and refuses ambiguous sour
     const script = path.join(root, 'tooling/scripts/sync-routing-domains.mjs')
     copyFileSync(fileURLToPath(new URL('../sync-routing-domains.mjs', import.meta.url)), script)
     const snapshot = path.join(root, 'tooling/scripts/sing-box/three-tier-template.json')
-    writeFileSync(snapshot, JSON.stringify({ version: 1, scope: 'bounded-service-classification-not-IP-geolocation',
+    writeFileSync(snapshot, JSON.stringify({ version: 2, scope: 'bounded-service-classification-not-IP-geolocation',
       domestic_full: ['www.local.test'], overseas_full: ['www.foreign.test'],
       graph: { rules: ['$home_suffixes', '$video_suffixes', '$domestic_full', '$overseas_full', '$home_cidrs', '$home_target'] } }))
     const contract = path.join(root, 'apps/macos/Tono/Core/ThreeTierRoutingContract.swift')

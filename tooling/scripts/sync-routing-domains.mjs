@@ -64,7 +64,7 @@ try {
   replace('cloudVideoDomainSuffixes', video)
 
   const snapshot = JSON.parse(readFileSync(path.join(root, 'tooling/scripts/sing-box/three-tier-template.json'), 'utf8'))
-  if (snapshot.version !== 1 || snapshot.scope !== 'bounded-service-classification-not-IP-geolocation') {
+  if (snapshot.version !== 2 || snapshot.scope !== 'bounded-service-classification-not-IP-geolocation') {
     throw new Error('unrecognized three-tier snapshot contract')
   }
   const countryHosts = [...snapshot.domestic_full, ...snapshot.overseas_full]

@@ -49,3 +49,11 @@
 - 独立high对该head判定3个安全Major：live Core运行图绑定、Windows strict继承stable LAN物理许可、丢失strict记录后的启动恢复。各记独立finding；本次集中补拒绝运行中strict绑定、strict撤回LAN FilterSpec、grant前独立持久strict判据与显式release清除。stable原合同保留。相关minor（verified Bootstrap重启保留云pin）一并收紧为Blocked floor。
 - 既有Mac真实Core生命周期回归扩展显式/推断两条绑定拒绝，Windows真实FilterSpec仲裁及Service传递断言覆盖LAN/IPv6/SSDP边界，单条持久恢复回归覆盖缺失/损坏/不可读会话记录、失败release与显式成功release。准确新head CI/增量独立复核以PR回执为准，未执行的native Red不记通过。
 - 本轮仍非全量地域分类或客户功能验收：快照仅10国内/11海外完整主机、实验默认关闭且无客户UI。设备真实DNS、第二跳身份/换云、网络变化/睡眠/重启、升级回退和G0/试用仍待真机；不动候选/feeds，不合并或发版。
+
+### 2026-10-17 续记 · 名单外默认DIRECT与双端设置入口
+- Owner最新明确“名单以外的都直连就好了呀”，取代以上历史未知拒绝：21视频云例外 → 原166 AI/具名Home → 明确云名单 → 其他受支持普通流量DIRECT（含未分类）。无需全地域库或新第三方信任源；10国内/11云完整hosts保留为具名规则，不扩Home/视频父域。
+- 同源图升级v2，普通真实解析/默认DNS走固定223.5.5.5 TLS并绑定物理NIC，客户端未知A同样fake-IP；解析后拒私网，普通DIRECT仍仅公网IPv4 TCP80/443。已命中Home/云DNS或拨号失败不fall through，Core死亡/重启floor与stable合同不变。Mac Helper协议4.52.56使旧未知拒绝Helper不能冒充新图准入。
+- Win/Mac设置新增稳定/三层选择，中英文、新旧外观；仅保存下次显式连接意图，不热切换/断开/解除保护。明确披露ECH/缓存或裸IP/自带DoH可能隐藏AI而默认DIRECT，不能保证任意AI走Home；业务UDP/QUIC、IPv6、LAN/其他普通端口未支持。Mac禁用三层LAN控件但保留stable偏好。
+- 回归扩展默认路由/DNS与保护组优先、缺Home/弱化图拒绝/稳定编译不变；Windows单条故障回归覆盖WFP成功移除后marker清除失败的错误报告、撤live/TUN证据、重启Blocked和显式重试。UI回归覆盖保存/回读不明/重载/导航/旧外观；新增Mac实际SettingsView双语双外观及保留会话渲染证据入口。
+- 本地验证和准确新head原生CI/独立high delta审查以PR回执为准，旧725ba绿灯不覆盖本轮；新增故障回归旧代码Red未执行。Windows实际生产组件+synthetic IO截图/指针演示非native持久化或网络证明；Mac渲染须托管WindowServer执行。
+- 交付仍Draft #1571；未合并/出包/发版/改feeds/移动端。设备真实DNS/第二跳身份/换云、Core/daemon故障、睡眠/网络变化/重启、升级回退/G0与试用未验收，#1071/#1504/#1605/#1643不称解决。

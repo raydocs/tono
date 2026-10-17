@@ -36,6 +36,11 @@ fn scm_stop_hint_refreshes_before_a_dns_restore_can_outlive_it() {
 struct SimulatedStateFailures;
 
 impl SimulatedStateFailures {
+    fn arm_strict_clear() -> Self {
+        intent::TEST_STRICT_CLEAR_FAILURE.store(true, Ordering::Relaxed);
+        Self
+    }
+
     fn arm_removal() -> Self {
         TEST_REMOVE_FAILURE.store(true, Ordering::Relaxed);
         Self
@@ -62,6 +67,7 @@ impl SimulatedStateFailures {
 
 impl Drop for SimulatedStateFailures {
     fn drop(&mut self) {
+        intent::TEST_STRICT_CLEAR_FAILURE.store(false, Ordering::Relaxed);
         TEST_REMOVE_FAILURE.store(false, Ordering::Relaxed);
         TEST_PERSIST_FAILURE.store(false, Ordering::Relaxed);
         TEST_INSTALL_FAILURE.store(false, Ordering::Relaxed);
@@ -1988,6 +1994,76 @@ async fn durable_strict_recovery_survives_lost_session_records_until_explicit_re
     *armed_guard() = None;
     restore_on_service_start().await?;
     assert!(!status().await.wanted, "successful explicit release stays released");
+    cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn strict_marker_clear_failure_retires_live_proof_but_keeps_restart_hold() -> Result<()> {
+    cleanup().await;
+    let contract = StrictContract {
+        runtime_sha256: strict_runtime_digest("admitted graph"),
+        config_path: None,
+        session_token_hash: "token-hash".into(),
+        generation: None,
+        release_generation: 0,
+        physical_interface: "Ethernet 7".into(),
+        exit_endpoints: test_config().proxy_endpoints,
+    };
+    arm_bootstrap_bound(&test_config(), "/opt/tono/sing-box", "owner-alice", Some(contract.clone())).await?;
+    // Seed the last installed tunnel/verification proof. The test engine has no native
+    // WFP; inspect its liveness cache too, since status.live is always false in that build.
+    TUNNEL_PERMIT_RENDERED.store(true, Ordering::Relaxed);
+    note_verify(true);
+    assert!(status().await.tunnel_permit_rendered);
+    assert!(verify_reads_live(*last_verify_guard()));
+    let failure = SimulatedStateFailures::arm_strict_clear();
+    let error = release().await.expect_err("WFP removal succeeds but clearing the hold fails");
+    assert!(format!("{error:#}").contains("simulated strict recovery clear failure"));
+    let released = status().await;
+    assert!(!released.live && !released.tunnel_permit_rendered);
+    assert!(!verify_reads_live(*last_verify_guard()), "removed WFP cannot retain live proof");
+    let tombstone: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+    assert!(!tombstone.wanted, "the fault must not prevent session tombstone persistence");
+    assert_eq!(tokio::fs::read(strict_recovery_path()).await?, b"strict\n");
+    drop(failure);
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    let recovered = status().await;
+    assert!(recovered.wanted);
+    assert_eq!(recovered.mode, KillSwitchStatusMode::Blocked);
+    assert!(!recovered.tunnel_permit_rendered);
+    release().await?;
+    assert!(!strict_kill_switch_intent_on_disk());
+    assert!(!status().await.wanted);
+
+    // The explicit emergency escape hatch owes the same reporting and durable retry contract.
+    arm_bootstrap_bound(&test_config(), "/opt/tono/sing-box", "owner-alice", Some(contract)).await?;
+    TUNNEL_PERMIT_RENDERED.store(true, Ordering::Relaxed);
+    note_verify(true);
+    assert!(status().await.tunnel_permit_rendered);
+    assert!(verify_reads_live(*last_verify_guard()));
+    let failure = SimulatedStateFailures::arm_strict_clear();
+    let error = emergency_disarm_windows_kill_switch().await
+        .expect_err("emergency removal must report the failed strict clear");
+    assert!(format!("{error:#}").contains("simulated strict recovery clear failure"));
+    let released = status().await;
+    assert!(!released.live && !released.tunnel_permit_rendered);
+    assert!(!verify_reads_live(*last_verify_guard()));
+    assert_eq!(tokio::fs::read(strict_recovery_path()).await?, b"strict\n");
+    drop(failure);
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    let recovered = status().await;
+    assert!(recovered.wanted);
+    assert_eq!(recovered.mode, KillSwitchStatusMode::Blocked);
+    assert!(!recovered.tunnel_permit_rendered);
+    emergency_disarm_windows_kill_switch().await?;
+    assert!(!strict_kill_switch_intent_on_disk());
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    assert!(!status().await.wanted, "explicit retry stays released across restart");
     cleanup().await;
     Ok(())
 }

@@ -1,6 +1,6 @@
 # 下一版智能分流 nightly：Home 链路与 DNS 防护设计提案
 
-日期：2026-10-11；三层合同续记：2026-10-17。状态：**#1572 已合并；#1571 已增加双端有界三层运行时、DNS 和严格会话源码，正在准确 head CI/独立审查，尚未设备验收或完成客户可用性资格。Owner 已授权实施和测试，未授权本 PR 合并或发布。AI/具名 Home 组 → Home、其余确认非 AI 国内 → DIRECT、海外 → 云，取代旧默认 DIRECT。**
+日期：2026-10-11；三层合同续记：2026-10-17。状态：**#1572 已合并；#1571 已增加双端三层运行时、DNS、严格会话与设置入口，正在准确 head CI/独立审查，尚未设备验收。Owner 最新明确“名单以外的都直连”：21视频云例外 → 166 AI/具名 Home → 明确云名单 → 其余受支持普通流量默认 DIRECT（含未分类），取代此前未知拒绝。已授权实施和测试，未授权合并或发布。**
 
 归属：[SHIP_PLAN](../SHIP_PLAN.md) G1/G2 的后续桌面版本；保持现有 0.0.76 客户 RC 和正式 feeds 不变，不修改 G1–G3 勾选。具体产品版本由 owner 另定。
 
@@ -10,13 +10,13 @@
 
 ### 0.1 本轮可执行源码与明确支持面
 
-- 同源快照：`tooling/scripts/sing-box/three-tier-template.json` v1，现有4 Model API/166 Home/21视频不变；地域部分仅 **10个国内、11个海外完整主机名**。国内取既有国内白名单的窄子集；海外为具名公共网站及三个现有云路径探测源。不是全量地理库，不是“所有国内/海外可用”；页面CDN、登录依赖或游戏未分类时照常拒绝。新增分类需源码评审和重建客户端/特权组件，不加载 latest、用户文件或远程规则集。
-- 两端编译并由 Helper/Service 精确准入同一内联 route/DNS 图。21视频先于166 Home；受支持国内TCP80/443 DIRECT，具名海外TCP云，Home TCP经云→原assigned Home。未知、IPv6、非DNS UDP/QUIC、LAN和未分类raw-IP拒绝；保留原Home IPv4 CIDR保护。仅公开字面IPv4 VLESS/TCP云出口及具名SOCKS5 Home，缺Home/云不准入；本单元不支持HY2或普通游戏任意UDP。
+- 同源快照：`tooling/scripts/sing-box/three-tier-template.json` v2，现有4 Model API/166 Home/21视频不变；保留10个显式国内DIRECT/11个明确云完整主机名。不需要全面地域库，其他受支持普通流量也默认DIRECT。名单和精确图的更新走源码评审、生成/漂移校验与客户端/特权组件重建，不加载 latest、用户文件或远程规则集。
+- 两端编译并由 Helper/Service 精确准入同一内联 route/DNS 图。21视频先于166 Home，再明确云，最后普通公网IPv4 TCP80/443 DIRECT；已命中Home/云的解析或拨号失败终止，不回落DIRECT。IPv6、非DNS UDP/QUIC、LAN和其他普通端口拒绝；保留Home IPv4 CIDR保护。缺Home/云不准入；不支持HY2或任意游戏UDP。**ECH、应用自带DoH、缓存/裸IP可能隐藏AI身份而走默认DIRECT，不能保证未识别AI走Home。**
 - 每类在Core内部显式真实解析：Home固定1.1.1.1 DoH经云→Home，海外经云，国内固定223.5.5.5 TLS DoH绑定物理NIC；客户端取得fake-IP。显式resolve后再转发已解析IP，避免SOCKS供应商的域名解析替代批准DoH。DNS答案和真实第二跳仍需抓包/受控接收端验证。
-- 模式默认`stable`，高级本地意图键为Mac `desktopRoutingMode` / Windows `desktop_routing_mode`，值`three-tier`。只在Connect捕获，不加客户UI入口或远程开关；当前会话不读取后改偏好。模式/快照/选云改变须显式Disconnect/Restore结束旧保护后重新Connect，不能热切换；Home凭据不自行重分配。
+- 模式默认`stable`，Mac/Windows设置均有明确入口及中英文支持面说明，本地意图键为Mac `desktopRoutingMode` / Windows `desktop_routing_mode`，值`three-tier`。只在Connect捕获，无远程开关；保存偏好不改变当前会话/自动断开或解除保护。模式/快照/选云改变须显式Disconnect/Restore后重新Connect，不能热切换；Home凭据不自行重分配。Mac三层会话/下次意图存在时禁用LAN控件但保留stable偏好。
 - Windows持久化运行时SHA、owner/token/generation、release generation和派生云端点，原Service DIRECT gate不撤；仅live受绑定Core/TUN可得TCP80/443许可，恢复只装block。Mac复用root快照/release authority绑定SHA，原生许可限定物理NIC及root UID，不冒充PID级隔离；Helper重启后重新装block，不承诺Helper启动前开机零流量。Core/特权故障、自动失败/Quit不结束strict意图，显式带栅栏release仍可恢复网络。
 - 健康检测：云证明失败后，受保护国内DNS/TLS可让健康Core继续服务国内，明确降级且不计为Home/云成功。Mac启动也可降级；Windows初始准入仍要求云证明，不能声称两端冷启动云故障可用性完全一致。单一国内探测站故障仍保守恢复。主机/网络实际变化、Core死亡或双路径失败保持严格保护。
-- 回归源码覆盖编译顺序/域名身份/缺Home、DNS及未知拒绝、准入负例、捕获模式、永久strict watchdog、重启无旧grant、显式release及Mac国内降级。Linux只执行便携检查；原生CI、设备/G0、升级/回退、换云后Home出口连续性和一周试用各自单列，不能互相替代。#1071/#1504、#1605/#1643不由本单元宣称解决。
+- 回归源码覆盖优先级/默认DIRECT与DNS/保护组不降级、准入负例、捕获模式、永久strict watchdog、重启无旧grant、显式release、Windows成功移除WFP后marker清除失败及Mac国内降级。Linux只执行便携/前端检查；原生CI、设备/G0、升级/回退、换云后Home出口连续性和一周试用各自单列。#1071/#1504、#1605/#1643不由本单元宣称解决。
 
 ## 0. 实施入口：先完成有共识的范围，再闭合产品取舍
 
@@ -30,7 +30,7 @@
 
 ### 三层语义与已确认的 Home 保护组
 
-最新 owner 要求锁定：**已识别 AI 优先于任何国家/地区分类；确认非 AI 的国内流量直连，确认非 AI 的海外流量走云。** 游戏、下载、语音都按此归属，不再一概 DIRECT。这里的“非 AI”不是“没命中 Home 就算非 AI”；未分类仍是独立安全状态，不是第四个用户出口。
+最新 owner 要求锁定：**具体视频云例外 → AI/具名 Home → 明确云名单 → 其余受支持普通流量默认DIRECT，包括未分类。** 名单缺席不是非AI身份证明，只是默认路由选择；域名不可见导致未识别AI直连是必须公开的覆盖边界。不为全面地域分类阻塞实施，UDP/IPv6支持仍另列。
 
 与 #1572 的冲突不在三层拓扑，而在**名单语义**：166 个 Home 后缀刻意包含非 AI 的 Google 搜索/Gmail、GitHub 下载、Reddit/TikTok 媒体和支付/验证码依赖，不能直接重命名为 AI 分类。21 个 YouTube/Pornhub 视频例外属于非 AI 海外走云，与新地域目标相容；`youtubei.googleapis.com` 必须继续先于宽 `googleapis.com`，不能被所谓 AI 父域吞掉。Twitch 不是 #1572 的新增批准表。
 
@@ -41,7 +41,7 @@
 [原审查](https://github.com/raydocs/tono/pull/1571#issuecomment-6117460125) 及 [更正](https://github.com/raydocs/tono/pull/1571#issuecomment-6117533750) 的三个问题没有因新要求被自动批准。按 [暂定安全决定](../decisions/128-2026-10-17-desktop-three-tier-routing-boundaries.md) 保留严格边界，不再要求 owner 逐项重答后才工作：
 
 - 新模式的 Core/特权组件死亡或分类可信性丢失时保持整机 fail-closed，不为普通网络开放通用物理许可。现有显式退出/恢复网络是用户结束保护，沿用其独立合同；不以本设计假称当前旧模式的自动恢复已改变。
-- 未分类缓存 IP、自带 DoH/ECH、未知 UDP 拒绝；CN 地址、非 443 UDP 或一次 sniff 成功都不足以证明非 AI。不得回退 DIRECT 或假称 Home；旧模式现有默认云出口不在本次改动中被静默改成拒绝。
+- 普通未分类流量按owner最新决定默认DIRECT；缓存IP/自带DoH/ECH隐藏AI身份可能进入该路径，不能假称Home。已识别Home/云不因失败降级DIRECT，旧模式默认云不变。未准入UDP/IPv6/端口仍拒绝。
 - 保留固定已评审 DoH/TLS 和 Home DNS 完整两跳要求，不接受未经审阅的供应商 resolver 替代。具体受信任端点、能力与准入仍须实现/验证；`ATYP=domain` 不是解析器身份证明。
 
 ### 最小实施顺序与退出条件
@@ -52,14 +52,14 @@
 4. 复用当前 release generation/writer 账本，核对模式切换、迟到 DNS、Core/daemon 故障及再次 Connect。必须单独保留 [#1071/#1504](https://github.com/raydocs/tono/issues/1071) 的 Mac abandoned upgrade AI-hold 缺口和 [#1605](https://github.com/raydocs/tono/pull/1605) 的 Windows DNS 恢复收尾；未合修复、旧 head 的 major 或绿色 CI 均不自动转成当前实现结论。这两项不与分流扩域混为已解决。
 5. G0/带外恢复就绪后，再做双端设备 DNS/QUIC、Home A→B→C 云切换、故障/升级回退的正负对照；没有对应证据不开放三层测试模式。一周小范围试用及任何新候选/正式推广仍需另行授权。
 
-以下为当前三层目标；旧默认 DIRECT 仅在原 changelog/PR 历史评论保留溯源，已被取代，不是实现依据。当前 #1605 是 OPEN/Draft [8439e5a06](https://github.com/raydocs/tono/commit/8439e5a06a5214bc6a0b1994ab8ca9ac5e59f6c3)，包含旧 R4 审查后的 debt-commit 续修；不能把 a529 旧 Major 直接套到新 head。它与 #1071/#1504、#1643 均未由本 PR 验收或合并。
+以下按最新默认DIRECT政策读取；原 changelog/PR历史评论中的未知拒绝只保留溯源。当前 #1605 是 OPEN/Draft [8439e5a06](https://github.com/raydocs/tono/commit/8439e5a06a5214bc6a0b1994ab8ca9ac5e59f6c3)，包含旧 R4 审查后的 debt-commit 续修；不能把 a529 旧 Major 直接套到新 head。它与 #1071/#1504、#1643 均未由本 PR 验收或合并。
 
 ## 1. Owner 已表达的目标与本提案的边界
 
 - 同一 App 代码里新增用户主动选择的测试模式，先通过独立 nightly 候选分发。稳定客户版和客户更新源不动，不新增第二个争抢同一 Helper/Service 的 App。
 - 保留当前宽 Home 名单作为具名保护组；不把这张表冒充服务事实分类，不据此扩新域。
 - **Home 是链式代理的家宽第二跳：本机 → 云节点 → Home → 目标服务。不能将其改成本机直接连接的独立家宽出口。**
-- 非 AI 的国内流量 DIRECT、海外流量走云；识别到的国内 AI 同样先走 Home。游戏按地域与协议能力准入，不一概直连。本地手机、NAS、打印机保留独立的受限许可。
+- 视频/明确云名单走云，AI/具名Home走Home，其余受支持普通流量DIRECT；游戏只按已支持协议，不承诺任意游戏可用。三层模式LAN拒绝，stable本地设备偏好保留。
 - Home 必须优先安全，不能为连接成功改用云端最终出口或直连。普通业务不应因 Home 单独故障被整机拖断。
 - 候选先验证安全，再让明确加入的用户稳定使用一周；不是七天后自动发布，也不是对服务商封号/地区政策的保证。
 
@@ -71,15 +71,14 @@ Home 末端上游 DNS 是本提案额外提出的增强，不是现有链路重�
 
 ```text
 已识别 AI / 具名例外  ──→ 云节点 ──→ Home 家宽 ──→ 受保护服务
-已分类非 AI 海外     ──→ 云节点 ───────────────→ 网站 / 游戏
-已分类非 AI 国内     ──→ 本地物理网络 ─────────→ 网站 / 游戏
-未分类 / 不支持       ──→ 拒绝（不是 DIRECT 兜底）
-明确允许的本地资源   ──→ 本地网络接口 ─────────→ 手机 / NAS / 打印机
+视频例外 / 明确云    ──→ 云节点 ───────────────→ 网站
+其余（含未分类）     ──→ 本地物理网络 ─────────→ 公网IPv4 TCP80/443
+不支持协议/端口/LAN  ──→ 拒绝
 ```
 
-规则语义为：入口/旧 fake-IP/保留地址拒绝 → 已批准具体云视频例外 → AI/具名 Home 域名和可信应用保护 → 确认非 AI 国内 → 确认非 AI 海外 → 未分类拒绝。具体视频例外维持 #1572 合同，包括宽 Google 父域及 Home 应用内的例外；Home 保护先于任何地域规则。未来新增条目与视频表冲突须先查 owner 决策并显式重审，不能悄悄挪顺序。局域网另有明确许可，不能覆盖 Home 或为 DNS 开洞。IP 字面量、DNS 回答和既有连接不能假定总携带域名。
+规则语义为：入口/旧fake-IP/保留地址拒绝 → 21视频例外 → 166 Home域名/既有Home CIDR → 显式国内/云 → 普通DIRECT。解析后再次拒绝私网答案；非支持端口末尾拒绝，不是任意端口放行。已匹配route为终止动作，resolve/拨号失败不重新分类或fall through。既有Home应用进程保护不被新模式冒称具备，当前图按域名/CIDR识别。IP字面量、DNS回答和既有连接不能假定携带服务身份。
 
-“国内”不能由 `.cn`、IP 国家、注册商或“没命中 AI”单独证明。国内 AI API 子域先于其普通父域，普通海外业务走云而非 DIRECT；没有名单命中不代表已分类。共享 CDN、国内服务海外依赖、DNS 重绑定和冲突输入保留上下文或拒绝；不做 `GEOIP,CN` 前置或把任意 CN raw-IP 流量直连。
+不做 `GEOIP,CN` 前置。国内AI子域依然先Home；名单外海外也默认DIRECT，不称全面地域分流。共享CDN/裸IP缺乏身份时可能普通DIRECT，原Home域名上下文仍需保留，不能把已识别保护流量解析后重分为普通流。
 
 名单内共享依赖用于普通工作时也走 Home：例如 Gmail、Stripe、npm、GitHub raw。Home 故障时这些请求同样会失败；“普通网络隔离”只指不属于 Home 的业务，不承诺所有页面/工作流毫无影响。不能为它们阻断整个 Cloudflare、Google、Azure 或 ASN。
 
@@ -99,23 +98,23 @@ Owner 的补充目标：云节点故障、节点供应商流量耗尽或不稳�
 
 ### 2.2 分类数据、编译与特权准入的同一合同（目标；实际有界实现见 §0.1）
 
-新三层模式仍为显式可选，稳定模式保持现有默认云出口；**不再实现“其余默认 DIRECT”**。国内/海外指经审阅的服务类别及其受支持端点，不单凭 IP 国家猜服务身份。国内 AI 即使回答 CN 地址也进 Home；同父域的普通服务才有资格按地域匹配。未识别目的地拒绝，不能为了“所有网站可用”伪造分类覆盖率。
+新三层模式显式可选，stable保持默认云；**其余普通流量默认DIRECT（含未分类）**，不需要全面国别库。国内AI仍先Home，明确云名单仍先云；未识别AI可能普通DIRECT，不能伪造分类覆盖率或任意AI保证。
 
 当前已核实的复用边界：
 
 | 所有者 | 可复用的当前实现 | 必须新增的有界合同 |
 |---|---|---|
 | 分类来源 | Windows `direct_domains.rs` 与 Mac `ConfigPipeline.swift` 的审核名单和 protected-child 检查 | 同一版本的 AI、Home 例外、非 AI 国内/海外类别及来源/许可/摘要；两端消费同一规范化快照，而非手写两份独立国别表。新 AI 项逐项评审，不把全部 geosite AI 标签自动变成 owner 批准 |
-| 地域数据 | Mac legacy `ConfigParser.swift` 的 GEOIP/GEOSITE 仅作历史语义参考 | 首版随包固定、经审阅的域名分类快照；可评估已有引用的 domain-list-community 固定 commit，不读 `latest` 或用户目录。GeoIP 只能辅助已分类域名/端点，raw-IP 缺业务身份仍拒绝。数据源及确切快照尚未选定，不声称已有受信任数据库 |
+| 地域数据 | Mac legacy GEOIP/GEOSITE不作新模式信任输入 | 现有10显式DIRECT/11明确云hosts随包固定；其他普通目的地DIRECT。无全地域库阻塞，也不引入远端分类授权 |
 | 可信装载 | Mac Helper `CoreManager.snapshot` 只复制摘要绑定的 config.json；Windows `sing_box_runtime.rs` 禁止任意 `rule_set`/文件 | 优先在有尺寸上限的规范化快照上编译内联规则，特权端验证来源摘要、模式和完整图；不因加地理规则撤掉文件/远程规则禁止项或 8 MiB 上限。放不下时不准入，另评审受信任资产协议 |
 | DIRECT 授权 | Windows `direct_admission.rs` 绑定签名策略与既有形状，Mac 有 endpoint/受审应用许可 | 新模式能力版本+精确 country-DIRECT 形状、AI/视频前置保护、快照成员关系与端口/端点限制一起验证；不把 geosite 行作为签名即安全，也不借 process DIRECT 绕过目标分类 |
-| 路由末尾 | 旧模式 `final=Tono-Exit` 保留 | 新模式显式 AI/Home、国内、海外规则后 terminal reject；Helper/Service 按明确模式分别验证末尾和 DNS 合同，不删旧 final 检查来兼容任意 JSON |
+| 路由末尾 | 旧模式 `final=Tono-Exit` 保留 | 新模式保护组后普通TCP80/443 resolve/私网拒绝/DIRECT，剩余不支持流拒绝；final与默认DNS同步DIRECT合同，特权端精确比较，不撤stable旧门 |
 
 **已实施的同源单元：** `direct_domains.rs` 保持现有4个 Model API、166个 Home、21个视频后缀的唯一手写来源；Windows Core/Service共用该文件和三层图，`tooling/scripts/sync-routing-domains.mjs --write` 生成Mac原三数组及App/Helper共用的 `ThreeTierRoutingContract.swift` 图。`--check` 与CLI回归进入ci-gate无条件changes job，Rust-only编辑不能跳过漂移检查。三层模式现有地域覆盖和原生准入见§0.1，不扩大到全量国家库或所有App。
 
 Windows `prebuild.mjs` 的 MetaCubeX `latest` 下载/按 mtime 复制，以及 Mac 已有 `geoip.dat/geosite.dat` 资源，**不是现有受信任更新通道**。首版不新增远端分类更新；以后需要更新时，签名来源/版本、内容摘要、大小/语法限制、旧版本拒绝、跨账号/模式缓存失效与恢复必须在同一授权更新事务里验证，不重解释旧 v1–v4 DIRECT 策略。最后已验收快照只在同账户/绑定/合同且仍有效时可继续用；缺失、损坏或无有效快照则拒绝模式准入，不退到全直连。
 
-DNS 同样按业务上下文分类：Home 固定 DoH 经云→Home，海外固定 DoH 经云，国内经绑定物理接口的批准加密 resolver。Windows 当前 DIRECT 默认 resolver 仍依赖云，需要和 Service DNS 形状一起实现；不能把国内 A 查询先走断开的云再声称“国内不依赖云”。保护特定子域先于国内父域；CNAME/真实查询/controller/预取及缓存要保留类别与代次。不是把系统 DNS 恢复成 DHCP，LAN/企业命名空间按既有受限合同单列。
+DNS按业务上下文：Home固定DoH经云→Home，明确云经云，普通默认经绑定物理NIC的223.5.5.5 TLS。所有支持的客户端A查询先fake-IP，Core真实解析仍按原域名分类；不是恢复DHCP DNS。保护组解析失败终止，不改用普通resolver；CNAME/缓存身份与实际出口待设备验证。
 
 协议边界不由新需求自动放开：Home SOCKS/Reality 不支持的 UDP/QUIC 拒绝，不物理回退；海外 UDP 仅在批准传输实际支持时走云。国内 UDP/游戏只有业务/目的端点分类及 Core 专属物理许可共同完成才开放，非 443 端口不是证明。IPv6 保留当前业务禁用边界，AAAA/字面 IPv6不能绕分类；系统 NDP/DHCPv6 维持现有许可，不以“国内”开放IPv6出站。先交付并验证有界 TCP/IPv4 路径，不把它说成所有国内游戏/IPv6已实现。
 
@@ -127,7 +126,7 @@ DNS 同样按业务上下文分类：Home 固定 DoH 经云→Home，海外固�
 
 | 项目 | 当前源码 | 对新模式的意义 |
 |---|---|---|
-| 默认路由 | Mac `ConfigPipeline+Runtime.swift:856–862` 的 MATCH，以及 `ConfigPipeline+SingBoxProduct.swift:355–367` 的 final；Windows `tooling/scripts/sing-box/runtime-template.json:25–34` 都指向 Tono-Exit | 旧模式保留；新模式需要显式海外规则及未分类拒绝，不改 final 为 DIRECT；PF/WFP、DNS 和特权准入也依赖合同 |
+| 默认路由 | stable原final指向Tono-Exit | stable保留；三层同源图v2保护组后普通DIRECT，DNS与Helper/Service准入同步变更，非只改final |
 | 已有国内直连 | Mac `ConfigPipeline.swift:111–176` 内置国内suffix，`AppState+Catalog.swift:738–798` 在有效policy下构造plan；Windows `config.rs:39–87` 和 `connection/direct.rs:2177–2184` 在native pins存在时附加国内suffix | 可复用国内规则，但不是完整国别分类；未知不能由“不在AI表”推导非AI |
 | 物理出口许可 | Mac `tooling/scripts/core-helper/KillSwitchPF.swift:510–559` 是session tuples/有TUN时root reviewed ports；Windows `wfp_model.rs:909–1016` 是有TUN的Locked状态下staged Core tuples/reviewed TCP ports | 既有许可不覆盖普通游戏任意UDP端口；改路由最终规则不自动获得许可，也不能撤防火墙代替新合同 |
 | Home 链 | Mac `ConfigPipeline+SingBoxProduct.swift:196–203`、Windows `sing_box/runtime.rs:312–348` 中 SOCKS5 的 detour 为 Tono-Exit，Home 不做最终云出口兜底 | 保留两跳；其他 home_proxy 表示必须证明同一拓扑后才能准入，不能只凭名字叫 Home |
@@ -175,9 +174,9 @@ DNS 同样按业务上下文分类：Home 固定 DoH 经云→Home，海外固�
 阻断物理 53/853 能约束常规 DNS/DoT/DoQ 的部分出口，不会辨认 HTTPS/443 里的 DoH；IPv6、非标准端口、DNSCrypt 等也需明确支持边界。不使用全网 443 或整段 CDN 阻断作为补救。
 
 - 接入前缓存的 A/AAAA、已存在 TCP/QUIC、旧 fake-IP slot、负缓存必须有转移规则。冲刷系统缓存不等于清除了浏览器或 App 的缓存，也不终止现有连接。
-- 域名信息缺失时，不能因为“不匹配 Home 名单”就当普通 DIRECT；可能是已缓存的 Home/CDN 地址。这类客户端/流在有可执行的分类或阻断机制前不取得严格资格。
+- 域名信息缺失且Home CIDR也未匹配时，按最新默认策略可普通DIRECT；可能实际是缓存Home/CDN地址，必须披露，不能授予“任意AI严格Home”的资格。已匹配保护上下文不得抹掉再走默认路径。
 - 原生 App可评估可信程序身份；Claude Code等共享 Node/Python运行时不能仅按 node.exe/python 进程名锁定或放开。Mac PF只按地址/端口/接口/UID，不是应用身份防火墙；Windows WFP有应用条件也不等于能区分同一浏览器的 AI 与普通页。
-- 浏览器配置扫描作为诊断/准入的一部分，不当作实时强制器。必须证明运行时自带 DoH、ECH、扩展代理、便携版/参数等的约束；约一分钟一次轮询不能封住变更到发现之间的流量窗口。
+- 浏览器配置扫描只是诊断/现有准入，不当作实时强制器；自带DoH/ECH等隐藏身份的覆盖缺口公开显示，不能靠约一分钟一次轮询声称任意AI不会默认DIRECT。
 
 ## 5. 故障安全与国内业务隔离：保持严格边界
 
@@ -192,7 +191,7 @@ DNS 同样按业务上下文分类：Home 固定 DoH 经云→Home，海外固�
 
 **Core 健康时的单跳故障隔离，与 Core 死后的全机阻断是两个不同承诺。** 不再要求现有 PF/WFP 按共享 CDN 域名在 Core 死后继续分类。普通网络独立仅在 Core/分类仍可信且对应 DIRECT/DNS路径已准入时成立；全机阻断是合法安全结果，不得以“恢复成功”展示。
 
-两类目标可能在通用浏览器/共享 CDN/非受控客户端上冲突：普通未知 HTTPS允许直连，但系统看不到其中是否是 Home业务。必须提交可执行的分类/约束机制、限定支持面，或承认无法满足并不准入。不能把未见反例、用户接受风险或七天稳定升级成机制保证。
+普通未知HTTPS允许直连时，系统未必能看到是否实际为Home业务。本版按owner决定实现默认DIRECT并公开此覆盖边界，不承诺任意AI保护；已识别Home/云故障不降级和Core死后的整机floor是另外两项仍要实施验证的保证。未见反例或七天稳定不升级成机制保证。
 
 与 A13独立的含义是不改它的释放队列/更新 fencing设计，不是这些底层能力与分流无关。复用已合 #1569，但若模式所需保证仍依赖 #1504/#1605/#1643 的未合修复，就列为具体阻塞，不自行恢复这些 PR，也不把其旧审查结论移植到当前 head。
 
@@ -202,16 +201,16 @@ DNS 同样按业务上下文分类：Home 固定 DoH 经云→Home，海外固�
 - 一份被审阅的不可变模式合同同时描述路由、DNS、Home身份和许可。持有者记录 mode、策略摘要、session/Core身份与实际生效组件证据；只接受匹配且新鲜的回执。签名证明授权来源，不证明策略安全；Home底线不得被签名 cloud/DIRECT规则覆盖。
 - 使用明确 capability和合同读回门。App本地版本、一个 /version字符串或未知字段没报错，不足以证明守护进程已实施新模式；旧/不可读/不匹配的 Helper/Service拒绝启用，不盲调用新接口。
 - 新模式默认关闭、不迁移已有设置、不远程自动开启；稳定模式保持原有合同。新增代码即使开关关着仍需验证对稳定模式没有回归，不能用“默认关闭”替代证明。
-- 首版只允许在未连接且旧工作已结清时改选择；不为了切模式自动断开、解除保护或做热切换。清洁 disconnected必须有证据，不是UI布尔值。已有 teardown/reload/DNS effect未终结时，Connect不准入；界面给出等待/无法确认，不无期限转圈。取消等待不取消旧 effect的所有权。
-- LAN保留明确选择；不静默改 stable版的默认关闭行为。nightly中的允许本地设备仍需用户选择，且不绕过 DNS/Home准入；on-link/global IPv6、企业VPN与手机发现另行测试，不能把RFC1918等同于全部本地设备。
+- 可随时保存下次连接意图，但仅旧工作结清、显式disconnect/reconnect后捕获新模式；不自动断开、解除保护或热切换。清洁disconnected需证据，不是UI布尔值。已有teardown/reload/DNS effect未终结时Connect不准入；取消等待不取消旧effect所有权。
+- 三层模式LAN拒绝；stable原局域网偏好及默认关闭不变。Mac控件在三层已选/仍由会话捕获时禁用但保留偏好；on-link/global IPv6、企业VPN与手机发现不冒称已支持。
 - 无Home绑定或绑定无效不能用云出口冒充此模式的Home保证；禁用测试模式并解释。恢复到已有模式也要用户明确选择，不静默降级。
 - 显式退出/恢复网络属于用户结束保护，应展示真实分项结果；DNS/代理/AI hold读不回或旧writer仍未终结时不能说全部恢复。这里不新增queue-independent release，不承诺60秒恢复或改变现有更新合同。
 
 ## 7. UI 与证据：当前 readback 和未来稳定性分两轴
 
-设置建议：“智能分流（实验）”，解释 AI/Home例外、国内 DIRECT、海外云与未知拒绝。开关明确标注nightly、支持边界和不保证服务商账号风控；本轮未实现UI。
+Win/Mac设置现有稳定/三层入口，中英文及新旧外观；保存仅下次显式连接生效，不自动断开或解除保护。渲染/持久回读测试与实际设备资格分开。
 
-必须直白告知：**只有已分类国内非 AI 使用本地公网出口，海外走云，已识别 AI 走 Home，未分类拒绝；现有 Home 例外若保留须具名说明。实验默认关闭，不改变已有稳定模式。** 游戏兼容性与协议支持如实列出，不把用户主动开启当作 Home 泄露或未知证据的免责。
+必须直白告知：**21视频例外云、166 AI/具名Home、明确云、其他受支持普通流量默认DIRECT（含未分类）；ECH/缓存IP/自带DoH隐藏AI可能直连，不保证任意AI走Home。普通DIRECT仅公网IPv4 TCP80/443，UDP/QUIC/IPv6/LAN阻断，Core死仍fail-closed。默认stable不变。**
 
 内部及验收记录分开保存：
 
@@ -228,7 +227,7 @@ owner 已授权桌面实施和测试；继续同一个 #1571，每个交付 head
 
 1. **锁基线和合同：** 确认owner稳定包及组件；冻结宽Home清单、云出口清单、支持客户端/OS/Core版本、普通DNS/企业网策略。未审 cloud名单不靠热门网站全表或国家IP猜测；固定nightly包内非秘密名单优先，任何远端变更需独立授权/审阅，不重解释现有v1–v4 DIRECT策略给旧客户端。
 2. **平台可行性/ownership评审：** 提交§5 Core故障fail-closed、单跳故障隔离、数据身份与DNS生命周期的有界实现，解决明确反例。能力不足时停止该平台，不宣布两端都已具备。
-3. **路由与DNS实现：** 保留具体视频例外及Home保护，加入已分类国内DIRECT、海外云和未知拒绝，同步Core与特权许可，明确IPv6/游戏支持面。Home末端DoH增强须满足同一候选准入，DNS失败终止、CNAME/缓存/协议规则不得退化。客户端、Helper/Service使用同一合同及准入；用独立预期测试国内AI先于国内普通父域、同域海外地址/裸IP、国内/海外游戏两侧和未知拒绝。沿用现有测试文件，每个行为最窄回归，不铺私有helper/mock调用顺序测试。
+3. **路由与DNS实现：** 保留视频/Home/明确云优先，其他受支持普通流量默认DIRECT，同步Core与特权许可；保护组DNS/拨号失败终止，不fall through。用独立预期覆盖名单优先、普通未知域名/裸IP、fake-IP默认DNS、私网拒绝与unsupported端口，不把数据结构通过冒称设备流量通过。
 4. **故障及LAN实现：** 与系统writer/恢复所有权的边界明确后才实现；批准的设备上验证Core故障、分项恢复和LAN。修改Helper/Service必须更新对应协议/合同，App、Core、特权组件同SHA配套。
 5. **nightly入口与UI：** 同一产品的显式可选模式，发布仅测试候选。新增受限候选入口，不把签名workflow放开到任意PR；[现有macOS candidate](../../.github/workflows/macos-release.yml) 只允许指定稳定候选ref，不能当作已有任意nightly通道。沿用 [BUILD_AND_TEST](../BUILD_AND_TEST.md) 的宿主与签名边界。
 6. **设备安全验收 → 小范围一周 → 发布决定：** 各阶段由owner确认受众/设备/动作；未过设备安全门，不拿真实AI账号替代验证。正式更新源、版本与升级/恢复验收走独立发布批准，不因nightly稳定跳过下一版G3。
@@ -250,8 +249,8 @@ owner 已授权桌面实施和测试；继续同一个 #1571，每个交付 head
 | 云失联但Core健康；国内A解析/HTTPS与海外/Home负对照 | 国内DIRECT的resolver仍依赖云，或为了成功恢复DHCP DNS | 国内批准加密DNS和DIRECT仍工作，海外/Home失败或重证新云，不物理回退 |
 | 规则快照缺失/篡改/超限/旧版本、更新中止、回滚与旧Core迟到 | 只校验App摘要，特权端接受任意国别规则；失败退全直连 | 不匹配/无效合同拒绝准入；同一模式/账户/有效快照才可保留，旧DIRECT/DNS effect不跨代 |
 | CNAME/HTTPS记录到共享CDN | 别名重新分类后DIRECT解析/拨号 | 原Home上下文保持；同CDN普通站不被整段误封 |
-| 接入前缓存A/AAAA、已有TCP/QUIC、旧fake-IP及跨类别缓存 | 没域名就按普通直连，或云解析缓存冒充Home来源 | 拒绝或受控收敛，不漏；普通长连接影响如实记录，缓存来源不被伪报 |
-| Chrome/Edge配置中途变化、便携/参数DoH、ECH | 扫描间隔或漏扫描窗口内直连 | 强制机制阻止绕行，或该配置不准入；不能仅事后报警 |
+| 接入前缓存A/AAAA、已有TCP/QUIC、旧fake-IP及跨类别缓存 | 把无法识别的AI直连说成已保证Home | 旧fake-IP拒绝；未识别公网IPv4 TCP80/443可普通DIRECT，明确记录覆盖边界，不假称缓存Home来源 |
+| Chrome/Edge配置中途变化、便携/参数DoH、ECH | 声称扫描即保证任意AI保护 | 若隐藏域名/CIDR则可默认DIRECT，UI和验收必须披露；已识别Home正对照仍不降级 |
 | system查询失败但TUN成功；foreign NRPT/GPO、Mac supplemental DNS | 把监听器成功/写注册表当系统通过 | 分项证据不被掩盖，不强制抹除外部策略，不声称严格通过 |
 | Home第二跳断，云第一跳仍通 | 偷退云IP | Home数据和DNS均失败；名单外普通业务继续 |
 | 云A故障/节点供应商额度耗尽，手动改云B，再改云C；含切换失败及旧Core迟到 | 重绑Home、只验证云出口、DNS临时另走或旧代覆盖新链 | 同一assigned Home；受控数据及DNS接收端看到批准Home出口，切换全窗口无链外业务；新链重新准入，普通业务作对照，不靠跨云绕过账户限制 |

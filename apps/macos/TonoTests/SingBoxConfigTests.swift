@@ -590,6 +590,16 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertTrue((rules[domestic]["domain"] as? [String])?.contains("www.bilibili.com") == true)
         XCTAssertNil(rules[domestic]["domain_suffix"])
         XCTAssertEqual(rules[domestic]["network"] as? String, "tcp")
+        let cloud = try XCTUnwrap(rules.firstIndex { ($0["domain"] as? [String])?.contains("www.wikipedia.org") == true && $0["action"] as? String == "route" })
+        let ordinary = try XCTUnwrap(rules.firstIndex { $0["outbound"] as? String == "Tono-ThreeTier-Direct" && $0["domain"] == nil })
+        XCTAssertLessThan(home, cloud)
+        XCTAssertLessThan(cloud, ordinary)
+        XCTAssertEqual(rules[cloud]["outbound"] as? String, "Tono-Exit")
+        XCTAssertTrue(NSDictionary(dictionary: rules[ordinary]).isEqual(to: ["network": "tcp", "port": [80, 443], "action": "route", "outbound": "Tono-ThreeTier-Direct"]),
+                      "Unlisted ordinary hosts and public cached IPs use DIRECT without a country-list match")
+        XCTAssertEqual(rules[ordinary - 2]["server"] as? String, "Tono-ThreeTier-China-DNS")
+        XCTAssertEqual(rules[ordinary - 1]["action"] as? String, "reject", "Private DNS answers cannot escape the default path")
+        XCTAssertEqual((document["route"] as? [String: Any])?["final"] as? String, "Tono-ThreeTier-Direct")
         XCTAssertEqual(rules.last?["action"] as? String, "reject")
         let dns = try XCTUnwrap(document["dns"] as? [String: Any])
         let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
@@ -597,6 +607,10 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertEqual(servers[2]["detour"] as? String, "Tono-Home-Residential")
         XCTAssertEqual(servers[2]["server"] as? String, "1.1.1.1")
         XCTAssertEqual(servers[3]["detour"] as? String, "Tono-ThreeTier-Direct")
+        XCTAssertEqual(dns["final"] as? String, "Tono-ThreeTier-China-DNS")
+        let dnsRules = try XCTUnwrap(dns["rules"] as? [[String: Any]])
+        XCTAssertTrue(NSDictionary(dictionary: try XCTUnwrap(dnsRules.last)).isEqual(to: ["action": "route", "server": "Tono-ThreeTier-China-DNS"]))
+        XCTAssertTrue(dnsRules.contains { $0["domain"] == nil && $0["domain_suffix"] == nil && $0["inbound"] != nil && $0["server"] as? String == "Tono-FakeIP" })
         XCTAssertTrue(rules[..<home].contains { $0["action"] as? String == "resolve" && $0["server"] as? String == "Tono-ThreeTier-Home-DNS" })
         var bad = document
         var wrongDNS = dns
@@ -605,6 +619,13 @@ final class SingBoxConfigTests: XCTestCase {
         wrongDNS["servers"] = wrongServers
         bad["dns"] = wrongDNS
         XCTAssertFalse(ThreeTierRoutingContract.admits(bad))
+        var wrongRoute = try XCTUnwrap(document["route"] as? [String: Any])
+        var wrongRules = rules
+        wrongRules[home]["outbound"] = "Tono-ThreeTier-Direct"
+        wrongRoute["rules"] = wrongRules
+        bad = document
+        bad["route"] = wrongRoute
+        XCTAssertFalse(ThreeTierRoutingContract.admits(bad), "Default DIRECT must not weaken a recognized Home match")
         XCTAssertThrowsError(try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values, physicalInterface: "utun199"))
         XCTAssertEqual(try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values, directPlan: nil).runtimeJSON, stable.runtimeJSON)
         overlay.claudeHomeSocks5 = nil

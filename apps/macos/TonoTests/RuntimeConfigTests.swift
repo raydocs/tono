@@ -5,16 +5,22 @@ final class RuntimeConfigTests: XCTestCase {
     @MainActor
     func testRuntimeWriterKeepsCapturedStrictModeWhenPreferenceChanges() async throws {
         let defaults = AppProfile.defaults
-        let previous = defaults.object(forKey: "desktopRoutingMode")
+        let previous = defaults.object(forKey: SettingsKey.desktopRoutingMode)
         defer {
-            if let previous { defaults.set(previous, forKey: "desktopRoutingMode") }
-            else { defaults.removeObject(forKey: "desktopRoutingMode") }
+            if let previous { defaults.set(previous, forKey: SettingsKey.desktopRoutingMode) }
+            else { defaults.removeObject(forKey: SettingsKey.desktopRoutingMode) }
         }
+        defaults.removeObject(forKey: SettingsKey.desktopRoutingMode)
+        XCTAssertEqual(try DesktopRoutingModeAdmission.capture(defaults.object(forKey: SettingsKey.desktopRoutingMode)), "stable")
+        XCTAssertEqual(SettingsKey.desktopRoutingModeOptions, ["stable", "three-tier"])
         let runtime = CoreRuntimeManager()
-        defaults.set("three-tier", forKey: "desktopRoutingMode")
-        let mode = try DesktopRoutingModeAdmission.capture(defaults.object(forKey: "desktopRoutingMode"))
+        defaults.set("three-tier", forKey: SettingsKey.desktopRoutingMode)
+        let mode = try DesktopRoutingModeAdmission.capture(defaults.object(forKey: SettingsKey.desktopRoutingMode))
         try runtime.captureRoutingMode(mode, physicalInterface: nil)
-        defaults.set("stable", forKey: "desktopRoutingMode")
+        defaults.set("stable", forKey: SettingsKey.desktopRoutingMode)
+        XCTAssertEqual(defaults.string(forKey: SettingsKey.desktopRoutingMode), "stable")
+        XCTAssertEqual(try DesktopRoutingModeAdmission.capture(defaults.object(forKey: SettingsKey.desktopRoutingMode)), "stable",
+                       "Settings saves the next connection's intent without changing the captured writer")
         do {
             _ = try await runtime.writeRuntimeConfig(overlay: .init())
             XCTFail("A strict writer without an interface must not compile stable after a preference change")

@@ -61,6 +61,8 @@ pub(crate) fn persisted_intent_owner() -> std::io::Result<Option<String>> {
 static INTENT_WRITE_SEQ: AtomicU64 = AtomicU64::new(1);
 #[cfg(test)]
 pub(super) static TEST_INTENT_VERIFY_CORRUPT: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+pub(super) static TEST_STRICT_CLEAR_FAILURE: AtomicBool = AtomicBool::new(false);
 
 pub(super) async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     #[cfg(test)]
@@ -68,6 +70,13 @@ pub(super) async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         TEST_PERSIST_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
         if TEST_PERSIST_FAILURE.load(Ordering::Relaxed) {
             bail!("simulated persistent-state write failure");
+        }
+        // Model an uncommitted marker clear (e.g. a failed temporary-file flush), without
+        // also breaking the session tombstone or the initial durable strict hold.
+        if path == strict_recovery_path() && bytes == b"released\n"
+            && TEST_STRICT_CLEAR_FAILURE.load(Ordering::Relaxed)
+        {
+            bail!("simulated strict recovery clear failure");
         }
     }
     crate::core::paths::ensure_persistent_state_layout()?;

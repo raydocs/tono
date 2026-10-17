@@ -1660,6 +1660,12 @@ export interface TranslationResources {
           launchAtStartupHint: string
           readFailed: string
           reload: string
+          routingEffect: string
+          routingLimits: string
+          routingMode: string
+          routingScope: string
+          routingStable: string
+          routingThreeTier: string
           saveFailed: string
           title: string
         }

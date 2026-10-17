@@ -19,7 +19,7 @@ extension AppState {
         let capturedRoutingMode: String
         do {
             capturedRoutingMode = try DesktopRoutingModeAdmission.capture(
-                AppProfile.defaults.object(forKey: "desktopRoutingMode")
+                AppProfile.defaults.object(forKey: SettingsKey.desktopRoutingMode)
             )
         } catch {
             // Refuse before admitting a generation or touching PF/DNS/Core.

@@ -13,10 +13,10 @@ nonisolated enum ThreeTierRoutingContract {
       "route": {
         "auto_detect_interface": true,
         "default_domain_resolver": {
-          "server": "Tono-DoH",
+          "server": "Tono-ThreeTier-China-DNS",
           "strategy": "ipv4_only"
         },
-        "final": "Tono-Exit",
+        "final": "Tono-ThreeTier-Direct",
         "rules": [
           {
             "ip_version": 6,
@@ -599,6 +599,39 @@ nonisolated enum ThreeTierRoutingContract {
             "outbound": "Tono-Exit"
           },
           {
+            "network": "tcp",
+            "port": [
+              80,
+              443
+            ],
+            "action": "resolve",
+            "server": "Tono-ThreeTier-China-DNS",
+            "strategy": "ipv4_only"
+          },
+          {
+            "ip_cidr": [
+              "0.0.0.0/8",
+              "10.0.0.0/8",
+              "100.64.0.0/10",
+              "127.0.0.0/8",
+              "169.254.0.0/16",
+              "172.16.0.0/12",
+              "192.168.0.0/16",
+              "224.0.0.0/3"
+            ],
+            "action": "reject",
+            "no_drop": true
+          },
+          {
+            "network": "tcp",
+            "port": [
+              80,
+              443
+            ],
+            "action": "route",
+            "outbound": "Tono-ThreeTier-Direct"
+          },
+          {
             "action": "reject",
             "no_drop": true
           }
@@ -606,7 +639,7 @@ nonisolated enum ThreeTierRoutingContract {
       },
       "dns": {
         "strategy": "ipv4_only",
-        "final": "Tono-DoH",
+        "final": "Tono-ThreeTier-China-DNS",
         "servers": [
           {
             "type": "fakeip",
@@ -936,6 +969,19 @@ nonisolated enum ThreeTierRoutingContract {
             "rewrite_ttl": 30
           },
           {
+            "inbound": [
+              "Tono-TUN",
+              "Tono-DNS",
+              "Tono-Mixed"
+            ],
+            "query_type": [
+              "A"
+            ],
+            "action": "route",
+            "server": "Tono-FakeIP",
+            "rewrite_ttl": 30
+          },
+          {
             "domain_suffix": [
               "youtube.com",
               "youtube-nocookie.com",
@@ -1168,7 +1214,8 @@ nonisolated enum ThreeTierRoutingContract {
             "server": "Tono-DoH"
           },
           {
-            "action": "reject"
+            "action": "route",
+            "server": "Tono-ThreeTier-China-DNS"
           }
         ]
       },

@@ -259,6 +259,64 @@ export const GeneralCard = () => {
         {t('tono.settings.general.effectHint')}
       </p>
       <Row
+        label={t('tono.settings.general.routingMode')}
+        subtitle={
+          <>
+            {t('tono.settings.general.routingScope')}
+            <br />
+            {t('tono.settings.general.routingLimits')}
+            <br />
+            {t('tono.settings.general.routingEffect')}
+          </>
+        }
+      >
+        {newAppearance ? (
+          <SeaSegmented
+            label={t('tono.settings.general.routingMode')}
+            value={preferences?.desktop_routing_mode ?? 'stable'}
+            disabled={disabled}
+            options={[
+              {
+                value: 'stable',
+                label: t('tono.settings.general.routingStable'),
+              },
+              {
+                value: 'three-tier',
+                label: t('tono.settings.general.routingThreeTier'),
+              },
+            ]}
+            onChange={(desktop_routing_mode) =>
+              void savePreferences({
+                desktop_routing_mode: desktop_routing_mode as
+                  | 'stable'
+                  | 'three-tier',
+              })
+            }
+          />
+        ) : (
+          <select
+            aria-label={t('tono.settings.general.routingMode')}
+            value={preferences?.desktop_routing_mode ?? 'stable'}
+            disabled={disabled}
+            style={{ flexShrink: 0 }}
+            onChange={(event) =>
+              void savePreferences({
+                desktop_routing_mode: event.target.value as
+                  | 'stable'
+                  | 'three-tier',
+              })
+            }
+          >
+            <option value="stable">
+              {t('tono.settings.general.routingStable')}
+            </option>
+            <option value="three-tier">
+              {t('tono.settings.general.routingThreeTier')}
+            </option>
+          </select>
+        )}
+      </Row>
+      <Row
         label={t('tono.settings.general.launchAtStartup')}
         subtitle={t('tono.settings.general.launchAtStartupHint')}
       >

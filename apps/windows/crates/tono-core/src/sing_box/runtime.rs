@@ -625,13 +625,25 @@ mod tests {
         assert!(rules[domestic].get("domain_suffix").is_none());
         assert_eq!(rules[domestic]["network"], "tcp");
         assert_eq!(rules[domestic]["port"], json!([80, 443]));
+        let cloud = rules.iter().position(|rule| rule["domain"].as_array().is_some_and(|hosts| hosts.contains(&json!("www.wikipedia.org"))) && rule["action"] == "route").unwrap();
+        let ordinary = rules.iter().position(|rule| rule["outbound"] == "Tono-ThreeTier-Direct" && rule.get("domain").is_none()).unwrap();
+        assert!(home < cloud && cloud < ordinary, "protected routes terminate before ordinary DIRECT");
+        assert_eq!(rules[cloud]["outbound"], "Tono-Exit");
+        // This unconditional supported-port rule also accepts a new ordinary
+        // hostname or public cached IP: no country list admission is needed.
+        assert_eq!(rules[ordinary], json!({"network":"tcp","port":[80,443],"action":"route","outbound":"Tono-ThreeTier-Direct"}));
+        assert_eq!(rules[ordinary - 2], json!({"network":"tcp","port":[80,443],"action":"resolve","server":"Tono-ThreeTier-China-DNS","strategy":"ipv4_only"}));
+        assert_eq!(rules[ordinary - 1]["action"], "reject", "reject private answers after ordinary resolution too");
+        assert_eq!(document["route"]["final"], "Tono-ThreeTier-Direct");
         assert_eq!(rules.first().unwrap()["ip_version"], 6);
         assert_eq!(rules.last().unwrap(), &json!({"action":"reject","no_drop":true}));
         assert!(rules[..domestic].iter().any(|rule| rule["network"] == json!(["udp", "icmp"]) && rule["action"] == "reject"));
         assert_eq!(document["dns"]["servers"][2]["detour"], "Tono-Home-Residential");
         assert_eq!(document["dns"]["servers"][2]["server"], "1.1.1.1");
         assert_eq!(document["dns"]["servers"][3]["detour"], "Tono-ThreeTier-Direct");
-        assert_eq!(document["dns"]["rules"].as_array().unwrap().last().unwrap()["action"], "reject");
+        assert_eq!(document["dns"]["final"], "Tono-ThreeTier-China-DNS");
+        assert_eq!(document["dns"]["rules"].as_array().unwrap().last().unwrap(), &json!({"action":"route","server":"Tono-ThreeTier-China-DNS"}));
+        assert!(document["dns"]["rules"].as_array().unwrap().contains(&json!({"inbound":["Tono-TUN","Tono-DNS","Tono-Mixed"],"query_type":["A"],"action":"route","server":"Tono-FakeIP","rewrite_ttl":30})));
         assert_eq!(compiled.direct_endpoints(), &[DialEndpoint {host: Ipv4Addr::new(223,5,5,5), port:443, transport:Transport::Tcp}]);
         let mut weakened = document.clone();
         weakened["route"]["rules"].as_array_mut().unwrap().remove(video);
@@ -639,6 +651,9 @@ mod tests {
         let mut wrong_dns = document.clone();
         wrong_dns["dns"]["servers"][2]["detour"] = json!("Tono-Exit");
         assert!(crate::three_tier::admit_runtime(&wrong_dns).is_err());
+        let mut home_direct = document.clone();
+        home_direct["route"]["rules"][home]["outbound"] = json!("Tono-ThreeTier-Direct");
+        assert!(crate::three_tier::admit_runtime(&home_direct).is_err());
         assert!(build_three_tier_runtime(input(&nodes, &CatalogRouting::default()), "Ethernet 7").is_err());
         assert!(build_three_tier_runtime(input(&nodes, &routing), "Tono").is_err());
         assert_eq!(build_runtime(input(&nodes, &routing)).unwrap().runtime_json(), baseline.runtime_json());

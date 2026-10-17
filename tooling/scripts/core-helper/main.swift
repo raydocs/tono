@@ -854,7 +854,10 @@ func runOwnedRuntimeContractSelfTests() -> Bool {
               ownedRuntimeConfigIsSafe(String(decoding: try JSONSerialization.data(withJSONObject: runtime), as: UTF8.self)) else { return false }
         var route = runtime["route"] as! [String: Any]
         var rules = route["rules"] as! [[String: Any]]
-        rules[rules.count - 1] = ["action": "route", "outbound": "Tono-ThreeTier-Direct"]
+        // Ordinary unmatched TCP80/443 is DIRECT, not permission to send a
+        // recognized Home match there (or to remove unsupported-port guards).
+        let homeRule = rules.firstIndex { $0["outbound"] as? String == "Tono-Home-Residential" }!
+        rules[homeRule]["outbound"] = "Tono-ThreeTier-Direct"
         route["rules"] = rules
         runtime["route"] = route
         guard !ThreeTierRoutingContract.admits(runtime),

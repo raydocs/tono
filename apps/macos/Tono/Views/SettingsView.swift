@@ -80,6 +80,8 @@ struct SettingsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(SettingsKey.interfaceLanguage, store: AppProfile.defaults)
     private var selectedLanguage = InterfaceLanguagePreference.simplifiedChinese
+    @AppStorage(SettingsKey.desktopRoutingMode, store: AppProfile.defaults)
+    private var desktopRoutingMode = "stable"
     @AppStorage(SettingsKey.logsEnabled) private var logsEnabled = true
     @AppStorage(SettingsKey.localTrafficAuditEnabled)
     private var localTrafficAuditEnabled = true
@@ -136,6 +138,7 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     AccountSettingsCard(session: accountSession)
+                    routingCard
                     if seaEnabled {
                         SettingsCard(icon: "gearshape", title: "General") {
                             generalRows
@@ -176,6 +179,28 @@ struct SettingsView: View {
     }
 
     // MARK: - Preferences
+
+    private var routingCard: some View {
+        SettingsCard(icon: "arrow.triangle.branch", title: "Routing mode") {
+            SettingRow(label: "Next connection", subtitle: "Stable is the default. A change is saved only for your next explicit disconnect and reconnect. It does not change the current session, disconnect you, or release protection.") {
+                settingsPicker(label: "Routing mode", selection: $desktopRoutingMode,
+                               options: SettingsKey.desktopRoutingModeOptions)
+                    .accessibilityIdentifier("settings.routingMode")
+            }
+            Text("Priority: 21 cloud-video exceptions → 166 AI/named Home entries → explicit cloud list → other supported traffic DIRECT, including unclassified destinations. Failed Home/cloud matches never fall back DIRECT. ECH, cached/raw IP or app DoH can hide AI identity and take default DIRECT; unidentified AI is not guaranteed Home routing.")
+                .font(.system(size: seaEnabled ? 12 : 11))
+                .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Ordinary DIRECT supports public IPv4 TCP ports 80/443 only. Application UDP/QUIC, IPv6 and LAN are blocked, even if Allow local network devices was enabled. If Core stops, protection stays fail-closed.")
+                .font(.system(size: seaEnabled ? 12 : 11))
+                .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var strictLANUnavailable: Bool {
+        desktopRoutingMode == "three-tier" || appState.coreRuntime.routingMode == "three-tier"
+    }
 
     private var preferencesCard: some View {
         SettingsCard(icon: "gearshape", title: "Preferences") {
@@ -227,6 +252,14 @@ struct SettingsView: View {
                     set: setAllowLocalNetworkDevices
                 )
             )
+            .disabled(strictLANUnavailable)
+
+            if strictLANUnavailable {
+                Text("LAN access is unavailable while Three-tier is selected or retained by the session. Your LAN preference is kept for Stable. Select Stable, then explicitly disconnect and reconnect to use it.")
+                    .font(.system(size: seaEnabled ? 12 : 11))
+                    .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if let localNetworkFault = appState.localNetworkDevicesFaultMessage {
                 Text(localNetworkFault)
@@ -579,9 +612,9 @@ struct SettingsView: View {
                     selection.wrappedValue = option
                 } label: {
                     if selection.wrappedValue == option {
-                        Label(option, systemImage: "checkmark")
+                        Label(LocalizedStringKey(option), systemImage: "checkmark")
                     } else {
-                        Text(option)
+                        Text(LocalizedStringKey(option))
                     }
                 }
             }
