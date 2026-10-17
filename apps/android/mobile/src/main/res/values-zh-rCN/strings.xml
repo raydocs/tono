@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Tono</string>
+    <string name="notification_channel">连接状态</string>
+    <string name="action_disconnect">断开</string>
+
+    <string name="state_signed_out">登录</string>
+    <string name="state_idle">未连接</string>
+    <string name="state_permission">需要授权</string>
+    <string name="state_preparing">连接中</string>
+    <string name="state_connecting">连接中</string>
+    <string name="state_connected">已连接</string>
+    <string name="state_degraded">部分可用</string>
+    <string name="state_disconnecting">断开中</string>
+    <string name="state_failed">没连上</string>
+
+    <string name="sentence_idle">选好线路，点连接。</string>
+    <string name="sentence_preparing">核对账号与线路…</string>
+    <string name="sentence_connecting">建立加密线路…</string>
+    <string name="sentence_connected_three_tier">AI 走家宽 · 视频走云 · 其他本地直连</string>
+    <string name="sentence_connected_stable">AI 走家宽 · 其他全部走云</string>
+    <string name="sentence_connected_no_home">AI 与视频走云 · 其他本地直连</string>
+    <string name="sentence_connected_stable_no_home">公网流量全部走云 · 局域网仍走本地</string>
+
+    <string name="line_pick">选择线路</string>
+    <string name="line_untested">未测速</string>
+    <string name="latency_ms">%1$d ms</string>
+    <string name="lines_title">线路</string>
+    <string name="lines_test">测速</string>
+    <string name="lines_in_use">正在使用</string>
+    <string name="lines_cached">暂时连不上 Tono，正在使用本机保存的线路</string>
+
+    <string name="lane_ai">AI 与指定服务</string>
+    <string name="lane_video">视频</string>
+    <string name="lane_other">其他应用</string>
+    <string name="lane_home">家宽 Home</string>
+    <string name="lane_home_node">家宽 · %1$s</string>
+    <string name="lane_cloud">云</string>
+    <string name="lane_cloud_no_home">云（未分配家宽）</string>
+    <string name="lane_local">本地直连</string>
+    <string name="lane_checking">检测中</string>
+    <string name="lane_down">不通</string>
+
+    <string name="speed_line">↓ %1$s · ↑ %2$s</string>
+
+    <string name="reason_HOME_UNAVAILABLE">分配给你的家宽出口暂时不可用。Tono 不会悄悄改走别的出口，请稍后再试。</string>
+    <string name="reason_NETWORK">连不上 Tono。请检查网络后重试。</string>
+    <string name="reason_RATE_LIMITED">尝试过多，请稍后再试。</string>
+    <string name="reason_CORE_START">隧道内核没能启动。请重试；一直失败请重启手机。</string>
+    <string name="reason_CLOUD_UNREACHABLE">云端出口没有响应。命中的流量已拦住，不会直连。可以换一条线路。</string>
+    <string name="reason_HOME_UNREACHABLE">家宽没有响应。AI 流量已拦住，不会直连；其他应用照常。</string>
+    <string name="reason_REVOKED">另一个 VPN 接管了，或授权被移除。</string>
+    <string name="reason_DENIED">你没有允许 VPN 授权。</string>
+    <string name="reason_SESSION_ENDED">登录已失效，请重新登录。</string>
+    <string name="reason_CATALOG_ROLLBACK">收到的线路列表比本机的旧，已拒绝。</string>
+    <string name="reason_CORE_STOPPED">隧道已停止。</string>
+    <string name="reason_generic">操作未完成（%1$s），请重试。</string>
+
+    <string name="action_retry">重试</string>
+    <string name="action_recheck">再检测</string>
+
+    <string name="signin_title">登录 Tono</string>
+    <string name="signin_intro">用邮箱验证码登录，无需密码。</string>
+    <string name="signin_email">邮箱</string>
+    <string name="signin_send">发送验证码</string>
+    <string name="signin_sending">发送中…</string>
+    <string name="signin_code_sent">如果该邮箱已开通 Tono，验证码已发送到 %1$s，也请查看垃圾箱。</string>
+    <string name="signin_code">6 位验证码</string>
+    <string name="signin_verify">登录</string>
+    <string name="signin_verifying">验证中…</string>
+    <string name="signin_change">换邮箱</string>
+    <string name="signin_privacy">邮箱只用于登录。验证码 10 分钟内有效。</string>
+    <string name="signin_error_INVALID_EMAIL">请输入有效邮箱</string>
+    <string name="signin_error_INVALID_CODE">请输入 6 位验证码</string>
+    <string name="signin_error_INVALID_OR_EXPIRED_CODE">验证码错误或已过期，请重新获取。</string>
+    <string name="signin_error_NETWORK">暂时连不上 Tono 的登录服务器。</string>
+    <string name="signin_error_RATE_LIMITED">尝试过多，请稍后再试。</string>
+    <string name="signin_error_DEVICE_LIMIT">这个账号的设备数已满。请在已登录的设备上移除一台设备后重试。</string>
+    <string name="signin_error_generic">这次登录未完成（%1$s）。</string>
+
+    <string name="settings_title">设置</string>
+    <string name="settings_back">返回</string>
+    <string name="settings_routing">路由模式</string>
+    <string name="mode_three_tier">三层路由（默认）</string>
+    <string name="mode_three_tier_short">三层路由</string>
+    <string name="mode_three_tier_desc">AI 与已批准的 Home 名单 → 云 → 你的家宽 Home；视频 → 云；国内应用、浏览器、局域网及其他流量走你自己的网络直连。</string>
+    <string name="mode_stable">稳定（全部经云）</string>
+    <string name="mode_stable_desc">AI 同样走家宽；其他所有公网目标都经云端出口。局域网仍走本地。</string>
+    <string name="mode_stable_short">稳定</string>
+    <string name="mode_applies">修改会立即应用到正在运行的连接。</string>
+    <string name="routing_scope_title">Tono 能识别什么、不能识别什么</string>
+    <string name="routing_scope">优先级：21 项云端视频例外 → 166 项 AI／指定 Home 条目（另含 Anthropic 地址段，以及 Claude、ChatGPT、Grok 应用）→ 明确的云端列表 → 其他全部直连。命中的流量失败时会被拦住，不会退回直连；命中的 UDP/QUIC 会被拒绝，应用会改用 TCP。使用 ECH、自带 DoH 或缓存地址的应用可能隐藏 AI 身份，这部分会走直连；无法保证未识别的 AI 走家宽。</string>
+    <string name="routing_platform">在 Android 上，所有应用、所有 TCP/UDP 端口以及 IPv4、IPv6 都进入隧道；局域网、链路本地与组播不进入。直连域名用你当前网络的 DNS 解析，命中名单的域名不会发给它。热点共享设备和你在下方排除的应用完全不经过 Tono。</string>
+    <string name="settings_apps">不经过 Tono 的应用</string>
+    <string name="settings_apps_none">无——所有应用都按 Tono 规则走</string>
+    <plurals name="settings_apps_count">
+        <item quantity="other">%1$d 个应用不经过 Tono（其中的 AI 也不会走家宽）</item>
+    </plurals>
+    <string name="apps_search">搜索应用</string>
+    <string name="apps_done">完成</string>
+    <string name="settings_check">这个网址会怎么走？</string>
+    <string name="check_hint">例如 claude.ai</string>
+    <string name="check_go">检查</string>
+    <string name="check_result">TCP → %1$s · UDP → %2$s</string>
+    <string name="verdict_HOME">家宽</string>
+    <string name="verdict_CLOUD">云</string>
+    <string name="verdict_DIRECT">直连</string>
+    <string name="verdict_BLOCKED">拦截</string>
+    <string name="verdict_DNS">DNS</string>
+    <string name="settings_system">Android 系统保护</string>
+    <string name="system_on">已开启始终开启的 VPN%1$s。</string>
+    <string name="system_lockdown">，并已“屏蔽未使用 VPN 的连接”</string>
+    <string name="system_off">未设为始终开启：Tono 停止时应用会直连。可在 Android 设置中开启“始终开启的 VPN”。</string>
+    <string name="system_open">打开 VPN 设置</string>
+    <string name="settings_account">账号</string>
+    <string name="settings_sign_out">退出登录</string>
+    <string name="settings_about">关于</string>
+    <string name="about_version">Tono %1$s · 测试版</string>
+    <string name="about_core">内核：sing-box %1$s（GPL-3.0-or-later，源码：github.com/SagerNet/sing-box）</string>
+    <string name="about_contract">路由合同：raydocs/tono@%1$s</string>
+    <string name="about_test">供评估的测试版，不是商店正式版。</string>
+    <string name="about_licenses">许可证与源代码</string>
+    <string name="ipv6_on">当前网络 IPv6：有</string>
+    <string name="ipv6_off">当前网络 IPv6：无（直连域名只返回 IPv4）</string>
+
+    <string name="action_connect">连接</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_allow_vpn">允许 VPN</string>
+    <string name="action_disconnecting">断开中…</string>
+    <string name="a11y_cancel_connect">取消连接</string>
+    <string name="a11y_connected_for">已连接 %1$s</string>
+    <string name="details">详情</string>
+    <string name="details_routes">流量去向</string>
+    <string name="details_mode">路由模式</string>
+    <string name="details_why">发生了什么</string>
+    <string name="details_speed">速度</string>
+    <string name="details_scope_more">Tono 能识别什么、不能识别什么</string>
+    <string name="status_exit_both">云端 %1$s · 家宽 %2$s</string>
+    <string name="status_exit_cloud">云端 %1$s</string>
+    <string name="status_protected">已保护</string>
+    <string name="short_HOME_UNAVAILABLE">家宽出口暂不可用</string>
+    <string name="short_NETWORK">连不上 Tono</string>
+    <string name="short_RATE_LIMITED">尝试太频繁</string>
+    <string name="short_CORE_START">内核没能启动</string>
+    <string name="short_CLOUD_UNREACHABLE">云端没响应 · 命中流量已拦住</string>
+    <string name="short_HOME_UNREACHABLE">家宽没响应 · AI 已暂停</string>
+    <string name="short_REVOKED">VPN 被其他应用接管</string>
+    <string name="short_DENIED">需要允许 VPN</string>
+    <string name="short_SESSION_ENDED">请重新登录</string>
+    <string name="short_CATALOG_ROLLBACK">线路列表异常，已拒绝</string>
+    <string name="short_CORE_STOPPED">隧道已停止</string>
+    <string name="short_generic">未完成（%1$s）</string>
+    <string name="sentence_permission_short">首次使用需允许一次 VPN</string>
+    <string name="settings_mode_hint">点选即切换，立即生效。</string>
+</resources>

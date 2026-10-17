@@ -1,0 +1,22 @@
+# sing-box core pin for the Tono Android test client.
+# Verified against https://github.com/SagerNet/sing-box/releases on 2026-10-17:
+# v1.15.0-alpha.12 (published 2026-10-11T06:13:25Z, prerelease) was the newest alpha.
+SING_BOX_VERSION=1.15.0-alpha.12
+SING_BOX_TAG=v1.15.0-alpha.12
+SING_BOX_COMMIT=25b0d5ea3e466d246c708ac0f20d0448110e566c
+SING_BOX_REPO=https://github.com/SagerNet/sing-box.git
+# Toolchain used by the upstream build.yml for this tag (build_android_library job).
+GO_VERSION=1.26.8
+GO_LINUX_AMD64_SHA256=d0f743b33e8d8945e6b1f432edd15785c70507121d6e2a723b21285eddf8b57b
+GOMOBILE_MODULE=github.com/sagernet/gomobile
+GOMOBILE_VERSION=v0.1.13
+NDK_PACKAGE="ndk;28.0.13004108"
+NDK_REVISION=28.0.13004108
+ANDROID_API=24
+# Reduced tag set: Reality needs with_utls; QUIC sniffing/hysteria2 need with_quic;
+# with_clash_api provides traffic counters (no listener is configured).
+LIBBOX_TAGS=with_quic,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0
+LIBBOX_TARGETS=android/arm64,android/amd64
+# Upstream linux-amd64 CLI of the same tag, used only by host-side config checks.
+SING_BOX_LINUX_AMD64_ASSET=sing-box-1.15.0-alpha.12-linux-amd64.tar.gz
+SING_BOX_LINUX_AMD64_SHA256=b107528ec7d989333d986573c097d840b9ef1afa9bb177f8eb03e0767f370514

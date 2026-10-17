@@ -1,0 +1,9 @@
+## 2026-10-17 · Android sing-box 测试客户端进入 apps/android（草稿，测试阶段）
+- 归属：ops 计划 §P2「Android / iOS 客户端」；不属于 SHIP_PLAN 0.0.75，G4 冻结期间不合并。影响：新增 `apps/android`、`.github/workflows/android-ci.yml`；不改桌面、服务端、feeds 或已有资产。
+- 来源：rw8/Tono-droid `feat/mobile-singbox-premium`（导出脚本 `scripts/export-android-monorepo.sh` 镜像）；分支 `feat/android-singbox-horizon`，草稿 PR，未合 main。
+- 缺陷修复：无既有发布客户端缺陷。开发中修正：目录 YAML 行首 Tab 检查原先永不触发（已加回归）；路由同步 `--check` 改为比较名单而非记录的桌面 commit。
+- 新增/优化：Android 客户端（`com.raydocs.tono.mobile`，测试包 `.test`）：邮箱验证码登录、按设备目录、与桌面相同的 sing-box 1.15.0-alpha.12 分流图（21 视频→云；166 具名 Home+Anthropic CIDR→云→Home；明确云名单→云；其余→DIRECT；匹配路线故障拒绝而非降级直连），VpnService + 官方 libbox；Horizon UI（单一主胶囊：连接/取消/断开，玻璃材质，日出地平线品牌，减弱动态与无障碍语义）。令牌与缓存目录用 Android Keystore AES-GCM 加密且排除备份。
+- 工程与测试：CI 从固定源码重建 libbox（Gradle 再核对固定 SHA-256），运行 JVM 测试、lint、debug APK 与仪器测试 APK；KVM x86_64 Android 14 模拟器安装并运行 `DeviceEvidenceTest`：`real-*` 为真实应用与系统（登录页本地校验、系统 VPN 授权框、无账号连接请求保持未登录且无 VPN 网络、设备 ABI 的 libbox 版本与 checkConfig），`fixture-*` 为设备 GPU 渲染的夹具状态与录屏，不代表隧道。
+- 验证：Linux Orb 本地 `apps/android`：`./gradlew :routing:testDebugUnitTest :mobile:testDebugUnitTest :mobile:lintDebug :mobile:assembleDebug :mobile:assembleDebugAndroidTest` 通过（routing 16、mobile 11 通过，16 个截图/动效渲染为按需项跳过；lint 0 error）；`scripts/routing/check-singbox-configs.sh` 4/4 ok（固定 linux CLI 同 commit）；`sync-desktop-routing.py --check` 与本分支桌面名单一致。CI 与模拟器结果待运行后续记。未执行：真实账号登录与真实隧道连接（需白名单账号与家宽分配，验证码在用户手机）、真机动效/性能。
+- 候选/发布：仅 Actions 产物（debug 签名测试 APK，保留 90 天）；无 Release、无商店、无 feeds、无部署。各次 CI 使用临时 debug 密钥，换装新构建需先卸载旧版。
+- 剩余限制：真实连接、TUN/DNS/QUIC 回退、始终开启、应用排除、Home 第二跳均未在设备验证；自评分不代替用户验收。
