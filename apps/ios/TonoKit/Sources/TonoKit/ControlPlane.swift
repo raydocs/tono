@@ -147,7 +147,10 @@ public struct ControlPlaneClient: Sendable {
 public enum HTTP1 {
     public static let maxBody = 2 * 1024 * 1024
 
-    public struct Failure: Error, Equatable { public let message: String }
+    public struct Failure: Error, Equatable {
+        public let message: String
+        public init(message: String) { self.message = message }
+    }
 
     public static func serialize(_ request: APIRequest, base: URL) -> Data {
         let host = base.host ?? ""
