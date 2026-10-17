@@ -140,19 +140,24 @@ jobs:
           # No -g: runtime permissions and VPN consent stay as on a fresh install.
           adb install -r apk/*-test-*.apk
           adb install -r apk/instrumentation.apk
-          # Keep going after a failed run so its screenshots and logs are still collected.
+          # One instrumentation call per test, pulling evidence after each, so an emulator crash
+          # (seen on hosted runners) costs one test's evidence rather than all of it.
           set +e
-          timeout 1800 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest \
-            $APP.test/androidx.test.runner.AndroidJUnitRunner | tee evidence/instrumentation.txt
-          # Every adb call after the run is bounded, so a dead emulator cannot eat the job timeout.
+          failed=""
+          for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog \
+                   a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig \
+                   b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale; do
+            timeout 600 adb shell am instrument -w -r -e class "com.raydocs.tono.mobile.DeviceEvidenceTest#$t" \
+              $APP.test/androidx.test.runner.AndroidJUnitRunner > "evidence/instrument-$t.txt"
+            grep -q '^OK (' "evidence/instrument-$t.txt" && echo "PASS $t" >> evidence/summary.txt || { echo "FAIL $t" >> evidence/summary.txt; failed="$failed $t"; }
+            timeout 120 adb pull /sdcard/Android/data/$APP/files/evidence/. evidence/
+            [ "$t" = b2_fixtureMotionRecordedOnDevice ] && timeout 120 adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4
+          done
           timeout 60 adb logcat -d > evidence/logcat.txt
-          timeout 120 adb pull /sdcard/Android/data/$APP/files/evidence/. evidence/ \
-            || timeout 120 sh -c "adb exec-out run-as $APP sh -c 'cd /sdcard/Android/data/$APP/files/evidence && tar -cf - .' | tar -C evidence -xf -"
-          timeout 120 adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4
           ls -la evidence
+          cat evidence/summary.txt
           set -e
-          # am instrument exits 0 even when tests fail; the runner's summary decides.
-          grep -q '^OK (' evidence/instrumentation.txt
+          [ -z "$failed" ]
           SH
       - name: Install and run on an Android 14 x86_64 emulator
         id: attempt1
@@ -161,7 +166,7 @@ jobs:
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 34
-          target: default
+          target: google_apis
           arch: x86_64
           profile: pixel_6
           disable-animations: false
@@ -174,7 +179,7 @@ jobs:
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 34
-          target: default
+          target: google_apis
           arch: x86_64
           profile: pixel_6
           disable-animations: false
