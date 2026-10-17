@@ -60,7 +60,27 @@ class DeviceEvidenceTest {
     private val device = UiDevice.getInstance(instrumentation)
     private val out = File(context.getExternalFilesDir(null), "evidence").apply { mkdirs() }
 
+    /**
+     * CI emulators sometimes raise a system "isn't responding" dialog for another app (e.g. the
+     * launcher right after boot). It is not ours; answer "Wait" so it does not cover the evidence.
+     */
+    private fun dismissForeignAnr() {
+        repeat(3) {
+            val title = device.findObject(By.text(Pattern.compile(".+ isn't responding"))) ?: return
+            // Our own ANR must stay visible and fail the run; only foreign ones are answered.
+            if (title.text.startsWith("Tono")) return
+            val wait = device.findObject(By.text("Wait")) ?: return
+            File(out, "foreign-anr.txt").appendText("${title.text} → Wait\n")
+            wait.click()
+            device.waitForIdle(1_000)
+        }
+    }
+
+    private fun find(selector: androidx.test.uiautomator.BySelector, timeoutMs: Long) =
+        device.wait(Until.findObject(selector), timeoutMs) ?: run { dismissForeignAnr(); device.wait(Until.findObject(selector), timeoutMs) }
+
     private fun shot(name: String) {
+        dismissForeignAnr()
         device.waitForIdle(2_000)
         assertTrue("screenshot $name", device.takeScreenshot(File(out, "$name.png")))
     }
@@ -69,12 +89,12 @@ class DeviceEvidenceTest {
 
     @Test fun a1_realSignInScreenAndLocalValidation() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            assertNotNull("sign-in screen", device.wait(Until.findObject(By.text(text(R.string.signin_title))), 20_000))
+            assertNotNull("sign-in screen", find(By.text(text(R.string.signin_title)), 20_000))
             shot("real-01-signin")
             // Client-side validation only: nothing is sent to the Tono API from CI.
             device.findObject(By.clazz("android.widget.EditText")).text = "not-an-email"
             device.findObject(By.text(text(R.string.signin_send))).click()
-            assertNotNull(device.wait(Until.findObject(By.text(text(R.string.signin_error_INVALID_EMAIL))), 10_000))
+            assertNotNull(find(By.text(text(R.string.signin_error_INVALID_EMAIL)), 10_000))
             shot("real-02-signin-invalid-email")
         }
     }
@@ -83,8 +103,8 @@ class DeviceEvidenceTest {
         val prepare = VpnService.prepare(context)
         assertNotNull("fresh install must need consent", prepare)
         context.startActivity(prepare!!.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        val ok = device.wait(Until.findObject(By.res(Pattern.compile(".*:id/button1")).pkg(Pattern.compile("com\\.android\\.vpndialogs"))), 20_000)
-            ?: device.wait(Until.findObject(By.text(Pattern.compile("(?i)ok|确定"))), 5_000)
+        val ok = find(By.res(Pattern.compile(".*:id/button1")).pkg(Pattern.compile("com\\.android\\.vpndialogs")), 20_000)
+            ?: find(By.pkg("com.android.vpndialogs").text(Pattern.compile("(?i)ok|确定")), 5_000)
         assertNotNull("system VPN consent dialog", ok)
         shot("real-03-system-vpn-consent")
         ok.click()
@@ -101,7 +121,7 @@ class DeviceEvidenceTest {
         val vpnUp = cm.allNetworks.any { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true }
         assertFalse("no tunnel may exist without an account", vpnUp)
         ActivityScenario.launch(MainActivity::class.java).use {
-            assertNotNull(device.wait(Until.findObject(By.text(text(R.string.signin_title))), 20_000))
+            assertNotNull(find(By.text(text(R.string.signin_title)), 20_000))
             shot("real-05-connect-without-account-stays-signed-out")
         }
     }
@@ -161,7 +181,10 @@ class DeviceEvidenceTest {
         }
         set(connected().copy(phase = Phase.DEGRADED, reasonCode = "HOME_UNREACHABLE", homeProbe = ExitProbe(ProbeState.FAILED)))
         Thread.sleep(1_500)
-        device.findObject(By.text(text(R.string.details))).click()
+        dismissForeignAnr()
+        val details = find(By.text(text(R.string.details)), 5_000)
+        assertNotNull("details", details)
+        details!!.click()
         Thread.sleep(1_200)
         shot("fixture-06-details-sheet")
     }
@@ -169,7 +192,7 @@ class DeviceEvidenceTest {
     @Test fun b2_fixtureMotionRecordedOnDevice() = withFixtureHost { set, _ ->
         val video = "/sdcard/Download/tono-fixture-motion.mp4"
         instrumentation.uiAutomation.executeShellCommand("rm -f $video").close()
-        val rec = instrumentation.uiAutomation.executeShellCommand("screenrecord --time-limit 16 --bit-rate 8000000 $video")
+        val rec = instrumentation.uiAutomation.executeShellCommand("screenrecord --time-limit 30 --bit-rate 8000000 $video")
         Thread.sleep(1_200)
         val steps = listOf(
             900L to idle,
@@ -182,7 +205,7 @@ class DeviceEvidenceTest {
             2_400L to idle.copy(phase = Phase.FAILED, reasonCode = "HOME_UNAVAILABLE"),
         )
         for ((ms, s) in steps) { set(s); Thread.sleep(ms) }
-        Thread.sleep(2_500) // screenrecord finalises the file at its time limit
+        Thread.sleep(16_000) // let screenrecord reach its time limit and finalise the file
         rec.close()
     }
 }

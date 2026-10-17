@@ -14,7 +14,7 @@
     <string name="state_disconnecting">Disconnecting</string>
     <string name="state_failed">Didn\'t connect</string>
 
-    <string name="sentence_idle">Pick a line and switch on.</string>
+    <string name="sentence_idle">Pick a line, then connect.</string>
     <string name="sentence_preparing">Checking account and lines…</string>
     <string name="sentence_connecting">Building the encrypted route…</string>
     <string name="sentence_connected_three_tier">AI goes home · video via cloud · the rest stays local</string>

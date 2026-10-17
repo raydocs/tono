@@ -131,6 +131,10 @@ jobs:
           adb shell settings put system screen_off_timeout 1800000
           adb shell svc power stayon true
           adb shell input keyevent 82 || true
+          # Let the launcher finish its first-boot work; on swiftshader it can otherwise raise an ANR
+          # dialog over the app. The test answers only foreign ANR dialogs and logs each one.
+          sleep 60
+          adb shell input keyevent 3
           # No -g: runtime permissions and VPN consent stay as on a fresh install.
           adb install -r apk/*-test-*.apk
           adb install -r apk/instrumentation.apk
@@ -151,6 +155,8 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_6
+          cores: 4
+          ram-size: 4096M
           disable-animations: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: bash evidence.sh
