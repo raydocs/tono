@@ -1,4 +1,4 @@
-/* Tono iOS copy. Keys and wording are shared with Android res/values*/strings.xml; iOS-only keys at the end. */
+/* Tono iOS copy. Keys and wording are shared with Android res/values{,-zh-rCN}/strings.xml; iOS-only keys at the end. */
 
 "app_name" = "Tono";
 "state_signed_out" = "Sign in";
