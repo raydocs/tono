@@ -80,6 +80,36 @@ Debug; the CI device build fails if a Release binary contains it.
 | Signed device install, tunnel start, real catalog, DNS/IPv6/UDP/LAN behaviour, On Demand recovery, memory under the 50 MB extension limit | iPhone + Apple Developer team | **not run** |
 | TestFlight / IPA | — | **none exists** |
 
+## TestFlight: what the owner must provide (nothing here is done)
+
+Never paste a private key, `.p12`, `.p8` or password into a chat or the repo; put them in the
+Mac keychain or GitHub Actions secrets.
+
+Ordinary Apple Developer Program capabilities (self-service in the developer portal, no request):
+1. A paid Apple Developer Program membership and its **Team ID** (`DEVELOPMENT_TEAM` in
+   `Configuration/Local.xcconfig`, or a CI variable). **Organization** enrolment, not individual:
+   App Review guideline 5.4 requires VPN apps to come from an organization, and external TestFlight
+   goes through Beta App Review.
+2. Two explicit App IDs: `com.raydocs.tono.ios` and `com.raydocs.tono.ios.tunnel` (or the owner's
+   prefix, set via `TONO_BUNDLE_ID`), both with **Network Extensions** and **App Groups** enabled.
+3. The App Group `group.com.raydocs.tono.ios` (`TONO_APP_GROUP`) registered and assigned to both IDs.
+   `packet-tunnel-provider` is a standard NE capability for paid teams; `includeAllNetworks` and On
+   Demand need no extra entitlement.
+4. Signing: an **Apple Distribution** certificate (private key stays with the owner) and two **App
+   Store** provisioning profiles (app + extension), or Xcode automatic signing; for CI, an App
+   Store Connect API key (issuer ID, key ID, `.p8`) stored as repository secrets.
+5. For on-device debugging before TestFlight: a registered iPhone UDID and development profiles.
+6. An App Store Connect app record (name, bundle ID, SKU), the export-compliance answers
+   (`ITSAppUsesNonExemptEncryption` is `true`: TLS/Reality tunnel encryption), a privacy-policy URL
+   and beta-review contact for external testers.
+
+Not a capability request, but blocks distribution:
+- The GPL-3.0 / sing-box name-clause answer ([decision 129](../../docs/decisions/129-2026-10-17-ios-client-tunnel-defaults.md)).
+- VPN apps are not available on the China mainland App Store; whether TestFlight testers there can
+  install is unverified.
+- No extra Apple approval is needed for this packet tunnel. Content filters, DNS proxies, app
+  proxies for unsupervised devices and per-app VPN (MDM) would be different; Tono uses none.
+
 ## Licence
 
 sing-box is GPL-3.0-or-later with an added condition: "no derivative work may use the name or imply
