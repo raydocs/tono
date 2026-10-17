@@ -19,14 +19,14 @@ struct SettingsView: View {
                         ModeRow(title: L.t("mode_stable"), desc: L.t("mode_stable_desc"), selected: model.mode == .stable) {
                             Task { await model.setMode(.stable) }
                         }
-                        Text(L.t("mode_applies")).font(.system(size: 11)).foregroundStyle(TonoColor.textTertiary)
+                        Text(L.t("mode_applies")).tonoFont(11, relativeTo: .caption2).foregroundStyle(TonoColor.textTertiary)
                     }
 
                     SectionLabel(text: L.t("routing_scope_title"))
                     SmokeCard {
                         para(L.t("routing_scope"))
                         para(L.t("routing_platform"))
-                        Text(L.t(model.underlyingIPv6 ? "ipv6_on" : "ipv6_off")).font(.system(size: 12, weight: .medium)).foregroundStyle(TonoColor.textTertiary)
+                        Text(L.t(model.underlyingIPv6 ? "ipv6_on" : "ipv6_off")).tonoFont(12, .medium, relativeTo: .caption).foregroundStyle(TonoColor.textTertiary)
                     }
 
                     SectionLabel(text: L.t("settings_check"))
@@ -35,26 +35,26 @@ struct SettingsView: View {
                     SectionLabel(text: L.t("settings_system"))
                     SmokeCard {
                         Toggle(isOn: Binding(get: { model.includeAllNetworks }, set: { on in Task { await model.setIncludeAllNetworks(on) } })) {
-                            Text(L.t("system_include_all")).font(.system(size: 16, weight: .medium)).foregroundStyle(TonoColor.textPrimary)
+                            Text(L.t("system_include_all")).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
                         }
                         .tint(TonoColor.accent)
                         para(L.t("system_include_all_desc"))
                         para(L.t("system_on_demand"))
-                        Text(L.t("system_limit")).font(.system(size: 13)).foregroundStyle(TonoColor.warning)
+                        Text(L.t("system_limit")).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
                     }
 
                     SectionLabel(text: L.t("settings_account"))
                     SmokeCard {
-                        Text(model.email ?? "").font(.system(size: 16)).foregroundStyle(TonoColor.textPrimary)
+                        Text(model.email ?? "").tonoFont(16, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
                         QuietButton(title: L.t("settings_sign_out"), color: TonoColor.error) { confirmSignOut = true }
                     }
 
                     SectionLabel(text: L.t("settings_about"))
                     SmokeCard {
-                        Text(L.t("about_version", AppModel.appVersion)).font(.system(size: 14)).foregroundStyle(TonoColor.textPrimary)
+                        Text(L.t("about_version", AppModel.appVersion)).tonoFont(14, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
                         small(L.t("about_core", model.coreVersion.isEmpty ? "—" : model.coreVersion))
                         small(L.t("about_contract", String(DesktopRoutingContract.sourceDigest.prefix(12))))
-                        Text(L.t("about_test")).font(.system(size: 12)).foregroundStyle(TonoColor.textTertiary)
+                        Text(L.t("about_test")).tonoFont(12, relativeTo: .caption).foregroundStyle(TonoColor.textTertiary)
                     }
                 }
                 .padding(.horizontal, 16).padding(.bottom, 24)
@@ -75,7 +75,7 @@ struct SettingsView: View {
                 GlyphIcon(glyph: .back, tint: TonoColor.textPrimary).frame(width: 48, height: 48).contentShape(Circle())
             }
             .accessibilityLabel(L.t("settings_back"))
-            Text(L.t("settings_title")).font(.system(size: 22, weight: .medium)).foregroundStyle(TonoColor.textPrimary)
+            Text(L.t("settings_title")).tonoFont(22, .medium, relativeTo: .title2).foregroundStyle(TonoColor.textPrimary)
                 .accessibilityAddTraits(.isHeader)
             Spacer()
         }
@@ -83,11 +83,11 @@ struct SettingsView: View {
     }
 
     private func para(_ text: String) -> some View {
-        Text(text).font(.system(size: 14)).lineSpacing(2).foregroundStyle(TonoColor.textSecondary).fixedSize(horizontal: false, vertical: true)
+        Text(text).tonoFont(14, relativeTo: .subheadline).lineSpacing(2).foregroundStyle(TonoColor.textSecondary).fixedSize(horizontal: false, vertical: true)
     }
 
     private func small(_ text: String) -> some View {
-        Text(text).font(.system(size: 12)).foregroundStyle(TonoColor.textSecondary).fixedSize(horizontal: false, vertical: true)
+        Text(text).tonoFont(12, relativeTo: .caption).foregroundStyle(TonoColor.textSecondary).fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -106,8 +106,8 @@ private struct ModeRow: View {
                 }
                 .padding(.top, 2)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.system(size: 16, weight: .medium)).foregroundStyle(TonoColor.textPrimary)
-                    Text(desc).font(.system(size: 13)).foregroundStyle(TonoColor.textSecondary).multilineTextAlignment(.leading)
+                    Text(title).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
+                    Text(desc).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.textSecondary).multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
@@ -137,7 +137,7 @@ private struct RouteCheck: View {
             QuietButton(title: L.t("check_go"), action: run)
         }
         if let result {
-            Text(result).font(.system(size: 16, weight: .medium)).foregroundStyle(TonoColor.textPrimary)
+            Text(result).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
                 .accessibilityAddTraits(.updatesFrequently)
         }
     }

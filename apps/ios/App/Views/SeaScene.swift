@@ -15,7 +15,7 @@ struct SeaScene: View {
             let t = timeline.date.timeIntervalSinceReferenceDate
             SeaCanvas(sunRise: sky.sunRise, warn: sky.warning ? 1 : 0, horizon: horizon,
                       drift: reduceMotion ? 0 : (t / 26).truncatingRemainder(dividingBy: 1),
-                      breath: sky == .dawn && !reduceMotion ? 0.5 + 0.5 * sin(t * .pi / 2.4) : 1,
+                      breath: (sky == .dawn || sky == .rising) && !reduceMotion ? 0.5 + 0.5 * sin(t * .pi / 2.4) : 1,
                       animateStars: !reduceMotion)
         }
         .animation(reduceMotion ? nil : (sky == .day ? TonoMotion.arrival : TonoMotion.ambient), value: sky)

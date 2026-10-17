@@ -8,25 +8,34 @@ struct SignInView: View {
     @State private var email = ""
     @State private var code = ""
     @FocusState private var focus: Field?
+    @Environment(\.dynamicTypeSize) private var typeSize
     private enum Field { case email, code }
 
     var body: some View {
         ZStack {
             TonoColor.night.ignoresSafeArea()
             SeaScene(sky: .night, horizon: 0.44)
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 6) {
-                    TonoMark(size: 44).padding(.bottom, 12)
-                    Text(L.t("signin_title")).font(.system(size: 30, weight: .regular)).foregroundStyle(TonoColor.textPrimary)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(L.t("signin_intro")).font(.system(size: 17)).lineSpacing(3).foregroundStyle(TonoColor.textSecondary)
+            if typeSize.isAccessibilitySize {
+                ScrollView { VStack(alignment: .leading, spacing: 16) { intro; form } }
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    intro
+                    Spacer(minLength: 16)
+                    form
                 }
-                .padding(.horizontal, 28).padding(.top, 28)
-                Spacer(minLength: 16)
-                form
             }
         }
         .onAppear { email = model.login.email }
+    }
+
+    private var intro: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TonoMark(size: 48).padding(.bottom, 12)
+            Text(L.t("signin_title")).tonoFont(30, .regular, relativeTo: .largeTitle).foregroundStyle(TonoColor.textPrimary)
+                .accessibilityAddTraits(.isHeader)
+            Text(L.t("signin_intro")).tonoFont(17, relativeTo: .body).lineSpacing(3).foregroundStyle(TonoColor.textSecondary)
+        }
+        .padding(.horizontal, 28).padding(.top, 28)
     }
 
     private var codeStep: Bool { model.login.challengeID != nil }
@@ -47,7 +56,7 @@ struct SignInView: View {
                 PrimaryButton(title: L.t(model.login.busy ? "signin_sending" : "signin_send"),
                               enabled: !model.login.busy && !email.trimmingCharacters(in: .whitespaces).isEmpty, action: send)
             } else {
-                Text(L.t("signin_code_sent", model.login.email)).font(.system(size: 14)).foregroundStyle(TonoColor.textSecondary)
+                Text(L.t("signin_code_sent", model.login.email)).tonoFont(14, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
                 TonoField(title: L.t("signin_code"), text: $code, large: true)
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)
@@ -61,25 +70,22 @@ struct SignInView: View {
                 PrimaryButton(title: L.t(model.login.busy ? "signin_verifying" : "signin_verify"),
                               enabled: !model.login.busy && code.count == 6, action: verify)
                 Button(L.t("signin_change")) { code = ""; model.changeEmail(); focus = .email }
-                    .font(.system(size: 15)).foregroundStyle(TonoColor.textSecondary)
+                    .tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
                     .frame(maxWidth: .infinity).frame(minHeight: 44)
             }
             if model.reason == "SESSION_ENDED", model.login.errorCode == nil {
-                Text(PhaseText.reason("SESSION_ENDED")).font(.system(size: 14)).foregroundStyle(TonoColor.warning)
+                Text(PhaseText.reason("SESSION_ENDED")).tonoFont(14, relativeTo: .subheadline).foregroundStyle(TonoColor.warning)
             }
             if let error = model.login.errorCode {
-                Text(PhaseText.signInError(error)).font(.system(size: 14)).foregroundStyle(TonoColor.error)
+                Text(PhaseText.signInError(error)).tonoFont(14, relativeTo: .subheadline).foregroundStyle(TonoColor.error)
                     .accessibilityAddTraits(.updatesFrequently)
             }
-            Text(L.t("signin_privacy")).font(.system(size: 11)).foregroundStyle(TonoColor.textTertiary)
+            Text(L.t("signin_privacy")).tonoFont(11, relativeTo: .caption2).foregroundStyle(TonoColor.textTertiary)
         }
         .padding(22)
-        .background(
-            UnevenSheetShape(radius: 30)
-                .fill(LinearGradient(colors: [TonoColor.smoke.opacity(0.92), TonoColor.nightDeep], startPoint: .top, endPoint: .bottom))
-                .overlay(UnevenSheetShape(radius: 30).stroke(TonoColor.hairline, lineWidth: 1))
-                .ignoresSafeArea(edges: .bottom)
-        )
+        .background {
+            Color.clear.glassSurface(UnevenSheetShape(radius: 32)).ignoresSafeArea(edges: .bottom)
+        }
         .animation(TonoMotion.state, value: codeStep)
         .onChange(of: codeStep) { focus = $0 ? .code : .email }
     }

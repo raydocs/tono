@@ -10,7 +10,7 @@ struct LinesSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(L.t("lines_title")).font(.system(size: 22, weight: .semibold)).foregroundStyle(TonoColor.textPrimary)
+                Text(L.t("lines_title")).tonoFont(22, .semibold, relativeTo: .title2).foregroundStyle(TonoColor.textPrimary)
                     .accessibilityAddTraits(.isHeader)
                 Spacer()
                 QuietButton(title: L.t("lines_test")) {
@@ -21,7 +21,7 @@ struct LinesSheet: View {
                 .opacity(testing ? 0.5 : 1)
             }
             if model.usingCachedCatalog {
-                Text(L.t("lines_cached")).font(.system(size: 13)).foregroundStyle(TonoColor.warning)
+                Text(L.t("lines_cached")).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
             }
             ScrollView {
                 LazyVStack(spacing: 6) {
@@ -31,7 +31,7 @@ struct LinesSheet: View {
         }
         .padding(.horizontal, 20).padding(.top, 22)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(TonoColor.smoke.ignoresSafeArea())
+        .modifier(SheetSurface())
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
@@ -45,16 +45,16 @@ struct LinesSheet: View {
             HStack(spacing: 12) {
                 StatusDot(color: LatencyLevelColor.color(line.latencyMS))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(Format.city(line.city, chinese: L.isChinese)).font(.system(size: 16, weight: .medium)).foregroundStyle(TonoColor.textPrimary).lineLimit(1)
+                    Text(Format.city(line.city, chinese: L.isChinese)).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary).lineLimit(1)
                     if !line.label.isEmpty {
-                        Text(line.label).font(.system(size: 13)).foregroundStyle(TonoColor.textSecondary).lineLimit(1)
+                        Text(line.label).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.textSecondary).lineLimit(1)
                     }
                 }
                 Spacer(minLength: 0)
                 Text(line.latencyMS.map { L.t("latency_ms", $0) } ?? L.t("line_untested"))
-                    .font(.system(size: 14, weight: .medium).monospacedDigit()).foregroundStyle(TonoColor.textSecondary)
+                    .tonoFont(14, .medium, relativeTo: .subheadline).monospacedDigit().foregroundStyle(TonoColor.textSecondary)
                 if selected {
-                    Text(L.t("lines_in_use")).font(.system(size: 12, weight: .medium)).foregroundStyle(TonoColor.accent)
+                    Text(L.t("lines_in_use")).tonoFont(12, .medium, relativeTo: .caption).foregroundStyle(TonoColor.accent)
                 }
             }
             .padding(.horizontal, 16)
@@ -64,5 +64,18 @@ struct LinesSheet: View {
         }
         .buttonStyle(PressScale())
         .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+}
+
+/// iOS 26 gives sheets Liquid Glass; earlier systems get the smoked surface.
+struct SheetSurface: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *), !reduceTransparency {
+            content
+        } else {
+            content.background(TonoColor.smoke.ignoresSafeArea())
+        }
     }
 }

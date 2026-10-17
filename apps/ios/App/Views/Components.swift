@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Line glyphs drawn in code (1.6 pt strokes on a 24 pt grid), same set as Android `Glyphs.kt`. Decorative.
-enum Glyph { case ai, video, apps, gear, chevronRight, back, arrow }
+enum Glyph { case ai, video, apps, gear, chevronRight, chevronUp, chevronDown, back, arrow }
 
 struct GlyphIcon: View {
     let glyph: Glyph
@@ -45,6 +45,10 @@ struct GlyphIcon: View {
                 ctx.stroke(Path(ellipseIn: CGRect(x: 9.4 * s, y: 9.4 * s, width: 5.2 * s, height: 5.2 * s)), with: .color(tint), style: style)
             case .chevronRight:
                 poly([p(9, 6), p(15, 12), p(9, 18)])
+            case .chevronUp:
+                poly([p(6, 15), p(12, 9), p(18, 15)])
+            case .chevronDown:
+                poly([p(6, 9), p(12, 15), p(18, 9)])
             case .back:
                 poly([p(15, 5), p(8, 12), p(15, 19)])
             case .arrow:
@@ -57,7 +61,7 @@ struct GlyphIcon: View {
     }
 }
 
-/// The TO mark from the shared design assets (`design-assets/tono-icon`).
+/// The sun-on-horizon mark, generated from the desktop brand source (decision 095).
 struct TonoMark: View {
     var size: CGFloat = 28
     var body: some View {
@@ -74,7 +78,7 @@ struct PrimaryButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 17, weight: .semibold))
+                .tonoFont(17, .semibold, relativeTo: .body)
                 .foregroundStyle(enabled ? TonoColor.actionInk : TonoColor.textTertiary)
                 .frame(maxWidth: .infinity, minHeight: 52)
                 .padding(.horizontal, 20)
@@ -93,7 +97,7 @@ struct QuietButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 15, weight: .medium))
+                .tonoFont(15, .medium, relativeTo: .subheadline)
                 .foregroundStyle(color)
                 .padding(.horizontal, 18)
                 .frame(minHeight: 44)
@@ -134,8 +138,8 @@ struct SectionLabel: View {
     let text: String
     var body: some View {
         Text(text.uppercased())
-            .font(.system(size: 12, weight: .medium))
             .tracking(0.6)
+            .tonoFont(12, .medium, relativeTo: .caption)
             .foregroundStyle(TonoColor.textTertiary)
             .padding(.leading, 6).padding(.top, 18).padding(.bottom, 8)
             .accessibilityAddTraits(.isHeader)
@@ -151,13 +155,14 @@ struct Banner: View {
     var body: some View {
         HStack(spacing: 10) {
             StatusDot(color: tone)
-            Text(text).font(.system(size: 14)).foregroundStyle(TonoColor.textPrimary).frame(maxWidth: .infinity, alignment: .leading)
+            Text(text).tonoFont(14, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary).frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.updatesFrequently)
             if let action { QuietButton(title: action, color: tone, action: onAction) }
         }
         .padding(.leading, 14).padding(.trailing, 8).padding(.vertical, 10)
-        .background(tone.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(tone.opacity(0.35), lineWidth: 1))
+        .background(tone.opacity(0.10), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(tone.opacity(0.45), lineWidth: 1))
     }
 }
 
@@ -169,7 +174,7 @@ struct TonoField: View {
 
     var body: some View {
         TextField("", text: $text, prompt: Text(title).foregroundColor(TonoColor.textTertiary))
-            .font(.system(size: large ? 24 : 17, weight: large ? .medium : .regular, design: large ? .rounded : .default))
+            .tonoFont(large ? 24 : 17, large ? .medium : .regular, relativeTo: large ? .title2 : .body, design: large ? .rounded : .default)
             .foregroundStyle(TonoColor.textPrimary)
             .tint(TonoColor.accent)
             .padding(.horizontal, 16)

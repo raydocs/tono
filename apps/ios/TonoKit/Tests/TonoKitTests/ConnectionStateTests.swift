@@ -68,3 +68,15 @@ final class TunnelStopTests: XCTestCase {
                        .expected)
     }
 }
+
+final class PrimaryActionTests: XCTestCase {
+    /// While a start is in flight the capsule must cancel it (never offer "connect" twice), and a
+    /// running tunnel offers only disconnect: one action per phase, as on Android and desktop.
+    func testInFlightStartOffersCancelAndRunningTunnelOffersDisconnect() {
+        XCTAssertEqual(PrimaryAction(.preparing), .cancel)
+        XCTAssertEqual(PrimaryAction(.connecting).wantsTunnel, false)
+        XCTAssertEqual(PrimaryAction(.degraded), .disconnect)
+        XCTAssertNil(PrimaryAction(.disconnecting).wantsTunnel)
+        XCTAssertEqual(PrimaryAction(.failed).wantsTunnel, true)
+    }
+}

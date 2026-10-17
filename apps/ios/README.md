@@ -25,7 +25,7 @@ with the desktop three-tier routing. Not a SHIP_PLAN gate and not an App Store r
 | Path | What |
 | --- | --- |
 | `TonoKit/` | Swift package with no Apple-only imports: catalog admission (restricted YAML, Reality-only, public IPv4), the sing-box graph, the route explainer, the control-plane client (system DNS → relays, HTTP/1.1 for relays), account/session/catalog cache, connection phases. Builds and tests on Linux and macOS. |
-| `App/` | SwiftUI app: sign-in, Home (sea scene, sun switch, line, three lanes, speed), lines sheet, Settings (mode, boundaries, route checker, iOS protection, account, about). `en` and `zh-Hans` copy uses the Android string keys. |
+| `App/` | SwiftUI app: sign-in, Home (sea scene, state, one status line, primary capsule, exit capsule), Details (lanes, full reason, mode), lines sheet, Settings (mode, boundaries, route checker, iOS protection, account, about). `en` and `zh-Hans` copy uses the Android string keys. |
 | `PacketTunnel/` | `NEPacketTunnelProvider` + libbox platform interface (TUN → `NEPacketTunnelNetworkSettings`, utun descriptor, default-interface monitor, IPv6 reload, sleep/wake, screen state). |
 | `Shared/` | App Group files and node latency, compiled into both targets. |
 | `supply-chain/` | `sing-box.pin` and `build-libbox-apple.sh` (pinned Go, upstream iOS Go patch, gomobile; verified by SHA-256 and commit). |

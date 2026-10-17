@@ -80,3 +80,55 @@ enum L {
 
     static var isChinese: Bool { Locale.preferredLanguages.first?.hasPrefix("zh") == true }
 }
+
+// MARK: - Type and surfaces
+
+/// Fixed design sizes that still follow Dynamic Type (`@ScaledMetric` against a text style).
+private struct TonoFont: ViewModifier {
+    @ScaledMetric private var size: CGFloat
+    private let weight: Font.Weight
+    private let design: Font.Design
+
+    init(size: CGFloat, weight: Font.Weight, design: Font.Design, relativeTo style: Font.TextStyle) {
+        _size = ScaledMetric(wrappedValue: size, relativeTo: style)
+        self.weight = weight
+        self.design = design
+    }
+
+    func body(content: Content) -> some View { content.font(.system(size: size, weight: weight, design: design)) }
+}
+
+/// Liquid Glass where the system has it (iOS 26), a dark material before that, and an opaque smoke
+/// surface when Reduce Transparency is on. The tint keeps text contrast over a bright sky.
+private struct GlassSurface<S: Shape>: ViewModifier {
+    let shape: S
+    let tint: Color?
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        if reduceTransparency || contrast == .increased {
+            content
+                .background(TonoColor.smoke, in: shape)
+                .overlay(shape.stroke(Color.white.opacity(contrast == .increased ? 0.4 : 0.12), lineWidth: 1))
+        } else if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.tint((tint ?? TonoColor.night).opacity(0.38)), in: shape)
+        } else {
+            content
+                .background((tint ?? TonoColor.night).opacity(0.42), in: shape)
+                .background(.ultraThinMaterial, in: shape)
+                .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+        }
+    }
+}
+
+extension View {
+    func tonoFont(_ size: CGFloat, _ weight: Font.Weight = .regular, relativeTo style: Font.TextStyle = .body,
+                  design: Font.Design = .default) -> some View {
+        modifier(TonoFont(size: size, weight: weight, design: design, relativeTo: style))
+    }
+
+    func glassSurface<S: Shape>(_ shape: S, tint: Color? = nil) -> some View {
+        modifier(GlassSurface(shape: shape, tint: tint))
+    }
+}

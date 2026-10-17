@@ -39,6 +39,8 @@ targets:
         embed: false
       - sdk: NetworkExtension.framework
       - sdk: libresolv.tbd
+      # libbox's Go code calls UIDevice; the extension imports no UIKit itself, so link it explicitly.
+      - sdk: UIKit.framework
   PacketTunnel:
     type: app-extension
     platform: iOS
@@ -60,6 +62,8 @@ targets:
         embed: false
       - sdk: NetworkExtension.framework
       - sdk: libresolv.tbd
+      # libbox's Go code calls UIDevice; the extension imports no UIKit itself, so link it explicitly.
+      - sdk: UIKit.framework
 schemes:
   Tono:
     build:

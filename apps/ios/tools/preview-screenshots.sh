@@ -52,10 +52,13 @@ echo "recorded state-cycle.mp4"
 for lang in zh-Hans en; do
   shot "$lang-01-signin" "$lang" SIGNED_OUT
   shot "$lang-02-idle" "$lang" IDLE
+  shot "$lang-02b-permission" "$lang" NEEDS_PERMISSION
+  shot "$lang-03a-preparing" "$lang" PREPARING
   shot "$lang-03-connecting" "$lang" CONNECTING
   shot "$lang-04-connected" "$lang" CONNECTED
   shot "$lang-05-degraded" "$lang" DEGRADED
   shot "$lang-06-failed" "$lang" FAILED
   shot "$lang-07-lines" "$lang" CONNECTED lines
   shot "$lang-08-settings" "$lang" CONNECTED settings
+  shot "$lang-09-details" "$lang" DEGRADED details
 done

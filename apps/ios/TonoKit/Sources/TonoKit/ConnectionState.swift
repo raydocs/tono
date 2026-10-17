@@ -28,11 +28,12 @@ public enum Phase: String, Sendable, CaseIterable {
 
 /// Which sky the sea scene paints (desktop SeaScene destinations, Android `SkyState`).
 public enum SkyState: Sendable {
-    case night, dawn, day, duskWarning, ember
+    case night, dawn, rising, day, duskWarning, ember
 
     public init(_ phase: Phase) {
         switch phase {
-        case .preparing, .connecting, .disconnecting: self = .dawn
+        case .preparing, .disconnecting: self = .dawn
+        case .connecting: self = .rising
         case .connected: self = .day
         case .degraded: self = .duskWarning
         case .failed: self = .ember
@@ -45,6 +46,7 @@ public enum SkyState: Sendable {
         switch self {
         case .night: return 0
         case .dawn: return 0.5
+        case .rising: return 0.7
         case .day: return 1
         case .duskWarning: return 0.72
         case .ember: return 0.28
@@ -144,6 +146,43 @@ public enum ConnectionState {
             if let p = f.permission { return (.needsPermission, p) }
             if let failure = f.failure { return (.failed, failure) }
             return (.idle, nil)
+        }
+    }
+}
+
+/// The one action the primary capsule offers in each phase (Android direction B, desktop main button).
+public enum PrimaryAction: Equatable, Sendable {
+    case connect, retry, allowVPN, cancel, disconnect, disconnecting, signIn
+
+    public init(_ phase: Phase) {
+        switch phase {
+        case .idle: self = .connect
+        case .failed: self = .retry
+        case .needsPermission: self = .allowVPN
+        case .preparing, .connecting: self = .cancel
+        case .connected, .degraded: self = .disconnect
+        case .disconnecting: self = .disconnecting
+        case .signedOut: self = .signIn
+        }
+    }
+
+    /// Whether pressing it asks for the tunnel (true) or for it to stop (false); nil = disabled.
+    public var wantsTunnel: Bool? {
+        switch self {
+        case .connect, .retry, .allowVPN: return true
+        case .cancel, .disconnect: return false
+        case .disconnecting, .signIn: return nil
+        }
+    }
+
+    /// Sunrise fill while connecting: account and lines checked → 0.36, tunnel coming up → 0.78,
+    /// connected → full (then it fades). Same steps as Android.
+    public static func progress(_ phase: Phase) -> Double {
+        switch phase {
+        case .preparing: return 0.36
+        case .connecting: return 0.78
+        case .connected, .degraded: return 1
+        default: return 0
         }
     }
 }
