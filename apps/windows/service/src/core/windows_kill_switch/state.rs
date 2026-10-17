@@ -207,6 +207,11 @@ pub(super) fn tunnel_permit_luid(armed: &Armed, current_core: Option<CoreInstanc
 pub(super) static ARMED: Lazy<Mutex<Option<Armed>>> = Lazy::new(|| Mutex::new(None));
 pub(super) static LAST_ERROR: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 pub(super) static WFP_OPERATION: Lazy<tokio::sync::Mutex<()>> = Lazy::new(|| tokio::sync::Mutex::new(()));
+/// Set when a takeover's write of the recorded owner may or may not have landed and the file
+/// could not be read back to tell. The in-memory owner is then not known to match the disk, so
+/// every owner gate refuses (retryably) until `reconcile_owner_record_if_unconfirmed` has
+/// re-read the file. A Service restart reloads the owner record from disk and starts clear.
+pub(super) static OWNER_RECORD_UNCONFIRMED: AtomicBool = AtomicBool::new(false);
 #[cfg(test)]
 pub(super) static TEST_INSTALL_FAILURE: AtomicBool = AtomicBool::new(false);
 #[cfg(test)]

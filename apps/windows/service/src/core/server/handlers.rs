@@ -90,6 +90,11 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             if lifecycle_is_stopping() {
                 return service_unavailable("service is stopping");
             }
+            // `update::request` decides with `authorize_write_for`: first settle an owner
+            // record a takeover could not confirm (see `enter_owner_lifecycle`).
+            if let Err(error) = windows_kill_switch::reconcile_owner_record_if_unconfirmed().await {
+                return service_error(error);
+            }
             // Sol R2-F4: a Disconnect queued before a Restore internet or a newer admitted Connect
             // names an older session and is refused before it touches anything. Checked under the
             // lifecycle lock, which StartClash admission also holds.
@@ -769,14 +774,38 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 ServiceOperationKind::PrepareCoreStart,
                 IPC_HANDLER_TIMEOUT,
             );
-            match CORE_MANAGER
-                .lock()
-                .await
-                .prepare_start(preserve_supervised_core)
-                .await
+            // The Core stopped here may belong to a recorded owner who has signed out. The
+            // takeover is allowed, but the owner on record used to change only at StartClash's
+            // `arm_bootstrap`; a connect failing in between released as this caller, which
+            // `authorize_write_for` refuses while the departed owner is still recorded, and the
+            // machine stayed Blocked (#1293 item 1). So the move of the recorded owner, the
+            // retirement of the departed owner's connection and the Core stop are one
+            // transaction under the release authority's lock, refused while a release is in
+            // flight. A recorded owner who is still signed in is refused as `arm_bootstrap`
+            // refuses it, and nothing is stopped.
+            match windows_kill_switch::stop_core_for_start(
+                &owner.key,
+                crate::core::release::Authority::live(),
+                std::sync::Arc::new(crate::core::release::Processes::live()),
+                || async {
+                    CORE_MANAGER
+                        .lock()
+                        .await
+                        .prepare_start(preserve_supervised_core)
+                        .await
+                },
+            )
+            .await
             {
                 Ok(terminated) => ok_json(terminated),
-                Err(error) => service_unavailable(format!(
+                Err(windows_kill_switch::TakeoverError::Refused(refusal)) => service_error(refusal),
+                Err(windows_kill_switch::TakeoverError::Release(refusal)) => {
+                    service_error(release_admission_error(&refusal))
+                }
+                Err(windows_kill_switch::TakeoverError::State(error)) => service_unavailable(format!(
+                    "Failed to take over the departed owner's protection: {error:#}"
+                )),
+                Err(windows_kill_switch::TakeoverError::Stop(error)) => service_unavailable(format!(
                     "Failed to reconcile Tono Core before DNS preflight: {error:#}"
                 )),
             }

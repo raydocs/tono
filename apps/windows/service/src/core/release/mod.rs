@@ -491,6 +491,36 @@ impl Authority {
         Ok(())
     }
 
+    /// Take C for a takeover of a departed owner's protection and prove no release is in
+    /// flight, so the takeover's effects cannot interleave with a release worker's. The worker
+    /// holds C from before its first effect until it has read everything back, and checks the
+    /// recorded owner under C; a takeover that held C could not be overtaken by a worker that
+    /// had passed that check, and one that finds C held, or anything from the last release not
+    /// proven finished (`unretired_reason`), changes nothing (the refusals are retryable).
+    pub(crate) fn hold_for_takeover(
+        &self,
+        lock_timeout: Duration,
+        processes: &Processes,
+    ) -> std::result::Result<Held, AdmissionRefusal> {
+        let held = self
+            .lock(lock_timeout)
+            .map_err(|error| AdmissionRefusal::Corrupt(format!("{error:#}")))?;
+        let Some(held) = held else {
+            return Err(AdmissionRefusal::InProgress);
+        };
+        let record = self
+            .load()
+            .map_err(|error| AdmissionRefusal::Corrupt(format!("{error:#}")))?;
+        // The proof `admit_start` asks of a new Connect: nothing from the last release can still
+        // act (live worker or survivor, unproven jobs, an incomplete release, outstanding DNS
+        // changes, lost history). A takeover stops the old Core and rewrites the owner, so it
+        // needs the same.
+        if let Some(reason) = processes.unretired_reason(&record) {
+            return Err(AdmissionRefusal::Unfinished(reason));
+        }
+        Ok(held)
+    }
+
     /// Admit a Connect (PROPOSAL §10 v5): only under C, only when nothing from the last
     /// release can still act, and only for a request prepared for the current generation.
     /// Returns the generation the session runs under. `restore_executor` puts the update
