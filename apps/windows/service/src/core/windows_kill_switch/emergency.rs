@@ -30,6 +30,9 @@ pub async fn emergency_disarm_windows_kill_switch_applying_narrow() -> Result<()
 
 async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
     let _operation = WFP_OPERATION.lock().await;
+    if apply_narrow && strict_kill_switch_enabled() {
+        bail!("automatic emergency recovery cannot release strict protection");
+    }
     // What the release does to the secondary AI hold. Failed-update recovery keeps a hold that is
     // owed and never installs a new one (decision 125); when nothing is owed it also never
     // removes one, because an earlier release whose tombstone write failed leaves a hold with
@@ -139,14 +142,18 @@ async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
     hold_ai_before_release(follow_up == Some(true)).await;
     #[cfg(all(windows, not(feature = "test")))]
     engine_call("emergency disarm", crate::core::wfp::emergency_disarm).await?;
+    *last_verify_guard() = None;
+    TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
+    // The explicit escape hatch may clear strict intent only after WFP removal succeeded.
+    if !apply_narrow {
+        clear_strict_recovery().await?;
+    }
     // WFP is gone. Explicit Restore removes the secondary hold; automatic
     // failure recovery applies it. Neither may undo or refuse this release.
     if let Some(apply_narrow) = follow_up {
         finish_release_follow_up(apply_narrow).await;
     }
     *armed_guard() = None;
-    *last_verify_guard() = None;
-    TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
     // Best-effort tombstone after a skipped pre-write so a later Service start still prefers
     // cleanup over emergency re-arm when ProgramData becomes writable again.
     if tombstone_error.is_some() {

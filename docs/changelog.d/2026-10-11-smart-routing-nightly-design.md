@@ -43,3 +43,9 @@
 - 回归源码覆盖顺序/身份/协议/DNS、缺Home拒绝、旧稳定编译不变、严格准入负例、捕获模式、持久化重启无旧grant及显式release、Mac国内降级。准确head的本地检查、原生CI和独立high结果以PR验证回执为准；没有执行结果的原生/Red/设备测试不记通过。
 - 剩余：不是所有国内/海外业务可用；页面依赖/游戏/自带DoH/未知IP仍可能拒绝。设备DNS真实路径、第二跳出口/固定身份、模式切换恢复、网络变化/睡眠/重启、升级/回退、G0及一周试用未验收。#1071/#1504、#1605/#1643独立保留，不称解决。
 - 候选/发布：0.0.76 RC、feeds、版本/标签、移动端不变；仅源码Draft，未新建包、合并或客户推送。
+
+### 2026-10-17 续记 · 首轮运行时CI/独立审查的集中修正
+- 首轮准确head [0c60a578](https://github.com/raydocs/tono/commit/0c60a578b0d3bc76197fd5d134f3617959914eed) 的 [CI39018619586](https://github.com/raydocs/tono/actions/runs/39018619586) 失败：Windows Service摘要LowerHex编译、Mac构建来源fixture缺新增合同输入，以及Mac三层回归的保留地址Home fixture/两条未本地化提示。仅修定点原因，不删断言、不跳测试、不放宽public地址准入。
+- 独立high对该head判定3个安全Major：live Core运行图绑定、Windows strict继承stable LAN物理许可、丢失strict记录后的启动恢复。各记独立finding；本次集中补拒绝运行中strict绑定、strict撤回LAN FilterSpec、grant前独立持久strict判据与显式release清除。stable原合同保留。相关minor（verified Bootstrap重启保留云pin）一并收紧为Blocked floor。
+- 既有Mac真实Core生命周期回归扩展显式/推断两条绑定拒绝，Windows真实FilterSpec仲裁及Service传递断言覆盖LAN/IPv6/SSDP边界，单条持久恢复回归覆盖缺失/损坏/不可读会话记录、失败release与显式成功release。准确新head CI/增量独立复核以PR回执为准，未执行的native Red不记通过。
+- 本轮仍非全量地域分类或客户功能验收：快照仅10国内/11海外完整主机、实验默认关闭且无客户UI。设备真实DNS、第二跳身份/换云、网络变化/睡眠/重启、升级回退和G0/试用仍待真机；不动候选/feeds，不合并或发版。

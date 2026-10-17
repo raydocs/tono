@@ -114,6 +114,9 @@ final class CoreManager {
     /// Validate the root snapshot before binding any intent or PF grants.
     func bindRuntime(configDirectory: String, digest: String, generation: UInt64?, mode: String?) throws -> StrictRuntimeProof? {
         lock.lock(); defer { lock.unlock() }
+        guard mode != "three-tier" || process?.isRunning != true else {
+            throw HelperFailure.invalid("Stop the running Core before binding strict routing.")
+        }
         let existing = try ReleaseAuthority().load()
         guard !existing.strictIntent || existing.strictRuntimeDigest == digest else {
             throw HelperFailure.invalid("Strict runtime is immutable. Explicitly disconnect before changing it.")
@@ -126,6 +129,12 @@ final class CoreManager {
         let strict = ThreeTierRoutingContract.isThreeTierRuntime(object)
         guard mode == nil || mode == (strict ? "three-tier" : "stable") else {
             throw HelperFailure.invalid("Routing mode/runtime mismatch.")
+        }
+        // Headerless /core/sync cannot bind a strict graph to the stable child
+        // it would replace. A proof is minted only with no live Core; start
+        // then verifies this digest before launching the sole owned child.
+        guard !strict || process?.isRunning != true else {
+            throw HelperFailure.invalid("Stop the running Core before binding strict routing.")
         }
         guard let generation else {
             let record = try ReleaseAuthority().load()

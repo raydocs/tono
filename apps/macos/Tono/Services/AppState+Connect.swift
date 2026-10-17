@@ -904,7 +904,7 @@ extension AppState {
             )
             if AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent") {
                 isProtectionBlocked = true
-                errorMessage = "Strict protection remains active. Restore internet could not be confirmed; retry Restore internet."
+                errorMessage = String(localized: "Strict protection remains active. Restore internet could not be confirmed; retry Restore internet.")
                 return
             }
             disconnect(releaseKillSwitch: true)

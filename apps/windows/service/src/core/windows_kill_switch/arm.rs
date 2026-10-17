@@ -135,6 +135,9 @@ pub(crate) async fn arm_bootstrap_bound(
     };
     // Persist fail-closed intent before touching WFP: a daemon restart installs at least the
     // floor if this process dies during the following transaction.
+    if armed.intent.strict_kill_switch {
+        persist_strict_recovery().await?;
+    }
     atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?).await?;
     CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
     publish_reconnect(false, None);

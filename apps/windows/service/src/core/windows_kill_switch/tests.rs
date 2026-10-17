@@ -653,6 +653,7 @@ async fn cleanup() {
     TEST_CORE_STARTING.store(false, Ordering::Release);
     for path in [
         intent_path(),
+        strict_recovery_path(),
         dns_snapshot_path(),
         crate::service_paths().active_owner_path(),
     ] {
@@ -1930,6 +1931,69 @@ fn strict_kill_switch_repairs_indefinitely() {
 
 #[tokio::test]
 #[serial]
+async fn durable_strict_recovery_survives_lost_session_records_until_explicit_release() -> Result<()> {
+    cleanup().await;
+    let contract = StrictContract {
+        runtime_sha256: strict_runtime_digest("admitted graph"),
+        config_path: None,
+        session_token_hash: "token-hash".into(),
+        generation: None,
+        release_generation: 0,
+        physical_interface: "Ethernet 7".into(),
+        exit_endpoints: test_config().proxy_endpoints,
+    };
+    arm_bootstrap_bound(&test_config(), "/opt/tono/sing-box", "owner-alice", Some(contract)).await?;
+    assert!(strict_recovery_required());
+    // An established session can have persisted Bootstrap during reconnect. It must not
+    // recover the old cloud grants merely because verification had already succeeded.
+    let mut intent: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+    intent.verified = Some(true);
+    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    let recovered = armed_guard().clone().expect("strict restart floor");
+    assert_eq!(recovered.intent.mode, KillSwitchStatusMode::Blocked);
+    assert!(rule_config_for(&recovered, None).endpoints.is_empty());
+
+    tokio::fs::remove_file(intent_path()).await?;
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    assert!(status().await.wanted, "lost record must not release strict intent");
+    tokio::fs::write(intent_path(), b"corrupt record").await?;
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    assert_eq!(status().await.mode, KillSwitchStatusMode::Blocked);
+    assert_eq!(tokio::fs::read(intent_path()).await?, b"corrupt record");
+    tokio::fs::remove_file(intent_path()).await?;
+    // A directory deterministically models unreadable record I/O on Windows and Unix.
+    tokio::fs::create_dir(intent_path()).await?;
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    assert!(status().await.wanted);
+    assert!(!status().await.tunnel_permit_rendered);
+    assert!(release_applying_narrow().await.is_err(), "unwritable session record is reported while narrowing stays fail-closed");
+    release_after_service_stop().await?;
+    assert!(emergency_disarm_windows_kill_switch_applying_narrow().await.is_err());
+    assert!(strict_recovery_required(), "automatic recovery cannot clear the hold");
+    tokio::fs::remove_dir(intent_path()).await?;
+    let failure = SimulatedStateFailures::arm_removal();
+    assert!(release().await.is_err());
+    assert!(strict_recovery_required(), "failed explicit release retains recovery proof");
+    drop(failure);
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    assert!(status().await.wanted, "failed release must survive another restart");
+    release().await?;
+    assert!(!strict_recovery_required());
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    assert!(!status().await.wanted, "successful explicit release stays released");
+    cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
 async fn strict_start_binds_the_session_and_only_explicit_release_opens_it() -> Result<()> {
     cleanup().await;
     let contract = StrictContract {
@@ -1955,6 +2019,16 @@ async fn strict_start_binds_the_session_and_only_explicit_release_opens_it() -> 
     assert_eq!(disk.endpoints, contract.exit_endpoints, "physical permits derive from the admitted graph, not the caller");
     assert!(disk.api_host_ips.is_empty(), "no stable recovery relay can bypass the strict graph");
     assert_eq!(disk.strict_contract.unwrap().generation, Some(17));
+    let mut locked = armed_guard().clone().expect("admitted strict session");
+    let core = CoreInstance { pid: 4242, generation: 17 };
+    locked.intent.mode = KillSwitchStatusMode::Locked;
+    locked.tun_luid = Some(7);
+    locked.core_instance = Some(core);
+    let config = rule_config_for(&locked, Some(core));
+    assert_eq!(config.tun_luid, Some(7));
+    assert!(!config.allow_local_network, "a live strict tunnel cannot inherit stable LAN bypasses");
+    assert!(!wfp_model::expected_filters(&config).iter()
+        .any(|filter| filter.weight == wfp_model::WEIGHT_LAN_PERMIT));
     assert!(arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await.is_err());
     assert!(begin_direct_runtime_reload(17).await.is_err());
     release_applying_narrow().await?;

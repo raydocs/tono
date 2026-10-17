@@ -558,6 +558,48 @@ func runCoreLifecycleSelfTests() -> Bool {
     }
     check("still-the-same-core", manager.status().pid == started.pid)
 
+    // A live stable child is not proof that a newly admitted strict graph is
+    // running. Neither the explicit bind nor sync's inferred mode may adopt it.
+    do {
+        let before = try ReleaseAuthority().load()
+        guard let interface = KillSwitchManager.physicalEgressInterfaces().first else {
+            throw HelperFailure.system("No physical interface for strict binding control.")
+        }
+        let graph = try ThreeTierRoutingContract.graph(home: "Tono-Home-Residential",
+            physicalInterface: interface, fakeRange: "198.18.176.0/20")
+        var strict = try JSONSerialization.jsonObject(with: staged) as! [String: Any]
+        strict["route"] = graph["route"]
+        strict["dns"] = graph["dns"]
+        strict["outbounds"] = [
+            ["type": "vless", "tag": "Fixture Cloud", "server": "9.9.9.9", "server_port": 8443,
+             "uuid": "11111111-1111-4111-8111-111111111111"],
+            ["type": "selector", "tag": "Tono-Exit", "outbounds": ["Fixture Cloud"], "default": "Fixture Cloud"],
+            ["type": "socks", "tag": "Tono-Home-Residential", "server": "203.0.113.60", "server_port": 11080,
+             "version": "5", "username": "fixture-user", "password": "fixture-password", "network": "tcp", "detour": "Tono-Exit"],
+            graph["direct_outbound"] as! [String: Any],
+        ]
+        check("strict-live-bind-fixture-is-admissible", ThreeTierRoutingContract.admits(strict))
+        let strictData = try JSONSerialization.data(withJSONObject: strict)
+        let strictDigest = SHA256.hash(data: strictData).map { String(format: "%02x", $0) }.joined()
+        try strictData.write(to: URL(fileURLWithPath: configPath))
+        chown(configPath, allowedUID, gid_t(bitPattern: -1))
+        chmod(configPath, 0o644)
+        refuses("strict-bind-must-not-adopt-live-stable-core") {
+            _ = try manager.bindRuntime(configDirectory: configDirectory, digest: strictDigest,
+                generation: before.generation, mode: "three-tier")
+        }
+        refuses("strict-inferred-bind-must-not-adopt-live-stable-core") {
+            _ = try manager.bindRuntime(configDirectory: configDirectory, digest: strictDigest,
+                generation: before.generation, mode: nil)
+        }
+        let after = try ReleaseAuthority().load()
+        check("refused-strict-bind-keeps-process-and-authority", manager.status().pid == started.pid
+            && manager.status().running && after == before)
+        try staged.write(to: URL(fileURLWithPath: configPath))
+        chown(configPath, allowedUID, gid_t(bitPattern: -1))
+        chmod(configPath, 0o644)
+    } catch { failures.append("strict-bind-live-process-refusal") }
+
     // A rejected replacement must not stop the live child. Once approved, a
     // user edit during beforeStop must not become the bytes launched afterward.
     let changedConfig = config.replacingOccurrences(of: "198.19.1.2", with: "198.19.1.3")

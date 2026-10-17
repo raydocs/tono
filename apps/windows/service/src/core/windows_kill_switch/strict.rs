@@ -3,7 +3,7 @@ use super::*;
 use sha2::{Digest, Sha256};
 
 pub(crate) fn strict_runtime_digest(text: &str) -> String {
-    format!("{:x}", Sha256::digest(text.as_bytes()))
+    Sha256::digest(text.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 pub(crate) async fn admit_strict_start(

@@ -201,6 +201,9 @@ pub struct RuleConfig {
     pub api_host_ips: Vec<IpAddr>,
     /// WinTUN LUID; only consulted in `Locked` mode.
     pub tun_luid: Option<u64>,
+    /// Stable sessions retain their reviewed LAN capability; strict routing never bypasses
+    /// the Core's LAN/IPv6/UDP rejection through physical on-link permits.
+    pub allow_local_network: bool,
     /// Staged core path, folded into the endpoint permit's key: an installer that moves the
     /// binary must rekey the permit (Proton's upgrade lesson — app-path filters silently die
     /// when the exe moves), which the add-before-remove plan then swaps atomically.
@@ -1034,7 +1037,8 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
 
     // I: the local network. Locked with a renderable tunnel only: in Bootstrap and Blocked
     // nothing carries the rest of the traffic, and the user is told nothing gets out.
-    if config.mode == KillSwitchStatusMode::Locked && config.tun_luid.is_some() {
+    if config.mode == KillSwitchStatusMode::Locked && config.tun_luid.is_some()
+        && config.allow_local_network {
         filters.extend(lan_rules(&config.app_path));
     }
 
@@ -1233,6 +1237,7 @@ mod tests {
             endpoints: vec![endpoint("8.8.8.8", 443)],
             api_host_ips: vec!["1.1.1.1".parse().unwrap()],
             tun_luid: Some(0x1234_5678),
+            allow_local_network: true,
             app_path: r"C:\ProgramData\Tono\bin\mihomo.exe".to_owned(),
             tono_app_path: r"C:\Program Files\Tono\Tono.exe".to_owned(),
             direct_endpoints: Vec::new(),
@@ -2188,6 +2193,27 @@ mod tests {
                 config.mode
             );
         }
+    }
+
+    #[test]
+    fn strict_locked_session_withholds_physical_lan_ipv6_and_discovery_permits() {
+        use FilterAction::{Block, Permit};
+        use IpProtocol::{Tcp, Udp};
+        use LayerKind::{AleAuthConnectV4 as OutV4, AleAuthConnectV6 as OutV6};
+        let mut strict = config(KillSwitchStatusMode::Locked);
+        strict.allow_local_network = false;
+        let filters = expected_filters(&strict);
+        assert!(!filters.iter().any(|filter| filter.weight == WEIGHT_LAN_PERMIT));
+        assert_eq!(arbitrate(&filters, &packet(OutV4, Tcp, "192.168.1.1", 443)), Block);
+        assert_eq!(arbitrate(&filters, &packet(OutV6, Tcp, "fe80::1", 443)), Block);
+        assert_eq!(arbitrate(&filters, &packet(OutV6, Tcp, "fd12::7", 443)), Block);
+        assert_eq!(arbitrate(&filters, &packet(OutV4, Udp, "239.255.255.250", 1900)), Block);
+        let mut tunneled = packet(OutV4, Tcp, "192.168.1.1", 443);
+        tunneled.local_interface = strict.tun_luid;
+        assert_eq!(arbitrate(&filters, &tunneled), Permit, "captured traffic reaches Core for routing rejection");
+        strict.allow_local_network = true;
+        assert_eq!(arbitrate(&expected_filters(&strict), &packet(OutV4, Tcp, "192.168.1.1", 443)), Permit,
+            "the stable contract is unchanged");
     }
 
     #[test]

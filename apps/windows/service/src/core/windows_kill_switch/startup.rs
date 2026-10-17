@@ -19,7 +19,7 @@ pub(super) fn spawn_startup_release_retry() {
         loop {
             tokio::time::sleep(delay).await;
             let _operation = WFP_OPERATION.lock().await;
-            if armed_guard().is_some() {
+            if armed_guard().is_some() || strict_recovery_required() {
                 drop(running);
                 return;
             }
@@ -153,12 +153,31 @@ pub async fn restore_on_service_start() -> Result<()> {
     publish_reconnect(false, None);
     STARTUP_UNVERIFIED_BARRIER.store(false, Ordering::Release);
     STARTUP_SETTLED.store(false, Ordering::Release);
-    match tokio::fs::read(intent_path()).await {
+    let record = tokio::fs::read(intent_path()).await;
+    if strict_recovery_required() && !record.as_ref().ok()
+        .and_then(|bytes| serde_json::from_slice::<IntentRecord>(bytes).ok())
+        .is_some_and(|intent| intent.wanted && intent.strict_kill_switch && intent_is_valid(&intent))
+    {
+        // The separate durable criterion wins over missing, corrupt, unreadable or stale
+        // session bytes. Retain those bytes as evidence; restore no previous-session grants.
+        let emergency = emergency_armed();
+        RESTORED_BARRIER_UNPROVEN.store(true, Ordering::Release);
+        *armed_guard() = Some(emergency.clone());
+        let installed = install_unlocked(&emergency).await;
+        if installed.is_ok() {
+            sweep_legacy_sublayers_unlocked().await;
+        }
+        return installed;
+    }
+    match record {
         Ok(bytes) => match serde_json::from_slice::<IntentRecord>(&bytes) {
             Ok(intent) if intent_is_valid(&intent) => {
                 // A strict recovery restores only the permanent floor. The previous session's
                 // token/generation cannot authorize this boot's tunnel or physical grants.
                 let mut intent = intent;
+                let strict_persist = if intent.strict_kill_switch {
+                    persist_strict_recovery().await
+                } else { Ok(()) };
                 if let Some(contract) = intent.strict_contract.as_mut() {
                     contract.generation = None;
                 }
@@ -189,7 +208,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                     };
                     let install = install_unlocked(&armed).await;
                     let wfp_live = install.is_ok();
-                    let reconciled = record_startup_reconciliation(persist, install);
+                    let reconciled = record_startup_reconciliation(persist.and(strict_persist), install);
                     if wfp_live {
                         sweep_legacy_sublayers_unlocked().await;
                     }
@@ -214,7 +233,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                 // Blocked (fail-closed, API recovery channel open) until the tunnel is
                 // re-locked — by `relock_restored_tunnel` after a core restore, or by the GUI.
                 let restored_was_locked = armed.intent.mode == KillSwitchStatusMode::Locked;
-                if restored_was_locked {
+                if restored_was_locked || armed.intent.strict_kill_switch {
                     // Materialize the legacy Locked => verified migration before changing mode.
                     // Otherwise a second service restart would reinterpret the now-Blocked
                     // field-less record as stale and incorrectly open an established session.
@@ -227,7 +246,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                 // not yet proof of a live barrier for the Remote Desktop exception.
                 RESTORED_BARRIER_UNPROVEN.store(true, Ordering::Release);
                 *armed_guard() = Some(armed.clone());
-                let persist = if restored_was_locked {
+                let persist = if restored_was_locked || armed.intent.strict_kill_switch {
                     match serde_json::to_vec_pretty(&armed.intent) {
                         Ok(encoded) => atomic_write(&intent_path(), &encoded).await,
                         Err(error) => Err(error.into()),
@@ -237,7 +256,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                 };
                 let install = install_unlocked(&armed).await;
                 let wfp_live = install.is_ok();
-                let reconciled = record_startup_reconciliation(persist, install);
+                let reconciled = record_startup_reconciliation(persist.and(strict_persist), install);
                 if wfp_live {
                     sweep_legacy_sublayers_unlocked().await;
                 }
@@ -332,6 +351,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                     return release_general_traffic_on_startup_unlocked("unusable kill-switch intent").await;
                 }
                 let emergency = emergency_armed();
+                let persist = persist_strict_recovery().await;
                 *armed_guard() = Some(emergency.clone());
                 let installed = install_unlocked(&emergency).await.context(
                     "unusable strict kill-switch intent: failed to install emergency block",
@@ -339,7 +359,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                 if installed.is_ok() {
                     sweep_legacy_sublayers_unlocked().await;
                 }
-                installed
+                record_startup_reconciliation(persist, installed)
             }
             Err(_) => {
                 // The bytes do not parse, so they cannot prove an explicit strict opt-in.

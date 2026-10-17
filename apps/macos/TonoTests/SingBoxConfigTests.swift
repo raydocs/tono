@@ -574,7 +574,7 @@ final class SingBoxConfigTests: XCTestCase {
         var overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
             externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
             selectedNodeName: "Fixture Beta", claudeHomeSocks5: .init(
-                host: "203.0.113.60", port: 11080, username: "fixture-user", password: "fixture-password"))
+                host: "9.9.9.8", port: 11080, username: "fixture-user", password: "fixture-password"))
         let stable = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values, directPlan: nil)
         let result = try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values, physicalInterface: "en0", fakeIPSlot: 3)
         let document = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])

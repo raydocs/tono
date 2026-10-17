@@ -6,6 +6,7 @@ pub(crate) fn strict_kill_switch_enabled() -> bool {
     armed_guard()
         .as_ref()
         .is_some_and(|armed| armed.intent.strict_kill_switch)
+        || strict_kill_switch_intent_on_disk()
 }
 
 /// Crash, hang, and unreadable state release general traffic unless the user explicitly
