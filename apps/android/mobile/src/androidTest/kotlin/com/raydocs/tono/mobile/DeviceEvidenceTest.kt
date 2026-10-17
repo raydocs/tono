@@ -102,12 +102,21 @@ class DeviceEvidenceTest {
     @Test fun a2_realSystemVpnConsentDialog() {
         val prepare = VpnService.prepare(context)
         assertNotNull("fresh install must need consent", prepare)
-        context.startActivity(prepare!!.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        // Launched from the app's own foreground activity, as its Connect does: Android blocks
+        // activity starts from a process with no visible window.
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            assertNotNull(find(By.text(text(R.string.signin_title)), 20_000))
+            scenario.onActivity { it.startActivity(prepare) }
+            consentDialog()
+        }
+    }
+
+    private fun consentDialog() {
         val ok = find(By.res(Pattern.compile(".*:id/button1")).pkg(Pattern.compile("com\\.android\\.vpndialogs")), 20_000)
             ?: find(By.pkg("com.android.vpndialogs").text(Pattern.compile("(?i)ok|确定")), 5_000)
         assertNotNull("system VPN consent dialog", ok)
         shot("real-03-system-vpn-consent")
-        ok.click()
+        ok!!.click()
         device.waitForIdle(3_000)
         assertNull("consent recorded by Android", VpnService.prepare(context))
         shot("real-04-after-consent")
@@ -115,13 +124,17 @@ class DeviceEvidenceTest {
 
     @Test fun a3_realEngineRefusesToConnectWithoutAccount() {
         // With consent granted but no Tono account, the real engine must not pretend to connect.
-        context.startForegroundService(Intent(context, TonoVpnService::class.java).setAction(TonoVpnService.ACTION_CONNECT))
-        Thread.sleep(3_000)
-        val cm = context.getSystemService(ConnectivityManager::class.java)
-        val vpnUp = cm.allNetworks.any { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true }
-        assertFalse("no tunnel may exist without an account", vpnUp)
-        ActivityScenario.launch(MainActivity::class.java).use {
+        // Sent from the foreground activity, so Android's background service-start limits do not apply.
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             assertNotNull(find(By.text(text(R.string.signin_title)), 20_000))
+            scenario.onActivity { it.startForegroundService(Intent(it, TonoVpnService::class.java).setAction(TonoVpnService.ACTION_CONNECT)) }
+            Thread.sleep(4_000)
+            val services = instrumentation.uiAutomation.executeShellCommand("dumpsys activity services ${context.packageName}")
+            File(out, "real-05-services.txt").writeText(android.os.ParcelFileDescriptor.AutoCloseInputStream(services).bufferedReader().readText())
+            val cm = context.getSystemService(ConnectivityManager::class.java)
+            val vpnUp = cm.allNetworks.any { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true }
+            assertFalse("no tunnel may exist without an account", vpnUp)
+            assertNotNull(find(By.text(text(R.string.signin_title)), 10_000))
             shot("real-05-connect-without-account-stays-signed-out")
         }
     }

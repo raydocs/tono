@@ -138,6 +138,8 @@ jobs:
           # No -g: runtime permissions and VPN consent stay as on a fresh install.
           adb install -r apk/*-test-*.apk
           adb install -r apk/instrumentation.apk
+          # Keep going after a failed run so its screenshots and logs are still collected.
+          set +e
           adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest \
             $APP.test/androidx.test.runner.AndroidJUnitRunner | tee evidence/instrumentation.txt
           adb logcat -d -s TonoEngine:V AndroidRuntime:E TestRunner:V > evidence/logcat.txt || true
@@ -145,6 +147,7 @@ jobs:
             || adb exec-out run-as $APP sh -c "cd /sdcard/Android/data/$APP/files/evidence && tar -cf - ." | tar -C evidence -xf -
           adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4 || true
           ls -la evidence
+          set -e
           # am instrument exits 0 even when tests fail; the runner's summary decides.
           grep -q '^OK (' evidence/instrumentation.txt
           SH
@@ -155,8 +158,6 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_6
-          cores: 4
-          ram-size: 4096M
           disable-animations: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: bash evidence.sh
