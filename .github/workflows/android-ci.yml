@@ -140,18 +140,20 @@ jobs:
           adb install -r apk/instrumentation.apk
           # Keep going after a failed run so its screenshots and logs are still collected.
           set +e
-          adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest \
+          timeout 1200 adb shell am instrument -w -r -e class com.raydocs.tono.mobile.DeviceEvidenceTest \
             $APP.test/androidx.test.runner.AndroidJUnitRunner | tee evidence/instrumentation.txt
-          adb logcat -d -s TonoEngine:V AndroidRuntime:E TestRunner:V > evidence/logcat.txt || true
-          adb pull /sdcard/Android/data/$APP/files/evidence/. evidence/ \
-            || adb exec-out run-as $APP sh -c "cd /sdcard/Android/data/$APP/files/evidence && tar -cf - ." | tar -C evidence -xf -
-          adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4 || true
+          # Every adb call after the run is bounded, so a dead emulator cannot eat the job timeout.
+          timeout 60 adb logcat -d > evidence/logcat.txt
+          timeout 120 adb pull /sdcard/Android/data/$APP/files/evidence/. evidence/ \
+            || timeout 120 sh -c "adb exec-out run-as $APP sh -c 'cd /sdcard/Android/data/$APP/files/evidence && tar -cf - .' | tar -C evidence -xf -"
+          timeout 120 adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4
           ls -la evidence
           set -e
           # am instrument exits 0 even when tests fail; the runner's summary decides.
           grep -q '^OK (' evidence/instrumentation.txt
           SH
       - name: Install and run on an Android 14 x86_64 emulator
+        timeout-minutes: 32
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 34

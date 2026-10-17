@@ -112,14 +112,24 @@ class DeviceEvidenceTest {
     }
 
     private fun consentDialog() {
-        val ok = find(By.res(Pattern.compile(".*:id/button1")).pkg(Pattern.compile("com\\.android\\.vpndialogs")), 20_000)
-            ?: find(By.pkg("com.android.vpndialogs").text(Pattern.compile("(?i)ok|确定")), 5_000)
-        assertNotNull("system VPN consent dialog", ok)
+        val appeared = device.wait(Until.hasObject(By.pkg("com.android.vpndialogs")), 30_000) == true
+        if (!appeared) diagnose("real-03-consent-missing")
+        assertTrue("system VPN consent dialog", appeared)
         shot("real-03-system-vpn-consent")
+        val ok = device.findObject(By.res("android:id/button1"))
+            ?: device.findObject(By.pkg("com.android.vpndialogs").text(Pattern.compile("(?i)ok|确定")))
+        if (ok == null) diagnose("real-03-consent-no-ok")
+        assertNotNull("consent OK button", ok)
         ok!!.click()
         device.waitForIdle(3_000)
         assertNull("consent recorded by Android", VpnService.prepare(context))
         shot("real-04-after-consent")
+    }
+
+    /** Failure evidence: what was actually on screen and in the window hierarchy. */
+    private fun diagnose(name: String) {
+        device.takeScreenshot(File(out, "$name.png"))
+        File(out, "$name.xml").outputStream().use { device.dumpWindowHierarchy(it) }
     }
 
     @Test fun a3_realEngineRefusesToConnectWithoutAccount() {
