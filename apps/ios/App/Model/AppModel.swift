@@ -413,7 +413,6 @@ final class AppModel: ObservableObject {
             reason = derived.reason
         }
     }
-    }
 
     private static var deviceName: String {
         let name = UIDevice.current.name.trimmingCharacters(in: .whitespacesAndNewlines)
