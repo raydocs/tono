@@ -99,6 +99,8 @@ struct QuietButton: View {
             Text(title)
                 .tonoFont(15, .medium, relativeTo: .subheadline)
                 .foregroundStyle(color)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 18)
                 .frame(minHeight: 44)
                 .overlay(Capsule().strokeBorder(TonoColor.hairline, lineWidth: 1))
@@ -141,6 +143,7 @@ struct SectionLabel: View {
             .tracking(0.6)
             .tonoFont(12, .medium, relativeTo: .caption)
             .foregroundStyle(TonoColor.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.leading, 6).padding(.top, 18).padding(.bottom, 8)
             .accessibilityAddTraits(.isHeader)
     }

@@ -35,7 +35,7 @@ struct LinesSheet: View {
         .padding(.horizontal, 20).padding(.top, 22)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .modifier(SheetSurface())
-        .presentationDetents(ax ? [.large] : [.medium, .large])
+        .presentationDetents(ax || DebugAccessibility.largeSheets ? [.large] : [.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
@@ -54,6 +54,7 @@ struct LinesSheet: View {
                     .padding(.top, ax ? 10 : 0)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(Format.city(line.city, chinese: L.isChinese)).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if !line.label.isEmpty {
                         Text(line.label).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.textSecondary)
                     }

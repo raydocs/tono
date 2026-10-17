@@ -44,6 +44,10 @@ xcrun simctl ui "$UDID" content_size accessibility-large
 shot "a11y-large-text-connected" zh-Hans CONNECTED
 shot "a11y-large-text-signin" zh-Hans SIGNED_OUT
 shot "a11y-large-text-details" zh-Hans DEGRADED details
+# The largest size (AX5, the one the XCUITest audit runs at), English: the longest strings.
+xcrun simctl ui "$UDID" content_size accessibility-extra-extra-extra-large
+shot "a11y-largest-text-en-connected" en CONNECTED
+shot "a11y-largest-text-en-details" en DEGRADED details
 xcrun simctl ui "$UDID" content_size large
 xcrun simctl ui "$UDID" increase_contrast enabled || true
 shot "a11y-increase-contrast-connected" zh-Hans CONNECTED

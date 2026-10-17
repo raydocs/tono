@@ -19,6 +19,7 @@ struct DetailsSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 Text(L.t("details")).tonoFont(22, .semibold, relativeTo: .title2).foregroundStyle(TonoColor.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
                 if let code = model.reason, BannerAction.showsBanner(model.phase, reason: code) {
                     section(L.t("details_why")) {
@@ -48,7 +49,7 @@ struct DetailsSheet: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .modifier(SheetSurface())
-        .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+        .presentationDetents(typeSize.isAccessibilitySize || DebugAccessibility.largeSheets ? [.large] : [.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
@@ -140,12 +141,15 @@ private struct Lane: View {
             GlyphIcon(glyph: glyph, tint: live ? TonoColor.accent : TonoColor.textTertiary)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 6) {
                     Text(dest).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if live, let probe, let color = probeColor(probe) {
                         StatusDot(color: color, size: 6)
                         if let status = status(probe) {
                             Text(status).tonoFont(12, relativeTo: .caption).foregroundStyle(TonoColor.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
@@ -168,7 +172,7 @@ private struct Lane: View {
 
     private func status(_ p: ExitProbe) -> String? {
         switch p.state {
-        case .ok: return p.location
+        case .ok: return p.location.map(PhaseText.region)
         case .failed: return L.t("lane_down")
         case .checking: return L.t("lane_checking")
         case .unknown: return nil

@@ -137,7 +137,7 @@ final class TonoUITests: XCTestCase {
     @MainActor func testAccessibilityAuditSheets() throws {
         var failures: [String] = []
         for sheet in ["lines", "details", "settings"] {
-            failures += try audit(launch("DEGRADED", ["-TonoPreviewSheet", sheet]), name: "sheet-\(sheet)")
+            failures += try audit(launch("DEGRADED", ["-TonoPreviewSheet", sheet, "-TonoLargeSheets"]), name: "sheet-\(sheet)")
         }
         XCTAssertTrue(failures.isEmpty, failures.joined(separator: "\n"))
     }
@@ -185,6 +185,7 @@ final class TonoUITests: XCTestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         sleep(2)
         var found: [String] = []
+        var unattributed: [String] = []
         var dumped = false
         do {
             try app.performAccessibilityAudit { issue in
@@ -202,6 +203,12 @@ final class TonoUITests: XCTestCase {
                     if ratio >= 4.5 { return true }
                 }
                 print(line)
+                // A contrast or hit-area flag Apple cannot tie to any element is checked by sweeping
+                // every exposed text and control on the screen (below) instead of being dropped.
+                if element == nil, issue.auditType == .contrast || issue.auditType == .hitRegion {
+                    unattributed.append(line)
+                    return true
+                }
                 found.append(line)
                 if element == nil && !dumped {
                     dumped = true
@@ -212,6 +219,38 @@ final class TonoUITests: XCTestCase {
         } catch {
             found.append("AUDIT \(name): audit error \(error)")
         }
+        if !unattributed.isEmpty {
+            let sweep = Self.sweep(app, name: name)
+            print("SWEEP \(name): \(unattributed.count) unattributed flag(s); checked \(sweep.checked) texts/controls, "
+                  + "\(sweep.failures.count) below 4.5:1 or under 44x44 pt")
+            sweep.failures.forEach { print($0) }
+            found += sweep.failures
+        }
         return found
+    }
+
+    /// Every text and control on screen: controls at least 44x44 pt, text and controls at least
+    /// 4.5:1 measured from their own pixels.
+    @MainActor static func sweep(_ app: XCUIApplication, name: String) -> (checked: Int, failures: [String]) {
+        let window = app.windows.firstMatch.frame
+        let controls: Set<XCUIElement.ElementType> = [.button, .switch, .textField, .secureTextField, .link, .slider]
+        var checked = 0
+        var failures: [String] = []
+        for element in app.descendants(matching: .any).allElementsBoundByIndex {
+            let type = element.elementType
+            guard type == .staticText || controls.contains(type), element.identifier != "previewBadge" else { continue }
+            let frame = element.frame
+            guard !frame.isEmpty, window.contains(frame) else { continue }
+            checked += 1
+            let what = "\(type.rawValue) id=\(element.identifier) label=\(element.label) frame=\(frame)"
+            if controls.contains(type), element.isHittable, frame.width < 44 || frame.height < 44 {
+                failures.append("SWEEP \(name): hit area under 44x44 pt | \(what)")
+            }
+            // WCAG 1.4.3 exempts inactive controls (the disabled sign-in button).
+            if element.isEnabled, let ratio = measuredContrast(element), ratio < 4.5 {
+                failures.append(String(format: "SWEEP %@: measured %.1f:1 under WCAG AA | %@", name, ratio, what))
+            }
+        }
+        return (checked, failures)
     }
 }

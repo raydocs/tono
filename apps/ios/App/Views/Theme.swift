@@ -139,9 +139,13 @@ enum DebugAccessibility {
     #if DEBUG
     static let reduceMotion = CommandLine.arguments.contains("-TonoReduceMotion")
     static let reduceTransparency = CommandLine.arguments.contains("-TonoReduceTransparency")
+    /// Sheets open at the large detent. iOS 26 draws the medium detent slightly scaled, which the
+    /// audit reads as clipped text; the same content is audited at full size.
+    static let largeSheets = CommandLine.arguments.contains("-TonoLargeSheets")
     #else
     static let reduceMotion = false
     static let reduceTransparency = false
+    static let largeSheets = false
     #endif
 }
 

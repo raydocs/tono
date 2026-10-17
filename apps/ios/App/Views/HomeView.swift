@@ -117,6 +117,8 @@ struct HomeView: View {
                         .foregroundStyle(TonoColor.textTertiary)
                         .contentTransition(.numericText())
                         .animation(TonoMotion.state, value: model.rx)
+                        .frame(minHeight: 44)
+                        .accessibilityElement(children: .combine)
                         .transition(.opacity)
                 }
                 if !typeSize.isAccessibilitySize { Spacer() }
@@ -129,8 +131,10 @@ struct HomeView: View {
                     .frame(minWidth: 64, minHeight: 48)
                     .padding(.horizontal, 6)
                     .contentShape(Rectangle())
+                    .accessibilityElement(children: .ignore)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(L.t("details"))
                 .accessibilityIdentifier("detailsButton")
             }
             .padding(.top, 4)
@@ -154,13 +158,17 @@ struct HomeView: View {
                 }
                 .frame(minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
+                .accessibilityElement(children: .ignore)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(PhaseText.short(reason))
             .accessibilityHint(PhaseText.reason(reason))
             .accessibilityIdentifier("reasonLine")
         } else if let text = PhaseText.status(model) {
+            // The element is the 44 pt row, not the 18 pt glyph run (accessibility audit: hit area).
             Text(text).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
                 .frame(minHeight: 44, alignment: .leading)
+                .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("statusLine")
         }
     }
@@ -188,6 +196,7 @@ struct HomeView: View {
             .frame(minHeight: 52)
             .glassSurface(Capsule())
             .contentShape(Capsule())
+            .accessibilityElement(children: .ignore)
         }
         .buttonStyle(PressScale())
         .accessibilityLabel("\(L.t("lines_title")): \(name), \(latency)")
@@ -231,6 +240,8 @@ struct ActionCapsule: View {
                 Capsule().strokeBorder(phase.tunnelUp ? TonoColor.sunMid.opacity(0.55) : .clear, lineWidth: 1)
             }
             .contentShape(Capsule())
+            // One leaf: the timer and arrow are not hit targets of their own; the timer is read in the value.
+            .accessibilityElement(children: .ignore)
         }
         .buttonStyle(PressScale())
         .disabled(action.wantsTunnel == nil)
@@ -285,9 +296,6 @@ struct ActionCapsule: View {
                     .tonoFont(15, .medium, relativeTo: .subheadline).monospacedDigit()
                     .foregroundStyle(TonoColor.textSecondary)
                     .lineLimit(1).fixedSize()
-                    // Read as the capsule's value; a separate small element inside the button would be a
-                    // hit target of its own (accessibility audit: hit area too small).
-                    .accessibilityHidden(true)
             }
         }
     }
