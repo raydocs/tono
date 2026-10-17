@@ -1,0 +1,17 @@
+## 2026-10-17 · iOS 客户端：sing-box 隧道 + Horizon 界面（测试阶段，未合入）
+- 归属：不在 SHIP_PLAN 0.0.75（§1 明确不进这一发）；ops 计划 §P2「Android / iOS 客户端」。平台：iOS（`apps/ios/`，新目录）。
+- 来源：基线 origin/main `59082acfb` → 分支 `feat/ios-singbox-horizon`（Draft PR，见 PR 正文）；未合 main。旧分支 `feat/ios-native-companion`（#204 已关闭、Issue #210）未改动、未复用其 alpha.3 补丁运行时。
+- 缺陷修复：无（新客户端）。
+- 新增/优化：
+  - TonoKit（无 Apple 依赖的 Swift 包）：目录准入（受限 YAML、仅 Reality、公网 IPv4、剥离 hy2）、与 Android 相同的 sing-box 1.15 路由图（21 视频例外 → 166 Home + Anthropic 网段 → 明确云列表 → 其余直连；命中失败拒绝不回落直连）、路由解释器、控制面客户端（系统 DNS → 三个 API 中继）、邮箱登录 / 令牌轮换 / 目录回滚拒绝与 7 天离线缓存、连接阶段推导。
+  - PacketTunnel：`NEPacketTunnelProvider` + 官方 libbox（v1.15.0-alpha.12 `25b0d5ea`，与 Android 同一版本），TUN/DNS/IPv4/IPv6/UDP/LAN 排除、IPv6 变化重建、睡眠/唤醒、屏幕状态；扩展不持有令牌，自行重新准入目录。
+  - App：SwiftUI Horizon 界面，与 Android 方向 B（`4bb6536`）同构：首页只留状态大字 → 一行状态 → 主胶囊（连接/取消/断开+计时，日出填充）→ 出口胶囊 →「详情」；通道、完整原因、模式在详情 sheet；滑动开关删除。Liquid Glass（iOS 26，降低透明度/增强对比时改不透明）、动态字体、VoiceOver 标签、减少动态效果、成功/失败触感。登录、线路、设置（模式、边界说明、路由检查、iOS 系统保护、账号、关于）；中英文案沿用 Android 键；品牌采用已批准的「海平线上的太阳」（决定 095，同一生成器绘制），不再用旧紫色 TO。
+  - 供应链：`supply-chain/build-libbox-apple.sh` 从固定源码构建 Libbox.xcframework（Go 归档、源码提交、iOS Go 补丁均校验）。
+  - 决定 129（provisional）：令牌只在 App 钥匙串；includeAllNetworks 默认开；按需连接随连接/断开开关；App Store 发布等所有者/法务对 GPL 的结论。
+- 工程与测试：新增 `.github/workflows/ios-ci.yml`（只在 `feat/ios-**` 推送与手动触发时运行，GitHub 托管 runner，不接入 ci-gate）。
+- 构建：托管 macos-26（Xcode 26.6，iPhoneOS 26.5 SDK）运行 39057008451 @ `e0f5586` 全绿：libbox 源码构建、未签名 Release 真机构建（含 PacketTunnel.appex）、Debug 模拟器构建、在 iPhone 17 Pro 模拟器安装并启动 App 截图 23 张 + 状态循环录像（artifact `ios-preview-screenshots`，保留 14 天至 2026-10-31）。截图为 DEBUG 夹具预览，每张带黄色「预览 · 夹具数据 · 无账号/隧道」标记，不是网络证据。修过的构建错误：libbox 引用 UIDevice 需链接 UIKit；Localizable.strings 注释被 `*/` 提前截断；`HTTP1.Failure` 初始化器需 public。
+- UI 自查：两轮（上限）。第 2 轮修复大字号布局、iOS 26 sheet 透出、已连接⇄部分可用填充闪烁、标题叠影；自评 77/100，未达 85 通过线（状态动效 10/15 低于 70%，真机/VoiceOver/减少动态效果/降低透明度未验证）。
+- 验证：见 PR 验证评论（Linux：TonoKit `swift test`、路由名单同步检查、sing-box CLI check + 真实内核路由 harness；托管 macOS：libbox 构建、未签名真机/模拟器 xcodebuild、模拟器设计预览截图）。
+- 候选/发布：无安装包；无 IPA、无 TestFlight、无签名。
+- TestFlight 需所有者提供：组织类开发者账号与 Team ID、两个 App ID（含 Network Extensions + App Groups）、App Group、Apple Distribution 证书与两个 App Store 描述文件（或自动签名 + App Store Connect API 密钥存为仓库 secret）、App Store Connect 记录与出口合规回答；packet-tunnel-provider 无需额外审批（清单见 `apps/ios/README.md`）。
+- 剩余限制：未在真机运行隧道（需要 Apple 开发者团队、Network Extension 与 App Group 能力、真机）；未验证真实目录下的连接、DNS/IPv6/UDP、按需连接恢复与 50 MB 内存上限；App Store 发布受 GPL 许可问题约束，待所有者决定。

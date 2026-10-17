@@ -1,0 +1,6 @@
+# Built from pinned upstream source by supply-chain/build-libbox-apple.sh; never committed.
+/Frameworks/
+/Tono.xcodeproj/
+/Configuration/Local.xcconfig
+/TonoKit/.build/
+/build/

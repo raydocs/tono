@@ -1,0 +1,29 @@
+# sing-box core pin for the Tono iOS client. Same release as the Android client
+# (rw8/Tono-droid supply-chain/sing-box/sing-box.pin); verified against
+# https://github.com/SagerNet/sing-box/releases on 2026-10-17: v1.15.0-alpha.12
+# (published 2026-10-11, prerelease) is the newest alpha.
+SING_BOX_VERSION=1.15.0-alpha.12
+SING_BOX_TAG=v1.15.0-alpha.12
+SING_BOX_COMMIT=25b0d5ea3e466d246c708ac0f20d0448110e566c
+SING_BOX_REPO=https://github.com/SagerNet/sing-box.git
+# Upstream Apple client at the submodule commit of that tag (reference only, not built).
+SING_BOX_APPLE_COMMIT=e232aaf22d6d68773196ffc8e6e79684a6be717c
+# Toolchain of the upstream build.yml build_apple_library job for this tag.
+GO_VERSION=1.26.8
+GO_DARWIN_ARM64_SHA256=a012b25b571bd0138a03dcd25375ceba866fe5ca822f426d2c66a4de56fd3f4b
+GO_DARWIN_AMD64_SHA256=186be014105aa6542b767d2c6ed5cca10a0214bdff809ef1724022a8c7894150
+GO_LINUX_AMD64_SHA256=d0f743b33e8d8945e6b1f432edd15785c70507121d6e2a723b21285eddf8b57b
+GOMOBILE_MODULE=github.com/sagernet/gomobile
+GOMOBILE_VERSION=v0.1.13
+# Upstream .github/go_ios_cpu_features.patch (enables ARMv8 crypto on GOOS=ios), applied to the
+# private Go copy exactly as .github/patch_go_for_ios.sh does.
+GO_IOS_PATCH_SHA256=c7f15a66193168a92b7b182e3b8b9ea5bdd14082bf4b97b5b4d4aeac6ab75eff
+# Android's reduced tag set plus with_low_memory, which upstream adds for every non-macOS Apple
+# target (-tags-not-macos). Reality needs with_utls; QUIC sniffing needs with_quic;
+# with_clash_api provides the traffic counters the command client reads (no listener).
+LIBBOX_TAGS=with_quic,with_utls,with_clash_api,with_low_memory,badlinkname,tfogo_checklinkname0
+LIBBOX_TARGETS=ios,iossimulator
+IOS_DEPLOYMENT_TARGET=16.0
+# Upstream linux-amd64 CLI of the same tag, used only by host-side config checks.
+SING_BOX_LINUX_AMD64_ASSET=sing-box-1.15.0-alpha.12-linux-amd64.tar.gz
+SING_BOX_LINUX_AMD64_SHA256=b107528ec7d989333d986573c097d840b9ef1afa9bb177f8eb03e0767f370514
