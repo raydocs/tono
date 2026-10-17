@@ -36,6 +36,11 @@ fn scm_stop_hint_refreshes_before_a_dns_restore_can_outlive_it() {
 struct SimulatedStateFailures;
 
 impl SimulatedStateFailures {
+    fn arm_strict_clear() -> Self {
+        intent::TEST_STRICT_CLEAR_FAILURE.store(true, Ordering::Relaxed);
+        Self
+    }
+
     fn arm_removal() -> Self {
         TEST_REMOVE_FAILURE.store(true, Ordering::Relaxed);
         Self
@@ -62,6 +67,7 @@ impl SimulatedStateFailures {
 
 impl Drop for SimulatedStateFailures {
     fn drop(&mut self) {
+        intent::TEST_STRICT_CLEAR_FAILURE.store(false, Ordering::Relaxed);
         TEST_REMOVE_FAILURE.store(false, Ordering::Relaxed);
         TEST_PERSIST_FAILURE.store(false, Ordering::Relaxed);
         TEST_INSTALL_FAILURE.store(false, Ordering::Relaxed);
@@ -125,6 +131,7 @@ fn valid_intent(mode: KillSwitchStatusMode, wanted: bool) -> IntentRecord {
         updated_at: 1,
         owner_key: None,
         strict_kill_switch: false,
+        strict_contract: None,
         reconnect_after_release: false,
         reconnect_owner_key: None,
         apply_narrow_after_release: None,
@@ -652,6 +659,7 @@ async fn cleanup() {
     TEST_CORE_STARTING.store(false, Ordering::Release);
     for path in [
         intent_path(),
+        strict_recovery_path(),
         dns_snapshot_path(),
         crate::service_paths().active_owner_path(),
     ] {
@@ -1915,16 +1923,205 @@ fn unhealthy_watchdog_releases_without_a_strict_opt_in() {
 }
 
 #[test]
-fn strict_kill_switch_repairs_then_releases() {
+fn strict_kill_switch_repairs_indefinitely() {
     assert!(!crash_recovery_releases_network(true));
     assert_eq!(
         unhealthy_watchdog_action(true, 1),
         UnhealthyWatchdogAction::Reinstall
     );
     assert_eq!(
-        unhealthy_watchdog_action(true, STRICT_UNHEALTHY_RELEASE_TICKS),
-        UnhealthyWatchdogAction::Release
+        unhealthy_watchdog_action(true, u32::MAX),
+        UnhealthyWatchdogAction::Reinstall
     );
+}
+
+#[tokio::test]
+#[serial]
+async fn durable_strict_recovery_survives_lost_session_records_until_explicit_release() -> Result<()> {
+    cleanup().await;
+    let contract = StrictContract {
+        runtime_sha256: strict_runtime_digest("admitted graph"),
+        config_path: None,
+        session_token_hash: "token-hash".into(),
+        generation: None,
+        release_generation: 0,
+        physical_interface: "Ethernet 7".into(),
+        exit_endpoints: test_config().proxy_endpoints,
+    };
+    arm_bootstrap_bound(&test_config(), "/opt/tono/sing-box", "owner-alice", Some(contract)).await?;
+    assert!(strict_recovery_required());
+    // An established session can have persisted Bootstrap during reconnect. It must not
+    // recover the old cloud grants merely because verification had already succeeded.
+    let mut intent: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+    intent.verified = Some(true);
+    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    let recovered = armed_guard().clone().expect("strict restart floor");
+    assert_eq!(recovered.intent.mode, KillSwitchStatusMode::Blocked);
+    assert!(rule_config_for(&recovered, None).endpoints.is_empty());
+
+    tokio::fs::remove_file(intent_path()).await?;
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    assert!(status().await.wanted, "lost record must not release strict intent");
+    tokio::fs::write(intent_path(), b"corrupt record").await?;
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    assert_eq!(status().await.mode, KillSwitchStatusMode::Blocked);
+    assert_eq!(tokio::fs::read(intent_path()).await?, b"corrupt record");
+    tokio::fs::remove_file(intent_path()).await?;
+    // A directory deterministically models unreadable record I/O on Windows and Unix.
+    tokio::fs::create_dir(intent_path()).await?;
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    assert!(status().await.wanted);
+    assert!(!status().await.tunnel_permit_rendered);
+    assert!(release_applying_narrow().await.is_err(), "unwritable session record is reported while narrowing stays fail-closed");
+    release_after_service_stop().await?;
+    assert!(emergency_disarm_windows_kill_switch_applying_narrow().await.is_err());
+    assert!(strict_recovery_required(), "automatic recovery cannot clear the hold");
+    tokio::fs::remove_dir(intent_path()).await?;
+    let failure = SimulatedStateFailures::arm_removal();
+    assert!(release().await.is_err());
+    assert!(strict_recovery_required(), "failed explicit release retains recovery proof");
+    drop(failure);
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    assert!(status().await.wanted, "failed release must survive another restart");
+    release().await?;
+    assert!(!strict_recovery_required());
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    assert!(!status().await.wanted, "successful explicit release stays released");
+    cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn strict_marker_clear_failure_retires_live_proof_but_keeps_restart_hold() -> Result<()> {
+    cleanup().await;
+    let contract = StrictContract {
+        runtime_sha256: strict_runtime_digest("admitted graph"),
+        config_path: None,
+        session_token_hash: "token-hash".into(),
+        generation: None,
+        release_generation: 0,
+        physical_interface: "Ethernet 7".into(),
+        exit_endpoints: test_config().proxy_endpoints,
+    };
+    arm_bootstrap_bound(&test_config(), "/opt/tono/sing-box", "owner-alice", Some(contract.clone())).await?;
+    // Seed the last installed tunnel/verification proof. The test engine has no native
+    // WFP; inspect its liveness cache too, since status.live is always false in that build.
+    TUNNEL_PERMIT_RENDERED.store(true, Ordering::Relaxed);
+    note_verify(true);
+    assert!(status().await.tunnel_permit_rendered);
+    assert!(verify_reads_live(*last_verify_guard()));
+    let failure = SimulatedStateFailures::arm_strict_clear();
+    let error = release().await.expect_err("WFP removal succeeds but clearing the hold fails");
+    assert!(format!("{error:#}").contains("simulated strict recovery clear failure"));
+    let released = status().await;
+    assert!(!released.live && !released.tunnel_permit_rendered);
+    assert!(!verify_reads_live(*last_verify_guard()), "removed WFP cannot retain live proof");
+    let tombstone: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+    assert!(!tombstone.wanted, "the fault must not prevent session tombstone persistence");
+    assert_eq!(tokio::fs::read(strict_recovery_path()).await?, b"strict\n");
+    drop(failure);
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    let recovered = status().await;
+    assert!(recovered.wanted);
+    assert_eq!(recovered.mode, KillSwitchStatusMode::Blocked);
+    assert!(!recovered.tunnel_permit_rendered);
+    release().await?;
+    assert!(!strict_kill_switch_intent_on_disk());
+    assert!(!status().await.wanted);
+
+    // The explicit emergency escape hatch owes the same reporting and durable retry contract.
+    arm_bootstrap_bound(&test_config(), "/opt/tono/sing-box", "owner-alice", Some(contract)).await?;
+    TUNNEL_PERMIT_RENDERED.store(true, Ordering::Relaxed);
+    note_verify(true);
+    assert!(status().await.tunnel_permit_rendered);
+    assert!(verify_reads_live(*last_verify_guard()));
+    let failure = SimulatedStateFailures::arm_strict_clear();
+    let error = emergency_disarm_windows_kill_switch().await
+        .expect_err("emergency removal must report the failed strict clear");
+    assert!(format!("{error:#}").contains("simulated strict recovery clear failure"));
+    let released = status().await;
+    assert!(!released.live && !released.tunnel_permit_rendered);
+    assert!(!verify_reads_live(*last_verify_guard()));
+    assert_eq!(tokio::fs::read(strict_recovery_path()).await?, b"strict\n");
+    drop(failure);
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    let recovered = status().await;
+    assert!(recovered.wanted);
+    assert_eq!(recovered.mode, KillSwitchStatusMode::Blocked);
+    assert!(!recovered.tunnel_permit_rendered);
+    emergency_disarm_windows_kill_switch().await?;
+    assert!(!strict_kill_switch_intent_on_disk());
+    *armed_guard() = None;
+    restore_on_service_start().await?;
+    assert!(!status().await.wanted, "explicit retry stays released across restart");
+    cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn strict_start_binds_the_session_and_only_explicit_release_opens_it() -> Result<()> {
+    cleanup().await;
+    let contract = StrictContract {
+        runtime_sha256: strict_runtime_digest("admitted graph"),
+        config_path: None,
+        session_token_hash: "token-hash".into(),
+        generation: None,
+        release_generation: 0,
+        physical_interface: "Ethernet 7".into(),
+        exit_endpoints: vec![ProxyEndpoint { ip: "9.9.9.9".into(), port: 8443, protocol: ProxyProtocol::Tcp }],
+    };
+    arm_bootstrap_bound(&test_config(), "/opt/tono/sing-box", "owner-alice", Some(contract.clone())).await?;
+    let mut active = crate::core::desired::ActiveOwnerState {
+        owner_key: "owner-alice".into(),
+        identity: crate::OwnerIdentity::Windows { sid: "S-1-5-21-test".into() },
+        app_data_root: String::new(), generation: 17, session_token_hash: "wrong-token".into(),
+    };
+    assert!(bind_strict_session(&active).await.is_err(), "another session cannot adopt the graph");
+    active.session_token_hash = contract.session_token_hash;
+    bind_strict_session(&active).await?;
+    let disk: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+    assert!(disk.strict_kill_switch);
+    assert_eq!(disk.endpoints, contract.exit_endpoints, "physical permits derive from the admitted graph, not the caller");
+    assert!(disk.api_host_ips.is_empty(), "no stable recovery relay can bypass the strict graph");
+    assert_eq!(disk.strict_contract.unwrap().generation, Some(17));
+    let mut locked = armed_guard().clone().expect("admitted strict session");
+    let core = CoreInstance { pid: 4242, generation: 17 };
+    locked.intent.mode = KillSwitchStatusMode::Locked;
+    locked.tun_luid = Some(7);
+    locked.core_instance = Some(core);
+    let config = rule_config_for(&locked, Some(core));
+    assert_eq!(config.tun_luid, Some(7));
+    assert!(!config.allow_local_network, "a live strict tunnel cannot inherit stable LAN bypasses");
+    assert!(!wfp_model::expected_filters(&config).iter()
+        .any(|filter| filter.weight == wfp_model::WEIGHT_LAN_PERMIT));
+    assert!(arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await.is_err());
+    assert!(begin_direct_runtime_reload(17).await.is_err());
+    release_applying_narrow().await?;
+    assert!(status().await.wanted, "automatic failure must not release strict intent");
+    restore_on_service_start().await?;
+    assert!(status().await.wanted, "restart must retain the floor");
+    assert!(!status().await.tunnel_permit_rendered);
+    assert!(armed_guard().as_ref().unwrap().intent.strict_contract.as_ref().unwrap().generation.is_none());
+    {
+        let _operation = WFP_OPERATION.lock().await;
+        release_unproven_wanted_session_unlocked().await?;
+    }
+    assert!(status().await.wanted, "the old proof-window escape must not open strict protection");
+    release().await?;
+    assert!(!status().await.wanted, "authenticated explicit disconnect remains available");
+    cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]
@@ -1989,6 +2186,7 @@ fn apply_learned_bootstrap_pins_reads_the_programdata_file() {
         updated_at: 0,
         owner_key: None,
         strict_kill_switch: false,
+        strict_contract: None,
         reconnect_after_release: false,
         reconnect_owner_key: None,
         apply_narrow_after_release: None,

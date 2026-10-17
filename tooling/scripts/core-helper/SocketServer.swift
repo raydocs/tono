@@ -405,6 +405,10 @@ final class SocketServer {
     /// Immediate release at start. Idempotent: no state file means no pfctl.
     /// A running Core is not disarmed and is not reinstalled from the file.
     private func releaseLeftoverBlockIfCoreStopped() {
+        if KillSwitchManager.strictIntentActive {
+            try? KillSwitchManager.installEmergencyBlock(allowedUID: killSwitch.allowedUID)
+            return
+        }
         guard !core.status().running else { return }
         guard KillSwitchManager.stateFileExists() else {
             killSwitch.reconcileSelectiveRecoveryIfReleased()
@@ -438,6 +442,15 @@ final class SocketServer {
     /// reinstalling that block. The threshold skips the short gap between
     /// arm and the Core process appearing.
     private func observeCoreForWatchdog() {
+        if KillSwitchManager.strictIntentActive {
+            if core.status().running {
+                killSwitch.superviseProtection()
+            } else {
+                killSwitch.strictProof = nil
+                try? KillSwitchManager.installEmergencyBlock(allowedUID: killSwitch.allowedUID)
+            }
+            return
+        }
         let epoch = killSwitch.openNetworkEpoch
         if epoch != openNetworkEpoch {
             openNetworkEpoch = epoch
@@ -823,6 +836,24 @@ final class SocketServer {
                 try Self.enforceSessionGeneration(request.generation, kind: kind)
             }
             switch (request.method, request.path) {
+            case ("POST", "/session/bind-runtime"):
+                let object = try jsonObject(request.body)
+                guard object.count == 3, let directory = object["configDir"] as? String,
+                      let digest = object["configSHA256"] as? String,
+                      let mode = object["routingMode"] as? String,
+                      ["stable", "three-tier"].contains(mode) else {
+                    throw HelperFailure.invalid("Invalid runtime binding.")
+                }
+                killSwitch.strictProof = try core.bindRuntime(configDirectory: directory,
+                    digest: digest, generation: request.generation, mode: mode)
+                if KillSwitchManager.strictIntentActive {
+                    try KillSwitchManager.installEmergencyBlock(allowedUID: killSwitch.allowedUID)
+                    killSwitch.lastLoadedPassRules = nil
+                    _ = try killSwitch.arm(["tunnelInterfaces": [String]()],
+                        commitAllowed: { transitionGate.isAwake() })
+                }
+                recordSessionOwner(owner)
+                sendResponse(client, status: 200, object: ["ok": true])
             case ("POST", "/session/admit"):
                 // Body `{"expectedGeneration": G}`: the generation the app
                 // read from `/session/status` just before (R-F3). An empty
@@ -882,6 +913,8 @@ final class SocketServer {
                       let digest = object["configSHA256"] as? String else {
                     throw HelperFailure.invalid("Invalid sync request.")
                 }
+                killSwitch.strictProof = try core.bindRuntime(configDirectory: directory,
+                    digest: digest, generation: request.generation, mode: nil)
                 let path = try core.sync(
                     configDirectory: directory,
                     configSHA256: digest,
@@ -895,6 +928,10 @@ final class SocketServer {
                 sendResponse(client, status: 200, object: ["ok": true, "configPath": path])
             case ("DELETE", "/core/stop"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
+                if KillSwitchManager.strictIntentActive {
+                    killSwitch.strictProof = nil
+                    try KillSwitchManager.installEmergencyBlock(allowedUID: killSwitch.allowedUID)
+                }
                 // The Core's utun goes away with it (#608). Best effort: the
                 // stop must still happen, and the idle loop retries.
                 do {
@@ -918,6 +955,11 @@ final class SocketServer {
             case ("POST", "/killswitch/arm"):
                 let object = try jsonObject(request.body)
                 try validateKillSwitchArmFields(object)
+                if KillSwitchManager.strictIntentActive,
+                   let tunnels = object["tunnelInterfaces"] as? [String], !tunnels.isEmpty,
+                   !core.status().running {
+                    throw HelperFailure.invalid("Strict TUN grants require the admitted Core to be running.")
+                }
                 let response: [String: Any]
                 do {
                     response = try killSwitch.arm(
@@ -986,6 +1028,7 @@ final class SocketServer {
     /// the upgrade path are not session effects.
     static func releaseRequestKind(method: String, path: String) -> ReleaseAuthority.RequestKind? {
         switch (method, path) {
+        case ("POST", "/session/bind-runtime"): return .protective
         case ("POST", "/core/start"), ("POST", "/core/sync"), ("POST", "/killswitch/arm"), ("POST", "/dns/enable"):
             return .protective
         case ("DELETE", "/core/stop"), ("POST", "/killswitch/quit"), ("POST", "/killswitch/disarm"),

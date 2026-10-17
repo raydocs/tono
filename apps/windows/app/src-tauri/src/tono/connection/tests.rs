@@ -53,6 +53,58 @@ fn recovery_preflight_rejects_a_changed_or_cleared_selection() {
 }
 
 #[tokio::test]
+async fn routing_mode_is_captured_only_by_admitted_explicit_connect() {
+    use super::attempt::begin_attempt_with_mode;
+    use crate::core::service;
+    let _epoch = service::RELEASE_EPOCH_TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let state = crate::tono::state::TonoState::for_test();
+    let _admission = state.begin_connect_mutation().await;
+    let mut inner = state.lock().await;
+    let owner = service::claim_user_connect(service::user_connect_stamp()).unwrap();
+    let generation = inner.connect_generation;
+    let (stable, _, _) = begin_attempt_with_mode(&mut inner, generation, Some(owner), Some(false)).await.unwrap();
+    assert!(!inner.three_tier_routing);
+
+    // Saving three-tier must not change Stable on an unarmed retry (including Retry Now).
+    // Fail before compilation: admission, not successful startup, owns the mode latch.
+    inner.fsm.connect_failed();
+    let (retry, _, _) = begin_attempt_with_mode(&mut inner, stable, None, Some(true)).await.unwrap();
+    assert!(!inner.three_tier_routing, "automatic recovery must not consume next-mode preferences");
+    assert!(begin_attempt_with_mode(&mut inner, retry, Some(owner), Some(true)).await.is_none());
+    assert!(!inner.three_tier_routing, "busy explicit Connect must not recapture");
+
+    // End the session: a new explicit Connect now consumes the saved three-tier mode.
+    inner.invalidate_connection(true);
+    inner.fsm.begin_disconnect();
+    inner.fsm.finish_disconnect();
+    let ended = inner.connect_generation;
+    let (strict, _, _) = begin_attempt_with_mode(&mut inner, ended, Some(owner), Some(true)).await.unwrap();
+    assert!(inner.three_tier_routing, "capture must precede readiness/compile failures");
+    inner.fsm.mark_kill_switch_armed();
+    inner.fsm.mark_session_verified();
+    inner.fsm.connect_succeeded().unwrap();
+    inner.invalidate_connection(false);
+    inner.fsm.connect_failed();
+    let recovery = inner.connect_generation;
+    let (recovered, _, _) = begin_attempt_with_mode(&mut inner, recovery, None, Some(false)).await.unwrap();
+    assert!(inner.three_tier_routing, "protected/monitor/transport recovery must retain strict mode");
+
+    inner.fsm.connect_failed();
+    assert!(begin_attempt_with_mode(&mut inner, strict, Some(owner), Some(false)).await.is_none());
+    assert!(inner.three_tier_routing, "stale generation must not consume Stable");
+    let newer_owner = service::claim_user_connect(service::user_connect_stamp()).unwrap();
+    assert!(begin_attempt_with_mode(&mut inner, recovered, Some(owner), Some(false)).await.is_none());
+    assert!(inner.three_tier_routing, "stale user ticket must not consume Stable");
+
+    inner.invalidate_connection(true);
+    inner.fsm.begin_disconnect();
+    inner.fsm.finish_disconnect();
+    let ended = inner.connect_generation;
+    begin_attempt_with_mode(&mut inner, ended, Some(newer_owner), Some(false)).await.unwrap();
+    assert!(!inner.three_tier_routing, "explicit ended-session Connect must capture Stable too");
+}
+
+#[tokio::test]
 async fn retained_failure_keeps_bounded_scrubbed_cause_when_retry_clears_live_error() {
     let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test());
     let first = {
@@ -1234,7 +1286,7 @@ fn failure_plan_is_exhaustive() {
             selective_ai_hold: false,
         }
     );
-    // Initial post-arm failure has not crossed the verification barrier: full release.
+    // Initial stable post-arm failure has not crossed the verification barrier: full release.
     assert_eq!(
         plan_failure(true, false, false, false),
         FailurePlan {
@@ -1243,6 +1295,16 @@ fn failure_plan_is_exhaustive() {
             restrict_bootstrap: false,
             selective_ai_hold: false,
         }
+    );
+    assert_eq!(
+        plan_failure(true, false, false, true),
+        FailurePlan {
+            mark_armed: true,
+            stop_core: Some(false),
+            restrict_bootstrap: true,
+            selective_ai_hold: false,
+        },
+        "captured strict intent holds even before the first verification barrier"
     );
     // A raced disconnect owns the release end to end; the failing
     // transaction does nothing, whatever the arm state. Strict does not

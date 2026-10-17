@@ -78,6 +78,7 @@ interface TonoPreferences {
   startup_script?: string
   start_page?: string
   clash_core?: string
+  desktop_routing_mode?: 'stable' | 'three-tier'
   theme_mode?: 'light' | 'dark' | 'system'
   enable_refined_ui?: boolean
   traffic_graph?: boolean

@@ -56,7 +56,16 @@ pub(crate) fn admit_new_runtime(text: &str) -> Result<(), String> {
 /// here; a document a request proposes goes through [`admit_new_runtime`] or
 /// [`admit_owned_runtime_bound`].
 pub fn admit_owned_runtime(text: &str) -> Result<(), String> {
-    admit_owned_runtime_bound(text, DirectBinding::ShapeOnly)
+    admit_runtime_impl(text, DirectBinding::ShapeOnly, true)
+}
+
+pub(crate) fn admit_strict_runtime(text: &str) -> Result<(), String> {
+    admit_runtime_impl(text, DirectBinding::NoPolicy, true)?;
+    let value: Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
+    if !crate::three_tier::admit_runtime(&value)? {
+        return Err("strict session requires the three-tier graph".into());
+    }
+    Ok(())
 }
 
 /// The same shape check, and every DIRECT rule must also be what `binding` allows (#1280).
@@ -64,6 +73,10 @@ pub(crate) fn admit_owned_runtime_bound(
     text: &str,
     binding: DirectBinding<'_>,
 ) -> Result<(), String> {
+    admit_runtime_impl(text, binding, false)
+}
+
+fn admit_runtime_impl(text: &str, binding: DirectBinding<'_>, allow_strict: bool) -> Result<(), String> {
     let FoldedJson(value) = serde_json::from_str(text)
         .map_err(|_| "runtime is not JSON with unambiguous keys".to_string())?;
     let root = value
@@ -71,6 +84,13 @@ pub(crate) fn admit_owned_runtime_bound(
         .ok_or_else(|| "runtime is not a JSON object".to_string())?;
     only_keys(root, TOP_LEVEL_KEYS, "top level")?;
     no_forbidden_keys(&value)?;
+    let three_tier = crate::three_tier::is_three_tier_runtime(&value);
+    if three_tier {
+        crate::three_tier::admit_runtime(&value)?;
+        if !allow_strict {
+            return Err("three-tier requires the strict StartClash session contract".into());
+        }
+    }
 
     let inbounds = root
         .get("inbounds")
@@ -108,6 +128,7 @@ pub(crate) fn admit_owned_runtime_bound(
     }
     admit_exit_selector(outbounds)?;
 
+    if !three_tier {
     let route = root
         .get("route")
         .and_then(Value::as_object)
@@ -146,6 +167,7 @@ pub(crate) fn admit_owned_runtime_bound(
         if kind == "https" && server.get("detour").and_then(Value::as_str) != Some("Tono-Exit") {
             return Err("an https DNS server must detour through Tono-Exit".to_string());
         }
+    }
     }
 
     let experimental = root
@@ -463,6 +485,33 @@ mod tests {
             {"type":"selector","tag":"Tono-Exit","outbounds":["Fixture Alpha"],"default":"Fixture Alpha"}
         ]);
         runtime
+    }
+
+    #[test]
+    fn a_three_tier_graph_requires_strict_admission_and_rejects_downgrade() {
+        let graph = crate::three_tier::graph("Tono-Home-Residential", "Ethernet 7", "198.18.176.0/20").unwrap();
+        let mut runtime = compiled();
+        runtime["route"] = graph["route"].clone();
+        runtime["dns"] = graph["dns"].clone();
+        runtime["outbounds"].as_array_mut().unwrap().extend([
+            json!({"type":"socks","tag":"Tono-Home-Residential","server":"203.0.113.60","server_port":11080,
+                "version":"5","username":"fixture-user","password":"fixture-password","network":"tcp","detour":"Tono-Exit"}),
+            graph["direct_outbound"].clone(),
+        ]);
+        assert_eq!(crate::three_tier::admit_runtime(&runtime), Ok(true));
+        assert!(admit_new_runtime(&runtime.to_string()).is_err());
+        assert_eq!(super::admit_strict_runtime(&runtime.to_string()), Ok(()));
+        assert!(super::admit_strict_runtime(&compiled().to_string()).is_err());
+        assert_eq!(admit_owned_runtime(&runtime.to_string()), Ok(()));
+        let mut weakened = runtime.clone();
+        let first_video = weakened["route"]["rules"].as_array().unwrap().iter().position(|rule|
+            rule["domain_suffix"].as_array().is_some_and(|domains| domains.contains(&json!("youtube.com")))
+                && rule["action"] == "route").unwrap();
+        weakened["route"]["rules"].as_array_mut().unwrap().remove(first_video);
+        assert!(crate::three_tier::admit_runtime(&weakened).is_err());
+        assert!(super::admit_strict_runtime(&weakened.to_string()).is_err());
+        let folded = runtime.to_string().replace("\"dns\":", "\"DNS\":");
+        assert!(admit_new_runtime(&folded).is_err());
     }
 
     #[test]

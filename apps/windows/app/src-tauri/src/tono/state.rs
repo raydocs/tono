@@ -248,6 +248,8 @@ pub struct TonoInner {
     pub installation_id: String,
     /// The core this connect armed. DIRECT in-place reload is mihomo-only.
     pub sing_box_core: bool,
+    /// Captured connect-time routing contract, never a live preference read.
+    pub three_tier_routing: bool,
     pub catalog_tracker: CatalogTracker,
     /// Directory holding `managed-exit-catalog.json` (`app_home_dir()/tono`).
     /// The cache itself is built on demand: `CatalogCache` boxes its safety
@@ -826,6 +828,7 @@ impl TonoState {
                 session_marker: Default::default(),
                 installation_id,
                 sing_box_core: false,
+                three_tier_routing: false,
                 catalog_tracker: CatalogTracker::new(),
                 catalog_dir,
                 nodes: Vec::new(),

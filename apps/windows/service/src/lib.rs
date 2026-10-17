@@ -17,6 +17,10 @@ pub mod clean_goodbye;
 #[cfg(any(feature = "client", feature = "standalone"))]
 #[path = "../../crates/tono-core/src/direct_domains.rs"]
 pub mod direct_domains;
+// The finite three-tier compiler graph, not a caller-supplied country list.
+#[cfg(any(feature = "client", feature = "standalone"))]
+#[path = "../../crates/tono-core/src/three_tier.rs"]
+pub mod three_tier;
 // The traffic-policy signature check, compiled from the file the clients use (#1280).
 #[cfg(any(feature = "client", feature = "standalone"))]
 #[path = "../../crates/tono-core/src/policy_signature.rs"]

@@ -8,11 +8,33 @@ pub(super) fn intent_path() -> PathBuf {
         .join("kill-switch.json")
 }
 
-/// Independent update recovery has no in-memory armed state. Like startup,
-/// only a readable wanted record with an explicit strict flag keeps it blocked.
-#[cfg(windows)]
+pub(super) fn strict_recovery_path() -> PathBuf {
+    crate::service_paths().persistent_state_dir().join("kill-switch-strict")
+}
+
+/// Independent of the mutable session record. Unknown/unreadable marker bytes are a hold,
+/// not permission to release. Only an explicit release writes the exact cleared value.
+pub(super) fn strict_recovery_required() -> bool {
+    match std::fs::read(strict_recovery_path()) {
+        Ok(bytes) => bytes != b"released\n",
+        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+    }
+}
+
+pub(super) async fn persist_strict_recovery() -> Result<()> {
+    atomic_write(&strict_recovery_path(), b"strict\n").await
+}
+
+pub(super) async fn clear_strict_recovery() -> Result<()> {
+    if strict_recovery_required() {
+        atomic_write(&strict_recovery_path(), b"released\n").await?;
+    }
+    Ok(())
+}
+
+/// Independent update recovery must respect the durable hold even if the session is lost.
 pub fn strict_kill_switch_intent_on_disk() -> bool {
-    std::fs::read(intent_path())
+    strict_recovery_required() || std::fs::read(intent_path())
         .ok()
         .and_then(|bytes| serde_json::from_slice::<IntentRecord>(&bytes).ok())
         .is_some_and(|intent| intent.wanted && intent.strict_kill_switch)
@@ -39,6 +61,8 @@ pub(crate) fn persisted_intent_owner() -> std::io::Result<Option<String>> {
 static INTENT_WRITE_SEQ: AtomicU64 = AtomicU64::new(1);
 #[cfg(test)]
 pub(super) static TEST_INTENT_VERIFY_CORRUPT: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+pub(super) static TEST_STRICT_CLEAR_FAILURE: AtomicBool = AtomicBool::new(false);
 
 pub(super) async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     #[cfg(test)]
@@ -46,6 +70,13 @@ pub(super) async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         TEST_PERSIST_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
         if TEST_PERSIST_FAILURE.load(Ordering::Relaxed) {
             bail!("simulated persistent-state write failure");
+        }
+        // Model an uncommitted marker clear (e.g. a failed temporary-file flush), without
+        // also breaking the session tombstone or the initial durable strict hold.
+        if path == strict_recovery_path() && bytes == b"released\n"
+            && TEST_STRICT_CLEAR_FAILURE.load(Ordering::Relaxed)
+        {
+            bail!("simulated strict recovery clear failure");
         }
     }
     crate::core::paths::ensure_persistent_state_layout()?;
@@ -59,6 +90,13 @@ pub(super) async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         INTENT_WRITE_SEQ.fetch_add(1, Ordering::Relaxed)
     ));
     tokio::fs::write(&temporary, bytes).await?;
+    // The strict criterion must reach disk before grants. A stalled flush refuses publication
+    // rather than holding the WFP writer forever; the temporary is not renamed on timeout.
+    if path == strict_recovery_path() {
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            tokio::fs::OpenOptions::new().write(true).open(&temporary).await?.sync_all().await
+        }).await.context("strict recovery flush timed out")??;
+    }
     crate::core::platform_security::secure_private_service_file_if_exists(&temporary)?;
     crate::core::atomic_file::replace(&temporary, path)
         .await
@@ -112,6 +150,7 @@ pub(super) fn disarmed_tombstone() -> IntentRecord {
         updated_at: now_unix(),
         owner_key: None,
         strict_kill_switch: false,
+        strict_contract: None,
         reconnect_after_release: false,
         reconnect_owner_key: None,
         apply_narrow_after_release: Some(false),

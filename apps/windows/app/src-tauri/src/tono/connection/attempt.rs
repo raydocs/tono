@@ -56,8 +56,18 @@ pub(super) fn clear_uncommitted_direct_overlay(inner: &mut TonoInner) {
 
 /// The caller holds lifecycle admission and the state mutex. Idle is not an ownership token:
 /// every admitted retry gets a fresh epoch so a completed failure tail cannot act on its state.
+#[cfg(test)]
 pub(crate) async fn begin_attempt(
     inner: &mut TonoInner, generation: u64,
+) -> Option<(u64, CancellationToken, (u64, u64))> {
+    begin_attempt_with_mode(inner, generation, None, None).await
+}
+
+/// Only an admitted explicit Connect consumes the saved next-session preference. Recovery
+/// retains the session latch, even after an unarmed failure or before compilation succeeds.
+pub(super) async fn begin_attempt_with_mode(
+    inner: &mut TonoInner, generation: u64,
+    owner: Option<crate::core::service::ReleaseTicket>, saved_mode: Option<bool>,
 ) -> Option<(u64, CancellationToken, (u64, u64))> {
     // Capture under the same account lock as adoption, before any admission mutation:
     // cancellation while awaiting the API mutex must not leave an orphan Connecting latch.
@@ -65,9 +75,15 @@ pub(crate) async fn begin_attempt(
     let account_owner = (inner.sign_in_generation, inner.client.diagnostics_log_identity().await);
     if inner.account_close.is_some()
         || inner.fsm.status().is_disconnecting
+        || owner.is_some_and(|ticket| !crate::core::service::release_ticket_current(&ticket))
         || !single_flight_begin(&mut inner.fsm, inner.connect_generation, generation)
     {
         return None;
+    }
+    if owner.is_some() {
+        if let Some(three_tier) = saved_mode {
+            inner.three_tier_routing = three_tier;
+        }
     }
     // Abort-free: the registered reconnect/switch task may itself be admitting this attempt.
     inner.retire_connection_generation(false);
@@ -100,6 +116,15 @@ async fn attempt_inner(
     if expected_generation.is_some_and(|expected| expected != generation) {
         return Attempt::Stale;
     }
+    let saved_mode = if owner.is_some() {
+        let preferences = crate::config::Config::preferences().await.data_arc();
+        if let Err(error) = preferences.require_available_desktop_routing_mode() {
+            return Attempt::GuardRejected(error.to_string());
+        }
+        Some(preferences.desktop_routing_mode.as_deref() == Some("three-tier"))
+    } else {
+        None
+    };
     // Recovery only, and only while protection is down: one TCP fail-fast so
     // the next tunnel is not installed on a node that just refused. The first
     // connect does not wait here.
@@ -110,7 +135,7 @@ async fn attempt_inner(
     // F5 single-flight, latched BEFORE any service I/O: rapid repeated
     // clicks admit exactly one attempt to the service probe; the rest exit
     // here with no side effects (the real-machine double-probe this kills).
-    let (attempt_record, generation, cancellation, account_owner, route_owner) = {
+    let (attempt_record, generation, cancellation, account_owner, route_owner, three_tier) = {
         let mut inner = state.lock().await;
         // The recovery TCP wait leaves the FSM idle, so a new selection may not bump the
         // generation. Check the user's preference, not the healer's possible backup dial.
@@ -122,8 +147,10 @@ async fn attempt_inner(
         if owner.is_some_and(|owner| !crate::core::service::release_ticket_current(&owner)) {
             return Attempt::Stale;
         }
-        let Some((admitted_generation, cancellation, account_owner)) = begin_attempt(&mut inner, generation).await else {
-            if inner.connect_generation != generation {
+        let Some((admitted_generation, cancellation, account_owner)) = begin_attempt_with_mode(&mut inner, generation, owner, saved_mode).await else {
+            if inner.connect_generation != generation
+                || owner.is_some_and(|ticket| !crate::core::service::release_ticket_current(&ticket))
+            {
                 return Attempt::Stale;
             }
             return Attempt::GuardRejected(TRANSITION_IN_FLIGHT_REJECTION.to_string());
@@ -165,7 +192,7 @@ async fn attempt_inner(
         let route_owner = crate::tono::route_preferences::PreferenceContext::capture(&inner);
         // A17: under the admission lock, before this attempt can publish Connected.
         inner.hy2_switch.note_admitted(&node);
-        (record, admitted_generation, cancellation, account_owner, route_owner)
+        (record, admitted_generation, cancellation, account_owner, route_owner, inner.three_tier_routing)
     };
     drop(admission);
     let transaction = ConnectTransaction::new(cancellation);
@@ -206,7 +233,7 @@ async fn attempt_inner(
         }
 
         let proof = unarmed_probe::tcp_proof_before_tunnel(state, &node);
-        let service = transaction.wait("service readiness", ready_service_and_prefetch(state));
+        let service = transaction.wait("service readiness", ready_service_and_prefetch(state, three_tier));
         let (proof, service) = tokio::join!(proof, service);
         let prefetched = match service {
             Ok(Ok(prefetched)) => prefetched,

@@ -4,6 +4,9 @@ import Foundation
 // MARK: - App Settings Keys
 
 enum SettingsKey {
+    /// Next explicit connection only; the runtime owns its captured session mode.
+    nonisolated static let desktopRoutingMode = "desktopRoutingMode"
+    nonisolated static let desktopRoutingModeOptions = ["stable", "three-tier"]
     static let launchAtStartup = "launchAtStartup"
     static let interfaceLanguage = "interfaceLanguage"
     static let subscriptionURL = "subscriptionURL"

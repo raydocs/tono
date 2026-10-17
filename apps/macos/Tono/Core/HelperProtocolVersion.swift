@@ -479,7 +479,16 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.53 → 4.52.54: `--emergency-reset` keeps the helper, and prints
     ///   what is left, while the AI-service layer (resolver sinkhole, blackhole
     ///   routes) is not proven gone, as it already did for a DNS restore failure.
-    static let current = "4.52.54"
+    /// - 4.52.54 → 4.52.55: three-tier graph admission is shared with the
+    ///   helper; execution refuses until generation-bound strict lifecycle
+    ///   ownership is installed. Stable release behavior is unchanged.
+    /// - 4.52.55 → 4.52.56: graph v2 routes unmatched supported ordinary
+    ///   traffic DIRECT, with protected Home/cloud matches and fixed DNS
+    ///   taking priority. Old unknown-reject helpers cannot admit this graph.
+    /// - 4.52.56 → 4.52.57: exact three-tier admission accepts its DIRECT
+    ///   final and rechecks protected Home CIDRs after ordinary resolution.
+    ///   Stable still requires the cloud final.
+    static let current = "4.52.57"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

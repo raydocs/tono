@@ -70,13 +70,11 @@ pub(super) struct IntentRecord {
     /// any authenticated owner (see `authorize_write_for`).
     #[serde(default)]
     pub(super) owner_key: Option<String>,
-    /// Explicit strict kill switch. Missing or false means a crash, hang, corrupt record,
-    /// or an unproven restored wanted session releases general traffic. Only `true` keeps
-    /// a block, and a bounded unhealthy streak still releases so that choice cannot brick
-    /// the machine. Production never writes `true`. Absent on older records, which stay
-    /// non-strict.
+    /// Explicit three-tier opt-in. Only authenticated explicit release may open this session.
     #[serde(default)]
     pub(super) strict_kill_switch: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) strict_contract: Option<StrictContract>,
     /// Crash-window tombstone only. A user disconnect leaves this false so startup still
     /// consumes the record. The app treats `wanted: false` plus this flag as "reconnect".
     #[serde(default)]
@@ -90,6 +88,18 @@ pub(super) struct IntentRecord {
     /// record whose existing hold is left alone; this never authorizes a broad WFP block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) apply_narrow_after_release: Option<bool>,
+}
+
+/// Persisted before arming; generation is filled only by the committed owner transition.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct StrictContract {
+    pub(crate) runtime_sha256: String,
+    pub(crate) config_path: Option<String>,
+    pub(crate) session_token_hash: String,
+    pub(crate) generation: Option<u64>,
+    pub(crate) release_generation: u64,
+    pub(crate) physical_interface: String,
+    pub(crate) exit_endpoints: Vec<ProxyEndpoint>,
 }
 
 impl IntentRecord {

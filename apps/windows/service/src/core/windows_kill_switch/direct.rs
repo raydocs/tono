@@ -80,6 +80,9 @@ pub(super) async fn transition_direct_to_blocked_unlocked(
     blocked.core_instance = None;
     blocked.intent.mode = KillSwitchStatusMode::Blocked;
     blocked.intent.updated_at = now_unix();
+    if let Some(contract) = blocked.intent.strict_contract.as_mut() {
+        contract.generation = None;
+    }
 
     // DIRECT grants are volatile and never restored from the intent file, so narrowing live WFP
     // first is crash-safe: an older Locked intent also restores as exact Blocked. More
@@ -129,11 +132,13 @@ pub(super) async fn transition_direct_to_blocked_unlocked(
 
 pub(super) fn direct_state_may_be_live(armed: &Armed) -> bool {
     !armed.direct_endpoints.is_empty() || armed.direct_reload.is_some()
+        || (armed.intent.strict_contract.is_some() && armed.intent.mode == KillSwitchStatusMode::Locked)
 }
 
 /// The connected sing-box session is a locked tunnel with no physical DIRECT set.
 pub(crate) fn sing_box_full_tunnel_is_locked() -> Result<()> {
     ensure_supported()?;
+    refuse_strict_mutation()?;
     let armed = armed_guard().clone().context("kill switch is not armed")?;
     if armed.intent.mode != KillSwitchStatusMode::Locked {
         bail!("sing-box replacement requires a locked tunnel");
@@ -161,6 +166,7 @@ pub(crate) async fn commit_sing_box_direct_while_locked(
     ensure_supported()?;
     let failed = {
         let _operation = WFP_OPERATION.lock().await;
+        refuse_strict_mutation()?;
         match commit_sing_box_direct_unlocked(endpoints, reviewed_ports, owner_generation).await {
             Ok(result) => return Ok(result),
             Err(error) => error,
@@ -287,6 +293,7 @@ pub(crate) async fn begin_direct_runtime_reload(
 ) -> Result<crate::DirectRuntimeReloadResult> {
     ensure_supported()?;
     let _operation = WFP_OPERATION.lock().await;
+    refuse_strict_mutation()?;
     let previous = armed_guard().clone().context("kill switch is not armed")?;
     if !matches!(
         previous.intent.mode,
@@ -321,6 +328,7 @@ pub(crate) async fn replace_direct_endpoints(
 ) -> Result<crate::DirectRuntimeReloadResult> {
     ensure_supported()?;
     let _operation = WFP_OPERATION.lock().await;
+    refuse_strict_mutation()?;
     let previous = armed_guard().clone().context("kill switch is not armed")?;
     let current_core = current_core_instance_authoritative().await;
     let lease = match direct_reload_matches(&previous, owner_generation, reload_id) {

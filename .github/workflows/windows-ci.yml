@@ -34,6 +34,7 @@ on:
       - apps/windows/crates/**
       - apps/windows/service/**
       - apps/windows/app/**
+      - tooling/scripts/sing-box/three-tier-template.json
       - .github/workflows/windows-ci.yml
       - .github/workflows/windows-candidate.yml
       - .github/workflows/windows-installer-smoke.yml

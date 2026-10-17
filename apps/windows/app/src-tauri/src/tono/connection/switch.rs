@@ -27,8 +27,7 @@ pub async fn selected_node_vanished(state: Arc<TonoState>, app: AppHandle, expec
     let result = tokio::spawn(
         async move {
             let mut guard = Some(state.begin_privileged_release().await);
-            // As in connect failure, no Windows preference means no explicit strict opt-in.
-            let releases = vanished_exit_releases(tono_core::strict_kill_switch_explicit(None));
+            let releases = vanished_exit_releases(state.lock().await.three_tier_routing);
             let generation = {
                 let mut inner = state.lock().await;
                 let active = inner.fsm.status().is_connected || inner.fsm.status().is_connecting;
@@ -188,6 +187,10 @@ pub async fn switch_selected_node(
     // The catalog owner keeps this worker detached and holds the policy writer. Own the Core
     // exclusively too, before reading its session: a retired switch must never adopt B's proof.
     let guard = state.begin_privileged_release().await;
+    if state.lock().await.three_tier_routing {
+        restore_selected_node(&state, &app, generation, &previous_name).await;
+        return;
+    }
     let snapshot = {
         let inner = state.lock().await;
         if inner.connect_generation != generation {
@@ -370,7 +373,7 @@ pub(super) async fn cold_switch_selected_node(
 ) {
     {
         let mut inner = state.lock().await;
-        if inner.connect_generation != generation {
+        if inner.connect_generation != generation || inner.three_tier_routing {
             return;
         }
         if !inner.fsm.status().is_connected && !inner.fsm.status().is_connecting {

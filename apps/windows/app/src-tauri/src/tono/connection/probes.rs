@@ -648,6 +648,97 @@ pub(super) async fn verify_tun_data_plane() -> Result<(), String> {
     verify_tun_data_plane_observed(None).await
 }
 
+/// Strict admission needs the Windows DNS Client's own result as well as the
+/// listener/TUN TLS proof. A successful explicit listener must not mask NRPT,
+/// GPO or OS DoH bypassing the protected resolver.
+pub(super) async fn verify_three_tier_data_plane() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let addresses = crate::tono::windows_dns::query_a(FAKE_IP_LOOKUP_HOST, FAKE_IP_LOOKUP_TIMEOUT).await?;
+        if !addresses.into_iter().any(|ip| is_fake_ip(IpAddr::V4(ip))) {
+            return Err("three-tier requires a protected fake-IP answer from the Windows DNS Client".into());
+        }
+    }
+    verify_tun_data_plane().await
+}
+
+pub(super) async fn verify_session_data_plane(state: &TonoState) -> Result<(), String> {
+    let three_tier = state.lock().await.three_tier_routing;
+    if three_tier { verify_three_tier_data_plane().await } else { verify_tun_data_plane().await }
+}
+
+/// Health only, never admission or a node-switch verdict. `Some` preserves the
+/// cloud failure: a domestic proof says nothing about Home or cloud reachability.
+pub(super) async fn verify_session_health(state: &TonoState) -> Result<Option<String>, String> {
+    let (generation, controller_generation, strict) = {
+        let inner = state.lock().await;
+        (inner.connect_generation, inner.controller_generation, inner.three_tier_routing)
+    };
+    if !strict {
+        return verify_tun_data_plane().await.map(|()| None);
+    }
+    let result = match verify_three_tier_data_plane().await {
+        Ok(()) => Ok(None),
+        Err(cloud) => verify_strict_domestic_data_plane().await
+            .map(|()| Some(cloud.clone()))
+            .map_err(|domestic| format!("cloud: {cloud}; domestic: {domestic}")),
+    };
+    let inner = state.lock().await;
+    if inner.connect_generation != generation || inner.controller_generation != controller_generation
+        || !inner.fsm.status().is_connected || inner.three_tier_routing != strict
+    {
+        return Err("session changed during health proof".into());
+    }
+    result
+}
+
+/// A fresh App DNS + TLS flow into WinTUN, not an IPC liveness claim. Resolve
+/// only on protected DNS and pin that fake IP with the original TLS name; no
+/// proxy, physical DNS, redirects, certificate bypass or new privileged grant.
+/// A single unavailable domestic origin conservatively retains normal recovery.
+async fn verify_strict_domestic_data_plane() -> Result<(), String> {
+    const HOST: &str = "www.jd.com";
+    // Ask the same compiled graph used by the runtime/Service, rather than
+    // maintaining another domain classification or expanding the snapshot.
+    let graph = tono_core::three_tier::graph(
+        "Tono-Home-Residential", "Ethernet", "198.18.128.0/20",
+    )?;
+    let domestic = graph["route"]["rules"].as_array().is_some_and(|rules| rules.iter().any(|rule| {
+        rule["outbound"] == tono_core::three_tier::DIRECT
+            && rule["domain"].as_array().is_some_and(|hosts| hosts.iter().any(|host| host == HOST))
+    }));
+    if !domestic {
+        return Err("domestic health origin is not in the compiled exact-host graph".into());
+    }
+    tokio::time::timeout(TUN_DATA_PLANE_TIMEOUT, async {
+        verify_locked().await?;
+        #[cfg(windows)]
+        {
+            let addresses = crate::tono::windows_dns::query_a(HOST, FAKE_IP_LOOKUP_TIMEOUT).await?;
+            if !addresses.into_iter().any(|ip| is_fake_ip(IpAddr::V4(ip))) {
+                return Err("domestic health requires protected Windows DNS".into());
+            }
+        }
+        let fake_ip = crate::tono::protected_probe::query_dns_endpoint(
+            crate::tono::protected_probe::PROTECTED_DNS, HOST,
+        ).await?;
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(TUN_DATA_PLANE_CONNECT_TIMEOUT)
+            .timeout(TUN_DATA_PLANE_TIMEOUT)
+            .resolve(HOST, std::net::SocketAddr::new(IpAddr::V4(fake_ip), 443))
+            .build().map_err(|error| error.to_string())?;
+        let response = client.get("https://www.jd.com/").send().await
+            .map_err(|error| format!("domestic TLS proof: {error}"))?;
+        if response.status() != reqwest::StatusCode::OK {
+            return Err(format!("domestic TLS origin answered {}", response.status()));
+        }
+        verify_locked().await?;
+        Ok(())
+    }).await.map_err(|_| "domestic health proof timed out".to_owned())?
+}
+
 async fn verify_tun_data_plane_observed(recorder: Option<&ProbeRecorder>) -> Result<(), String> {
     crate::tono::integration_profile::delay_remote_operation().await;
     crate::tono::protected_probe::verify_protected_origins(

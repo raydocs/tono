@@ -165,6 +165,10 @@ async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
     let tombstone = release_tombstone(apply_narrow).await;
     let previous = armed_guard().clone();
     let Some(previous) = previous else {
+        if strict_recovery_required() {
+            // A failed arm or lost session can leave only the independent durable hold.
+            bounded_dns_call("strict recovery release", crate::core::dns::ensure_restored()).await?;
+        }
         // Not armed: still sweep possible residuals so a half-failed earlier run cannot
         // linger. Persist the explicit-release tombstone *after* proving the sweep so a Service
         // replacement cannot reinterpret late-visible persistent filters as a wanted session.
@@ -196,6 +200,7 @@ async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
             finish_release_follow_up(apply_narrow).await;
         }
         clear_wanted_core_window();
+        clear_strict_recovery().await?;
         // This successful release supersedes any older crash-record retry.
         CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
         publish_reconnect_from(&tombstone);
@@ -216,6 +221,12 @@ async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
     if let Err(error) = remove_all_filters_unlocked().await {
         let _ = install_unlocked(&previous).await;
         return Err(error.context("failed to remove kill-switch filters; protection restored"));
+    }
+    // Strict release still has durable bookkeeping that may fail below. Do not report the
+    // old live tunnel while WFP is already gone and the recovery marker is not yet cleared.
+    if previous.intent.strict_kill_switch {
+        note_verify(false);
+        TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
     }
     // The tombstone tells a later Service start this release won (see `disarmed_tombstone`).
     // When it cannot be written the release is still final: the filters are proven gone and
@@ -257,6 +268,9 @@ async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
             })
         }
     };
+    // Never clear the independent hold before DNS and WFP removal are proven. A failed
+    // clear remains fail-closed across restart, even if the session tombstone was written.
+    clear_strict_recovery().await?;
     *armed_guard() = None;
     *last_error_guard() = tombstone_note;
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
@@ -274,6 +288,9 @@ async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
 /// Filter removal failure leaves `ARMED` set so the next tick retries. A tombstone failure
 /// after the filters are gone does not reinstall them.
 pub(super) async fn release_unproven_wanted_session_unlocked() -> Result<()> {
+    if strict_kill_switch_enabled() {
+        return restrict_bootstrap_unlocked().await;
+    }
     // Held until WFP removal commits: no update writer can start under this release (#1292).
     let update_fence = update_release_fence()?;
     if let Err(error) = bounded_dns_call(
@@ -529,6 +546,11 @@ pub(crate) async fn release_applying_narrow_if_owed() -> Result<KillSwitchStatus
     ensure_supported()?;
     {
         let _operation = WFP_OPERATION.lock().await;
+        if strict_kill_switch_enabled() {
+            restrict_bootstrap_unlocked().await?;
+            drop(_operation);
+            return Ok(status().await);
+        }
         let owed = ai_hold_owed().await;
         disarm_unlocked_with_narrow(owed.then_some(true)).await?;
         note_explicit_release();
@@ -540,6 +562,9 @@ pub(crate) async fn release_applying_narrow_if_owed() -> Result<KillSwitchStatus
 pub(crate) async fn release_after_service_stop() -> Result<()> {
     ensure_supported()?;
     let _operation = WFP_OPERATION.lock().await;
+    if strict_kill_switch_enabled() {
+        return Ok(());
+    }
     let apply_narrow = {
         let armed = armed_guard();
         if armed
@@ -564,8 +589,12 @@ async fn release_with(apply_narrow: bool) -> Result<KillSwitchStatus> {
     ensure_supported()?;
     {
         let _operation = WFP_OPERATION.lock().await;
-        disarm_unlocked(apply_narrow).await?;
-        note_explicit_release();
+        if apply_narrow && strict_kill_switch_enabled() {
+            restrict_bootstrap_unlocked().await?;
+        } else {
+            disarm_unlocked(apply_narrow).await?;
+            note_explicit_release();
+        }
     }
     Ok(status().await)
 }
@@ -590,6 +619,9 @@ pub(crate) async fn transition_after_stop(release_requested: bool) -> Result<()>
 /// The caller decides whether the on-disk intent bytes stay (corrupt evidence) or are
 /// replaced by a disarmed tombstone (a live session the watchdog gave up on).
 pub(super) async fn release_general_traffic_unlocked(reason: &str, replace_intent: bool) -> Result<()> {
+    if strict_kill_switch_enabled() {
+        return restrict_bootstrap_unlocked().await;
+    }
     tracing::warn!("wfp: {reason}; releasing general traffic and restoring DNS");
     if let Err(error) = bounded_dns_call(reason, crate::core::dns::ensure_restored()).await {
         tracing::warn!("wfp: DNS restore during {reason} failed; still releasing WFP: {error:#}");
