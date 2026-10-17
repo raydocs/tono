@@ -63,3 +63,4 @@
 - 独立high增量发现两项源码Major并各记finding：晚解析Home CIDR与自动恢复重新消费下一次模式。共享图在国内/普通解析后、DIRECT前重检Home CIDR；既有编译器回归注入保护CIDR/普通公网/私网答案，并保留视频/明确云优先。双端将模式锁在准入会话，自动恢复不读取新偏好，显式结束后才采纳，覆盖stable→三层及反向恢复。
 - 原生Red、真实DNS/第二跳身份、PF/WFP设备故障、升级回退与试用未执行；顺序图注入测试不冒充真实Core/网络。准确修复head的本地检查、新CI与独立增量复核以PR回执为准，不沿用679的绿灯或称两个finding已合main。
 - 继续原Draft，不合并、不出包、不改候选/feeds。Windows设置截图/指针演示为真实组件+synthetic IO；Mac SettingsView渲染待新原生CI执行和图像核验。
+- 修复head [63f7e9149](https://github.com/raydocs/tono/commit/63f7e91495b27716b4dab3417c1d7c84517e0050) 独立high增量源码PASS；[CI39024073099](https://github.com/raydocs/tono/actions/runs/39024073099) 中Helper/privileged通过，Mac单测因新增渲染fixture缺`ServiceManagement`导入而编译失败。只补模块导入，不删除渲染/恢复断言；后续head重新执行，不把此编译错误当native Red。

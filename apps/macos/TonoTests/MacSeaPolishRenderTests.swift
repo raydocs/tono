@@ -3,6 +3,7 @@ import QuartzCore
 import Darwin
 import ImageIO
 import ScreenCaptureKit
+import ServiceManagement
 import SwiftUI
 import XCTest
 @testable import Tono
