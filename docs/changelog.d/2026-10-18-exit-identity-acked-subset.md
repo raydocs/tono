@@ -10,4 +10,5 @@
 - 剩余限制：生产 Worker 在这次合入并部署之前仍是旧门。当前这名用户要靠运维对未确认出口做身份同步，或在该出口无法确认时下架。本变更不部署生产。
 
 ## 2026-10-18 · 续记
-- Windows `app-rust`（run 39102190037）在测试模块里找不到 `note_identity_propagating` / `IDENTITY_PROPAGATING_BOUND`，`ci-gate` 随之失败。测试模块改为显式 `use super::`。控制面那一项当时是绿的。
+- Windows `app-rust`（run 39102190037）在测试模块里找不到 `note_identity_propagating` / `IDENTITY_PROPAGATING_BOUND`，`ci-gate` 随之失败。测试模块改为显式 `use super::`。控制面那一项当时是绿的。`81d192114` 的 `ci-gate`（run 39114067543）全绿。
+- 独立审查在 `81d192114` 上阻断两处：确认时间晚于凭据但早于 15 分钟仍被当成可用；`proxies: [A, B]` 这种流式分组成员在拿掉出口后仍留着名字。`exitAckGate` 改为先看新鲜度；`retainCatalogProxies` 与 hy2 过滤共用同一段成员删除，流式列表也改写。

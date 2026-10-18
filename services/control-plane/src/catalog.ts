@@ -63,10 +63,12 @@ function exitAckGate(
 ): 'ready' | 'pending' | 'unhealthy' {
   if (!row || row.status !== 'active') return 'unhealthy';
   const ack = row.lastRosterAt;
-  if (!Number.isSafeInteger(ack) || ack < 0) return 'unhealthy';
+  if (!Number.isSafeInteger(ack) || ack <= 0) return 'unhealthy';
+  // Freshness first. An acknowledgement after this credential that then goes
+  // quiet for the roster window is unhealthy, not still ready.
+  if (t - ack >= ROSTER_FRESH_SEC) return 'unhealthy';
   if (ack > createdAt) return 'ready';
-  if (ack > 0 && t - ack < ROSTER_FRESH_SEC) return 'pending';
-  return 'unhealthy';
+  return 'pending';
 }
 
 async function loadExitAckRows(e: Env, bases: string[]): Promise<ExitAckRow[]> {
@@ -115,12 +117,14 @@ function keptExitBases(ready: Set<string>, tracked: Set<string>, servedHomes: Se
 export type AcknowledgedExitIdentity = { clientUuid: string; keep: Set<string> };
 
 // The identity and the exit base names allowed to carry it. A ready exit
-// (active, last_roster_at after this credential) is served. A pending exit
-// (active and fresh, but not yet past this credential) is omitted while a
-// sibling is ready, and holds the catalog at 503 when it is the only tracked
-// exit. An unhealthy exit is omitted the same way and never holds a ready
-// sibling closed. No ready exit at all stays 503: an unacknowledged UUID is
-// not served, and a shared credential is still never minted here.
+// (active, last_roster_at inside the fresh window and strictly after this
+// credential) is served. A pending exit (active and fresh, but not yet past
+// this credential) is omitted while a sibling is ready, and holds the catalog
+// at 503 when it is the only tracked exit. An unhealthy exit — disabled,
+// missing, never acknowledged, or last acknowledged 15 minutes ago or earlier
+// — is omitted the same way and never holds a ready sibling closed. No ready
+// exit at all stays 503: an unacknowledged UUID is not served, and a shared
+// credential is still never minted here.
 export async function selectAcknowledgedExitIdentity(
   e: Env,
   userId: string,

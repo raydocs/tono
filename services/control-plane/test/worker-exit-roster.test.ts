@@ -440,6 +440,56 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(yaml).not.toContain('pending.example.com');
   });
 
+  it('omits an exit whose acknowledgement is older than fifteen minutes even when it is after this credential', async () => {
+    const startedAt = 1_800_000_000_000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+    try {
+      const account = await createAccount('stale-after-ack');
+      const block = (name: string, server: string) => `  - name: ${name}\n    type: vless\n    server: ${server}\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
+      const first = await admin('exit-catalog', {
+        yaml: `proxies:\n${block('Stale Exit', 'stale.example.com')}`,
+        expectedRevision: 0,
+      }, 'PUT');
+      expect(first.status).toBe(200);
+      const device = await env.DB.prepare(
+        'SELECT client_uuid, created_at FROM device_exit_credentials WHERE device_id = ?',
+      ).bind(account.device.id).first<any>();
+      const createdAt = Number(device.created_at);
+      await env.DB.prepare(
+        `INSERT INTO exit_nodes(id, name, token_hash, status, last_roster_at, created_at, updated_at)
+         VALUES('exit-stale-ack', 'Stale Exit', ?, 'active', ?, ?, ?)`,
+      ).bind(await sha256('exit-stale-ack-token-with-at-least-32-characters'), createdAt + 5, createdAt, createdAt).run();
+
+      clock.mockReturnValue((createdAt + 5 + 15 * 60) * 1000);
+      const alone = await api('exit-catalog', {
+        headers: { authorization: `Bearer ${account.accessToken}` },
+      });
+      expect(alone.status).toBe(503);
+      expect((await alone.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
+
+      const published = await admin('exit-catalog', {
+        yaml: `proxies:\n${block('Stale Exit', 'stale.example.com')}${block('Fresh Exit', 'fresh.example.com')}`,
+        expectedRevision: (await first.json() as any).revision,
+      }, 'PUT');
+      expect(published.status).toBe(200);
+      const freshAt = createdAt + 5 + 15 * 60;
+      await env.DB.prepare(
+        `INSERT INTO exit_nodes(id, name, token_hash, status, last_roster_at, created_at, updated_at)
+         VALUES('exit-fresh-ack', 'Fresh Exit', ?, 'active', ?, ?, ?)`,
+      ).bind(await sha256('exit-fresh-ack-token-with-at-least-32-characters'), freshAt, createdAt, createdAt).run();
+      const withSibling = await api('exit-catalog', {
+        headers: { authorization: `Bearer ${account.accessToken}` },
+      });
+      expect(withSibling.status).toBe(200);
+      const yaml = String((await withSibling.json() as any).yaml);
+      expect(yaml).toContain(device.client_uuid);
+      expect(yaml).toContain('fresh.example.com');
+      expect(yaml).not.toContain('stale.example.com');
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('issues no exit identity when the served catalog filters down to no proxies', async () => {
     const account = await createAccount('empty-served');
     await env.DB.prepare(
