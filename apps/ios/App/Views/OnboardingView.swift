@@ -96,7 +96,8 @@ struct VPNPrimerSheet: View {
         }
         .modifier(SheetSurface())
         .presentationDetents(typeSize.isAccessibilitySize || DebugAccessibility.largeSheets ? [.large] : [.medium, .large])
-        .presentationDragIndicator(.visible)
+        // One detent (accessibility sizes): nothing to drag between, so no grabber; a swipe still closes it.
+        .presentationDragIndicator(typeSize.isAccessibilitySize || DebugAccessibility.largeSheets ? .hidden : .visible)
     }
 
     private func point(_ text: String) -> some View {

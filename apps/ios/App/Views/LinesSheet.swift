@@ -47,7 +47,8 @@ struct LinesSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .modifier(SheetSurface())
         .presentationDetents(ax || DebugAccessibility.largeSheets ? [.large] : [.medium, .large])
-        .presentationDragIndicator(.visible)
+        // One detent (accessibility sizes): nothing to drag between, so no grabber; a swipe still closes it.
+        .presentationDragIndicator(ax || DebugAccessibility.largeSheets ? .hidden : .visible)
     }
 
     private var loading: some View {

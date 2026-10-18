@@ -66,7 +66,8 @@ struct DetailsSheet: View {
         .modifier(SheetSurface())
         .presentationDetents(detents, selection: $detent)
         .onAppear { if !detents.contains(detent) { detent = .large } }
-        .presentationDragIndicator(.visible)
+        // One detent (accessibility sizes): nothing to drag between, so no grabber; a swipe still closes it.
+        .presentationDragIndicator(detents.count > 1 ? .visible : .hidden)
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

@@ -765,12 +765,6 @@ final class TonoUITests: XCTestCase {
         for element in app.descendants(matching: .any).allElementsBoundByIndex {
             let type = element.elementType
             guard type == .staticText || controls.contains(type), element.identifier != "previewBadge" else { continue }
-            // The sheet's drag indicator is drawn and sized by UIKit (76 x 25 pt), not by Tono; a sheet
-            // also closes with a swipe anywhere on it. Logged, not counted.
-            if type == .button, element.identifier.isEmpty, element.label == "Sheet Grabber" {
-                print("SWEEP \(name): system sheet grabber \(element.frame) not Tono's control; skipped")
-                continue
-            }
             let frame = element.frame
             guard !frame.isEmpty, window.contains(frame) else { continue }
             checked += 1
