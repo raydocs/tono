@@ -219,6 +219,16 @@ jobs:
           disable-animations: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: bash evidence.sh
+      # Why an emulator went offline: its own crash reports, the host kernel log (OOM kills) and memory.
+      - name: Host diagnostics for emulator crashes
+        if: always()
+        run: |
+          mkdir -p evidence/host
+          sudo dmesg -T 2>&1 | tail -300 > evidence/host/dmesg.txt || true
+          free -m > evidence/host/free.txt || true
+          nproc >> evidence/host/free.txt || true
+          cp -r /tmp/android-runner/emu-crash-*.db evidence/host/ 2>/dev/null || true
+          ls -laR evidence/host > evidence/host/listing.txt || true
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
