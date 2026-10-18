@@ -56,7 +56,7 @@ struct SettingsView: View {
                         Toggle(isOn: Binding(get: { model.includeAllNetworks }, set: { on in Task { await model.setIncludeAllNetworks(on) } })) {
                             Text(L.t("system_include_all")).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
                         }
-                        .tint(TonoColor.accent)
+                        .toggleStyle(RowToggleStyle())
                         if model.includeAllPending {
                             // The running tunnel keeps the previous setting until it next starts.
                             Text(L.t("system_include_all_pending")).tonoFont(13, .medium, relativeTo: .footnote)
@@ -85,7 +85,7 @@ struct SettingsView: View {
                         Toggle(isOn: Binding(get: { model.liveActivityEnabled }, set: { model.setLiveActivity($0) })) {
                             Text(L.t("settings_live_activity")).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
                         }
-                        .tint(TonoColor.accent)
+                        .toggleStyle(RowToggleStyle())
                         .accessibilityIdentifier("liveActivityToggle")
                         para(L.t("settings_live_activity_desc"))
                     }
@@ -115,7 +115,9 @@ struct SettingsView: View {
                 ToolbarItem(placement: .primaryAction) { closeButton }
             }
         }
-        .presentationDragIndicator(.visible)
+        // One detent: nothing to drag between, so no grabber (a swipe down still closes it). At AX5
+        // the grabber's 76 x 25 pt target was flagged by the contrast/hit-area sweep.
+        .presentationDragIndicator(.hidden)
         .confirmationDialog(L.t("settings_sign_out"), isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button(L.t("settings_sign_out"), role: .destructive) {
                 Task { await model.signOut() }
@@ -128,6 +130,9 @@ struct SettingsView: View {
     private var closeButton: some View {
         Button { dismiss() } label: {
             Image(systemName: "xmark").font(.body.weight(.semibold)).foregroundStyle(TonoColor.textPrimary)
+                // 44 pt target (was 32 x 36 at AX5).
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
         }
         .accessibilityLabel(L.t("settings_close"))
         .accessibilityIdentifier("settingsClose")
@@ -242,6 +247,28 @@ struct RouteCheck: View {
         // After the keyboard has gone, so the announcement is not cut off by the focus change.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             UIAccessibility.post(notification: .announcement, argument: spoken)
+        }
+    }
+}
+
+/// A settings switch whose whole row is the tap target (at least 44 pt tall), not only the
+/// 63 x 28 pt switch; VoiceOver gets one switch with its label.
+struct RowToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button { configuration.isOn.toggle() } label: {
+            HStack(spacing: 12) {
+                configuration.label
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                // Drawn only; the row's button takes the tap.
+                Toggle("", isOn: configuration.$isOn).labelsHidden().tint(TonoColor.accent).allowsHitTesting(false)
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityRepresentation {
+            Toggle(isOn: configuration.$isOn) { configuration.label }
         }
     }
 }
