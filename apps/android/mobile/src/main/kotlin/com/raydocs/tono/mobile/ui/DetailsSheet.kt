@@ -125,7 +125,7 @@ private fun Lane(glyph: Glyph, name: String, dest: String, probe: ExitProbe?, li
     val tint by animateColorAsState(if (live) TonoColors.Accent else TonoColors.TextTertiary, tween(350), label = "lane")
     val status = when {
         probeColor == null -> null
-        probe!!.state == ProbeState.OK -> probe.location?.let(Format::country) ?: ""
+        probe!!.state == ProbeState.OK -> probe.location?.let { countryName(it) } ?: ""
         probe.state == ProbeState.FAILED -> stringResource(R.string.lane_down)
         probe.state == ProbeState.CHECKING -> stringResource(R.string.lane_checking)
         else -> null

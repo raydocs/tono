@@ -49,9 +49,10 @@ class HomeInteractionTest {
 
     private fun str(id: Int, vararg args: Any) = compose.activity.getString(id, *args)
 
-    private fun show() {
+    private fun show(locale: java.util.Locale? = null) {
         compose.setContent {
-            CompositionLocalProvider(LocalReduceMotion provides true) {
+            val conf = android.content.res.Configuration(androidx.compose.ui.platform.LocalConfiguration.current).apply { if (locale != null) setLocale(locale) }
+            CompositionLocalProvider(LocalReduceMotion provides true, androidx.compose.ui.platform.LocalConfiguration provides conf) {
                 TonoTheme {
                     TonoRoot(snapshot, object : TonoActions {
                         override fun connect() { calls += "connect" }
@@ -129,5 +130,31 @@ class HomeInteractionTest {
         snapshot = UiFixtures.connected()
         compose.waitForIdle()
         compose.onNodeWithText(str(R.string.status_exit_both, "Japan", "United States")).assertExists()
+    }
+
+    @Test fun exitCountriesFollowTheAppLanguageNotTheProcessDefault() {
+        java.util.Locale.setDefault(java.util.Locale.US)
+        show(java.util.Locale.SIMPLIFIED_CHINESE)
+        snapshot = UiFixtures.connected()
+        compose.waitForIdle()
+        compose.onNode(hasText("日本", substring = true)).assertExists()
+        compose.onAllNodes(hasText("Japan", substring = true)).assertCountEquals(0)
+    }
+
+    @Test fun fadingTimerKeepsTheLastElapsedTimeWhenDisconnected() {
+        compose.mainClock.autoAdvance = false
+        show()
+        snapshot = UiFixtures.connected()
+        compose.mainClock.advanceTimeBy(1_000)
+        snapshot = UiFixtures.idle // the engine clears connectedSinceMs together with the phase
+        val hugeElapsed = Regex("""\d{3,}:\d{2}:\d{2}""")
+        val shown = SemanticsMatcher("elapsed time in the hundreds of hours") { n ->
+            (n.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty() + n.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text })
+                .any { hugeElapsed.containsMatchIn(it) }
+        }
+        repeat(8) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.onAllNodes(shown, useUnmergedTree = true).assertCountEquals(0)
+        }
     }
 }

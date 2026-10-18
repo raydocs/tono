@@ -175,14 +175,18 @@ internal test builds.
     - Frames compared with *Remove animations* off, on and off again.
     - The app under Android's light and dark themes.
     - The Quick Settings tile and the widget inside Android's own Quick Settings and widget host,
-      showing this install's real (signed-out) status.
+      showing this install's real (signed-out) status; a real tap on each opens sign-in.
   - `fixture-*`: the real UI fed fixture snapshots (no tunnel). Covers states, sheets, Settings and
     a screenrecord, plus these checks:
     - `A11yContract` together with Google's Accessibility Test Framework.
     - Real taps and a swipe injected through the system.
     - The screen-reader order, read from the accessibility tree.
     - Android's 200 % font size with no truncated text.
-    - A measured glass blur.
+    - A measured glass blur: the stripe pattern behind glass, divided by the same glass without
+      blur so the tint does not count, next to Android's own blur at the same radius.
+    - Simplified Chinese on Home, Details and Settings (also at 200 % text on the JVM).
+    - The motion frame by frame: the test clock advances 16 ms per frame and the device renders
+      each one (`frames/`). This shows timing and easing, not real-time smoothness.
     - Widget and notification states, labelled "Fixture" on screen.
 - Screenshots (no emulator needed):
   `./gradlew :android:mobile:testDebugUnitTest -Ptono.screenshots --tests '*ScreenshotRender*'`
@@ -195,6 +199,8 @@ internal test builds.
   exclusion and the Home second hop are therefore untested on Android. The tile, widget and
   notifications have only been seen signed out (real) or with fixture states.
 - Real hardware. The CI emulator renders in software (swiftshader, about 5 fps under the animated
-  scene), so motion smoothness, GPU blur cost, touch feel and battery are unmeasured.
+  scene), so motion smoothness, GPU blur cost, touch feel and battery are unmeasured. The blur
+  itself does render there (stripes behind glass drop to 0.1 %), but its look on a phone panel has
+  not been seen.
 - TalkBack is not on the emulator image. Labels, roles and reading order are checked from the
   accessibility tree; speech and gestures are not.

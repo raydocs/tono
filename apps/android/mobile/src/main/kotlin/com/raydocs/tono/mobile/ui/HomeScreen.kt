@@ -200,8 +200,8 @@ fun statusLine(s: EngineSnapshot): String? {
         Phase.PREPARING -> stringResource(R.string.sentence_preparing)
         Phase.CONNECTING -> stringResource(R.string.sentence_connecting)
         Phase.CONNECTED -> {
-            val cloud = s.cloudProbe.location?.let(Format::country)
-            val home = s.homeProbe.location.takeIf { s.homeKind != HomeKind.NONE }?.let(Format::country)
+            val cloud = s.cloudProbe.location?.let { countryName(it) }
+            val home = s.homeProbe.location.takeIf { s.homeKind != HomeKind.NONE }?.let { countryName(it) }
             when {
                 cloud != null && home != null -> stringResource(R.string.status_exit_both, cloud, home)
                 cloud != null -> stringResource(R.string.status_exit_cloud, cloud)
@@ -313,8 +313,12 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
                 }
             }
             // The timer arrives after the label has become “Disconnect”, never beside “Cancel”.
+            // Disconnecting clears connectedSinceMs in the same snapshot that hides the timer; the fading
+            // timer keeps the last start time (frame-by-frame capture showed "497860:50:23" otherwise).
+            val since = remember { LongArray(1) }
+            if (s.connectedSinceMs > 0) since[0] = s.connectedSinceMs
             AnimatedVisibility(s.tunnelUp && s.connectedSinceMs > 0, enter = fadeIn(tween(220, delayMillis = 240)), exit = fadeOut(tween(120))) {
-                ConnectedTimer(s.connectedSinceMs)
+                ConnectedTimer(since[0])
             }
         }
     }

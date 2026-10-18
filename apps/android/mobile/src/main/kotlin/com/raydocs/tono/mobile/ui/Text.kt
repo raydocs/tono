@@ -83,3 +83,7 @@ fun signInError(code: String): String = when (code) {
     "DEVICE_LIMIT" -> stringResource(R.string.signin_error_DEVICE_LIMIT)
     else -> stringResource(R.string.signin_error_generic, code)
 }
+
+/** A probe's ISO country code in the UI language, which can differ from the process default (per-app language). */
+@Composable
+fun countryName(code: String): String = Format.country(code, LocalConfiguration.current.locales[0])
