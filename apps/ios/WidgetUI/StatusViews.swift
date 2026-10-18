@@ -72,6 +72,13 @@ struct StatusWidgetView: View {
     var preview = false
 
     var body: some View {
+        content
+            // Widgets have a fixed size: text grows with Dynamic Type up to xxxLarge, then stops
+            // (Apple's guidance for widgets); the app itself follows every size.
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+
+    @ViewBuilder private var content: some View {
         switch family {
         case .accessoryInline:
             Text(p.detail.map { "Tono · \(p.title) · \($0)" } ?? "Tono · \(p.title)")
@@ -134,12 +141,12 @@ struct StatusWidgetView: View {
                     .lineLimit(1)
             }
             if let detail = p.detail {
-                Text(detail).font(.footnote).foregroundStyle(TonoColor.textSecondary).lineLimit(2)
+                Text(detail).font(.footnote).foregroundStyle(TonoColor.textSecondary).lineLimit(2).minimumScaleFactor(0.85)
             }
             Text(p.footnote)
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(p.stale ? TonoColor.warning : TonoColor.textTertiary)
-                .lineLimit(2)
+                .lineLimit(2).minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)

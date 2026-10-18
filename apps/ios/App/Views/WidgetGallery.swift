@@ -9,22 +9,23 @@ import WidgetKit
 /// the Preview tag. `-TonoPreviewWidgetsLight` puts them on a light wallpaper.
 struct WidgetGallery: View {
     private let now = Date()
+    private var exit: String { Format.city("Tokyo", chinese: L.isChinese) + " · Dawn" }
     private var light: Bool { CommandLine.arguments.contains("-TonoPreviewWidgetsLight") }
 
     private var on: StatusReading {
-        .fresh(StatusSnapshot(state: .on, exit: "Tokyo · Dawn", since: now.addingTimeInterval(-47 * 60), updatedAt: now.addingTimeInterval(-90), writer: .tunnel))
+        .fresh(StatusSnapshot(state: .on, exit: exit, since: now.addingTimeInterval(-47 * 60), updatedAt: now.addingTimeInterval(-90), writer: .tunnel))
     }
     private var degraded: StatusReading {
-        .fresh(StatusSnapshot(state: .degraded, exit: "Tokyo · Dawn", since: now.addingTimeInterval(-12 * 60), reason: "HOME_UNREACHABLE", updatedAt: now.addingTimeInterval(-60), writer: .app))
+        .fresh(StatusSnapshot(state: .degraded, exit: exit, since: now.addingTimeInterval(-12 * 60), reason: "HOME_UNREACHABLE", updatedAt: now.addingTimeInterval(-60), writer: .app))
     }
     private var stale: StatusReading {
-        .stale(StatusSnapshot(state: .on, exit: "Tokyo · Dawn", since: now.addingTimeInterval(-3 * 3600), updatedAt: now.addingTimeInterval(-40 * 60), writer: .tunnel))
+        .stale(StatusSnapshot(state: .on, exit: exit, since: now.addingTimeInterval(-3 * 3600), updatedAt: now.addingTimeInterval(-40 * 60), writer: .tunnel))
     }
     private var dropped: StatusReading {
-        .fresh(StatusSnapshot(state: .failed, exit: "Tokyo · Dawn", reason: "CORE_STOPPED", updatedAt: now.addingTimeInterval(-120), writer: .tunnel))
+        .fresh(StatusSnapshot(state: .failed, exit: exit, reason: "CORE_STOPPED", updatedAt: now.addingTimeInterval(-120), writer: .tunnel))
     }
     private var off: StatusReading {
-        .fresh(StatusSnapshot(state: .off, exit: "Tokyo · Dawn", updatedAt: now.addingTimeInterval(-300), writer: .app))
+        .fresh(StatusSnapshot(state: .off, exit: exit, updatedAt: now.addingTimeInterval(-300), writer: .app))
     }
 
     var body: some View {

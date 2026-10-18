@@ -46,6 +46,8 @@ struct HomeView: View {
                 .accessibilityElement(children: .contain)
                 .accessibilitySortPriority(1)
             }
+            // Sort priorities only order siblings inside one accessibility container.
+            .accessibilityElement(children: .contain)
         }
         .sheet(isPresented: $showLines) { LinesSheet().environmentObject(model).tonoAccessibility() }
         .sheet(isPresented: $model.showVPNPrimer) { VPNPrimerSheet().environmentObject(model).tonoAccessibility() }

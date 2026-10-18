@@ -52,7 +52,7 @@ struct OnboardingView: View {
     }
 
     private func row(_ glyph: Glyph, _ text: String) -> some View {
-        HStack(spacing: 14) {
+        HStack(alignment: typeSize.isAccessibilitySize ? .top : .center, spacing: 14) {
             GlyphIcon(glyph: glyph, tint: TonoColor.accent)
             Text(text).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -95,7 +95,7 @@ struct VPNPrimerSheet: View {
             .padding(.horizontal, 22).padding(.top, 26).padding(.bottom, 16)
         }
         .modifier(SheetSurface())
-        .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+        .presentationDetents(typeSize.isAccessibilitySize || DebugAccessibility.largeSheets ? [.large] : [.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
