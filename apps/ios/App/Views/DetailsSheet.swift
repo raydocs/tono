@@ -30,7 +30,7 @@ struct DetailsSheet: View {
     var body: some View {
         ScrollViewReader { proxy in
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 14) {
                 Text(L.t("details")).tonoFont(22, .semibold, relativeTo: .title2).foregroundStyle(TonoColor.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
@@ -223,8 +223,8 @@ private struct Lane: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .frame(minHeight: 52)
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .frame(minHeight: 48)
         .accessibilityElement(children: .combine)
     }
 

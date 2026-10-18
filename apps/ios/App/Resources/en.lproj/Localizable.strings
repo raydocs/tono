@@ -194,8 +194,8 @@
 "gallery_note" = "Preview: the widget and Live Activity views rendered inside the app with fixture data, including stale and unavailable states. This is not the system Home Screen or Lock Screen.";
 "gallery_lock" = "Lock Screen";
 "gallery_control" = "Control Center";
-"mode_three_tier_line" = "AI and video go through Tono; everything else goes direct.";
-"mode_stable_line" = "Everything except your local network goes through Tono.";
+"mode_three_tier_line" = "AI and video use Tono; the rest goes direct.";
+"mode_stable_line" = "Everything but your local network uses Tono.";
 "route_switching" = "Switching to %1$@…";
 "route_not_applied" = "Couldn't switch to %1$@";
 "route_not_applied_full" = "Couldn't switch to %1$@. Still using %2$@.";
