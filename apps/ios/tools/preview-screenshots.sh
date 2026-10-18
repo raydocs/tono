@@ -63,6 +63,8 @@ done
 # Widget views on a light wallpaper, and the app itself with the system in light appearance
 # (Tono is dark by design and opts out of light mode; this shows it stays legible and unchanged).
 shot "en-17b-widgets-light-wallpaper" en CONNECTED "" -TonoPreviewWidgets -TonoPreviewWidgetsLight
+# The Control Center switch's custom symbols (on / off / no fresh reading), bottom of the gallery.
+shot "en-17c-widgets-control-symbols" en CONNECTED "" -TonoPreviewWidgets -TonoPreviewWidgetsBottom
 xcrun simctl ui "$UDID" appearance light || true
 shot "en-18-system-light-appearance" en CONNECTED
 xcrun simctl ui "$UDID" appearance dark || true
@@ -107,6 +109,9 @@ record() { # <file> <seconds> <launch args...>
 # the same loop under Reduce Motion (cross-fades only, still sea, no fill sweep or shake).
 record state-cycle.mp4 32 -TonoPreviewCycle -AppleLanguages "(zh-Hans)" -AppleLocale zh_CN
 record state-cycle-reduce-motion.mp4 28 -TonoPreviewCycle -TonoReduceMotion -AppleLanguages "(zh-Hans)" -AppleLocale zh_CN
+# Sheets grow out of the control that opened them (iOS 26 zoom from the glass control): Lines from
+# the exit capsule, Details from "Details", Settings from the gear; 12.6 s loop.
+record sheet-zoom.mp4 27 -TonoPreview CONNECTED -TonoPreviewSheetCycle -AppleLanguages "(en)" -AppleLocale en_US
 
 # Cost of the live sea on the runner's simulator (host CPU %, RSS KB of the app process; a Mac
 # simulator, not an iPhone: only the relative difference means anything).
@@ -132,7 +137,9 @@ feed the same code path as the iOS settings (simctl cannot toggle them). perf.tx
 of the simulator process on a Mac runner, not iPhone performance. These images show layout, copy and motion only;
 they are not evidence of sign-in, connectivity or routing.
 *-17-widgets*: the widget / Live Activity SwiftUI views rendered INSIDE the app with fixture
-readings (each tagged Preview); not the system Home Screen. live-activity-island-*.png (from the
+readings (each tagged Preview); not the system Home Screen. en-17c shows the Control Center
+switch's custom symbols in the app, not the system Control Center. sheet-zoom.mp4: sheets
+opened by the preview itself (no taps), to show the zoom out of each control. live-activity-island-*.png (from the
 UI tests): a real ActivityKit Live Activity in the simulator's Dynamic Island, started by the
 preview with fixture content and tagged Preview. Not captured anywhere: the Control Center
 control (iOS 18) and Lock Screen widgets placed by a user; no haptics (a simulator has none).

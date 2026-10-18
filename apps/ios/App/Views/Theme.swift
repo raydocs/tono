@@ -161,10 +161,14 @@ private struct TonoAccessibilityRoot: ViewModifier {
 }
 
 /// Liquid Glass where the system has it (iOS 26), a dark material before that, and an opaque smoke
-/// surface when Reduce Transparency is on. The tint keeps text contrast over a bright sky.
+/// surface when Reduce Transparency is on. The tint keeps text contrast over a bright sky. Glass is
+/// for the control layer only (buttons floating over the sea); content inside sheets uses
+/// `contentCard`, so glass never sits on glass.
 private struct GlassSurface<S: Shape>: ViewModifier {
     let shape: S
     let tint: Color?
+    /// Tappable glass: iOS 26 answers the touch itself (scale, highlight).
+    let interactive: Bool
     @Environment(\.tonoReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
@@ -174,12 +178,38 @@ private struct GlassSurface<S: Shape>: ViewModifier {
                 .background(TonoColor.smoke, in: shape)
                 .overlay(shape.stroke(Color.white.opacity(contrast == .increased ? 0.4 : 0.12), lineWidth: 1))
         } else if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.tint((tint ?? TonoColor.night).opacity(0.38)), in: shape)
+            content.glassEffect(.regular.tint((tint ?? TonoColor.night).opacity(0.38)).interactive(interactive), in: shape)
         } else {
             content
                 .background((tint ?? TonoColor.night).opacity(0.42), in: shape)
                 .background(.ultraThinMaterial, in: shape)
                 .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+        }
+    }
+}
+
+/// Content surface inside a sheet: a smoked fill, not glass (the sheet itself is the glass).
+private struct ContentCard<S: Shape>: ViewModifier {
+    let shape: S
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        content
+            .background(TonoColor.smokeHigh.opacity(contrast == .increased ? 1 : 0.6), in: shape)
+            .overlay(shape.stroke(Color.white.opacity(contrast == .increased ? 0.4 : 0.06), lineWidth: 1))
+    }
+}
+
+/// Groups neighbouring glass controls so iOS 26 renders them as one layer (shared sampling of the
+/// sea behind, no glass sampling glass). Shapes this close merge, so it is smaller than any gap.
+struct GlassCluster<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 4) { content }
+        } else {
+            content
         }
     }
 }
@@ -197,7 +227,11 @@ extension View {
         }
     }
 
-    func glassSurface<S: Shape>(_ shape: S, tint: Color? = nil) -> some View {
-        modifier(GlassSurface(shape: shape, tint: tint))
+    func glassSurface<S: Shape>(_ shape: S, tint: Color? = nil, interactive: Bool = false) -> some View {
+        modifier(GlassSurface(shape: shape, tint: tint, interactive: interactive))
+    }
+
+    func contentCard<S: Shape>(_ shape: S) -> some View {
+        modifier(ContentCard(shape: shape))
     }
 }

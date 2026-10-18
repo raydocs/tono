@@ -14,6 +14,8 @@ struct HomeView: View {
     @Environment(\.tonoReduceMotion) private var reduceMotion
     /// The phase the last haptic was decided from (Android `PhaseHaptics` keeps the same).
     @State private var hapticPhase: Phase?
+    /// Sheets zoom out of the control that opened them.
+    @Namespace private var zoom
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -38,10 +40,10 @@ struct HomeView: View {
                     .accessibilitySortPriority(0)
                 Group {
                     if typeSize.isAccessibilitySize {
-                        BottomScroll { controls.padding(.top, 24) }
+                        BottomScroll { GlassCluster { controls }.padding(.top, 24) }
                     } else {
                         Spacer(minLength: 0)
-                        controls
+                        GlassCluster { controls }
                     }
                 }
                 .accessibilityElement(children: .contain)
@@ -50,10 +52,17 @@ struct HomeView: View {
             // Sort priorities only order siblings inside one accessibility container.
             .accessibilityElement(children: .contain)
         }
-        .sheet(isPresented: $showLines) { LinesSheet().environmentObject(model).tonoAccessibility() }
-        .sheet(isPresented: $model.showVPNPrimer) { VPNPrimerSheet().environmentObject(model).tonoAccessibility() }
+        .sheet(isPresented: $showLines) {
+            LinesSheet().environmentObject(model).tonoAccessibility()
+                .zoomTransition("lines", in: zoom, enabled: !reduceMotion)
+        }
+        .sheet(isPresented: $model.showVPNPrimer) {
+            VPNPrimerSheet().environmentObject(model).tonoAccessibility()
+                .zoomTransition("primary", in: zoom, enabled: !reduceMotion)
+        }
         .sheet(isPresented: $showDetails) {
             DetailsSheet(onSettings: openSettingsFromDetails).environmentObject(model).tonoAccessibility()
+                .zoomTransition("details", in: zoom, enabled: !reduceMotion)
         }
         #if DEBUG
         .onAppear {
@@ -65,10 +74,28 @@ struct HomeView: View {
                 showSettings = args[i + 1] == "settings"
                 if args[i + 1] == "primer" { model.showVPNPrimer = true }
             }
+            // `-TonoPreviewSheetCycle`: opens and closes each sheet in turn, so the zoom out of its
+            // control can be recorded (simctl cannot tap).
+            if args.contains("-TonoPreviewSheetCycle") {
+                Task { @MainActor in
+                    let sheets: [Binding<Bool>] = [$showLines, $showDetails, $showSettings]
+                    while true {
+                        for sheet in sheets {
+                            try? await Task.sleep(nanoseconds: 1_600_000_000)
+                            sheet.wrappedValue = true
+                            try? await Task.sleep(nanoseconds: 2_600_000_000)
+                            sheet.wrappedValue = false
+                        }
+                    }
+                }
+            }
         }
         #endif
         // A sheet, not a full-screen cover: swipe down closes it with the thumb.
-        .sheet(isPresented: $showSettings) { SettingsView().environmentObject(model).tonoAccessibility() }
+        .sheet(isPresented: $showSettings) {
+            SettingsView().environmentObject(model).tonoAccessibility()
+                .zoomTransition("settings", in: zoom, enabled: !reduceMotion)
+        }
         .onChange(of: model.phase) { next in
             StateFeedback.arrived(at: next, from: hapticPhase)
             hapticPhase = next
@@ -95,10 +122,11 @@ struct HomeView: View {
             Button { showSettings = true } label: {
                 GlyphIcon(glyph: .gear, tint: TonoColor.textPrimary, size: 20)
                     .frame(width: 48, height: 48)
-                    .glassSurface(Circle())
+                    .glassSurface(Circle(), interactive: true)
                     .contentShape(Circle())
             }
-            .buttonStyle(PressScale())
+            .buttonStyle(PressScale(glass: true))
+            .zoomSource("settings", in: zoom)
             .accessibilityLabel(L.t("settings_title"))
             .accessibilityIdentifier("settingsButton")
         }
@@ -128,6 +156,7 @@ struct HomeView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 10)
             ActionCapsule(phase: model.phase, connectedSince: model.connectedSince) { model.toggle($0) }
+                .zoomSource("primary", in: zoom)
                 .accessibilityIdentifier("primaryAction")
             exitCapsule.padding(.top, 10)
             let footer = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout())
@@ -155,6 +184,7 @@ struct HomeView: View {
                     .accessibilityElement(children: .ignore)
                 }
                 .buttonStyle(.plain)
+                .zoomSource("details", in: zoom)
                 .accessibilityLabel(L.t("details"))
                 .accessibilityIdentifier("detailsButton")
             }
@@ -219,7 +249,7 @@ struct HomeView: View {
                     }
                     .padding(.horizontal, 20).padding(.vertical, 14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .glassSurface(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .glassSurface(RoundedRectangle(cornerRadius: 26, style: .continuous), interactive: true)
                     .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
                 } else {
                     HStack(spacing: 12) {
@@ -234,13 +264,14 @@ struct HomeView: View {
                     }
                     .padding(.horizontal, 18)
                     .frame(minHeight: 52)
-                    .glassSurface(Capsule())
+                    .glassSurface(Capsule(), interactive: true)
                     .contentShape(Capsule())
                 }
             }
             .accessibilityElement(children: .ignore)
         }
-        .buttonStyle(PressScale())
+        .buttonStyle(PressScale(glass: true))
+        .zoomSource("lines", in: zoom)
         .accessibilityLabel("\(L.t("lines_title")): \(name), \(latency)")
         .accessibilityIdentifier("exitCapsule")
     }
@@ -285,7 +316,7 @@ struct ActionCapsule: View {
             // One leaf: the timer and arrow are not hit targets of their own; the timer is read in the value.
             .accessibilityElement(children: .ignore)
         }
-        .buttonStyle(PressScale())
+        .buttonStyle(PressScale(glass: !filled))
         .disabled(action.wantsTunnel == nil)
         .modifier(Shake(amount: shake))
         .onAppear { fill = PrimaryAction.progress(phase); fillOpacity = phase.tunnelUp ? 0 : 1; shownPhase = phase }
@@ -347,7 +378,7 @@ struct ActionCapsule: View {
             Capsule().fill(TonoColor.actionFill)
         } else {
             ZStack(alignment: .leading) {
-                Color.clear.glassSurface(Capsule())
+                Color.clear.glassSurface(Capsule(), interactive: true)
                 GeometryReader { geo in
                     Capsule()
                         .fill(LinearGradient(colors: [TonoColor.sunEdge.opacity(0.55), TonoColor.sunCore.opacity(0.85)],
@@ -485,5 +516,45 @@ extension BannerAction {
         case .retry: return L.t("action_retry")
         case .none: return nil
         }
+    }
+}
+
+/// A sheet grows out of the control that opened it and shrinks back into it (iOS 18 zoom; on
+/// iOS 26 the glass control morphs into the sheet). Reduce Motion keeps the plain sheet.
+private struct ZoomSource: ViewModifier {
+    let id: String
+    let namespace: Namespace.ID
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.matchedTransitionSource(id: id, in: namespace)
+        } else {
+            content
+        }
+    }
+}
+
+private struct ZoomTransition: ViewModifier {
+    let id: String
+    let namespace: Namespace.ID
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *), enabled {
+            content.navigationTransition(.zoom(sourceID: id, in: namespace))
+        } else {
+            content
+        }
+    }
+}
+
+// App only: the widget extension compiles Theme.swift and has no sheets.
+extension View {
+    func zoomSource(_ id: String, in namespace: Namespace.ID) -> some View {
+        modifier(ZoomSource(id: id, namespace: namespace))
+    }
+
+    func zoomTransition(_ id: String, in namespace: Namespace.ID, enabled: Bool) -> some View {
+        modifier(ZoomTransition(id: id, namespace: namespace, enabled: enabled))
     }
 }

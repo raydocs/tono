@@ -192,6 +192,9 @@ final class TonoUITests: XCTestCase {
         let close = app.buttons["settingsClose"]
         XCTAssertTrue(close.waitForExistence(timeout: 6))
         XCTAssertEqual(close.label, "Close settings")
+        // Scrolled: the content passes under the navigation bar (iOS 26 scroll edge effect).
+        app.swipeUp()
+        save(XCUIScreen.main.screenshot(), "settings-scrolled-under-bar")
         close.tap()
         waitHittable(primary(app))
     }

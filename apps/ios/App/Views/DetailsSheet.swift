@@ -39,7 +39,7 @@ struct DetailsSheet: View {
                     }
                     .padding(.horizontal, 14)
                     .frame(minHeight: 52)
-                    .glassSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .contentCard(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(PressScale())
@@ -86,7 +86,7 @@ struct DetailsSheet: View {
                  probe: model.mode == .stable ? model.cloudProbe : nil, live: live)
         }
         .padding(.vertical, 4)
-        .glassSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .contentCard(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var modePicker: some View {
@@ -95,7 +95,7 @@ struct DetailsSheet: View {
             LaneDivider()
             modeRow(.stable, title: L.t("mode_stable_short"), desc: L.t("mode_stable_desc"))
         }
-        .glassSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .contentCard(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func modeRow(_ mode: RoutingMode, title: String, desc: String) -> some View {

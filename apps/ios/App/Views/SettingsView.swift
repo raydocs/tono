@@ -8,8 +8,9 @@ struct SettingsView: View {
     @State private var showScope = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
+        // A navigation bar, not a hand-made header: on iOS 26 the close button is system glass and
+        // the content blurs under the bar as it scrolls (scroll edge effect).
+        NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     SectionLabel(text: L.t("settings_routing"))
@@ -82,8 +83,13 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 16).padding(.bottom, 24)
             }
+            .background(TonoColor.night.ignoresSafeArea())
+            .navigationTitle(L.t("settings_title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) { closeButton }
+            }
         }
-        .background(TonoColor.night.ignoresSafeArea())
         .presentationDragIndicator(.visible)
         .confirmationDialog(L.t("settings_sign_out"), isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button(L.t("settings_sign_out"), role: .destructive) {
@@ -91,25 +97,16 @@ struct SettingsView: View {
                 dismiss()
             }
         }
-        .previewBadge()
+        .previewBadge(alignment: .bottom)
     }
 
-    private var header: some View {
-        HStack(spacing: 2) {
-            Text(L.t("settings_title")).tonoFont(22, .medium, relativeTo: .title2).foregroundStyle(TonoColor.textPrimary)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.leading, 14)
-            Spacer()
-            // Presented as a sheet: swipe down closes it; the button is for VoiceOver and two-handed use.
-            Button { dismiss() } label: {
-                GlyphIcon(glyph: .chevronDown, tint: TonoColor.textPrimary, size: 18).frame(width: 44, height: 44)
-                    .glassSurface(Circle()).contentShape(Circle())
-            }
-            .buttonStyle(PressScale())
-            .accessibilityLabel(L.t("settings_close"))
-            .accessibilityIdentifier("settingsClose")
+    /// Presented as a sheet: swipe down closes it; the button is for VoiceOver and two-handed use.
+    private var closeButton: some View {
+        Button { dismiss() } label: {
+            Image(systemName: "xmark").font(.body.weight(.semibold)).foregroundStyle(TonoColor.textPrimary)
         }
-        .padding(.horizontal, 8).padding(.top, 18).padding(.bottom, 4)
+        .accessibilityLabel(L.t("settings_close"))
+        .accessibilityIdentifier("settingsClose")
     }
 
     private func para(_ text: String) -> some View {

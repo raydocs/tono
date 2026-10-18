@@ -29,6 +29,7 @@ struct WidgetGallery: View {
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text(L.t("gallery_title")).font(.title2.weight(.semibold)).foregroundStyle(light ? .black : TonoColor.textPrimary)
@@ -47,8 +48,15 @@ struct WidgetGallery: View {
                 card(off, .systemMedium)
                 Text(L.t("gallery_lock")).font(.headline).foregroundStyle(light ? .black : TonoColor.textPrimary).padding(.top, 6)
                 lockScreen
+                Text(L.t("gallery_control")).font(.headline).foregroundStyle(light ? .black : TonoColor.textPrimary).padding(.top, 6)
+                controls.id("controls")
             }
             .padding(20)
+        }
+        .onAppear {
+            // `-TonoPreviewWidgetsBottom`: start at the Control Center row (screenshots cannot scroll).
+            if CommandLine.arguments.contains("-TonoPreviewWidgetsBottom") { proxy.scrollTo("controls", anchor: .bottom) }
+        }
         }
         .background(background.ignoresSafeArea())
         .accessibilityIdentifier("widgetGallery")
@@ -87,6 +95,33 @@ struct WidgetGallery: View {
         .padding(14)
         .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .environment(\.colorScheme, .dark)
+    }
+
+    /// The Control Center switch's symbol and labels for on, off and no fresh reading (the system
+    /// draws the real control; this shows the custom symbols render).
+    private var controls: some View {
+        HStack(spacing: 18) {
+            control(on: true, label: L.t("widget_on_short"))
+            control(on: false, label: L.t("widget_off_short"))
+            control(on: false, label: L.t("widget_unknown_short"))
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .accessibilityIdentifier("galleryControls")
+    }
+
+    private func control(on: Bool, label: String) -> some View {
+        VStack(spacing: 6) {
+            Image(on ? "tono.sun.on" : "tono.sun.off")
+                .font(.system(size: 24, weight: .medium))
+                .foregroundStyle(on ? TonoColor.actionInk : Color.white)
+                .frame(width: 64, height: 64)
+                .background(on ? TonoColor.sunMid.opacity(0.95) : Color.white.opacity(0.18), in: Circle())
+            Text(label).font(.caption.weight(.medium)).foregroundStyle(.white)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Tono, \(label)")
     }
 }
 #endif

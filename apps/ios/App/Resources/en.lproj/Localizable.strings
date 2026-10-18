@@ -183,3 +183,4 @@
 "gallery_title" = "Widgets and Live Activity";
 "gallery_note" = "Preview: the widget and Live Activity views rendered inside the app with fixture data, including stale and unavailable states. This is not the system Home Screen or Lock Screen.";
 "gallery_lock" = "Lock Screen";
+"gallery_control" = "Control Center";

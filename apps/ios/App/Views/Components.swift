@@ -111,10 +111,30 @@ struct QuietButton: View {
 }
 
 struct PressScale: ButtonStyle {
+    /// The label is interactive glass: on iOS 26 the glass answers the press, so no second scale.
+    var glass = false
+
     func makeBody(configuration: Configuration) -> some View {
+        PressScaleBody(configuration: configuration, glass: glass)
+    }
+}
+
+private struct PressScaleBody: View {
+    let configuration: ButtonStyleConfiguration
+    let glass: Bool
+    @Environment(\.tonoReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .scaleEffect(configuration.isPressed && !glassAnswers ? 0.97 : 1)
             .animation(TonoMotion.press, value: configuration.isPressed)
+    }
+
+    private var glassAnswers: Bool {
+        guard glass, !reduceTransparency, contrast != .increased else { return false }
+        if #available(iOS 26.0, *) { return true }
+        return false
     }
 }
 

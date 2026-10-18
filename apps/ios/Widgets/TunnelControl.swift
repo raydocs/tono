@@ -11,7 +11,8 @@ struct TunnelControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: StatusReload.controlKind, provider: Provider()) { value in
             ControlWidgetToggle(value.label, isOn: value.isOn, action: SetTunnelIntent()) { isOn in
-                Label(isOn ? L.t("widget_on_short") : value.offLabel, systemImage: "sun.horizon.fill")
+                // The desktop state glyphs as custom symbols: filled sun = on, open arch = no claim.
+                Label(isOn ? L.t("widget_on_short") : value.offLabel, image: isOn ? "tono.sun.on" : "tono.sun.off")
             }
             .tint(TonoColor.sunMid)
         }

@@ -183,3 +183,4 @@
 "gallery_title" = "小组件与实时活动";
 "gallery_note" = "预览：在 App 内用夹具数据渲染的小组件与实时活动视图，含过时与不可用状态。这不是系统主屏幕或锁屏。";
 "gallery_lock" = "锁屏";
+"gallery_control" = "控制中心";

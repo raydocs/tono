@@ -35,7 +35,7 @@ struct OnboardingView: View {
                 row(.apps, L.t("onboard_row_other"))
             }
             .padding(.vertical, 6)
-            .glassSurface(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .contentCard(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .padding(.top, 20)
             Text(L.t("onboard_fail_closed"))
                 .tonoFont(15, relativeTo: .subheadline)

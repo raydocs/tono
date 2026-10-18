@@ -71,10 +71,11 @@ struct RootView: View {
 extension View {
     /// DEBUG design preview only: every capture says it shows fixture data, not a real account or
     /// tunnel. Compiled out of Release (CI fails a Release binary that contains `-TonoPreview`).
-    @ViewBuilder func previewBadge() -> some View {
+    /// `alignment: .bottom` where a navigation bar owns the top of the surface.
+    @ViewBuilder func previewBadge(alignment: Alignment = .top) -> some View {
         #if DEBUG
         if CommandLine.arguments.contains(where: { $0.hasPrefix("-TonoPreview") }) {
-            overlay(alignment: .top) {
+            overlay(alignment: alignment) {
                 Text(L.isChinese ? "预览 · 夹具 · 无账号/隧道" : "Preview · fixtures · no account/tunnel")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Color.black)
