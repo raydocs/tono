@@ -81,4 +81,12 @@ final class PrimaryActionTests: XCTestCase {
         XCTAssertNil(PrimaryAction(.disconnecting).wantsTunnel)
         XCTAssertEqual(PrimaryAction(.failed).wantsTunnel, true)
     }
+
+    func testHapticsOnlyForAStartReachingConnectedOrFailing() {
+        XCTAssertEqual(HapticCue.forChange(from: .connecting, to: .connected), .success)
+        XCTAssertNil(HapticCue.forChange(from: .degraded, to: .connected))
+        XCTAssertEqual(HapticCue.forChange(from: .connected, to: .failed), .error)
+        XCTAssertNil(HapticCue.forChange(from: .connected, to: .degraded))
+        XCTAssertNil(HapticCue.forChange(from: nil, to: .connected))
+    }
 }

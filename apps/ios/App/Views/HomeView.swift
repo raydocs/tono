@@ -12,6 +12,8 @@ struct HomeView: View {
     @State private var showSettings = false
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.tonoReduceMotion) private var reduceMotion
+    /// The phase the last haptic was decided from (Android `PhaseHaptics` keeps the same).
+    @State private var hapticPhase: Phase?
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -64,7 +66,10 @@ struct HomeView: View {
         #endif
         // A sheet, not a full-screen cover: swipe down closes it with the thumb.
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(model).tonoAccessibility() }
-        .onChange(of: model.phase) { StateFeedback.arrived(at: $0) }
+        .onChange(of: model.phase) { next in
+            StateFeedback.arrived(at: next, from: hapticPhase)
+            hapticPhase = next
+        }
         // VoiceOver magic tap (two-finger double tap) runs the primary action from anywhere.
         .accessibilityAction(.magicTap) {
             if let want = PrimaryAction(model.phase).wantsTunnel { model.toggle(want) }
@@ -109,8 +114,11 @@ struct HomeView: View {
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("stateTitle")
                     .id(model.phase)
+                    // Android `crossRise`: the new word rises in from a third of its height, the old one
+                    // lifts a quarter and fades faster.
                     .transition(reduceMotion ? AnyTransition.opacity
-                                : AnyTransition.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .opacity))
+                                : AnyTransition.asymmetric(insertion: .opacity.animation(TonoMotion.state.delay(0.06)).combined(with: .offset(y: 16)),
+                                                           removal: .opacity.animation(.easeOut(duration: 0.12)).combined(with: .offset(y: -12))))
             }
             ZStack(alignment: .leading) { statusLine }
                 .frame(minHeight: 32, alignment: .topLeading)
@@ -290,7 +298,7 @@ struct ActionCapsule: View {
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.6).delay(0.9)) { fillOpacity = 0 }
             }
             if next == .failed && !reduceMotion {
-                withAnimation(.linear(duration: 0.36)) { shake += 1 }
+                withAnimation(.linear(duration: 0.38)) { shake += 1 }
             }
         }
         .accessibilityLabel(action == .cancel ? L.t("a11y_cancel_connect") : title)
@@ -358,20 +366,28 @@ private struct Shake: GeometryEffect {
         set { amount = newValue }
     }
 
+    /// Android's failure nudge: -7 pt at 60 ms, 6 at 140, -3 at 230, rest at 380 (one unit of `amount`).
+    private static let keys: [(t: CGFloat, x: CGFloat)] = [(0, 0), (60.0 / 380, -7), (140.0 / 380, 6), (230.0 / 380, -3), (1, 0)]
+
     func effectValue(size: CGSize) -> ProjectionTransform {
-        ProjectionTransform(CGAffineTransform(translationX: 6 * sin(amount * .pi * 4), y: 0))
+        let t = amount - amount.rounded(.down)
+        var x: CGFloat = 0
+        for (a, b) in zip(Self.keys, Self.keys.dropFirst()) where t >= a.t && t <= b.t {
+            x = a.x + (b.x - a.x) * (t - a.t) / (b.t - a.t)
+        }
+        return ProjectionTransform(CGAffineTransform(translationX: x, y: 0))
     }
 }
 
-/// System haptics when a state arrives (not on every intermediate step).
+/// System haptics when a state arrives, as Android `PhaseHaptics`: success only when a start
+/// reaches connected (not on partly working → connected), error when it fails, nothing else.
+/// Pressing the capsule adds a light tap (Android CONTEXT_CLICK). Not felt in a simulator.
 enum StateFeedback {
-    static func arrived(at phase: Phase) {
-        let generator = UINotificationFeedbackGenerator()
-        switch phase {
-        case .connected: generator.notificationOccurred(.success)
-        case .degraded: generator.notificationOccurred(.warning)
-        case .failed: generator.notificationOccurred(.error)
-        default: break
+    static func arrived(at phase: Phase, from previous: Phase?) {
+        switch HapticCue.forChange(from: previous, to: phase) {
+        case .success: UINotificationFeedbackGenerator().notificationOccurred(.success)
+        case .error: UINotificationFeedbackGenerator().notificationOccurred(.error)
+        case nil: break
         }
     }
 }

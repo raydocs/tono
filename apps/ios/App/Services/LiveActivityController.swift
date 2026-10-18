@@ -8,8 +8,6 @@ import TonoKit
 /// few minutes so the user sees why the session ended.
 @MainActor
 final class LiveActivityController {
-    private var lastContent: TonoActivityAttributes.ContentState?
-
     func sync(_ snapshot: StatusSnapshot, enabled: Bool, preview: Bool = false) {
         guard #available(iOS 16.2, *) else { return }
         let content = TonoActivityAttributes.ContentState(state: snapshot.state.rawValue, exit: snapshot.exit,
@@ -17,7 +15,6 @@ final class LiveActivityController {
         let running = Activity<TonoActivityAttributes>.activities
         let live = snapshot.state == .connecting || snapshot.state.tunnelUp
         guard enabled, live else {
-            lastContent = nil
             let dismissal: ActivityUIDismissalPolicy = snapshot.state == .failed && enabled
                 ? .after(Date().addingTimeInterval(5 * 60)) : .immediate
             for activity in running {
@@ -32,6 +29,5 @@ final class LiveActivityController {
         } else if ActivityAuthorizationInfo().areActivitiesEnabled {
             _ = try? Activity.request(attributes: TonoActivityAttributes(preview: preview), content: update, pushType: nil)
         }
-        lastContent = content
     }
 }

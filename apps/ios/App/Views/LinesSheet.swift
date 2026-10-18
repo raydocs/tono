@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import TonoKit
 
 /// Cloud line picker. Lines come only from the admitted exit catalog; nothing is invented here.
@@ -82,6 +83,7 @@ struct LinesSheet: View {
     private func row(_ line: LineItem) -> some View {
         let selected = line.name == model.selectedNode
         return Button {
+            UISelectionFeedbackGenerator().selectionChanged()
             Task { await model.select(line.name) }
             dismiss()
         } label: {

@@ -80,7 +80,9 @@ jobs:
           set -o pipefail
           xcodebuild -project Tono.xcodeproj -scheme Tono -configuration Release -sdk iphoneos \
             -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/dd-device" \
-            CODE_SIGNING_ALLOWED=NO build | tail -n 40
+            CODE_SIGNING_ALLOWED=NO build > "$RUNNER_TEMP/build-device.log" 2>&1 \
+            || { grep -E "error:" "$RUNNER_TEMP/build-device.log" | sort -u | head -n 80; tail -n 20 "$RUNNER_TEMP/build-device.log"; exit 1; }
+          tail -n 20 "$RUNNER_TEMP/build-device.log"
           APP="$RUNNER_TEMP/dd-device/Build/Products/Release-iphoneos/Tono.app"
           test -d "$APP/PlugIns/PacketTunnel.appex"
           test -d "$APP/PlugIns/TonoWidgets.appex"
@@ -97,7 +99,9 @@ jobs:
           set -o pipefail
           xcodebuild -project Tono.xcodeproj -scheme Tono -configuration Debug -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/dd-sim" \
-            CODE_SIGNING_ALLOWED=NO build | tail -n 40
+            CODE_SIGNING_ALLOWED=NO build > "$RUNNER_TEMP/build-sim.log" 2>&1 \
+            || { grep -E "error:" "$RUNNER_TEMP/build-sim.log" | sort -u | head -n 80; tail -n 20 "$RUNNER_TEMP/build-sim.log"; exit 1; }
+          tail -n 20 "$RUNNER_TEMP/build-sim.log"
       - name: Design preview screenshots (simulator, fixture lines, no tunnel)
         run: |
           apps/ios/tools/preview-screenshots.sh \

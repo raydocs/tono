@@ -259,3 +259,18 @@ public enum TunnelStop: Equatable, Sendable {
         return .expected
     }
 }
+
+/// Which haptic a phase change earns, shared with Android `PhaseHaptics`: success only when a start
+/// reaches connected (not partly working → connected), an error when it fails, nothing otherwise.
+public enum HapticCue: Equatable, Sendable {
+    case success, error
+
+    public static func forChange(from previous: Phase?, to phase: Phase) -> HapticCue? {
+        guard let previous, previous != phase else { return nil }
+        switch phase {
+        case .connected: return previous == .connecting || previous == .preparing ? .success : nil
+        case .failed: return .error
+        default: return nil
+        }
+    }
+}
