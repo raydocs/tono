@@ -251,7 +251,9 @@ class HorizonUiDeviceTest {
         fun check(screen: String) { compose.waitForIdle(); found += A11yContract.violations(compose, "zh $screen") + A11yContract.truncatedText(compose, "zh $screen") }
         set(DeviceFixtures.idle); check("idle"); shot("fixture-21-zh-idle")
         set(DeviceFixtures.degraded()); check("degraded"); shot("fixture-22-zh-degraded")
-        compose.onNodeWithTag("details").performClick(); check("details"); shot("fixture-23-zh-details"); back()
+        compose.onNodeWithTag("details").performClick(); check("details"); shot("fixture-23-zh-details")
+        assertTrue("country in Chinese inside the Details sheet", compose.onAllNodes(androidx.compose.ui.test.hasText("日本", substring = true)).fetchSemanticsNodes().isNotEmpty())
+        back()
         compose.onNodeWithContentDescription(zhContext.getString(R.string.settings_title)).performClick(); check("settings"); shot("fixture-24-zh-settings")
         assertTrue("Chinese copy is on screen", compose.onAllNodes(androidx.compose.ui.test.hasText(zhContext.getString(R.string.settings_title))).fetchSemanticsNodes().isNotEmpty())
         assertEquals(found.joinToString("\n"), 0, found.size)

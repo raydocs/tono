@@ -52,7 +52,13 @@ class HomeInteractionTest {
     private fun show(locale: java.util.Locale? = null) {
         compose.setContent {
             val conf = android.content.res.Configuration(androidx.compose.ui.platform.LocalConfiguration.current).apply { if (locale != null) setLocale(locale) }
-            CompositionLocalProvider(LocalReduceMotion provides true, androidx.compose.ui.platform.LocalConfiguration provides conf) {
+            val base = androidx.compose.ui.platform.LocalContext.current
+            val ctx = if (locale != null) base.createConfigurationContext(conf) else base
+            CompositionLocalProvider(
+                LocalReduceMotion provides true,
+                androidx.compose.ui.platform.LocalContext provides ctx,
+                androidx.compose.ui.platform.LocalResources provides ctx.resources,
+            ) {
                 TonoTheme {
                     TonoRoot(snapshot, object : TonoActions {
                         override fun connect() { calls += "connect" }
@@ -138,6 +144,10 @@ class HomeInteractionTest {
         snapshot = UiFixtures.connected()
         compose.waitForIdle()
         compose.onNode(hasText("日本", substring = true)).assertExists()
+        // Details is a bottom sheet in its own window, which re-provides the activity's configuration.
+        compose.onNodeWithTag("details").performClick()
+        compose.waitForIdle()
+        compose.onAllNodes(hasText("日本", substring = true)).fetchSemanticsNodes().let { assertEquals("日本 on Home and in Details", true, it.size >= 2) }
         compose.onAllNodes(hasText("Japan", substring = true)).assertCountEquals(0)
     }
 

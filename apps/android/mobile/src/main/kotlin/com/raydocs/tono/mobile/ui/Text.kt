@@ -1,7 +1,7 @@
 package com.raydocs.tono.mobile.ui
 
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import com.raydocs.tono.mobile.R
 import com.raydocs.tono.mobile.engine.EngineSnapshot
@@ -10,7 +10,15 @@ import com.raydocs.tono.mobile.engine.Phase
 import com.raydocs.tono.routing.RoutingMode
 
 @Composable
-fun isChinese(): Boolean = LocalConfiguration.current.locales[0].language == "zh"
+fun isChinese(): Boolean = uiLocale().language == "zh"
+
+/**
+ * The language the strings on screen are in. Read from the same resources as stringResource, because
+ * a bottom sheet's window re-provides LocalConfiguration from the activity (device check: Chinese
+ * Details showed "Japan").
+ */
+@Composable
+fun uiLocale(): java.util.Locale = LocalResources.current.configuration.locales[0]
 
 @Composable
 fun phaseTitle(p: Phase): String = stringResource(
@@ -86,4 +94,4 @@ fun signInError(code: String): String = when (code) {
 
 /** A probe's ISO country code in the UI language, which can differ from the process default (per-app language). */
 @Composable
-fun countryName(code: String): String = Format.country(code, LocalConfiguration.current.locales[0])
+fun countryName(code: String): String = Format.country(code, uiLocale())
