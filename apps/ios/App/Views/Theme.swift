@@ -183,14 +183,22 @@ private struct GlassSurface<S: Shape>: ViewModifier {
                 .overlay(shape.stroke(Color.white.opacity(contrast == .increased ? 0.4 : 0.12), lineWidth: 1))
         } else if #available(iOS 26.0, *) {
             content
+                .background(sheen)
                 .glassEffect(.regular.tint((tint ?? TonoColor.glassTint).opacity(0.3)).interactive(interactive), in: shape)
                 .overlay(rim)
         } else {
             content
+                .background(sheen)
                 .background((tint ?? TonoColor.glassTint).opacity(0.36), in: shape)
                 .background(.ultraThinMaterial, in: shape)
                 .overlay(rim)
         }
+    }
+
+    /// Light falling on the upper half, over the glass and under the label.
+    private var sheen: some View {
+        shape.fill(LinearGradient(colors: [Color.white.opacity(0.07), .clear], startPoint: .top, endPoint: .center))
+            .allowsHitTesting(false)
     }
 
     /// Bright where the sky lights the top edge, faint underneath.

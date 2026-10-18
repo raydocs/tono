@@ -89,11 +89,9 @@ struct WidgetGallery: View {
 
     private var lockScreen: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                StatusWidgetView(p: StatusPresentation(on), family: .accessoryRectangular, interactive: false, preview: true)
-                    .frame(width: 172, height: 76)
-                StatusWidgetView(p: StatusPresentation(stale), family: .accessoryRectangular, interactive: false, preview: true)
-                    .frame(width: 172, height: 76)
+            HStack(alignment: .top, spacing: 12) {
+                lockWidget(on)
+                lockWidget(stale)
             }
             .foregroundStyle(.white)
             ActivityLockView(p: StatusPresentation(on), preview: true)
@@ -104,6 +102,14 @@ struct WidgetGallery: View {
         .padding(14)
         .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .environment(\.colorScheme, .dark)
+    }
+
+    private func lockWidget(_ reading: StatusReading) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            StatusWidgetView(p: StatusPresentation(reading), family: .accessoryRectangular, interactive: false, preview: true)
+                .frame(width: 172, height: 76)
+            PreviewTag()
+        }
     }
 
     /// The Control Center switch's symbol and labels for on, off and no fresh reading (the system

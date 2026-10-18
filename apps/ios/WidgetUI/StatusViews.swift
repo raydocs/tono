@@ -95,8 +95,12 @@ struct StatusWidgetView: View {
 
     var body: some View {
         content
-            // The tag takes the same corner on every size (it sat mid-card on the medium widget).
-            .overlay(alignment: .topTrailing) { if preview { PreviewTag() } }
+            // The tag takes the same corner on both Home Screen sizes (it sat mid-card on the medium
+            // widget). Lock Screen widgets are too small to share a corner: the gallery tags them
+            // underneath.
+            .overlay(alignment: .topTrailing) {
+                if preview && (family == .systemSmall || family == .systemMedium) { PreviewTag() }
+            }
             // Widgets have a fixed size: text grows with Dynamic Type up to xxxLarge, then stops
             // (Apple's guidance for widgets); the app itself follows every size.
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)

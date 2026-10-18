@@ -613,8 +613,15 @@ extension AppModel {
     }
 
     private func show(_ phase: Phase, reason override: String? = nil) {
-        if override == "NETWORK_CHANGED" {
-            // Reasserting keeps the session; only the probes restart.
+        var reason: String? = phase == .degraded ? "HOME_UNREACHABLE" : phase == .failed ? "HOME_UNAVAILABLE" : nil
+        // `-TonoPreviewReason NETWORK_CHANGED|CORE_STOPPED|…` shows another reason for the same phase.
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "-TonoPreviewReason"), i + 1 < args.count, phase != .idle { reason = args[i + 1] }
+        if let override { reason = override }
+        if phase == .connecting, reason == "NETWORK_CHANGED" {
+            // Reasserting keeps the session and its connected date (as `tunnelChanged` does for
+            // `.reasserting`); only the probes restart.
+            connectedSince = connectedSince ?? Date().addingTimeInterval(-47 * 60)
             cloudProbe = ExitProbe(state: .checking)
             homeProbe = ExitProbe(state: .checking)
         } else if phase.tunnelUp {
@@ -630,11 +637,6 @@ extension AppModel {
             rx = 0
             tx = 0
         }
-        var reason: String? = phase == .degraded ? "HOME_UNREACHABLE" : phase == .failed ? "HOME_UNAVAILABLE" : nil
-        // `-TonoPreviewReason NETWORK_CHANGED|CORE_STOPPED|…` shows another reason for the same phase.
-        let args = CommandLine.arguments
-        if let i = args.firstIndex(of: "-TonoPreviewReason"), i + 1 < args.count, phase != .idle { reason = args[i + 1] }
-        if let override { reason = override }
         previewPhase = (phase, reason)
         recompute()
     }

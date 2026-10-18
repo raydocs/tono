@@ -381,13 +381,17 @@ struct ActionCapsule: View {
             shownPhase = phase
             shownReconnecting = reconnecting
         }
-        .onChange(of: phase) { next in
+        // Keyed on the phase and the reason together: the iOS 16 `onChange` closure sees the previous
+        // render's properties, so `reason` read inside it would be stale (state-cycle-en.mp4 @ fc9c812
+        // replayed the sunrise on connected → reconnecting).
+        .onChange(of: CapsuleState(phase: phase, reconnecting: reconnecting)) { change in
+            let next = change.phase
             let wasUp = shownPhase?.tunnelUp == true || shownReconnecting
             shownPhase = next
-            shownReconnecting = reconnecting
+            shownReconnecting = change.reconnecting
             // Connected ⇄ partly working ⇄ reconnecting keeps the warm edge; the sunrise plays only
             // on the way up from off.
-            if wasUp && (next.tunnelUp || reconnecting) {
+            if wasUp && (next.tunnelUp || change.reconnecting) {
                 fillOpacity = 0
                 return
             }
@@ -406,7 +410,7 @@ struct ActionCapsule: View {
     }
 
     private var accessibilityValue: String {
-        if phase.tunnelUp, let connectedSince {
+        if phase.tunnelUp || reconnecting, let connectedSince {
             return PhaseText.title(phase, reason: reason) + ", " + L.t("a11y_connected_for", PhaseText.clock(since: connectedSince, now: Date()))
         }
         return PhaseText.title(phase, reason: reason)
@@ -435,7 +439,9 @@ struct ActionCapsule: View {
     @ViewBuilder private var trailing: some View {
         if filled {
             if !typeSize.isAccessibilitySize { GlyphIcon(glyph: .arrow, tint: TonoColor.actionInk, size: 18) }
-        } else if phase.tunnelUp, let connectedSince {
+        } else if phase.tunnelUp || reconnecting, let connectedSince {
+            // A network change does not end the session: its clock keeps running (iOS keeps the
+            // connected date while it reasserts).
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 Text(PhaseText.clock(since: connectedSince, now: context.date))
                     .tonoFont(15, .medium, relativeTo: .subheadline).monospacedDigit()
@@ -474,6 +480,11 @@ extension AnyTransition {
         guard rise > 0, !reduceMotion else { return .asymmetric(insertion: arrive, removal: leave) }
         return .asymmetric(insertion: arrive.combined(with: .offset(y: rise)), removal: leave.combined(with: .offset(y: -rise * 0.75)))
     }
+}
+
+private struct CapsuleState: Equatable {
+    let phase: Phase
+    let reconnecting: Bool
 }
 
 /// A soft warm band crossing the capsule every 1.6 s (the reflection's light, in the control),
