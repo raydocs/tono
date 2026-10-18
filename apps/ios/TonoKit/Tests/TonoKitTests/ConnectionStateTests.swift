@@ -34,10 +34,11 @@ final class ConnectionStateTests: XCTestCase {
         XCTAssertEqual(reason, "NETWORK_CHANGED")
     }
 
-    func testNetworkChangeHoldsTheSunAboveAFirstStart() {
+    func testNetworkChangeSunSitsBelowAPartlyWorkingTunnel() {
         let held = SkyState(.connecting, reason: "NETWORK_CHANGED")
         XCTAssertEqual(held, .reconnecting)
-        XCTAssertGreaterThan(held.sunRise, SkyState(.connecting).sunRise)
+        // Nothing is confirmed while iOS reasserts: no brighter than a tunnel that is up but partly failing.
+        XCTAssertLessThan(held.sunRise, SkyState(.degraded).sunRise)
         XCTAssertLessThan(held.sunRise, SkyState(.connected).sunRise)
     }
 

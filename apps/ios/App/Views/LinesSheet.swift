@@ -128,8 +128,9 @@ struct SheetSurface: ViewModifier {
 
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *), !reduceTransparency {
-            // System sheet glass, smoked enough that Home's title never shows through behind rows.
-            content.background(TonoColor.smoke.opacity(0.72).ignoresSafeArea())
+            // System sheet glass, smoked enough that Home's title never shows through behind rows
+            // (0.72 read as a thick smoke over the glass in round 8's reviews; 0.6 still hides it).
+            content.background(TonoColor.smoke.opacity(0.6).ignoresSafeArea())
         } else {
             content.background(TonoColor.smoke.ignoresSafeArea())
         }

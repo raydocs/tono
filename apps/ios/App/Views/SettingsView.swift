@@ -1,5 +1,6 @@
 import SwiftUI
 import TonoKit
+import UIKit
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
@@ -18,22 +19,20 @@ struct SettingsView: View {
                     // In the content, under the navigation bar, so it never covers the sheet's edge.
                     if PreviewBadge.shown { PreviewBadge().padding(.leading, 6).padding(.top, 4) }
                     #endif
+                    // The mode is chosen in one place, Details (one tap from Home, next to where traffic
+                    // goes); Settings names it and keeps the full descriptions in the disclosure below.
                     SectionLabel(text: L.t("settings_routing"))
-                    SmokeCard {
-                        ModeRow(title: L.t("mode_three_tier"), desc: L.t("mode_three_tier_line"), selected: model.mode == .threeTier) {
-                            Task { await model.setMode(.threeTier) }
-                        }
-                        // The line already says "everything else → cloud"; the title does not repeat it.
-                        ModeRow(title: L.t("mode_stable_short"), desc: L.t("mode_stable_line"), selected: model.mode == .stable) {
-                            Task { await model.setMode(.stable) }
-                        }
-                    }
+                    Text(L.t("settings_mode_where", L.t(model.mode == .stable ? "mode_stable_short" : "mode_three_tier_short")))
+                        .tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4).padding(.bottom, 8)
+                        .accessibilityIdentifier("settingsModeWhere")
 
                     // The routing boundaries stay one tap away instead of a wall of text on open.
                     SmokeCard {
                         DisclosureGroup(isExpanded: $showScope) {
                             VStack(alignment: .leading, spacing: 10) {
-                                // The full mode descriptions live here; the rows above say one line each.
+                                // The full mode descriptions live here; the picker is in Details.
                                 para(L.t("mode_three_tier") + (L.isChinese ? "：" : ": ") + L.t("mode_three_tier_desc"))
                                 para(L.t("mode_stable") + (L.isChinese ? "：" : ": ") + L.t("mode_stable_desc"))
                                 para(L.t("routing_scope"))
@@ -49,7 +48,6 @@ struct SettingsView: View {
                         .tint(TonoColor.textSecondary)
                         .accessibilityIdentifier("scopeDisclosure")
                     }
-                    .padding(.top, 16)
 
                     // "Where does a site go?" lives in Details, next to where traffic goes.
 
@@ -59,6 +57,13 @@ struct SettingsView: View {
                             Text(L.t("system_include_all")).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
                         }
                         .tint(TonoColor.accent)
+                        if model.includeAllPending {
+                            // The running tunnel keeps the previous setting until it next starts.
+                            Text(L.t("system_include_all_pending")).tonoFont(13, .medium, relativeTo: .footnote)
+                                .foregroundStyle(TonoColor.warning)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("includeAllPending")
+                        }
                         para(L.t("system_include_all_short"))
                         // The mechanics (restart hold, Connect On Demand) one tap away, as the routing scope.
                         DisclosureGroup(isExpanded: $showSystemHow) {
@@ -133,41 +138,19 @@ struct SettingsView: View {
     }
 }
 
-private struct ModeRow: View {
-    let title: String
-    let desc: String
-    let selected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    Circle().strokeBorder(selected ? TonoColor.accent : TonoColor.textTertiary, lineWidth: 2).frame(width: 20, height: 20)
-                    if selected { Circle().fill(TonoColor.accent).frame(width: 10, height: 10) }
-                }
-                .padding(.top, 2)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
-                    Text(desc).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.textSecondary).multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
-    }
-}
-
-/// "Where does this site go?" against the same graph the tunnel runs (shown in Details).
+/// "Where does this site go?" against the same graph the tunnel runs (shown in Details). The answer
+/// is worked out from the routing rules for the current mode, not a live test. Submitting closes the
+/// keyboard, so the answer is on screen, and VoiceOver reads it; a different site or mode clears or
+/// recomputes it, so an old answer never stands next to new input.
 struct RouteCheck: View {
+    /// The answer appeared: the sheet scrolls it into view.
+    var onAnswer: () -> Void = {}
+    /// The field gained or lost focus: the sheet grows to full height while typing.
+    var onFocus: (Bool) -> Void = { _ in }
     @EnvironmentObject private var model: AppModel
     @State private var host = ""
-    @State private var result: String?
-
+    @State private var answer: RouteAnswer?
+    @FocusState private var focused: Bool
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -180,23 +163,48 @@ struct RouteCheck: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
+                .focused($focused)
                 .onSubmit(run)
                 .onChange(of: host) { value in
                     // A wrapping field types return as a newline: treat it as Search.
-                    guard value.contains("\n") else { return }
-                    host = value.replacingOccurrences(of: "\n", with: "")
-                    run()
+                    if value.contains("\n") {
+                        host = value.replacingOccurrences(of: "\n", with: "")
+                        run()
+                        return
+                    }
+                    // Another site: the answer on screen is no longer about it.
+                    if let answer, RouteExplainer.cleanHost(value) != answer.host { self.answer = nil }
                 }
             QuietButton(title: L.t("check_go"), action: run)
         }
-        if let result {
-            Text(result).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
-                .accessibilityAddTraits(.updatesFrequently)
+        .onChange(of: focused) { onFocus($0) }
+        // The same site under the other mode can go elsewhere (example.com: direct vs cloud).
+        .onChange(of: model.mode) { _ in if answer != nil { run() } }
+        if let answer {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L.t("check_answer_\(answer.tcp.rawValue)", answer.host))
+                    .tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(L.t("check_result", L.t("verdict_\(answer.tcp.rawValue)"), L.t("verdict_\(answer.udp.rawValue)")))
+                    .tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.textSecondary)
+                Text(L.t("check_basis")).tonoFont(12, relativeTo: .caption).foregroundStyle(TonoColor.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("routeAnswer")
+            .id("routeAnswer")
         }
     }
 
     private func run() {
-        guard let answer = model.explain(host) else { result = nil; return }
-        result = L.t("check_result", L.t("verdict_\(answer.tcp.rawValue)"), L.t("verdict_\(answer.udp.rawValue)"))
+        focused = false
+        guard let found = model.explain(host) else { answer = nil; return }
+        answer = found
+        onAnswer()
+        let spoken = L.t("check_answer_\(found.tcp.rawValue)", found.host)
+        // After the keyboard has gone, so the announcement is not cut off by the focus change.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            UIAccessibility.post(notification: .announcement, argument: spoken)
+        }
     }
 }

@@ -45,6 +45,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var mode: RoutingMode = Preferences.mode
     @Published private(set) var selectedNode: String? = Preferences.selectedNode
     @Published private(set) var includeAllNetworks: Bool = Preferences.includeAllNetworks
+    /// Changed while the tunnel is on: iOS applies it only when the tunnel next starts, so the running
+    /// tunnel still uses the previous value until then.
+    @Published private(set) var includeAllPending = false
     @Published private(set) var liveActivityEnabled: Bool = Preferences.liveActivity
     /// First run: the one-screen introduction before sign-in.
     @Published private(set) var showOnboarding: Bool = !Preferences.onboarded
@@ -323,10 +326,12 @@ final class AppModel: ObservableObject {
 
     func setIncludeAllNetworks(_ on: Bool) async {
         includeAllNetworks = on
+        includeAllPending = phase.switchOn
         if isPreview { return }
         Preferences.includeAllNetworks = on
         guard tunnel.manager != nil else { return }
         // Takes effect on the next start; iOS does not apply protocol options to a running tunnel.
+        // `tunnel.start` passes the value again, so a failed save here is repaired by the next start.
         _ = try? await tunnel.prepare(includeAllNetworks: on, onDemand: tunnel.manager?.isOnDemandEnabled ?? false)
     }
 
@@ -419,6 +424,7 @@ final class AppModel: ObservableObject {
             if before != .connected { runProbes() }
             Task { await readStatus() }
         case .disconnected, .invalid:
+            includeAllPending = false
             traffic.stop()
             probeTask?.cancel()
             cloudProbe = ExitProbe()

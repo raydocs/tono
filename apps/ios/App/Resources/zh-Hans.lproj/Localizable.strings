@@ -83,8 +83,6 @@
 "mode_three_tier_desc" = "AI 与已批准的家宽名单 → 云 → 你的家宽；视频 → 云；国内应用、浏览器、局域网及其他流量走你自己的网络直连。";
 "mode_stable" = "稳定（全部经云）";
 "mode_stable_desc" = "AI 同样走家宽；其他所有公网目标都经云端出口。局域网仍走本地。";
-"mode_stable_line" = "AI → 家宽 · 其他全部 → 云";
-"mode_three_tier_line" = "AI → 家宽 · 视频 → 云 · 其他直连";
 "mode_stable_short" = "稳定";
 "routing_scope_title" = "Tono 能识别什么、不能识别什么";
 "routing_scope" = "优先级：21 项云端视频例外 → 166 项 AI／指定家宽条目（另含 Anthropic 地址段）→ 明确的云端列表 → 其他全部直连。命中的流量失败时会被拦住，不会退回直连；命中的 UDP/QUIC 会被拒绝，应用会改用 TCP。使用 ECH、自带 DoH 或缓存地址的应用可能隐藏 AI 身份，这部分会走直连；无法保证未识别的 AI 走家宽。";
@@ -92,6 +90,14 @@
 "check_hint_inline" = "查一个网址，例如 claude.ai";
 "check_go" = "检查";
 "check_result" = "TCP → %1$@ · UDP → %2$@";
+"settings_mode_where" = "当前为%1$@。在「详情」里切换，就在流量去向旁边。";
+"system_include_all_pending" = "下次连接时生效。";
+"check_answer_HOME" = "%1$@ 走你的家宽。";
+"check_answer_CLOUD" = "%1$@ 走云端出口。";
+"check_answer_DIRECT" = "%1$@ 直连，走你自己的网络。";
+"check_answer_BLOCKED" = "%1$@ 会被拦截。";
+"check_answer_DNS" = "%1$@ 由 Tono 的 DNS 解析。";
+"check_basis" = "按当前模式的路由规则推算，不是实测。";
 "verdict_HOME" = "家宽";
 "verdict_CLOUD" = "云";
 "verdict_DIRECT" = "直连";

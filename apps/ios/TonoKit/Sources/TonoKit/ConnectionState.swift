@@ -28,8 +28,9 @@ public enum Phase: String, Sendable, CaseIterable {
 
 /// Which sky the sea scene paints (desktop SeaScene destinations, Android `SkyState`).
 public enum SkyState: Sendable {
-    /// `reconnecting`: iOS is reasserting a tunnel that was up (network change). The sun holds near
-    /// the day height instead of dropping back to the dawn of a first start.
+    /// `reconnecting`: iOS is reasserting a tunnel that was up (network change). The sun sits a little
+    /// below a partly working tunnel (nothing is confirmed yet), never as high as a working one; the
+    /// session clock and the light running down the reflection tell it apart from a first start.
     case night, dawn, rising, reconnecting, day, duskWarning, ember
 
     public init(_ phase: Phase, reason: String? = nil) {
@@ -50,7 +51,7 @@ public enum SkyState: Sendable {
         case .night: return 0
         case .dawn: return 0.5
         case .rising: return 0.7
-        case .reconnecting: return 0.9
+        case .reconnecting: return 0.66
         case .day: return 1
         case .duskWarning: return 0.72
         case .ember: return 0.28

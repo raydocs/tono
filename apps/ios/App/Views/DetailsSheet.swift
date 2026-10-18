@@ -18,7 +18,16 @@ struct DetailsSheet: View {
         self.onOtherLine = onOtherLine
     }
 
+    /// Medium by default (large at accessibility sizes); typing in the route check grows it to large,
+    /// so the field, the keyboard and the answer fit together.
+    @State private var detent: PresentationDetent = .medium
+
+    private var detents: Set<PresentationDetent> {
+        typeSize.isAccessibilitySize || DebugAccessibility.largeSheets ? [.large] : [.medium, .large]
+    }
+
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text(L.t("details")).tonoFont(22, .semibold, relativeTo: .title2).foregroundStyle(TonoColor.textPrimary)
@@ -31,7 +40,7 @@ struct DetailsSheet: View {
                                action: action.title, onAction: { perform(action) })
                     }
                 }
-                section(L.t("details_routes")) { lanes }
+                section(L.t("details_routes")) { lanes(proxy) }
                 section(L.t("details_mode")) { modePicker }
                 Button(action: onSettings) {
                     HStack(spacing: 12) {
@@ -50,9 +59,11 @@ struct DetailsSheet: View {
             }
             .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 20)
         }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .modifier(SheetSurface())
-        .presentationDetents(typeSize.isAccessibilitySize || DebugAccessibility.largeSheets ? [.large] : [.medium, .large])
+        .presentationDetents(detents, selection: $detent)
+        .onAppear { if !detents.contains(detent) { detent = .large } }
         .presentationDragIndicator(.visible)
     }
 
@@ -72,7 +83,7 @@ struct DetailsSheet: View {
         }
     }
 
-    private var lanes: some View {
+    private func lanes(_ proxy: ScrollViewProxy) -> some View {
         let homeDest: String
         switch model.homeKind {
         case .none: homeDest = L.t("lane_cloud_no_home")
@@ -90,7 +101,14 @@ struct DetailsSheet: View {
             LaneDivider()
             // "Where does a site go?" in the same card as where traffic goes (moved out of Settings);
             // the field's prompt carries the question, so it needs no section of its own.
-            VStack(alignment: .leading, spacing: 8) { RouteCheck() }
+            VStack(alignment: .leading, spacing: 8) {
+                RouteCheck(onAnswer: {
+                    // After the keyboard has gone and the answer has laid out.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        withAnimation(TonoMotion.surface) { proxy.scrollTo("routeAnswer", anchor: .bottom) }
+                    }
+                }, onFocus: { if $0 { detent = .large } })
+            }
                 .padding(.horizontal, 14).padding(.vertical, 10)
         }
         .padding(.vertical, 4)

@@ -334,10 +334,8 @@ final class TonoUITests: XCTestCase {
         save(XCUIScreen.main.screenshot(), "interrupted-start-arrives-connected")
     }
 
-    /// "Where does a site go?" moved from Settings to Details (next to where traffic goes) and still
-    /// answers there.
-    @MainActor func testRouteCheckInDetailsAnswers() {
-        let app = launch("DEGRADED", ["-TonoPreviewSheet", "details", "-TonoLargeSheets"])
+    /// Types a site into Details' route check and submits it from the keyboard.
+    @MainActor private func checkSite(_ app: XCUIApplication, _ host: String) {
         // The wrapping field is a text view on iOS 26; Details has no other input.
         let field = app.descendants(matching: .any).matching(NSPredicate(format: "elementType == %d OR elementType == %d",
                                                                         XCUIElement.ElementType.textField.rawValue,
@@ -345,10 +343,40 @@ final class TonoUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 6), "route check field missing from Details")
         if !field.isHittable { app.swipeUp() }
         field.tap()
-        field.typeText("claude.ai\n")
-        let answer = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "TCP →")).firstMatch
+        field.typeText(host + "\n")
+    }
+
+    /// The answer is on screen after Search, not just in the tree: the keyboard has gone and the
+    /// answer lies inside the window, hittable (round 8: it sat under the keyboard while CI was green).
+    @MainActor func testRouteCheckAnswerIsVisibleAfterSubmit() {
+        let app = launch("DEGRADED", ["-TonoPreviewSheet", "details"])
+        checkSite(app, "example.com")
+        let answer = app.descendants(matching: .any)["routeAnswer"]
         XCTAssertTrue(answer.waitForExistence(timeout: 4), "no route answer in Details")
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 0"), object: app.keyboards)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 4), .completed, "the keyboard stayed up over the answer")
+        waitHittable(answer)
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(answer.frame), "answer at \(answer.frame) is off screen")
+        XCTAssertTrue(answer.label.hasPrefix("example.com goes directly over your own network."), answer.label)
         save(XCUIScreen.main.screenshot(), "details-route-check")
+    }
+
+    /// Switching the mode re-answers the same site instead of leaving the old answer up:
+    /// example.com goes direct under Three-tier and through the cloud under Stable.
+    @MainActor func testRouteCheckAnswerFollowsTheMode() {
+        let app = launch("DEGRADED", ["-TonoPreviewSheet", "details"])
+        checkSite(app, "example.com")
+        let answer = app.descendants(matching: .any)["routeAnswer"]
+        XCTAssertTrue(answer.waitForExistence(timeout: 4))
+        XCTAssertTrue(answer.label.hasPrefix("example.com goes directly"), answer.label)
+        let stable = app.buttons["Stable"]
+        XCTAssertTrue(stable.waitForExistence(timeout: 4))
+        if !stable.isHittable { app.swipeUp() }
+        stable.tap()
+        let cloud = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH %@", "example.com goes through the cloud exit."),
+                                              object: answer)
+        XCTAssertEqual(XCTWaiter().wait(for: [cloud], timeout: 4), .completed, "answer stayed \"\(answer.label)\" after Stable")
+        save(XCUIScreen.main.screenshot(), "details-route-check-stable")
     }
 
     @MainActor func testLinePickerSelectsAndCloses() {
