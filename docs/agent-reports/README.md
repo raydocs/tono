@@ -22,3 +22,4 @@ Collected 2026-09-30 (MDT) from the box; credential values, auth paths, and emai
 - [macos-open-issues-grok.md](macos-open-issues-grok.md) — open macOS-app issues with no unclaimed fix; 2026-10-01; source model: Grok 4.7.
 - [W2-grok-helper.md](W2-grok-helper.md) — macOS root helper hunt (M1–M4): findings, false positives, and PR list; 2026-09-30; source model: Grok 4.7.
 - [W1-grok-mac-config.md](W1-grok-mac-config.md) — W1 macOS config/account/connectivity hunt (M9–M12); 2026-09-30, addendum 2026-10-01; source model: Grok 4.7.
+- [2026-10-18-mobile-reviews-implementation-note.md](2026-10-18-mobile-reviews-implementation-note.md) — two independent blind UI reviews of iOS #1672 / Android #1673, committed verbatim with their evidence lists ([Opus 5.5](2026-10-18-mobile-opus-5-5.md), [GPT-6.1 Sol](2026-10-18-mobile-gpt-6-1-sol.md)), plus the note on their different cutoffs/heads; 2026-10-18; source models: Claude Opus 5.5, GPT-6.1 Sol.
