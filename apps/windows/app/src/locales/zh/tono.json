@@ -555,6 +555,9 @@
     "waitingForSync": "等待首次同步",
     "verifiedSyncHint": "每 5 分钟自动同步。断开时可测全部线路。",
     "catalogError": "最近一次刷新失败：{{error}}",
+    "identityPropagating": "这台设备的出口身份还在准备，Tono 会自动重试。",
+    "identityStuck": "可用出口还没有确认这台设备的身份。退出再登录不会更换身份。请点「重新准备出口身份」再试一次；若仍然停在这里，需要运维对尚未确认的出口做一次身份同步。",
+    "reprovisionIdentity": "重新准备出口身份",
     "protocol": {
       "backup": "备用通道",
       "vlessReality": "VLESS · Reality",

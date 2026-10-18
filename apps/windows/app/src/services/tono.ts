@@ -321,6 +321,9 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   },
   { prefix: 'TONO_DIAG_PREVIEW_EXPIRED', key: 'tono.experience.prepareFailed' },
   { prefix: 'TONO_DIAG_FAILED', key: 'tono.progress.upload.errors.failed' },
+  // Ahead of the English propagating sentence: the stuck prefix contains that
+  // sentence, and the short-retry copy must not win.
+  { prefix: 'TONO_EXIT_IDENTITY_STUCK', key: 'tono.nodes.identityStuck' },
 ]
 
 const MESSAGE_ERROR_KEYS: Array<{ match: RegExp; key: string }> = [
@@ -356,6 +359,10 @@ const MESSAGE_ERROR_KEYS: Array<{ match: RegExp; key: string }> = [
   {
     match: /server error 5\d\d|INTERNAL_ERROR|internal server error/i,
     key: 'tono.login.errors.serverError',
+  },
+  {
+    match: /secure exit identity is still being prepared/i,
+    key: 'tono.nodes.identityPropagating',
   },
 ]
 

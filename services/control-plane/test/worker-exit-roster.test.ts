@@ -279,8 +279,11 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const held = await api('exit-catalog', {
       headers: { authorization: `Bearer ${account.accessToken}` },
     });
-    expect(held.status).toBe(503);
-    expect((await held.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
+    expect(held.status).toBe(200);
+    const heldYaml = String((await held.json() as any).yaml);
+    expect(heldYaml).toContain(device.client_uuid);
+    expect(heldYaml).toContain('exit.example.com');
+    expect(heldYaml).not.toContain('late.example.com');
   });
 
   it('serves the device identity to a bound catalog-home user once the served exit nodes ack', async () => {
@@ -335,14 +338,106 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const catalog = await api('exit-catalog', {
       headers: { authorization: `Bearer ${account.accessToken}` },
     });
-    expect(catalog.status).toBe(503);
-    expect((await catalog.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
+    expect(catalog.status).toBe(200);
+    const body = await catalog.json() as any;
+    const yaml = String(body.yaml);
+    const device = await env.DB.prepare(
+      'SELECT client_uuid FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(account.device.id).first<any>();
+    expect(yaml).toContain(device.client_uuid);
+    expect(yaml).toContain('exit.example.com');
+    expect(yaml).not.toContain('collision.example.com');
+    expect(body.routing?.homeProxy).toBeUndefined();
     // Same when the exit row itself carries the hy2 suffix and only the base block is served.
     await env.DB.prepare("UPDATE exit_nodes SET name = 'Collision · hy2' WHERE id = 'exit-collision'").run();
     const suffixed = await api('exit-catalog', {
       headers: { authorization: `Bearer ${account.accessToken}` },
     });
-    expect(suffixed.status).toBe(503);
+    expect(suffixed.status).toBe(200);
+    expect(String((await suffixed.json() as any).yaml)).not.toContain('collision.example.com');
+  });
+
+  it('serves the acknowledged exit when another served exit is disabled or its roster ack is stale', async () => {
+    const account = await createAccount('unhealthy-sibling');
+    const block = (name: string, server: string) => `  - name: ${name}\n    type: vless\n    server: ${server}\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
+    expect((await admin('exit-catalog', {
+      yaml: `proxies:\n${block('Ready Exit', 'ready.example.com')}${block('Late Exit', 'late.example.com')}`,
+      expectedRevision: 0,
+    }, 'PUT')).status).toBe(200);
+    const timestamp = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      `INSERT INTO exit_nodes(id, name, token_hash, status, last_roster_at, created_at, updated_at)
+       VALUES('exit-ready', 'Ready Exit', ?, 'active', ?, ?, ?)`,
+    ).bind(await sha256('exit-ready-token-with-at-least-32-characters'), timestamp + 3600, timestamp, timestamp).run();
+    await env.DB.prepare(
+      `INSERT INTO exit_nodes(id, name, token_hash, status, last_roster_at, created_at, updated_at)
+       VALUES('exit-late', 'Late Exit', ?, 'active', 1, ?, ?)`,
+    ).bind(await sha256('exit-late-token-with-at-least-32-characters'), timestamp, timestamp).run();
+
+    const stale = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(stale.status).toBe(200);
+    const staleYaml = String((await stale.json() as any).yaml);
+    const device = await env.DB.prepare(
+      'SELECT client_uuid FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(account.device.id).first<any>();
+    expect(staleYaml).toContain(device.client_uuid);
+    expect(staleYaml).toContain('ready.example.com');
+    expect(staleYaml).not.toContain('late.example.com');
+
+    await env.DB.prepare(
+      "UPDATE exit_nodes SET status = 'disabled', last_roster_at = ? WHERE id = 'exit-late'",
+    ).bind(timestamp + 3600).run();
+    const disabled = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(disabled.status).toBe(200);
+    const disabledYaml = String((await disabled.json() as any).yaml);
+    expect(disabledYaml).toContain('ready.example.com');
+    expect(disabledYaml).not.toContain('late.example.com');
+  });
+
+  it('keeps a fresh exit that has not acknowledged this device off the catalog until it does', async () => {
+    const account = await createAccount('pending-exit');
+    const block = (name: string, server: string) => `  - name: ${name}\n    type: vless\n    server: ${server}\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n    servername: www.microsoft.com\n    reality-opts:\n      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n      short-id: abcd1234\n`;
+    const first = await admin('exit-catalog', {
+      yaml: `proxies:\n${block('Pending Exit', 'pending.example.com')}`,
+      expectedRevision: 0,
+    }, 'PUT');
+    expect(first.status).toBe(200);
+    const device = await env.DB.prepare(
+      'SELECT client_uuid, created_at FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(account.device.id).first<any>();
+    const createdAt = Number(device.created_at);
+    await env.DB.prepare(
+      `INSERT INTO exit_nodes(id, name, token_hash, status, last_roster_at, created_at, updated_at)
+       VALUES('exit-pending', 'Pending Exit', ?, 'active', ?, ?, ?)`,
+    ).bind(await sha256('exit-pending-token-with-at-least-32-characters'), createdAt - 30, createdAt, createdAt).run();
+
+    const alone = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(alone.status).toBe(503);
+    expect((await alone.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
+
+    const published = await admin('exit-catalog', {
+      yaml: `proxies:\n${block('Pending Exit', 'pending.example.com')}${block('Ready Exit', 'ready.example.com')}`,
+      expectedRevision: (await first.json() as any).revision,
+    }, 'PUT');
+    expect(published.status).toBe(200);
+    await env.DB.prepare(
+      `INSERT INTO exit_nodes(id, name, token_hash, status, last_roster_at, created_at, updated_at)
+       VALUES('exit-ready-sibling', 'Ready Exit', ?, 'active', ?, ?, ?)`,
+    ).bind(await sha256('exit-ready-sibling-token-with-at-least-32-characters'), createdAt + 10, createdAt, createdAt).run();
+    const withSibling = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(withSibling.status).toBe(200);
+    const yaml = String((await withSibling.json() as any).yaml);
+    expect(yaml).toContain(device.client_uuid);
+    expect(yaml).toContain('ready.example.com');
+    expect(yaml).not.toContain('pending.example.com');
   });
 
   it('issues no exit identity when the served catalog filters down to no proxies', async () => {
@@ -626,8 +721,9 @@ rules: []
         headers: { authorization: `Bearer ${HOME_TOKEN}` },
       })).status).toBe(401);
 
-      // Publishing an unacknowledged node after cutover must hold new catalog
-      // credentials until that node has actually reconciled the roster.
+      // A node that has never acknowledged is omitted. The exit that already
+      // acknowledged this device keeps serving; the new node stays out until
+      // its roster ack is strictly after the credential.
       const late = await admin('exit-nodes', { id: 'exit-late', name: 'Late Exit' });
       const lateToken = String((await late.json() as any).token);
       expect((await admin('exit-catalog', {
@@ -637,8 +733,8 @@ rules: []
       const blocked = await api('exit-catalog', {
         headers: { authorization: `Bearer ${account.accessToken}` },
       });
-      expect(blocked.status).toBe(503);
-      expect((await blocked.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
+      expect(blocked.status).toBe(200);
+      expect(String((await blocked.json() as any).yaml)).not.toContain('late.example.com');
 
       const lateRoster = await api('home/exit-identities', {
         headers: { authorization: `Bearer ${lateToken}` },
@@ -646,9 +742,11 @@ rules: []
       const observedAt = Number((await lateRoster.json() as any).observedAt);
       expect(observedAt).toBe(Math.floor(startedAt / 1_000));
       expect((await api('home/roster-ack', json({ observedAt }, lateToken))).status).toBe(200);
-      expect((await api('exit-catalog', {
+      const tied = await api('exit-catalog', {
         headers: { authorization: `Bearer ${account.accessToken}` },
-      })).status).toBe(503);
+      });
+      expect(tied.status).toBe(200);
+      expect(String((await tied.json() as any).yaml)).not.toContain('late.example.com');
 
       // Seconds are the persisted wire precision. An acknowledgement tied with a
       // credential's creation cannot prove whether it was fetched before or after
@@ -660,9 +758,11 @@ rules: []
       const settledAt = Number((await settledRoster.json() as any).observedAt);
       expect(settledAt).toBe(observedAt + 1);
       expect((await api('home/roster-ack', json({ observedAt: settledAt }, lateToken))).status).toBe(200);
-      expect((await api('exit-catalog', {
+      const settled = await api('exit-catalog', {
         headers: { authorization: `Bearer ${account.accessToken}` },
-      })).status).toBe(200);
+      });
+      expect(settled.status).toBe(200);
+      expect(String((await settled.json() as any).yaml)).toContain('late.example.com');
 
     } finally {
       clock.mockRestore();

@@ -7,6 +7,7 @@ import {
   filterHy2CatalogForViewer,
   hy2CatalogEmailAllowlist,
   requestAcceptsHy2Catalog,
+  retainCatalogProxies,
   splitManagedCatalogProxies,
   HY2_NAME_SUFFIX,
 } from './catalog-yaml';
@@ -40,38 +41,138 @@ export async function enqueueRefreshCatalogForUser(e: Env, userId: string) {
   return queued;
 }
 
-// A served node without an active exit_nodes row has no token to
-// acknowledge a roster with, so nothing proves it holds the credential.
-// A served catalog home is left out only while no exit_nodes row (any
-// status) carries its name, its hy2 base name or that name plus the hy2
-// suffix: the two tables share no uniqueness, so a home named like an
-// exit must not exempt that exit.
-async function servedExitsAcknowledged(
-  e: Env,
+// Same window as ops exit-token freshness. Defined here so the catalog gate
+// does not import an ops handler. An exit that acknowledged a roster inside
+// this window is still catching up to a newer credential (pending). Older
+// than this, never acknowledged, disabled, or missing, it is unhealthy and
+// must not keep every other exit's catalog at 503.
+export const ROSTER_FRESH_SEC = 15 * 60;
+
+type ExitAckRow = { name: string; status: string; lastRosterAt: number };
+type ServedHome = { node: string; name: string };
+
+function exitRowForBase(rows: ExitAckRow[], base: string): ExitAckRow | undefined {
+  return rows.find((row) => row.name === base)
+    ?? rows.find((row) => row.name === `${base}${HY2_NAME_SUFFIX}`);
+}
+
+function exitAckGate(
+  row: ExitAckRow | undefined,
   createdAt: number,
+  t: number,
+): 'ready' | 'pending' | 'unhealthy' {
+  if (!row || row.status !== 'active') return 'unhealthy';
+  const ack = row.lastRosterAt;
+  if (!Number.isSafeInteger(ack) || ack < 0) return 'unhealthy';
+  if (ack > createdAt) return 'ready';
+  if (ack > 0 && t - ack < ROSTER_FRESH_SEC) return 'pending';
+  return 'unhealthy';
+}
+
+async function loadExitAckRows(e: Env, bases: string[]): Promise<ExitAckRow[]> {
+  const names = [...new Set(bases.flatMap((base) => [base, `${base}${HY2_NAME_SUFFIX}`]))];
+  if (names.length === 0) return [];
+  const listed = await e.DB.prepare(
+    `SELECT name, status, last_roster_at FROM exit_nodes
+     WHERE name IN (SELECT value FROM json_each(?))`,
+  ).bind(JSON.stringify(names)).all<Row>();
+  return listed.results.map((row) => ({
+    name: String(row.name),
+    status: String(row.status),
+    lastRosterAt: Number(row.last_roster_at ?? 0),
+  }));
+}
+
+// Cloud names are always tracked. A catalog home is tracked only when an
+// exit_nodes row carries its base name or that name plus the hy2 suffix:
+// the two tables share no uniqueness, so a home with no exit row must not
+// invent an acknowledgement, and a home that shares an exit's name must
+// not exempt that exit.
+function trackedExitBases(rows: ExitAckRow[], servedNodes: string[], servedHomes: ServedHome[]): Set<string> {
+  const tracked = new Set(servedNodes);
+  for (const home of servedHomes) {
+    if (exitRowForBase(rows, home.node)) tracked.add(home.node);
+  }
+  return tracked;
+}
+
+function readyExitBases(rows: ExitAckRow[], tracked: Set<string>, createdAt: number, t: number): Set<string> {
+  const ready = new Set<string>();
+  for (const base of tracked) {
+    if (exitAckGate(exitRowForBase(rows, base), createdAt, t) === 'ready') ready.add(base);
+  }
+  return ready;
+}
+
+function keptExitBases(ready: Set<string>, tracked: Set<string>, servedHomes: ServedHome[]): Set<string> {
+  const keep = new Set(ready);
+  for (const home of servedHomes) {
+    if (!tracked.has(home.node)) keep.add(home.node);
+  }
+  return keep;
+}
+
+export type AcknowledgedExitIdentity = { clientUuid: string; keep: Set<string> };
+
+// The identity and the exit base names allowed to carry it. A ready exit
+// (active, last_roster_at after this credential) is served. A pending exit
+// (active and fresh, but not yet past this credential) is omitted while a
+// sibling is ready, and holds the catalog at 503 when it is the only tracked
+// exit. An unhealthy exit is omitted the same way and never holds a ready
+// sibling closed. No ready exit at all stays 503: an unacknowledged UUID is
+// not served, and a shared credential is still never minted here.
+export async function selectAcknowledgedExitIdentity(
+  e: Env,
+  userId: string,
+  deviceId: string,
   servedNodes: string[],
-  servedHomes: Array<{ node: string; name: string }>,
-): Promise<boolean> {
-  const readiness = await e.DB.prepare(
-    `SELECT COUNT(*) AS served_nodes,
-            SUM(CASE WHEN exit_nodes.status = 'active' AND exit_nodes.last_roster_at > ?
-                     THEN 0 ELSE 1 END) AS unready_nodes
-     FROM (
-       SELECT value AS node FROM json_each(?)
-       UNION
-       SELECT json_extract(home.value, '$.node') FROM json_each(?) home
-       WHERE EXISTS (
-         SELECT 1 FROM exit_nodes named
-         WHERE named.name IN (json_extract(home.value, '$.node'), json_extract(home.value, '$.name'))
-            OR named.name IN (json_extract(home.value, '$.node') || ?, json_extract(home.value, '$.name') || ?)
-       )
-     ) served
-     LEFT JOIN exit_nodes ON exit_nodes.name = served.node`,
-  ).bind(
-    createdAt, JSON.stringify(servedNodes), JSON.stringify(servedHomes),
-    HY2_NAME_SUFFIX, HY2_NAME_SUFFIX,
-  ).first<Row>();
-  return Number(readiness?.served_nodes ?? 0) >= 1 && Number(readiness?.unready_nodes ?? 0) === 0;
+  servedHomes: ServedHome[],
+): Promise<AcknowledgedExitIdentity> {
+  await e.DB.prepare(
+    `INSERT OR IGNORE INTO device_exit_credentials(device_id, user_id, client_uuid, created_at)
+     SELECT id, user_id, ?, ? FROM devices
+     WHERE id = ? AND user_id = ? AND status IN ('pending', 'active')`,
+  ).bind(crypto.randomUUID(), now(), deviceId, userId).run();
+  const row = await e.DB.prepare(
+    `SELECT credentials.client_uuid, credentials.created_at
+     FROM device_exit_credentials credentials
+     JOIN devices ON devices.id = credentials.device_id
+     WHERE credentials.device_id = ? AND credentials.user_id = ?
+       AND devices.status IN ('pending', 'active')`,
+  ).bind(deviceId, userId).first<Row>();
+  if (!row) {
+    throw new ApiError(409, 'DEVICE_STATE_CHANGED', 'Device is no longer active');
+  }
+  const bases = [...new Set([...servedNodes, ...servedHomes.map((home) => home.node)])];
+  const rows = await loadExitAckRows(e, bases);
+  const tracked = trackedExitBases(rows, servedNodes, servedHomes);
+  const t = now();
+  const deviceReady = readyExitBases(rows, tracked, Number(row.created_at), t);
+  if (deviceReady.size > 0) {
+    return {
+      clientUuid: String(row.client_uuid),
+      keep: keptExitBases(deviceReady, tracked, servedHomes),
+    };
+  }
+  if (await exitCredentialRolloutPhase(e) === 'dual' && !(await legacyExitCredentialRetired(e, userId))) {
+    const shared = await e.DB.prepare(
+      'SELECT client_uuid, created_at FROM exit_credentials WHERE user_id = ? AND retired_at IS NULL',
+    ).bind(userId).first<Row>();
+    if (shared) {
+      const sharedReady = readyExitBases(rows, tracked, Number(shared.created_at), t);
+      if (sharedReady.size > 0) {
+        return {
+          clientUuid: String(shared.client_uuid),
+          keep: keptExitBases(sharedReady, tracked, servedHomes),
+        };
+      }
+    }
+  }
+  throw new ApiError(
+    503,
+    'EXIT_IDENTITY_PROPAGATING',
+    'Exit identity is waiting for a served exit node to acknowledge it',
+  );
 }
 
 /// The identity this account presents at the exit, minted on first need.
@@ -81,8 +182,9 @@ async function servedExitsAcknowledged(
 /// tampered catalog every time.
 ///
 /// `servedNodes` are the exit node names (hy2 folded to the base name) of the
-/// catalog this response serves. Only they must hold the device credential; a
-/// node that is registered but not published is not dialed with it.
+/// catalog this response serves. A device catalog substitutes the returned
+/// uuid only into the bases `selectAcknowledgedExitIdentity` keeps. A node
+/// that is registered but not published is not dialed with it.
 export async function exitClientUUID(
   e: Env,
   userId: string,
@@ -91,46 +193,12 @@ export async function exitClientUUID(
   servedHomes: Array<{ node: string; name: string }> = [],
 ): Promise<string> {
   if (deviceId) {
-    await e.DB.prepare(
-      `INSERT OR IGNORE INTO device_exit_credentials(device_id, user_id, client_uuid, created_at)
-       SELECT id, user_id, ?, ? FROM devices
-       WHERE id = ? AND user_id = ? AND status IN ('pending', 'active')`,
-    ).bind(crypto.randomUUID(), now(), deviceId, userId).run();
-    const row = await e.DB.prepare(
-      `SELECT credentials.client_uuid, credentials.created_at
-       FROM device_exit_credentials credentials
-       JOIN devices ON devices.id = credentials.device_id
-       WHERE credentials.device_id = ? AND credentials.user_id = ?
-         AND devices.status IN ('pending', 'active')`,
-    ).bind(deviceId, userId).first<Row>();
-    if (!row) {
-      throw new ApiError(409, 'DEVICE_STATE_CHANGED', 'Device is no longer active');
-    }
-    if (!(await servedExitsAcknowledged(e, Number(row.created_at), servedNodes, servedHomes))) {
-      // During the dual phase, keep existing clients on the per-user
-      // credential until the device credential is confirmed on every served
-      // exit, but only a shared credential that already exists and that every
-      // served exit has acknowledged since it was created. A missing or
-      // unacknowledged one is never minted or served here: the exit would
-      // reject it, so this device waits for its own credential instead.
-      // A revoked device may hold the shared credential, so once any device
-      // of the account is revoked it is retired (migration 0077) and never
-      // served again; this device waits for its own credential instead.
-      if (await exitCredentialRolloutPhase(e) === 'dual' && !(await legacyExitCredentialRetired(e, userId))) {
-        const shared = await e.DB.prepare(
-          'SELECT client_uuid, created_at FROM exit_credentials WHERE user_id = ? AND retired_at IS NULL',
-        ).bind(userId).first<Row>();
-        if (shared && await servedExitsAcknowledged(e, Number(shared.created_at), servedNodes, servedHomes)) {
-          return String(shared.client_uuid);
-        }
-      }
-      throw new ApiError(
-        503,
-        'EXIT_IDENTITY_PROPAGATING',
-        'Exit identity is waiting for every served exit node to acknowledge it',
-      );
-    }
-    return String(row.client_uuid);
+    // Callers that substitute this uuid must keep only `keep`. The device
+    // catalog path does that in publicManagedCatalog; a uuid from here is
+    // not safe to write into a node this selection omitted.
+    return (await selectAcknowledgedExitIdentity(
+      e, userId, deviceId, servedNodes, servedHomes,
+    )).clientUuid;
   }
   if (await exitCredentialRolloutPhase(e) === 'device_only') {
     throw new ApiError(
@@ -283,6 +351,18 @@ export async function routingSha256(routing: CatalogRouting | undefined) {
  *   fixed recipe — so clients read it from every response, including one
  *   whose (revision, sha256, routingSha256) key is unchanged.
  */
+export function routingWithoutOmittedProxies(
+  routing: CatalogRouting | undefined,
+  keep: ReadonlySet<string>,
+): CatalogRouting | undefined {
+  if (!routing) return undefined;
+  const next: CatalogRouting = { ...routing };
+  if (next.homeProxy && !keep.has(catalogBaseName(next.homeProxy))) delete next.homeProxy;
+  if (next.defaultProxy && !keep.has(catalogBaseName(next.defaultProxy))) delete next.defaultProxy;
+  if (!next.homeProxy && !next.defaultProxy && !next.homeSocks5) return undefined;
+  return next;
+}
+
 export async function publicManagedCatalog(
   e: Env,
   options?: {
@@ -361,8 +441,23 @@ export async function publicManagedCatalog(
       if (homeNames.has(item.name) || homeNames.has(node)) servedHomes.push({ node, name: item.name });
       else servedNodes.add(node);
     }
-    const issued = await exitClientUUID(e, options.userId, options.deviceId, [...servedNodes], servedHomes);
-    served = served.split(CLIENT_UUID_PLACEHOLDER).join(issued);
+    if (options.deviceId) {
+      const selected = await selectAcknowledgedExitIdentity(
+        e, options.userId, options.deviceId, [...servedNodes], servedHomes,
+      );
+      served = retainCatalogProxies(served, selected.keep);
+      routing = routingWithoutOmittedProxies(routing, selected.keep);
+      if (
+        hy2AutoSwitch
+        && !splitManagedCatalogProxies(served).items.some((item) => item.name.endsWith(HY2_NAME_SUFFIX))
+      ) {
+        hy2AutoSwitch = false;
+      }
+      served = served.split(CLIENT_UUID_PLACEHOLDER).join(selected.clientUuid);
+    } else {
+      const issued = await exitClientUUID(e, options.userId, null, [...servedNodes], servedHomes);
+      served = served.split(CLIENT_UUID_PLACEHOLDER).join(issued);
+    }
   }
   return {
     revision,

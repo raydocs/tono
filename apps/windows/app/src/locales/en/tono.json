@@ -555,6 +555,9 @@
     "waitingForSync": "Waiting for first sync",
     "verifiedSyncHint": "Automatic sync runs every 5 minutes. Invalid updates never replace the last verified copy. “Test all” is available while disconnected.",
     "catalogError": "Latest refresh failed: {{error}}",
+    "identityPropagating": "This device's exit identity is still being prepared. Tono will retry shortly.",
+    "identityStuck": "No usable exit has confirmed this device's identity yet. Signing out and back in does not replace it. Tap Prepare exit identity again. If it stays here, an operator has to re-sync the exit that has not acknowledged.",
+    "reprovisionIdentity": "Prepare exit identity",
     "protocol": {
       "backup": "Backup channel",
       "vlessReality": "VLESS · Reality",
