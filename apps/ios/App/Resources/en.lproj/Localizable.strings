@@ -206,3 +206,7 @@
 "reason_ROUTES_STOPPED" = "A settings change was refused and the previous routes could not be restored. Retry rebuilds them.";
 "short_ROUTES_STOPPED" = "Retry rebuilds them";
 "state_routes_stopped" = "Routes stopped";
+"route_unconfirmed" = "Couldn't confirm the switch to %1$@";
+"route_unsaved" = "Couldn't save the routes in use either; Tono will retry.";
+"check_unconfirmed" = "Tono couldn't confirm which routes are in use, so there's no answer yet.";
+"line_unconfirmed" = "Unconfirmed";

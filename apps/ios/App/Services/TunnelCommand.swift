@@ -28,6 +28,13 @@ enum TunnelCommand {
             throw TunnelCommandError(refusal: refusal)
         }
         guard let manager else { return }
+        // Retry while the tunnel runs without routes (a refused rebuild): starting would do nothing,
+        // so ask the extension to rebuild; its heartbeat then reports what runs.
+        let status = manager.connection.status
+        if status == .connected || status == .reasserting, let session = manager.connection as? NETunnelProviderSession {
+            try session.sendProviderMessage(TunnelMessage.reload.encoded) { _ in }
+            return
+        }
         if !manager.isOnDemandEnabled {
             manager.isOnDemandEnabled = true
             try await manager.saveToPreferences()

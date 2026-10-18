@@ -47,6 +47,20 @@ public enum ReloadReply: Equatable, Sendable {
     }
 }
 
+/// The `running` field of the extension's status reply.
+public enum TunnelRunning: Equatable, Sendable {
+    case graph(RouteSettings)
+    /// The extension answered: no graph runs.
+    case noGraph
+
+    /// nil when there is no reply or it does not say.
+    public static func decode(_ data: Data?) -> TunnelRunning? {
+        guard let data, let json = try? JSON.parse(data), let running = json["running"] else { return nil }
+        if let s = RouteSettings(running) { return .graph(s) }
+        return running == .null ? .noGraph : nil
+    }
+}
+
 public enum RouteApplyOutcome: Equatable, Sendable {
     /// The running tunnel confirmed the new graph.
     case applied(RouteSettings)
@@ -55,6 +69,22 @@ public enum RouteApplyOutcome: Equatable, Sendable {
     /// Not in effect. `inEffect` is what the tunnel uses (or, when off, will use); nil when the
     /// running tunnel has no graph at all.
     case notApplied(code: String, inEffect: RouteSettings?)
+    /// The tunnel answered neither the rebuild nor the question of what it runs: the request may or
+    /// may not be in effect, so neither it nor the previous routes are claimed. The file keeps the
+    /// request (it was not refused).
+    case unconfirmed(RouteSettings)
+}
+
+public struct RouteApplyReport: Equatable, Sendable {
+    public var outcome: RouteApplyOutcome
+    /// Put-back of the inputs file that failed: what the file should hold and does not. The app
+    /// retries it, and says so, instead of swallowing the error.
+    public var unsaved: RouteSettings?
+
+    public init(_ outcome: RouteApplyOutcome, unsaved: RouteSettings? = nil) {
+        self.outcome = outcome
+        self.unsaved = unsaved
+    }
 }
 
 /// Changing the mode or line: save the inputs, ask a running tunnel to rebuild, and report only
@@ -62,30 +92,46 @@ public enum RouteApplyOutcome: Equatable, Sendable {
 public enum RouteApply {
     public static func run(_ requested: RouteSettings, previous: RouteSettings, tunnelUp: Bool,
                            save: (RouteSettings) throws -> Void,
-                           reload: () async -> Data?) async -> RouteApplyOutcome {
+                           reload: () async -> Data?,
+                           status: () async -> Data?) async -> RouteApplyReport {
         do {
             try save(requested)
         } catch {
             // The inputs file is written atomically: it still holds the previous choice.
-            return .notApplied(code: "SAVE_FAILED", inEffect: previous)
+            return RouteApplyReport(.notApplied(code: "SAVE_FAILED", inEffect: previous))
         }
-        guard tunnelUp else { return .saved(requested) }
+        guard tunnelUp else { return RouteApplyReport(.saved(requested)) }
+        var unsaved: RouteSettings?
+        // A later On Demand restart reads the file: keep it on the graph that runs.
+        func putBack(_ s: RouteSettings) {
+            do { try save(s) } catch { unsaved = s }
+        }
+        let outcome: RouteApplyOutcome
         switch ReloadReply.decode(await reload()) {
         case .applied(let running) where running == requested:
-            return .applied(requested)
+            outcome = .applied(requested)
         case .applied(let running):
-            // The extension read other inputs than these (a concurrent write): keep the file and the
-            // screens on what actually runs.
-            try? save(running)
-            return .notApplied(code: "NOT_APPLIED", inEffect: running)
+            // The extension read other inputs than these (a concurrent write).
+            putBack(running)
+            outcome = .notApplied(code: "NOT_APPLIED", inEffect: running)
         case .refused(let code, let running):
-            // A later On Demand restart reads the file: keep it on the graph that runs.
-            try? save(running ?? previous)
-            return .notApplied(code: code, inEffect: running)
+            putBack(running ?? previous)
+            outcome = .notApplied(code: code, inEffect: running)
         case nil:
-            // No answer from the tunnel: the switch is unconfirmed, so nothing claims it.
-            try? save(previous)
-            return .notApplied(code: "NO_REPLY", inEffect: previous)
+            // No answer is not a refusal: the rebuild may have run. Ask what runs instead of assuming.
+            switch TunnelRunning.decode(await status()) {
+            case .graph(let running) where running == requested:
+                outcome = .applied(requested)
+            case .graph(let running):
+                putBack(running)
+                outcome = .notApplied(code: "NO_REPLY", inEffect: running)
+            case .noGraph:
+                putBack(previous)
+                outcome = .notApplied(code: "NO_REPLY", inEffect: nil)
+            case nil:
+                outcome = .unconfirmed(requested)
+            }
         }
+        return RouteApplyReport(outcome, unsaved: unsaved)
     }
 }

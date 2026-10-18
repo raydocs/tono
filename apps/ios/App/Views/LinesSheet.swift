@@ -86,7 +86,8 @@ struct LinesSheet: View {
     }
 
     private func row(_ line: LineItem) -> some View {
-        let selected = line.name == model.selectedNode
+        // After a line switch the tunnel never answered, no row claims to be in use.
+        let selected = line.name == model.selectedNode && model.unsettled(\.node)?.pending != false
         return Button {
             guard !model.changingRoutes else { return }
             UISelectionFeedbackGenerator().selectionChanged()

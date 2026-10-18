@@ -206,3 +206,7 @@
 "reason_ROUTES_STOPPED" = "设置更改被拒绝，之前的路由也没能恢复。点「重试」重建。";
 "short_ROUTES_STOPPED" = "点重试重建";
 "state_routes_stopped" = "路由已停止";
+"route_unconfirmed" = "无法确认是否已切换到「%1$@」";
+"route_unsaved" = "当前路由也没能保存，Tono 会重试。";
+"check_unconfirmed" = "无法确认当前使用的路由，暂不作答。";
+"line_unconfirmed" = "未确认";

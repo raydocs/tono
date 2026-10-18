@@ -25,6 +25,20 @@ struct WidgetGallery: View {
     private var dropped: StatusReading {
         .fresh(StatusSnapshot(state: .failed, exit: exit, reason: "CORE_STOPPED", updatedAt: now.addingTimeInterval(-120), writer: .tunnel))
     }
+    /// Not a fixture: built the way the extension builds it. A rebuild and the restore of the old
+    /// graph are both refused (`TunnelGraph`, as in PacketTunnelProvider), the heartbeat writes over
+    /// the app's Connected snapshot, and the reading comes back through the shared file's encoding.
+    private var routesStopped: StatusReading {
+        struct Refused: Error {}
+        var graph = TunnelGraph()
+        try? graph.run(TunnelInputs(catalogBody: "", mode: .threeTier, selectedNode: nil), build: { _ in "" }, start: { _ in })
+        _ = graph.reload(load: { TunnelInputs(catalogBody: "", mode: .stable, selectedNode: nil) }, build: { _ in "" },
+                         start: { _ in throw Refused() }, persist: { _ in })
+        let since = now.addingTimeInterval(-20 * 60)
+        let app = StatusSnapshot.fromApp(.connected, reason: nil, exit: exit, since: since, now: now.addingTimeInterval(-10 * 60))
+        let beat = graph.heartbeat(since: since, previous: app, now: now.addingTimeInterval(-30))
+        return StatusReading.read(StatusSnapshot.decode(beat.encoded()), now: now)
+    }
     private var off: StatusReading {
         .fresh(StatusSnapshot(state: .off, exit: exit, updatedAt: now.addingTimeInterval(-300), writer: .app))
     }
@@ -45,6 +59,7 @@ struct WidgetGallery: View {
                     card(dropped, .systemSmall)
                     card(.unavailable, .systemSmall)
                 }
+                card(routesStopped, .systemMedium).id("routesStopped")
                 card(degraded, .systemMedium)
                 card(off, .systemMedium)
                 Text(L.t("gallery_lock")).font(.headline).foregroundStyle(light ? .black : TonoColor.textPrimary).padding(.top, 6)
@@ -57,6 +72,8 @@ struct WidgetGallery: View {
         .onAppear {
             // `-TonoPreviewWidgetsBottom`: start at the Control Center row (screenshots cannot scroll).
             if CommandLine.arguments.contains("-TonoPreviewWidgetsBottom") { proxy.scrollTo("controls", anchor: .bottom) }
+            // `-TonoPreviewWidgetsRoutes`: the card the heartbeat writes when no graph runs.
+            if CommandLine.arguments.contains("-TonoPreviewWidgetsRoutes") { proxy.scrollTo("routesStopped", anchor: .center) }
         }
         }
         // Cards scroll under a strip the colour of the top of the wallpaper, not under the clock;
@@ -112,18 +129,27 @@ struct WidgetGallery: View {
         }
     }
 
-    /// The Control Center switch's symbol and labels for on, off and no fresh reading (the system
-    /// draws the real control; this shows the custom symbols render).
+    /// The Control Center switch's symbol and labels for on, off, no fresh reading and routes
+    /// stopped (the system draws the real control; this shows the custom symbols render).
     private var controls: some View {
-        HStack(spacing: 18) {
-            control(on: true, label: L.t("widget_on_short"))
-            control(on: false, label: L.t("widget_off_short"))
-            control(on: false, label: L.t("widget_unknown_short"))
+        let stopped = routesStopped
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 18) { controlRow(stopped) }
+            VStack(alignment: .leading, spacing: 12) { controlRow(stopped) }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .accessibilityIdentifier("galleryControls")
+    }
+
+    @ViewBuilder private func controlRow(_ stopped: StatusReading) -> some View {
+        control(on: true, label: L.t("widget_on_short"))
+        control(on: false, label: L.t("widget_off_short"))
+        control(on: false, label: L.t("widget_unknown_short"))
+        if case .fresh(let s) = stopped {
+            control(on: StatusWording(stopped).switchOn, label: L.t(StatusWording.titleKey(s.state, reason: s.reason)))
+        }
     }
 
     private func control(on: Bool, label: String) -> some View {

@@ -7,7 +7,7 @@ import TonoKit
 /// time and no live timer; no reading says so and offers the app, never a guessed "off".
 struct StatusPresentation: Equatable {
     enum Tone: Equatable { case on, warn, error, busy, off, unknown }
-    enum Action: Equatable { case connect, disconnect, openApp }
+    typealias Action = StatusWording.Action
 
     let title: String
     /// Line in use, or the short reason when something is wrong.
@@ -35,20 +35,20 @@ struct StatusPresentation: Equatable {
         }
         let fresh: Bool
         if case .fresh = reading { fresh = true } else { fresh = false }
+        // Title key, switch and button come from TonoKit's `StatusWording` (tested with the heartbeat).
+        let wording = StatusWording(reading)
         stale = !fresh
-        isOn = fresh && s.state.switchOn
+        isOn = wording.switchOn
         let time = Self.time(s.updatedAt)
         since = fresh && s.state.tunnelUp ? s.since : nil
-        let stateTitle: String
+        let stateTitle = L.t(StatusWording.titleKey(s.state, reason: s.reason))
         let stateTone: Tone
         switch s.state {
-        case .on: stateTitle = L.t("state_connected"); stateTone = .on
-        case .degraded: stateTitle = L.t("state_degraded"); stateTone = .warn
-        case .connecting:
-            stateTitle = L.t(s.reason == "NETWORK_CHANGED" ? "state_reconnecting" : "state_connecting"); stateTone = .busy
-        case .off: stateTitle = L.t("state_idle"); stateTone = .off
-        case .failed: stateTitle = L.t(s.reason == "CORE_STOPPED" ? "state_dropped" : "state_failed"); stateTone = .error
-        case .signedOut: stateTitle = L.t("state_signed_out"); stateTone = .off
+        case .on: stateTone = .on
+        case .degraded: stateTone = .warn
+        case .connecting: stateTone = .busy
+        case .off, .signedOut: stateTone = .off
+        case .failed: stateTone = .error
         }
         guard fresh else {
             // An old report is never stated as now: the title says the status is unknown and the
@@ -69,12 +69,9 @@ struct StatusPresentation: Equatable {
         case .degraded, .failed: detail = reasonText
         case .off, .signedOut: detail = nil
         }
-        // Only a fresh, signed-in reading offers a switch; anything else opens the app first.
-        if s.state == .signedOut {
-            action = .openApp
-        } else {
-            action = s.state.switchOn ? .disconnect : .connect
-        }
+        // Only a fresh, signed-in reading offers a switch; anything else opens the app first. A
+        // failure offers Retry (a rebuild when the tunnel is still up, see `TunnelCommand`).
+        action = wording.action
     }
 
     var tint: Color {
@@ -102,6 +99,7 @@ struct StatusPresentation: Equatable {
     var actionTitle: String {
         switch action {
         case .connect: return L.t("action_connect")
+        case .retry: return L.t("action_retry")
         case .disconnect: return L.t("action_disconnect")
         case .openApp: return L.t("widget_open")
         }

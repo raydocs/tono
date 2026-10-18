@@ -128,18 +128,22 @@ struct DetailsSheet: View {
     /// Two segments and one plain sentence for the mode in effect. A switch shows as pending on the
     /// segment asked for until the tunnel confirms it; a refusal says so here and keeps the old one.
     private var modePicker: some View {
-        let pending = model.changingRoutes ? model.routeChange?.requested.mode : nil
+        // Pending: the switch is waiting on the tunnel. Unsure: it never answered, so no segment
+        // claims to be in use until a status read settles it.
+        let unsettled = model.unsettled(\.mode)
+        let pending = unsettled?.pending == true ? unsettled?.value : nil
+        let unsure = unsettled?.pending == false
         return VStack(alignment: .leading, spacing: 8) {
             // Accessibility sizes stack the two, so "Three-tier" never breaks inside the word.
             let row = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 4))
             row {
-                modeSegment(.threeTier, pending: pending)
-                modeSegment(.stable, pending: pending)
+                modeSegment(.threeTier, pending: pending, unsure: unsure)
+                modeSegment(.stable, pending: pending, unsure: unsure)
             }
             .padding(4)
             .contentCard(RoundedRectangle(cornerRadius: 16, style: .continuous))
             Group {
-                if let pending, pending != model.mode {
+                if let pending {
                     Text(L.t("route_switching", ModeText.name(pending))).foregroundStyle(TonoColor.textSecondary)
                 } else if let note = model.routeNote(full: true), model.routeChange?.requested.mode != model.mode {
                     Text(note).foregroundStyle(TonoColor.warning).accessibilityIdentifier("modeNotApplied")
@@ -153,9 +157,9 @@ struct DetailsSheet: View {
         }
     }
 
-    private func modeSegment(_ mode: RoutingMode, pending: RoutingMode?) -> some View {
-        let selected = model.mode == mode
-        let waiting = pending == mode && !selected
+    private func modeSegment(_ mode: RoutingMode, pending: RoutingMode?, unsure: Bool) -> some View {
+        let selected = model.mode == mode && !unsure
+        let waiting = pending == mode
         return Button {
             guard !selected else { return }
             UISelectionFeedbackGenerator().selectionChanged()
@@ -178,7 +182,7 @@ struct DetailsSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(pending != nil)
+        .disabled(model.changingRoutes)
         .accessibilityLabel(ModeText.name(mode))
         .accessibilityValue(waiting ? L.t("route_switching", ModeText.name(mode)) : "")
         .accessibilityAddTraits(selected ? [.isSelected] : [])

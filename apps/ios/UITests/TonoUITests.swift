@@ -442,6 +442,73 @@ final class TonoUITests: XCTestCase {
         save(XCUIScreen.main.screenshot(), "home-mode-refused")
     }
 
+    /// A mode switch the tunnel answers neither for the rebuild nor for what it runs (injected):
+    /// neither mode is claimed. No segment is selected, Details says the switch is unconfirmed, and
+    /// the route check gives no rule-based answer until a status read settles it.
+    @MainActor func testUnansweredModeSwitchClaimsNeitherMode() {
+        let app = launch("CONNECTED", ["-TonoPreviewSheet", "details", "-TonoPreviewApplyFails", "silent"])
+        let stable = app.buttons["mode_STABLE"]
+        XCTAssertTrue(stable.waitForExistence(timeout: 4))
+        if !stable.isHittable { app.scrollViews.firstMatch.swipeDown() }
+        stable.tap()
+        let note = app.descendants(matching: .any)["modeNotApplied"]
+        XCTAssertTrue(note.waitForExistence(timeout: 4), "no word in Details that the switch is unconfirmed")
+        XCTAssertEqual(note.label, "Couldn't confirm the switch to Stable")
+        XCTAssertFalse(app.buttons["mode_THREE_TIER"].isSelected, "Three-tier is claimed although the switch may have run")
+        XCTAssertFalse(stable.isSelected, "Stable is claimed although the tunnel never confirmed it")
+        checkSite(app, "example.com")
+        let message = app.descendants(matching: .any)["routeCheckMessage"]
+        XCTAssertTrue(message.waitForExistence(timeout: 4))
+        XCTAssertTrue(message.label.hasPrefix("Tono couldn't confirm which routes are in use"), message.label)
+        XCTAssertFalse(app.descendants(matching: .any)["routeAnswer"].exists)
+        save(XCUIScreen.main.screenshot(), "details-mode-unconfirmed")
+    }
+
+    /// A refusal whose put-back of the inputs file also fails is said, not swallowed.
+    @MainActor func testFailedPutBackOfTheFileIsSaid() {
+        let app = launch("CONNECTED", ["-TonoPreviewSheet", "details", "-TonoPreviewApplyFails", "putback"])
+        let stable = app.buttons["mode_STABLE"]
+        XCTAssertTrue(stable.waitForExistence(timeout: 4))
+        if !stable.isHittable { app.scrollViews.firstMatch.swipeDown() }
+        stable.tap()
+        let note = app.descendants(matching: .any)["modeNotApplied"]
+        XCTAssertTrue(note.waitForExistence(timeout: 4))
+        XCTAssertEqual(note.label, "Couldn't switch to Stable. Still using Three-tier. Couldn't save the routes in use either; Tono will retry.")
+    }
+
+    /// A line switch shows on Home as pending until the tunnel confirms it (injected: a slow
+    /// confirmation), then names the new line.
+    @MainActor func testLineSwitchIsPendingOnHomeUntilConfirmed() {
+        let app = launch("CONNECTED", ["-TonoPreviewApplyFails", "slow"])
+        let exit = app.buttons["exitCapsule"]
+        XCTAssertTrue(exit.waitForExistence(timeout: 6))
+        exit.tap()
+        let other = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Los Angeles")).firstMatch
+        XCTAssertTrue(other.waitForExistence(timeout: 4))
+        other.tap()
+        let pending = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Switching to Los Angeles"), object: exit)
+        XCTAssertEqual(XCTWaiter().wait(for: [pending], timeout: 3), .completed, exit.label)
+        XCTAssertFalse(exit.label.hasPrefix("Lines: Los Angeles"), "the new line is named before it is confirmed: \(exit.label)")
+        save(XCUIScreen.main.screenshot(), "home-line-pending")
+        let confirmed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH %@ AND NOT label CONTAINS %@",
+                                                                         "Lines: Los Angeles", "Switching"), object: exit)
+        XCTAssertEqual(XCTWaiter().wait(for: [confirmed], timeout: 8), .completed, exit.label)
+    }
+
+    /// The widget card the extension's heartbeat produces after a rebuild and its restore were
+    /// both refused (built through `TunnelGraph`, the shared-file encoding and `StatusWording`, in
+    /// the real widget view): it says Routes stopped with Retry, never Connected; the Control
+    /// Center switch reads off with the same words.
+    @MainActor func testWidgetFromAHeartbeatWithNoGraphSaysRoutesStopped() {
+        let app = launch("CONNECTED", ["-TonoPreviewWidgets", "-TonoPreviewWidgetsRoutes"])
+        let card = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Routes stopped, Retry rebuilds them")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 8), "no card reading \"Routes stopped, Retry rebuilds them, …\"")
+        XCTAssertTrue(app.staticTexts["Retry"].exists, "the card's button is not Retry")
+        save(XCUIScreen.main.screenshot(), "widget-routes-stopped")
+        let control = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Tono, Routes stopped")).firstMatch
+        XCTAssertTrue(control.exists, "no Control Center switch reading off with Routes stopped")
+    }
+
     @MainActor func testLinePickerSelectsAndCloses() {
         let app = launch("CONNECTED")
         let exit = app.buttons["exitCapsule"]
@@ -502,6 +569,44 @@ final class TonoUITests: XCTestCase {
                               atLargestSize: true)
         failures += try audit(launch("DEGRADED", largest + ["-TonoPreviewSheet", "settings"]), name: "largest-text-settings",
                               atLargestSize: true)
+        failures += try audit(launch("DEGRADED", largest + ["-TonoPreviewSheet", "lines"]), name: "largest-text-lines",
+                              atLargestSize: true)
+        failures += try audit(launch("DEGRADED", largest), name: "largest-text-degraded")
+        failures += try audit(launch("CONNECTING", largest + ["-TonoPreviewReason", "NETWORK_CHANGED"]), name: "largest-text-network-changed")
+        XCTAssertTrue(failures.isEmpty, failures.joined(separator: "\n"))
+    }
+
+    /// Contrast at the largest text size measured without Apple's audit: the audit changes the text
+    /// size while it runs, so its in-place flags are re-measured after it (above). This sweep takes
+    /// every text and control on screen at AX5, at rest, from its own pixels (4.5:1), scrolling each
+    /// sheet once, so a contrast problem that exists only at large sizes cannot pass unseen.
+    @MainActor func testLargestTextContrastSweep() {
+        let largest = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        let screens: [(String, String, [String])] = [
+            ("connected", "CONNECTED", []), ("degraded", "DEGRADED", []), ("failed", "FAILED", []),
+            ("network-changed", "CONNECTING", ["-TonoPreviewReason", "NETWORK_CHANGED"]),
+            ("details", "DEGRADED", ["-TonoPreviewSheet", "details"]), ("lines", "DEGRADED", ["-TonoPreviewSheet", "lines"]),
+            ("settings", "DEGRADED", ["-TonoPreviewSheet", "settings"]),
+        ]
+        var failures: [String] = []
+        var checked = 0
+        for (name, phase, extra) in screens {
+            let app = launch(phase, largest + extra)
+            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+            sleep(2)
+            var result = Self.sweep(app, name: "largest-\(name)")
+            if !extra.isEmpty {
+                app.swipeUp(velocity: .slow)
+                sleep(1)
+                let lower = Self.sweep(app, name: "largest-\(name)-scrolled")
+                result = (result.checked + lower.checked, result.failures + lower.failures)
+            }
+            print("SWEEP largest-\(name): checked \(result.checked) texts/controls, \(result.failures.count) below 4.5:1 or under 44x44 pt")
+            result.failures.forEach { print($0) }
+            checked += result.checked
+            failures += result.failures
+        }
+        XCTAssertGreaterThan(checked, 40, "the sweep measured almost nothing")
         XCTAssertTrue(failures.isEmpty, failures.joined(separator: "\n"))
     }
 

@@ -61,6 +61,8 @@ for lang in zh-Hans en; do
   shot "$lang-16-lines-loading" "$lang" IDLE lines -TonoPreviewLines loading
   shot "$lang-17-widgets" "$lang" CONNECTED "" -TonoPreviewWidgets
   shot "$lang-19-routes-stopped" "$lang" FAILED "" -TonoPreviewReason ROUTES_STOPPED
+  # The widget card and Control Center label the tunnel's heartbeat produces when no graph runs.
+  shot "$lang-17d-widgets-routes-stopped" "$lang" CONNECTED "" -TonoPreviewWidgets -TonoPreviewWidgetsRoutes
 done
 # Widget views on a light wallpaper, and the app itself with the system in light appearance
 # (Tono is dark by design and opts out of light mode; this shows it stays legible and unchanged).
@@ -86,6 +88,10 @@ shot "a11y-largest-text-en-idle" en IDLE
 shot "a11y-largest-text-en-onboarding" en SIGNED_OUT "" -TonoPreviewOnboarding
 shot "a11y-largest-text-en-primer" en NEEDS_PERMISSION primer
 shot "a11y-largest-text-en-widgets" en CONNECTED "" -TonoPreviewWidgets
+shot "a11y-largest-text-en-widgets-routes-stopped" en CONNECTED "" -TonoPreviewWidgets -TonoPreviewWidgetsRoutes
+shot "a11y-largest-text-en-lines" en DEGRADED lines
+shot "a11y-largest-text-en-degraded" en DEGRADED
+shot "a11y-largest-text-en-network-changed" en CONNECTING "" -TonoPreviewReason NETWORK_CHANGED
 xcrun simctl ui "$UDID" content_size large
 xcrun simctl ui "$UDID" increase_contrast enabled || true
 shot "a11y-increase-contrast-connected" zh-Hans CONNECTED

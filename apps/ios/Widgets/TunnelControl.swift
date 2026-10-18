@@ -37,7 +37,9 @@ struct TunnelControl: ControlWidget {
             case .stale:
                 return Value(isOn: false, label: "Tono", offLabel: L.t("widget_unknown_short"))
             case .fresh(let s):
-                return Value(isOn: s.state.switchOn, label: "Tono", offLabel: s.state == .failed ? L.t("state_failed") : L.t("widget_off_short"))
+                // "Routes stopped" while the tunnel runs without a graph; turning it on asks for a rebuild.
+                let off = s.state == .failed ? L.t(StatusWording.titleKey(s.state, reason: s.reason)) : L.t("widget_off_short")
+                return Value(isOn: StatusWording(reading).switchOn, label: "Tono", offLabel: off)
             }
         }
     }

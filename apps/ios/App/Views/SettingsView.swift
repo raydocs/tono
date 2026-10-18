@@ -192,6 +192,8 @@ struct RouteCheck: View {
         // confirmed mode changes `model.mode`, so a pending or refused switch never rewrites it.
         .onChange(of: model.mode) { _ in if result != nil { run() } }
         .onChange(of: model.routesStopped) { _ in if result != nil { run() } }
+        // An unanswered switch withdraws a rule-based answer until a status read settles it.
+        .onChange(of: model.routeChange) { _ in if result != nil { run() } }
         switch result {
         case .answer(let answer)?:
             VStack(alignment: .leading, spacing: 4) {
@@ -224,6 +226,7 @@ struct RouteCheck: View {
         case .invalid(let typed): return L.t("check_invalid", String(typed.prefix(40)))
         case .noLines: return L.t("check_no_lines")
         case .routesStopped: return L.t("check_routes_stopped")
+        case .unconfirmed: return L.t("check_unconfirmed")
         }
     }
 

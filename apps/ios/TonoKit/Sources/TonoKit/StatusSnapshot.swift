@@ -67,11 +67,18 @@ public struct StatusSnapshot: Equatable, Sendable {
     }
 
     /// The tunnel's own write. While it runs it keeps the app's finer state (degraded, the exit
-    /// name) for the same session and only refreshes the time; a stop always wins.
-    public static func fromTunnel(running: Bool, since: Date?, failure: String?, previous: StatusSnapshot?, now: Date) -> StatusSnapshot {
+    /// name) for the same session and only refreshes the time; a stop always wins. `routing` is
+    /// whether sing-box runs a graph: a live process without one is not a connection, so its
+    /// heartbeat says failed (ROUTES_STOPPED), never on.
+    public static func fromTunnel(running: Bool, routing: Bool = true, since: Date?, failure: String?,
+                                  previous: StatusSnapshot?, now: Date) -> StatusSnapshot {
         guard running else {
             return StatusSnapshot(state: failure == nil ? .off : .failed, exit: previous?.exit, since: nil,
                                   reason: failure, updatedAt: now, writer: .tunnel)
+        }
+        guard routing else {
+            return StatusSnapshot(state: .failed, exit: previous?.exit, since: nil, reason: "ROUTES_STOPPED",
+                                  updatedAt: now, writer: .tunnel)
         }
         // Same session: the app's start time (iOS connectedDate) and the tunnel's own differ by the
         // time the start took, so they are compared within a minute.
@@ -142,6 +149,53 @@ public enum StatusReading: Equatable, Sendable {
     public var switchOn: Bool {
         if case .fresh(let s) = self { return s.state.switchOn }
         return false
+    }
+}
+
+/// What a widget, Lock Screen accessory and the Control Center switch say for a reading: the title
+/// (a localisation key), whether the switch reads on, and what their one button does. Kept here so
+/// the path heartbeat → shared snapshot → widget wording is tested in one place.
+public struct StatusWording: Equatable, Sendable {
+    public enum Action: Equatable, Sendable { case connect, retry, disconnect, openApp }
+
+    public let titleKey: String
+    public let switchOn: Bool
+    public let action: Action
+
+    public init(titleKey: String, switchOn: Bool, action: Action) {
+        self.titleKey = titleKey
+        self.switchOn = switchOn
+        self.action = action
+    }
+
+    public init(_ reading: StatusReading) {
+        guard case .fresh(let s) = reading else {
+            titleKey = reading.snapshot == nil ? "widget_unavailable_title" : "widget_stale_title"
+            switchOn = false
+            action = .openApp
+            return
+        }
+        titleKey = Self.titleKey(s.state, reason: s.reason)
+        switchOn = s.state.switchOn
+        switch s.state {
+        case .signedOut: action = .openApp
+        case .failed: action = .retry
+        default: action = s.state.switchOn ? .disconnect : .connect
+        }
+    }
+
+    public static func titleKey(_ state: StatusSnapshot.State, reason: String?) -> String {
+        switch state {
+        case .on: return "state_connected"
+        case .degraded: return "state_degraded"
+        case .connecting: return reason == "NETWORK_CHANGED" ? "state_reconnecting" : "state_connecting"
+        case .off: return "state_idle"
+        case .failed:
+            if reason == "CORE_STOPPED" { return "state_dropped" }
+            if reason == "ROUTES_STOPPED" { return "state_routes_stopped" }
+            return "state_failed"
+        case .signedOut: return "state_signed_out"
+        }
     }
 }
 

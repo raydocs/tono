@@ -193,11 +193,11 @@ struct StatusWidgetView: View {
     @ViewBuilder private var actionButton: some View {
         let label = Text(p.actionTitle)
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(p.action == .connect ? TonoColor.actionInk : TonoColor.textPrimary)
+            .foregroundStyle(p.action == .connect || p.action == .retry ? TonoColor.actionInk : TonoColor.textPrimary)
             .padding(.horizontal, 16)
             .frame(minHeight: 44)
             .background {
-                if p.action == .connect {
+                if p.action == .connect || p.action == .retry {
                     Capsule().fill(TonoColor.actionFill)
                 } else {
                     Capsule().strokeBorder(TonoColor.sunMid.opacity(0.6), lineWidth: 1)
@@ -205,7 +205,7 @@ struct StatusWidgetView: View {
             }
         if interactive && p.action != .openApp {
             if #available(iOS 17.0, *) {
-                Button(intent: SetTunnelIntent(value: p.action == .connect)) { label }
+                Button(intent: SetTunnelIntent(value: p.action != .disconnect)) { label }
                     .buttonStyle(.plain)
             } else {
                 Link(destination: URL(string: "tono://home")!) { label }

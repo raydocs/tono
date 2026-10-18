@@ -314,6 +314,23 @@ struct HomeView: View {
         let latencyText = Text(latency).tonoFont(15, .medium, relativeTo: .subheadline).monospacedDigit()
             .foregroundStyle(TonoColor.textSecondary)
         let chevron = GlyphIcon(glyph: .chevronDown, tint: TonoColor.textTertiary, size: 14)
+        // A line switch waiting on the tunnel spins where the latency was; one it never answered
+        // says Unconfirmed there, so the name above is not read as confirmed.
+        let change = model.unsettled(\.node)
+        let asked = change.map { c in model.lines.first { $0.name == c.value }.map(model.displayName) ?? c.value ?? "" }
+        let trailing = Group {
+            if let change, change.pending {
+                ProgressView().controlSize(.small).tint(TonoColor.textPrimary)
+            } else if change != nil {
+                Text(L.t("line_unconfirmed")).tonoFont(13, .medium, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
+            } else {
+                latencyText
+            }
+        }
+        let status: String = {
+            guard let change, let asked else { return latency }
+            return change.pending ? L.t("route_switching", asked) : L.t("route_unconfirmed", asked)
+        }()
         return Button { showLines = true } label: {
             Group {
                 if ax {
@@ -325,7 +342,7 @@ struct HomeView: View {
                             nameText.fixedSize(horizontal: false, vertical: true)
                         }
                         if model.usingCachedCatalog { cached.fixedSize(horizontal: false, vertical: true) }
-                        HStack { latencyText; Spacer(minLength: 8); chevron }
+                        HStack { trailing; Spacer(minLength: 8); chevron }
                     }
                     .padding(.horizontal, 20).padding(.vertical, 14)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -339,7 +356,7 @@ struct HomeView: View {
                             if model.usingCachedCatalog { cached.lineLimit(2) }
                         }
                         Spacer(minLength: 0)
-                        latencyText.fixedSize()
+                        trailing.fixedSize()
                         chevron
                     }
                     .padding(.horizontal, 18)
@@ -352,7 +369,7 @@ struct HomeView: View {
         }
         .buttonStyle(PressScale(glass: true))
         .zoomSource("lines", in: zoom)
-        .accessibilityLabel("\(L.t("lines_title")): \(name), \(latency)")
+        .accessibilityLabel("\(L.t("lines_title")): \(name), \(status)")
         .accessibilityIdentifier("exitCapsule")
     }
 }

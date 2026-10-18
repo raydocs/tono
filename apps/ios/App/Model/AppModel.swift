@@ -19,6 +19,8 @@ enum HomeKind: Equatable { case none, residential, catalogNode(String) }
 enum RouteCheckResult: Equatable {
     case answer(RouteAnswer)
     case empty, invalid(String), noLines, routesStopped
+    /// A switch the tunnel never answered: which routes are in use is not known.
+    case unconfirmed
 }
 
 /// A mode or line change the tunnel has not (yet) confirmed. The routes on screen stay the ones in
@@ -26,10 +28,13 @@ enum RouteCheckResult: Equatable {
 enum RouteChange: Equatable {
     case pending(RouteSettings)
     case failed(requested: RouteSettings, code: String)
+    /// The tunnel answered neither the rebuild nor what it runs: the request may be in effect or
+    /// not, so the screens claim neither until a status read settles it.
+    case unconfirmed(RouteSettings)
 
     var requested: RouteSettings {
         switch self {
-        case .pending(let s), .failed(let s, _): return s
+        case .pending(let s), .failed(let s, _), .unconfirmed(let s): return s
         }
     }
 }
@@ -67,6 +72,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var routeChange: RouteChange?
     /// The tunnel is up but its graph was closed by a refused rebuild and could not be restored.
     @Published private(set) var routesStopped = false
+    /// The inputs file should hold these (the routes in use) but the put-back after a refusal failed.
+    /// Retried on the next change, foreground and connect; said in the change's note meanwhile.
+    @Published private(set) var unsavedRoutes: RouteSettings?
     @Published private(set) var includeAllNetworks: Bool = Preferences.includeAllNetworks
     /// Changed while the tunnel is on: iOS applies it only when the tunnel next starts, so the running
     /// tunnel still uses the previous value until then.
@@ -174,6 +182,7 @@ final class AppModel: ObservableObject {
         publishStatus(force: true)
         if tunnelStatus == .connected, cloudProbe.state != .checking { runProbes() }
         if tunnelStatus == .connected { await readStatus() }
+        retryPutBack()
         if !tunnelStatus.isUp, let f = SharedFiles.loadFailure(), failure == nil, !userStopping {
             failure = f.code
             recompute()
@@ -264,6 +273,7 @@ final class AppModel: ObservableObject {
         guard await refreshCatalog(quiet: false), let loaded = catalog, wantOn else { return }
         do {
             try SharedFiles.saveInputs(inputs(for: loaded))
+            unsavedRoutes = nil
             userStarting = true
             try await tunnel.start(includeAllNetworks: includeAllNetworks)
         } catch TunnelError.denied {
@@ -351,34 +361,59 @@ final class AppModel: ObservableObject {
 
     var changingRoutes: Bool { if case .pending = routeChange { return true }; return false }
 
+    /// The mode (`\.mode`) or line (`\.node`) a switch is waiting on or that was never confirmed;
+    /// nil when that part is settled.
+    func unsettled<T: Equatable>(_ part: KeyPath<RouteSettings, T>) -> (value: T, pending: Bool)? {
+        switch routeChange {
+        case .pending(let r) where r[keyPath: part] != routeSettings[keyPath: part]: return (r[keyPath: part], true)
+        case .unconfirmed(let r) where r[keyPath: part] != routeSettings[keyPath: part]: return (r[keyPath: part], false)
+        default: return nil
+        }
+    }
+
+    private var unconfirmed: Bool { if case .unconfirmed = routeChange { return true }; return false }
+
     /// Mode and line changes. The screens show the request as pending and keep describing the
     /// routes in effect until the tunnel confirms; a refusal is said where the change was made and
     /// on Home, and the in-effect routes stay as they are.
     private func change(_ requested: RouteSettings, retry: Bool = false) async {
         let previous = routeSettings
-        guard !changingRoutes, retry || requested != previous else { return }
+        // After an unconfirmed switch either choice is a real request, including the previous one.
+        guard !changingRoutes, retry || unconfirmed || requested != previous else { return }
         routeChange = .pending(requested)
-        let outcome: RouteApplyOutcome
+        let report: RouteApplyReport
         #if DEBUG
         if isPreview {
-            outcome = await previewApply(requested, previous: previous)
-            finish(outcome, requested: requested)
+            report = await previewApply(requested, previous: previous)
+            finish(report, requested: requested)
             return
         }
         #endif
+        retryPutBack()
         if let loaded = catalog {
             let tunnel = self.tunnel
-            outcome = await RouteApply.run(requested, previous: previous, tunnelUp: tunnelStatus.isUp,
-                                           save: { try SharedFiles.saveInputs(TunnelInputs(catalogBody: loaded.body, mode: $0.mode, selectedNode: $0.node)) },
-                                           reload: { await tunnel.send(.reload) })
+            report = await RouteApply.run(requested, previous: previous, tunnelUp: tunnelStatus.isUp,
+                                          save: { try SharedFiles.saveInputs(TunnelInputs(catalogBody: loaded.body, mode: $0.mode, selectedNode: $0.node)) },
+                                          reload: { await tunnel.send(.reload) },
+                                          status: { await tunnel.send(.status) })
         } else {
             // No catalog yet, so no tunnel to rebuild: the choice is kept for the first start.
-            outcome = .saved(requested)
+            report = RouteApplyReport(.saved(requested))
         }
-        finish(outcome, requested: requested)
+        finish(report, requested: requested)
     }
 
-    private func finish(_ outcome: RouteApplyOutcome, requested: RouteSettings) {
+    /// Writes the routes in use back to the inputs file after an earlier put-back failed.
+    private func retryPutBack() {
+        guard let s = unsavedRoutes, !isPreview, let loaded = catalog else { return }
+        if (try? SharedFiles.saveInputs(TunnelInputs(catalogBody: loaded.body, mode: s.mode, selectedNode: s.node))) != nil {
+            unsavedRoutes = nil
+        }
+    }
+
+    private func finish(_ report: RouteApplyReport, requested: RouteSettings) {
+        unsavedRoutes = report.unsaved
+        let outcome = report.outcome
         switch outcome {
         case .applied(let s), .saved(let s):
             setInEffect(s)
@@ -393,6 +428,10 @@ final class AppModel: ObservableObject {
             if previewPhase != nil, routesStopped { previewPhase = (.failed, "ROUTES_STOPPED"); recompute() }
             #endif
             if let note = routeNote(full: true) { UIAccessibility.post(notification: .announcement, argument: note) }
+        case .unconfirmed:
+            routeChange = .unconfirmed(requested)
+            recompute()
+            if let note = routeNote(full: true) { UIAccessibility.post(notification: .announcement, argument: note) }
         }
     }
 
@@ -404,16 +443,25 @@ final class AppModel: ObservableObject {
         Preferences.selectedNode = selectedNode
     }
 
-    /// "Couldn't switch to Stable" (short, Home) or with what is still in use (full, the sheets).
+    /// "Couldn't switch to Stable" (short, Home) or with what is still in use (full, the sheets);
+    /// "Couldn't confirm …" when the tunnel never answered. Nothing once what runs is what was asked.
     func routeNote(full: Bool) -> String? {
-        guard case .failed(let requested, _) = routeChange else { return nil }
-        if requested.mode != mode {
-            let want = ModeText.name(requested.mode), have = ModeText.name(mode)
-            return full && !routesStopped ? L.t("route_not_applied_full", want, have) : L.t("route_not_applied", want)
-        }
         let line = { (name: String?) in self.lines.first { $0.name == name }.map(self.displayName) ?? name ?? "" }
-        return full && !routesStopped ? L.t("route_not_applied_full", line(requested.node), line(selectedNode))
-                                      : L.t("route_not_applied", line(requested.node))
+        let unsaved = full && unsavedRoutes != nil ? " " + L.t("route_unsaved") : ""
+        switch routeChange {
+        case .unconfirmed(let requested):
+            let want = requested.mode != mode ? ModeText.name(requested.mode) : line(requested.node)
+            return L.t("route_unconfirmed", want) + unsaved
+        case .failed(let requested, _) where requested != routeSettings:
+            if requested.mode != mode {
+                let want = ModeText.name(requested.mode), have = ModeText.name(mode)
+                return (full && !routesStopped ? L.t("route_not_applied_full", want, have) : L.t("route_not_applied", want)) + unsaved
+            }
+            return (full && !routesStopped ? L.t("route_not_applied_full", line(requested.node), line(selectedNode))
+                                           : L.t("route_not_applied", line(requested.node))) + unsaved
+        default:
+            return nil
+        }
     }
 
     func setIncludeAllNetworks(_ on: Bool) async {
@@ -450,6 +498,8 @@ final class AppModel: ObservableObject {
         guard RouteExplainer.cleanHost(typed) != nil else { return .invalid(typed) }
         // No graph runs: no rule-based answer would describe this phone right now.
         if routesStopped { return .routesStopped }
+        // Which graph runs is not known: an answer from either mode's rules could be wrong.
+        if unconfirmed { return .unconfirmed }
         guard let answer = explain(typed) else { return .noLines }
         return .answer(answer)
     }
@@ -517,6 +567,8 @@ final class AppModel: ObservableObject {
             includeAllPending = false
             routesStopped = false
             if case .failed = routeChange { routeChange = nil }
+            // Stopped before it answered: the file holds the request, so the next start builds it.
+            if case .unconfirmed(let requested) = routeChange { setInEffect(requested); routeChange = nil }
             traffic.stop()
             probeTask?.cancel()
             cloudProbe = ExitProbe()
@@ -545,7 +597,15 @@ final class AppModel: ObservableObject {
         if let v6 = json["ipv6"]?.bool { underlyingIPv6 = v6 }
         // What the extension actually runs; null when a refused rebuild left no graph.
         if let running = json["running"], !changingRoutes {
-            if let settings = RouteSettings(running) {
+            let settings = RouteSettings(running)
+            if case .unconfirmed(let requested) = routeChange, settings != requested {
+                // The unanswered switch did not take: say so, and keep the file on what runs.
+                routeChange = .failed(requested: requested, code: "NO_REPLY")
+                if let settings { unsavedRoutes = settings; retryPutBack() }
+            } else if case .unconfirmed = routeChange {
+                routeChange = nil
+            }
+            if let settings {
                 if settings != routeSettings { setInEffect(settings) }
                 routesStopped = false
             } else {
@@ -750,23 +810,32 @@ extension AppModel {
         recompute()
     }
 
-    /// The real `RouteApply` with an injected fault (`-TonoPreviewApplyFails save|send|reload|stopped`):
-    /// the write is refused, the tunnel does not answer, the tunnel refuses and keeps the previous
-    /// graph, or it refuses with no graph left. Without the argument the change is confirmed.
-    fileprivate func previewApply(_ requested: RouteSettings, previous: RouteSettings) async -> RouteApplyOutcome {
+    /// The real `RouteApply` with an injected fault (`-TonoPreviewApplyFails save|send|silent|reload|stopped|putback|slow`):
+    /// the write is refused; the tunnel does not answer the rebuild but its status shows the old
+    /// graph; it answers neither; it refuses and keeps the previous graph; it refuses with no graph
+    /// left; it refuses and the put-back of the file fails; it confirms after 3 s. Without the argument the
+    /// change is confirmed after 0.7 s.
+    fileprivate func previewApply(_ requested: RouteSettings, previous: RouteSettings) async -> RouteApplyReport {
         let args = CommandLine.arguments
         let fault = args.firstIndex(of: "-TonoPreviewApplyFails").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
         // Long enough for the pending state to be seen and recorded.
-        try? await Task.sleep(nanoseconds: 700_000_000)
+        try? await Task.sleep(nanoseconds: fault == "slow" ? 3_000_000_000 : 700_000_000)
+        var writes = 0
         return await RouteApply.run(requested, previous: previous, tunnelUp: phase.tunnelUp,
-                                    save: { _ in if fault == "save" { throw CocoaError(.fileWriteNoPermission) } },
+                                    save: { _ in
+                                        writes += 1
+                                        if fault == "save" || (fault == "putback" && writes > 1) { throw CocoaError(.fileWriteNoPermission) }
+                                    },
                                     reload: {
                                         switch fault {
-                                        case "send": return nil
-                                        case "reload": return ReloadReply.refused(code: "CORE_START", running: previous).encoded
+                                        case "send", "silent": return nil
+                                        case "reload", "putback": return ReloadReply.refused(code: "CORE_START", running: previous).encoded
                                         case "stopped": return ReloadReply.refused(code: "CORE_START", running: nil).encoded
                                         default: return ReloadReply.applied(requested).encoded
                                         }
+                                    },
+                                    status: {
+                                        fault == "send" ? Data(JSON.obj(("running", previous.json)).serialized().utf8) : nil
                                     })
     }
 }
