@@ -13,6 +13,7 @@ import android.os.Process
 import android.os.SystemClock
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -29,7 +30,9 @@ import com.raydocs.tono.mobile.ui.MainActivity
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.Assert.assertEquals
 import org.junit.runner.RunWith
 import java.io.File
 import java.net.HttpURLConnection
@@ -50,6 +53,8 @@ import java.util.regex.Pattern
  */
 @RunWith(AndroidJUnit4::class)
 class LocalTunnelDeviceTest {
+    // Compose semantics of the real MainActivity, for the text-size contract (t4); idle otherwise.
+    @get:Rule val compose = createEmptyComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
     private val device = UiDevice.getInstance(instrumentation)
@@ -264,9 +269,10 @@ class LocalTunnelDeviceTest {
 
     @Test fun t1_realTunnelThroughLocalFixtureServers() {
         useLocalServers()
+        stillScene(true)
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
-                assertNotNull("sign-in screen", find(text(R.string.signin_title)))
+                startSignedOut()
                 assertLocalMark("sign-in")
                 shot("local-01-signin")
 
@@ -339,10 +345,40 @@ class LocalTunnelDeviceTest {
                 signOut()
             }
         } finally {
+            stillScene(false)
             override.delete()
             stopEngineProcess()
         }
         assertFalse("no VPN left behind", vpnUp())
+    }
+
+    /**
+     * Runs [block] on the main thread with the resumed activity, if any. Not ActivityScenario.onActivity:
+     * that first waits for the main thread to go idle, which a slow software-GPU emulator drawing the
+     * animated sea never does (run 39153105611: t2 hung there for 600 s).
+     */
+    private fun onResumed(block: (android.app.Activity) -> Unit) {
+        instrumentation.runOnMainSync {
+            androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).firstOrNull()?.let(block)
+        }
+    }
+
+    /** Debug runs share the emulator: a test stopped mid-way can leave an account behind. Start signed out. */
+    private fun startSignedOut() {
+        val signIn = find(text(R.string.signin_title), 20_000)
+        if (signIn != null) return
+        if (find(text(R.string.details), 5_000) != null) { note("signed in from an earlier run: signing out first"); signOut() }
+        assertNotNull("sign-in screen", find(text(R.string.signin_title), 10_000))
+    }
+
+    /**
+     * Android's "Remove animations": the sea holds still, so a software-GPU emulator is not drawing a
+     * new frame all the time. For checks that are not about motion (t3 keeps animations on).
+     */
+    private fun stillScene(on: Boolean) {
+        shell("settings put global animator_duration_scale ${if (on) 0 else 1}")
+        if (on) Thread.sleep(1_000)
     }
 
     private fun rotate(rotation: Int, landscape: Boolean, scenario: ActivityScenario<MainActivity>): Boolean {
@@ -350,7 +386,7 @@ class LocalTunnelDeviceTest {
         val deadline = SystemClock.elapsedRealtime() + 15_000
         while (SystemClock.elapsedRealtime() < deadline) {
             var now: Int? = null
-            runCatching { scenario.onActivity { now = it.resources.configuration.orientation } }
+            onResumed { now = it.resources.configuration.orientation }
             if ((now == Configuration.ORIENTATION_LANDSCAPE) == landscape && now != null) { Thread.sleep(1_200); return true }
             Thread.sleep(250)
         }
@@ -359,14 +395,14 @@ class LocalTunnelDeviceTest {
 
     private fun insets(scenario: ActivityScenario<MainActivity>): WindowInsetsCompat? {
         var found: WindowInsetsCompat? = null
-        scenario.onActivity { a -> found = ViewCompat.getRootWindowInsets(a.window.decorView) }
+        onResumed { a -> found = ViewCompat.getRootWindowInsets(a.window.decorView) }
         return found
     }
 
     /** Text and controls on screen that overlap the display cutout (camera), as found. */
     private fun underCutout(scenario: ActivityScenario<MainActivity>): List<String> {
         val cutouts = mutableListOf<Rect>()
-        scenario.onActivity { a -> a.window.decorView.rootWindowInsets?.displayCutout?.boundingRects?.let { cutouts += it } }
+        onResumed { a -> a.window.decorView.rootWindowInsets?.displayCutout?.boundingRects?.let { cutouts += it } }
         val hits = mutableListOf<String>()
         for (o in device.findObjects(By.pkg(context.packageName))) {
             val label = runCatching { o.text ?: o.contentDescription }.getOrNull() ?: continue
@@ -389,9 +425,10 @@ class LocalTunnelDeviceTest {
         // The CI image has a hardware keyboard configured; show the on-screen one anyway, as on a phone.
         val imeSetting = shell("settings get secure show_ime_with_hard_keyboard").trim()
         shell("settings put secure show_ime_with_hard_keyboard 1")
+        stillScene(true)
         val scenario = ActivityScenario.launch(MainActivity::class.java)
         try {
-            assertNotNull("sign-in screen", find(text(R.string.signin_title)))
+            startSignedOut()
             requestCode()
             val field = device.findObject(By.clazz("android.widget.EditText"))
             field.click()
@@ -460,7 +497,171 @@ class LocalTunnelDeviceTest {
             instrumentation.uiAutomation.setRotation(UiAutomation.ROTATION_FREEZE_0)
             instrumentation.uiAutomation.setRotation(UiAutomation.ROTATION_UNFREEZE)
             shell("settings put secure show_ime_with_hard_keyboard ${imeSetting.toIntOrNull() ?: 0}")
+            stillScene(false)
             scenario.close()
+            override.delete()
+            stopEngineProcess()
+        }
+    }
+
+    /** Switches the stand-in control plane's scenario (scripts/local-tunnel/fixture-servers.py). */
+    private fun scenario(name: String) {
+        val conn = URL("http://127.0.0.1:28080/fixture/scenario").openConnection() as HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.outputStream.use { it.write("{\"name\":\"$name\"}".toByteArray()) }
+        val code = conn.responseCode
+        conn.disconnect()
+        assertEquals("stand-in scenario $name", 200, code)
+        note("stand-in scenario: $name")
+    }
+
+    /** Mean luminance (0–255) of the sky: 8–45 % of the screen height, below the status bar. */
+    private fun sky(name: String): Double {
+        val b = android.graphics.BitmapFactory.decodeFile(File(out, "$name.png").path)
+        var sum = 0.0; var n = 0
+        for (y in (b.height * 0.08).toInt() until (b.height * 0.45).toInt() step 6) for (x in 0 until b.width step 6) {
+            val p = b.getPixel(x, y)
+            sum += 0.2126 * android.graphics.Color.red(p) + 0.7152 * android.graphics.Color.green(p) + 0.0722 * android.graphics.Color.blue(p); n++
+        }
+        return sum / n
+    }
+
+    private fun signInWithCode() {
+        startSignedOut()
+        requestCode()
+        device.findObject(By.clazz("android.widget.EditText")).text = "246810"
+        val connect = find(text(R.string.action_connect), 30_000)
+        if (connect == null) diagnose("local-signin-failed")
+        assertNotNull("signed in: Home with Connect", connect)
+    }
+
+    private fun tapConnectAndConsent() {
+        find(text(R.string.action_connect), 10_000)!!.click()
+        // Tono's explanation and Android's dialog appear while consent is missing; once granted, neither does.
+        find(text(R.string.consent_continue), 4_000)?.let { it.click(); answerSystemConsent() }
+    }
+
+    private fun disconnectToIdle() {
+        val disconnect = find(text(R.string.action_disconnect), 10_000)
+        assertNotNull("Disconnect", disconnect)
+        disconnect!!.click()
+        assertNotNull("back to Not connected", find(text(R.string.state_idle), 20_000))
+        val deadline = SystemClock.elapsedRealtime() + 10_000
+        while (vpnUp() && SystemClock.elapsedRealtime() < deadline) Thread.sleep(250)
+    }
+
+    /**
+     * The real app's states on MainActivity, against the stand-ins (counterpart of the fixture-host
+     * b1, and with CI's screen recording of the b2 motion): Not connected, connecting, Connected,
+     * partly working (the Home stand-in rejects the Home exit's password) and failed (the stand-in
+     * control plane answers CATALOG_UNAVAILABLE). Each is asserted from the screen, and the sky must
+     * follow the state: day when connected, darker when partly working or failed, night when off.
+     */
+    @Test fun t3_realAppStatesAndSkyOnMainActivity() {
+        useLocalServers()
+        scenario("normal")
+        val scenarioApp = ActivityScenario.launch(MainActivity::class.java)
+        try {
+            signInWithCode()
+            Thread.sleep(2_600)
+            shot("local-10-real-idle")
+
+            tapConnectAndConsent()
+            val busy = device.wait(Until.findObject(By.text(Pattern.compile(Pattern.quote(text(R.string.state_preparing)) + "|" + Pattern.quote(text(R.string.state_connecting))))), 10_000)
+            if (busy != null) Captures.drawn(File(out, "local-11-real-connecting.png"), attempts = 2)
+            note("real states: ${if (busy != null) "\"${busy.text}\" seen while connecting" else "connecting NOT seen"}")
+            assertNotNull("a connecting state on screen before Connected", busy)
+            assertNotNull("Connected", find(text(R.string.state_connected), 90_000))
+            assertTrue("Android shows a VPN network", vpnUp())
+            Thread.sleep(2_600)
+            shot("local-12-real-connected")
+            disconnectToIdle()
+
+            scenario("home-down")
+            tapConnectAndConsent()
+            val partly = find(text(R.string.state_degraded), 90_000)
+            if (partly == null) diagnose("local-partly-working-missing")
+            assertNotNull("partly working when the Home exit fails its check", partly)
+            assertNotNull("the short reason names the Home check", find(text(R.string.short_HOME_UNREACHABLE), 5_000))
+            assertTrue("the tunnel stays up for everything else", vpnUp())
+            Thread.sleep(2_600)
+            shot("local-13-real-partly-working")
+            disconnectToIdle()
+
+            scenario("catalog-unavailable")
+            tapConnectAndConsent()
+            val failed = find(text(R.string.state_failed), 60_000)
+            if (failed == null) diagnose("local-failed-missing")
+            assertNotNull("failed when the catalog is unavailable", failed)
+            assertFalse("a failed connect leaves the phone's network untouched", vpnUp())
+            assertNotNull("Retry is the primary action", find(text(R.string.action_retry), 5_000))
+            Thread.sleep(2_600)
+            shot("local-14-real-failed")
+            scenario("normal")
+
+            val idle = sky("local-10-real-idle"); val connected = sky("local-12-real-connected")
+            val partlySky = sky("local-13-real-partly-working"); val failedSky = sky("local-14-real-failed")
+            note("sky luminance (0–255): not connected %.1f, connected %.1f, partly working %.1f, failed %.1f".format(idle, connected, partlySky, failedSky))
+            assertTrue("day sky when connected: %.1f vs night %.1f".format(connected, idle), connected > idle + 30)
+            assertTrue("partly working is lit but below connected: %.1f".format(partlySky), partlySky > idle + 15 && partlySky < connected - 5)
+            assertTrue("failed keeps an ember, below connected: %.1f".format(failedSky), failedSky > idle + 8 && failedSky < connected - 10)
+
+            signOut()
+        } finally {
+            runCatching { scenario("normal") }
+            scenarioApp.close()
+            override.delete()
+            stopEngineProcess()
+        }
+        assertFalse("no VPN left behind", vpnUp())
+    }
+
+    /**
+     * The real MainActivity at Android's largest text size (200 %) with animations removed, against
+     * the stand-ins (counterpart of the fixture-host b3/l1): sign-in, the code step, Home, Details and
+     * Settings keep every text uncut and every control at 48 dp with a label.
+     */
+    @Test fun t4_realAppAtLargestSystemText() {
+        useLocalServers()
+        shell("settings put system font_scale 2.0")
+        shell("settings put global animator_duration_scale 0")
+        Thread.sleep(1_500)
+        val app = ActivityScenario.launch(MainActivity::class.java)
+        val found = mutableListOf<String>()
+        fun check(screen: String) {
+            compose.waitForIdle()
+            found += A11yContract.truncatedText(compose, "real 200 % $screen") + A11yContract.violations(compose, "real 200 % $screen")
+        }
+        try {
+            startSignedOut()
+            check("sign-in"); shot("local-15-real-font-2.0-signin")
+            requestCode()
+            check("code step")
+            device.findObject(By.clazz("android.widget.EditText")).text = "246810"
+            assertNotNull("Home", find(text(R.string.action_connect), 30_000))
+            Thread.sleep(800)
+            check("Home"); shot("local-16-real-font-2.0-home")
+            device.findObject(By.text(text(R.string.details))).click()
+            assertNotNull("Details", find(text(R.string.details_routes), 15_000))
+            check("Details"); shot("local-17-real-font-2.0-details")
+            device.pressBack(); Thread.sleep(800)
+            device.findObject(By.desc(text(R.string.settings_title))).click()
+            assertNotNull("Settings", find(text(R.string.settings_title), 10_000))
+            Thread.sleep(600)
+            check("Settings"); shot("local-18-real-font-2.0-settings")
+            device.pressBack(); Thread.sleep(800)
+            File(out, "real-font-2.0-report.txt").writeText(
+                if (found.isEmpty()) "real MainActivity at font scale 2.0: no text cut off, every control ≥ 48 dp and labelled on sign-in, the code step, Home, Details and Settings\n"
+                else found.joinToString("\n") + "\n",
+            )
+            assertEquals(found.joinToString("\n"), 0, found.size)
+            signOut()
+        } finally {
+            shell("settings put system font_scale 1.0")
+            shell("settings put global animator_duration_scale 1")
+            app.close()
             override.delete()
             stopEngineProcess()
         }

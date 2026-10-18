@@ -110,6 +110,14 @@ def serve(singbox: str, work: str) -> None:
     socks = {"host": HOME_IP, "port": HOME_PORT, "username": home_user, "password": home_pass}
     routing_sha = sha("\n".join(["", "", "\n".join([HOME_IP, str(HOME_PORT), home_user, home_pass])]))
     catalog = {"revision": 1, "yaml": yaml, "sha256": sha(yaml), "routing": {"homeSocks5": socks}, "routingSha256": routing_sha}
+    # Scenarios a device test can switch to, so the real app reaches its failure states against these
+    # stand-ins: "home-down" hands out a Home exit whose password the Home stand-in rejects (the Home
+    # check fails after Connected: partly working); "catalog-unavailable" answers the catalog with the
+    # control plane's CATALOG_UNAVAILABLE (the connect fails). Test fixtures only, never a Tono server.
+    bad_socks = dict(socks, password="wrong-" + secrets.token_hex(6))
+    bad_routing_sha = sha("\n".join(["", "", "\n".join([HOME_IP, str(HOME_PORT), home_user, bad_socks["password"]])]))
+    home_down = dict(catalog, routing={"homeSocks5": bad_socks}, routingSha256=bad_routing_sha)
+    scenario = {"name": "normal"}
     api_log = open(os.path.join(work, "control-plane.log"), "a", buffering=1)
 
     class Api(http.server.BaseHTTPRequestHandler):
@@ -130,7 +138,9 @@ def serve(singbox: str, work: str) -> None:
             if self.path == "/api/v1/exit-catalog":
                 if not (self.headers.get("Authorization") or "").startswith("Bearer "):
                     return self.reply(401, {"error": {"code": "UNAUTHORIZED", "message": "no token"}})
-                return self.reply(200, catalog)
+                if scenario["name"] == "catalog-unavailable":
+                    return self.reply(503, {"error": {"code": "CATALOG_UNAVAILABLE", "message": "stand-in: catalog unavailable"}})
+                return self.reply(200, home_down if scenario["name"] == "home-down" else catalog)
             self.reply(404, {"error": {"code": "NOT_FOUND", "message": self.path}})
 
         def do_POST(self):
@@ -146,6 +156,10 @@ def serve(singbox: str, work: str) -> None:
                 return self.reply(200, {"accessToken": jwt()})
             if self.path == "/api/v1/auth/logout":
                 return self.reply(200, {})
+            if self.path == "/fixture/scenario" and body.get("name") in ("normal", "home-down", "catalog-unavailable"):
+                scenario["name"] = body["name"]
+                api_log.write("%s scenario %s\n" % (time.strftime("%H:%M:%S"), scenario["name"]))
+                return self.reply(200, scenario)
             self.reply(404, {"error": {"code": "NOT_FOUND", "message": self.path}})
 
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", API_PORT), Api)

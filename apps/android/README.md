@@ -106,11 +106,17 @@ Round 7 (after the round-6 blind reviews, `docs/agent-reports/2026-10-18-android
   cut-off "Not connectec").
 - **Sheets.** The sheets draw their grip themselves: Material's handle is a keyboard focus stop whose
   "Drag handle" tooltip covered the sheet title.
-- **CI.** Three emulator shards (`system`, `tunnel`, `ui`). Each records the sign-in screen's frame
-  time before the tests (tried as a gate at 650 ms, it stopped emulators that then ran at normal
-  speed, so it is a measurement until a threshold is backed by data). A hung test is stopped after
-  600 s with a screenshot, window dump and focus state, and a shard that passes only on the
-  fresh-emulator retry is marked flaky.
+- **CI.** Three emulator shards (`system`, `tunnel`, `ui`). Each measures the sign-in screen's
+  median frame time before the tests and stops the attempt above 850 ms, so the fresh-emulator
+  retry starts early. Calibration: emulators at 500–750 ms ran at normal speed; two at 900 and
+  950 ms ran the fixture tests three to six times slower and hung the real-app tests (run
+  39153105611). A first gate at 650 ms stopped healthy emulators (run 39151329824). A hung test is
+  stopped after 600 s with a screenshot, window dump and focus state, and a shard that passes only
+  on the fresh-emulator retry is marked flaky.
+- **Real-app device tests no longer wait for the main thread to go idle.** `ActivityScenario.onActivity`
+  waits for idle, which never comes under the animated scene on a slow emulator (t2 hung there in
+  run 39153105611). The tests reach the resumed activity directly, start from signed out whatever an
+  earlier test left, and keep the sea still where they only need layout.
 - **Sheets stop below the status bar**, so the clock and the local-test-server or fixture mark stay
   in sight with a sheet open, also in landscape where Details reaches the top.
 
@@ -271,6 +277,12 @@ internal test builds.
     - The real app turned to landscape (t2): the code step with the on-screen keyboard up, typed
       digits kept, the code field above the keyboard; Home and Details with nothing under the camera
       cutout; Tono's consent explanation still open after turning back.
+    - The real app's states on `MainActivity` (t3): idle, connecting, Connected, partly working
+      (the stand-in Home exit down → *Home didn't answer*, VPN still up) and failed (catalog
+      unavailable → no VPN, Retry). The sky's luminance is asserted per state, and the run is
+      screen-recorded (`local-real-motion.mp4`).
+    - The real app at the largest system text, 200 % (t4): sign-in, code step, Home, Details and
+      Settings with no text cut off and every control ≥ 48 dp and labelled.
     - Requests made from inside the tunnel to a video site, an AI site and an ordinary site. CI
       checks them against the stand-in exits' own logs: cloud, Home through the cloud, and direct.
   - Keyboard: Tab order, a visible focus ring and Enter, all through Android's input system; TalkBack's

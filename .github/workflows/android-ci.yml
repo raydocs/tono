@@ -215,11 +215,12 @@ jobs:
           # No -g: runtime permissions and VPN consent stay as on a fresh install.
           adb install -r apk/*-test-*.apk
           adb install -r apk/instrumentation.apk
-          # Emulator health, measured before the tests: the median frame time of Tono's own sign-in
-          # screen over 8 s. Run 39151329824 tried this as a gate at 650 ms and stopped five of six
-          # emulators (650–1000 ms), including ones that then ran the tests at normal speed, so it is a
-          # recorded measurement until a threshold is backed by data; the per-test 600 s limit and the
-          # attempt budget below still stop a pathologically slow emulator.
+          # Emulator health gate, measured before the tests: the median frame time of Tono's own
+          # sign-in screen over 8 s. Calibration so far: emulators at 500–750 ms ran the tests at normal
+          # speed (runs 39151329824, 39153105611); two at 900 and 950 ms ran the fixture tests three to
+          # six times slower and hung the real-app tests (run 39153105611, tunnel shard). A first try at
+          # 650 ms stopped healthy emulators, so the limit is 850 ms. Above it this attempt stops before
+          # the tests and the fresh-emulator retry starts early.
           set +e
           adb shell am start -W -n $APP/com.raydocs.tono.mobile.ui.MainActivity > /dev/null
           sleep 3
@@ -228,7 +229,12 @@ jobs:
           median=$(adb shell dumpsys gfxinfo $APP | sed -n 's/^ *50th percentile: \([0-9]*\)ms.*/\1/p' | head -1)
           adb shell am force-stop $APP
           set -e
-          echo "health: sign-in screen median frame ${median:-unknown} ms before the tests (measurement, not a gate)" | tee evidence/health.txt >> evidence/summary.txt
+          echo "health: sign-in screen median frame ${median:-unknown} ms before the tests (limit 850 ms)" | tee evidence/health.txt >> evidence/summary.txt
+          if [ -n "$median" ] && [ "$median" -gt 850 ]; then
+            echo "HEALTH-GATE: emulator renders too slowly (median frame ${median} ms > 850 ms); no tests run in this attempt" >> evidence/summary.txt
+            timeout 60 adb logcat -d > evidence/logcat.txt || true
+            exit 1
+          fi
           # The tunnel test's stand-in control plane, on the phone's loopback (the only address the
           # debug build's LocalTestServer accepts).
           [ "$SHARD" = tunnel ] && adb reverse tcp:28080 tcp:28080
@@ -247,7 +253,8 @@ jobs:
             SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates" ;;
             tunnel) tests="DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice
             DeviceEvidenceTest#b3_fixtureAtLargeFontScale LocalTunnelDeviceTest#t2_realAppTurnsWithKeyboardAndConsentOpen
-            LocalTunnelDeviceTest#t1_realTunnelThroughLocalFixtureServers" ;;
+            LocalTunnelDeviceTest#t1_realTunnelThroughLocalFixtureServers LocalTunnelDeviceTest#t3_realAppStatesAndSkyOnMainActivity
+            LocalTunnelDeviceTest#t4_realAppAtLargestSystemText" ;;
             ui) tests="HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps
             HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt
             HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome
@@ -273,6 +280,11 @@ jobs:
               adb shell screenrecord --time-limit 25 --bit-rate 8000000 /sdcard/Download/tono-fixture-motion.mp4 &
               rec=$!
             fi
+            if [ "$t" = t3_realAppStatesAndSkyOnMainActivity ]; then
+              # The real app's own motion through its states, at the emulator's real (software) frame rate.
+              adb shell screenrecord --time-limit 180 --bit-rate 6000000 /sdcard/Download/tono-real-motion.mp4 &
+              rec=$!
+            fi
             # The tunnel test is judged again from the stand-in exits' own logs, from this point on.
             [ "$t" = t1_realTunnelThroughLocalFixtureServers ] && from=$(stat -c %s "$LOCAL_TUNNEL/sing-box.log")
             timeout 600 adb shell am instrument -w -r -e class "com.raydocs.tono.mobile.$c" \
@@ -286,10 +298,13 @@ jobs:
               timeout 30 adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp|isn.t responding' > "evidence/hang-$t-window.txt"
               timeout 30 adb shell am force-stop $APP
             fi
-            [ -n "$rec" ] && timeout 60 tail --pid="$rec" -f /dev/null
+            # The real-app recording ends with the test (SIGINT lets screenrecord finish the file).
+            [ "$t" = t3_realAppStatesAndSkyOnMainActivity ] && timeout 10 adb shell pkill -2 screenrecord
+            [ -n "$rec" ] && { timeout 200 tail --pid="$rec" -f /dev/null || kill "$rec"; }
             grep -q '^OK (' "evidence/instrument-$t.txt" && echo "PASS $t" >> evidence/summary.txt || { echo "FAIL $t" >> evidence/summary.txt; failed="$failed $t"; }
             timeout 120 adb pull /sdcard/Android/data/$APP/files/evidence/. evidence/
             [ "$t" = b2_fixtureMotionRecordedOnDevice ] && timeout 120 adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4
+            [ "$t" = t3_realAppStatesAndSkyOnMainActivity ] && timeout 120 adb pull /sdcard/Download/tono-real-motion.mp4 evidence/local-real-motion.mp4
             if [ "$t" = t1_realTunnelThroughLocalFixtureServers ]; then
               mkdir -p evidence/local-tunnel
               tail -c +$((from + 1)) "$LOCAL_TUNNEL/sing-box.log" > evidence/local-tunnel/exits.log
