@@ -11,8 +11,17 @@ enum TonoColor {
     static let smokeHigh = Color(hex: 0x221F2B)
     static let hairline = Color.white.opacity(0.12)
     static let textPrimary = Color(hex: 0xF7F3EE)
-    static let textSecondary = Color(hex: 0xF7F3EE, opacity: 0.66)
-    static let textTertiary = Color(hex: 0xF7F3EE, opacity: 0.58)  // ≥ 4.5:1 on the night surfaces
+    /// Secondary and tertiary text step up under Increase Contrast (the timer, latency and lane
+    /// details stayed dim there in round 9's captures).
+    static let textSecondary = contrastAware(0.66, increased: 0.86)
+    static let textTertiary = contrastAware(0.58, increased: 0.8)  // ≥ 4.5:1 on the night surfaces
+
+    private static func contrastAware(_ opacity: CGFloat, increased: CGFloat) -> Color {
+        Color(uiColor: UIColor { traits in
+            UIColor(red: 247.0 / 255, green: 243.0 / 255, blue: 238.0 / 255,
+                    alpha: traits.accessibilityContrast == .high ? increased : opacity)
+        })
+    }
 
     static let sunCore = Color(hex: 0xFFE2A8)
     static let sunMid = Color(hex: 0xFFB46A)

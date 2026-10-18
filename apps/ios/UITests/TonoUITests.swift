@@ -183,16 +183,21 @@ final class TonoUITests: XCTestCase {
             save(XCUIScreen.main.screenshot(), "live-activity-island-expanded")
         }
         XCTAssertTrue(shown, "no Live Activity element in the Dynamic Island:\n\(springboard.debugDescription.prefix(3000))")
+        // End the fixture activity (an idle preview ends it), so it cannot appear in a later capture
+        // such as the real widget on the Home Screen.
+        _ = launch("IDLE", ["-TonoPreviewLiveActivity"])
+        sleep(3)
         XCUIDevice.shared.press(.home)
+        let gone = NSPredicate(format: "exists == false")
+        XCTAssertEqual(XCTWaiter().wait(for: [expectation(for: gone, evaluatedWith: island)], timeout: 8), .completed,
+                       "the preview Live Activity is still shown after an idle preview")
     }
 
     /// The real Tono widget in SpringBoard's widget gallery (the system host, not the app's own
     /// gallery): the system lists "Tono status" and renders the extension with the real shared
-    /// status, which the preview never writes, so it must not claim a state. Then it tries to place
-    /// the widget on the Home Screen and logs whether that worked (REAL-WIDGET line, not asserted:
-    /// the captures are the evidence), because edit
-    /// mode differs between iOS releases. Named to run last, so a Home Screen left in edit mode
-    /// cannot disturb another test.
+    /// status, which the preview never writes, so it must not claim a state. Then it places the
+    /// widget on the Home Screen and asserts it is there and reads "Status unavailable". Named to
+    /// run last, so a Home Screen left in edit mode cannot disturb another test.
     @MainActor func testZZRealWidgetInTheSystemGallery() {
         let app = launch("IDLE")
         XCTAssertTrue(primary(app).waitForExistence(timeout: 6))
@@ -229,6 +234,7 @@ final class TonoUITests: XCTestCase {
         save(XCUIScreen.main.screenshot(), "real-widget-home-screen")
         print("REAL-WIDGET gallery-lists-tono=yes gallery-text-exposed=\(shownAsText ? "yes" : "no") placed-and-read=\(placed ? "yes" : "no")")
         XCUIDevice.shared.press(.home)
+        XCTAssertTrue(placed, "the Tono widget is not on the Home Screen reading \"Status unavailable\" after Add Widget")
     }
 
     /// Simulator CPU / memory while Home shows a connected session (sea animating). Mac-host
@@ -371,12 +377,67 @@ final class TonoUITests: XCTestCase {
         XCTAssertTrue(answer.label.hasPrefix("example.com goes directly"), answer.label)
         let stable = app.buttons["Stable"]
         XCTAssertTrue(stable.waitForExistence(timeout: 4))
-        if !stable.isHittable { app.swipeUp() }
+        // The mode sits above the routes: scroll back up to it.
+        if !stable.isHittable { app.scrollViews.firstMatch.swipeDown() }
         stable.tap()
         let cloud = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH %@", "example.com goes through the cloud exit."),
                                               object: answer)
         XCTAssertEqual(XCTWaiter().wait(for: [cloud], timeout: 4), .completed, "answer stayed \"\(answer.label)\" after Stable")
         save(XCUIScreen.main.screenshot(), "details-route-check-stable")
+    }
+
+    /// Editing the site takes the old answer away at once: it was about another site.
+    @MainActor func testRouteCheckEditingTheSiteClearsTheAnswer() {
+        let app = launch("CONNECTED", ["-TonoPreviewSheet", "details"])
+        checkSite(app, "example.com")
+        let answer = app.descendants(matching: .any)["routeAnswer"]
+        XCTAssertTrue(answer.waitForExistence(timeout: 4))
+        let field = app.descendants(matching: .any).matching(NSPredicate(format: "elementType == %d OR elementType == %d",
+                                                                        XCUIElement.ElementType.textField.rawValue,
+                                                                        XCUIElement.ElementType.textView.rawValue)).firstMatch
+        field.tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3) + "org")
+        let cleared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: answer)
+        XCTAssertEqual(XCTWaiter().wait(for: [cleared], timeout: 4), .completed, "answer \"\(answer.label)\" stayed after editing the site")
+    }
+
+    /// Something that is not a site gets a sentence saying so, where the answer would be.
+    @MainActor func testRouteCheckSaysWhenTheQueryIsNotASite() {
+        let app = launch("CONNECTED", ["-TonoPreviewSheet", "details"])
+        checkSite(app, "hello world")
+        let message = app.descendants(matching: .any)["routeCheckMessage"]
+        XCTAssertTrue(message.waitForExistence(timeout: 4), "no feedback for a query that is not a site")
+        waitHittable(message)
+        XCTAssertTrue(message.label.contains("isn't a site address"), message.label)
+        XCTAssertFalse(app.descendants(matching: .any)["routeAnswer"].exists)
+        save(XCUIScreen.main.screenshot(), "details-route-check-invalid")
+    }
+
+    /// A mode switch the tunnel refuses (injected: the reload is refused and the previous graph
+    /// keeps running) never shows the new mode as in effect: the old mode stays selected, the
+    /// answer and lanes stay on it, Details says the switch failed, and so does Home.
+    @MainActor func testRefusedModeSwitchKeepsShowingTheModeInEffect() {
+        let app = launch("CONNECTED", ["-TonoPreviewSheet", "details", "-TonoPreviewApplyFails", "reload"])
+        checkSite(app, "example.com")
+        let answer = app.descendants(matching: .any)["routeAnswer"]
+        XCTAssertTrue(answer.waitForExistence(timeout: 4))
+        let stable = app.buttons["mode_STABLE"]
+        XCTAssertTrue(stable.waitForExistence(timeout: 4))
+        if !stable.isHittable { app.scrollViews.firstMatch.swipeDown() }
+        stable.tap()
+        let note = app.descendants(matching: .any)["modeNotApplied"]
+        XCTAssertTrue(note.waitForExistence(timeout: 4), "no word in Details that the switch failed")
+        XCTAssertEqual(note.label, "Couldn't switch to Stable. Still using Three-tier.")
+        XCTAssertTrue(app.buttons["mode_THREE_TIER"].isSelected, "Three-tier should stay selected")
+        XCTAssertFalse(stable.isSelected)
+        XCTAssertTrue(answer.label.hasPrefix("example.com goes directly"), answer.label)
+        XCTAssertTrue(answer.label.contains("Three-tier"), answer.label)
+        save(XCUIScreen.main.screenshot(), "details-mode-refused")
+        app.swipeDown(velocity: .fast)
+        let home = app.buttons["routeNote"]
+        XCTAssertTrue(home.waitForExistence(timeout: 4), "Home does not say the switch failed")
+        XCTAssertTrue(home.label.hasPrefix("Couldn't switch to Stable"), home.label)
+        save(XCUIScreen.main.screenshot(), "home-mode-refused")
     }
 
     @MainActor func testLinePickerSelectsAndCloses() {

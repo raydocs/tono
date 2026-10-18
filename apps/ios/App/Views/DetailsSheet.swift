@@ -1,5 +1,6 @@
 import SwiftUI
 import TonoKit
+import UIKit
 
 /// Details behind the home screen: where each kind of traffic goes right now, what happened (the
 /// full reason and its one action), and the routing mode. Home keeps only the state, one line and
@@ -40,8 +41,9 @@ struct DetailsSheet: View {
                                action: action.title, onAction: { perform(action) })
                     }
                 }
-                section(L.t("details_routes")) { lanes(proxy) }
+                // The mode first: it decides the routes listed under it.
                 section(L.t("details_mode")) { modePicker }
+                section(L.t("details_routes")) { lanes(proxy) }
                 Button(action: onSettings) {
                     HStack(spacing: 12) {
                         GlyphIcon(glyph: .gear, tint: TonoColor.textSecondary, size: 20)
@@ -107,47 +109,85 @@ struct DetailsSheet: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                         withAnimation(TonoMotion.surface) { proxy.scrollTo("routeAnswer", anchor: .bottom) }
                     }
-                }, onFocus: { if $0 { detent = .large } })
+                }, onFocus: { focused in
+                    guard focused else { return }
+                    detent = .large
+                    // Lift the field and Check clear of the keyboard's top edge, not flush with it.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        withAnimation(TonoMotion.surface) { proxy.scrollTo("routeCheck", anchor: .center) }
+                    }
+                })
             }
-                .padding(.horizontal, 14).padding(.vertical, 10)
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .id("routeCheck")
         }
         .padding(.vertical, 4)
         .contentCard(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
+    /// Two segments and one plain sentence for the mode in effect. A switch shows as pending on the
+    /// segment asked for until the tunnel confirms it; a refusal says so here and keeps the old one.
     private var modePicker: some View {
-        VStack(spacing: 0) {
-            // Titles only: the routes right above already show what the selected mode does, and
-            // they change with it.
-            modeRow(.threeTier, title: L.t("mode_three_tier_short"))
-            LaneDivider()
-            modeRow(.stable, title: L.t("mode_stable_short"))
+        let pending = model.changingRoutes ? model.routeChange?.requested.mode : nil
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                modeSegment(.threeTier, pending: pending)
+                modeSegment(.stable, pending: pending)
+            }
+            .padding(4)
+            .contentCard(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            Group {
+                if let pending, pending != model.mode {
+                    Text(L.t("route_switching", ModeText.name(pending))).foregroundStyle(TonoColor.textSecondary)
+                } else if let note = model.routeNote(full: true), model.routeChange?.requested.mode != model.mode {
+                    Text(note).foregroundStyle(TonoColor.warning).accessibilityIdentifier("modeNotApplied")
+                } else {
+                    Text(ModeText.line(model.mode)).foregroundStyle(TonoColor.textSecondary).accessibilityIdentifier("modeLine")
+                }
+            }
+            .tonoFont(14, relativeTo: .footnote)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 4)
         }
-        .contentCard(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func modeRow(_ mode: RoutingMode, title: String) -> some View {
+    private func modeSegment(_ mode: RoutingMode, pending: RoutingMode?) -> some View {
         let selected = model.mode == mode
+        let waiting = pending == mode && !selected
         return Button {
             guard !selected else { return }
+            UISelectionFeedbackGenerator().selectionChanged()
             Task { await model.setMode(mode) }
         } label: {
-            HStack(spacing: 12) {
-                Circle()
-                    .strokeBorder(selected ? TonoColor.accent : TonoColor.textTertiary, lineWidth: 1.6)
-                    .background(Circle().fill(selected ? TonoColor.accent : .clear).padding(5))
-                    .frame(width: 20, height: 20)
-                Text(title).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
+            HStack(spacing: 6) {
+                if waiting { ProgressView().controlSize(.mini).tint(TonoColor.textPrimary) }
+                Text(ModeText.name(mode)).tonoFont(16, .medium, relativeTo: .callout)
+                    .foregroundStyle(selected ? TonoColor.textPrimary : TonoColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
+                    .multilineTextAlignment(.center)
             }
-            .padding(.horizontal, 14)
-            .frame(minHeight: 50)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background {
+                if selected {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(TonoColor.accent.opacity(0.28))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(TonoColor.accent.opacity(0.7), lineWidth: 1))
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(pending != nil)
+        .accessibilityLabel(ModeText.name(mode))
+        .accessibilityValue(waiting ? L.t("route_switching", ModeText.name(mode)) : "")
         .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .accessibilityIdentifier("mode_\(mode.rawValue)")
     }
+}
+
+enum ModeText {
+    static func name(_ mode: RoutingMode) -> String { L.t(mode == .stable ? "mode_stable_short" : "mode_three_tier_short") }
+    /// What the mode does, in one plain sentence.
+    static func line(_ mode: RoutingMode) -> String { L.t(mode == .stable ? "mode_stable_line" : "mode_three_tier_line") }
 }
 
 private struct LaneDivider: View {

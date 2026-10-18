@@ -60,6 +60,7 @@ for lang in zh-Hans en; do
   shot "$lang-15-lines-empty" "$lang" IDLE lines -TonoPreviewLines empty
   shot "$lang-16-lines-loading" "$lang" IDLE lines -TonoPreviewLines loading
   shot "$lang-17-widgets" "$lang" CONNECTED "" -TonoPreviewWidgets
+  shot "$lang-19-routes-stopped" "$lang" FAILED "" -TonoPreviewReason ROUTES_STOPPED
 done
 # Widget views on a light wallpaper, and the app itself with the system in light appearance
 # (Tono is dark by design and opts out of light mode; this shows it stays legible and unchanged).

@@ -24,6 +24,11 @@ struct LinesSheet: View {
                 }
                 .opacity(testing ? 0.5 : 1)
             }
+            if let note = model.routeNote(full: true), model.routeChange?.requested.node != model.selectedNode {
+                Text(note).tonoFont(14, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("lineNotApplied")
+            }
             if model.usingCachedCatalog {
                 Text(L.t("lines_cached")).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
             }
@@ -83,6 +88,7 @@ struct LinesSheet: View {
     private func row(_ line: LineItem) -> some View {
         let selected = line.name == model.selectedNode
         return Button {
+            guard !model.changingRoutes else { return }
             UISelectionFeedbackGenerator().selectionChanged()
             Task { await model.select(line.name) }
             dismiss()

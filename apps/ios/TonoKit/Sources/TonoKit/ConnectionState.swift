@@ -118,9 +118,12 @@ public struct ConnectionFacts: Sendable {
     public var failure: String?
     /// The last explicit permission problem ("DENIED" or "REVOKED"); nil when there is none.
     public var permission: String?
+    /// The tunnel is up but runs no routing graph: a settings change was refused and the previous
+    /// graph could not be brought back.
+    public var routesStopped: Bool
 
     public init(signedIn: Bool, preparing: Bool = false, tunnel: TunnelStatus, configured: Bool = true,
-                cloudProbe: ExitProbe = ExitProbe(), homeProbe: ExitProbe = ExitProbe(), failure: String? = nil, permission: String? = nil) {
+                cloudProbe: ExitProbe = ExitProbe(), homeProbe: ExitProbe = ExitProbe(), failure: String? = nil, permission: String? = nil, routesStopped: Bool = false) {
         self.signedIn = signedIn
         self.preparing = preparing
         self.tunnel = tunnel
@@ -129,6 +132,7 @@ public struct ConnectionFacts: Sendable {
         self.homeProbe = homeProbe
         self.failure = failure
         self.permission = permission
+        self.routesStopped = routesStopped
     }
 }
 
@@ -145,6 +149,8 @@ public enum ConnectionState {
         case .disconnecting:
             return (.disconnecting, nil)
         case .connected:
+            // Up but routing nothing is not protection, whatever the last checks said.
+            if f.routesStopped { return (.failed, "ROUTES_STOPPED") }
             if f.cloudProbe.state == .unknown || f.cloudProbe.state == .checking || f.homeProbe.state == .checking {
                 return (.connecting, nil)
             }

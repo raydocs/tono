@@ -22,7 +22,7 @@ struct SettingsView: View {
                     // The mode is chosen in one place, Details (one tap from Home, next to where traffic
                     // goes); Settings names it and keeps the full descriptions in the disclosure below.
                     SectionLabel(text: L.t("settings_routing"))
-                    Text(L.t("settings_mode_where", L.t(model.mode == .stable ? "mode_stable_short" : "mode_three_tier_short")))
+                    Text(L.t("settings_mode_where", ModeText.name(model.mode)))
                         .tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 4).padding(.bottom, 8)
@@ -153,7 +153,7 @@ struct RouteCheck: View {
     var onFocus: (Bool) -> Void = { _ in }
     @EnvironmentObject private var model: AppModel
     @State private var host = ""
-    @State private var answer: RouteAnswer?
+    @State private var result: RouteCheckResult?
     @FocusState private var focused: Bool
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -176,36 +176,58 @@ struct RouteCheck: View {
                         run()
                         return
                     }
-                    // Another site: the answer on screen is no longer about it.
-                    if let answer, RouteExplainer.cleanHost(value) != answer.host { self.answer = nil }
+                    // Another site: the result on screen is no longer about it.
+                    if case .answer(let answer) = result, RouteExplainer.cleanHost(value) == answer.host { return }
+                    result = nil
                 }
             QuietButton(title: L.t("check_go"), action: run)
         }
         .onChange(of: focused) { onFocus($0) }
-        // The same site under the other mode can go elsewhere (example.com: direct vs cloud).
-        .onChange(of: model.mode) { _ in if answer != nil { run() } }
-        if let answer {
+        // The same site under the other mode can go elsewhere (example.com: direct vs cloud). Only a
+        // confirmed mode changes `model.mode`, so a pending or refused switch never rewrites it.
+        .onChange(of: model.mode) { _ in if result != nil { run() } }
+        .onChange(of: model.routesStopped) { _ in if result != nil { run() } }
+        switch result {
+        case .answer(let answer)?:
             VStack(alignment: .leading, spacing: 4) {
                 Text(L.t("check_answer_\(answer.tcp.rawValue)", answer.host))
                     .tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(L.t("check_result", L.t("verdict_\(answer.tcp.rawValue)"), L.t("verdict_\(answer.udp.rawValue)")))
                     .tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.textSecondary)
-                Text(L.t("check_basis")).tonoFont(12, relativeTo: .caption).foregroundStyle(TonoColor.textTertiary)
+                // Names the mode the answer is for: the one in effect, not a pending request.
+                Text(L.t("check_basis", ModeText.name(model.mode))).tonoFont(12, relativeTo: .caption).foregroundStyle(TonoColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("routeAnswer")
             .id("routeAnswer")
+        case let other?:
+            Text(Self.message(other)).tonoFont(14, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("routeCheckMessage")
+                .id("routeAnswer")
+        case nil:
+            EmptyView()
+        }
+    }
+
+    static func message(_ result: RouteCheckResult) -> String {
+        switch result {
+        case .answer(let a): return L.t("check_answer_\(a.tcp.rawValue)", a.host)
+        case .empty: return L.t("check_empty")
+        case .invalid(let typed): return L.t("check_invalid", String(typed.prefix(40)))
+        case .noLines: return L.t("check_no_lines")
+        case .routesStopped: return L.t("check_routes_stopped")
         }
     }
 
     private func run() {
         focused = false
-        guard let found = model.explain(host) else { answer = nil; return }
-        answer = found
+        let found = model.check(host)
+        result = found
         onAnswer()
-        let spoken = L.t("check_answer_\(found.tcp.rawValue)", found.host)
+        let spoken = Self.message(found)
         // After the keyboard has gone, so the announcement is not cut off by the focus change.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             UIAccessibility.post(notification: .announcement, argument: spoken)

@@ -201,14 +201,19 @@ struct HomeView: View {
                     Text(L.t("speed_line", Format.rate(model.rx), Format.rate(model.tx)))
                         .tonoFont(12, .medium, relativeTo: .caption).monospacedDigit()
                         .foregroundStyle(TonoColor.textTertiary)
-                        .contentTransition(.numericText())
-                        .animation(TonoMotion.state, value: model.rx)
+                        // Rates roll between live values; the drop to zero as the tunnel stops is not
+                        // animated, or the digits morph into each other while the line fades
+                        // ("184/4 K", state-cycle @ b36d07d 17.3 s).
+                        .contentTransition(model.rx == 0 && model.tx == 0 ? .identity : .numericText())
+                        .animation(model.rx == 0 && model.tx == 0 ? nil : TonoMotion.state, value: model.rx)
                         .frame(minHeight: 44)
                         .accessibilityElement(children: .combine)
                         .transition(.opacity)
                 }
                 if !typeSize.isAccessibilitySize { Spacer() }
-                HStack(spacing: 2) {
+                // Two separate glass controls with a clear gap, so Settings and Details never read
+                // as one button (round 9 review).
+                HStack(spacing: 14) {
                     // A glass circle like the old top-right gear, so it reads as a control; the
                     // glyph grows with the text size.
                     Button { showSettings = true } label: {
@@ -224,15 +229,16 @@ struct HomeView: View {
                     Button { showDetails = true } label: {
                         HStack(spacing: 4) {
                             Text(L.t("details")).tonoFont(15, .medium, relativeTo: .subheadline)
-                            GlyphIcon(glyph: .chevronUp, tint: TonoColor.textSecondary, size: 14)
+                            GlyphIcon(glyph: .chevronUp, tint: TonoColor.textPrimary, size: 14)
                         }
-                        .foregroundStyle(TonoColor.textSecondary)
-                        .frame(minWidth: 64, minHeight: 48)
-                        .padding(.horizontal, 6)
-                        .contentShape(Rectangle())
+                        .foregroundStyle(TonoColor.textPrimary)
+                        .padding(.horizontal, 16)
+                        .frame(minWidth: 64, minHeight: gearGlyph + 26)
+                        .glassSurface(Capsule(), tint: glassTint, interactive: true)
+                        .contentShape(Capsule())
                         .accessibilityElement(children: .ignore)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressScale(glass: true))
                     .zoomSource("details", in: zoom)
                     .accessibilityLabel(L.t("details"))
                     .accessibilityIdentifier("detailsButton")
@@ -266,6 +272,26 @@ struct HomeView: View {
             .accessibilityHint(PhaseText.reason(reason))
             .accessibilityIdentifier("reasonLine")
             .id(reason)
+            .transition(.swap(rise: 8, reduceMotion: reduceMotion))
+        } else if let note = model.routeNote(full: false), model.phase.tunnelUp {
+            // A mode or line switch the tunnel refused: said on Home too, since the sheet it was made
+            // in may already be closed. Opens where the switch is made.
+            Button {
+                if model.routeChange?.requested.mode != model.mode { showDetails = true } else { showLines = true }
+            } label: {
+                HStack(spacing: 8) {
+                    StatusDot(color: TonoColor.warning, size: 7)
+                    Text(note).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
+                    GlyphIcon(glyph: .chevronRight, tint: TonoColor.textSecondary, size: 12)
+                }
+                .frame(minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+                .accessibilityElement(children: .ignore)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(model.routeNote(full: true) ?? note)
+            .accessibilityIdentifier("routeNote")
+            .id(note)
             .transition(.swap(rise: 8, reduceMotion: reduceMotion))
         } else if let text = PhaseText.status(model) {
             // The element is the 44 pt row, not the 18 pt glyph run (accessibility audit: hit area).
@@ -464,6 +490,9 @@ struct ActionCapsule: View {
                     .foregroundStyle(TonoColor.textSecondary)
                     .lineLimit(1).fixedSize()
             }
+            // The clock arrives as the sunrise fill hands over, not on top of its bright end
+            // (state-cycle @ b36d07d 2.7 s).
+            .opacity(fill > 0 ? 1 - fillOpacity : 1)
         }
     }
 
@@ -646,7 +675,7 @@ enum PhaseText {
 
     static let knownReasons: Set<String> = [
         "HOME_UNAVAILABLE", "NETWORK", "RATE_LIMITED", "CORE_START", "CLOUD_UNREACHABLE", "HOME_UNREACHABLE",
-        "REVOKED", "DENIED", "SESSION_ENDED", "CATALOG_ROLLBACK", "CORE_STOPPED", "NETWORK_CHANGED",
+        "REVOKED", "DENIED", "SESSION_ENDED", "CATALOG_ROLLBACK", "CORE_STOPPED", "NETWORK_CHANGED", "ROUTES_STOPPED",
     ]
 
     static func reason(_ code: String) -> String {

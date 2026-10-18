@@ -12,7 +12,7 @@
 "state_failed" = "Didn't connect";
 "widget_last_known" = "Last known: %1$@ at %2$@";
 "widget_stale_title" = "Status unknown";
-"status_protected_home" = "Protected · Home in %1$@";
+"status_protected_home" = "Protected · Home exit in %1$@";
 "status_network_changed" = "Network changed";
 "state_reconnecting" = "Reconnecting";
 "state_dropped" = "Connection dropped";
@@ -97,7 +97,7 @@
 "check_answer_DIRECT" = "%1$@ goes directly over your own network.";
 "check_answer_BLOCKED" = "%1$@ is blocked.";
 "check_answer_DNS" = "%1$@ is answered by Tono's DNS.";
-"check_basis" = "From the routing rules for this mode, not a live test.";
+"check_basis" = "Based on %1$@ mode's rules, not a live test.";
 "verdict_HOME" = "Home";
 "verdict_CLOUD" = "Cloud";
 "verdict_DIRECT" = "Direct";
@@ -194,3 +194,14 @@
 "gallery_note" = "Preview: the widget and Live Activity views rendered inside the app with fixture data, including stale and unavailable states. This is not the system Home Screen or Lock Screen.";
 "gallery_lock" = "Lock Screen";
 "gallery_control" = "Control Center";
+"mode_three_tier_line" = "AI and video go through Tono; everything else goes direct.";
+"mode_stable_line" = "Everything except your local network goes through Tono.";
+"route_switching" = "Switching to %1$@…";
+"route_not_applied" = "Couldn't switch to %1$@";
+"route_not_applied_full" = "Couldn't switch to %1$@. Still using %2$@.";
+"check_empty" = "Type a site first, e.g. claude.ai.";
+"check_invalid" = "\"%1$@\" isn't a site address. Try one like claude.ai.";
+"check_no_lines" = "Lines haven't loaded yet, so there are no routes to check.";
+"check_routes_stopped" = "Tono's routes are stopped right now. Retry rebuilds them.";
+"reason_ROUTES_STOPPED" = "A settings change was refused and the previous routes could not be restored. Retry rebuilds them.";
+"short_ROUTES_STOPPED" = "Routes stopped";

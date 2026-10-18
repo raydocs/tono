@@ -12,7 +12,7 @@
 "state_failed" = "没连上";
 "widget_last_known" = "最后已知：%2$@ %1$@";
 "widget_stale_title" = "状态未知";
-"status_protected_home" = "已保护 · 家宽在%1$@";
+"status_protected_home" = "已保护 · 家宽出口在%1$@";
 "status_network_changed" = "网络已切换";
 "state_reconnecting" = "正在重连";
 "state_dropped" = "连接已断开";
@@ -97,7 +97,7 @@
 "check_answer_DIRECT" = "%1$@ 直连，走你自己的网络。";
 "check_answer_BLOCKED" = "%1$@ 会被拦截。";
 "check_answer_DNS" = "%1$@ 由 Tono 的 DNS 解析。";
-"check_basis" = "按当前模式的路由规则推算，不是实测。";
+"check_basis" = "按「%1$@」模式的规则推算，不是实测。";
 "verdict_HOME" = "家宽";
 "verdict_CLOUD" = "云";
 "verdict_DIRECT" = "直连";
@@ -194,3 +194,14 @@
 "gallery_note" = "预览：在 App 内用夹具数据渲染的小组件与实时活动视图，含过时与不可用状态。这不是系统主屏幕或锁屏。";
 "gallery_lock" = "锁屏";
 "gallery_control" = "控制中心";
+"mode_three_tier_line" = "AI 和视频走 Tono，其他直连。";
+"mode_stable_line" = "除局域网外，全部走 Tono。";
+"route_switching" = "正在切换到「%1$@」…";
+"route_not_applied" = "没能切换到「%1$@」";
+"route_not_applied_full" = "没能切换到「%1$@」，仍在使用「%2$@」。";
+"check_empty" = "先输入一个网址，例如 claude.ai。";
+"check_invalid" = "「%1$@」不是网址，试试 claude.ai 这样的。";
+"check_no_lines" = "线路还没加载，暂时没有可查的路由。";
+"check_routes_stopped" = "Tono 的路由现在已停止。点「重试」重建。";
+"reason_ROUTES_STOPPED" = "设置更改被拒绝，之前的路由也没能恢复。点「重试」重建。";
+"short_ROUTES_STOPPED" = "路由已停止";

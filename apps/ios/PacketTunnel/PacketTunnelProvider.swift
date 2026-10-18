@@ -18,6 +18,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private lazy var platform = TunnelPlatform(provider: self)
     private let underlying = UnderlyingNetwork()
     private var inputs: TunnelInputs?
+    /// sing-box runs a graph built from `inputs`. A refused rebuild leaves none running.
+    private var graphRunning = false
     #if os(iOS)
     private var screenObserver: ScreenStateObserver?
     #endif
@@ -103,15 +105,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     override func handleAppMessage(_ messageData: Data) async -> Data? {
         switch TunnelMessage.decode(messageData) {
         case .reload:
-            do {
-                reasserting = true
-                defer { reasserting = false }
-                try startService(reloadInputs: true)
-                return nil
-            } catch {
-                // The previous graph keeps running; matched traffic keeps its old routes.
-                return Data("reload failed: \(error)".utf8)
-            }
+            reasserting = true
+            defer { reasserting = false }
+            return reloadFromApp().encoded
         case .measure:
             var nodes: [VlessNode] = []
             if let body = currentInputs()?.catalogBody, let catalog = try? CatalogAdmission.admit(JSON.parse(body)) {
@@ -125,7 +121,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             return Data(JSON.obj(
                 ("core", .string(LibboxVersion())),
                 ("ipv6", .bool(underlying.hasGlobalIPv6)),
-                ("path", .string(underlying.summary))
+                ("path", .string(underlying.summary)),
+                ("running", runningSettings()?.json ?? .null)
             ).serialized().utf8)
         case nil:
             return Data("unknown message".utf8)
@@ -168,8 +165,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     /// Builds the graph from the current inputs and starts (or hot-reloads) sing-box.
-    /// `reloadInputs` re-reads the App Group file (start and app-requested reloads); IPv6 and core
-    /// reloads rebuild from the inputs already in memory.
+    /// `reloadInputs` re-reads the App Group file (start); IPv6 and core reloads rebuild from the
+    /// inputs already in memory.
     private func startService(reloadInputs: Bool = false) throws {
         serviceLock.lock()
         defer { serviceLock.unlock() }
@@ -180,9 +177,59 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 throw CatalogRejected("NO_INPUTS", "tunnel inputs are missing or unreadable: \(error)")
             }
         }
-        guard let inputs, let commandServer else { throw CatalogRejected("NO_INPUTS", "no inputs") }
+        guard let inputs else { throw CatalogRejected("NO_INPUTS", "no inputs") }
+        try run(inputs)
+    }
+
+    /// Caller holds `serviceLock`.
+    private func run(_ inputs: TunnelInputs) throws {
+        guard let commandServer else { throw CatalogRejected("NO_INPUTS", "no command server") }
+        // Admission and the config build fail before libbox is touched: a running graph stays intact.
         let config = try inputs.makeConfig(underlyingIPv6: underlying.hasGlobalIPv6, cacheFilePath: SharedFiles.cacheDB.path)
+        // libbox's StartOrReloadService closes the running graph before it builds this one.
+        graphRunning = false
         try commandServer.startOrReloadService(config, options: LibboxOverrideOptions())
+        graphRunning = true
+    }
+
+    /// The app changed the mode or line. Answers with what actually runs afterwards, so the app
+    /// never shows a graph this process did not start.
+    private func reloadFromApp() -> ReloadReply {
+        serviceLock.lock()
+        defer { serviceLock.unlock() }
+        let previous = graphRunning ? inputs : nil
+        let next: TunnelInputs
+        do {
+            next = try SharedFiles.loadInputs()
+        } catch {
+            return .refused(code: "NO_INPUTS", running: previous?.settings)
+        }
+        do {
+            try run(next)
+            inputs = next
+            return .applied(next.settings)
+        } catch {
+            Self.log.error("reload refused: \(error.localizedDescription, privacy: .public)")
+            let code = (error as? CatalogRejected)?.code ?? "CORE_START"
+            if graphRunning { return .refused(code: code, running: previous?.settings) }
+            // libbox had already closed the previous graph: bring it back.
+            guard let previous else { return .refused(code: code, running: nil) }
+            do {
+                try run(previous)
+                return .refused(code: code, running: previous.settings)
+            } catch {
+                // Nothing runs. The tunnel is not cancelled here; the app shows the failure and
+                // its Retry asks for another rebuild.
+                Self.log.error("restore refused: \(error.localizedDescription, privacy: .public)")
+                return .refused(code: code, running: nil)
+            }
+        }
+    }
+
+    private func runningSettings() -> RouteSettings? {
+        serviceLock.lock()
+        defer { serviceLock.unlock() }
+        return graphRunning ? inputs?.settings : nil
     }
 
     private func currentInputs() -> TunnelInputs? {
@@ -192,6 +239,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     func stopService() {
+        serviceLock.lock()
+        graphRunning = false
+        serviceLock.unlock()
         do {
             try commandServer?.closeService()
         } catch {

@@ -16,6 +16,24 @@ struct LineItem: Identifiable, Equatable {
 
 enum HomeKind: Equatable { case none, residential, catalogNode(String) }
 
+enum RouteCheckResult: Equatable {
+    case answer(RouteAnswer)
+    case empty, invalid(String), noLines, routesStopped
+}
+
+/// A mode or line change the tunnel has not (yet) confirmed. The routes on screen stay the ones in
+/// effect (`AppModel.mode`, `selectedNode`) until it does.
+enum RouteChange: Equatable {
+    case pending(RouteSettings)
+    case failed(requested: RouteSettings, code: String)
+
+    var requested: RouteSettings {
+        switch self {
+        case .pending(let s), .failed(let s, _): return s
+        }
+    }
+}
+
 struct LoginState: Equatable {
     var email = ""
     var challengeID: String?
@@ -42,8 +60,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var coreVersion = ""
     @Published var login = LoginState()
     @Published private(set) var email: String? = Preferences.email
+    /// The mode and line in effect: confirmed by the running tunnel, or saved for the next start
+    /// when it is off. Answers and lanes read these, never a request.
     @Published private(set) var mode: RoutingMode = Preferences.mode
     @Published private(set) var selectedNode: String? = Preferences.selectedNode
+    @Published private(set) var routeChange: RouteChange?
+    /// The tunnel is up but its graph was closed by a refused rebuild and could not be restored.
+    @Published private(set) var routesStopped = false
     @Published private(set) var includeAllNetworks: Bool = Preferences.includeAllNetworks
     /// Changed while the tunnel is on: iOS applies it only when the tunnel next starts, so the running
     /// tunnel still uses the previous value until then.
@@ -150,6 +173,7 @@ final class AppModel: ObservableObject {
         // Coming back is a chance to confirm the shared status and move the Live Activity's stale date.
         publishStatus(force: true)
         if tunnelStatus == .connected, cloudProbe.state != .checking { runProbes() }
+        if tunnelStatus == .connected { await readStatus() }
         if !tunnelStatus.isUp, let f = SharedFiles.loadFailure(), failure == nil, !userStopping {
             failure = f.code
             recompute()
@@ -219,6 +243,11 @@ final class AppModel: ObservableObject {
 
     func connect() async {
         guard signedIn, !phase.busy else { return }
+        // Retry after a refused rebuild left the running tunnel without routes: rebuild in place.
+        if routesStopped, tunnelStatus.isUp {
+            await change(routeSettings, retry: true)
+            return
+        }
         // Before iOS asks to add the VPN configuration, say what it is and why (once per ask).
         if !tunnel.configured && !primerConfirmed {
             showVPNPrimer = true
@@ -311,17 +340,80 @@ final class AppModel: ObservableObject {
 
     func select(_ name: String) async {
         guard lines.contains(where: { $0.name == name }) else { return }
-        selectedNode = name
-        if isPreview { return }
-        Preferences.selectedNode = name
-        await pushInputs()
+        await change(RouteSettings(mode: mode, node: name))
     }
 
     func setMode(_ newMode: RoutingMode) async {
-        mode = newMode
+        await change(RouteSettings(mode: newMode, node: selectedNode))
+    }
+
+    var routeSettings: RouteSettings { RouteSettings(mode: mode, node: selectedNode) }
+
+    var changingRoutes: Bool { if case .pending = routeChange { return true }; return false }
+
+    /// Mode and line changes. The screens show the request as pending and keep describing the
+    /// routes in effect until the tunnel confirms; a refusal is said where the change was made and
+    /// on Home, and the in-effect routes stay as they are.
+    private func change(_ requested: RouteSettings, retry: Bool = false) async {
+        let previous = routeSettings
+        guard !changingRoutes, retry || requested != previous else { return }
+        routeChange = .pending(requested)
+        let outcome: RouteApplyOutcome
+        #if DEBUG
+        if isPreview {
+            outcome = await previewApply(requested, previous: previous)
+            finish(outcome, requested: requested)
+            return
+        }
+        #endif
+        if let loaded = catalog {
+            let tunnel = self.tunnel
+            outcome = await RouteApply.run(requested, previous: previous, tunnelUp: tunnelStatus.isUp,
+                                           save: { try SharedFiles.saveInputs(TunnelInputs(catalogBody: loaded.body, mode: $0.mode, selectedNode: $0.node)) },
+                                           reload: { await tunnel.send(.reload) })
+        } else {
+            // No catalog yet, so no tunnel to rebuild: the choice is kept for the first start.
+            outcome = .saved(requested)
+        }
+        finish(outcome, requested: requested)
+    }
+
+    private func finish(_ outcome: RouteApplyOutcome, requested: RouteSettings) {
+        switch outcome {
+        case .applied(let s), .saved(let s):
+            setInEffect(s)
+            routeChange = nil
+            routesStopped = false
+            if case .applied = outcome, !isPreview { runProbes() } else { recompute() }
+        case .notApplied(let code, let inEffect):
+            if let inEffect { setInEffect(inEffect) } else { routesStopped = true }
+            routeChange = .failed(requested: requested, code: code)
+            recompute()
+            #if DEBUG
+            if previewPhase != nil, routesStopped { previewPhase = (.failed, "ROUTES_STOPPED"); recompute() }
+            #endif
+            if let note = routeNote(full: true) { UIAccessibility.post(notification: .announcement, argument: note) }
+        }
+    }
+
+    private func setInEffect(_ s: RouteSettings) {
+        mode = s.mode
+        if lines.contains(where: { $0.name == s.node }) || s.node == nil { selectedNode = s.node }
         if isPreview { return }
-        Preferences.mode = newMode
-        await pushInputs()
+        Preferences.mode = mode
+        Preferences.selectedNode = selectedNode
+    }
+
+    /// "Couldn't switch to Stable" (short, Home) or with what is still in use (full, the sheets).
+    func routeNote(full: Bool) -> String? {
+        guard case .failed(let requested, _) = routeChange else { return nil }
+        if requested.mode != mode {
+            let want = ModeText.name(requested.mode), have = ModeText.name(mode)
+            return full && !routesStopped ? L.t("route_not_applied_full", want, have) : L.t("route_not_applied", want)
+        }
+        let line = { (name: String?) in self.lines.first { $0.name == name }.map(self.displayName) ?? name ?? "" }
+        return full && !routesStopped ? L.t("route_not_applied_full", line(requested.node), line(selectedNode))
+                                      : L.t("route_not_applied", line(requested.node))
     }
 
     func setIncludeAllNetworks(_ on: Bool) async {
@@ -351,6 +443,17 @@ final class AppModel: ObservableObject {
         lines = lines.map { var l = $0; if let v = results[l.name] { l.latencyMS = v }; return l }
     }
 
+    /// The route check's result for what was typed: an answer, or why there is none.
+    func check(_ input: String) -> RouteCheckResult {
+        let typed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if typed.isEmpty { return .empty }
+        guard RouteExplainer.cleanHost(typed) != nil else { return .invalid(typed) }
+        // No graph runs: no rule-based answer would describe this phone right now.
+        if routesStopped { return .routesStopped }
+        guard let answer = explain(typed) else { return .noLines }
+        return .answer(answer)
+    }
+
     /// "Where does this site go?" against the graph built from the current catalog and settings.
     func explain(_ host: String) -> RouteAnswer? {
         guard let catalog = catalog?.catalog else { return nil }
@@ -363,19 +466,6 @@ final class AppModel: ObservableObject {
 
     private func inputs(for loaded: LoadedCatalog) -> TunnelInputs {
         TunnelInputs(catalogBody: loaded.body, mode: mode, selectedNode: selectedNode)
-    }
-
-    /// Writes the inputs and asks a running tunnel to rebuild its graph in place.
-    private func pushInputs() async {
-        guard let loaded = catalog else { return }
-        try? SharedFiles.saveInputs(inputs(for: loaded))
-        if tunnelStatus.isUp, let reply = await tunnel.send(.reload), !reply.isEmpty {
-            // The extension keeps the previous graph running when the new one is refused.
-            failure = "CORE_START"
-            recompute()
-        } else if tunnelStatus.isUp {
-            runProbes()
-        }
     }
 
     @discardableResult
@@ -425,6 +515,8 @@ final class AppModel: ObservableObject {
             Task { await readStatus() }
         case .disconnected, .invalid:
             includeAllPending = false
+            routesStopped = false
+            if case .failed = routeChange { routeChange = nil }
             traffic.stop()
             probeTask?.cancel()
             cloudProbe = ExitProbe()
@@ -451,6 +543,16 @@ final class AppModel: ObservableObject {
         guard let data = await tunnel.send(.status), let json = try? JSON.parse(data) else { return }
         if let core = json["core"]?.string { coreVersion = core }
         if let v6 = json["ipv6"]?.bool { underlyingIPv6 = v6 }
+        // What the extension actually runs; null when a refused rebuild left no graph.
+        if let running = json["running"], !changingRoutes {
+            if let settings = RouteSettings(running) {
+                if settings != routeSettings { setInEffect(settings) }
+                routesStopped = false
+            } else {
+                routesStopped = true
+            }
+            recompute()
+        }
     }
 
     private func runProbes() {
@@ -491,7 +593,8 @@ final class AppModel: ObservableObject {
 
     private func recompute() {
         let facts = ConnectionFacts(signedIn: signedIn, preparing: preparing, tunnel: tunnelStatus, configured: tunnel.configured,
-                                    cloudProbe: cloudProbe, homeProbe: homeProbe, failure: failure, permission: permission)
+                                    cloudProbe: cloudProbe, homeProbe: homeProbe, failure: failure, permission: permission,
+                                    routesStopped: routesStopped)
         var derived = ConnectionState.derive(facts)
         #if DEBUG
         if let previewPhase { derived = (previewPhase.0, previewPhase.1) }
@@ -645,6 +748,26 @@ extension AppModel {
         }
         previewPhase = (phase, reason)
         recompute()
+    }
+
+    /// The real `RouteApply` with an injected fault (`-TonoPreviewApplyFails save|send|reload|stopped`):
+    /// the write is refused, the tunnel does not answer, the tunnel refuses and keeps the previous
+    /// graph, or it refuses with no graph left. Without the argument the change is confirmed.
+    fileprivate func previewApply(_ requested: RouteSettings, previous: RouteSettings) async -> RouteApplyOutcome {
+        let args = CommandLine.arguments
+        let fault = args.firstIndex(of: "-TonoPreviewApplyFails").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+        // Long enough for the pending state to be seen and recorded.
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        return await RouteApply.run(requested, previous: previous, tunnelUp: phase.tunnelUp,
+                                    save: { _ in if fault == "save" { throw CocoaError(.fileWriteNoPermission) } },
+                                    reload: {
+                                        switch fault {
+                                        case "send": return nil
+                                        case "reload": return ReloadReply.refused(code: "CORE_START", running: previous).encoded
+                                        case "stopped": return ReloadReply.refused(code: "CORE_START", running: nil).encoded
+                                        default: return ReloadReply.applied(requested).encoded
+                                        }
+                                    })
     }
 }
 #endif
