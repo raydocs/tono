@@ -61,13 +61,19 @@ class EngineClient(private val context: Context) {
     /**
      * Android restarts a dead engine on its own, but not always (run 39170392763: not within 90 s).
      * With the app in front, start it again as Android's restart would, so a tunnel the user wanted
-     * comes back and the screen stops saying "Status unknown".
+     * comes back and the screen stops saying "Status unknown". The old binding is replaced too: when
+     * Android drops the dead service instead of restarting it, that binding never connects again
+     * (run 39173982324: the revived engine was up, the screen still waiting).
      */
-    private val revive = Runnable {
-        if (engine == null && bound && !paused) runCatching { context.startService(Intent(context, TonoVpnService::class.java)) }
+    private val revive: Runnable = Runnable {
+        if (engine != null || !bound || paused) return@Runnable
+        runCatching { context.startService(Intent(context, TonoVpnService::class.java)) }
+        runCatching { context.unbindService(connection) }
+        bound = false
+        bind()
     }
 
-    private val connection = object : ServiceConnection {
+    private val connection: ServiceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder) {
             val e = ITonoEngine.Stub.asInterface(service)
             engine = e
@@ -154,6 +160,8 @@ class EngineClient(private val context: Context) {
     fun resume() {
         paused = false
         engine?.let { refresh(it) }
+        // The engine died while the app was away and has not come back: try now.
+        if (engine == null && _link.value == EngineLink.LOST) main.post(revive)
     }
 
     fun command(op: String, vararg args: Pair<String, Any?>) {

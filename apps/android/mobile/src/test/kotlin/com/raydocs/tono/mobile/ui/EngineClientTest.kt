@@ -80,16 +80,17 @@ class EngineClientTest {
         assertEquals(TonoVpnService.ACTION_DISCONNECT, shadowOf(app).nextStartedService?.action)
         assertEquals(emptyList<String>(), engine.commands)
 
-        // Android does not restart it within 3 s: the app in front starts the engine itself.
+        // Android does not restart it within 3 s: the app in front starts the engine itself, and binds
+        // afresh, since the old binding may never connect again. The restarted engine has not restored
+        // its state yet, so it has nothing to say.
+        val restarted = StandInEngine(null)
+        shadowOf(app).setComponentNameAndServiceForBindService(name, restarted)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3))
         val revived = shadowOf(app).nextStartedService
         assertEquals(TonoVpnService::class.java.name, revived?.component?.className)
         assertNull("started as Android's own restart, with no action", revived?.action)
-
-        // Android restarts the engine; it has not restored its state yet, so it has nothing to say.
-        val restarted = StandInEngine(null)
-        connection().onServiceConnected(name, restarted)
-        assertEquals(EngineLink.WAITING, client.link.value)
+        idleLooper()
+        assertEquals("the fresh binding reached the restarted engine", EngineLink.WAITING, client.link.value)
         assertEquals(Phase.CONNECTED, client.snapshot.value?.phase)
 
         restarted.push(UiFixtures.idle)

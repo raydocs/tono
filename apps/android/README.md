@@ -127,8 +127,12 @@ Round 7 (after the round-6 blind reviews, `docs/agent-reports/2026-10-18-android
   notification with *Status unknown · Open Tono to check*: Android had left it up, still saying
   Connected, for the whole 90 s fault-injection window (run 39170392763). With the app in front and
   the engine still gone after 3 s, the app starts the engine as Android's own restart would (Android
-  had not restarted it within 90 s in that run), so a tunnel the user wanted comes back. A restarted
-  engine with no tunnel clears the app's replacement.
+  had not restarted it within 90 s in that run), so a tunnel the user wanted comes back, and binds
+  to it afresh: when Android drops the dead service instead of restarting it, the old binding never
+  connects again (run 39173982324: tunnel back up, screen still on *Status unknown*). Coming back to
+  the app after the engine died away from it does the same. A restart request reaching an engine
+  that already runs the tunnel changes nothing, and a restarted engine with no tunnel clears the
+  app's replacement.
 - **Sheets stop below the status bar**, so the clock and the local-test-server or fixture mark stay
   in sight with a sheet open, also in landscape where Details reaches the top.
 

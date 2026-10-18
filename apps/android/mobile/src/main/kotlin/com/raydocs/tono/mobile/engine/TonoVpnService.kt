@@ -109,7 +109,8 @@ class TonoVpnService : VpnService() {
             // Always-on VPN or a restart after the OS reclaimed the process.
             SERVICE_INTERFACE, null -> {
                 if (store.settings().wantConnected || intent?.action == SERVICE_INTERFACE) {
-                    enterForeground(); engine.execute { connect(userInitiated = false) }
+                    // A restart request for an engine that already runs the tunnel changes nothing.
+                    enterForeground(); engine.execute { if (!snapshot.get().tunnelUp) connect(userInitiated = false) }
                 } else if (!foreground) {
                     // Started again with no tunnel wanted (the app reviving a dead engine): bound only.
                     stopSelf(startId)
