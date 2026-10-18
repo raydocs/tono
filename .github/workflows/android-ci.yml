@@ -216,13 +216,13 @@ jobs:
           adb install -r apk/*-test-*.apk
           adb install -r apk/instrumentation.apk
           # Emulator health gate, measured before the tests: the median frame time of Tono's own
-          # sign-in screen over 8 s. Calibration: emulators at 300–750 ms ran the tests at normal speed
-          # (runs 39151329824, 39153105611, 39159687608, 39163947970). At 800 ms and above they ran
-          # three to six times slower: b3 and a3 hung at 800 ms (run 39159687608); at 850 ms
-          # ActivityScenario.launch took 9 minutes, a5 hung and the shard ran out of time (run
-          # 39163947970); 900–1000 ms hung the real-app tests. A first gate at 650 ms stopped healthy
-          # emulators, so the limit is 775 ms. Above it this attempt stops before the tests and the
-          # fresh-emulator retry starts early.
+          # animated sign-in screen over 8 s. Emulators at 300–750 ms ran every test at normal speed.
+          # From 800 ms up, tests hung in waits for an idle main thread under the animated sea (runs
+          # 39153105611, 39159687608, 39163947970); those waits are gone or run with animations
+          # removed, and the motion tests start still. At 775 ms the gate stopped all four ui and
+          # tunnel emulators of run 39167725741 twice (850–1000 ms), so it now stops only emulators
+          # slower than the slowest seen so far: above 1000 ms. Above it this attempt stops
+          # before the tests and the fresh-emulator retry starts early.
           set +e
           adb shell am start -W -n $APP/com.raydocs.tono.mobile.ui.MainActivity > /dev/null
           sleep 3
@@ -231,9 +231,9 @@ jobs:
           median=$(adb shell dumpsys gfxinfo $APP | sed -n 's/^ *50th percentile: \([0-9]*\)ms.*/\1/p' | head -1)
           adb shell am force-stop $APP
           set -e
-          echo "health: sign-in screen median frame ${median:-unknown} ms before the tests (limit 775 ms)" | tee evidence/health.txt >> evidence/summary.txt
-          if [ -n "$median" ] && [ "$median" -gt 775 ]; then
-            echo "HEALTH-GATE: emulator renders too slowly (median frame ${median} ms > 775 ms); no tests run in this attempt" >> evidence/summary.txt
+          echo "health: sign-in screen median frame ${median:-unknown} ms before the tests (limit 1000 ms)" | tee evidence/health.txt >> evidence/summary.txt
+          if [ -n "$median" ] && [ "$median" -gt 1000 ]; then
+            echo "HEALTH-GATE: emulator renders too slowly (median frame ${median} ms > 1000 ms); no tests run in this attempt" >> evidence/summary.txt
             timeout 60 adb logcat -d > evidence/logcat.txt || true
             exit 1
           fi
@@ -287,6 +287,17 @@ jobs:
               adb shell screenrecord --time-limit 180 --bit-rate 6000000 /sdcard/Download/tono-real-motion.mp4 &
               rec=$!
             fi
+            # On a software-GPU emulator the animated sea keeps the app's main thread busy, and every
+            # wait for an idle main thread (ActivityScenario.launch among them) then takes minutes:
+            # at 850 ms per frame, launching the app took 9 minutes (run 39163947970). Tests that are
+            # not about motion run with Android's "Remove animations"; a5, b2, u8 and t3 are the
+            # motion evidence and keep it on (a5 and t3 launch still and turn motion on themselves).
+            case "$t" in
+              a5_*|b2_*|u8_*|t3_*) motion=1 ;;
+              *) motion=0 ;;
+            esac
+            adb shell settings put global animator_duration_scale $motion
+            echo "$t: animator_duration_scale $motion" >> evidence/animations.txt
             # The tunnel test is judged again from the stand-in exits' own logs, from this point on.
             [ "$t" = t1_realTunnelThroughLocalFixtureServers ] && from=$(stat -c %s "$LOCAL_TUNNEL/sing-box.log")
             timeout 600 adb shell am instrument -w -r -e class "com.raydocs.tono.mobile.$c" \

@@ -197,10 +197,13 @@ class DeviceEvidenceTest {
             Thread.sleep(gapMs)
             return a to shell.takeScreenshot()
         }
-        scale("1")
+        // Launched still: waiting for the activity to start needs an idle main thread, which the
+        // animated sea on a slow software-GPU emulator does not give (run 39163947970: 9 minutes).
+        scale("0")
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
                 assertNotNull("sign-in screen", find(By.text(text(R.string.signin_title)), 20_000))
+                scale("1") // motion on while the app is running
                 Thread.sleep(1_500)
                 val (m1, m2) = frames(1_500)
                 val moving = diff(m1, m2)

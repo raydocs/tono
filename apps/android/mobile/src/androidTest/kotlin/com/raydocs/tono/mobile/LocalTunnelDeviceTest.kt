@@ -596,7 +596,10 @@ class LocalTunnelDeviceTest {
     @Test fun t3_realAppStatesAndSkyOnMainActivity() {
         useLocalServers()
         scenario("normal")
+        // Launched still (waiting for the launch needs an idle main thread), then with motion on.
+        stillScene(true)
         val scenarioApp = ActivityScenario.launch(MainActivity::class.java)
+        stillScene(false)
         try {
             signInWithCode()
             Thread.sleep(2_600)
