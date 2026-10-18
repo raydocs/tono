@@ -85,12 +85,18 @@ class SystemSurfacesDeviceTest {
             Thread.sleep(2_000) // let the panel finish expanding before reading it
             val signIn = context.getString(R.string.state_signed_out)
             val tileSelector = By.descContains("Tono")
-            val found = device.wait(Until.findObject(tileSelector), 10_000)
-            assertNotNull("Tono tile in Quick Settings", found)
-            val desc = runCatching { device.findObject(tileSelector)?.contentDescription }.getOrNull()
-            File(out, "real-tile.txt").writeText("shared status: $state\ntile description: $desc\n")
+            assertNotNull("Tono tile in Quick Settings", device.wait(Until.findObject(tileSelector), 10_000))
             shot("real-08-quick-settings-tile")
-            assertTrue("tile shows the shared status ($desc)", desc?.contains(signIn) == true)
+            // The compact row shows labels only; the full panel also shows each tile's subtitle (state).
+            if (!device.hasObject(By.text(signIn))) {
+                device.swipe(device.displayWidth / 2, device.displayHeight / 6, device.displayWidth / 2, device.displayHeight * 3 / 4, 30)
+                Thread.sleep(1_500)
+            }
+            val subtitle = device.wait(Until.findObject(By.text(signIn)), 5_000)
+            val desc = runCatching { device.findObject(tileSelector)?.contentDescription }.getOrNull()
+            File(out, "real-tile.txt").writeText("shared status: $state\ntile description: $desc\ntile subtitle shown: ${subtitle != null}\n")
+            shot("real-08b-quick-settings-full")
+            assertNotNull("tile subtitle shows the shared status (\"$signIn\")", subtitle)
             device.findObject(tileSelector).click()
             // Signed out: the tile must not try to connect; it opens Tono at sign-in and closes the shade.
             assertNotNull("tile opens the app", device.wait(Until.findObject(By.text(context.getString(R.string.signin_title))), 15_000))
