@@ -22,3 +22,10 @@
   - 构建：托管 macos-26 运行 39078716807 @ `63066f0` 全绿（libbox、未签名 Release 真机、Debug 模拟器、9 个 XCUITest：6 交互 + 3 审计、46 张截图、3 段录像 + perf.txt；artifact `ios-preview-screenshots` 保留至 2026-10-31）。红：同一审计在 39071414305 @ `9a097b6`、39074124929 @ `f8b589f` 失败。
   - 自评 86/100（模拟器夹具证据；真实性/性能 4/5 仅凭 Mac 宿主数据，若要求真机数据则为 3/5，低于 70% 线）。
   - 未验证：真机、VoiceOver 实操、触感、真实隧道与网络、签名 / TestFlight（等待所有者）。
+- 续记（2026-10-18，UI 第 4 轮，目标 ≥95）：
+  - 原生扩展（新增 `TonoWidgets`，iOS 17+；Control Center 开关需 iOS 18）：状态小组件（主屏幕小/中、锁屏三种）、实时活动（锁屏 + 灵动岛，15 分钟过期日期）、控制中心开关。三者只读 App Group 中由 App 与隧道写入的 `StatusSnapshot`（隧道每 5 分钟心跳）：15 分钟内为当前状态，更旧只显示「最后已知 · 时间」，没有则显示「状态不可用」。唯一命令 `SetTunnelIntent` 由 iOS 在 App 进程执行，并经 `TunnelCommandGate` 检查（需账号、已启用的 VPN 配置、已准入的输入）。实时活动默认关闭（决定 130，provisional）。DEBUG 预览从不写共享状态，预览渲染都带「Preview」标记。
+  - 体验：首次引导、系统 VPN 提示前的说明页、网络切换「正在重连」、连接中断 + 重试、无网络、线路加载中与空状态；触感与标题 / 失败动效对齐 Android（`HapticCue`，有测试）；开启 120 Hz（`CADisableMinimumFrameDurationOnPhone`）。
+  - 证据：灵动岛紧凑与展开视图由系统真实渲染（模拟器，ActivityKit，夹具内容带 Preview 标记）；小组件视图在 App 内渲染（不是系统主屏幕）。
+  - 未验证：控制中心开关、主屏幕 / 锁屏上真实放置的小组件、App 进程中的 intent、VoiceOver 朗读顺序（XCUITest 只能按布局顺序枚举元素）、触感、ProMotion 帧率、真机性能、真实隧道 / 网络、签名。
+  - 构建：托管 macos-26 运行 39091191911 @ `35cdff4` 全绿（libbox、未签名 Release 真机含 `TonoWidgets.appex`、Debug 模拟器、15 个 XCUITest：12 交互 + 3 审计 / 性能、55 张截图、3 段录像；artifact `ios-preview-screenshots` 12122929452 保留至 2026-11-01）。红：39084572728 @ `f8fa697`（可用性编译错误）、39085570631 @ `d532218`、39088664883 @ `2f35044`（审计 / 朗读顺序测试失败）。
+  - 自评 88/100（86 → 88）；95 需真机与签名才能诚实验证，见 PR #1672。
