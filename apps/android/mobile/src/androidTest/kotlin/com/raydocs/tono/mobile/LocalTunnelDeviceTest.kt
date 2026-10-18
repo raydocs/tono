@@ -78,6 +78,26 @@ class LocalTunnelDeviceTest {
         Thread.sleep(800)
     }
 
+    /**
+     * The "Local test server · not Tono" mark is in the app's accessibility tree. It sits in the
+     * status-bar band, which UiAutomator's visible-node search may skip, so the window hierarchy is
+     * read instead; the screenshot that follows shows it.
+     */
+    private fun assertLocalMark(screen: String) {
+        val mark = text(R.string.local_test_server)
+        val deadline = SystemClock.elapsedRealtime() + 10_000
+        var dump = ""
+        while (SystemClock.elapsedRealtime() < deadline) {
+            dump = java.io.ByteArrayOutputStream().also { device.dumpWindowHierarchy(it) }.toString()
+            if (dump.contains("text=\"$mark\"")) break
+            Thread.sleep(300)
+        }
+        val found = dump.contains("text=\"$mark\"")
+        if (!found) diagnose("local-mark-missing-$screen")
+        note("mark on $screen: ${if (found) "present" else "MISSING"}")
+        assertTrue("$screen says it is a local test server", found)
+    }
+
     private fun reachable(host: String, port: Int) = runCatching { Socket().use { it.connect(InetSocketAddress(host, port), 3_000) } }.isSuccess
 
     /** One request from this process, which shares the app's uid and is therefore inside the tunnel. */
@@ -104,7 +124,7 @@ class LocalTunnelDeviceTest {
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
                 assertNotNull("sign-in screen", find(text(R.string.signin_title)))
-                assertNotNull("every screen says it is a local test server", find(text(R.string.local_test_server), 5_000))
+                assertLocalMark("sign-in")
                 shot("local-01-signin")
 
                 device.findObject(By.clazz("android.widget.EditText")).text = "tester@local.test"
@@ -119,7 +139,7 @@ class LocalTunnelDeviceTest {
                 if (connect == null) diagnose("local-signin-failed")
                 assertNotNull("signed in: Home with Connect", connect)
                 assertNotNull("the local catalog's line", find("Local test", 10_000))
-                assertNotNull(find(text(R.string.local_test_server), 5_000))
+                assertLocalMark("Home")
                 shot("local-02-home")
 
                 val tapped = SystemClock.elapsedRealtime()

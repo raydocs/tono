@@ -155,19 +155,35 @@ jobs:
           for i in $(seq 30); do curl -fs http://127.0.0.1:28080/healthz && break; sleep 1; done
           cat "$RUNNER_TEMP/local-tunnel/serve.out"
           echo "LOCAL_TUNNEL=$RUNNER_TEMP/local-tunnel" >> "$GITHUB_ENV"
-      # Hosted emulators were seen vanishing mid-run with no crash report and no OOM kill. Record how the
-      # emulator process ends (exit status or signal) and sample it from the host every 5 s.
+      # Hosted emulators were seen vanishing mid-run with no crash report and no OOM kill; run 39113297176
+      # showed exit status 139 (SIGSEGV) three times. Record how the emulator ends, keep a small core
+      # (the guest RAM, a shared mapping, is left out) and print the faulting thread's stack from it.
       - name: Record how the emulator ends
         run: |
           mkdir -p host-watch
+          command -v gdb > /dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq gdb > /dev/null) || true
+          sudo sysctl -w kernel.core_pattern="$GITHUB_WORKSPACE/host-watch/core.%e.%p"
           cat > wrap-emulator.sh <<'SH'
           set -eu
           E="$ANDROID_HOME/emulator"
           grep -q emulator-exit "$E/emulator" 2>/dev/null && exit 0
           mv -f "$E/emulator" "$E/emulator.real"
-          printf '%s\n' '#!/bin/bash' '"$0.real" "$@"' 'code=$?' \
-            'echo "$(date -u +%FT%TZ) emulator exited with status $code" >> "$GITHUB_WORKSPACE/host-watch/emulator-exit.txt"' \
-            'exit $code' > "$E/emulator"
+          cat > "$E/emulator" <<'W'
+          #!/bin/bash
+          W="$GITHUB_WORKSPACE/host-watch"
+          ulimit -c unlimited
+          echo 0x11 > /proc/self/coredump_filter
+          "$0.real" "$@"
+          code=$?
+          echo "$(date -u +%FT%TZ) emulator exited with status $code" >> "$W/emulator-exit.txt"
+          for core in "$W"/core.*; do
+            [ -f "$core" ] || continue
+            exe=$(find "$(dirname "$0")/qemu" -name 'qemu-system-x86_64*' -type f | head -1)
+            { echo "== $core ($(du -h "$core" | cut -f1))"; timeout 300 gdb -batch -ex bt -ex 'info registers rip' -ex 'info sharedlibrary' "$exe" "$core" 2>&1 | grep -v '^\[New LWP' | head -200; } >> "$W/emulator-crash-stack.txt"
+            rm -f "$core"
+          done
+          exit $code
+          W
           chmod +x "$E/emulator"
           SH
           nohup bash -c 'while true; do
@@ -306,7 +322,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu swangle_indirect -noaudio -no-boot-anim -camera-back none
           pre-emulator-launch-script: bash wrap-emulator.sh
           script: SHARD=${{ matrix.shard }} bash evidence.sh
       # One bounded retry: software-GPU emulators on hosted runners occasionally die mid-run.
@@ -320,7 +336,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu swangle_indirect -noaudio -no-boot-anim -camera-back none
           pre-emulator-launch-script: bash wrap-emulator.sh
           script: SHARD=${{ matrix.shard }} bash evidence.sh
       # Why an emulator went offline: its own crash reports, the host kernel log (OOM kills) and memory.
@@ -332,7 +348,7 @@ jobs:
           free -m > evidence/host/free.txt || true
           nproc >> evidence/host/free.txt || true
           cp -r /tmp/android-runner/emu-crash-*.db evidence/host/ 2>/dev/null || true
-          cp host-watch/* evidence/host/ 2>/dev/null || true
+          cp host-watch/*.txt evidence/host/ 2>/dev/null || true
           ls -laR evidence/host > evidence/host/listing.txt || true
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

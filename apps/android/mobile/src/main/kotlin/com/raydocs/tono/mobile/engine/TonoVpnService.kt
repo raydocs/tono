@@ -80,6 +80,8 @@ class TonoVpnService : VpnService() {
         localTestServer = local != null
         apiBase = local ?: BuildConfig.API_BASE
         api = ControlPlane(apiBase, BuildConfig.VERSION_NAME.substringBefore('-'))
+        // From the very first snapshot a client receives, before restore() runs.
+        snapshot.set(snapshot.get().copy(localTestServer = localTestServer))
         val connectivity = getSystemService(ConnectivityManager::class.java)
         monitor = NetworkMonitor(connectivity)
         monitor.start()
