@@ -64,9 +64,8 @@ struct TonoLiveActivityWidget: Widget {
                     }
                 }
             } compactLeading: {
-                Image(systemName: "sun.horizon.fill")
+                MarkGlyph(size: 22, label: p.title)
                     .foregroundStyle(p.stale ? TonoColor.neutral : p.tint)
-                    .accessibilityLabel(p.title)
             } compactTrailing: {
                 if let since = p.since {
                     Text(since, style: .timer)
@@ -81,9 +80,8 @@ struct TonoLiveActivityWidget: Widget {
                         .foregroundStyle(p.tint)
                 }
             } minimal: {
-                Image(systemName: "sun.horizon.fill")
+                MarkGlyph(size: 20, label: p.title)
                     .foregroundStyle(p.stale ? TonoColor.neutral : p.tint)
-                    .accessibilityLabel(p.title)
             }
             .widgetURL(URL(string: "tono://home"))
             .keylineTint(TonoColor.sunMid)

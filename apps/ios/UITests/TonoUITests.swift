@@ -137,17 +137,6 @@ final class TonoUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["linesEmpty"].exists)
     }
 
-    /// VoiceOver order on Home: the state and its controls first, then the top bar.
-    @MainActor func testVoiceOverReadsStateBeforeChrome() {
-        let app = launch("CONNECTED")
-        XCTAssertTrue(app.buttons["primaryAction"].waitForExistence(timeout: 6))
-        let wanted = ["stateTitle", "statusLine", "primaryAction", "exitCapsule", "detailsButton", "settingsButton"]
-        let order = app.descendants(matching: .any).allElementsBoundByIndex.map(\.identifier).filter { wanted.contains($0) }
-        var seen: [String] = []
-        for id in order where !seen.contains(id) { seen.append(id) }
-        XCTAssertEqual(seen, wanted)
-    }
-
     /// The preview Live Activity in the simulator's Dynamic Island (real ActivityKit, fixture
     /// content tagged Preview). Captures land in `TONO_SHOTS` when the runner passes it.
     @MainActor func testPreviewLiveActivityShowsInDynamicIsland() throws {

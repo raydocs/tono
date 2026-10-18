@@ -30,8 +30,9 @@ struct HomeView: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             VStack(spacing: 0) {
-                // VoiceOver reads the state and its controls first (title → status → action → line →
-                // details), then the top bar: the answer to "am I protected?" comes before chrome.
+                // VoiceOver should read the state and its controls first (title → status → action →
+                // line → details), then the top bar. XCUITest lists elements in layout order, so this
+                // order is not checked in CI; it needs a VoiceOver pass on a device.
                 topBar
                     .accessibilityElement(children: .contain)
                     .accessibilitySortPriority(0)

@@ -69,6 +69,17 @@ xcrun simctl launch booted com.raydocs.tono.ios -TonoPreview CONNECTED -TonoPrev
 `-TonoPreview` shows fictional fixture lines with no account and no tunnel. It is compiled only in
 Debug; the CI device build fails if a Release binary contains it.
 
+Widgets (Home Screen, Lock Screen), the Live Activity (Lock Screen, Dynamic Island) and the iOS 18
+Control Center switch live in the `TonoWidgets` extension (iOS 17+). They read one status snapshot
+from the App Group, written by the app and by the tunnel (heartbeat every 5 min). Older than 15 min
+it is shown only as "last known"; none means "unavailable". Their only command is
+`SetTunnelIntent`, which iOS runs in the app process behind `TunnelCommandGate`
+([decision 130](../../docs/decisions/130-2026-10-18-ios-widgets-live-activity-control.md)).
+Without the App Group (an unsigned simulator build) they read "unavailable". Preview flags for
+these states: `-TonoPreviewWidgets` (in-app rendering of the widget views), `-TonoPreviewLiveActivity`,
+`-TonoPreviewOnboarding`, `-TonoPreviewSheet primer`, `-TonoPreviewReason NETWORK_CHANGED|CORE_STOPPED`,
+`-TonoPreviewOffline` and `-TonoPreviewLines empty|loading`.
+
 ## Verification
 
 | Check | Where | Status |
@@ -77,6 +88,8 @@ Debug; the CI device build fails if a Release binary contains it.
 | `tools/sync-desktop-routing.py --check` | Linux | runs |
 | `tools/check-singbox.sh`: pinned sing-box CLI `check` + real-kernel route harness for 4 graphs, incl. Home-down / cloud-down fail-closed | Linux | runs |
 | libbox build, unsigned device + simulator `xcodebuild`, preview screenshots | `.github/workflows/ios-ci.yml` on GitHub-hosted `macos-26` | see the PR |
+| XCUITest: 12 interaction flows, Apple accessibility audit (home states, sheets, AX5), Live Activity in the Dynamic Island, simulator CPU/memory sample | `ios-ci.yml`, simulator, DEBUG preview | see the PR |
+| Widgets on a real Home Screen / Lock Screen, Control Center switch, intent in the app process, VoiceOver reading order, haptics, ProMotion frame pacing | iPhone + signing | **not run** |
 | Signed device install, tunnel start, real catalog, DNS/IPv6/UDP/LAN behaviour, On Demand recovery, memory under the 50 MB extension limit | iPhone + Apple Developer team | **not run** |
 | TestFlight / IPA | — | **none exists** |
 
@@ -90,13 +103,18 @@ Ordinary Apple Developer Program capabilities (self-service in the developer por
    `Configuration/Local.xcconfig`, or a CI variable). **Organization** enrolment, not individual:
    App Review guideline 5.4 requires VPN apps to come from an organization, and external TestFlight
    goes through Beta App Review.
-2. Two explicit App IDs: `com.raydocs.tono.ios` and `com.raydocs.tono.ios.tunnel` (or the owner's
-   prefix, set via `TONO_BUNDLE_ID`), both with **Network Extensions** and **App Groups** enabled.
-3. The App Group `group.com.raydocs.tono.ios` (`TONO_APP_GROUP`) registered and assigned to both IDs.
+2. Three explicit App IDs (or the owner's prefix, set via `TONO_BUNDLE_ID`):
+   - `com.raydocs.tono.ios` and `com.raydocs.tono.ios.tunnel`, with **Network Extensions** and
+     **App Groups** enabled;
+   - `com.raydocs.tono.ios.widgets` (widgets, Live Activity, Control Center switch), with
+     **App Groups** only.
+3. The App Group `group.com.raydocs.tono.ios` (`TONO_APP_GROUP`) registered and assigned to all three IDs.
+   Live Activities need no entitlement (no push updates are used); widgets and the iOS 18 control
+   need none beyond the App Group.
    `packet-tunnel-provider` is a standard NE capability for paid teams; `includeAllNetworks` and On
    Demand need no extra entitlement.
-4. Signing: an **Apple Distribution** certificate (private key stays with the owner) and two **App
-   Store** provisioning profiles (app + extension), or Xcode automatic signing; for CI, an App
+4. Signing: an **Apple Distribution** certificate (private key stays with the owner) and three **App
+   Store** provisioning profiles (app, tunnel, widgets), or Xcode automatic signing; for CI, an App
    Store Connect API key (issuer ID, key ID, `.p8`) stored as repository secrets.
 5. For on-device debugging before TestFlight: a registered iPhone UDID and development profiles.
 6. An App Store Connect app record (name, bundle ID, SKU), the export-compliance answers

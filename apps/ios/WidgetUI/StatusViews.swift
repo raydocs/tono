@@ -42,6 +42,24 @@ struct HorizonGlyph: View {
     }
 }
 
+/// The Tono mark as a template (one colour), for system-tinted places: Lock Screen accessories, the
+/// Dynamic Island, tinted / clear Home Screen widgets.
+struct MarkGlyph: View {
+    var size: CGFloat = 20
+    /// Spoken label where the mark alone carries the state (Dynamic Island); nil = decorative.
+    var label: String?
+
+    var body: some View {
+        let image = Image("TonoMark").resizable().renderingMode(.template).interpolation(.high).scaledToFit()
+            .frame(width: size, height: size)
+        if let label {
+            image.accessibilityLabel(label)
+        } else {
+            image.accessibilityHidden(true)
+        }
+    }
+}
+
 /// "Preview" tag on every fixture rendering (DEBUG gallery, preview Live Activity).
 struct PreviewTag: View {
     var body: some View {
@@ -65,6 +83,7 @@ struct WidgetSky: View {
 
 /// Home-screen and Lock Screen widget content for one `StatusPresentation`.
 struct StatusWidgetView: View {
+    @Environment(\.widgetRenderingMode) private var renderingMode
     let p: StatusPresentation
     let family: WidgetFamily
     /// Buttons run `SetTunnelIntent`; the DEBUG gallery renders them inert.
@@ -86,8 +105,12 @@ struct StatusWidgetView: View {
             ZStack {
                 AccessoryWidgetBackground()
                 VStack(spacing: 1) {
-                    Image(systemName: p.isOn ? "sun.horizon.fill" : (p.stale || p.tone == .unknown ? "questionmark" : "moon.fill"))
-                        .font(.system(size: 17, weight: .semibold))
+                    if p.isOn {
+                        MarkGlyph(size: 22).widgetAccentable()
+                    } else {
+                        Image(systemName: p.stale || p.tone == .unknown ? "questionmark" : "moon.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                    }
                     Text(p.isOn ? L.t("widget_on_short") : (p.stale || p.tone == .unknown ? "?" : L.t("widget_off_short")))
                         .font(.system(size: 10, weight: .semibold))
                         .minimumScaleFactor(0.7)
@@ -98,7 +121,7 @@ struct StatusWidgetView: View {
         case .accessoryRectangular:
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Image(systemName: "sun.horizon.fill")
+                    MarkGlyph(size: 16).widgetAccentable()
                     Text(p.title).font(.headline).lineLimit(1)
                 }
                 if let since = p.since {
@@ -125,7 +148,12 @@ struct StatusWidgetView: View {
     private var summary: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top) {
-                HorizonGlyph(sunRise: p.sunRise, warn: p.tone == .warn || p.tone == .error, size: 40)
+                // Tinted and clear Home Screens (iOS 18 / 26) draw one colour: the mark, accented.
+                if renderingMode == .fullColor {
+                    HorizonGlyph(sunRise: p.sunRise, warn: p.tone == .warn || p.tone == .error, size: 40)
+                } else {
+                    MarkGlyph(size: 32).widgetAccentable()
+                }
                 Spacer(minLength: 0)
                 if preview { PreviewTag() }
             }
