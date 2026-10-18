@@ -777,7 +777,14 @@ final class TonoUITests: XCTestCase {
             // capsule the few text pixels fall below the percentile used here.
             let hasText = controls.contains(type) && element.staticTexts.count > 0
             if element.isEnabled, !hasText, let ratio = measuredContrast(element), ratio < 4.5 {
-                failures.append(String(format: "SWEEP %@: measured %.1f:1 under WCAG AA | %@", name, ratio, what))
+                // XCUITest lists Home's elements under an open sheet too (the AX5 Lines sweep measured
+                // Home's "86 ms" at 1.0:1: the sheet's own background). Only a failing element that is
+                // also not hittable is taken as covered; it is logged, never silently dropped.
+                if !element.isHittable {
+                    print(String(format: "SWEEP %@: %.1f:1 but not hittable (covered by a sheet), not counted | %@", name, ratio, what))
+                } else {
+                    failures.append(String(format: "SWEEP %@: measured %.1f:1 under WCAG AA | %@", name, ratio, what))
+                }
             }
         }
         return (checked, failures)
