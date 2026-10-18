@@ -112,11 +112,16 @@ class SystemSurfacesDeviceTest {
             assertNotNull("Tono tile in Quick Settings", device.wait(Until.findObject(tileSelector), 10_000))
             shot("real-08-quick-settings-tile")
             // The compact row shows labels only; the full panel also shows each tile's subtitle (state).
-            if (!device.hasObject(By.text(signIn))) {
-                device.swipe(device.displayWidth / 2, device.displayHeight / 6, device.displayWidth / 2, device.displayHeight * 3 / 4, 30)
-                Thread.sleep(1_500)
+            // A slow SystemUI can stop at the compact row (run 39103789541), so the panel is opened
+            // again until it is the full one; the subtitle itself must still read "Sign in".
+            var subtitle = device.wait(Until.findObject(By.text(signIn)), 3_000)
+            var attempt = 0
+            while (subtitle == null && attempt++ < 3) {
+                collapseShade()
+                shell("cmd statusbar expand-settings")
+                subtitle = device.wait(Until.findObject(By.text(signIn)), 8_000)
+                File(out, "real-tile-panel.txt").appendText("full panel reopened ($attempt): subtitle ${if (subtitle != null) "shown" else "not shown"}\n")
             }
-            val subtitle = device.wait(Until.findObject(By.text(signIn)), 5_000)
             val desc = runCatching { device.findObject(tileSelector)?.contentDescription }.getOrNull()
             File(out, "real-tile.txt").writeText("shared status: $state\ntile description: $desc\ntile subtitle shown: ${subtitle != null}\n")
             shot("real-08b-quick-settings-full")
