@@ -611,8 +611,13 @@ final class TonoUITests: XCTestCase {
     }
 
     /// WCAG contrast of an element's text against its own background, from a screenshot of the
-    /// element: text = the 3% of pixels furthest from the background (light or dark text alike),
-    /// background = the median pixel.
+    /// element. Background = the median pixel. Text = the glyph core: among the ink pixels (at least
+    /// 1.5:1 from the background, lighter or darker), the one at the 90th percentile of contrast.
+    /// Until round 11 the text was the 97th percentile of all pixels, which reads background when
+    /// ink covers under 3% of the element: Details' 362 x 52 pt Settings row (2.1% ink, white text
+    /// at 15.3:1 in the capture) measured 1.2:1. Both values are logged for every measurement, and
+    /// `testContrastMeasureFailsLowContrastTextInASparseRow` keeps this method failing 3:1 and 4:1
+    /// text in the same kind of row.
     @MainActor static func measuredContrast(_ element: XCUIElement) -> Double? {
         guard let cg = element.screenshot().image.cgImage else { return nil }
         let w = cg.width, h = cg.height
@@ -631,10 +636,30 @@ final class TonoUITests: XCTestCase {
         for i in stride(from: 0, to: bytes.count, by: 4) {
             lum.append(0.2126 * lin(bytes[i]) + 0.7152 * lin(bytes[i + 1]) + 0.0722 * lin(bytes[i + 2]))
         }
-        lum.sort()
-        let background = lum[lum.count / 2]
-        let text = background < 0.18 ? lum[lum.count * 97 / 100] : lum[lum.count * 3 / 100]
-        return (max(text, background) + 0.05) / (min(text, background) + 0.05)
+        let sorted = lum.sorted()
+        let background = sorted[sorted.count / 2]
+        func ratio(_ l: Double) -> Double { (max(l, background) + 0.05) / (min(l, background) + 0.05) }
+        let percentile = ratio(background < 0.18 ? sorted[sorted.count * 97 / 100] : sorted[sorted.count * 3 / 100])
+        let ink = lum.map(ratio).filter { $0 >= 1.5 }.sorted()
+        // No ink to speak of (under 0.05% of the pixels): the text is not visible against its background.
+        let core = ink.count >= max(20, lum.count / 2000) ? ink[ink.count * 9 / 10] : (ink.last ?? 1)
+        print(String(format: "MEASURE id=%@ label=%@: glyph core %.1f:1 (ink %.2f%%), 97th percentile %.1f:1",
+                     element.identifier, String(element.label.prefix(40)), core, Double(ink.count) * 100 / Double(lum.count), percentile))
+        return core
+    }
+
+    /// Calibration of `measuredContrast` on CI: a DEBUG probe draws rows built like Details'
+    /// Settings row (full-width card, 52 pt, one short word) with text at about 3:1, 4:1 and the
+    /// app's primary text. The two low ones must fail 4.5:1 and the primary one must pass, so a
+    /// measurement that passes everything cannot go unnoticed.
+    @MainActor func testContrastMeasureFailsLowContrastTextInASparseRow() {
+        let app = launch("CONNECTED", ["-TonoPreviewContrastProbe"])
+        for (id, passes) in [("probe3", false), ("probe4", false), ("probePrimary", true)] {
+            let row = app.descendants(matching: .any)[id]
+            XCTAssertTrue(row.waitForExistence(timeout: 6), id)
+            guard let ratio = Self.measuredContrast(row) else { return XCTFail("\(id): no pixels") }
+            XCTAssertEqual(ratio >= 4.5, passes, String(format: "%@ measured %.1f:1", id, ratio))
+        }
     }
 
     /// Runs Apple's audit and returns one line per issue (empty when the screen is clean).
@@ -740,6 +765,12 @@ final class TonoUITests: XCTestCase {
         for element in app.descendants(matching: .any).allElementsBoundByIndex {
             let type = element.elementType
             guard type == .staticText || controls.contains(type), element.identifier != "previewBadge" else { continue }
+            // The sheet's drag indicator is drawn and sized by UIKit (76 x 25 pt), not by Tono; a sheet
+            // also closes with a swipe anywhere on it. Logged, not counted.
+            if type == .button, element.identifier.isEmpty, element.label == "Sheet Grabber" {
+                print("SWEEP \(name): system sheet grabber \(element.frame) not Tono's control; skipped")
+                continue
+            }
             let frame = element.frame
             guard !frame.isEmpty, window.contains(frame) else { continue }
             checked += 1
