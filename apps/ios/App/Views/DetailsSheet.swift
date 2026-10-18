@@ -130,7 +130,9 @@ struct DetailsSheet: View {
     private var modePicker: some View {
         let pending = model.changingRoutes ? model.routeChange?.requested.mode : nil
         return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 4) {
+            // Accessibility sizes stack the two, so "Three-tier" never breaks inside the word.
+            let row = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 4))
+            row {
                 modeSegment(.threeTier, pending: pending)
                 modeSegment(.stable, pending: pending)
             }

@@ -204,4 +204,5 @@
 "check_no_lines" = "线路还没加载，暂时没有可查的路由。";
 "check_routes_stopped" = "Tono 的路由现在已停止。点「重试」重建。";
 "reason_ROUTES_STOPPED" = "设置更改被拒绝，之前的路由也没能恢复。点「重试」重建。";
-"short_ROUTES_STOPPED" = "路由已停止";
+"short_ROUTES_STOPPED" = "点重试重建";
+"state_routes_stopped" = "路由已停止";

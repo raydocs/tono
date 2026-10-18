@@ -154,6 +154,8 @@ struct RouteCheck: View {
     @EnvironmentObject private var model: AppModel
     @State private var host = ""
     @State private var result: RouteCheckResult?
+    /// The text the result on screen answers.
+    @State private var asked: String?
     @FocusState private var focused: Bool
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -172,11 +174,14 @@ struct RouteCheck: View {
                 .onChange(of: host) { value in
                     // A wrapping field types return as a newline: treat it as Search.
                     if value.contains("\n") {
-                        host = value.replacingOccurrences(of: "\n", with: "")
-                        run()
+                        let typed = value.replacingOccurrences(of: "\n", with: "")
+                        host = typed
+                        submit(typed)
                         return
                     }
-                    // Another site: the result on screen is no longer about it.
+                    // Another site: the result on screen is no longer about it. (Stripping the
+                    // newline above lands here too, with the text just checked.)
+                    if value == asked { return }
                     if case .answer(let answer) = result, RouteExplainer.cleanHost(value) == answer.host { return }
                     result = nil
                 }
@@ -222,9 +227,12 @@ struct RouteCheck: View {
         }
     }
 
-    private func run() {
+    private func run() { submit(host) }
+
+    private func submit(_ text: String) {
         focused = false
-        let found = model.check(host)
+        let found = model.check(text)
+        asked = text
         result = found
         onAnswer()
         let spoken = Self.message(found)

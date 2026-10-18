@@ -490,9 +490,10 @@ struct ActionCapsule: View {
                     .foregroundStyle(TonoColor.textSecondary)
                     .lineLimit(1).fixedSize()
             }
-            // The clock arrives as the sunrise fill hands over, not on top of its bright end
-            // (state-cycle @ b36d07d 2.7 s).
-            .opacity(fill > 0 ? 1 - fillOpacity : 1)
+            // The clock arrives after the sunrise fill has handed over, not on top of its bright
+            // end (state-cycle @ b36d07d 2.7 s; a fade tied to the fill still showed it faintly).
+            .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.3).delay(reduceMotion ? 0 : 1.4)),
+                                    removal: .opacity.animation(.easeOut(duration: 0.1))))
         }
     }
 
@@ -624,6 +625,8 @@ enum PhaseText {
     /// are a first start and iOS reconnecting after a network change.
     static func title(_ p: Phase, reason: String? = nil) -> String {
         if p == .failed, reason == "CORE_STOPPED" { return L.t("state_dropped") }
+        // The tunnel did connect; what stopped is its routing after a refused change.
+        if p == .failed, reason == "ROUTES_STOPPED" { return L.t("state_routes_stopped") }
         if p == .connecting, reason == "NETWORK_CHANGED" { return L.t("state_reconnecting") }
         switch p {
         case .signedOut: return L.t("state_signed_out")

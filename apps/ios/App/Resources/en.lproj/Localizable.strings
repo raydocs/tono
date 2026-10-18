@@ -204,4 +204,5 @@
 "check_no_lines" = "Lines haven't loaded yet, so there are no routes to check.";
 "check_routes_stopped" = "Tono's routes are stopped right now. Retry rebuilds them.";
 "reason_ROUTES_STOPPED" = "A settings change was refused and the previous routes could not be restored. Retry rebuilds them.";
-"short_ROUTES_STOPPED" = "Routes stopped";
+"short_ROUTES_STOPPED" = "Retry rebuilds them";
+"state_routes_stopped" = "Routes stopped";

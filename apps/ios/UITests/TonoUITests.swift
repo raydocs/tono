@@ -433,9 +433,12 @@ final class TonoUITests: XCTestCase {
         XCTAssertTrue(answer.label.hasPrefix("example.com goes directly"), answer.label)
         XCTAssertTrue(answer.label.contains("Three-tier"), answer.label)
         save(XCUIScreen.main.screenshot(), "details-mode-refused")
-        app.swipeDown(velocity: .fast)
+        // Close Details (a large sheet first drops to medium), so Home's line is what is captured.
+        let header = app.staticTexts["Details"]
+        for _ in 0..<3 where header.isHittable { app.swipeDown(velocity: .fast); sleep(1) }
         let home = app.buttons["routeNote"]
         XCTAssertTrue(home.waitForExistence(timeout: 4), "Home does not say the switch failed")
+        waitHittable(home)
         XCTAssertTrue(home.label.hasPrefix("Couldn't switch to Stable"), home.label)
         save(XCUIScreen.main.screenshot(), "home-mode-refused")
     }
