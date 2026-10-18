@@ -169,8 +169,12 @@ class LocalTunnelDeviceTest {
 
                 note("memory while connected (PSS): app ${pss(context.packageName)}, engine :vpn ${pss("${context.packageName}:vpn")}")
 
-                device.findObject(By.text(text(R.string.details)))?.click()
-                Thread.sleep(1_500)
+                device.findObject(By.text(text(R.string.details))).click()
+                // The sheet is its own window; on the software-GPU emulator it can take a few
+                // seconds to draw, so wait for its content before the screenshot.
+                val details = find(text(R.string.lane_video), 15_000)
+                if (details == null) diagnose("local-details-missing")
+                assertNotNull("Details opened while connected", details)
                 shot("local-04-details")
                 device.pressBack()
                 Thread.sleep(800)
