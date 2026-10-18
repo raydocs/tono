@@ -284,13 +284,26 @@ class HorizonUiDeviceTest {
             timeline.append("frame $frame (${frame * 16} ms): ${s.phase}\n")
             repeat((ms / 16).toInt()) {
                 compose.mainClock.advanceTimeByFrame()
-                val image = compose.onRoot().captureToImage().asAndroidBitmap()
+                val image = captureFrame()
                 val small = android.graphics.Bitmap.createScaledBitmap(image, image.width / 2, image.height / 2, true)
                 File(dir, "frame-%04d.jpg".format(frame++)).outputStream().use { small.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, it) }
             }
         }
         File(out, "motion-frames.txt").writeText("$frame frames, 16 ms each, rendered on this device by the Compose test clock\n$timeline")
         assertTrue("frames rendered: $frame", frame > 200)
+    }
+
+    /**
+     * One capture of the current frame. captureToImage waits at most 2 s for the window to redraw;
+     * a software-GPU frame of the animated scene occasionally takes longer (run 39100236753), so the
+     * same frame is captured again, up to three times, before the test fails.
+     */
+    private fun captureFrame(): android.graphics.Bitmap {
+        var last: Throwable? = null
+        repeat(3) {
+            try { return compose.onRoot().captureToImage().asAndroidBitmap() } catch (e: androidx.compose.ui.test.ComposeTimeoutException) { last = e }
+        }
+        throw AssertionError("frame not drawn after three 2 s waits", last)
     }
 
     /** Shown before Android's VPN dialog whenever consent is missing; Continue is what opens it. */

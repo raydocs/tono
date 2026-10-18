@@ -61,6 +61,30 @@ class SystemSurfacesDeviceTest {
 
     private fun shot(name: String) { Thread.sleep(600); assertTrue(name, device.takeScreenshot(File(out, "$name.png"))) }
 
+    private val shade = By.res("com.android.systemui", "notification_stack_scroller")
+
+    /**
+     * Collapses the shade and waits until it is gone. On a slow emulator SystemUI can drop a collapse
+     * issued mid-animation (run 39100236753 left the shade over the next test), so the command is
+     * re-sent until the shade is really closed; the caller fails if it never closes.
+     */
+    private fun collapseShade(): Boolean {
+        repeat(4) {
+            shell("cmd statusbar collapse")
+            if (device.wait(Until.gone(shade), 5_000)) return true
+        }
+        return false
+    }
+
+    /** Expands the notification shade and waits for [selector]; re-sends the expand once if SystemUI ignored it. */
+    private fun expandNotificationsUntil(selector: androidx.test.uiautomator.BySelector): androidx.test.uiautomator.UiObject2? {
+        repeat(2) {
+            shell("cmd statusbar expand-notifications")
+            device.wait(Until.findObject(selector), 10_000)?.let { return it }
+        }
+        return null
+    }
+
     /** The engine publishes its status whenever it runs; launching the app starts it if needed. */
     private fun realState(): SurfaceState {
         if (PublicStatusStore.read(context) == null) {
@@ -102,7 +126,7 @@ class SystemSurfacesDeviceTest {
             assertNotNull("tile opens the app", device.wait(Until.findObject(By.text(context.getString(R.string.signin_title))), 15_000))
             shot("real-09-tile-opens-sign-in")
         } finally {
-            shell("cmd statusbar collapse")
+            collapseShade()
             shell(if (savedTiles.isEmpty() || savedTiles == "null") "settings delete secure sysui_qs_tiles" else "settings put secure sysui_qs_tiles $savedTiles")
         }
     }
@@ -192,16 +216,15 @@ class SystemSurfacesDeviceTest {
         )
         try {
             for ((name, n) in notifications) {
+                val title = n.extras.getCharSequence(Notification.EXTRA_TITLE).toString()
                 nm.notify(9101, fixture(n))
-                shell("cmd statusbar expand-notifications")
-                assertNotNull(device.wait(Until.findObject(By.textStartsWith("FIXTURE · ")), 10_000))
+                assertNotNull("$name in the shade", expandNotificationsUntil(By.text("FIXTURE · $title")))
                 shot(name)
-                shell("cmd statusbar collapse")
+                assertTrue("shade closes after $name", collapseShade())
                 nm.cancel(9101)
-                Thread.sleep(800)
             }
         } finally {
-            shell("cmd statusbar collapse")
+            collapseShade()
             nm.cancel(9101)
         }
     }

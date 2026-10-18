@@ -144,6 +144,9 @@ jobs:
           # (seen on hosted runners) costs one test's evidence rather than all of it.
           set +e
           failed=""
+          # Streamed from the host, so an emulator that dies mid-run still leaves its last log lines.
+          adb logcat -v threadtime > evidence/logcat-live.txt 2>&1 &
+          logcat=$!
           for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog \
                    DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig \
                    DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme \
@@ -169,7 +172,17 @@ jobs:
             grep -q '^OK (' "evidence/instrument-$t.txt" && echo "PASS $t" >> evidence/summary.txt || { echo "FAIL $t" >> evidence/summary.txt; failed="$failed $t"; }
             timeout 120 adb pull /sdcard/Android/data/$APP/files/evidence/. evidence/
             [ "$t" = b2_fixtureMotionRecordedOnDevice ] && timeout 120 adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4
+            # A dead emulator fails every later test with no output; say so once and stop, so the
+            # fresh-emulator retry starts sooner. Every test must still pass in a single session.
+            if [ "$(timeout 30 adb get-state 2>/dev/null)" != device ]; then
+              echo "DEVICE-OFFLINE after $t; later tests not run in this attempt" >> evidence/summary.txt
+              failed="$failed device-offline"
+              break
+            fi
+            # Isolation: a shade a test left open would cover the next test's app.
+            timeout 30 adb shell cmd statusbar collapse
           done
+          kill $logcat
           # Leave the shared emulator settings as found, whatever a failed test left behind.
           adb shell settings put system font_scale 1.0
           adb shell settings put global animator_duration_scale 1
