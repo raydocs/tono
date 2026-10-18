@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -160,37 +162,46 @@ class HorizonUiDeviceTest {
 
     /**
      * The glass material really blurs what is behind it on this device (RenderEffect, API 31+):
-     * Tono's [Glass] over 8 dp black/white stripes. Without blur the stripes would still show through
-     * the 46 % tint at about half their contrast; blurred they must almost vanish.
+     * Tono's [Glass] over 8 dp black/white stripes, next to a control surface using Compose's own
+     * `Modifier.blur` on the same stripes. Without blur the stripes would still show through the 46 %
+     * tint at about half their contrast; blurred they must almost vanish.
      */
     @Test fun u4_glassBlursTheSceneBehindIt() {
+        val stripes: androidx.compose.ui.graphics.drawscope.DrawScope.() -> Unit = {
+            val w = 8.dp.toPx()
+            var x = 0f
+            while (x < size.width) { drawRect(Color.White, Offset(x, 0f), Size(w, size.height)); x += 2 * w }
+        }
         compose.setContent {
             Box(Modifier.fillMaxSize().background(Color.Black)) {
-                BackdropHost(scene = { Canvas(Modifier.fillMaxSize()) {
-                    val w = 8.dp.toPx()
-                    var x = 0f
-                    while (x < size.width) { drawRect(Color.White, Offset(x, 0f), Size(w, size.height)); x += 2 * w }
-                } }, modifier = Modifier.fillMaxSize()) {
+                BackdropHost(scene = { Canvas(Modifier.fillMaxSize(), onDraw = stripes) }, modifier = Modifier.fillMaxSize()) {
                     Glass(RoundedCornerShape(28.dp), Modifier.align(Alignment.Center).size(240.dp, 160.dp).testTag("glass")) {}
+                    // Control: the platform blur alone, same radius, over the same stripes.
+                    Canvas(Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp).size(240.dp, 120.dp).blur(26.dp, BlurredEdgeTreatment.Rectangle).testTag("control"), onDraw = stripes)
                 }
             }
         }
         compose.waitForIdle()
         val image = compose.onRoot().captureToImage().asAndroidBitmap()
-        val g = compose.onNodeWithTag("glass").fetchSemanticsNode().boundsInRoot
-        fun contrast(left: Int, top: Int, w: Int, h: Int): Double {
+        val inset = 24.dp.value * compose.density.density // away from the rim and rounded corners
+        fun contrast(r: androidx.compose.ui.geometry.Rect): Double {
+            val left = (r.left + inset).toInt(); val top = (r.top + inset).toInt()
+            val w = (r.width - 2 * inset).toInt(); val h = (r.height - 2 * inset).toInt()
             val px = IntArray(w * h).also { image.getPixels(it, 0, w, left, top, w, h) }
             val luma = px.map { (0.299 * ((it shr 16) and 0xFF) + 0.587 * ((it shr 8) and 0xFF) + 0.114 * (it and 0xFF)) }
             return luma.max() - luma.min()
         }
-        val inset = 24.dp.value * compose.density.density // away from the rim and rounded corners
-        val inside = contrast((g.left + inset).toInt(), (g.top + inset).toInt(), (g.width - 2 * inset).toInt(), (g.height - 2 * inset).toInt())
-        val outside = contrast(0, (g.top + inset).toInt(), (g.left - 8).toInt(), (g.height - 2 * inset).toInt())
+        val g = compose.onNodeWithTag("glass").fetchSemanticsNode().boundsInRoot
+        val inside = contrast(g)
+        val control = contrast(compose.onNodeWithTag("control").fetchSemanticsNode().boundsInRoot)
+        val outside = contrast(androidx.compose.ui.geometry.Rect(0f, g.top, g.left - 8, g.bottom))
         File(out, "fixture-16-glass-blur.png").outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
         File(out, "glass-report.txt").writeText(
-            "API ${android.os.Build.VERSION.SDK_INT}: stripe luminance range behind glass %.1f vs. beside it %.1f (%.1f %%)\n".format(inside, outside, 100 * inside / outside),
+            ("API ${android.os.Build.VERSION.SDK_INT}: stripe luminance range beside the glass %.1f, behind Tono glass %.1f (%.1f %%), " +
+                "under the platform's own blur %.1f (%.1f %%)\n").format(outside, inside, 100 * inside / outside, control, 100 * control / outside),
         )
         assertTrue("stripes visible beside the glass ($outside)", outside > 200)
+        assertTrue("the platform blur renders on this device: $control of $outside", control < 0.15 * outside)
         assertTrue("glass blurs the stripes: $inside of $outside", inside < 0.15 * outside)
     }
 
@@ -207,7 +218,7 @@ class HorizonUiDeviceTest {
             }
         }
         val found = A11yContract.violations(compose, "consent") + A11yContract.truncatedText(compose, "consent")
-        shot("fixture-19-consent-explainer")
+        shot("fixture-20-consent-explainer")
         compose.onNodeWithText(str(R.string.consent_continue)).performClick()
         compose.onNodeWithText(str(R.string.consent_later)).performClick()
         assertEquals(found.joinToString("\n"), 0, found.size)
@@ -223,25 +234,31 @@ class HorizonUiDeviceTest {
     @Test fun u6_screenReaderOrderAndLabelsOnHome() {
         show()
         set(DeviceFixtures.degraded())
-        Thread.sleep(500)
+        Thread.sleep(800)
         val seen = mutableListOf<String>()
-        fun walk(n: android.view.accessibility.AccessibilityNodeInfo?) {
+        val tree = StringBuilder()
+        val unreachable = mutableListOf<String>()
+        fun walk(n: android.view.accessibility.AccessibilityNodeInfo?, depth: Int) {
             if (n == null) return
             val label = listOfNotNull(n.contentDescription, n.text).joinToString(" ").trim()
+            val r = android.graphics.Rect().also(n::getBoundsInScreen)
+            tree.append("  ".repeat(depth)).append("${n.className} \"$label\" click=${n.isClickable} focus=${n.isFocusable} srf=${n.isScreenReaderFocusable} visible=${n.isVisibleToUser} important=${n.isImportantForAccessibility} $r\n")
+            if (n.isClickable && !n.isVisibleToUser) unreachable += label.ifEmpty { "${n.className} $r" }
             val speaks = n.isVisibleToUser && label.isNotEmpty() && (n.isClickable || n.isScreenReaderFocusable || n.isHeading || n.isFocusable)
             val state = if (android.os.Build.VERSION.SDK_INT >= 30) n.stateDescription?.let { " ($it)" } ?: "" else ""
             if (speaks) seen += label + (if (n.isClickable) " [button]" else "") + state
-            for (i in 0 until n.childCount) walk(n.getChild(i))
+            for (i in 0 until n.childCount) walk(n.getChild(i), depth + 1)
         }
-        walk(instrumentation.uiAutomation.rootInActiveWindow)
+        walk(instrumentation.uiAutomation.rootInActiveWindow, 0)
+        File(out, "a11y-tree.txt").writeText(tree.toString())
         File(out, "screen-reader-order.txt").writeText(seen.joinToString("\n"))
+        assertTrue("clickable but hidden from screen readers: $unreachable", unreachable.isEmpty())
         fun at(text: String) = seen.indexOfFirst { it.contains(text) }.also { assertTrue("\"$text\" is read: $seen", it >= 0) }
         val order = listOf(
             at(str(R.string.settings_title)), at(str(R.string.state_degraded)), at(str(R.string.action_disconnect)),
             at("Tokyo"), at(str(R.string.details)),
         )
         assertEquals("reading order follows the screen: $seen", order.sorted(), order)
-        assertTrue("every button has a label: $seen", seen.none { it.startsWith(" [button]") })
     }
 
     /** Window → screen offset for UiDevice coordinates. */

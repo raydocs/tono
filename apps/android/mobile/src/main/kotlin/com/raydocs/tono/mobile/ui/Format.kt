@@ -22,10 +22,11 @@ object Format {
     // ICU's long forms do not fit the one status line.
     private val COUNTRY_ZH_SHORT = mapOf("HK" to "香港", "MO" to "澳门")
 
+    /** Non-breaking space between number and unit: large text wraps between rates, never inside one. */
     fun rate(bytesPerSec: Long): String = when {
-        bytesPerSec >= 1_000_000 -> String.format(Locale.ROOT, "%.2f MB/s", bytesPerSec / 1_000_000.0)
-        bytesPerSec >= 1_000 -> String.format(Locale.ROOT, "%d KB/s", bytesPerSec / 1_000)
-        else -> "$bytesPerSec B/s"
+        bytesPerSec >= 1_000_000 -> String.format(Locale.ROOT, "%.2f\u00A0MB/s", bytesPerSec / 1_000_000.0)
+        bytesPerSec >= 1_000 -> String.format(Locale.ROOT, "%d\u00A0KB/s", bytesPerSec / 1_000)
+        else -> "$bytesPerSec\u00A0B/s"
     }
 
     /** Desktop LatencyLevel thresholds: <200 good, <400 slow, ≥400 very slow. */

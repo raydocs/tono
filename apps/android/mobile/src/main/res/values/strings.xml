@@ -41,7 +41,7 @@
     <string name="lane_checking">checking</string>
     <string name="lane_down">unreachable</string>
 
-    <string name="speed_line">↓ %1$s · ↑ %2$s</string>
+    <string name="speed_line">↓\u00A0%1$s · ↑\u00A0%2$s</string>
 
     <string name="reason_HOME_UNAVAILABLE">Your assigned Home exit is unavailable right now. Tono won\'t quietly send AI elsewhere; try again later.</string>
     <string name="reason_NETWORK">Can\'t reach Tono. Check the network and retry.</string>

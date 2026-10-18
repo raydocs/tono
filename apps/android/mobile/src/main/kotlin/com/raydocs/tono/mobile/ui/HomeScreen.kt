@@ -58,6 +58,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -171,8 +172,13 @@ private fun StateHeader(s: EngineSnapshot) {
         }
         Spacer(Modifier.height(4.dp))
         AnimatedContent(line to tone, transitionSpec = { crossRise() }, label = "line") { (text, c) ->
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 22.dp)) {
-                if (c != null) { StatusDot(c, size = 7); Spacer(Modifier.width(8.dp)) }
+            Row(verticalAlignment = Alignment.Top, modifier = Modifier.heightIn(min = 22.dp)) {
+                // The dot sits on the first line, also when large text wraps the reason to two.
+                if (c != null) {
+                    val line = with(LocalDensity.current) { MaterialTheme.typography.bodyLarge.lineHeight.toDp() }
+                    Box(Modifier.height(line), contentAlignment = Alignment.Center) { StatusDot(c, size = 7) }
+                    Spacer(Modifier.width(8.dp))
+                }
                 // Up to two lines: at large font sizes the exit or reason wraps instead of being cut off.
                 Text(text ?: "", style = MaterialTheme.typography.bodyLarge, color = if (c != null) TonoColors.TextPrimary else TonoColors.TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }

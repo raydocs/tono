@@ -13,55 +13,48 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * What glass sees through: the scene behind it, recorded once per frame by [BackdropHost] together
- * with one blurred copy. Every glass surface draws its slice of that copy, so five surfaces cost one
- * scene draw and one blur instead of five of each.
+ * What glass sees through: the scene behind it, recorded once per frame by [BackdropHost]. Each
+ * glass surface blurs only its own slice of that recording, so the scene is composed and drawn once
+ * instead of once per surface.
  */
-class Backdrop(val origin: Offset, val blurred: GraphicsLayer)
+class Backdrop(val origin: Offset, val scene: GraphicsLayer)
 
 val LocalBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 
-/** Glass blur radius; one radius for the whole screen, so the blurred copy can be shared. */
-val GlassBlur = 26.dp
-
-/** Hosts [scene] full-bleed and exposes it (blurred, API 31+) to every [Glass] drawn above it. */
+/** Hosts [scene] full-bleed and exposes its recording to every [Glass] drawn above it (API 31+). */
 @Composable
 fun BackdropHost(scene: @Composable () -> Unit, modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
     var origin by remember { mutableStateOf(Offset.Zero) }
-    val sharp = rememberGraphicsLayer()
-    val blurred = rememberGraphicsLayer()
+    val recording = rememberGraphicsLayer()
     val canBlur = Build.VERSION.SDK_INT >= 31
     Box(modifier.onGloballyPositioned { origin = it.positionInRoot() }) {
         Box(
             Modifier.matchParentSize().drawWithContent {
                 if (!canBlur) return@drawWithContent drawContent()
-                sharp.record { this@drawWithContent.drawContent() }
-                drawLayer(sharp)
-                // Recorded, not drawn here: glass surfaces draw slices of it later in this frame.
-                val r = GlassBlur.toPx()
-                blurred.renderEffect = BlurEffect(r, r, TileMode.Clamp)
-                blurred.record { drawLayer(sharp) }
+                recording.record { this@drawWithContent.drawContent() }
+                drawLayer(recording)
             },
         ) { scene() }
-        CompositionLocalProvider(LocalBackdrop provides if (canBlur) Backdrop(origin, blurred) else null) { content() }
+        CompositionLocalProvider(LocalBackdrop provides if (canBlur) Backdrop(origin, recording) else null) { content() }
     }
 }
 
@@ -74,6 +67,7 @@ fun BackdropHost(scene: @Composable () -> Unit, modifier: Modifier = Modifier, c
 fun Glass(
     shape: Shape,
     modifier: Modifier = Modifier,
+    blur: Dp = 26.dp,
     tint: Color = TonoColors.Smoke,
     tintAlpha: Float = 0.46f,
     rim: Float = 1f,
@@ -82,14 +76,16 @@ fun Glass(
 ) {
     val backdrop = LocalBackdrop.current
     var origin by remember { mutableStateOf(Offset.Zero) }
-    Box(
-        modifier
-            .onGloballyPositioned { origin = it.positionInRoot() }
-            .clip(shape)
-            .drawBehind {
-                if (backdrop != null) translate(backdrop.origin.x - origin.x, backdrop.origin.y - origin.y) { drawLayer(backdrop.blurred) }
-            },
-    ) {
+    Box(modifier.onGloballyPositioned { origin = it.positionInRoot() }.clip(shape)) {
+        if (backdrop != null) {
+            // The platform blur (RenderEffect) over this surface's slice of the shared scene recording.
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .blur(blur, BlurredEdgeTreatment.Rectangle)
+                    .drawBehind { translate(backdrop.origin.x - origin.x, backdrop.origin.y - origin.y) { drawLayer(backdrop.scene) } },
+            )
+        }
         Box(
             Modifier
                 .matchParentSize()

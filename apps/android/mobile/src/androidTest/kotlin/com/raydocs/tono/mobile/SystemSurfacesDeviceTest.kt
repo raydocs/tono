@@ -75,22 +75,29 @@ class SystemSurfacesDeviceTest {
     @Test fun s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp() {
         val state = realState()
         assertEquals("CI install is signed out", SurfaceState.SIGNED_OUT, state)
-        shell("cmd statusbar add-tile ${tile.flattenToString()}")
+        // Put the tile first in Quick Settings for the capture (restored afterwards); appended tiles
+        // land on a later page of the emulator's grid.
+        val savedTiles = shell("settings get secure sysui_qs_tiles").trim()
+        shell("settings put secure sysui_qs_tiles custom(${tile.flattenToString()}),internet,bt,flashlight,dnd")
         try {
+            Thread.sleep(1_500)
             shell("cmd statusbar expand-settings")
+            Thread.sleep(2_000) // let the panel finish expanding before reading it
             val signIn = context.getString(R.string.state_signed_out)
-            val tileView = device.wait(Until.findObject(By.descContains(signIn)), 10_000)
-                ?: device.wait(Until.findObject(By.textContains("Tono")), 5_000)
-            assertNotNull("Tono tile in Quick Settings", tileView)
-            File(out, "real-tile.txt").writeText("shared status: $state\ntile: text=${tileView!!.text} desc=${tileView.contentDescription}\n")
+            val tileSelector = By.descContains("Tono")
+            val found = device.wait(Until.findObject(tileSelector), 10_000)
+            assertNotNull("Tono tile in Quick Settings", found)
+            val desc = runCatching { device.findObject(tileSelector)?.contentDescription }.getOrNull()
+            File(out, "real-tile.txt").writeText("shared status: $state\ntile description: $desc\n")
             shot("real-08-quick-settings-tile")
-            tileView.click()
+            assertTrue("tile shows the shared status ($desc)", desc?.contains(signIn) == true)
+            device.findObject(tileSelector).click()
             // Signed out: the tile must not try to connect; it opens Tono at sign-in and closes the shade.
             assertNotNull("tile opens the app", device.wait(Until.findObject(By.text(context.getString(R.string.signin_title))), 15_000))
             shot("real-09-tile-opens-sign-in")
         } finally {
             shell("cmd statusbar collapse")
-            shell("cmd statusbar remove-tile ${tile.flattenToString()}")
+            shell(if (savedTiles.isEmpty() || savedTiles == "null") "settings delete secure sysui_qs_tiles" else "settings put secure sysui_qs_tiles $savedTiles")
         }
     }
 
@@ -154,6 +161,7 @@ class SystemSurfacesDeviceTest {
                 }
                 a.setContentView(column)
             }
+            assertNotNull(device.wait(Until.findObject(By.textStartsWith("FIXTURE · connected")), 10_000))
             shot("fixture-17-widget-states")
         }
 
@@ -161,18 +169,27 @@ class SystemSurfacesDeviceTest {
         val nm = context.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(TonoNotifications.CHANNEL, context.getString(R.string.notification_channel), NotificationManager.IMPORTANCE_LOW))
         val pi = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        fun fixture(n: Notification) = Notification.Builder.recoverBuilder(context, n).setSubText("Fixture · no tunnel").build()
+        // Marked in the title itself, so the label survives collapsed and grouped notification views.
+        fun fixture(n: Notification) = Notification.Builder.recoverBuilder(context, n)
+            .setContentTitle("FIXTURE · " + n.extras.getCharSequence(Notification.EXTRA_TITLE)).setSubText("no tunnel").build()
         val connected = DeviceFixtures.connected().let { EngineSnapshot(phase = it.phase, nodes = it.nodes, selectedNode = it.selectedNode, homeKind = it.homeKind, cloudProbe = it.cloudProbe, homeProbe = it.homeProbe) }
+        val notifications = listOf(
+            "fixture-18-notification-connected" to TonoNotifications.ongoing(context, connected, pi, pi),
+            "fixture-19-notification-stopped" to TonoNotifications.stopped(context, "CORE_STOPPED", pi, pi),
+        )
         try {
-            nm.notify(9101, fixture(TonoNotifications.ongoing(context, connected, pi, pi)))
-            nm.notify(9102, fixture(TonoNotifications.stopped(context, "CORE_STOPPED", pi, pi)))
-            shell("cmd statusbar expand-notifications")
-            assertNotNull(device.wait(Until.findObject(By.text(context.getString(R.string.notif_stopped_title))), 10_000))
-            shot("fixture-18-notifications")
+            for ((name, n) in notifications) {
+                nm.notify(9101, fixture(n))
+                shell("cmd statusbar expand-notifications")
+                assertNotNull(device.wait(Until.findObject(By.textStartsWith("FIXTURE · ")), 10_000))
+                shot(name)
+                shell("cmd statusbar collapse")
+                nm.cancel(9101)
+                Thread.sleep(800)
+            }
         } finally {
             shell("cmd statusbar collapse")
             nm.cancel(9101)
-            nm.cancel(9102)
         }
     }
 }
