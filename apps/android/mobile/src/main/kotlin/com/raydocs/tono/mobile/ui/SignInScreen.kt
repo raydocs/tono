@@ -10,6 +10,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -62,60 +71,86 @@ fun SignInScreen(login: LoginView, onSend: (String) -> Unit, onVerify: (String) 
     var code by rememberSaveable { mutableStateOf("") }
     val codeStep = login.challengeId != null
     BackdropHost(scene = { SeaScene(SkyState.NIGHT, Modifier.fillMaxSize(), horizon = 0.44f) }, modifier = Modifier.fillMaxSize().background(TonoColors.Night)) {
-        Column(Modifier.fillMaxSize().imePadding()) {
-            Column(Modifier.statusBarsPadding().padding(horizontal = 28.dp, vertical = 28.dp)) {
-                Image(painterResource(R.drawable.tono_tile), contentDescription = null, modifier = Modifier.size(48.dp))
-                Spacer(Modifier.height(18.dp))
-                Text(stringResource(R.string.signin_title), style = MaterialTheme.typography.headlineMedium, color = TonoColors.TextPrimary, modifier = Modifier.semantics { heading() })
-                Spacer(Modifier.height(6.dp))
-                Text(stringResource(R.string.signin_intro), style = MaterialTheme.typography.bodyLarge, color = TonoColors.TextSecondary)
-            }
-            Spacer(Modifier.weight(1f))
-            Glass(RoundedCornerShape(28.dp), Modifier.align(Alignment.CenterHorizontally).navigationBarsPadding().padding(12.dp).widthIn(max = 560.dp).fillMaxWidth(), tintAlpha = 0.52f) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                AnimatedContent(codeStep, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(220)) }, label = "step") { step ->
-                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        if (!step) {
-                            OutlinedTextField(
-                                value = email,
-                                onValueChange = { email = it.take(254) },
-                                label = { Text(stringResource(R.string.signin_email)) },
-                                singleLine = true,
-                                enabled = !login.busy,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Send, autoCorrectEnabled = false),
-                                keyboardActions = KeyboardActions(onSend = { if (!login.busy) onSend(email) }),
-                                colors = fieldColors(),
-                                modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.EmailAddress },
-                            )
-                            PrimaryButton(stringResource(if (login.busy) R.string.signin_sending else R.string.signin_send), { onSend(email) }, enabled = !login.busy && email.isNotBlank())
-                        } else {
-                            Text(stringResource(R.string.signin_code_sent, login.email), style = MaterialTheme.typography.bodyMedium, color = TonoColors.TextSecondary)
-                            OutlinedTextField(
-                                value = code,
-                                onValueChange = { v -> code = v.filter(Char::isDigit).take(6); if (code.length == 6 && !login.busy) onVerify(code) },
-                                label = { Text(stringResource(R.string.signin_code)) },
-                                singleLine = true,
-                                enabled = !login.busy,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { if (!login.busy) onVerify(code) }),
-                                colors = fieldColors(),
-                                textStyle = MaterialTheme.typography.headlineSmall,
-                                modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.SmsOtpCode },
-                            )
-                            PrimaryButton(stringResource(if (login.busy) R.string.signin_verifying else R.string.signin_verify), { onVerify(code) }, enabled = !login.busy && code.length == 6)
-                            TextButton(onClick = { code = ""; onChangeEmail() }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                                Text(stringResource(R.string.signin_change), color = TonoColors.TextSecondary)
+        val card: @Composable (Modifier) -> Unit = { modifier ->
+            Glass(RoundedCornerShape(28.dp), modifier.widthIn(max = 560.dp).fillMaxWidth(), tintAlpha = 0.52f) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    AnimatedContent(codeStep, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(220)) }, label = "step") { step ->
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            if (!step) {
+                                OutlinedTextField(
+                                    value = email,
+                                    onValueChange = { email = it.take(254) },
+                                    label = { Text(stringResource(R.string.signin_email)) },
+                                    singleLine = true,
+                                    enabled = !login.busy,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Send, autoCorrectEnabled = false),
+                                    keyboardActions = KeyboardActions(onSend = { if (!login.busy) onSend(email) }),
+                                    colors = fieldColors(),
+                                    modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.EmailAddress },
+                                )
+                                PrimaryButton(stringResource(if (login.busy) R.string.signin_sending else R.string.signin_send), { onSend(email) }, enabled = !login.busy && email.isNotBlank())
+                            } else {
+                                Text(stringResource(R.string.signin_code_sent, login.email), style = MaterialTheme.typography.bodyMedium, color = TonoColors.TextSecondary)
+                                OutlinedTextField(
+                                    value = code,
+                                    onValueChange = { v -> code = v.filter(Char::isDigit).take(6); if (code.length == 6 && !login.busy) onVerify(code) },
+                                    label = { Text(stringResource(R.string.signin_code)) },
+                                    singleLine = true,
+                                    enabled = !login.busy,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(onDone = { if (!login.busy) onVerify(code) }),
+                                    colors = fieldColors(),
+                                    textStyle = MaterialTheme.typography.headlineSmall,
+                                    modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.SmsOtpCode },
+                                )
+                                PrimaryButton(stringResource(if (login.busy) R.string.signin_verifying else R.string.signin_verify), { onVerify(code) }, enabled = !login.busy && code.length == 6)
+                                TextButton(onClick = { code = ""; onChangeEmail() }, modifier = Modifier.align(Alignment.CenterHorizontally).heightIn(min = 48.dp)) {
+                                    Text(stringResource(R.string.signin_change), color = TonoColors.TextSecondary)
+                                }
                             }
                         }
                     }
+                    login.errorCode?.let {
+                        Text(signInError(it), style = MaterialTheme.typography.bodyMedium, color = TonoColors.Error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive })
+                    }
+                    Text(stringResource(R.string.signin_privacy), style = MaterialTheme.typography.labelSmall, color = TonoColors.TextTertiary)
                 }
-                login.errorCode?.let {
-                    Text(signInError(it), style = MaterialTheme.typography.bodyMedium, color = TonoColors.Error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive })
-                }
-                Text(stringResource(R.string.signin_privacy), style = MaterialTheme.typography.labelSmall, color = TonoColors.TextTertiary)
             }
         }
+        BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
+            if (maxWidth > maxHeight) {
+                // Landscape: the words beside the card, so neither is cut off; either side scrolls if
+                // it still does not fit (large text, the code step).
+                Row(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+                    Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
+                        SignInHeader(Modifier.verticalScroll(rememberScrollState()).padding(28.dp))
+                    }
+                    Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                        Column(Modifier.verticalScroll(rememberScrollState()).padding(12.dp)) { card(Modifier) }
+                    }
+                }
+            } else {
+                // Portrait: words at the top, the card at the thumb; scrolls instead of clipping.
+                val screenHeight = maxHeight
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                    Column(Modifier.heightIn(min = screenHeight).fillMaxWidth(), verticalArrangement = Arrangement.SpaceBetween) {
+                        SignInHeader(Modifier.statusBarsPadding().padding(horizontal = 28.dp, vertical = 28.dp))
+                        card(Modifier.align(Alignment.CenterHorizontally).navigationBarsPadding().padding(12.dp))
+                    }
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun SignInHeader(modifier: Modifier) {
+    Column(modifier) {
+        Image(painterResource(R.drawable.tono_tile), contentDescription = null, modifier = Modifier.size(48.dp))
+        Spacer(Modifier.height(18.dp))
+        Text(stringResource(R.string.signin_title), style = MaterialTheme.typography.headlineMedium, color = TonoColors.TextPrimary, modifier = Modifier.semantics { heading() })
+        Spacer(Modifier.height(6.dp))
+        Text(stringResource(R.string.signin_intro), style = MaterialTheme.typography.bodyLarge, color = TonoColors.TextSecondary)
     }
 }
 
