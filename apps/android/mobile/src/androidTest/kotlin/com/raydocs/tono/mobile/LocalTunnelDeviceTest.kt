@@ -13,7 +13,16 @@ import android.os.Process
 import android.os.SystemClock
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -30,7 +39,8 @@ import com.raydocs.tono.mobile.ui.MainActivity
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
-import org.junit.Rule
+import org.junit.runner.Description
+import org.junit.runners.model.Statement
 import org.junit.Test
 import org.junit.Assert.assertEquals
 import org.junit.runner.RunWith
@@ -54,7 +64,6 @@ import java.util.regex.Pattern
 @RunWith(AndroidJUnit4::class)
 class LocalTunnelDeviceTest {
     // Compose semantics of the real MainActivity, for the text-size contract (t4); idle otherwise.
-    @get:Rule val compose = createEmptyComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
     private val device = UiDevice.getInstance(instrumentation)
@@ -504,16 +513,23 @@ class LocalTunnelDeviceTest {
         }
     }
 
-    /** Switches the stand-in control plane's scenario (scripts/local-tunnel/fixture-servers.py). */
+    /**
+     * Switches the stand-in control plane's scenario (scripts/local-tunnel/fixture-servers.py). Over a
+     * plain socket, as the debug build's ControlPlane reaches the local test server: the app's network
+     * security config allows no cleartext HTTP, and this test runs in the app's process.
+     */
     private fun scenario(name: String) {
-        val conn = URL("http://127.0.0.1:28080/fixture/scenario").openConnection() as HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.doOutput = true
-        conn.setRequestProperty("Content-Type", "application/json")
-        conn.outputStream.use { it.write("{\"name\":\"$name\"}".toByteArray()) }
-        val code = conn.responseCode
-        conn.disconnect()
-        assertEquals("stand-in scenario $name", 200, code)
+        val body = "{\"name\":\"$name\"}"
+        val status = Socket().use { socket ->
+            socket.connect(InetSocketAddress("127.0.0.1", 28080), 5_000)
+            socket.soTimeout = 10_000
+            socket.getOutputStream().write(
+                ("POST /fixture/scenario HTTP/1.1\r\nHost: 127.0.0.1:28080\r\nContent-Type: application/json\r\n" +
+                    "Content-Length: ${body.toByteArray().size}\r\nConnection: close\r\n\r\n$body").toByteArray(),
+            )
+            socket.getInputStream().bufferedReader().readLine().orEmpty()
+        }
+        assertTrue("stand-in scenario $name: $status", status.startsWith("HTTP/1.") && status.split(' ').getOrNull(1) == "200")
         note("stand-in scenario: $name")
     }
 
@@ -622,48 +638,82 @@ class LocalTunnelDeviceTest {
      * The real MainActivity at Android's largest text size (200 %) with animations removed, against
      * the stand-ins (counterpart of the fixture-host b3/l1): sign-in, the code step, Home, Details and
      * Settings keep every text uncut and every control at 48 dp with a label.
+     *
+     * The Compose test rule is applied only around this test and the test drives the app through it:
+     * under the rule, the app's composition advances only when the rule synchronises, so the
+     * UiAutomator-driven tests above must not run under it (run 39159687608: the screen stayed on its
+     * first frame and the sign-in screen never appeared).
      */
     @Test fun t4_realAppAtLargestSystemText() {
         useLocalServers()
         shell("settings put system font_scale 2.0")
         shell("settings put global animator_duration_scale 0")
         Thread.sleep(1_500)
-        val app = ActivityScenario.launch(MainActivity::class.java)
+        val rule = createEmptyComposeRule()
+        try {
+            rule.apply(object : Statement() {
+                override fun evaluate() = largestText(rule)
+            }, Description.createTestDescription(javaClass, "t4_realAppAtLargestSystemText")).evaluate()
+        } finally {
+            shell("settings put system font_scale 1.0")
+            shell("settings put global animator_duration_scale 1")
+            override.delete()
+            stopEngineProcess()
+        }
+    }
+
+    private fun largestText(compose: ComposeTestRule) {
         val found = mutableListOf<String>()
+        fun shown(t: String) = compose.onAllNodes(hasText(t)).fetchSemanticsNodes().isNotEmpty()
+        fun await(what: String, t: String, timeoutMs: Long) {
+            runCatching { compose.waitUntil(timeoutMs) { shown(t) } }.onFailure { diagnose("local-t4-${what.replace(' ', '-')}-missing") }
+            assertTrue(what, shown(t))
+        }
+        // Brought on screen first where a screen scrolls; not every one does.
+        fun tap(node: SemanticsNodeInteraction) { runCatching { node.performScrollTo() }; node.performClick() }
         fun check(screen: String) {
             compose.waitForIdle()
             found += A11yContract.truncatedText(compose, "real 200 % $screen") + A11yContract.violations(compose, "real 200 % $screen")
         }
-        try {
-            startSignedOut()
+        fun signOutHere() {
+            compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
+            await("Settings", text(R.string.settings_title), 10_000)
+            tap(compose.onNodeWithText(text(R.string.settings_sign_out)))
+            await("signed out", text(R.string.signin_title), 20_000)
+        }
+        ActivityScenario.launch(MainActivity::class.java).use {
+            runCatching { compose.waitUntil(20_000) { shown(text(R.string.signin_title)) || shown(text(R.string.details)) } }
+            if (!shown(text(R.string.signin_title)) && shown(text(R.string.details))) { note("t4: signed in from an earlier run: signing out first"); signOutHere() }
+            await("sign-in screen", text(R.string.signin_title), 10_000)
             check("sign-in"); shot("local-15-real-font-2.0-signin")
-            requestCode()
+
+            compose.onNode(hasSetTextAction()).performTextReplacement("tester@local.test")
+            tap(compose.onNodeWithText(text(R.string.signin_send)))
+            await("code step", text(R.string.signin_code), 20_000)
+            compose.waitUntil(5_000) { compose.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size == 1 }
             check("code step")
-            device.findObject(By.clazz("android.widget.EditText")).text = "246810"
-            assertNotNull("Home", find(text(R.string.action_connect), 30_000))
-            Thread.sleep(800)
+            compose.onNode(hasSetTextAction()).performTextReplacement("246810")
+            await("Home", text(R.string.action_connect), 30_000)
             check("Home"); shot("local-16-real-font-2.0-home")
-            device.findObject(By.text(text(R.string.details))).click()
-            assertNotNull("Details", find(text(R.string.details_routes), 15_000))
+
+            tap(compose.onNodeWithText(text(R.string.details)))
+            await("Details", text(R.string.details_routes), 15_000)
             check("Details"); shot("local-17-real-font-2.0-details")
-            device.pressBack(); Thread.sleep(800)
-            device.findObject(By.desc(text(R.string.settings_title))).click()
-            assertNotNull("Settings", find(text(R.string.settings_title), 10_000))
-            Thread.sleep(600)
+            device.pressBack()
+            compose.waitUntil(10_000) { !shown(text(R.string.details_routes)) }
+
+            compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
+            await("Settings", text(R.string.settings_title), 10_000)
             check("Settings"); shot("local-18-real-font-2.0-settings")
-            device.pressBack(); Thread.sleep(800)
+            device.pressBack()
+            compose.waitForIdle()
+
             File(out, "real-font-2.0-report.txt").writeText(
                 if (found.isEmpty()) "real MainActivity at font scale 2.0: no text cut off, every control ≥ 48 dp and labelled on sign-in, the code step, Home, Details and Settings\n"
                 else found.joinToString("\n") + "\n",
             )
             assertEquals(found.joinToString("\n"), 0, found.size)
-            signOut()
-        } finally {
-            shell("settings put system font_scale 1.0")
-            shell("settings put global animator_duration_scale 1")
-            app.close()
-            override.delete()
-            stopEngineProcess()
+            signOutHere()
         }
     }
 }

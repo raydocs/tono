@@ -116,7 +116,10 @@ Round 7 (after the round-6 blind reviews, `docs/agent-reports/2026-10-18-android
 - **Real-app device tests no longer wait for the main thread to go idle.** `ActivityScenario.onActivity`
   waits for idle, which never comes under the animated scene on a slow emulator (t2 hung there in
   run 39153105611). The tests reach the resumed activity directly, start from signed out whatever an
-  earlier test left, and keep the sea still where they only need layout.
+  earlier test left, and keep the sea still where they only need layout. The Compose test rule is
+  applied only around the 200 % text test, which drives the app through it: under the rule the app's
+  composition advances only when the rule synchronises, so the app stayed on its first frame for the
+  UiAutomator-driven tests (run 39159687608).
 - **Sheets stop below the status bar**, so the clock and the local-test-server or fixture mark stay
   in sight with a sheet open, also in landscape where Details reaches the top.
 

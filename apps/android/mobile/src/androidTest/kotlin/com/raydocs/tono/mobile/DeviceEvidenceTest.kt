@@ -98,14 +98,28 @@ class DeviceEvidenceTest {
         }
     }
 
+    /**
+     * Runs [block] on the main thread with the resumed activity. Not ActivityScenario.onActivity: that
+     * first waits for the main thread to go idle, which never happens under the animated sea on a slow
+     * software-GPU emulator (a3 hung there for 600 s in run 39159687608, a2 and a3 in run 39138009249).
+     */
+    private fun onResumed(block: (android.app.Activity) -> Unit) {
+        var ran = false
+        instrumentation.runOnMainSync {
+            androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).firstOrNull()?.let { block(it); ran = true }
+        }
+        assertTrue("a resumed activity", ran)
+    }
+
     @Test fun a2_realSystemVpnConsentDialog() {
         val prepare = VpnService.prepare(context)
         assertNotNull("fresh install must need consent", prepare)
         // Started for a result from the app's own foreground activity, exactly as its Connect does:
         // the system dialog needs a calling package and Android blocks background activity starts.
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        ActivityScenario.launch(MainActivity::class.java).use {
             assertNotNull(find(By.text(text(R.string.signin_title)), 20_000))
-            @Suppress("DEPRECATION") scenario.onActivity { it.startActivityForResult(prepare, 1) }
+            @Suppress("DEPRECATION") onResumed { it.startActivityForResult(prepare, 1) }
             consentDialog()
         }
     }
@@ -136,9 +150,9 @@ class DeviceEvidenceTest {
     @Test fun a3_realEngineRefusesToConnectWithoutAccount() {
         // With consent granted but no Tono account, the real engine must not pretend to connect.
         // Sent from the foreground activity, so Android's background service-start limits do not apply.
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        ActivityScenario.launch(MainActivity::class.java).use {
             assertNotNull(find(By.text(text(R.string.signin_title)), 20_000))
-            scenario.onActivity { it.startForegroundService(Intent(it, TonoVpnService::class.java).setAction(TonoVpnService.ACTION_CONNECT)) }
+            onResumed { it.startForegroundService(Intent(it, TonoVpnService::class.java).setAction(TonoVpnService.ACTION_CONNECT)) }
             Thread.sleep(4_000)
             val services = instrumentation.uiAutomation.executeShellCommand("dumpsys activity services ${context.packageName}")
             File(out, "real-05-services.txt").writeText(android.os.ParcelFileDescriptor.AutoCloseInputStream(services).bufferedReader().readText())
