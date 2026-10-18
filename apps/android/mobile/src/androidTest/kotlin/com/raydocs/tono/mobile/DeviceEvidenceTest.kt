@@ -223,6 +223,24 @@ class DeviceEvidenceTest {
         }
     }
 
+    /** Tono is a night-sky app by design: Android's light theme must not turn it into a half-light one. */
+    @Test fun a6_realAppUnderSystemLightAndDarkTheme() {
+        val shell = instrumentation.uiAutomation
+        fun night(v: String) { shell.executeShellCommand("cmd uimode night $v").close(); Thread.sleep(1_500) }
+        try {
+            for ((mode, name) in listOf("no" to "real-11-system-light-theme", "yes" to "real-12-system-dark-theme")) {
+                night(mode)
+                ActivityScenario.launch(MainActivity::class.java).use {
+                    assertNotNull("sign-in under night=$mode", find(By.text(text(R.string.signin_title)), 20_000))
+                    Thread.sleep(1_000)
+                    shot(name)
+                }
+            }
+        } finally {
+            night("no") // the emulator's default
+        }
+    }
+
     // ---- fixture renders: real device rendering, fake state --------------------------------
 
     private val nodes = listOf(NodeView("Tokyo · Dawn", "Tokyo", "Dawn", 86), NodeView("Los Angeles · Grove", "Los Angeles", "Grove", 162))

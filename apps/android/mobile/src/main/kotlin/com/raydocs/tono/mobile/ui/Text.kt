@@ -54,21 +54,24 @@ fun reasonText(code: String): String = when (code) {
     else -> stringResource(R.string.reason_generic, code)
 }
 
-@Composable
-fun shortReason(code: String): String = when (code) {
-    "HOME_UNAVAILABLE" -> stringResource(R.string.short_HOME_UNAVAILABLE)
-    "NETWORK" -> stringResource(R.string.short_NETWORK)
-    "RATE_LIMITED" -> stringResource(R.string.short_RATE_LIMITED)
-    "CORE_START" -> stringResource(R.string.short_CORE_START)
-    "CLOUD_UNREACHABLE" -> stringResource(R.string.short_CLOUD_UNREACHABLE)
-    "HOME_UNREACHABLE" -> stringResource(R.string.short_HOME_UNREACHABLE)
-    "REVOKED" -> stringResource(R.string.short_REVOKED)
-    "DENIED" -> stringResource(R.string.short_DENIED)
-    "SESSION_ENDED" -> stringResource(R.string.short_SESSION_ENDED)
-    "CATALOG_ROLLBACK" -> stringResource(R.string.short_CATALOG_ROLLBACK)
-    "CORE_STOPPED" -> stringResource(R.string.short_CORE_STOPPED)
-    else -> stringResource(R.string.short_generic, code)
+/** Short reason resource for a known code; unknown codes are shown with the code itself. */
+fun shortReasonRes(code: String): Int? = when (code) {
+    "HOME_UNAVAILABLE" -> R.string.short_HOME_UNAVAILABLE
+    "NETWORK" -> R.string.short_NETWORK
+    "RATE_LIMITED" -> R.string.short_RATE_LIMITED
+    "CORE_START" -> R.string.short_CORE_START
+    "CLOUD_UNREACHABLE" -> R.string.short_CLOUD_UNREACHABLE
+    "HOME_UNREACHABLE" -> R.string.short_HOME_UNREACHABLE
+    "REVOKED" -> R.string.short_REVOKED
+    "DENIED" -> R.string.short_DENIED
+    "SESSION_ENDED" -> R.string.short_SESSION_ENDED
+    "CATALOG_ROLLBACK" -> R.string.short_CATALOG_ROLLBACK
+    "CORE_STOPPED" -> R.string.short_CORE_STOPPED
+    else -> null
 }
+
+@Composable
+fun shortReason(code: String): String = shortReasonRes(code)?.let { stringResource(it) } ?: stringResource(R.string.short_generic, code)
 
 @Composable
 fun signInError(code: String): String = when (code) {

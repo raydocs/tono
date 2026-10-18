@@ -153,4 +153,20 @@
     <string name="short_generic">Didn\'t finish (%1$s)</string>
     <string name="sentence_permission_short">Allow VPN once to start</string>
     <string name="settings_mode_hint">Tap a mode to switch; it applies right away.</string>
+    <string name="surface_unknown">Status unknown</string>
+    <string name="surface_open_to_check">Open Tono to check</string>
+    <string name="surface_last_known">Last known: %1$s at %2$s</string>
+    <string name="surface_open_to_sign_in">Open Tono to sign in</string>
+    <string name="surface_open_to_allow">Open Tono to allow the VPN</string>
+    <string name="surface_open_to_pick">Pick a line in Tono</string>
+    <string name="surface_sign_in">Sign in</string>
+    <string name="surface_open">Open</string>
+    <string name="widget_description">Tono status and one-tap connect</string>
+    <string name="notif_stopped_title">Tono stopped</string>
+    <string name="consent_title">Before Android asks</string>
+    <string name="consent_ask">Android will ask once whether Tono may set up a VPN. Tap OK there.</string>
+    <string name="consent_routes">AI and video go through Tono\'s exits; other apps go out directly.</string>
+    <string name="consent_stop">A key icon shows while it\'s on. Stop it here, from the notification or in Quick Settings.</string>
+    <string name="consent_continue">Continue</string>
+    <string name="consent_later">Not now</string>
 </resources>

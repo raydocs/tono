@@ -70,6 +70,7 @@ class ScreenshotRender {
     @Test fun disconnecting() = home("10-home-disconnecting", base.copy(phase = Phase.DISCONNECTING))
     @Test fun details() = sheet("11-details-degraded") { DetailsContent(UiFixtures.degraded(), {}, {}, {}) }
     @Test fun lines() = sheet("12-lines-sheet") { LinesContent(base, zh = true, onSelect = {}, onTest = {}) }
+    @Test fun consent() = sheet("15-consent-explainer") { ConsentContent({}, {}) }
     @Test fun settings() = shot("13-settings") { SettingsScreen(base.copy(excludedPackages = listOf("com.example.bank")), {}, {}, {}, { null }, {}) }
     @Test fun largeText() {
         RuntimeEnvironment.setFontScale(1.3f)

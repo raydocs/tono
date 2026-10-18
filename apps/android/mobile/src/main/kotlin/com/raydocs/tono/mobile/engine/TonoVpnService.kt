@@ -20,6 +20,7 @@ import com.raydocs.tono.mobile.BuildConfig
 import com.raydocs.tono.mobile.R
 import com.raydocs.tono.mobile.ipc.ITonoEngine
 import com.raydocs.tono.mobile.ipc.ITonoEngineListener
+import com.raydocs.tono.mobile.surface.SystemSurfaces
 import com.raydocs.tono.routing.CatalogAdmission
 import com.raydocs.tono.routing.CatalogRejected
 import com.raydocs.tono.routing.ConfigInput
@@ -118,13 +119,16 @@ class TonoVpnService : VpnService() {
     // ---- state -------------------------------------------------------------------------------
 
     private fun update(block: (EngineSnapshot) -> EngineSnapshot) {
-        val next = block(snapshot.get())
+        val before = snapshot.get()
+        val next = block(before)
         snapshot.set(next)
         val json = next.toJson()
         val n = listeners.beginBroadcast()
         for (i in 0 until n) runCatching { listeners.getBroadcastItem(i).onSnapshot(json) }
         listeners.finishBroadcast()
         if (foreground) notify(next)
+        SystemSurfaces.publish(this, next)
+        if (next.tunnelUp && !before.tunnelUp) getSystemService(NotificationManager::class.java).cancel(NOTICE_ID)
     }
 
     private fun restore() {
@@ -410,6 +414,8 @@ class TonoVpnService : VpnService() {
         update { it.copy(phase = Phase.FAILED, reasonCode = code, connectedSinceMs = 0) }
         // An automatic (always-on/restart) attempt keeps the user's intent; a tapped one asks again.
         if (userInitiated) store.update { it.copy(wantConnected = false) }
+        // Nobody may be looking at the app after an automatic attempt: say so, with a Retry.
+        else postStopped(code)
     }
 
     private fun endSession() {
@@ -496,7 +502,7 @@ class TonoVpnService : VpnService() {
             commandServerSecret = EngineStore.randomHex(16)
         })
         val server = Libbox.newCommandServer(object : CommandServerHandler {
-            override fun serviceStop() { engine.execute { disconnect(reason = "CORE_STOPPED") } }
+            override fun serviceStop() { engine.execute { disconnect(reason = "CORE_STOPPED"); postStopped("CORE_STOPPED") } }
             override fun serviceReload() { engine.execute { reloadIfRunning() } }
             override fun getSystemProxyStatus(): SystemProxyStatus = SystemProxyStatus()
             override fun setSystemProxyEnabled(enabled: Boolean) {}
@@ -521,6 +527,14 @@ class TonoVpnService : VpnService() {
         )
     }
 
+    /** The tunnel ended without the user asking: tell them, with one Retry (the engine re-checks consent). */
+    private fun postStopped(code: String) {
+        val retry = PendingIntent.getForegroundService(
+            this, 2, Intent(this, TonoVpnService::class.java).setAction(ACTION_CONNECT), PendingIntent.FLAG_IMMUTABLE,
+        )
+        getSystemService(NotificationManager::class.java).notify(NOTICE_ID, TonoNotifications.stopped(this, code, configureIntent(), retry))
+    }
+
     private fun createChannel() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, getString(R.string.notification_channel), NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) },
@@ -528,37 +542,10 @@ class TonoVpnService : VpnService() {
     }
 
     private fun buildNotification(s: EngineSnapshot): Notification {
-        val title = getString(
-            when (s.phase) {
-                Phase.CONNECTED -> R.string.state_connected
-                Phase.DEGRADED -> R.string.state_degraded
-                Phase.DISCONNECTING -> R.string.state_disconnecting
-                else -> R.string.state_connecting
-            },
-        )
-        val node = s.nodes.firstOrNull { it.name == s.selectedNode }
-        val text = listOfNotNull(node?.name, getString(if (s.mode == RoutingMode.THREE_TIER) R.string.mode_three_tier_short else R.string.mode_stable_short))
-            .joinToString(" · ")
         val stop = PendingIntent.getService(
             this, 1, Intent(this, TonoVpnService::class.java).setAction(ACTION_DISCONNECT), PendingIntent.FLAG_IMMUTABLE,
         )
-        // Same glyph family as the desktop menu bar/tray: only a verified connection gets the filled sun.
-        val icon = when (s.phase) {
-            Phase.CONNECTED -> R.drawable.ic_stat_connected
-            Phase.DEGRADED -> R.drawable.ic_stat_degraded
-            Phase.DISCONNECTING -> R.drawable.ic_stat_standby
-            else -> R.drawable.ic_stat_connecting
-        }
-        return Notification.Builder(this, CHANNEL)
-            .setSmallIcon(icon)
-            .setColor(0xFFFFAD74.toInt())
-            .setContentTitle(title)
-            .setContentText(text)
-            .setOngoing(true)
-            .setContentIntent(configureIntent())
-            .addAction(Notification.Action.Builder(null, getString(R.string.action_disconnect), stop).build())
-            .setCategory(Notification.CATEGORY_SERVICE)
-            .build()
+        return TonoNotifications.ongoing(this, s, configureIntent(), stop)
     }
 
     private fun enterForeground() {
@@ -660,7 +647,7 @@ class TonoVpnService : VpnService() {
         const val ACTION_CONNECT = "com.raydocs.tono.mobile.CONNECT"
         const val ACTION_DISCONNECT = "com.raydocs.tono.mobile.DISCONNECT"
         const val ACTION_BIND_ENGINE = "com.raydocs.tono.mobile.BIND_ENGINE"
-        private const val CHANNEL = "tunnel"
+        private const val CHANNEL = TonoNotifications.CHANNEL
         private const val NOTIFICATION_ID = 7
         private const val NOTICE_ID = 8
         private const val CACHE_MAX_AGE_MS = 7L * 24 * 3600 * 1000

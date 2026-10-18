@@ -2,6 +2,7 @@ package com.raydocs.tono.mobile.ui
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
@@ -13,11 +14,13 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
- * Single activity. Owns only what must run in the UI: Android's VPN consent dialog and the
- * notification permission request. Everything else goes to the engine in the `:vpn` process.
+ * Single activity. Owns only what must run in the UI: Android's VPN consent dialog (explained
+ * first) and the notification permission request. Everything else goes to the engine in the `:vpn` process.
  */
 class MainActivity : ComponentActivity(), TonoActions {
     private lateinit var client: EngineClient
@@ -35,7 +38,15 @@ class MainActivity : ComponentActivity(), TonoActions {
         setContent {
             val snapshot by client.snapshot.collectAsStateWithLifecycle()
             CompositionLocalProvider(LocalReduceMotion provides rememberSystemReduceMotion()) {
-                TonoTheme { TonoRoot(snapshot, this) }
+                TonoTheme {
+                    TonoRoot(snapshot, this)
+                    pendingConsent?.let { prepare ->
+                        ConsentSheet(
+                            onContinue = { pendingConsent = null; consent.launch(prepare) },
+                            onDismiss = { pendingConsent = null },
+                        )
+                    }
+                }
             }
         }
     }
@@ -50,9 +61,12 @@ class MainActivity : ComponentActivity(), TonoActions {
         super.onStop()
     }
 
+    /** Android's consent intent, held while Tono explains it first ([ConsentSheet]). */
+    private var pendingConsent by mutableStateOf<Intent?>(null)
+
     override fun connect() {
         val prepare = VpnService.prepare(this)
-        if (prepare != null) consent.launch(prepare) else { client.startConnect(); askNotifications() }
+        if (prepare != null) pendingConsent = prepare else { client.startConnect(); askNotifications() }
     }
 
     /** Asked after VPN consent so the two system dialogs never stack. */

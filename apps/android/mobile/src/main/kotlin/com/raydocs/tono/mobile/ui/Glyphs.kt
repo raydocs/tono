@@ -19,7 +19,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /** Line glyphs drawn in code (1.5 dp strokes, 24 dp grid) so the app carries no icon font. Decorative only. */
-enum class Glyph { AI, VIDEO, APPS, GEAR, CHEVRON_RIGHT, CHEVRON_DOWN, CHEVRON_UP, BACK, HOME, CLOUD, ARROW }
+enum class Glyph { AI, VIDEO, APPS, GEAR, CHEVRON_RIGHT, CHEVRON_DOWN, CHEVRON_UP, BACK, HOME, CLOUD, ARROW, KEY, STOP }
 
 @Composable
 fun GlyphIcon(glyph: Glyph, tint: Color, modifier: Modifier = Modifier, size: Dp = 22.dp) {
@@ -72,6 +72,17 @@ fun GlyphIcon(glyph: Glyph, tint: Color, modifier: Modifier = Modifier, size: Dp
             Glyph.ARROW -> {
                 drawLine(tint, p(4f, 12f), p(19f, 12f), stroke.width, StrokeCap.Round)
                 drawPath(Path().apply { moveTo(14f * s, 7f * s); lineTo(19f * s, 12f * s); lineTo(14f * s, 17f * s) }, tint, style = stroke)
+            }
+            // Android's own VPN symbol is a key, so the consent explanation uses the same one.
+            Glyph.KEY -> {
+                drawCircle(tint, 4f * s, p(7.5f, 12f), style = stroke)
+                drawLine(tint, p(11.5f, 12f), p(21f, 12f), stroke.width, StrokeCap.Round)
+                drawLine(tint, p(17.5f, 12f), p(17.5f, 15.5f), stroke.width, StrokeCap.Round)
+                drawLine(tint, p(20.5f, 12f), p(20.5f, 14.5f), stroke.width, StrokeCap.Round)
+            }
+            Glyph.STOP -> {
+                drawCircle(tint, 9f * s, p(12f, 12f), style = stroke)
+                drawRoundRect(tint, p(9f, 9f), Size(6f * s, 6f * s), CornerRadius(1.2f * s))
             }
         }
     }

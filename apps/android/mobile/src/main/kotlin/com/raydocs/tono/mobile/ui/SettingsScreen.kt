@@ -172,7 +172,8 @@ private fun Expandable(title: String, content: @Composable () -> Unit) {
 @Composable
 private fun ModeRow(title: String, desc: String, selected: Boolean, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).selectable(selected, role = Role.RadioButton, onClick = onClick).padding(vertical = 6.dp),
+        // ≥ 48 dp even when collapsed to its title (the device accessibility check found 38 dp).
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(MaterialTheme.shapes.medium).selectable(selected, role = Role.RadioButton, onClick = onClick).padding(vertical = 6.dp),
         verticalAlignment = Alignment.Top,
     ) {
         RadioButton(selected, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = TonoColors.Accent), modifier = Modifier.padding(top = 2.dp, end = 10.dp))

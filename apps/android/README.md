@@ -28,6 +28,25 @@ Japan), Details is a glass pill and also opens with an upward flick on the dock,
 shorter, and tokens/catalog use a module-local Keystore AES-GCM store (no dependency on the legacy
 `android/security` module, so the client builds on its own).
 
+Round 4 (Android-native surfaces and accessibility):
+- **System surfaces.** A Quick Settings tile, a home-screen widget, and a notification when the
+  tunnel ends without the user asking (with Retry). The ongoing notification shows the verified
+  exits. All of them read one shared status that the engine writes (`surface/PublicStatus`: no
+  tokens, e-mail or catalog) with a 30 s heartbeat and the boot count. A tunnel is shown only while
+  that record is fresh, from this boot, and Android reports a VPN network. Otherwise the surface
+  says *Status unknown* with the last known state and time.
+- **Safe actions.** Tile and widget actions never get around sign-in, Android's VPN consent or the
+  lock screen: those cases open the app. The engine re-checks the account and consent before it
+  connects.
+- **Consent explanation.** Before Android's VPN dialog, whenever consent is missing, a short sheet
+  says what the dialog is, what Tono routes and how to stop it.
+- **Accessibility and text size.** Every control is laid out at ≥ 48 dp. Home scrolls at the largest
+  font size instead of squeezing the dock. The app follows Android's *Remove animations* live.
+  Predictive back is enabled.
+- **Glass.** The scene is recorded once per frame and blurred once (`BackdropHost`). Every glass
+  surface draws its slice of that copy, instead of each surface composing and blurring its own copy
+  of the scene.
+
 ## Where it lives
 
 `rw8/Tono-droid` (Amp) is the source; `scripts/export-android-monorepo.sh <raydocs/tono checkout>`
@@ -147,19 +166,35 @@ internal test builds.
   semantics/state description, short home vs. full Details text, verified-exit line.
 - Motion preview (JVM frames on a manual Compose clock, not a device): `MotionPreview` →
   `build/motion/`, assembled with ffmpeg.
-- On a real Android system (`DeviceEvidenceTest`, instrumentation; CI emulator): `real-*` files are
-  the shipped app and the OS — sign-in screen and local e-mail validation (nothing is sent to the
-  API), the system VPN consent dialog (`VpnService.prepare`, accepted through UiAutomator), a
-  connect request without an account (must stay signed out with no VPN network), and the device-ABI
-  libbox reporting the pinned version and accepting every generated config. `fixture-*` files are
-  the real UI rendered by the device GPU from fixture snapshots (no tunnel), plus a screenrecord.
+- On a real Android system (CI emulator, Android 14 x86_64). Output names say which kind each is:
+  - `real-*`: the shipped app and the OS.
+    - The sign-in screen and local e-mail validation (nothing is sent to the API).
+    - The system VPN consent dialog, accepted through UiAutomator.
+    - A connect request without an account, which must stay signed out with no VPN network.
+    - The device-ABI libbox reporting the pinned version and accepting every generated config.
+    - Frames compared with *Remove animations* off, on and off again.
+    - The app under Android's light and dark themes.
+    - The Quick Settings tile and the widget inside Android's own Quick Settings and widget host,
+      showing this install's real (signed-out) status.
+  - `fixture-*`: the real UI fed fixture snapshots (no tunnel). Covers states, sheets, Settings and
+    a screenrecord, plus these checks:
+    - `A11yContract` together with Google's Accessibility Test Framework.
+    - Real taps and a swipe injected through the system.
+    - The screen-reader order, read from the accessibility tree.
+    - Android's 200 % font size with no truncated text.
+    - A measured glass blur.
+    - Widget and notification states, labelled "Fixture" on screen.
 - Screenshots (no emulator needed):
   `./gradlew :android:mobile:testDebugUnitTest -Ptono.screenshots --tests '*ScreenshotRender*'`
   → `android/mobile/build/screenshots/`.
 
 ## Not yet verified
 
-- No emulator or device was available (no KVM): the APK has not been installed or run; VpnService,
-  libbox start-up, TUN, DNS, QUIC fallback, always-on and app exclusion are untested on Android.
-- No real sign-in or connection: needs an allowlisted Tono account, whose code arrives on the
-  user's phone, and a catalog with an assigned Home.
+- No real sign-in or connection. That needs an allowlisted Tono account (the code arrives on the
+  user's phone) and a catalog with an assigned Home. TUN, DNS, QUIC fallback, always-on, app
+  exclusion and the Home second hop are therefore untested on Android. The tile, widget and
+  notifications have only been seen signed out (real) or with fixture states.
+- Real hardware. The CI emulator renders in software (swiftshader, about 5 fps under the animated
+  scene), so motion smoothness, GPU blur cost, touch feel and battery are unmeasured.
+- TalkBack is not on the emulator image. Labels, roles and reading order are checked from the
+  accessibility tree; speech and gestures are not.

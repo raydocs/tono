@@ -8,9 +8,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Density
+import androidx.test.espresso.Espresso
 import com.raydocs.tono.mobile.engine.EngineSnapshot
 import com.raydocs.tono.mobile.engine.Phase
 import org.junit.Assert.assertEquals
@@ -19,6 +21,7 @@ import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
@@ -67,6 +70,11 @@ class AccessibilityContractTest {
         compose.onNodeWithTag("details").performClick()
         compose.waitForIdle()
         found += check("details")
+        Espresso.pressBack()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription(RuntimeEnvironment.getApplication().getString(com.raydocs.tono.mobile.R.string.settings_title)).performClick()
+        compose.waitForIdle()
+        found += check("settings")
         return found
     }
 

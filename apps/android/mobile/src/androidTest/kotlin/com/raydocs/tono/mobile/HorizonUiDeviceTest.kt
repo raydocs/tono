@@ -1,11 +1,35 @@
 package com.raydocs.tono.mobile
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.unit.dp
+import com.raydocs.tono.mobile.ui.BackdropHost
+import com.raydocs.tono.mobile.ui.ConsentContent
+import com.raydocs.tono.mobile.ui.Glass
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -109,7 +133,8 @@ class HorizonUiDeviceTest {
         }
         set(DeviceFixtures.idle.copy(phase = Phase.DISCONNECTING))
         calls.clear()
-        compose.onNodeWithTag("primary").assertIsNotEnabled()
+        // The tag sits on the glass; the button is the clickable inside it.
+        compose.onNode(hasAnyAncestor(hasTestTag("primary")) and hasClickAction()).assertIsNotEnabled()
         val b = compose.onNodeWithTag("primary").fetchSemanticsNode().boundsInWindow
         device.click(b.center.x.toInt(), b.center.y.toInt() + windowTop())
         compose.waitForIdle()
@@ -131,6 +156,92 @@ class HorizonUiDeviceTest {
         shot("fixture-09-details-by-swipe")
         File(out, "interaction-report.txt").appendText("\nswipe up from the capsule → Details open, actions: ${calls.joinToString().ifEmpty { "none" }}\n")
         assertTrue("a swipe is not a tap", calls.isEmpty())
+    }
+
+    /**
+     * The glass material really blurs what is behind it on this device (RenderEffect, API 31+):
+     * Tono's [Glass] over 8 dp black/white stripes. Without blur the stripes would still show through
+     * the 46 % tint at about half their contrast; blurred they must almost vanish.
+     */
+    @Test fun u4_glassBlursTheSceneBehindIt() {
+        compose.setContent {
+            Box(Modifier.fillMaxSize().background(Color.Black)) {
+                BackdropHost(scene = { Canvas(Modifier.fillMaxSize()) {
+                    val w = 8.dp.toPx()
+                    var x = 0f
+                    while (x < size.width) { drawRect(Color.White, Offset(x, 0f), Size(w, size.height)); x += 2 * w }
+                } }, modifier = Modifier.fillMaxSize()) {
+                    Glass(RoundedCornerShape(28.dp), Modifier.align(Alignment.Center).size(240.dp, 160.dp).testTag("glass")) {}
+                }
+            }
+        }
+        compose.waitForIdle()
+        val image = compose.onRoot().captureToImage().asAndroidBitmap()
+        val g = compose.onNodeWithTag("glass").fetchSemanticsNode().boundsInRoot
+        fun contrast(left: Int, top: Int, w: Int, h: Int): Double {
+            val px = IntArray(w * h).also { image.getPixels(it, 0, w, left, top, w, h) }
+            val luma = px.map { (0.299 * ((it shr 16) and 0xFF) + 0.587 * ((it shr 8) and 0xFF) + 0.114 * (it and 0xFF)) }
+            return luma.max() - luma.min()
+        }
+        val inset = 24.dp.value * compose.density.density // away from the rim and rounded corners
+        val inside = contrast((g.left + inset).toInt(), (g.top + inset).toInt(), (g.width - 2 * inset).toInt(), (g.height - 2 * inset).toInt())
+        val outside = contrast(0, (g.top + inset).toInt(), (g.left - 8).toInt(), (g.height - 2 * inset).toInt())
+        File(out, "fixture-16-glass-blur.png").outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        File(out, "glass-report.txt").writeText(
+            "API ${android.os.Build.VERSION.SDK_INT}: stripe luminance range behind glass %.1f vs. beside it %.1f (%.1f %%)\n".format(inside, outside, 100 * inside / outside),
+        )
+        assertTrue("stripes visible beside the glass ($outside)", outside > 200)
+        assertTrue("glass blurs the stripes: $inside of $outside", inside < 0.15 * outside)
+    }
+
+    /** Shown before Android's VPN dialog whenever consent is missing; Continue is what opens it. */
+    @Test fun u5_consentExplainedBeforeTheSystemDialog() {
+        compose.enableAccessibilityChecks()
+        var continued = 0
+        var dismissed = 0
+        compose.setContent {
+            TonoTheme {
+                Box(Modifier.fillMaxSize().background(com.raydocs.tono.mobile.ui.TonoColors.Smoke)) {
+                    Box(Modifier.statusBarsPadding().padding(top = 24.dp)) { ConsentContent(onContinue = { continued++ }, onDismiss = { dismissed++ }) }
+                }
+            }
+        }
+        val found = A11yContract.violations(compose, "consent") + A11yContract.truncatedText(compose, "consent")
+        shot("fixture-19-consent-explainer")
+        compose.onNodeWithText(str(R.string.consent_continue)).performClick()
+        compose.onNodeWithText(str(R.string.consent_later)).performClick()
+        assertEquals(found.joinToString("\n"), 0, found.size)
+        assertEquals(1, continued)
+        assertEquals(1, dismissed)
+    }
+
+    /**
+     * What a screen reader walks through, read from Android's accessibility tree (the same nodes
+     * TalkBack gets), top to bottom. TalkBack itself is not on the emulator image, so speech and
+     * gestures are not exercised; labels, roles and order are.
+     */
+    @Test fun u6_screenReaderOrderAndLabelsOnHome() {
+        show()
+        set(DeviceFixtures.degraded())
+        Thread.sleep(500)
+        val seen = mutableListOf<String>()
+        fun walk(n: android.view.accessibility.AccessibilityNodeInfo?) {
+            if (n == null) return
+            val label = listOfNotNull(n.contentDescription, n.text).joinToString(" ").trim()
+            val speaks = n.isVisibleToUser && label.isNotEmpty() && (n.isClickable || n.isScreenReaderFocusable || n.isHeading || n.isFocusable)
+            val state = if (android.os.Build.VERSION.SDK_INT >= 30) n.stateDescription?.let { " ($it)" } ?: "" else ""
+            if (speaks) seen += label + (if (n.isClickable) " [button]" else "") + state
+            for (i in 0 until n.childCount) walk(n.getChild(i))
+        }
+        walk(instrumentation.uiAutomation.rootInActiveWindow)
+        File(out, "screen-reader-order.txt").writeText(seen.joinToString("\n"))
+        fun at(text: String) = seen.indexOfFirst { it.contains(text) }.also { assertTrue("\"$text\" is read: $seen", it >= 0) }
+        val order = listOf(
+            at(str(R.string.settings_title)), at(str(R.string.state_degraded)), at(str(R.string.action_disconnect)),
+            at("Tokyo"), at(str(R.string.details)),
+        )
+        assertEquals("reading order follows the screen: $seen", order.sorted(), order)
+        assertTrue("every button has a label: $seen", seen.none { it.startsWith(" [button]") })
     }
 
     /** Window → screen offset for UiDevice coordinates. */

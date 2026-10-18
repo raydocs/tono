@@ -100,7 +100,7 @@ jobs:
   emulator:
     needs: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 95
+    timeout-minutes: 130
     defaults:
       run:
         working-directory: .
@@ -146,11 +146,15 @@ jobs:
           failed=""
           for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog \
                    DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig \
-                   DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations \
+                   DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme \
+                   SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp \
+                   SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates \
                    DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice \
                    DeviceEvidenceTest#b3_fixtureAtLargeFontScale \
                    HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps \
-                   HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff; do
+                   HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt \
+                   HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome \
+                   LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff; do
             t="${c#*#}"
             rec=""
             if [ "$t" = b2_fixtureMotionRecordedOnDevice ]; then
@@ -158,7 +162,7 @@ jobs:
               adb shell screenrecord --time-limit 25 --bit-rate 8000000 /sdcard/Download/tono-fixture-motion.mp4 &
               rec=$!
             fi
-            timeout 600 adb shell am instrument -w -r -e class "com.raydocs.tono.mobile.$c" \
+            timeout 900 adb shell am instrument -w -r -e class "com.raydocs.tono.mobile.$c" \
               $APP.test/androidx.test.runner.AndroidJUnitRunner > "evidence/instrument-$t.txt"
             [ -n "$rec" ] && timeout 60 tail --pid="$rec" -f /dev/null
             grep -q '^OK (' "evidence/instrument-$t.txt" && echo "PASS $t" >> evidence/summary.txt || { echo "FAIL $t" >> evidence/summary.txt; failed="$failed $t"; }
@@ -168,6 +172,7 @@ jobs:
           # Leave the shared emulator settings as found, whatever a failed test left behind.
           adb shell settings put system font_scale 1.0
           adb shell settings put global animator_duration_scale 1
+          adb shell cmd uimode night no
           timeout 60 adb logcat -d > evidence/logcat.txt
           ls -la evidence
           cat evidence/summary.txt
@@ -177,7 +182,7 @@ jobs:
       - name: Install and run on an Android 14 x86_64 emulator
         id: attempt1
         continue-on-error: true
-        timeout-minutes: 42
+        timeout-minutes: 55
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 34
@@ -190,7 +195,7 @@ jobs:
       # One bounded retry: software-GPU emulators on hosted runners occasionally die mid-run.
       - name: Retry once on a fresh emulator
         if: steps.attempt1.outcome == 'failure'
-        timeout-minutes: 42
+        timeout-minutes: 55
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 34

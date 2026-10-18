@@ -271,7 +271,15 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
             Box(
                 Modifier.fillMaxHeight().fillMaxWidth(fill.coerceIn(0.001f, 1f)).graphicsLayer { alpha = fillAlpha }
                     .clip(shape)
-                    .background(Brush.horizontalGradient(listOf(Color.Transparent, TonoColors.SunEdge.copy(alpha = 0.28f), TonoColors.SunMid.copy(alpha = 0.62f), TonoColors.SunCore.copy(alpha = 0.92f)))),
+                    // A thin wash with a narrow bright edge: wide warm stops read as a muddy brown bar on device.
+                    .background(
+                        Brush.horizontalGradient(
+                            0f to Color.Transparent,
+                            0.55f to TonoColors.SunMid.copy(alpha = 0.16f),
+                            0.9f to TonoColors.SunMid.copy(alpha = 0.42f),
+                            1f to TonoColors.SunCore.copy(alpha = 0.85f),
+                        ),
+                    ),
             )
         }
         Row(

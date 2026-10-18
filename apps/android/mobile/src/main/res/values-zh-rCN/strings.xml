@@ -152,4 +152,20 @@
     <string name="short_generic">未完成（%1$s）</string>
     <string name="sentence_permission_short">首次使用需允许一次 VPN</string>
     <string name="settings_mode_hint">点选即切换，立即生效。</string>
+    <string name="surface_unknown">状态未知</string>
+    <string name="surface_open_to_check">打开 Tono 查看</string>
+    <string name="surface_last_known">最后已知：%2$s %1$s</string>
+    <string name="surface_open_to_sign_in">打开 Tono 登录</string>
+    <string name="surface_open_to_allow">打开 Tono 授权 VPN</string>
+    <string name="surface_open_to_pick">在 Tono 中选择线路</string>
+    <string name="surface_sign_in">登录</string>
+    <string name="surface_open">打开</string>
+    <string name="widget_description">Tono 状态与一键连接</string>
+    <string name="notif_stopped_title">Tono 已停止</string>
+    <string name="consent_title">系统询问之前</string>
+    <string name="consent_ask">Android 会询问一次是否允许 Tono 建立 VPN，请在系统弹窗中点“确定”。</string>
+    <string name="consent_routes">AI 与视频经 Tono 出口，其余应用直连。</string>
+    <string name="consent_stop">开启时状态栏显示钥匙图标。可在这里、通知或快捷设置中关闭。</string>
+    <string name="consent_continue">继续</string>
+    <string name="consent_later">以后再说</string>
 </resources>
