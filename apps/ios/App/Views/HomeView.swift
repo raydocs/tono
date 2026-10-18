@@ -121,17 +121,10 @@ struct HomeView: View {
             TonoMark(size: 24)
             Text("Tono").tonoFont(17, .semibold, relativeTo: .headline).foregroundStyle(TonoColor.textPrimary)
             Spacer()
-            Button { showSettings = true } label: {
-                GlyphIcon(glyph: .gear, tint: TonoColor.textPrimary, size: 20)
-                    .frame(width: 48, height: 48)
-                    .glassSurface(Circle(), interactive: true)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(PressScale(glass: true))
-            .zoomSource("settings", in: zoom)
-            .accessibilityLabel(L.t("settings_title"))
-            .accessibilityIdentifier("settingsButton")
         }
+        // Settings lives in the bottom row with Details, inside the thumb's reach; the top bar
+        // only names the app. Same height as before, so the sky does not move.
+        .frame(minHeight: 48)
         .padding(.leading, 22).padding(.trailing, 16).padding(.top, 4)
     }
 
@@ -174,21 +167,32 @@ struct HomeView: View {
                         .transition(.opacity)
                 }
                 if !typeSize.isAccessibilitySize { Spacer() }
-                Button { showDetails = true } label: {
-                    HStack(spacing: 4) {
-                        Text(L.t("details")).tonoFont(15, .medium, relativeTo: .subheadline)
-                        GlyphIcon(glyph: .chevronUp, tint: TonoColor.textSecondary, size: 14)
+                HStack(spacing: 2) {
+                    Button { showSettings = true } label: {
+                        GlyphIcon(glyph: .gear, tint: TonoColor.textSecondary, size: 18)
+                            .frame(width: 48, height: 48)
+                            .contentShape(Rectangle())
                     }
-                    .foregroundStyle(TonoColor.textSecondary)
-                    .frame(minWidth: 64, minHeight: 48)
-                    .padding(.horizontal, 6)
-                    .contentShape(Rectangle())
-                    .accessibilityElement(children: .ignore)
+                    .buttonStyle(PressScale())
+                    .zoomSource("settings", in: zoom)
+                    .accessibilityLabel(L.t("settings_title"))
+                    .accessibilityIdentifier("settingsButton")
+                    Button { showDetails = true } label: {
+                        HStack(spacing: 4) {
+                            Text(L.t("details")).tonoFont(15, .medium, relativeTo: .subheadline)
+                            GlyphIcon(glyph: .chevronUp, tint: TonoColor.textSecondary, size: 14)
+                        }
+                        .foregroundStyle(TonoColor.textSecondary)
+                        .frame(minWidth: 64, minHeight: 48)
+                        .padding(.horizontal, 6)
+                        .contentShape(Rectangle())
+                        .accessibilityElement(children: .ignore)
+                    }
+                    .buttonStyle(.plain)
+                    .zoomSource("details", in: zoom)
+                    .accessibilityLabel(L.t("details"))
+                    .accessibilityIdentifier("detailsButton")
                 }
-                .buttonStyle(.plain)
-                .zoomSource("details", in: zoom)
-                .accessibilityLabel(L.t("details"))
-                .accessibilityIdentifier("detailsButton")
             }
             .padding(.top, 4)
         }

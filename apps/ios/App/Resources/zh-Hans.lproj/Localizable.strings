@@ -77,6 +77,8 @@
 "mode_three_tier_desc" = "AI 与已批准的 Home 名单 → 云 → 你的家宽 Home；视频 → 云；国内应用、浏览器、局域网及其他流量走你自己的网络直连。";
 "mode_stable" = "稳定（全部经云）";
 "mode_stable_desc" = "AI 同样走家宽；其他所有公网目标都经云端出口。局域网仍走本地。";
+"mode_stable_line" = "AI → 家宽 · 其他全部 → 云";
+"mode_three_tier_line" = "AI → 家宽 · 视频 → 云 · 其他直连";
 "mode_stable_short" = "稳定";
 "mode_applies" = "修改会立即应用到正在运行的连接。";
 "routing_scope_title" = "Tono 能识别什么、不能识别什么";
@@ -106,7 +108,7 @@
 "system_include_all_short" = "开启（推荐）：Tono 重启时流量先等待，不会直接放行。";
 "system_how_title" = "工作方式";
 "system_on_demand" = "连接时会开启 iOS“按需连接”，Tono 崩溃、更新或手机重启后由 iOS 自动恢复；断开时关闭。";
-"system_limit" = "Tono 关闭时 iOS 不拦截任何流量；部分 Apple 系统服务可以绕过任何 VPN。";
+"system_limit" = "Tono 关闭时 iOS 不拦截；部分 Apple 服务可绕过任何 VPN。";
 "sentence_connected_stable_no_home" = "公网流量全部走云 · 局域网仍走本地";
 "lane_home_short" = "家宽";
 "lane_local_short" = "本地直连";
@@ -159,8 +161,8 @@
 "lines_retry" = "重试";
 "settings_lock_screen" = "锁屏与小组件";
 "settings_live_activity" = "实时活动";
-"settings_live_activity_desc" = "Tono 开启时在锁屏和灵动岛显示连接状态。默认关闭，因为它会在锁屏上显示你的线路。";
-"settings_widgets_desc" = "小组件和控制中心开关显示 Tono 最后报告的状态及时间；超过 15 分钟没有更新时会明确标出，而不是猜测。";
+"settings_live_activity_desc" = "Tono 开启时显示在锁屏和灵动岛。默认关闭：它会在锁屏显示你的线路。";
+"settings_widgets_desc" = "小组件和控制中心开关显示最后的状态及时间。";
 "widget_unavailable_title" = "状态不可用";
 "widget_unavailable" = "打开 Tono 查看状态";
 "widget_as_of" = "截至 %1$@";

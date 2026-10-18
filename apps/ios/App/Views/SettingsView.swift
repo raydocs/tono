@@ -16,10 +16,10 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     SectionLabel(text: L.t("settings_routing"))
                     SmokeCard {
-                        ModeRow(title: L.t("mode_three_tier"), desc: L.t("mode_three_tier_desc"), selected: model.mode == .threeTier) {
+                        ModeRow(title: L.t("mode_three_tier"), desc: L.t("mode_three_tier_line"), selected: model.mode == .threeTier) {
                             Task { await model.setMode(.threeTier) }
                         }
-                        ModeRow(title: L.t("mode_stable"), desc: L.t("mode_stable_desc"), selected: model.mode == .stable) {
+                        ModeRow(title: L.t("mode_stable"), desc: L.t("mode_stable_line"), selected: model.mode == .stable) {
                             Task { await model.setMode(.stable) }
                         }
                         Text(L.t("mode_applies")).tonoFont(12, relativeTo: .caption).foregroundStyle(TonoColor.textTertiary)
@@ -29,6 +29,9 @@ struct SettingsView: View {
                     SmokeCard {
                         DisclosureGroup(isExpanded: $showScope) {
                             VStack(alignment: .leading, spacing: 10) {
+                                // The full mode descriptions live here; the rows above say one line each.
+                                para(L.t("mode_three_tier") + (L.isChinese ? "：" : ": ") + L.t("mode_three_tier_desc"))
+                                para(L.t("mode_stable") + (L.isChinese ? "：" : ": ") + L.t("mode_stable_desc"))
                                 para(L.t("routing_scope"))
                                 para(L.t("routing_platform"))
                                 Text(L.t(model.underlyingIPv6 ? "ipv6_on" : "ipv6_off")).tonoFont(12, .medium, relativeTo: .caption).foregroundStyle(TonoColor.textTertiary)

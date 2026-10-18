@@ -110,7 +110,7 @@ record() { # <file> <seconds> <launch args...>
 record state-cycle.mp4 32 -TonoPreviewCycle -AppleLanguages "(zh-Hans)" -AppleLocale zh_CN
 record state-cycle-reduce-motion.mp4 28 -TonoPreviewCycle -TonoReduceMotion -AppleLanguages "(zh-Hans)" -AppleLocale zh_CN
 # Sheets grow out of the control that opened them (iOS 26 zoom from the glass control): Lines from
-# the exit capsule, Details from "Details", Settings from the gear; 12.6 s loop.
+# the exit capsule, Details from "Details", Settings from the gear beside it; 12.6 s loop.
 record sheet-zoom.mp4 27 -TonoPreview CONNECTED -TonoPreviewSheetCycle -AppleLanguages "(en)" -AppleLocale en_US
 
 # Cost of the live sea on the runner's simulator (host CPU %, RSS KB of the app process; a Mac

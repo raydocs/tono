@@ -8,7 +8,7 @@ struct DetailsSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var typeSize
-    /// Settings from inside the sheet, so the thumb never has to reach the top-right gear.
+    /// Settings from inside the sheet as well (Home has it in the bottom row).
     private let onSettings: () -> Void
 
     init(onSettings: @escaping () -> Void = {}) {
@@ -91,9 +91,9 @@ struct DetailsSheet: View {
 
     private var modePicker: some View {
         VStack(spacing: 0) {
-            modeRow(.threeTier, title: L.t("mode_three_tier_short"), desc: L.t("mode_three_tier_desc"))
+            modeRow(.threeTier, title: L.t("mode_three_tier_short"), desc: L.t("mode_three_tier_line"))
             LaneDivider()
-            modeRow(.stable, title: L.t("mode_stable_short"), desc: L.t("mode_stable_desc"))
+            modeRow(.stable, title: L.t("mode_stable_short"), desc: L.t("mode_stable_line"))
         }
         .contentCard(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }

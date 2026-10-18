@@ -78,6 +78,8 @@
 "mode_stable" = "Stable — everything via cloud";
 "mode_stable_short" = "Stable";
 "mode_stable_desc" = "AI → Home as above; every other public destination leaves through the cloud. LAN stays local.";
+"mode_stable_line" = "AI → Home · everything else → cloud";
+"mode_three_tier_line" = "AI → Home · Video → cloud · the rest direct";
 "mode_applies" = "Changes apply immediately to the running tunnel.";
 "routing_scope_title" = "What Tono can and cannot recognise";
 "routing_scope" = "Order: 21 cloud video exceptions → 166 AI / named Home entries (plus the Anthropic address range) → explicit cloud list → everything else direct. Matched traffic that fails is blocked, never retried directly; matched UDP/QUIC is refused so apps fall back to TCP. Apps using ECH, their own DNS-over-HTTPS, or cached addresses can hide an AI service; that traffic then goes direct. Unrecognised AI is not guaranteed to use Home.";
@@ -106,7 +108,7 @@
 "system_include_all_short" = "On (recommended): while Tono restarts, traffic waits instead of leaving directly.";
 "system_how_title" = "How this works";
 "system_on_demand" = "Connecting turns on iOS Connect On Demand, so iOS brings Tono back after a crash, an update or a restart; disconnecting turns it off.";
-"system_limit" = "While Tono is switched off, iOS does not block anything, and some Apple system services can bypass any VPN.";
+"system_limit" = "While Tono is off, iOS blocks nothing; some Apple services bypass any VPN.";
 "sentence_connected_stable_no_home" = "All public traffic via cloud · LAN stays local";
 "lane_home_short" = "Home";
 "lane_local_short" = "Direct";
@@ -159,8 +161,8 @@
 "lines_retry" = "Try again";
 "settings_lock_screen" = "Lock Screen and widgets";
 "settings_live_activity" = "Live Activity";
-"settings_live_activity_desc" = "Shows the connection on the Lock Screen and in the Dynamic Island while Tono is on. Off by default, because it shows your line on the Lock Screen.";
-"settings_widgets_desc" = "Widgets and the Control Center switch show the last status Tono reported, with its time; after 15 minutes without news they say so instead of guessing.";
+"settings_live_activity_desc" = "Lock Screen and Dynamic Island while Tono is on. Off by default: it shows your line.";
+"settings_widgets_desc" = "Widgets and the Control Center switch show the last status and its time.";
 "widget_unavailable_title" = "Status unavailable";
 "widget_unavailable" = "Open Tono to see the status";
 "widget_as_of" = "As of %1$@";

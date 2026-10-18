@@ -197,6 +197,15 @@ final class TonoUITests: XCTestCase {
         save(XCUIScreen.main.screenshot(), "settings-scrolled-under-bar")
         close.tap()
         waitHittable(primary(app))
+        // One-handed: Home's own Settings entry sits in the bottom third, next to Details.
+        let gear = app.buttons["settingsButton"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 4))
+        let screen = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(gear.frame.minY, screen.height * 2 / 3, "Settings entry at \(gear.frame), screen \(screen)")
+        gear.tap()
+        XCTAssertTrue(close.waitForExistence(timeout: 6))
+        close.tap()
+        waitHittable(primary(app))
     }
 
     @MainActor func testLinePickerSelectsAndCloses() {
