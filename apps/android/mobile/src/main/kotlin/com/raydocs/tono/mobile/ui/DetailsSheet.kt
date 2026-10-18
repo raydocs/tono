@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -46,6 +47,9 @@ import com.raydocs.tono.routing.RoutingMode
 fun DetailsSheet(s: EngineSnapshot, onRecheck: () -> Unit, onOpenLines: () -> Unit, onOpenSettings: () -> Unit, onDismiss: () -> Unit) {
     ModalBottomSheet(
         dragHandle = null,
+        // Stops below the status bar, also when tall content or landscape lifts it to the top: the
+        // clock stays readable and the local-test-server and fixture marks stay in sight.
+        modifier = Modifier.statusBarsPadding(),
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = TonoColors.Smoke, // opaque: device renders showed home text through a 97% sheet

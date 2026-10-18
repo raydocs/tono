@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
@@ -36,6 +37,9 @@ fun LinesSheet(s: EngineSnapshot, onSelect: (String) -> Unit, onTest: () -> Unit
     val zh = isChinese()
     ModalBottomSheet(
         dragHandle = null,
+        // Stops below the status bar, also when tall content or landscape lifts it to the top: the
+        // clock stays readable and the local-test-server and fixture marks stay in sight.
+        modifier = Modifier.statusBarsPadding(),
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = TonoColors.Smoke,

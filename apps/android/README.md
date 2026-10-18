@@ -106,9 +106,13 @@ Round 7 (after the round-6 blind reviews, `docs/agent-reports/2026-10-18-android
   cut-off "Not connectec").
 - **Sheets.** The sheets draw their grip themselves: Material's handle is a keyboard focus stop whose
   "Drag handle" tooltip covered the sheet title.
-- **CI.** Three emulator shards (`system`, `tunnel`, `ui`). Each starts with a health gate on the
-  sign-in screen's frame time, a hung test is stopped after 600 s with a screenshot, window dump and
-  focus state, and a shard that passes only on the fresh-emulator retry is marked flaky.
+- **CI.** Three emulator shards (`system`, `tunnel`, `ui`). Each records the sign-in screen's frame
+  time before the tests (tried as a gate at 650 ms, it stopped emulators that then ran at normal
+  speed, so it is a measurement until a threshold is backed by data). A hung test is stopped after
+  600 s with a screenshot, window dump and focus state, and a shard that passes only on the
+  fresh-emulator retry is marked flaky.
+- **Sheets stop below the status bar**, so the clock and the local-test-server or fixture mark stay
+  in sight with a sheet open, also in landscape where Details reaches the top.
 
 ## Where it lives
 
