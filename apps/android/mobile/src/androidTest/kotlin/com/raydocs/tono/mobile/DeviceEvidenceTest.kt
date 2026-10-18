@@ -69,21 +69,7 @@ class DeviceEvidenceTest {
         Configurator.getInstance().waitForIdleTimeout = 300
     }
 
-    /**
-     * CI emulators sometimes raise a system "isn't responding" dialog for another app (e.g. the
-     * launcher right after boot). It is not ours; answer "Wait" so it does not cover the evidence.
-     */
-    private fun dismissForeignAnr() {
-        repeat(3) {
-            val title = device.findObject(By.text(Pattern.compile(".+ isn't responding"))) ?: return
-            // Our own ANR must stay visible and fail the run; only foreign ones are answered.
-            if (title.text.startsWith("Tono")) return
-            val wait = device.findObject(By.text("Wait")) ?: return
-            File(out, "foreign-anr.txt").appendText("${title.text} → Wait\n")
-            wait.click()
-            device.waitForIdle(1_000)
-        }
-    }
+    private fun dismissForeignAnr() = ForeignAnr.dismiss(device, out)
 
     private fun find(selector: androidx.test.uiautomator.BySelector, timeoutMs: Long) =
         device.wait(Until.findObject(selector), timeoutMs) ?: run { dismissForeignAnr(); device.wait(Until.findObject(selector), timeoutMs) }
@@ -95,6 +81,7 @@ class DeviceEvidenceTest {
         // "takeScreenshot() returned null"); try again, but a screenshot is still required.
         val saved = (1..5).any { attempt -> device.takeScreenshot(File(out, "$name.png")).also { if (!it && attempt < 5) Thread.sleep(1_000) } }
         assertTrue("screenshot $name", saved)
+        if (name.startsWith("fixture-")) assertTrue("$name shows the FIXTURE mark", Captures.fixtureMarked(File(out, "$name.png")))
     }
 
     private fun text(id: Int) = context.getString(id)
@@ -226,7 +213,10 @@ class DeviceEvidenceTest {
         }
     }
 
-    /** Tono is a night-sky app by design: Android's light theme must not turn it into a half-light one. */
+    /**
+     * Tono is a night-sky app by design (a fixed dark theme, a decision rather than a missing light
+     * one): Android's light theme must not turn it into a half-light one.
+     */
     @Test fun a6_realAppUnderSystemLightAndDarkTheme() {
         val shell = instrumentation.uiAutomation
         fun night(v: String) { shell.executeShellCommand("cmd uimode night $v").close(); Thread.sleep(1_500) }
@@ -242,6 +232,21 @@ class DeviceEvidenceTest {
         } finally {
             night("no") // the emulator's default
         }
+        // The assertion, not just the pictures: both screens stay night-dark and look alike.
+        fun luminance(name: String): Double {
+            val b = android.graphics.BitmapFactory.decodeFile(File(out, "$name.png").path)
+            var sum = 0.0; var n = 0
+            for (y in (b.height * 0.08).toInt() until b.height step 8) for (x in 0 until b.width step 8) {
+                val p = b.getPixel(x, y)
+                sum += 0.2126 * android.graphics.Color.red(p) + 0.7152 * android.graphics.Color.green(p) + 0.0722 * android.graphics.Color.blue(p); n++
+            }
+            return sum / n
+        }
+        val light = luminance("real-11-system-light-theme")
+        val dark = luminance("real-12-system-dark-theme")
+        File(out, "theme-report.txt").writeText("mean luminance below the status bar (0–255): system light theme %.1f, system dark theme %.1f\n".format(light, dark))
+        assertTrue("under Android's light theme Tono stays a night scene: %.1f".format(light), light < 70)
+        assertTrue("light and dark system themes give the same Tono: %.1f vs %.1f".format(light, dark), Math.abs(light - dark) < 12)
     }
 
     // ---- fixture renders: real device rendering, fake state --------------------------------

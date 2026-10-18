@@ -47,8 +47,8 @@
     <string name="reason_NETWORK">Can\'t reach Tono. Check the network and retry.</string>
     <string name="reason_RATE_LIMITED">Too many attempts. Wait a moment.</string>
     <string name="reason_CORE_START">The tunnel core didn\'t start. Retry; if it keeps failing, restart the phone.</string>
-    <string name="reason_CLOUD_UNREACHABLE">The cloud exit isn\'t answering. Matched traffic is paused, not sent direct. Try another line.</string>
-    <string name="reason_HOME_UNREACHABLE">Home isn\'t answering. AI is paused, not sent direct. Other apps still work.</string>
+    <string name="reason_CLOUD_UNREACHABLE">The cloud exit didn\'t answer the last check. Matched traffic is paused, not sent direct. Try another line.</string>
+    <string name="reason_HOME_UNREACHABLE">Home didn\'t answer the last check. AI matched to Home is paused, not sent direct. Other apps still work.</string>
     <string name="reason_REVOKED">Another VPN took over or the permission was removed.</string>
     <string name="reason_DENIED">VPN permission was declined.</string>
     <string name="reason_SESSION_ENDED">Your sign-in ended. Please sign in again.</string>
@@ -109,9 +109,9 @@
     <string name="verdict_BLOCKED">Blocked</string>
     <string name="verdict_DNS">DNS</string>
     <string name="settings_system">Android VPN protection</string>
-    <string name="system_on">Always-on VPN is on%1$s.</string>
-    <string name="system_lockdown">, with \"block connections without VPN\"</string>
-    <string name="system_off">Not always-on: if Tono stops, apps go out directly. Turn on Always-on VPN in Android settings.</string>
+    <string name="system_lockdown">Always-on VPN is on, with \"block connections without VPN\": if Tono stops, apps wait instead of going out directly.</string>
+    <string name="system_on_open">Always-on VPN is on, but without \"block connections without VPN\" apps go out directly while Tono restarts. Turn it on in Android VPN settings.</string>
+    <string name="system_off">Not always-on: if Tono stops, apps go out directly. In Android VPN settings, turn on Always-on VPN and \"block connections without VPN\".</string>
     <string name="system_open">Open VPN settings</string>
     <string name="settings_account">Account</string>
     <string name="settings_sign_out">Sign out</string>
@@ -139,13 +139,16 @@
     <string name="status_exit_both">Cloud %1$s · Home %2$s</string>
     <string name="status_exit_cloud">Cloud %1$s</string>
     <string name="status_protected">Protected</string>
+    <string name="status_rechecking">Checking the exits again</string>
+    <string name="a11y_expanded">Expanded</string>
+    <string name="a11y_collapsed">Collapsed</string>
     <string name="short_HOME_UNAVAILABLE">Home exit unavailable</string>
     <string name="short_NETWORK">Can\'t reach Tono</string>
     <string name="short_RATE_LIMITED">Too many attempts</string>
     <string name="short_CORE_START">Core didn\'t start</string>
-    <string name="short_CLOUD_UNREACHABLE">Cloud not answering · matched traffic paused</string>
+    <string name="short_CLOUD_UNREACHABLE">Cloud check failed · matched traffic paused</string>
     <string name="local_test_server">Local test server · not Tono</string>
-    <string name="short_HOME_UNREACHABLE">Home not answering · AI paused</string>
+    <string name="short_HOME_UNREACHABLE">Home check failed · AI paused</string>
     <string name="short_REVOKED">Another VPN took over</string>
     <string name="short_DENIED">VPN permission needed</string>
     <string name="short_SESSION_ENDED">Sign in again</string>
@@ -156,6 +159,9 @@
     <string name="settings_mode_hint">Tap a mode to switch; it applies right away.</string>
     <string name="surface_unknown">Status unknown</string>
     <string name="surface_open_to_check">Open Tono to check</string>
+    <!-- Home while the engine's last word is not current (it is restarting, or the app just came back). -->
+    <string name="engine_waiting">Checking with Tono\'s engine</string>
+    <string name="engine_lost">Engine stopped · checking again</string>
     <string name="surface_last_known">Last known: %1$s at %2$s</string>
     <string name="surface_open_to_sign_in">Open Tono to sign in</string>
     <string name="surface_open_to_allow">Open Tono to allow the VPN</string>

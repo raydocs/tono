@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.TrafficStats
 import android.net.VpnService
 import android.os.Build
@@ -56,6 +57,11 @@ class TonoVpnService : VpnService() {
     private val io = Executors.newCachedThreadPool()
     private val listeners = RemoteCallbackList<ITonoEngineListener>()
     private val snapshot = AtomicReference(EngineSnapshot(coreVersion = BuildConfig.SING_BOX_VERSION))
+    /**
+     * False until [restore] has read the account and settings. Before that the snapshot is a
+     * placeholder (signed out, nothing known), and no client is shown it.
+     */
+    @Volatile private var restored = false
 
     /** A signed-out snapshot; keeps the local-test-server mark, which belongs to the process, not the account. */
     private fun signedOut(phase: Phase = Phase.SIGNED_OUT, reasonCode: String? = null, mode: RoutingMode, excluded: List<String> = emptyList()) =
@@ -70,6 +76,8 @@ class TonoVpnService : VpnService() {
     private var trafficTask: ScheduledFuture<*>? = null
     private var foreground = false
     private var generation = 0L
+    /** The phone's own network the exits were last checked over (engine thread only). */
+    private var lastUnderlying: Network? = null
     private lateinit var apiBase: String
     private var localTestServer = false
 
@@ -80,7 +88,7 @@ class TonoVpnService : VpnService() {
         localTestServer = local != null
         apiBase = local ?: BuildConfig.API_BASE
         api = ControlPlane(apiBase, BuildConfig.VERSION_NAME.substringBefore('-'))
-        // From the very first snapshot a client receives, before restore() runs.
+        // Before restore() runs, so every snapshot built from here on carries the mark.
         snapshot.set(snapshot.get().copy(localTestServer = localTestServer))
         val connectivity = getSystemService(ConnectivityManager::class.java)
         monitor = NetworkMonitor(connectivity)
@@ -133,13 +141,16 @@ class TonoVpnService : VpnService() {
         val before = snapshot.get()
         val next = block(before)
         snapshot.set(next)
-        val json = next.toJson()
-        val n = listeners.beginBroadcast()
-        for (i in 0 until n) runCatching { listeners.getBroadcastItem(i).onSnapshot(json) }
-        listeners.finishBroadcast()
+        broadcast(next.toJson())
         if (foreground) notify(next)
         SystemSurfaces.publish(this, next)
         if (next.tunnelUp && !before.tunnelUp) getSystemService(NotificationManager::class.java).cancel(NOTICE_ID)
+    }
+
+    private fun broadcast(json: String) {
+        val n = listeners.beginBroadcast()
+        for (i in 0 until n) runCatching { listeners.getBroadcastItem(i).onSnapshot(json) }
+        listeners.finishBroadcast()
     }
 
     private fun restore() {
@@ -161,6 +172,9 @@ class TonoVpnService : VpnService() {
                 localTestServer = localTestServer,
             ).withCatalog(cached)
         }
+        restored = true
+        // A client that registered while the update above was broadcasting got nothing: send again.
+        broadcast(snapshot.get().toJson())
         if (signedIn && cached == null) refreshCatalogQuietly()
     }
 
@@ -453,10 +467,20 @@ class TonoVpnService : VpnService() {
     private fun onUnderlyingChanged(u: NetworkMonitor.Underlying?) {
         val v6 = u?.globalIpv6 == true
         val before = snapshot.get()
-        if (before.underlyingIpv6 == v6) return
-        update { it.copy(underlyingIpv6 = v6) }
-        // DIRECT AAAA answers depend on the phone's IPv6; regenerate only when that changes.
-        if (before.tunnelUp) reloadIfRunning()
+        val switched = u != null && lastUnderlying != null && u.network != lastUnderlying
+        if (u != null) lastUnderlying = u.network
+        if (before.underlyingIpv6 != v6) {
+            update { it.copy(underlyingIpv6 = v6) }
+            // DIRECT AAAA answers depend on the phone's IPv6; regenerate only when that changes (the
+            // restart checks both exits again).
+            if (before.tunnelUp) { reloadIfRunning(); return }
+        }
+        // Wi-Fi ↔ mobile: the exits' last answers came over the old network, so ask them again
+        // instead of keeping a verdict the new network has not earned.
+        if (switched && before.tunnelUp) {
+            update { it.copy(cloudProbe = ExitProbe(ProbeState.CHECKING), homeProbe = ExitProbe(ProbeState.CHECKING)) }
+            runProbes(generation)
+        }
     }
 
     private fun startTraffic() {
@@ -588,8 +612,10 @@ class TonoVpnService : VpnService() {
     private val binder = object : ITonoEngine.Stub() {
         override fun register(listener: ITonoEngineListener) {
             listeners.register(listener)
-            runCatching { listener.onSnapshot(snapshot.get().toJson()) }
+            if (restored) runCatching { listener.onSnapshot(snapshot.get().toJson()) }
         }
+
+        override fun snapshot(): String? = if (restored) snapshot.get().toJson() else null
 
         override fun unregister(listener: ITonoEngineListener) { listeners.unregister(listener) }
 

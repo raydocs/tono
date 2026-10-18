@@ -22,8 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -112,10 +110,17 @@ fun SectionLabel(text: String) {
     Text(text.uppercase(), style = MaterialTheme.typography.labelMedium, color = TonoColors.TextTertiary, modifier = Modifier.padding(start = 6.dp, top = 18.dp, bottom = 8.dp))
 }
 
-/** Material's sheet handle with its hit area widened to 48 dp; the visible pill is unchanged. */
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * The sheet's grip, drawn only. Material wraps its own drag handle in a keyboard focus stop whose
+ * "Drag handle" tooltip covered the sheet's title; the whole sheet still drags, and Back, Esc or
+ * the scrim close it.
+ */
 @Composable
-fun WideDragHandle() = BottomSheetDefaults.DragHandle(Modifier.padding(horizontal = 8.dp))
+fun SheetGrip() {
+    Box(Modifier.fillMaxWidth().padding(vertical = 22.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(32.dp, 4.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), CircleShape))
+    }
+}
 
 /**
  * A small mark centred in the status-bar band, between the clock and the system icons, so it never

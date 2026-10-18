@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,7 +49,7 @@ interface TonoActions {
 }
 
 @Composable
-fun TonoRoot(snapshot: EngineSnapshot?, actions: TonoActions) {
+fun TonoRoot(snapshot: EngineSnapshot?, actions: TonoActions, link: EngineLink = EngineLink.LIVE) {
     var screen by rememberSaveable { mutableStateOf(Screen.HOME) }
     var linesOpen by rememberSaveable { mutableStateOf(false) }
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
@@ -74,33 +77,40 @@ fun TonoRoot(snapshot: EngineSnapshot?, actions: TonoActions) {
                     },
                     label = "screen",
                 ) { target ->
-                    when (target) {
-                        Screen.HOME -> HomeScreen(
-                            s,
-                            onConnect = actions::connect,
-                            onDisconnect = { actions.command("disconnect") },
-                            onOpenLines = { linesOpen = true; actions.command("refreshCatalog") },
-                            onOpenDetails = { detailsOpen = true },
-                            onOpenSettings = { screen = Screen.SETTINGS },
-                        )
-                        Screen.SETTINGS -> SettingsScreen(
-                            s,
-                            onBack = { screen = Screen.HOME },
-                            onMode = { m: RoutingMode -> actions.command("setMode", "mode" to m.name) },
-                            onOpenApps = { screen = Screen.APPS },
-                            onExplain = actions::explain,
-                            onSignOut = { actions.command("signOut") },
-                            onOpenLicenses = { screen = Screen.LICENSES },
-                        )
-                        Screen.LICENSES -> LicensesScreen(onBack = { screen = Screen.SETTINGS })
-                        Screen.APPS -> AppsScreen(
-                            s.excludedPackages,
-                            onBack = { screen = Screen.SETTINGS },
-                            onSave = { actions.command("setExcluded", "packages" to it) },
-                        )
+                    // Home pads its own controls and lets the sea run under the camera cutout; the other
+                    // screens keep clear of it as a whole when the phone is turned.
+                    Box(if (target == Screen.HOME) Modifier else Modifier.windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))) {
+                        when (target) {
+                            Screen.HOME -> HomeScreen(
+                                s,
+                                onConnect = actions::connect,
+                                onDisconnect = { actions.command("disconnect") },
+                                onOpenLines = { linesOpen = true; actions.command("refreshCatalog") },
+                                onOpenDetails = { detailsOpen = true },
+                                onOpenSettings = { screen = Screen.SETTINGS },
+                                link = link,
+                            )
+                            Screen.SETTINGS -> SettingsScreen(
+                                s,
+                                onBack = { screen = Screen.HOME },
+                                onMode = { m: RoutingMode -> actions.command("setMode", "mode" to m.name) },
+                                onOpenApps = { screen = Screen.APPS },
+                                onExplain = actions::explain,
+                                onSignOut = { actions.command("signOut") },
+                                onOpenLicenses = { screen = Screen.LICENSES },
+                            )
+                            Screen.LICENSES -> LicensesScreen(onBack = { screen = Screen.SETTINGS })
+                            Screen.APPS -> AppsScreen(
+                                s.excludedPackages,
+                                onBack = { screen = Screen.SETTINGS },
+                                onSave = { actions.command("setExcluded", "packages" to it) },
+                            )
+                        }
                     }
                 }
-                if (detailsOpen && screen == Screen.HOME) {
+                // Details and Lines speak about the tunnel; they come back once the engine's word is current.
+                val current = link == EngineLink.LIVE
+                if (detailsOpen && screen == Screen.HOME && current) {
                     DetailsSheet(
                         s,
                         onRecheck = { actions.command("recheck") },
@@ -109,7 +119,7 @@ fun TonoRoot(snapshot: EngineSnapshot?, actions: TonoActions) {
                         onDismiss = { detailsOpen = false },
                     )
                 }
-                if (linesOpen && screen == Screen.HOME) {
+                if (linesOpen && screen == Screen.HOME && current) {
                     LinesSheet(
                         s,
                         onSelect = { actions.command("selectNode", "name" to it) },

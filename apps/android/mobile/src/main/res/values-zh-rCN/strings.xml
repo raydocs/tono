@@ -47,8 +47,8 @@
     <string name="reason_NETWORK">连不上 Tono。请检查网络后重试。</string>
     <string name="reason_RATE_LIMITED">尝试过多，请稍后再试。</string>
     <string name="reason_CORE_START">隧道内核没能启动。请重试；一直失败请重启手机。</string>
-    <string name="reason_CLOUD_UNREACHABLE">云端出口没有响应。命中的流量已暂停，不会直连。可以换一条线路。</string>
-    <string name="reason_HOME_UNREACHABLE">家宽没有响应。AI 已暂停，不会直连；其他应用照常。</string>
+    <string name="reason_CLOUD_UNREACHABLE">云端出口没有通过最近一次检查。命中的流量已暂停，不会直连。可以换一条线路。</string>
+    <string name="reason_HOME_UNREACHABLE">家宽没有通过最近一次检查。分到家宽的 AI 已暂停，不会直连；其他应用照常。</string>
     <string name="reason_REVOKED">另一个 VPN 接管了，或授权被移除。</string>
     <string name="reason_DENIED">你没有允许 VPN 授权。</string>
     <string name="reason_SESSION_ENDED">登录已失效，请重新登录。</string>
@@ -108,9 +108,9 @@
     <string name="verdict_BLOCKED">拦截</string>
     <string name="verdict_DNS">DNS</string>
     <string name="settings_system">Android 系统保护</string>
-    <string name="system_on">已开启始终开启的 VPN%1$s。</string>
-    <string name="system_lockdown">，并已“屏蔽未使用 VPN 的连接”</string>
-    <string name="system_off">未设为始终开启：Tono 停止时应用会直连。可在 Android 设置中开启“始终开启的 VPN”。</string>
+    <string name="system_lockdown">已开启始终开启的 VPN，并已“屏蔽未使用 VPN 的连接”：Tono 停止时应用会等待，不会直连。</string>
+    <string name="system_on_open">已开启始终开启的 VPN，但未开启“屏蔽未使用 VPN 的连接”：Tono 重启期间应用会直连。可在 Android VPN 设置中开启。</string>
+    <string name="system_off">未设为始终开启：Tono 停止时应用会直连。可在 Android VPN 设置中开启“始终开启的 VPN”和“屏蔽未使用 VPN 的连接”。</string>
     <string name="system_open">打开 VPN 设置</string>
     <string name="settings_account">账号</string>
     <string name="settings_sign_out">退出登录</string>
@@ -138,13 +138,16 @@
     <string name="status_exit_both">云端 %1$s · 家宽 %2$s</string>
     <string name="status_exit_cloud">云端 %1$s</string>
     <string name="status_protected">已保护</string>
+    <string name="status_rechecking">正在重新检查出口</string>
+    <string name="a11y_expanded">已展开</string>
+    <string name="a11y_collapsed">已收起</string>
     <string name="short_HOME_UNAVAILABLE">家宽出口暂不可用</string>
     <string name="short_NETWORK">连不上 Tono</string>
     <string name="short_RATE_LIMITED">尝试太频繁</string>
     <string name="short_CORE_START">内核没能启动</string>
-    <string name="short_CLOUD_UNREACHABLE">云端没响应 · 命中流量已暂停</string>
+    <string name="short_CLOUD_UNREACHABLE">云端检查未通过 · 命中流量已暂停</string>
     <string name="local_test_server">本地测试服务器 · 非 Tono</string>
-    <string name="short_HOME_UNREACHABLE">家宽没响应 · AI 已暂停</string>
+    <string name="short_HOME_UNREACHABLE">家宽检查未通过 · AI 已暂停</string>
     <string name="short_REVOKED">VPN 被其他应用接管</string>
     <string name="short_DENIED">需要允许 VPN</string>
     <string name="short_SESSION_ENDED">请重新登录</string>
@@ -155,6 +158,9 @@
     <string name="settings_mode_hint">点选即切换，立即生效。</string>
     <string name="surface_unknown">状态未知</string>
     <string name="surface_open_to_check">打开 Tono 查看</string>
+    <!-- Home while the engine's last word is not current (it is restarting, or the app just came back). -->
+    <string name="engine_waiting">正在向 Tono 引擎确认</string>
+    <string name="engine_lost">引擎已停止 · 正在重新确认</string>
     <string name="surface_last_known">最后已知：%2$s %1$s</string>
     <string name="surface_open_to_sign_in">打开 Tono 登录</string>
     <string name="surface_open_to_allow">打开 Tono 授权 VPN</string>

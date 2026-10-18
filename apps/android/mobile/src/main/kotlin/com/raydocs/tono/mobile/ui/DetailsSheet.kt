@@ -45,12 +45,15 @@ import com.raydocs.tono.routing.RoutingMode
 @Composable
 fun DetailsSheet(s: EngineSnapshot, onRecheck: () -> Unit, onOpenLines: () -> Unit, onOpenSettings: () -> Unit, onDismiss: () -> Unit) {
     ModalBottomSheet(
-        dragHandle = { WideDragHandle() },
+        dragHandle = null,
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = TonoColors.Smoke, // opaque: device renders showed home text through a 97% sheet
         scrimColor = TonoColors.NightDeep.copy(alpha = 0.45f),
-    ) { DetailsContent(s, onRecheck, onOpenLines, onOpenSettings) }
+    ) {
+        SheetGrip()
+        DetailsContent(s, onRecheck, onOpenLines, onOpenSettings)
+    }
 }
 
 /** Everything explanatory, on demand: routes with live exit checks, why something failed, mode. */

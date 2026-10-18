@@ -56,6 +56,26 @@ object Captures {
         return false
     }
 
+    /**
+     * The "FIXTURE · no tunnel" pill ([FixtureFrame]) is in the picture: enough pixels of its colour in
+     * the status-bar band, as drawn or under an open sheet's scrim (45 % or 55 % of the sheets' night
+     * colour). A fixture capture without it could pass for the real app.
+     */
+    fun fixtureMarked(file: java.io.File): Boolean {
+        val b = android.graphics.BitmapFactory.decodeFile(file.path) ?: return false
+        val mark = intArrayOf(0xFF, 0xB4, 0xA0)
+        val night = intArrayOf(0x06, 0x07, 0x0F)
+        val looks = listOf(0f, 0.45f, 0.55f).map { scrim -> IntArray(3) { (mark[it] * (1 - scrim) + night[it] * scrim).toInt() } }
+        val band = (b.height * 0.06).toInt()
+        var hits = 0
+        for (y in 0 until band step 2) for (x in 0 until b.width step 2) {
+            val p = b.getPixel(x, y)
+            val rgb = intArrayOf(android.graphics.Color.red(p), android.graphics.Color.green(p), android.graphics.Color.blue(p))
+            if (looks.any { c -> (0..2).sumOf { Math.abs(rgb[it] - c[it]) } < 24 }) hits++
+        }
+        return hits > 40
+    }
+
     /** Every sample on a 24 × 24 grid between 8 % and 92 % of the height has the same colour. */
     private fun plain(b: android.graphics.Bitmap): Boolean {
         val first = b.getPixel(b.width / 2, b.height / 2)
@@ -78,7 +98,11 @@ object Captures {
  */
 @androidx.compose.runtime.Composable
 fun FixtureFrame(content: @androidx.compose.runtime.Composable () -> Unit) {
-    val activity = androidx.activity.compose.LocalActivity.current as? androidx.activity.ComponentActivity
+    // From the view, not LocalActivity: tests that switch the language provide a configuration context
+    // as LocalContext, which hid the activity, so the Chinese captures were neither edge to edge nor marked.
+    val activity = androidx.compose.ui.platform.LocalView.current.context.let { c ->
+        generateSequence(c) { (it as? android.content.ContextWrapper)?.baseContext }.firstNotNullOfOrNull { it as? androidx.activity.ComponentActivity }
+    }
     androidx.compose.runtime.LaunchedEffect(activity) {
         activity?.enableEdgeToEdge(
             statusBarStyle = androidx.activity.SystemBarStyle.dark(0),
@@ -91,5 +115,23 @@ fun FixtureFrame(content: @androidx.compose.runtime.Composable () -> Unit) {
             "FIXTURE · no tunnel",
             androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.TopCenter).clearAndSetSemantics { },
         )
+    }
+}
+
+/**
+ * CI emulators sometimes raise a system "isn't responding" dialog for another app (the launcher
+ * after boot, VpnDialogs on a slow host). It is not ours; answer "Wait" so it does not cover the
+ * evidence, and log it. Tono's own ANR stays on screen and fails the run.
+ */
+object ForeignAnr {
+    fun dismiss(device: androidx.test.uiautomator.UiDevice, out: java.io.File) {
+        repeat(3) {
+            val title = device.findObject(androidx.test.uiautomator.By.text(java.util.regex.Pattern.compile(".+ isn't responding"))) ?: return
+            if (title.text.startsWith("Tono")) return
+            val wait = device.findObject(androidx.test.uiautomator.By.text("Wait")) ?: return
+            java.io.File(out, "foreign-anr.txt").appendText("${title.text} → Wait\n")
+            wait.click()
+            device.waitForIdle(1_000)
+        }
     }
 }

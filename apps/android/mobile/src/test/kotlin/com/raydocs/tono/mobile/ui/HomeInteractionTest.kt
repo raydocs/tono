@@ -46,6 +46,7 @@ class HomeInteractionTest {
 
     private val calls = mutableListOf<String>()
     private var snapshot by mutableStateOf(UiFixtures.idle)
+    private var link by mutableStateOf(EngineLink.LIVE)
 
     private fun str(id: Int, vararg args: Any) = compose.activity.getString(id, *args)
 
@@ -64,7 +65,7 @@ class HomeInteractionTest {
                         override fun connect() { calls += "connect" }
                         override fun command(op: String, vararg args: Pair<String, Any?>) { calls += op }
                         override fun explain(host: String): Map<String, Any?>? = null
-                    })
+                    }, link)
                 }
             }
         }
@@ -177,6 +178,59 @@ class HomeInteractionTest {
         repeat(8) {
             compose.mainClock.advanceTimeByFrame()
             compose.onAllNodes(shown, useUnmergedTree = true).assertCountEquals(0)
+        }
+    }
+
+    /**
+     * The engine's process can die with a tunnel up (and the tunnel with it). Until a running engine
+     * speaks again, Home must not keep its last "Connected": no state word, sun timer, speed or Details.
+     */
+    @Test fun lastWordFromALostEngineIsNotShownAsCurrent() {
+        snapshot = UiFixtures.connected()
+        show()
+        val connected = str(R.string.state_connected)
+        val unknown = str(R.string.surface_unknown)
+        compose.onNodeWithText(connected).assertExists()
+        compose.onNodeWithTag("details").performClick()
+        compose.onNodeWithText(str(R.string.lane_video)).assertExists()
+
+        link = EngineLink.LOST
+        compose.waitForIdle()
+        compose.onAllNodesWithText(connected).assertCountEquals(0)
+        compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, connected)).assertCountEquals(0)
+        compose.onNodeWithText(unknown).assertExists()
+        compose.onNodeWithText(str(R.string.engine_lost)).assertExists()
+        compose.onAllNodesWithText(str(R.string.lane_video)).assertCountEquals(0)
+        compose.onAllNodesWithText(str(R.string.speed_line, Format.rate(2_340_000), Format.rate(81_000))).assertCountEquals(0)
+        compose.onAllNodes(SemanticsMatcher("connected timer") { n -> n.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().any { it.startsWith(str(R.string.a11y_connected_for, "").trim()) } }).assertCountEquals(0)
+        // Stopping still works: the client sends it to the engine's service without the binder.
+        compose.onNode(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, unknown)).assertExists()
+        compose.onNodeWithText(str(R.string.action_disconnect)).performClick()
+        assertEquals(listOf("disconnect"), calls.filter { it == "disconnect" })
+
+        link = EngineLink.WAITING
+        compose.waitForIdle()
+        compose.onAllNodesWithText(connected).assertCountEquals(0)
+        compose.onNodeWithText(str(R.string.engine_waiting)).assertExists()
+
+        // The restarted engine's first word is the current state, whatever it is.
+        snapshot = UiFixtures.idle
+        link = EngineLink.LIVE
+        compose.waitForIdle()
+        compose.onNodeWithText(str(R.string.state_idle)).assertExists()
+        compose.onAllNodesWithText(unknown).assertCountEquals(0)
+    }
+
+    @Test fun unconfirmedPrimaryStopsAfterATunnelPhaseAndConnectsOtherwise() {
+        link = EngineLink.LOST
+        show()
+        for (p in Phase.entries.filter { it != Phase.SIGNED_OUT }) {
+            snapshot = UiFixtures.connected().copy(phase = p)
+            compose.waitForIdle()
+            val tunnel = p in setOf(Phase.PREPARING, Phase.CONNECTING, Phase.CONNECTED, Phase.DEGRADED, Phase.DISCONNECTING)
+            val expected = str(if (tunnel) R.string.action_disconnect else R.string.action_connect)
+            compose.onNodeWithTag("primary").assert(hasAnyDescendant(hasText(expected)))
+            compose.onAllNodesWithText(str(R.string.surface_unknown)).assertCountEquals(1)
         }
     }
 }

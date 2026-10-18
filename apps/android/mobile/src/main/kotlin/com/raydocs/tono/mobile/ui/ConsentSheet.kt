@@ -37,12 +37,15 @@ import com.raydocs.tono.mobile.R
 @Composable
 fun ConsentSheet(onContinue: () -> Unit, onDismiss: () -> Unit) {
     ModalBottomSheet(
-        dragHandle = { WideDragHandle() },
+        dragHandle = null,
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = TonoColors.Smoke,
         scrimColor = TonoColors.NightDeep.copy(alpha = 0.55f),
-    ) { ConsentContent(onContinue, onDismiss) }
+    ) {
+        SheetGrip()
+        ConsentContent(onContinue, onDismiss)
+    }
 }
 
 @Composable

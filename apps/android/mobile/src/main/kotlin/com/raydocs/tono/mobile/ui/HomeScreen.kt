@@ -3,6 +3,7 @@ package com.raydocs.tono.mobile.ui
 import android.os.Build
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -33,11 +34,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -106,9 +110,21 @@ fun primaryActionFor(p: Phase): PrimaryAction = when (p) {
     Phase.DISCONNECTING -> PrimaryAction.WAIT
 }
 
+/** The phases in which the engine may hold, or be bringing up or down, a tunnel. */
+private val TUNNEL_PHASES = setOf(Phase.PREPARING, Phase.CONNECTING, Phase.CONNECTED, Phase.DEGRADED, Phase.DISCONNECTING)
+
+/**
+ * What the primary does while the engine's word is not current: stop, if the last word was a
+ * tunnel (the stop request reaches the engine without its binder), otherwise connect.
+ */
+fun unconfirmedActionFor(last: Phase): PrimaryAction = if (last in TUNNEL_PHASES) PrimaryAction.DISCONNECT else PrimaryAction.CONNECT
+
 /**
  * Home. The sea scene carries the state at a glance; the thumb zone holds only the state word, one
  * status line, the primary capsule and the exit. Everything explanatory lives in Details.
+ *
+ * When [link] is not [EngineLink.LIVE], [s] is the engine's last word, not its current one: Home says
+ * "Status unknown" and drops everything that would claim a tunnel (sun, fill, timer, speed).
  */
 @Composable
 fun HomeScreen(
@@ -118,8 +134,10 @@ fun HomeScreen(
     onOpenLines: () -> Unit,
     onOpenDetails: () -> Unit,
     onOpenSettings: () -> Unit,
+    link: EngineLink = EngineLink.LIVE,
 ) {
-    val sky = skyFor(s.phase)
+    val unconfirmed = link != EngineLink.LIVE
+    val sky = if (unconfirmed) SkyState.NIGHT else skyFor(s.phase)
     Box(Modifier.fillMaxSize().background(TonoColors.Night)) {
         BackdropHost(scene = { SeaScene(sky, Modifier.fillMaxSize(), horizon = 0.46f) }, modifier = Modifier.fillMaxSize()) {
             // Top bar at the top, dock at the bottom; when large text makes them taller than the
@@ -129,13 +147,13 @@ fun HomeScreen(
                 Column(Modifier.fillMaxWidth().verticalScroll(scroll).heightIn(min = maxHeight), verticalArrangement = Arrangement.SpaceBetween) {
                     TopBar()
                     // A thumb-width column: on a landscape phone or a tablet the capsules do not stretch across the sea.
-                    Column(Modifier.widthIn(max = 560.dp).fillMaxWidth().swipeUpTo(onOpenDetails, enabled = scroll.maxValue == 0).navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 8.dp)) {
-                        StateHeader(s)
+                    Column(Modifier.widthIn(max = 560.dp).fillMaxWidth().swipeUpTo(onOpenDetails, enabled = scroll.maxValue == 0).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)).padding(horizontal = 20.dp).padding(bottom = 8.dp)) {
+                        StateHeader(s, link)
                         Spacer(Modifier.height(18.dp))
-                        PrimaryCapsule(s, onConnect, onDisconnect)
+                        PrimaryCapsule(s, onConnect, onDisconnect, link)
                         Spacer(Modifier.height(10.dp))
-                        ExitPill(s, onOpenLines)
-                        Footer(s, onOpenDetails, onOpenSettings)
+                        ExitPill(s, onOpenLines, live = !unconfirmed)
+                        Footer(s, onOpenDetails, onOpenSettings, link)
                     }
                 }
             }
@@ -147,7 +165,8 @@ fun HomeScreen(
 /** Brand only; Settings lives in the thumb zone next to Details, and screen readers reach it after the state. */
 @Composable
 private fun TopBar() {
-    Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 54.dp).padding(start = 20.dp, end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+    // safeDrawing, not just the status bar: on a phone turned to landscape the camera cutout sits at a side.
+    Row(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top)).heightIn(min = 54.dp).padding(start = 20.dp, end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Image(painterResource(R.drawable.tono_sun_mark), contentDescription = null, modifier = Modifier.size(26.dp))
         Spacer(Modifier.width(8.dp))
         Text("Tono", style = MaterialTheme.typography.titleMedium, color = TonoColors.TextPrimary)
@@ -155,12 +174,19 @@ private fun TopBar() {
 }
 
 @Composable
-private fun StateHeader(s: EngineSnapshot) {
-    val title = phaseTitle(s.phase)
-    val line = statusLine(s)
-    val tone = when (s.phase) {
-        Phase.FAILED -> TonoColors.Error
-        Phase.DEGRADED, Phase.NEEDS_PERMISSION -> TonoColors.Warning
+private fun StateHeader(s: EngineSnapshot, link: EngineLink) {
+    val unconfirmed = link != EngineLink.LIVE
+    val title = if (unconfirmed) stringResource(R.string.surface_unknown) else phaseTitle(s.phase)
+    val line = when (link) {
+        EngineLink.LIVE -> statusLine(s)
+        EngineLink.WAITING -> stringResource(R.string.engine_waiting)
+        EngineLink.LOST -> stringResource(R.string.engine_lost)
+    }
+    val tone = when {
+        link == EngineLink.LOST -> TonoColors.Warning
+        unconfirmed -> null
+        s.phase == Phase.FAILED -> TonoColors.Error
+        s.phase == Phase.DEGRADED || s.phase == Phase.NEEDS_PERMISSION -> TonoColors.Warning
         else -> null
     }
     Column(Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }) {
@@ -184,9 +210,12 @@ private fun StateHeader(s: EngineSnapshot) {
 }
 
 private fun <T> androidx.compose.animation.AnimatedContentTransitionScope<T>.crossRise() =
-    // The outgoing words are gone before the incoming ones appear: frame-by-frame review found two
-    // half-transparent labels on top of each other mid-transition.
-    (fadeIn(tween(180, delayMillis = 100)) + slideInVertically(tween(260)) { it / 3 }) togetherWith (fadeOut(tween(90)) + slideOutVertically(tween(160)) { -it / 4 })
+    // The incoming words start as the outgoing ones are nearly gone, rising from below while those
+    // leave upwards. Frame-by-frame review found two half-transparent labels on top of each other
+    // when the fades fully overlapped, and 64–100 ms with no words at all when they ran back to back.
+    // No clipping while the size changes: a shorter word cut the old one off ("Not connectec").
+    ((fadeIn(tween(200, delayMillis = 70)) + slideInVertically(tween(260)) { it / 3 }) togetherWith
+        (fadeOut(tween(120)) + slideOutVertically(tween(160)) { -it / 4 })) using SizeTransform(clip = false)
 
 /** One short line under the state word: the exit when connected, the short reason otherwise. */
 @Composable
@@ -198,6 +227,8 @@ fun statusLine(s: EngineSnapshot): String? {
         Phase.PREPARING -> stringResource(R.string.sentence_preparing)
         Phase.CONNECTING -> stringResource(R.string.sentence_connecting)
         Phase.CONNECTED -> {
+            // Rechecking (Details, or a new Wi-Fi or mobile network): the last verdict is not repeated as current.
+            if (s.cloudProbe.state == ProbeState.CHECKING || s.homeProbe.state == ProbeState.CHECKING) return stringResource(R.string.status_rechecking)
             val cloud = s.cloudProbe.location?.let { countryName(it) }
             val home = s.homeProbe.location.takeIf { s.homeKind != HomeKind.NONE }?.let { countryName(it) }
             when {
@@ -211,8 +242,12 @@ fun statusLine(s: EngineSnapshot): String? {
 }
 
 @Composable
-private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnect: () -> Unit) {
-    val action = primaryActionFor(s.phase)
+private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnect: () -> Unit, link: EngineLink) {
+    val unconfirmed = link != EngineLink.LIVE
+    val action = if (unconfirmed) unconfirmedActionFor(s.phase) else primaryActionFor(s.phase)
+    // Only the engine's current word may show a tunnel or its progress.
+    val phase = if (unconfirmed) null else s.phase
+    val tunnelUp = !unconfirmed && s.tunnelUp
     val reduce = LocalReduceMotion.current
     val view = LocalView.current
     val source = remember { MutableInteractionSource() }
@@ -223,7 +258,7 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
     val warmAlpha by animateFloatAsState(if (warm) 1f else 0f, TonoMotion.state, label = "warm")
     // The sunrise fill is the connection's progress: it advances with the engine phase, completes on
     // arrival, then fades so the connected capsule is quiet. It moves on the same phases as the sun.
-    val fillTarget = when (s.phase) {
+    val fillTarget = when (phase) {
         Phase.PREPARING -> 0.36f
         Phase.CONNECTING -> 0.78f
         Phase.CONNECTED, Phase.DEGRADED -> 1f
@@ -231,13 +266,13 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
     }
     val fill by animateFloatAsState(fillTarget, if (reduce) tween(0) else TonoMotion.surface, label = "fill")
     val fillAlpha by animateFloatAsState(
-        if (s.phase == Phase.PREPARING || s.phase == Phase.CONNECTING) 1f else 0f,
-        if (reduce) tween(0) else tween(if (s.tunnelUp) 700 else 220, delayMillis = if (s.tunnelUp) 250 else 0),
+        if (phase == Phase.PREPARING || phase == Phase.CONNECTING) 1f else 0f,
+        if (reduce) tween(0) else tween(if (tunnelUp) 700 else 220, delayMillis = if (tunnelUp) 250 else 0),
         label = "fillAlpha",
     )
     val nudge = remember { Animatable(0f) }
-    LaunchedEffect(s.phase) {
-        if (s.phase == Phase.FAILED && !reduce) {
+    LaunchedEffect(phase) {
+        if (phase == Phase.FAILED && !reduce) {
             nudge.animateTo(0f, keyframes { durationMillis = 380; -7f at 60; 6f at 140; -3f at 230; 0f at 380 })
         }
     }
@@ -251,11 +286,11 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
         PrimaryAction.WAIT -> stringResource(R.string.action_disconnecting)
     }
     val clickLabel = if (action == PrimaryAction.CANCEL) stringResource(R.string.a11y_cancel_connect) else label
-    val stateText = phaseTitle(s.phase)
+    val stateText = if (unconfirmed) stringResource(R.string.surface_unknown) else phaseTitle(s.phase)
     val labelColor by animateColorAsState(if (warm) Color(0xFF2A1406) else TonoColors.TextPrimary, tween(220), label = "labelColor")
     val shape = RoundedCornerShape(28.dp)
     // While the tunnel is up the primary keeps a warm rim, so it outranks the exit pill without shouting.
-    val rimColor by animateColorAsState(if (s.tunnelUp) TonoColors.SunMid else Color.White, tween(350), label = "rim")
+    val rimColor by animateColorAsState(if (tunnelUp) TonoColors.SunMid else Color.White, tween(350), label = "rim")
 
     Glass(
         shape,
@@ -316,7 +351,7 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
             // timer keeps the last start time (frame-by-frame capture showed "497860:50:23" otherwise).
             val since = remember { LongArray(1) }
             if (s.connectedSinceMs > 0) since[0] = s.connectedSinceMs
-            AnimatedVisibility(s.tunnelUp && s.connectedSinceMs > 0, enter = fadeIn(tween(220, delayMillis = 240)), exit = fadeOut(tween(120))) {
+            AnimatedVisibility(tunnelUp && s.connectedSinceMs > 0, enter = fadeIn(tween(220, delayMillis = 240)), exit = fadeOut(tween(120))) {
                 ConnectedTimer(since[0])
             }
         }
@@ -335,9 +370,12 @@ private fun ConnectedTimer(since: Long) {
 }
 
 @Composable
-private fun ExitPill(s: EngineSnapshot, onOpenLines: () -> Unit) {
+private fun ExitPill(s: EngineSnapshot, onOpenLines: () -> Unit, live: Boolean) {
     val zh = isChinese()
     val node = s.nodes.firstOrNull { it.name == s.selectedNode } ?: s.nodes.firstOrNull()
+    // Until "Test" measures it, the connected line's dot follows the cloud exit check: it answered.
+    // No number: that check is a whole HTTPS request, not the round trip "Test" reports.
+    val answered = live && s.tunnelUp && s.cloudProbe.state == ProbeState.OK && node?.name == s.selectedNode
     // The line's own name only when another line shares the city; otherwise the city says it all.
     val shared = node != null && s.nodes.count { it.city.equals(node.city, ignoreCase = true) } > 1
     val name = node?.let { Format.city(it.city, zh) + (if (shared && it.label.isNotBlank()) " · ${it.label}" else "") } ?: stringResource(R.string.line_pick)
@@ -351,7 +389,7 @@ private fun ExitPill(s: EngineSnapshot, onOpenLines: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            StatusDot(Format.latencyColor(node?.latencyMs))
+            StatusDot(if (node?.latencyMs == null && answered) TonoColors.Connected else Format.latencyColor(node?.latencyMs))
             Text(name, style = MaterialTheme.typography.bodyLarge, color = TonoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (latency != null) Text(latency, style = MaterialTheme.typography.labelLarge, color = TonoColors.TextSecondary)
             GlyphIcon(Glyph.CHEVRON_DOWN, TonoColors.TextTertiary, size = 16.dp)
@@ -360,20 +398,21 @@ private fun ExitPill(s: EngineSnapshot, onOpenLines: () -> Unit) {
 }
 
 @Composable
-private fun Footer(s: EngineSnapshot, onOpenDetails: () -> Unit, onOpenSettings: () -> Unit) {
-    val attention = s.usingCachedCatalog || s.phase == Phase.DEGRADED ||
-        (s.tunnelUp && (s.homeProbe.state == ProbeState.FAILED || s.cloudProbe.state == ProbeState.FAILED))
+private fun Footer(s: EngineSnapshot, onOpenDetails: () -> Unit, onOpenSettings: () -> Unit, link: EngineLink) {
+    val tunnelUp = link == EngineLink.LIVE && s.tunnelUp
+    val attention = link == EngineLink.LIVE && (s.usingCachedCatalog || s.phase == Phase.DEGRADED ||
+        (tunnelUp && (s.homeProbe.state == ProbeState.FAILED || s.cloudProbe.state == ProbeState.FAILED)))
     val settings = stringResource(R.string.settings_title)
     val gearSource = remember { MutableInteractionSource() }
     val detailsSource = remember { MutableInteractionSource() }
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-        AnimatedVisibility(s.tunnelUp, enter = fadeIn(tween(350)), exit = fadeOut(tween(220)), modifier = Modifier.weight(1f)) {
+        AnimatedVisibility(tunnelUp, enter = fadeIn(tween(350)), exit = fadeOut(tween(220)), modifier = Modifier.weight(1f)) {
             Text(
                 stringResource(R.string.speed_line, Format.rate(s.rxBytesPerSec), Format.rate(s.txBytesPerSec)),
                 style = MaterialTheme.typography.labelMedium, color = TonoColors.TextTertiary, maxLines = 2,
             )
         }
-        if (!s.tunnelUp) Spacer(Modifier.weight(1f))
+        if (!tunnelUp) Spacer(Modifier.weight(1f))
         // One quiet glass segment for both secondary entries: Settings within thumb reach, then Details.
         Glass(RoundedCornerShape(24.dp), tintAlpha = 0.24f) {
             Row(verticalAlignment = Alignment.CenterVertically) {

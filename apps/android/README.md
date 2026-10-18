@@ -82,6 +82,34 @@ Round 6:
 - **Fixture captures.** The fixture mark sits in the status-bar band, and fixture hosts draw edge to
   edge as the app does.
 
+Round 7 (after the round-6 blind reviews, `docs/agent-reports/2026-10-18-android-r6-*` in raydocs/tono):
+- **The engine's word, or "Status unknown".** The UI keeps the engine's last snapshot but tracks
+  whether it is current (`EngineLink`: waiting, live, lost). When the `:vpn` process dies (and the
+  tunnel with it), Home says *Status unknown* and drops the sun, the progress fill, the timer, the
+  speed and the Details and Lines sheets until the restarted engine speaks. Disconnect still works
+  then: without the binder it goes to the engine's service as an intent. Coming back from the
+  background, the app reads the current snapshot before its first frame instead of showing the one
+  from before. The engine no longer sends its start-up placeholder (signed out) to a client before
+  it has read the account, which could flash the sign-in screen after a restart. The QS tile already
+  required a VPN network for Connected; the open app now also asks the tile and widget to look again
+  when the engine dies.
+- **Wording.** The always-on advice names Android's "block connections without VPN", the only
+  setting that keeps apps from going direct while Tono restarts. A failed exit check says it was the
+  last check ("Home check failed · AI paused") instead of saying Home is down. After a switch between
+  Wi-Fi and mobile, the engine checks both exits again and Home says so instead of repeating the old
+  verdict.
+- **Landscape in the real app.** Home's controls and the other screens keep clear of a camera
+  cutout at the side; Tono's consent explanation survives turning the phone (it is saved state, also
+  across process recreation).
+- **Motion.** State words cross-fade with a short overlap instead of back to back, and are no longer
+  clipped while the label width changes (frame-by-frame review found 64–100 ms with no words, and a
+  cut-off "Not connectec").
+- **Sheets.** The sheets draw their grip themselves: Material's handle is a keyboard focus stop whose
+  "Drag handle" tooltip covered the sheet title.
+- **CI.** Three emulator shards (`system`, `tunnel`, `ui`). Each starts with a health gate on the
+  sign-in screen's frame time, a hung test is stopped after 600 s with a screenshot, window dump and
+  focus state, and a shard that passes only on the fresh-emulator retry is marked flaky.
+
 ## Where it lives
 
 `rw8/Tono-droid` (Amp) is the source; `scripts/export-android-monorepo.sh <raydocs/tono checkout>`
@@ -193,7 +221,9 @@ internal test builds.
 
 - `./gradlew :android:routing:test` — catalog admission and routing policy (16 tests).
 - `./gradlew :android:mobile:testDebugUnitTest` — HTTP framing, token refresh, error mapping,
-  cross-process snapshot (7 tests).
+  cross-process snapshot, the engine link (death, restart, return from the background), Home and
+  accessibility contracts: 46 tests, of which 17 (screenshot and motion renders, opt-in with
+  `-Ptono.screenshots`) are skipped by default.
 - `scripts/routing/check-singbox-configs.sh android/routing/build/singbox-configs` — real
   `sing-box check` (pinned linux CLI, same commit) on generated configs.
 - `scripts/routing/engine-route-harness.py` — real engine, stub cloud/Home, fail-closed checks.
@@ -225,8 +255,18 @@ internal test builds.
     - Widget and notification states, labelled "Fixture" on screen.
   - `local-*`: the shipped app on a real tunnel to local stand-in servers, not Tono's
     (`LocalTunnelDeviceTest`).
-    - The flow: sign-in, Android's consent dialog, Connected after both exit checks, Details,
-      Disconnect (the VPN network goes away) and sign-out.
+    - The flow: sign-in, with VPN consent withdrawn first so Tono's explanation and then Android's
+      consent dialog both appear, Connected after both exit checks, Details, Disconnect (the VPN
+      network goes away) and sign-out.
+    - Fault injection: the engine's `:vpn` process is killed with the tunnel up and the real app in
+      front. Until the restarted engine reconnects, nothing may say Connected without a VPN network:
+      Home (after a 1.5 s grace to redraw), the status the tile and widget read, or the
+      notification. Home must say *Status unknown*, and the sign-in screen must never appear. Then
+      the app goes to the home screen and back, and must show Connected again without passing
+      through *Status unknown*.
+    - The real app turned to landscape (t2): the code step with the on-screen keyboard up, typed
+      digits kept, the code field above the keyboard; Home and Details with nothing under the camera
+      cutout; Tono's consent explanation still open after turning back.
     - Requests made from inside the tunnel to a video site, an AI site and an ordinary site. CI
       checks them against the stand-in exits' own logs: cloud, Home through the cloud, and direct.
   - Keyboard: Tab order, a visible focus ring and Enter, all through Android's input system; TalkBack's
@@ -248,7 +288,10 @@ internal test builds.
   - Still untested: QUIC fallback, always-on, app exclusion, network changes, and Tono's real exits
     and control plane.
   - The tile, widget and notifications have only been seen signed out (real) or with fixture states.
-- Landscape on a phone; the emulator check is above.
+- Landscape on a phone; the emulator checks are above (a fixture host in l3, the real app in t2).
+- The widget redraws when the engine publishes, when the open app sees the engine die, or on its
+  own check about 100 s later. If the engine dies while the app is closed and Android does not
+  restart it, a widget can show its last state for up to that long.
 - Real hardware. The CI emulator renders in software (SwiftShader/ANGLE, about 5 fps under the animated
   scene), so motion smoothness, GPU blur cost, touch feel and battery are unmeasured. The blur
   itself does render there (stripes behind glass drop to 0.1 %), but its look on a phone panel has

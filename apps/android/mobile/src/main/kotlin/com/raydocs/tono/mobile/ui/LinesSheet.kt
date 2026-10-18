@@ -35,12 +35,15 @@ import com.raydocs.tono.mobile.engine.EngineSnapshot
 fun LinesSheet(s: EngineSnapshot, onSelect: (String) -> Unit, onTest: () -> Unit, onDismiss: () -> Unit) {
     val zh = isChinese()
     ModalBottomSheet(
-        dragHandle = { WideDragHandle() },
+        dragHandle = null,
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = TonoColors.Smoke,
         scrimColor = TonoColors.NightDeep.copy(alpha = 0.55f),
-    ) { LinesContent(s, zh, onSelect, onTest) }
+    ) {
+        SheetGrip()
+        LinesContent(s, zh, onSelect, onTest)
+    }
 }
 
 @Composable

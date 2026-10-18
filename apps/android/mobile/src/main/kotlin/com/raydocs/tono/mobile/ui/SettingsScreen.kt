@@ -117,8 +117,15 @@ fun SettingsScreen(
             SectionLabel(stringResource(R.string.settings_system))
             SmokeCard {
                 Text(
-                    if (s.alwaysOn) stringResource(R.string.system_on, if (s.lockdown) stringResource(R.string.system_lockdown) else "") else stringResource(R.string.system_off),
-                    style = MaterialTheme.typography.bodyMedium, color = if (s.alwaysOn) TonoColors.TextSecondary else TonoColors.Warning,
+                    stringResource(
+                        when {
+                            s.alwaysOn && s.lockdown -> R.string.system_lockdown
+                            s.alwaysOn -> R.string.system_on_open
+                            else -> R.string.system_off
+                        },
+                    ),
+                    // Only Android's own block keeps apps from going out directly while Tono is down.
+                    style = MaterialTheme.typography.bodyMedium, color = if (s.alwaysOn && s.lockdown) TonoColors.TextSecondary else TonoColors.Warning,
                 )
                 QuietButton(stringResource(R.string.system_open), { context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) })
             }
@@ -157,10 +164,11 @@ fun ScreenHeader(title: String, onBack: () -> Unit) {
 private fun Expandable(title: String, content: @Composable () -> Unit) {
     var open by rememberSaveable { mutableStateOf(false) }
     val turn by animateFloatAsState(if (open) 180f else 0f, TonoMotion.state, label = "chevron")
+    val state = stringResource(if (open) R.string.a11y_expanded else R.string.a11y_collapsed)
     Row(
         Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(MaterialTheme.shapes.small)
             .clickable(role = Role.Button, onClickLabel = title) { open = !open }
-            .semantics { stateDescription = if (open) "expanded" else "collapsed" },
+            .semantics { stateDescription = state },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(title, style = MaterialTheme.typography.bodyLarge, color = TonoColors.TextPrimary, modifier = Modifier.weight(1f))

@@ -103,7 +103,10 @@ class HorizonUiDeviceTest {
 
     private fun set(s: EngineSnapshot) { snapshot = s; compose.waitForIdle() }
 
-    private fun shot(name: String) { compose.waitForIdle(); Thread.sleep(400); assertTrue("screenshot $name drawn", Captures.drawn(File(out, "$name.png"))) }
+    private fun shot(name: String) {
+        compose.waitForIdle(); Thread.sleep(400); assertTrue("screenshot $name drawn", Captures.drawn(File(out, "$name.png")))
+        if (name.startsWith("fixture-")) assertTrue("$name shows the FIXTURE mark", Captures.fixtureMarked(File(out, "$name.png")))
+    }
 
     private fun back() { device.pressBack(); compose.waitForIdle(); Thread.sleep(300) }
 

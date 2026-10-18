@@ -51,7 +51,10 @@ class LargeTextDeviceTest {
     private var snapshot by mutableStateOf<EngineSnapshot>(DeviceFixtures.idle)
 
     private fun set(s: EngineSnapshot) { snapshot = s; compose.waitForIdle() }
-    private fun shot(name: String) { compose.waitForIdle(); Thread.sleep(400); assertTrue("screenshot $name drawn", Captures.drawn(File(out, "$name.png"))) }
+    private fun shot(name: String) {
+        compose.waitForIdle(); Thread.sleep(400); assertTrue("screenshot $name drawn", Captures.drawn(File(out, "$name.png")))
+        if (name.startsWith("fixture-")) assertTrue("$name shows the FIXTURE mark", Captures.fixtureMarked(File(out, "$name.png")))
+    }
 
     @Test fun l1_largestSystemTextIsNeverCutOff() {
         assertEquals("system font scale", 2f, compose.activity.resources.configuration.fontScale, 0.01f)
