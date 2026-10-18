@@ -44,5 +44,32 @@
   }
   @media (max-width: 640px) {
     .home-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    /* The pinned line column: wide enough for an ellipsised name, narrow enough
+       to leave the rest of the row a window to scroll through. */
+    .settings-inventory-table th:first-child { width: 150px; }
+  }
+}
+
+/* 家宽库存 · 出口 drawer: each provider's answer, one row per database. */
+.egress-answers th,
+.egress-answers td {
+  text-align: left;
+  vertical-align: top;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+.egress-answers td + td { padding-left: 12px; }
+.egress-answers tbody tr:last-child > * { border-bottom: 0; }
+.egress-answers th[scope="row"] {
+  white-space: nowrap;
+  padding-right: 12px;
+}
+@media (min-width: 641px) {
+  .egress-answers { table-layout: fixed; }
+  .egress-answers thead th:first-child { width: 88px; }
+  .egress-answers td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }

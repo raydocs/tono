@@ -34,6 +34,8 @@ const SHARED_ADMIN: readonly Entry[] = [
   ['POST', at('home-exits/assign'), 'settings.publish'],
   ['POST', at('home-exits/import'), 'settings.publish'],
   ['GET', at('home-exits/{id}/probes'), 'settings.read'],
+  ['GET', at('home-exits/egress'), 'settings.read'],
+  ['POST', at('home-exits/{id}/egress'), 'settings.publish'],
   ['PATCH', at('home-exits/{id}'), 'settings.publish'],
   ['DELETE', at('home-exits/{id}'), 'settings.publish'],
   ['GET', at('home-bindings'), 'settings.read'],
