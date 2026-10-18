@@ -1,0 +1,9 @@
+PASS source snapshot: 22/22 byte-identical to b36d07d7907f39364f1cfe4309d60824fea9d24e
+PASS artifact hashes: 77/77 match evidence-manifest.tsv
+PASS PNG inventory: 65/65 listed, no extra PNG originals
+PASS run/artifact head: both b36d07d7907f39364f1cfe4309d60824fea9d24e
+REUSED CI evidence: 22 XCUITest passed, 0 failed, 0 skipped; not rerun locally
+REUSED widget evidence: REAL-WIDGET gallery-lists-tono=yes gallery-text-exposed=no placed-and-read=yes
+PASS score arithmetic: 86/100; 7/7 item ratios >= 70%; separate source-derived veto remains
+NOT RUN Red, fault injection, Xcode/XCTest locally, physical device, live tunnel, VoiceOver, device performance
+READ-ONLY REVIEW: no source changes, GitHub comments, implementation-thread messages, merge or release
