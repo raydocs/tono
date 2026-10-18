@@ -33,3 +33,35 @@ object DeviceFixtures {
         "failed" to failed,
     )
 }
+
+/**
+ * Saves a screenshot only once the window below the status bar has actually been drawn: a software-GPU
+ * emulator can hand back a frame of plain window background while the test already sees the content
+ * in the semantics tree (run 39095195211 kept a blank consent capture that way).
+ */
+object Captures {
+    fun drawn(file: java.io.File, attempts: Int = 12): Boolean {
+        val automation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation
+        repeat(attempts) {
+            val bitmap = automation.takeScreenshot()
+            if (bitmap != null && !plain(bitmap)) {
+                file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                return true
+            }
+            Thread.sleep(500)
+        }
+        return false
+    }
+
+    /** Every sample on a 24 × 24 grid between 8 % and 92 % of the height has the same colour. */
+    private fun plain(b: android.graphics.Bitmap): Boolean {
+        val first = b.getPixel(b.width / 2, b.height / 2)
+        for (i in 0 until 24) for (j in 0 until 24) {
+            val p = b.getPixel(b.width * (i * 2 + 1) / 48, (b.height * (0.08 + 0.84 * (j * 2 + 1) / 48)).toInt())
+            if (Math.abs(android.graphics.Color.red(p) - android.graphics.Color.red(first)) +
+                Math.abs(android.graphics.Color.green(p) - android.graphics.Color.green(first)) +
+                Math.abs(android.graphics.Color.blue(p) - android.graphics.Color.blue(first)) > 12) return false
+        }
+        return true
+    }
+}

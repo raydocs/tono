@@ -19,6 +19,7 @@ import com.raydocs.tono.mobile.ui.TonoActions
 import com.raydocs.tono.mobile.ui.TonoRoot
 import com.raydocs.tono.mobile.ui.TonoTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.ExternalResource
@@ -50,7 +51,7 @@ class LargeTextDeviceTest {
     private var snapshot by mutableStateOf<EngineSnapshot>(DeviceFixtures.idle)
 
     private fun set(s: EngineSnapshot) { snapshot = s; compose.waitForIdle() }
-    private fun shot(name: String) { compose.waitForIdle(); Thread.sleep(400); device.takeScreenshot(File(out, "$name.png")) }
+    private fun shot(name: String) { compose.waitForIdle(); Thread.sleep(400); assertTrue("screenshot $name drawn", Captures.drawn(File(out, "$name.png"))) }
 
     @Test fun l1_largestSystemTextIsNeverCutOff() {
         assertEquals("system font scale", 2f, compose.activity.resources.configuration.fontScale, 0.01f)
