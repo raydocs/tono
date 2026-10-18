@@ -186,49 +186,49 @@ final class TonoUITests: XCTestCase {
         XCUIDevice.shared.press(.home)
     }
 
-    /// Best effort: places the real Tono widget on the simulator's Home Screen through SpringBoard
-    /// and captures it. The preview never writes the shared status, so a correct widget says
-    /// "Status unavailable" here. SpringBoard's edit-mode labels differ between iOS releases; if a
-    /// step is not found the test is skipped with a capture of where it stopped (not a pass).
-    /// Named to run last, so a Home Screen left in edit mode cannot disturb another test.
-    @MainActor func testZZRealHomeScreenWidget() throws {
+    /// The real Tono widget in SpringBoard's widget gallery (the system host, not the app's own
+    /// gallery): the system lists "Tono status" and renders the extension with the real shared
+    /// status, which the preview never writes, so it must not claim a state. Then it tries to place
+    /// the widget on the Home Screen and logs whether that worked (REAL-WIDGET line, not asserted:
+    /// the captures are the evidence), because edit
+    /// mode differs between iOS releases. Named to run last, so a Home Screen left in edit mode
+    /// cannot disturb another test.
+    @MainActor func testZZRealWidgetInTheSystemGallery() {
         let app = launch("IDLE")
         XCTAssertTrue(primary(app).waitForExistence(timeout: 6))
         XCUIDevice.shared.press(.home)
         sleep(2)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        func step(_ element: XCUIElement, _ name: String) throws {
-            guard element.waitForExistence(timeout: 4) else {
-                save(XCUIScreen.main.screenshot(), "real-widget-stopped-at-\(name)")
-                XCUIDevice.shared.press(.home)
-                throw XCTSkip("SpringBoard step not found: \(name)")
-            }
+        func tap(_ element: XCUIElement, _ name: String) {
+            XCTAssertTrue(element.waitForExistence(timeout: 6), "SpringBoard step not found: \(name)")
             element.tap()
             sleep(1)
         }
         springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7)).press(forDuration: 1.6)
         sleep(1)
-        let edit = springboard.buttons.matching(NSPredicate(format: "label == 'Edit' OR identifier == 'edit-mode-button'")).firstMatch
-        try step(edit, "edit")
-        let addWidget = springboard.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'Add Widget'")).firstMatch
-        try step(addWidget, "add-widget")
+        tap(springboard.buttons.matching(NSPredicate(format: "label == 'Edit' OR identifier == 'edit-mode-button'")).firstMatch, "edit")
+        tap(springboard.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'Add Widget'")).firstMatch, "add-widget")
         let search = springboard.searchFields.firstMatch
-        try step(search, "search")
+        tap(search, "search")
         search.typeText("Tono")
         sleep(2)
-        let result = springboard.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Tono'")).firstMatch
-        try step(result, "result")
+        tap(springboard.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Tono'")).firstMatch, "result")
+        let listed = springboard.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Tono status")).firstMatch
+        XCTAssertTrue(listed.waitForExistence(timeout: 6), "the system gallery does not list the Tono status widget")
         save(XCUIScreen.main.screenshot(), "real-widget-gallery")
-        let add = springboard.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'Add Widget'")).firstMatch
-        try step(add, "add")
-        XCUIDevice.shared.press(.home)
+        let unavailable = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Status unavailable")).firstMatch
+        let shownAsText = unavailable.waitForExistence(timeout: 3)
+        // The sheet's own "Add Widget" is the last one in the tree (the edit menu's may linger).
+        let adds = springboard.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'Add Widget'")).allElementsBoundByIndex
+        adds.last?.tap()
         sleep(2)
         XCUIDevice.shared.press(.home)
         sleep(2)
+        let placed = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Status unavailable")).firstMatch
+            .waitForExistence(timeout: 4)
         save(XCUIScreen.main.screenshot(), "real-widget-home-screen")
-        let widget = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Status unavailable")).firstMatch
-        // A label SpringBoard does not expose is "not read", not a pass: the capture above is the evidence.
-        if !widget.waitForExistence(timeout: 6) { throw XCTSkip("widget text not exposed to XCUITest; see real-widget-home-screen") }
+        print("REAL-WIDGET gallery-lists-tono=yes gallery-text-exposed=\(shownAsText ? "yes" : "no") placed-and-read=\(placed ? "yes" : "no")")
+        XCUIDevice.shared.press(.home)
     }
 
     /// Simulator CPU / memory while Home shows a connected session (sea animating). Mac-host

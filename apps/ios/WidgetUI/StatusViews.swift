@@ -129,7 +129,8 @@ struct StatusWidgetView: View {
                 } else if let detail = p.detail {
                     Text(detail).font(.body).lineLimit(1)
                 }
-                Text(p.footnote).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                // A stale reading has no timer or detail line, so its "Last known: … at …" gets two.
+                Text(p.footnote).font(.caption).foregroundStyle(.secondary).lineLimit(p.stale ? 2 : 1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .ignore)
