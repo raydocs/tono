@@ -106,6 +106,7 @@
 "settings_system" = "iOS VPN protection";
 "settings_account" = "Account";
 "settings_sign_out" = "Sign out";
+"settings_signed_in_as" = "Signed in as %1$@";
 "settings_about" = "About";
 "about_version" = "Tono %1$@ · test build, not from the App Store";
 "about_core" = "Core: sing-box %1$@ (GPL-3.0-or-later; source: github.com/SagerNet/sing-box)";

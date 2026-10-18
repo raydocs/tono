@@ -92,7 +92,11 @@ struct SettingsView: View {
 
                     SectionLabel(text: L.t("settings_account"))
                     SmokeCard {
-                        Text(model.email ?? "").tonoFont(16, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
+                        // "Signed in as …", not the bare address: VoiceOver gets a sentence (Apple's audit
+                        // flagged the bare address as not human-readable once Settings got shorter).
+                        Text(L.t("settings_signed_in_as", model.email ?? "")).tonoFont(16, relativeTo: .callout)
+                            .foregroundStyle(TonoColor.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
                         QuietButton(title: L.t("settings_sign_out"), color: TonoColor.error) { confirmSignOut = true }
                     }
 

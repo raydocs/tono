@@ -106,6 +106,7 @@
 "settings_system" = "iOS 系统保护";
 "settings_account" = "账号";
 "settings_sign_out" = "退出登录";
+"settings_signed_in_as" = "已登录：%1$@";
 "settings_about" = "关于";
 "about_version" = "Tono %1$@ · 测试版，非 App Store 版本";
 "about_core" = "内核：sing-box %1$@（GPL-3.0-or-later，源码：github.com/SagerNet/sing-box）";
