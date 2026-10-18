@@ -1,6 +1,7 @@
 package com.raydocs.tono.mobile.engine
 
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import com.raydocs.tono.mobile.R
@@ -11,6 +12,8 @@ import com.raydocs.tono.routing.RoutingMode
 /** The tunnel's notifications. Built from a snapshot only, so fixture renders use the same code. */
 object TonoNotifications {
     const val CHANNEL = "tunnel"
+    const val ONGOING_ID = 7
+    const val NOTICE_ID = 8
 
     /** Ongoing while the tunnel runs: state, verified exits (or the line), and Disconnect. */
     fun ongoing(c: Context, s: EngineSnapshot, open: PendingIntent, disconnect: PendingIntent): Notification {
@@ -63,4 +66,30 @@ object TonoNotifications {
             .addAction(Notification.Action.Builder(null, c.getString(R.string.action_retry), retry).build())
             .setCategory(Notification.CATEGORY_ERROR)
             .build()
+
+    /**
+     * Posted by the app's own process over the engine's ongoing notification when the engine's
+     * process died: Android may leave that notification up, still saying Connected, after the tunnel
+     * died with the process. Replaced by the engine's own as soon as it runs again.
+     */
+    fun engineLost(c: Context, open: PendingIntent): Notification =
+        Notification.Builder(c, CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_standby)
+            .setColor(0xFFFFAD74.toInt())
+            .setContentTitle(c.getString(R.string.surface_unknown))
+            .setContentText(c.getString(R.string.surface_open_to_check))
+            .setOnlyAlertOnce(true)
+            .setContentIntent(open)
+            .setCategory(Notification.CATEGORY_STATUS)
+            .build()
+
+    /** Replaces the engine's ongoing notification, if one is up, with [engineLost]. */
+    fun replaceAfterEngineLoss(c: Context) {
+        val nm = c.getSystemService(NotificationManager::class.java) ?: return
+        if (nm.activeNotifications.none { it.id == ONGOING_ID }) return
+        val open = PendingIntent.getActivity(
+            c, 0, c.packageManager.getLaunchIntentForPackage(c.packageName), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        nm.notify(ONGOING_ID, engineLost(c, open))
+    }
 }

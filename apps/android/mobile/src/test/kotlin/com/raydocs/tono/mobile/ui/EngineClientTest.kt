@@ -1,8 +1,13 @@
 package com.raydocs.tono.mobile.ui
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.ComponentName
 import android.os.Looper
+import com.raydocs.tono.mobile.R
 import com.raydocs.tono.mobile.engine.EngineSnapshot
+import com.raydocs.tono.mobile.engine.TonoNotifications
 import com.raydocs.tono.mobile.engine.Phase
 import com.raydocs.tono.mobile.engine.TonoVpnService
 import com.raydocs.tono.mobile.ipc.ITonoEngine
@@ -15,6 +20,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.time.Duration
 
 /**
  * The UI's link to the engine process, on the JVM (Robolectric) with an in-process stand-in engine:
@@ -53,11 +59,19 @@ class EngineClientTest {
         val client = bound(engine)
         assertEquals(EngineLink.LIVE, client.link.value)
         assertEquals(Phase.CONNECTED, client.snapshot.value?.phase)
+        // The engine's ongoing notification, as its process left it.
+        val nm = app.getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(NotificationChannel(TonoNotifications.CHANNEL, "t", NotificationManager.IMPORTANCE_LOW))
+        nm.notify(TonoNotifications.ONGOING_ID, Notification.Builder(app, TonoNotifications.CHANNEL).setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setContentTitle(app.getString(R.string.state_connected)).setOngoing(true).build())
 
         connection().onServiceDisconnected(name)
         assertEquals(EngineLink.LOST, client.link.value)
         // The last word is kept for layout, but only alongside LOST.
         assertEquals(Phase.CONNECTED, client.snapshot.value?.phase)
+        // Android may leave the dead engine's notification up; it must stop saying Connected.
+        val title = nm.activeNotifications.single { it.id == TonoNotifications.ONGOING_ID }.notification.extras.getCharSequence(Notification.EXTRA_TITLE)
+        assertEquals(app.getString(R.string.surface_unknown), title.toString())
 
         // Commands have no binder to go to; a stop request still reaches the engine's service.
         client.command("recheck")
@@ -66,6 +80,12 @@ class EngineClientTest {
         assertEquals(TonoVpnService.ACTION_DISCONNECT, shadowOf(app).nextStartedService?.action)
         assertEquals(emptyList<String>(), engine.commands)
 
+        // Android does not restart it within 3 s: the app in front starts the engine itself.
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3))
+        val revived = shadowOf(app).nextStartedService
+        assertEquals(TonoVpnService::class.java.name, revived?.component?.className)
+        assertNull("started as Android's own restart, with no action", revived?.action)
+
         // Android restarts the engine; it has not restored its state yet, so it has nothing to say.
         val restarted = StandInEngine(null)
         connection().onServiceConnected(name, restarted)
@@ -73,6 +93,7 @@ class EngineClientTest {
         assertEquals(Phase.CONNECTED, client.snapshot.value?.phase)
 
         restarted.push(UiFixtures.idle)
+        idleLooper()
         assertEquals(EngineLink.LIVE, client.link.value)
         assertEquals(Phase.IDLE, client.snapshot.value?.phase)
     }

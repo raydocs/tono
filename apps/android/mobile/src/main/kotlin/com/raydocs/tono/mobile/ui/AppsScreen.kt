@@ -54,7 +54,7 @@ fun AppsScreen(excluded: List<String>, onBack: () -> Unit, onSave: (List<String>
     var query by rememberSaveable { mutableStateOf("") }
     var chosen by remember { mutableStateOf(excluded.toSet()) }
     LaunchedEffect(Unit) {
-        apps = withContext(Dispatchers.IO) {
+        val loaded = withContext(Dispatchers.IO) {
             val pm = context.packageManager
             val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
             @Suppress("DEPRECATION") pm.queryIntentActivities(launcher, 0)
@@ -67,6 +67,9 @@ fun AppsScreen(excluded: List<String>, onBack: () -> Unit, onSave: (List<String>
                 }
                 .sortedWith(compareByDescending<AppEntry> { it.pkg in excluded }.thenBy { it.label.lowercase() })
         }
+        // Written on the main thread whatever dispatcher this effect runs on (a Compose test's resumed
+        // it on the IO thread, which then drew a frame there: run 39170392763, u1).
+        withContext(Dispatchers.Main) { apps = loaded }
     }
     val save = { onSave(chosen.toList().sorted()); onBack() }
     Column(Modifier.fillMaxSize().background(TonoColors.Night)) {

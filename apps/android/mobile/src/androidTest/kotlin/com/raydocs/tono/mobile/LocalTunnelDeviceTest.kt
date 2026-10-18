@@ -236,7 +236,7 @@ class LocalTunnelDeviceTest {
     }
 
     /** Android's own VPN consent dialog, answered OK. */
-    private fun answerSystemConsent() {
+    private fun answerSystemConsent(thenNotifications: Boolean = true) {
         if (device.wait(Until.hasObject(By.pkg("com.android.vpndialogs")), 10_000) != true) ForeignAnr.dismiss(device, out)
         assertTrue("Android's VPN consent dialog", device.wait(Until.hasObject(By.pkg("com.android.vpndialogs")), 10_000) == true)
         ForeignAnr.dismiss(device, out)
@@ -244,7 +244,7 @@ class LocalTunnelDeviceTest {
         assertNotNull("system consent OK", ok)
         ok!!.click()
         note("consent: Android's VPN dialog answered OK")
-        answerNotificationPrompt()
+        if (thenNotifications) answerNotificationPrompt()
     }
 
     /**
@@ -573,8 +573,36 @@ class LocalTunnelDeviceTest {
 
     private fun tapConnectAndConsent() {
         find(text(R.string.action_connect), 10_000)!!.click()
-        // Tono's explanation and Android's dialog appear while consent is missing; once granted, neither does.
-        find(text(R.string.consent_continue), 4_000)?.let { it.click(); answerSystemConsent() }
+    }
+
+    /**
+     * The first connect after consent was withdrawn: Tono's explanation, Android's dialog, then the
+     * connecting state, watched from the moment consent is given (it lasts seconds, and a slow
+     * emulator spends as long answering a lookup). Android's notification prompt, if it appears on
+     * top, is answered on the way. Returns the busy word seen, or null if Connected came first.
+     */
+    private fun connectFirstTimeWatchingBusy(): String? {
+        tapConnectAndConsent()
+        val explained = find(text(R.string.consent_continue), 20_000)
+        if (explained == null) diagnose("local-t3-consent-sheet-missing")
+        assertNotNull("Tono's explanation before Android's VPN dialog", explained)
+        explained!!.click()
+        answerSystemConsent(thenNotifications = false)
+        val busy = Pattern.compile(Pattern.quote(text(R.string.state_preparing)) + "|" + Pattern.quote(text(R.string.state_connecting)))
+        val watched = Pattern.compile(busy.pattern() + "|" + Pattern.quote(text(R.string.state_connected)))
+        val prompt = By.pkg(Pattern.compile("com\\.(google\\.)?android\\.permissioncontroller"))
+        val deadline = SystemClock.elapsedRealtime() + 30_000
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val seen = device.findObjects(By.text(watched)).mapNotNull { runCatching { it.text }.getOrNull() }
+            seen.firstOrNull { busy.matcher(it).matches() }?.let { word ->
+                Captures.drawn(File(out, "local-11-real-connecting.png"), attempts = 2)
+                return word
+            }
+            if (text(R.string.state_connected) in seen) return null
+            if (device.hasObject(prompt)) answerNotificationPrompt()
+            Thread.sleep(100)
+        }
+        return null
     }
 
     private fun disconnectToIdle() {
@@ -605,11 +633,12 @@ class LocalTunnelDeviceTest {
             Thread.sleep(2_600)
             shot("local-10-real-idle")
 
-            tapConnectAndConsent()
-            val busy = device.wait(Until.findObject(By.text(Pattern.compile(Pattern.quote(text(R.string.state_preparing)) + "|" + Pattern.quote(text(R.string.state_connecting))))), 10_000)
-            if (busy != null) Captures.drawn(File(out, "local-11-real-connecting.png"), attempts = 2)
-            note("real states: ${if (busy != null) "\"${busy.text}\" seen while connecting" else "connecting NOT seen"}")
+            val busy = connectFirstTimeWatchingBusy()
+            if (busy == null) diagnose("local-t3-connecting-missing")
+            note("real states: ${if (busy != null) "\"$busy\" seen while connecting" else "connecting NOT seen"}")
             assertNotNull("a connecting state on screen before Connected", busy)
+            // Notifications may still be asking once Connected shows.
+            answerNotificationPrompt()
             assertNotNull("Connected", find(text(R.string.state_connected), 90_000))
             assertTrue("Android shows a VPN network", vpnUp())
             Thread.sleep(2_600)

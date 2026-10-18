@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import com.raydocs.tono.mobile.engine.EngineSnapshot
+import com.raydocs.tono.mobile.engine.TonoNotifications
 import com.raydocs.tono.mobile.engine.TonoVpnService
 import com.raydocs.tono.mobile.ipc.ITonoEngine
 import com.raydocs.tono.mobile.ipc.ITonoEngineListener
@@ -47,18 +48,30 @@ class EngineClient(private val context: Context) {
 
     private val listener = object : ITonoEngineListener.Stub() {
         override fun onSnapshot(json: String) {
-            if (paused) return
-            runCatching { EngineSnapshot.fromJson(json) }.onSuccess {
-                _snapshot.value = it
+            val fresh = runCatching { EngineSnapshot.fromJson(json) }.getOrNull() ?: return
+            // On the main thread, in order with the connection callbacks that set [engine].
+            main.post {
+                if (paused) return@post
+                _snapshot.value = fresh
                 if (engine != null) _link.value = EngineLink.LIVE
             }
         }
+    }
+
+    /**
+     * Android restarts a dead engine on its own, but not always (run 39170392763: not within 90 s).
+     * With the app in front, start it again as Android's restart would, so a tunnel the user wanted
+     * comes back and the screen stops saying "Status unknown".
+     */
+    private val revive = Runnable {
+        if (engine == null && bound && !paused) runCatching { context.startService(Intent(context, TonoVpnService::class.java)) }
     }
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder) {
             val e = ITonoEngine.Stub.asInterface(service)
             engine = e
+            main.removeCallbacks(revive)
             _link.value = EngineLink.WAITING
             if (!paused) refresh(e)
         }
@@ -72,6 +85,10 @@ class EngineClient(private val context: Context) {
             // after Android has had time to drop the dead tunnel's VPN network.
             SystemSurfaces.refresh(context)
             main.postDelayed({ SystemSurfaces.refresh(context) }, 2_000)
+            // Android can leave the dead engine's notification up, still saying Connected.
+            runCatching { TonoNotifications.replaceAfterEngineLoss(context) }
+            main.removeCallbacks(revive)
+            main.postDelayed(revive, 3_000)
         }
 
         override fun onBindingDied(name: ComponentName?) {
@@ -114,6 +131,7 @@ class EngineClient(private val context: Context) {
     }
 
     fun unbind() {
+        main.removeCallbacks(revive)
         if (!bound) return
         runCatching { engine?.unregister(listener) }
         context.unbindService(connection)

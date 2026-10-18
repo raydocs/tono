@@ -123,6 +123,12 @@ Round 7 (after the round-6 blind reviews, `docs/agent-reports/2026-10-18-android
   applied only around the 200 % text test, which drives the app through it: under the rule the app's
   composition advances only when the rule synchronises, so the app stayed on its first frame for the
   UiAutomator-driven tests (run 39159687608).
+- **After the engine's process dies**, the app (if running) replaces the engine's ongoing
+  notification with *Status unknown · Open Tono to check*: Android had left it up, still saying
+  Connected, for the whole 90 s fault-injection window (run 39170392763). With the app in front and
+  the engine still gone after 3 s, the app starts the engine as Android's own restart would (Android
+  had not restarted it within 90 s in that run), so a tunnel the user wanted comes back. A restarted
+  engine with no tunnel clears the app's replacement.
 - **Sheets stop below the status bar**, so the clock and the local-test-server or fixture mark stay
   in sight with a sheet open, also in landscape where Details reaches the top.
 
@@ -314,6 +320,9 @@ internal test builds.
 - The widget redraws when the engine publishes, when the open app sees the engine die, or on its
   own check about 100 s later. If the engine dies while the app is closed and Android does not
   restart it, a widget can show its last state for up to that long.
+- The engine's notification after its process dies while the app is closed: Android may leave it
+  up, still saying Connected, and only the app (when opened) or the restarted engine replaces it.
+  The tile and widget do not have this gap: they check for a VPN network themselves.
 - Real hardware. The CI emulator renders in software (SwiftShader/ANGLE, about 5 fps under the animated
   scene), so motion smoothness, GPU blur cost, touch feel and battery are unmeasured. The blur
   itself does render there (stripes behind glass drop to 0.1 %), but its look on a phone panel has

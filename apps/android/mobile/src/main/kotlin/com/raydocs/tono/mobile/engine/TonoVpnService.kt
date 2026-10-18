@@ -74,7 +74,7 @@ class TonoVpnService : VpnService() {
     @Volatile private var catalog: ExitCatalog? = null
     private var accessToken: String? = null
     private var trafficTask: ScheduledFuture<*>? = null
-    private var foreground = false
+    @Volatile private var foreground = false
     private var generation = 0L
     /** The phone's own network the exits were last checked over (engine thread only). */
     private var lastUnderlying: Network? = null
@@ -110,6 +110,9 @@ class TonoVpnService : VpnService() {
             SERVICE_INTERFACE, null -> {
                 if (store.settings().wantConnected || intent?.action == SERVICE_INTERFACE) {
                     enterForeground(); engine.execute { connect(userInitiated = false) }
+                } else if (!foreground) {
+                    // Started again with no tunnel wanted (the app reviving a dead engine): bound only.
+                    stopSelf(startId)
                 }
             }
         }
@@ -173,6 +176,9 @@ class TonoVpnService : VpnService() {
             ).withCatalog(cached)
         }
         restored = true
+        // The app may have put "Status unknown" over a dead predecessor's notification; a restarted
+        // engine that is not running a tunnel has nothing ongoing to show.
+        if (!foreground) getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
         // A client that registered while the update above was broadcasting got nothing: send again.
         broadcast(snapshot.get().toJson())
         if (signedIn && cached == null) refreshCatalogQuietly()
@@ -689,8 +695,8 @@ class TonoVpnService : VpnService() {
         const val ACTION_DISCONNECT = "com.raydocs.tono.mobile.DISCONNECT"
         const val ACTION_BIND_ENGINE = "com.raydocs.tono.mobile.BIND_ENGINE"
         private const val CHANNEL = TonoNotifications.CHANNEL
-        private const val NOTIFICATION_ID = 7
-        private const val NOTICE_ID = 8
+        private const val NOTIFICATION_ID = TonoNotifications.ONGOING_ID
+        private const val NOTICE_ID = TonoNotifications.NOTICE_ID
         private const val CACHE_MAX_AGE_MS = 7L * 24 * 3600 * 1000
 
         fun errorCode(e: Throwable): String = when (e) {
