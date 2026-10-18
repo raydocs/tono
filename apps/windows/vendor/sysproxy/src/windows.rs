@@ -175,6 +175,36 @@ fn notify_proxy_change() -> Result<()> {
     Ok(())
 }
 
+/// Turn off `ProxyEnable` and tell WinINet the settings changed. Does not
+/// rewrite `ProxyServer`, a PAC URL, or per-connection RAS entries.
+pub fn disable_proxy_enable_and_notify() -> Result<()> {
+    let hkcu = RegKey::predef(enums::HKEY_CURRENT_USER);
+    let key = hkcu.open_subkey_with_flags(SUB_KEY, enums::KEY_SET_VALUE)?;
+    key.set_value("ProxyEnable", &0u32)?;
+    notify_proxy_change()
+}
+
+/// Put back a previously saved Internet Settings record and notify WinINet.
+/// Used only when a Tono ownership marker matches a stale loopback proxy.
+pub fn restore_internet_proxy_settings(
+    enable: bool,
+    server: &str,
+    bypass: &str,
+    pac_url: &str,
+) -> Result<()> {
+    let hkcu = RegKey::predef(enums::HKEY_CURRENT_USER);
+    let key = hkcu.open_subkey_with_flags(SUB_KEY, enums::KEY_SET_VALUE)?;
+    key.set_value("ProxyEnable", &u32::from(enable))?;
+    key.set_value("ProxyServer", &server)?;
+    key.set_value("ProxyOverride", &bypass)?;
+    if pac_url.is_empty() {
+        let _ = key.delete_value("AutoConfigURL");
+    } else {
+        key.set_value("AutoConfigURL", &pac_url)?;
+    }
+    notify_proxy_change()
+}
+
 impl Sysproxy {
     #[inline]
     pub fn get_system_proxy() -> Result<Sysproxy> {

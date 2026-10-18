@@ -1388,6 +1388,7 @@ export interface TranslationResources {
         catalogRevision: string
         catalogSynced: string
         catalogVerified: string
+        clearStaleProxy: string
         cloudServers: string
         empty: string
         exitLatency: string
@@ -1415,6 +1416,8 @@ export interface TranslationResources {
         }
         reprovisionIdentity: string
         search: string
+        staleSystemProxy: string
+        staleSystemProxyNotice: string
         subtitle: string
         switchRequested: string
         tcpLatency: string

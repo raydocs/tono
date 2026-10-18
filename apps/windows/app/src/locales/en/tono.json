@@ -558,6 +558,9 @@
     "identityPropagating": "This device's exit identity is still being prepared. Tono will retry shortly.",
     "identityStuck": "No usable exit has confirmed this device's identity yet. Signing out and back in does not replace it. Tap Prepare exit identity again. If it stays here, an operator has to re-sync the exit that has not acknowledged.",
     "reprovisionIdentity": "Prepare exit identity",
+    "staleSystemProxy": "The system proxy points at this computer ({{server}}), but nothing is listening there. Tono connects directly. This proxy was not turned on by Tono. You can turn it off.",
+    "staleSystemProxyNotice": "The system proxy points at this computer, but nothing is listening there. Tono connects directly. This proxy was not turned on by Tono.",
+    "clearStaleProxy": "Clear stale proxy",
     "protocol": {
       "backup": "Backup channel",
       "vlessReality": "VLESS · Reality",

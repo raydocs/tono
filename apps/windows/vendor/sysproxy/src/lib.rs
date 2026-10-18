@@ -7,6 +7,9 @@ mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
 
+#[cfg(target_os = "windows")]
+pub use windows::{disable_proxy_enable_and_notify, restore_internet_proxy_settings};
+
 // #[cfg(feature = "utils")]
 pub mod utils;
 

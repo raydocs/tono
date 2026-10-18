@@ -14,6 +14,7 @@ import {
   idleSelectShouldConnect,
   tonoCancelServerTests,
   tonoCatalogStatus,
+  tonoDisableStaleSystemProxy,
   tonoRefreshCatalog,
   tonoRoutePreferences,
   tonoSelectServer,
@@ -588,6 +589,14 @@ const ServersPage = () => {
         onPreferencesRetry={() => void refreshPreferences()}
         catalogError={catalogFailure}
         identityStuck={Boolean(catalog?.error?.includes('TONO_EXIT_IDENTITY_STUCK'))}
+        staleProxy={catalog?.staleSystemProxy ?? null}
+        onClearStaleProxy={() =>
+          void tonoDisableStaleSystemProxy()
+            .then(() => mutateCatalog())
+            .catch((error) =>
+              setRefreshError(describeTonoActionError(error, t)),
+            )
+        }
         feedback={refreshFeedback}
         refreshing={refreshing}
         refreshDisabled={refreshing || status?.accountState !== 'ready'}
@@ -811,6 +820,32 @@ const ServersPage = () => {
                 : TONO_COLORS.latencyGood,
             }}
           >
+            {catalog?.staleSystemProxy && (
+              <div style={{ marginBottom: 6 }}>
+                {t('tono.nodes.staleSystemProxy', {
+                  server: catalog.staleSystemProxy.replace(
+                    /^TONO_STALE_SYSTEM_PROXY:\s*/,
+                    '',
+                  ),
+                })}
+                <div style={{ marginTop: 6 }}>
+                  <button
+                    type="button"
+                    className="tono-button"
+                    onClick={() =>
+                      void tonoDisableStaleSystemProxy()
+                        .then(() => mutateCatalog())
+                        .catch((error) =>
+                          setRefreshError(describeTonoActionError(error, t)),
+                        )
+                    }
+                    style={{ padding: '7px 12px', fontSize: 11 }}
+                  >
+                    {t('tono.nodes.clearStaleProxy')}
+                  </button>
+                </div>
+              </div>
+            )}
             {catalogFailure
               ? t('tono.nodes.catalogError', {
                   error: catalogFailure.message,

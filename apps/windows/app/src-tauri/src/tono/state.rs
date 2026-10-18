@@ -270,6 +270,9 @@ pub struct TonoInner {
     pub catalog_last_synced_at_ms: Option<i64>,
     /// Latest catalog fetch/verification failure. The last verified catalog remains installed.
     pub catalog_sync_error: Option<String>,
+    /// `TONO_STALE_SYSTEM_PROXY: <server>` when a dead loopback system proxy
+    /// is present and Tono does not own it. The registry is unchanged.
+    pub stale_system_proxy: Option<String>,
     /// The latest catalog sync ended on 503 `EXIT_IDENTITY_PROPAGATING`: the
     /// periodic task asks again after a short delay instead of a full period.
     pub catalog_identity_propagating: bool,
@@ -841,6 +844,7 @@ impl TonoState {
                 catalog_requires_choice: false,
                 catalog_last_synced_at_ms: None,
                 catalog_sync_error: None,
+                stale_system_proxy: None,
                 catalog_identity_propagating: false,
                 catalog_identity_since_ms: None,
                 server_test_generation: 0,
