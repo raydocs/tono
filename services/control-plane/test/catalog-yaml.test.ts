@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../src/errors';
-import { managedCatalogYAML, retirementCatalogPlan, relistCatalogPlan, filterHy2CatalogForViewer, hy2CatalogEmailAllowlist, requestAcceptsHy2Catalog } from '../src/catalog-yaml';
+import { managedCatalogYAML, retirementCatalogPlan, relistCatalogPlan, filterHy2CatalogForViewer, hy2CatalogEmailAllowlist, requestAcceptsHy2Catalog, retainCatalogProxies } from '../src/catalog-yaml';
 
 function expectInvalidCatalog(yaml: string) {
   try {
@@ -227,5 +227,35 @@ describe('catalog hy2 contract', () => {
     expect(requestAcceptsHy2Catalog('HY2')).toBe(true);
     expect(requestAcceptsHy2Catalog('hy2, other')).toBe(true);
     expect(requestAcceptsHy2Catalog('other')).toBe(false);
+  });
+});
+
+describe('retainCatalogProxies', () => {
+  it('drops an omitted exit from a flow-style proxy-group list', () => {
+    const yaml = [
+      'proxies:',
+      '  - name: Ready Exit',
+      '    type: vless',
+      '    server: ready.example.com',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Late Exit',
+      '    type: vless',
+      '    server: late.example.com',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono',
+      '    type: select',
+      '    proxies: [Ready Exit, Late Exit]',
+      'rules:',
+      '  - Late Exit',
+      '',
+    ].join('\n');
+    const kept = retainCatalogProxies(yaml, new Set(['Ready Exit']));
+    expect(kept).toContain('ready.example.com');
+    expect(kept).not.toContain('late.example.com');
+    expect(kept).not.toContain('Late Exit');
+    expect(kept).toContain('proxies: [Ready Exit]');
   });
 });

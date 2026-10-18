@@ -472,6 +472,21 @@ describe('describeTonoActionError', () => {
     )
   })
 
+  it('says an exit identity is still propagating, and that it is stuck after the bound', () => {
+    expect(
+      describeTonoActionError(
+        'your secure exit identity is still being prepared; Tono will retry shortly',
+        t,
+      ),
+    ).toEqual({ message: 'translated:tono.nodes.identityPropagating' })
+    expect(
+      describeTonoActionError(
+        'TONO_EXIT_IDENTITY_STUCK: your secure exit identity is still being prepared; Tono will retry shortly',
+        t,
+      ),
+    ).toEqual({ message: 'translated:tono.nodes.identityStuck' })
+  })
+
   it('returns the raw string when no translator is provided', () => {
     const raw = 'os error 10061'
     expect(describeTonoActionError(raw)).toEqual({ message: raw })

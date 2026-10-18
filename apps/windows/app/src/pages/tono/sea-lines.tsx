@@ -69,6 +69,7 @@ interface Props {
   preferencesError: boolean
   onPreferencesRetry: () => void
   catalogError: { message: string; detail?: string | null } | null
+  identityStuck: boolean
   feedback: string | null
   refreshing: boolean
   refreshDisabled: boolean
@@ -102,6 +103,7 @@ export const SeaLines = ({
   onPreferencesRetry,
   error,
   catalogError,
+  identityStuck,
   refreshDisabled,
   onRefresh,
   readError,
@@ -447,7 +449,9 @@ export const SeaLines = ({
             disabled={refreshDisabled}
             onClick={onRefresh}
           >
-            {t('shared.actions.retry')}
+            {identityStuck
+              ? t('tono.nodes.reprovisionIdentity')
+              : t('shared.actions.retry')}
           </SeaButton>
         </SeaAttentionCard>
       )}

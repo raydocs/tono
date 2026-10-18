@@ -587,6 +587,7 @@ const ServersPage = () => {
         preferencesError={Boolean(preferencesError)}
         onPreferencesRetry={() => void refreshPreferences()}
         catalogError={catalogFailure}
+        identityStuck={Boolean(catalog?.error?.includes('TONO_EXIT_IDENTITY_STUCK'))}
         feedback={refreshFeedback}
         refreshing={refreshing}
         refreshDisabled={refreshing || status?.accountState !== 'ready'}
@@ -815,6 +816,19 @@ const ServersPage = () => {
                   error: catalogFailure.message,
                 })
               : refreshFeedback}
+            {catalog?.error?.includes('TONO_EXIT_IDENTITY_STUCK') && (
+              <div style={{ marginTop: 6 }}>
+                <button
+                  type="button"
+                  className="tono-button"
+                  onClick={() => void handleRefresh()}
+                  disabled={refreshing || status?.accountState !== 'ready'}
+                  style={{ padding: '7px 12px', fontSize: 11 }}
+                >
+                  {t('tono.nodes.reprovisionIdentity')}
+                </button>
+              </div>
+            )}
             {catalogFailure?.detail && (
               <div
                 data-testid="tono-catalog-error-detail"

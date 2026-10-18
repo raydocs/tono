@@ -273,6 +273,10 @@ pub struct TonoInner {
     /// The latest catalog sync ended on 503 `EXIT_IDENTITY_PROPAGATING`: the
     /// periodic task asks again after a short delay instead of a full period.
     pub catalog_identity_propagating: bool,
+    /// Wall clock of the first continuous `EXIT_IDENTITY_PROPAGATING` in this
+    /// streak. Cleared when a sync ends any other way. After five minutes the
+    /// short retry stops and the error is `TONO_EXIT_IDENTITY_STUCK`.
+    pub catalog_identity_since_ms: Option<i64>,
     /// Read-only server reachability batch. It never changes selection or connection state.
     pub server_test_generation: u64,
     pub server_test_cancellation: Option<CancellationToken>,
@@ -838,6 +842,7 @@ impl TonoState {
                 catalog_last_synced_at_ms: None,
                 catalog_sync_error: None,
                 catalog_identity_propagating: false,
+                catalog_identity_since_ms: None,
                 server_test_generation: 0,
                 server_test_cancellation: None,
                 fsm: ConnectionFsm::new(),

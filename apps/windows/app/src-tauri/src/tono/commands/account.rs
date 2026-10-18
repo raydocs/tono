@@ -462,6 +462,7 @@ pub(crate) async fn adopt_sign_in_response(
     inner.catalog_last_synced_at_ms = None;
     inner.catalog_sync_error = None;
     inner.catalog_identity_propagating = false;
+    inner.catalog_identity_since_ms = None;
     inner.account_state = if info.suspended { AccountState::Suspended } else { AccountState::Ready };
     emit(&inner);
     Ok(info)
@@ -777,6 +778,7 @@ where
             inner.catalog_last_synced_at_ms = None;
             inner.catalog_sync_error = None;
             inner.catalog_identity_propagating = false;
+            inner.catalog_identity_since_ms = None;
             catalog_sync::discard_account_catalog(&mut inner);
             // Failover dial, pending dial, and the armed bit belong to the
             // account that just left. The next sign-in must dial its own

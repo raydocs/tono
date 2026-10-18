@@ -1392,6 +1392,8 @@ export interface TranslationResources {
         empty: string
         exitLatency: string
         exitLatencySlow: string
+        identityPropagating: string
+        identityStuck: string
         lastSynced: string
         noMatches: string
         protocol: {
@@ -1411,6 +1413,7 @@ export interface TranslationResources {
           unavailable: string
           us: string
         }
+        reprovisionIdentity: string
         search: string
         subtitle: string
         switchRequested: string
