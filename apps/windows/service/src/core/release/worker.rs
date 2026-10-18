@@ -430,7 +430,9 @@ async fn clean_up() -> Option<String> {
     }
     match tokio::time::timeout(
         CLEANUP_TIMEOUT,
-        crate::core::windows_kill_switch::emergency_disarm_windows_kill_switch(),
+        crate::core::windows_kill_switch::emergency_disarm_windows_kill_switch_until(
+            Instant::now() + CLEANUP_TIMEOUT,
+        ),
     )
     .await
     {
