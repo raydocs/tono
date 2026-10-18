@@ -77,8 +77,16 @@ class HorizonUiDeviceTest {
 
     private fun str(id: Int) = context.getString(id)
 
-    private fun show() = compose.setContent {
-        CompositionLocalProvider(LocalReduceMotion provides true) {
+    private fun show(locale: java.util.Locale? = null, reduceMotion: Boolean = true) = compose.setContent {
+        val base = androidx.compose.ui.platform.LocalContext.current
+        val conf = android.content.res.Configuration(androidx.compose.ui.platform.LocalConfiguration.current).apply { if (locale != null) setLocale(locale) }
+        val ctx = if (locale != null) base.createConfigurationContext(conf) else base
+        CompositionLocalProvider(
+            LocalReduceMotion provides reduceMotion,
+            androidx.compose.ui.platform.LocalContext provides ctx,
+            androidx.compose.ui.platform.LocalConfiguration provides conf,
+            androidx.compose.ui.platform.LocalResources provides ctx.resources,
+        ) {
             TonoTheme {
                 TonoRoot(snapshot, object : TonoActions {
                     override fun connect() { calls += "connect" }
@@ -167,7 +175,9 @@ class HorizonUiDeviceTest {
      * tint at about half their contrast; fully blurred they almost vanish.
      */
     @Test fun u4_glassBlursTheSceneBehindIt() {
+        // Opaque, like the real sky: black ground with 8 dp white stripes (period 16 dp).
         val stripes: androidx.compose.ui.graphics.drawscope.DrawScope.() -> Unit = {
+            drawRect(Color.Black)
             val w = 8.dp.toPx()
             var x = 0f
             while (x < size.width) { drawRect(Color.White, Offset(x, 0f), Size(w, size.height)); x += 2 * w }
@@ -175,37 +185,110 @@ class HorizonUiDeviceTest {
         compose.setContent {
             Box(Modifier.fillMaxSize().background(Color.Black)) {
                 BackdropHost(scene = { Canvas(Modifier.fillMaxSize(), onDraw = stripes) }, modifier = Modifier.fillMaxSize()) {
-                    Glass(RoundedCornerShape(28.dp), Modifier.align(Alignment.Center).size(240.dp, 160.dp).testTag("glass")) {}
-                    // Control: the platform blur alone, same radius, over the same stripes.
-                    Canvas(Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp).size(240.dp, 120.dp).blur(26.dp, BlurredEdgeTreatment.Rectangle).testTag("control"), onDraw = stripes)
+                    Glass(RoundedCornerShape(28.dp), Modifier.align(Alignment.TopCenter).padding(top = 96.dp).size(240.dp, 140.dp).testTag("glass")) {}
+                    // Same glass with no blur: tint and rim alone. Dividing by it leaves the blur's own effect.
+                    Glass(RoundedCornerShape(28.dp), Modifier.align(Alignment.Center).size(240.dp, 140.dp).testTag("tint"), blur = 0.dp) {}
+                    // The platform blur alone, same radius, over the same stripes.
+                    Canvas(Modifier.align(Alignment.BottomCenter).padding(bottom = 72.dp).size(240.dp, 140.dp).blur(26.dp, BlurredEdgeTreatment.Rectangle).testTag("control"), onDraw = stripes)
                 }
             }
         }
         compose.waitForIdle()
         val image = compose.onRoot().captureToImage().asAndroidBitmap()
-        val inset = 24.dp.value * compose.density.density // away from the rim and rounded corners
-        fun contrast(r: androidx.compose.ui.geometry.Rect): Double {
-            val left = (r.left + inset).toInt(); val top = (r.top + inset).toInt()
-            val w = (r.width - 2 * inset).toInt(); val h = (r.height - 2 * inset).toInt()
-            val px = IntArray(w * h).also { image.getPixels(it, 0, w, left, top, w, h) }
-            val luma = px.map { (0.299 * ((it shr 16) and 0xFF) + 0.587 * ((it shr 8) and 0xFF) + 0.114 * (it and 0xFF)) }
-            return luma.max() - luma.min()
+        val d = compose.density.density
+        val period = Math.round(16 * d) // pixels; stripes start at x = 0 of the screen-wide scene
+        /** Amplitude of the stripe pattern (fundamental, or [harmonic]) in [r]'s column-averaged luminance, away from its edges. */
+        fun stripeAmplitude(r: androidx.compose.ui.geometry.Rect, harmonic: Int = 1): Double {
+            val inset = 24 * d
+            val top = (r.top + inset).toInt(); val bottom = (r.bottom - inset).toInt()
+            val left = (r.left + inset).toInt()
+            val n = ((r.width - 2 * inset).toInt() / period) * period
+            check(n >= period) { "window narrower than one stripe period" }
+            var re = 0.0; var im = 0.0
+            for (i in 0 until n) {
+                val x = left + i
+                var sum = 0.0
+                for (y in top until bottom) { val c = image.getPixel(x, y); sum += 0.299 * ((c shr 16) and 0xFF) + 0.587 * ((c shr 8) and 0xFF) + 0.114 * (c and 0xFF) }
+                val v = sum / (bottom - top)
+                val a = 2 * Math.PI * harmonic * x / period
+                re += v * Math.cos(a); im -= v * Math.sin(a)
+            }
+            return 2 * Math.hypot(re, im) / n
         }
-        val g = compose.onNodeWithTag("glass").fetchSemanticsNode().boundsInRoot
-        val inside = contrast(g)
-        val control = contrast(compose.onNodeWithTag("control").fetchSemanticsNode().boundsInRoot)
-        val outside = contrast(androidx.compose.ui.geometry.Rect(0f, g.top, g.left - 8, g.bottom))
+        fun bounds(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        val g = bounds("glass")
+        val besideRect = androidx.compose.ui.geometry.Rect(-24 * d, g.top, g.left, g.bottom) // bare stripes from the screen edge to the glass
+        val beside = stripeAmplitude(besideRect)
+        val glass = stripeAmplitude(g)
+        val tintOnly = stripeAmplitude(bounds("tint"))
+        val control = stripeAmplitude(bounds("control"))
+        val glassBlur = glass / tintOnly // what the blur leaves of the stripes under this glass's tint
+        val platform = control / beside // what the platform blur leaves of bare stripes
         File(out, "fixture-16-glass-blur.png").outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
         File(out, "glass-report.txt").writeText(
-            ("API ${android.os.Build.VERSION.SDK_INT}: stripe luminance range beside the glass %.1f, behind Tono glass %.1f (%.1f %%), " +
-                "under the platform's own blur %.1f (%.1f %%)\n").format(outside, inside, 100 * inside / outside, control, 100 * control / outside),
+            ("API ${android.os.Build.VERSION.SDK_INT}, stripe amplitude (luminance, 16 dp period): bare %.1f; Tono glass %.1f; same glass without blur %.1f; " +
+                "platform blur alone %.1f.\nBlur leaves %.1f %% of the stripes under Tono glass; the platform's own blur leaves %.1f %% of bare stripes. " +
+                "A full Gaussian blur at this radius leaves under 0.1 %%.\n3rd/1st harmonic (edge sharpness, square wave 33 %%): bare %.0f %%, Tono glass %.0f %%, platform blur %.0f %%.\n").format(
+                beside, glass, tintOnly, control, 100 * glassBlur, 100 * platform,
+                100 * stripeAmplitude(besideRect, 3) / beside,
+                100 * stripeAmplitude(g, 3) / glass.coerceAtLeast(1e-6), 100 * stripeAmplitude(bounds("control"), 3) / control.coerceAtLeast(1e-6),
+            ),
         )
-        assertTrue("stripes visible beside the glass ($outside)", outside > 200)
+        assertTrue("stripes visible beside the glass ($beside)", beside > 100)
+        assertTrue("tint alone keeps the stripes, so the comparison means something ($tintOnly)", tintOnly > 0.2 * beside)
         // Glass never shows more of what is behind it than the platform's own blur would.
-        assertTrue("glass ($inside) diffuses at least as much as the platform blur ($control)", inside <= control + 0.05 * outside)
+        assertTrue("glass blur leaves $glassBlur of the stripes, platform blur $platform", glassBlur <= platform + 0.05)
         // Where the platform blur renders fully (hardware GPU), the stripes must vanish behind glass too.
-        // The CI emulator's software renderer only partly applies RenderEffect blur; the report says so.
-        if (control < 0.15 * outside) assertTrue("glass blurs the stripes: $inside of $outside", inside < 0.15 * outside)
+        if (platform < 0.10) assertTrue("glass blurs the stripes away: $glassBlur", glassBlur < 0.10)
+    }
+
+    /** The Simplified Chinese copy (values-zh-rCN) on the same screens: contract, no truncation, captures. */
+    @Test fun u7_simplifiedChineseCopyFitsEveryScreen() {
+        val zh = java.util.Locale.SIMPLIFIED_CHINESE
+        show(zh)
+        val zhContext = context.createConfigurationContext(android.content.res.Configuration(context.resources.configuration).apply { setLocale(zh) })
+        val found = mutableListOf<String>()
+        fun check(screen: String) { compose.waitForIdle(); found += A11yContract.violations(compose, "zh $screen") + A11yContract.truncatedText(compose, "zh $screen") }
+        set(DeviceFixtures.idle); check("idle"); shot("fixture-21-zh-idle")
+        set(DeviceFixtures.degraded()); check("degraded"); shot("fixture-22-zh-degraded")
+        compose.onNodeWithTag("details").performClick(); check("details"); shot("fixture-23-zh-details"); back()
+        compose.onNodeWithContentDescription(zhContext.getString(R.string.settings_title)).performClick(); check("settings"); shot("fixture-24-zh-settings")
+        assertTrue("Chinese copy is on screen", compose.onAllNodes(androidx.compose.ui.test.hasText(zhContext.getString(R.string.settings_title))).fetchSemanticsNodes().isNotEmpty())
+        assertEquals(found.joinToString("\n"), 0, found.size)
+    }
+
+    /**
+     * The motion itself, frame by frame: the test clock advances one 16 ms frame at a time and the
+     * device renders each frame, so `frames/` is the designed 60 fps motion regardless of how fast
+     * this software GPU is. It shows timing and easing, not real-time smoothness on hardware.
+     */
+    @Test fun u8_motionFrameByFrameAt60fps() {
+        compose.mainClock.autoAdvance = false
+        show(reduceMotion = false)
+        val dir = File(out, "frames").apply { deleteRecursively(); mkdirs() }
+        val steps = listOf(
+            250L to DeviceFixtures.idle,
+            400L to DeviceFixtures.idle.copy(phase = Phase.PREPARING),
+            600L to DeviceFixtures.idle.copy(phase = Phase.CONNECTING),
+            1_400L to DeviceFixtures.connected(),
+            300L to DeviceFixtures.idle.copy(phase = Phase.DISCONNECTING),
+            600L to DeviceFixtures.idle,
+            800L to DeviceFixtures.failed,
+        )
+        var frame = 0
+        val timeline = StringBuilder()
+        for ((ms, s) in steps) {
+            snapshot = s
+            timeline.append("frame $frame (${frame * 16} ms): ${s.phase}\n")
+            repeat((ms / 16).toInt()) {
+                compose.mainClock.advanceTimeByFrame()
+                val image = compose.onRoot().captureToImage().asAndroidBitmap()
+                val small = android.graphics.Bitmap.createScaledBitmap(image, image.width / 2, image.height / 2, true)
+                File(dir, "frame-%04d.jpg".format(frame++)).outputStream().use { small.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, it) }
+            }
+        }
+        File(out, "motion-frames.txt").writeText("$frame frames, 16 ms each, rendered on this device by the Compose test clock\n$timeline")
+        assertTrue("frames rendered: $frame", frame > 200)
     }
 
     /** Shown before Android's VPN dialog whenever consent is missing; Continue is what opens it. */

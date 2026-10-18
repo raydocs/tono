@@ -90,4 +90,12 @@ class AccessibilityContractTest {
         val found = eachScreen { A11yContract.truncatedText(compose, it) }
         assertEquals(found.joinToString("\n"), 0, found.size)
     }
+
+    @Config(qualifiers = "+zh-rCN")
+    @Test fun simplifiedChineseFitsAtDoubleSize() {
+        assertEquals("设置", RuntimeEnvironment.getApplication().getString(com.raydocs.tono.mobile.R.string.settings_title))
+        show(fontScale = 2f)
+        val found = eachScreen { A11yContract.violations(compose, it) + A11yContract.truncatedText(compose, it) }
+        assertEquals(found.joinToString("\n"), 0, found.size)
+    }
 }

@@ -132,6 +132,13 @@ class SystemSurfacesDeviceTest {
                 assertNotNull("widget shows the real state", device.wait(Until.findObject(By.text(context.getString(R.string.state_signed_out))), 10_000))
                 File(out, "real-widget.txt").writeText("shared status: $state; widget bound through AppWidgetManager id=$id\n")
                 shot("real-10-widget")
+                // A real tap on the widget's button, through the system input pipeline and the
+                // widget's PendingIntent: signed out, it opens Tono at sign-in and starts nothing.
+                val button = device.findObject(By.res(context.packageName, "widget_action"))
+                assertNotNull("widget button", button)
+                button.click()
+                assertNotNull("widget button opens the app", device.wait(Until.findObject(By.text(context.getString(R.string.signin_title))), 15_000))
+                shot("real-10b-widget-opens-sign-in")
             }
         } finally {
             host.stopListening()
