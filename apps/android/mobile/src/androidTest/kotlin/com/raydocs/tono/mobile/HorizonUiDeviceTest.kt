@@ -433,7 +433,11 @@ class HorizonUiDeviceTest {
             val holder = focused.firstOrNull()?.let { n ->
                 generateSequence<androidx.compose.ui.semantics.SemanticsNode>(n) { it.parent }.firstNotNullOfOrNull { it.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.TestTag) }
             }
-            val ring = changed(unfocused.getValue(tag), ringBand(tag))
+            // The software-GPU emulator can show the frame before the ring for a moment: sample
+            // until the ring is there or 3 s have passed; the threshold does not change.
+            val deadline = android.os.SystemClock.elapsedRealtime() + 3_000
+            var ring = changed(unfocused.getValue(tag), ringBand(tag))
+            while (ring <= 0.2 && android.os.SystemClock.elapsedRealtime() < deadline) { Thread.sleep(200); ring = changed(unfocused.getValue(tag), ringBand(tag)) }
             report += "Tab ${i + 1} → ${holder ?: "(nothing focused)"}; ring pixels changed on \"$tag\": ${"%.0f".format(ring * 100)} %"
             if (i == 0) shot("fixture-25-keyboard-focus")
             assertEquals("Tab stop ${i + 1}: $report", tag, holder)

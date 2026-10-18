@@ -185,10 +185,18 @@ class LocalTunnelDeviceTest {
                 shot("local-05-disconnected")
 
                 device.findObject(By.desc(text(R.string.settings_title))).click()
+                // Settings slides in over 350 ms; until its title shows, the scrollable on screen is Home's.
+                assertNotNull("Settings opened", find(text(R.string.settings_title), 10_000))
+                Thread.sleep(600)
                 // Sign out is at the bottom of Settings: scroll to it as a user would.
-                val settings = device.wait(Until.findObject(By.scrollable(true)), 5_000)
-                val signOut = settings?.scrollUntil(androidx.test.uiautomator.Direction.DOWN, Until.findObject(By.text(text(R.string.settings_sign_out))))
-                    ?: device.findObject(By.text(text(R.string.settings_sign_out)))
+                val signOutText = By.text(text(R.string.settings_sign_out))
+                var signOut = device.findObject(signOutText)
+                repeat(6) {
+                    if (signOut != null) return@repeat
+                    device.swipe(device.displayWidth / 2, device.displayHeight * 3 / 4, device.displayWidth / 2, device.displayHeight / 4, 30)
+                    signOut = device.wait(Until.findObject(signOutText), 1_500)
+                }
+                if (signOut == null) diagnose("local-sign-out-missing")
                 assertNotNull("Sign out in Settings", signOut)
                 signOut!!.click()
                 assertNotNull("signed out", find(text(R.string.signin_title)))

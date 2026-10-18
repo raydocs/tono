@@ -237,8 +237,7 @@ jobs:
             HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome
             HorizonUiDeviceTest#u7_simplifiedChineseCopyFitsEveryScreen HorizonUiDeviceTest#u8_motionFrameByFrameAt60fps
             HorizonUiDeviceTest#u9_keyboardFocusIsVisibleAndAccessibilityActionsWork
-            LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff SmallScreenDeviceTest#l2_smallPhoneKeepsEverythingReadableAndReachable
-            LandscapeDeviceTest#l3_landscapeKeepsEverythingReadableAndReachable" ;;
+            LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff SmallScreenDeviceTest#l2_smallPhoneKeepsEverythingReadableAndReachable" ;;
             *) echo "unknown shard $SHARD"; exit 1 ;;
           esac
           echo "shard $SHARD" > evidence/shard.txt

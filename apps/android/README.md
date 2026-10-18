@@ -74,7 +74,8 @@ Round 6:
 - **Keyboard, D-pad and switch access.** Focus shows a ring on every Home control and on the
   sign-in buttons; Enter acts.
 - **Other screen shapes.** On a landscape phone, Home keeps a thumb-width column and the sun moves
-  aside. Sign-in centres its card.
+  aside; sign-in centres its card. This is from JVM renders only: the CI emulator could not be
+  turned to landscape (two attempts), so landscape is not verified on a device.
 - **Copy.** A stopped hop is "paused" (暂停) everywhere: the status line, Details and the routing
   scope.
 - **Fixture captures.** The fixture mark sits in the status-bar band, and fixture hosts draw edge to
@@ -229,8 +230,8 @@ internal test builds.
       checks them against the stand-in exits' own logs: cloud, Home through the cloud, and direct.
   - Keyboard: Tab order, a visible focus ring and Enter, all through Android's input system; TalkBack's
     ACTION_CLICK on every Home control's platform node.
-  - A small phone (360 × 640 dp) and landscape: no truncated text, the accessibility contract holds,
-    and every Home control can be reached.
+  - A small phone (360 × 640 dp): no truncated text, the accessibility contract holds, and every
+    Home control can be reached.
   - `perf.txt`: cold start, APK size, frame stats and memory on the emulator. These are
     measurements, not a gate.
 - Screenshots (no emulator needed):
@@ -246,7 +247,8 @@ internal test builds.
   - Still untested: QUIC fallback, always-on, app exclusion, network changes, and Tono's real exits
     and control plane.
   - The tile, widget and notifications have only been seen signed out (real) or with fixture states.
-- Real hardware. The CI emulator renders in software (swiftshader, about 5 fps under the animated
+- Landscape on a device (see "Other screen shapes" above).
+- Real hardware. The CI emulator renders in software (SwiftShader/ANGLE, about 5 fps under the animated
   scene), so motion smoothness, GPU blur cost, touch feel and battery are unmeasured. The blur
   itself does render there (stripes behind glass drop to 0.1 %), but its look on a phone panel has
   not been seen.

@@ -31,15 +31,13 @@ import java.io.File
 
 /**
  * Screen shapes other than the CI phone, set on the real system before the activity starts: a small
- * phone (360 × 640 dp) and the CI phone turned to landscape (the app does not lock orientation).
+ * phone (360 × 640 dp). Landscape is not covered: neither the user_rotation setting nor
+ * UiAutomation.setRotation turned the CI emulator's activity to landscape (runs 39115256726,
+ * 39120135343).
  * Fixture snapshots; in every Home state and in Details and Settings no text may be cut off, every
  * control keeps the accessibility contract, and every Home control can be brought on screen.
  */
-abstract class ScreenShapeCheck(
-    private val setUp: List<String>,
-    private val tearDown: List<String>,
-    private val rotation: Int? = null,
-) {
+abstract class ScreenShapeCheck(private val setUp: List<String>, private val tearDown: List<String>) {
     protected val instrumentation = InstrumentationRegistry.getInstrumentation()
     protected val context = instrumentation.targetContext
     private val device = UiDevice.getInstance(instrumentation)
@@ -48,19 +46,8 @@ abstract class ScreenShapeCheck(
     private fun shell(cmd: String) = instrumentation.uiAutomation.executeShellCommand(cmd).close()
 
     private val shape = object : ExternalResource() {
-        override fun before() {
-            setUp.forEach(::shell)
-            rotation?.let { instrumentation.uiAutomation.setRotation(it) }
-            Thread.sleep(2_000)
-        }
-        override fun after() {
-            if (rotation != null) {
-                instrumentation.uiAutomation.setRotation(android.app.UiAutomation.ROTATION_FREEZE_0)
-                instrumentation.uiAutomation.setRotation(android.app.UiAutomation.ROTATION_UNFREEZE)
-            }
-            tearDown.forEach(::shell)
-            Thread.sleep(1_000)
-        }
+        override fun before() { setUp.forEach(::shell); Thread.sleep(2_000) }
+        override fun after() { tearDown.forEach(::shell); Thread.sleep(1_000) }
     }
     protected val compose = createAndroidComposeRule<ComponentActivity>()
     @get:Rule val rules: RuleChain = RuleChain.outerRule(shape).around(compose)
@@ -124,19 +111,5 @@ class SmallScreenDeviceTest : ScreenShapeCheck(
     @Test fun l2_smallPhoneKeepsEverythingReadableAndReachable() {
         assertEquals("small phone width", 360, compose.activity.resources.configuration.screenWidthDp)
         check("26-small-phone", "small-phone-report.txt")
-    }
-}
-
-@RunWith(AndroidJUnit4::class)
-class LandscapeDeviceTest : ScreenShapeCheck(
-    setUp = emptyList(),
-    tearDown = emptyList(),
-    // As a user turning the phone with auto-rotate on; the platform rotation API, because the
-    // user_rotation setting alone does not turn the display on API 34.
-    rotation = android.app.UiAutomation.ROTATION_FREEZE_90,
-) {
-    @Test fun l3_landscapeKeepsEverythingReadableAndReachable() {
-        assertEquals("landscape", android.content.res.Configuration.ORIENTATION_LANDSCAPE, compose.activity.resources.configuration.orientation)
-        check("27-landscape", "landscape-report.txt")
     }
 }
