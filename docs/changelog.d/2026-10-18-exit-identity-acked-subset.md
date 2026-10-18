@@ -8,3 +8,6 @@
 - 验证：`services/control-plane` 上 `npx vitest run test/worker-exit-roster.test.ts` 25 passed；`npx tsc --noEmit --pretty false --incremental false` 退出码 0。Node v22.14.0（CI 为 Node 24）。Windows `cargo test`、前端 vitest 与实机未跑，由托管 CI。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：生产 Worker 在这次合入并部署之前仍是旧门。当前这名用户要靠运维对未确认出口做身份同步，或在该出口无法确认时下架。本变更不部署生产。
+
+## 2026-10-18 · 续记
+- Windows `app-rust`（run 39102190037）在测试模块里找不到 `note_identity_propagating` / `IDENTITY_PROPAGATING_BOUND`，`ci-gate` 随之失败。测试模块改为显式 `use super::`。控制面那一项当时是绿的。

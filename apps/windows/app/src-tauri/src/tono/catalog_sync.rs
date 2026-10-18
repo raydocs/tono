@@ -850,10 +850,11 @@ pub fn region_rank(name: &str) -> u8 {
 mod tests {
     use super::{
         SyncFailure, commit_fetched_catalog, default_usable_exit, install_and_persist, is_exit_blocked,
-        is_legacy_wire_name, names_equivalent, next_catalog_exit, periodic_sync_continues, periodic_sync_interval,
-        region_rank, replacement_for_selection, residential_routing_changed, run_with_retries,
-        selected_exit_still_present, sort_server_names, suspend_rejected_session, tcp_probe_socket,
-        PeriodicSyncWake, wait_for_next_periodic_sync,
+        is_legacy_wire_name, names_equivalent, next_catalog_exit, note_identity_propagating,
+        periodic_sync_continues, periodic_sync_interval, region_rank, replacement_for_selection,
+        residential_routing_changed, run_with_retries, selected_exit_still_present, sort_server_names,
+        suspend_rejected_session, tcp_probe_socket, IDENTITY_PROPAGATING_BOUND, PeriodicSyncWake,
+        wait_for_next_periodic_sync,
     };
     use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
