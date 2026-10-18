@@ -103,6 +103,8 @@
 "ipv6_off" = "IPv6 on this network: no (direct names answer IPv4 only)";
 "system_include_all" = "Include all networks";
 "system_include_all_desc" = "On (recommended): iOS sends all traffic to Tono and holds it while the tunnel restarts instead of letting it out directly. Takes effect the next time Tono connects.";
+"system_include_all_short" = "On (recommended): while Tono restarts, traffic waits instead of leaving directly.";
+"system_how_title" = "How this works";
 "system_on_demand" = "Connecting turns on iOS Connect On Demand, so iOS brings Tono back after a crash, an update or a restart; disconnecting turns it off.";
 "system_limit" = "While Tono is switched off, iOS does not block anything, and some Apple system services can bypass any VPN.";
 "sentence_connected_stable_no_home" = "All public traffic via cloud · LAN stays local";

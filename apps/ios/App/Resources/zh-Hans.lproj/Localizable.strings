@@ -103,6 +103,8 @@
 "ipv6_off" = "当前网络 IPv6：无（直连域名只返回 IPv4）";
 "system_include_all" = "包含所有网络";
 "system_include_all_desc" = "开启（推荐）：iOS 把所有流量交给 Tono，隧道重启期间先拦住，而不是直接放行。下次连接时生效。";
+"system_include_all_short" = "开启（推荐）：Tono 重启时流量先等待，不会直接放行。";
+"system_how_title" = "工作方式";
 "system_on_demand" = "连接时会开启 iOS“按需连接”，Tono 崩溃、更新或手机重启后由 iOS 自动恢复；断开时关闭。";
 "system_limit" = "Tono 关闭时 iOS 不拦截任何流量；部分 Apple 系统服务可以绕过任何 VPN。";
 "sentence_connected_stable_no_home" = "公网流量全部走云 · 局域网仍走本地";

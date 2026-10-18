@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var confirmSignOut = false
     @State private var showScope = false
+    @State private var showSystemHow = false
 
     var body: some View {
         // A navigation bar, not a hand-made header: on iOS 26 the close button is system glass and
@@ -51,8 +52,19 @@ struct SettingsView: View {
                             Text(L.t("system_include_all")).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
                         }
                         .tint(TonoColor.accent)
-                        para(L.t("system_include_all_desc"))
-                        para(L.t("system_on_demand"))
+                        para(L.t("system_include_all_short"))
+                        // The mechanics (restart hold, Connect On Demand) one tap away, as the routing scope.
+                        DisclosureGroup(isExpanded: $showSystemHow) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                para(L.t("system_include_all_desc"))
+                                para(L.t("system_on_demand"))
+                            }
+                            .padding(.top, 8)
+                        } label: {
+                            Text(L.t("system_how_title")).tonoFont(15, .medium, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
+                                .frame(minHeight: 44, alignment: .leading)
+                        }
+                        .tint(TonoColor.textSecondary)
                         Text(L.t("system_limit")).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
                     }
 
