@@ -244,6 +244,22 @@ class LocalTunnelDeviceTest {
         assertNotNull("system consent OK", ok)
         ok!!.click()
         note("consent: Android's VPN dialog answered OK")
+        answerNotificationPrompt()
+    }
+
+    /**
+     * Tono asks for notifications right after VPN consent (so the two system dialogs never stack). On a
+     * fresh emulator Android's prompt then covers the app; answer Allow, as the status notification
+     * is part of what these tests check.
+     */
+    private fun answerNotificationPrompt() {
+        val prompt = By.pkg(Pattern.compile("com\\.(google\\.)?android\\.permissioncontroller"))
+        if (device.wait(Until.hasObject(prompt), 5_000) != true) return
+        val allow = device.findObject(By.res(Pattern.compile(".*:id/permission_allow_button")))
+        assertNotNull("Allow on Android's notification prompt", allow)
+        allow!!.click()
+        device.wait(Until.gone(prompt), 5_000)
+        note("notifications: Android's prompt answered Allow")
     }
 
     /** Sign out is at the bottom of Settings: scroll to it as a user would. Leaves the next test signed out. */
@@ -418,6 +434,8 @@ class LocalTunnelDeviceTest {
             // The local-server mark's screen-reader line spans the window's width on purpose.
             if (label.isBlank() || label == text(R.string.local_test_server)) continue
             val r = runCatching { o.visibleBounds }.getOrNull() ?: continue
+            // A sheet's scrim ("Close sheet") is a dismiss area covering the whole window by design.
+            if (r.width() >= device.displayWidth && r.height() >= device.displayHeight) continue
             if (cutouts.any { Rect.intersects(it, r) }) hits += "\"$label\" $r"
         }
         return hits

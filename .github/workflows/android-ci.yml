@@ -216,11 +216,13 @@ jobs:
           adb install -r apk/*-test-*.apk
           adb install -r apk/instrumentation.apk
           # Emulator health gate, measured before the tests: the median frame time of Tono's own
-          # sign-in screen over 8 s. Calibration so far: emulators at 500–750 ms ran the tests at normal
-          # speed (runs 39151329824, 39153105611); two at 900 and 950 ms ran the fixture tests three to
-          # six times slower and hung the real-app tests (run 39153105611, tunnel shard). A first try at
-          # 650 ms stopped healthy emulators, so the limit is 850 ms. Above it this attempt stops before
-          # the tests and the fresh-emulator retry starts early.
+          # sign-in screen over 8 s. Calibration: emulators at 300–750 ms ran the tests at normal speed
+          # (runs 39151329824, 39153105611, 39159687608, 39163947970). At 800 ms and above they ran
+          # three to six times slower: b3 and a3 hung at 800 ms (run 39159687608); at 850 ms
+          # ActivityScenario.launch took 9 minutes, a5 hung and the shard ran out of time (run
+          # 39163947970); 900–1000 ms hung the real-app tests. A first gate at 650 ms stopped healthy
+          # emulators, so the limit is 775 ms. Above it this attempt stops before the tests and the
+          # fresh-emulator retry starts early.
           set +e
           adb shell am start -W -n $APP/com.raydocs.tono.mobile.ui.MainActivity > /dev/null
           sleep 3
@@ -229,9 +231,9 @@ jobs:
           median=$(adb shell dumpsys gfxinfo $APP | sed -n 's/^ *50th percentile: \([0-9]*\)ms.*/\1/p' | head -1)
           adb shell am force-stop $APP
           set -e
-          echo "health: sign-in screen median frame ${median:-unknown} ms before the tests (limit 850 ms)" | tee evidence/health.txt >> evidence/summary.txt
-          if [ -n "$median" ] && [ "$median" -gt 850 ]; then
-            echo "HEALTH-GATE: emulator renders too slowly (median frame ${median} ms > 850 ms); no tests run in this attempt" >> evidence/summary.txt
+          echo "health: sign-in screen median frame ${median:-unknown} ms before the tests (limit 775 ms)" | tee evidence/health.txt >> evidence/summary.txt
+          if [ -n "$median" ] && [ "$median" -gt 775 ]; then
+            echo "HEALTH-GATE: emulator renders too slowly (median frame ${median} ms > 775 ms); no tests run in this attempt" >> evidence/summary.txt
             timeout 60 adb logcat -d > evidence/logcat.txt || true
             exit 1
           fi

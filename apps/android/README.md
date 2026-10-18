@@ -107,10 +107,11 @@ Round 7 (after the round-6 blind reviews, `docs/agent-reports/2026-10-18-android
 - **Sheets.** The sheets draw their grip themselves: Material's handle is a keyboard focus stop whose
   "Drag handle" tooltip covered the sheet title.
 - **CI.** Three emulator shards (`system`, `tunnel`, `ui`). Each measures the sign-in screen's
-  median frame time before the tests and stops the attempt above 850 ms, so the fresh-emulator
-  retry starts early. Calibration: emulators at 500–750 ms ran at normal speed; two at 900 and
-  950 ms ran the fixture tests three to six times slower and hung the real-app tests (run
-  39153105611). A first gate at 650 ms stopped healthy emulators (run 39151329824). A hung test is
+  median frame time before the tests and stops the attempt above 775 ms, so the fresh-emulator
+  retry starts early. Calibration: emulators at 300–750 ms ran at normal speed; at 800 ms and
+  above tests ran three to six times slower and hung (runs 39153105611, 39159687608, 39163947970;
+  at 850 ms launching the app alone took 9 minutes). A first gate at 650 ms stopped healthy
+  emulators (run 39151329824). A hung test is
   stopped after 600 s with a screenshot, window dump and focus state, and a shard that passes only
   on the fresh-emulator retry is marked flaky.
 - **Real-app device tests no longer wait for the main thread to go idle.** `ActivityScenario.onActivity`
