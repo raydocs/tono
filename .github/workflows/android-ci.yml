@@ -237,12 +237,20 @@ jobs:
             HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome
             HorizonUiDeviceTest#u7_simplifiedChineseCopyFitsEveryScreen HorizonUiDeviceTest#u8_motionFrameByFrameAt60fps
             HorizonUiDeviceTest#u9_keyboardFocusIsVisibleAndAccessibilityActionsWork
-            LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff SmallScreenDeviceTest#l2_smallPhoneKeepsEverythingReadableAndReachable" ;;
+            LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff SmallScreenDeviceTest#l2_smallPhoneKeepsEverythingReadableAndReachable
+            LandscapeDeviceTest#l3_landscapeKeepsEverythingReadableAndReachable" ;;
             *) echo "unknown shard $SHARD"; exit 1 ;;
           esac
           echo "shard $SHARD" > evidence/shard.txt
           for c in $tests; do
             t="${c#*#}"
+            # A pathologically slow emulator (run 39126740818: a1 took 163 s instead of ~30 s) would
+            # otherwise use the whole step; stop the attempt so the fresh-emulator retry has time.
+            if [ "$SECONDS" -gt 2100 ]; then
+              echo "TIME-BUDGET: attempt stopped after ${SECONDS}s before $t; later tests not run in this attempt" >> evidence/summary.txt
+              failed="$failed time-budget"
+              break
+            fi
             rec=""
             if [ "$t" = b2_fixtureMotionRecordedOnDevice ]; then
               # Recorded from the host: a screenrecord started inside the test kept the run open.
@@ -326,6 +334,15 @@ jobs:
           emulator-options: -no-window -gpu swangle_indirect -noaudio -no-boot-anim -camera-back none
           pre-emulator-launch-script: bash wrap-emulator.sh
           script: SHARD=${{ matrix.shard }} bash evidence.sh
+      # A timed-out attempt leaves its emulator running; the retry must not share the host with it.
+      - name: Stop the first emulator
+        if: steps.attempt1.outcome == 'failure'
+        run: |
+          adb emu kill || true
+          sleep 5
+          pkill -9 -f "[q]emu-system-x86_64" || true
+          sleep 3
+          pgrep -fa "[q]emu-system-x86_64" || echo "no emulator left running"
       # One bounded retry: software-GPU emulators on hosted runners occasionally die mid-run.
       - name: Retry once on a fresh emulator
         if: steps.attempt1.outcome == 'failure'
