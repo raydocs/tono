@@ -1,7 +1,13 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import type { Env } from '../src/env';
-import { egressConsensus, type EgressConnect, type EgressFetch, type GeoAnswer } from '../src/home-egress';
+import {
+  egressConsensus,
+  resolveEgressIp,
+  type EgressConnect,
+  type EgressFetch,
+  type GeoAnswer,
+} from '../src/home-egress';
 import { homeEgressResource } from '../src/ops/shared-admin/home-egress';
 
 const e = () => env as unknown as Env;
@@ -20,7 +26,12 @@ async function seedSocksHome(id: string) {
  * A SOCKS5 server in a stream pair: checks the greeting, the RFC 1929
  * credential and the CONNECT target, then answers the HTTP request with `ip`.
  */
-function fakeLine(ip: string, seen: { auth?: string; target?: string }, acceptPassword = PASSWORD): EgressConnect {
+function fakeLine(
+  ip: string,
+  seen: { auth?: string; target?: string },
+  acceptPassword = PASSWORD,
+  echo = (address: string) => `HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n${address}\n`,
+): EgressConnect {
   return () => {
     let reply!: ReadableStreamDefaultController<Uint8Array>;
     const readable = new ReadableStream<Uint8Array>({ start: (c) => { reply = c; } });
@@ -43,7 +54,7 @@ function fakeLine(ip: string, seen: { auth?: string; target?: string }, acceptPa
           seen.target = `${host}:${(chunk[5 + chunk[4]!]! << 8) | chunk[6 + chunk[4]!]!}`;
           reply.enqueue(Uint8Array.from([5, 0, 0, 1, 10, 0, 0, 1, 0, 80]));
         } else {
-          reply.enqueue(new TextEncoder().encode(`HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n${ip}\n`));
+          reply.enqueue(new TextEncoder().encode(echo(ip)));
           reply.close();
         }
         step += 1;
@@ -53,8 +64,9 @@ function fakeLine(ip: string, seen: { auth?: string; target?: string }, acceptPa
   };
 }
 
-const geoFetch = (asked: string[]): EgressFetch => async (url) => {
+const geoFetch = (asked: string[]): EgressFetch => async (url, init) => {
   asked.push(url);
+  expect(init.redirect).toBe('manual');
   if (url.includes('ipinfo.io')) {
     return Response.json({ ip: '48.45.90.215', city: 'New York City', region: 'New York', country: 'US', org: 'AS7922 Comcast' });
   }
@@ -104,6 +116,54 @@ describe('home egress lookup', () => {
     const { lookup } = await res!.json() as { lookup: { ip: string | null; errorStage: string; error: string } };
     expect(lookup).toMatchObject({ ip: null, errorStage: 'auth', error: 'username or password rejected' });
     expect(asked).toEqual([]);
+  });
+
+  it('never stores or returns what a hostile echo says after it has seen the password', async () => {
+    await seedSocksHome('egress-leak');
+    const res = await homeEgressResource(
+      new Request('https://hub.test/api/v1/ops/home-exits/egress-leak/egress', { method: 'POST' }),
+      e(), 'home-exits/egress-leak/egress', 'POST', 'owner@example.com',
+      { connect: fakeLine('48.45.90.215', {}, PASSWORD, () => `HTTP/1.0 500 ${PASSWORD}\r\n\r\n${PASSWORD}`), fetch: geoFetch([]) },
+    );
+    const text = await res!.text();
+    expect(text).not.toContain(PASSWORD);
+    expect(JSON.parse(text)).toMatchObject({ lookup: { ip: null, errorStage: 'echo', error: 'echo answered HTTP 500' } });
+    const stored = await e().DB.prepare('SELECT error FROM home_exit_egress WHERE home_exit_id = ?').bind('egress-leak').first();
+    expect(JSON.stringify(stored)).not.toContain(PASSWORD);
+  });
+
+  it('closes the socket and dials nothing more when the line stalls past the deadline', async () => {
+    let dials = 0;
+    let closes = 0;
+    const stalled: EgressConnect = () => {
+      dials += 1;
+      return {
+        opened: new Promise(() => undefined),
+        readable: new ReadableStream(),
+        writable: new WritableStream(),
+        close: () => { closes += 1; },
+      };
+    };
+    await expect(resolveEgressIp({ host: 'isp.example.net', port: 1, username: 'u', password: 'p' }, stalled, 20))
+      .rejects.toMatchObject({ stage: 'timeout' });
+    expect({ dials, closes }).toEqual({ dials: 1, closes: 1 });
+  });
+
+  it('drops a lookup whose line was re-pointed while it ran', async () => {
+    await seedSocksHome('egress-moved');
+    const moving: EgressConnect = (address) => {
+      void e().DB.prepare("UPDATE home_exits SET socks5_port = 10079, egress_ipv4 = '12.12.115.213' WHERE id = 'egress-moved'").run();
+      return fakeLine('48.45.90.215', {})(address);
+    };
+    await expect(homeEgressResource(
+      new Request('https://hub.test/api/v1/ops/home-exits/egress-moved/egress', { method: 'POST' }),
+      e(), 'home-exits/egress-moved/egress', 'POST', 'owner@example.com',
+      { connect: moving, fetch: geoFetch([]) },
+    )).rejects.toMatchObject({ status: 409, code: 'HOME_EXIT_CHANGED' });
+    const home = await e().DB.prepare('SELECT egress_ipv4 FROM home_exits WHERE id = ?').bind('egress-moved').first();
+    expect(home).toEqual({ egress_ipv4: '12.12.115.213' });
+    const lookup = await e().DB.prepare('SELECT 1 AS hit FROM home_exit_egress WHERE home_exit_id = ?').bind('egress-moved').first();
+    expect(lookup).toBeNull();
   });
 
   it('votes on the region and flags a disagreement instead of averaging it away', () => {

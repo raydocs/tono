@@ -48,6 +48,8 @@ export const residentialCopy = {
         columns: { provider: '来源', place: '位置', org: '运营商' },
         hosting: '机房 IP',
         noAnswer: '没答复',
+        changed: '查的时候线路被改过了，这次结果没存，再查一次。',
+        noAddress: '目录线路没有登记出口地址，先填上再查。',
       },
     },
     lines: {

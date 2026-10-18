@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { copy } from '@/copy/copy';
 import { egressApi, type EgressLookup } from '@/lib/home-egress';
-import type { HomeExit } from '@/lib/settings-legacy';
+import { refusalCode, type HomeExit } from '@/lib/settings-legacy';
 import { useResource } from '@/lib/use-resource';
 
 /**
@@ -38,7 +38,13 @@ export function useEgress(rows: readonly HomeExit[] | null, onLooked: () => void
         latest.current.reload();
         latest.current.onLooked();
       } catch (failure) {
-        setError(failure instanceof Error ? failure.message : copy.actionFailed);
+        const code = refusalCode(failure);
+        const words = copy.residential.inventory.egress;
+        setError(code === 'HOME_EXIT_CHANGED'
+          ? words.changed
+          : code === 'HOME_EGRESS_UNKNOWN'
+            ? words.noAddress
+            : failure instanceof Error ? failure.message : copy.actionFailed);
       } finally {
         setLooking((current) => {
           const next = new Set(current);

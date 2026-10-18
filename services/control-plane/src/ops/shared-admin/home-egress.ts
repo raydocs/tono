@@ -86,8 +86,10 @@ export async function homeEgressResource(
         password: home.socks5_password == null ? null : String(home.socks5_password),
       }, deps.connect);
     } catch (x) {
-      errorStage = x instanceof EgressError ? x.stage : 'connect';
-      error = x instanceof Error ? x.message : 'lookup failed';
+      // resolveEgressIp only throws its own fixed sentences; anything else is
+      // replaced here too, so no text from the line reaches D1 or the response.
+      errorStage = x instanceof EgressError ? x.stage : 'tunnel';
+      error = x instanceof EgressError ? x.message : 'lookup failed';
     }
   } else if (home.egress_ipv4 != null) {
     ip = String(home.egress_ipv4);
@@ -97,24 +99,36 @@ export async function homeEgressResource(
 
   const answers = ip === null ? [] : await geolocate(ip, deps.fetch);
   const t = now();
+  // The lookup took seconds; an operator may have re-pointed the line in the
+  // meantime. Both writes hold only while the line is still the one dialled,
+  // so a stale observation is dropped rather than filed under the new line.
+  const sameLine = `EXISTS (SELECT 1 FROM home_exits WHERE id = ? AND kind IS ? AND socks5_host IS ?
+    AND socks5_port IS ? AND socks5_username IS ? AND socks5_password IS ?)`;
+  const lineKey = [homeId, home.kind, home.socks5_host, home.socks5_port, home.socks5_username, home.socks5_password];
   const writes = [
     e.DB.prepare(
       `INSERT INTO home_exit_egress(home_exit_id, ip, checked_at, error_stage, error, answers)
-       VALUES(?, ?, ?, ?, ?, ?)
+       SELECT ?, ?, ?, ?, ?, ? WHERE ${sameLine}
        ON CONFLICT(home_exit_id) DO UPDATE SET
          ip = excluded.ip, checked_at = excluded.checked_at, error_stage = excluded.error_stage,
          error = excluded.error, answers = excluded.answers`,
-    ).bind(homeId, ip, t, errorStage, error, JSON.stringify(answers)),
+    ).bind(homeId, ip, t, errorStage, error, JSON.stringify(answers), ...lineKey),
   ];
   // The stored address is display-only (no catalog reads it), so following
   // what the line really exits from needs no catalog revision. updated_at
-  // stays put, as for the prober: this is an observation, not an edit.
-  if (ip !== null && isIpv4(ip) && ip !== (home.egress_ipv4 == null ? null : String(home.egress_ipv4))) {
+  // stays put, as for the prober: this is an observation, not an edit. An
+  // address the operator typed while the lookup ran is theirs to keep.
+  const stored = home.egress_ipv4 == null ? null : String(home.egress_ipv4);
+  if (ip !== null && isIpv4(ip) && ip !== stored) {
     writes.push(e.DB.prepare(
-      'UPDATE home_exits SET egress_ipv4 = ?, updated_at = updated_at WHERE id = ?',
-    ).bind(ip, homeId));
+      `UPDATE home_exits SET egress_ipv4 = ?, updated_at = updated_at
+       WHERE id = ? AND egress_ipv4 IS ? AND ${sameLine}`,
+    ).bind(ip, homeId, stored, ...lineKey));
   }
-  await e.DB.batch(writes);
+  const [recorded] = await e.DB.batch(writes);
+  if (!recorded?.meta.changes) {
+    throw new ApiError(409, 'HOME_EXIT_CHANGED', 'The line changed while it was being looked up; look it up again');
+  }
   await writeOpsAudit(
     e, actorEmail, 'home.egress', 'home_exit', homeId,
     ip === null ? `egress lookup failed at ${errorStage}` : `egress ${ip}`,

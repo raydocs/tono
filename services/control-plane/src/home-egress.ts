@@ -55,6 +55,11 @@ export class EgressError extends Error {
 export const TUNNEL_TIMEOUT_MS = 10_000;
 export const PROVIDER_TIMEOUT_MS = 6_000;
 const ECHO_LIMIT = 4096;
+/** What the tunnel reader keeps at most: a line answering one huge chunk is cut, not buffered. */
+const BUFFER_LIMIT = ECHO_LIMIT + 1024;
+/** A provider answer is a few hundred bytes; anything past this is not one. */
+const PROVIDER_BODY_LIMIT = 64 * 1024;
+const FIELD_MAX = 120;
 const ERROR_MAX = 160;
 
 /** Plain HTTP on port 80: a raw socket through the tunnel has no TLS of its own. */
@@ -82,7 +87,9 @@ class ByteReader {
     while (this.buffered.length < n) {
       const { value, done } = await this.reader.read();
       if (done) throw new EgressError(stage, 'connection closed by the line');
+      const before = this.buffered.length;
       this.append(value);
+      if (value.length > 0 && this.buffered.length === before) throw new EgressError(stage, 'line sent too much');
     }
     const out = this.buffered.slice(0, n);
     this.buffered = this.buffered.slice(n);
@@ -100,9 +107,11 @@ class ByteReader {
   }
 
   private append(chunk: Uint8Array) {
-    const next = new Uint8Array(this.buffered.length + chunk.length);
+    const room = Math.max(0, BUFFER_LIMIT - this.buffered.length);
+    const kept = chunk.length > room ? chunk.subarray(0, room) : chunk;
+    const next = new Uint8Array(this.buffered.length + kept.length);
     next.set(this.buffered);
-    next.set(chunk, this.buffered.length);
+    next.set(kept, this.buffered.length);
     this.buffered = next;
   }
 }
@@ -121,20 +130,22 @@ async function socks5Connect(
   const [version, method] = await reader.take(2, 'auth');
   if (version !== 5) throw new EgressError('auth', 'not a SOCKS5 server');
   if (method === 0xff) throw new EgressError('auth', 'no acceptable authentication method');
+  // Only the one method offered is acceptable: a server that picks "none"
+  // after being offered a password is not the server the line was sold as.
+  if (method !== (withAuth ? 2 : 0)) throw new EgressError('auth', 'server chose a method that was not offered');
   if (method === 2) {
-    if (!withAuth) throw new EgressError('auth', 'line asks for a password that is not stored');
     const user = encoder.encode(line.username!);
     const pass = encoder.encode(line.password!);
     if (user.length > 255 || pass.length > 255) throw new EgressError('auth', 'credential too long for SOCKS5');
     await writer.write(Uint8Array.from([1, user.length, ...user, pass.length, ...pass]));
-    const [, status] = await reader.take(2, 'auth');
+    const [authVersion, status] = await reader.take(2, 'auth');
+    if (authVersion !== 1) throw new EgressError('auth', 'malformed authentication reply');
     if (status !== 0) throw new EgressError('auth', 'username or password rejected');
-  } else if (method !== 0) {
-    throw new EgressError('auth', `unsupported method ${method}`);
   }
   const host = encoder.encode(target.hostname);
   await writer.write(Uint8Array.from([5, 1, 0, 3, host.length, ...host, target.port >> 8, target.port & 0xff]));
   const head = await reader.take(4, 'tunnel');
+  if (head[0] !== 5 || head[2] !== 0) throw new EgressError('tunnel', 'malformed reply');
   if (head[1] !== 0) throw new EgressError('tunnel', SOCKS_REPLY[head[1]!] ?? `reply ${head[1]}`);
   const atyp = head[3];
   const addressBytes = atyp === 1 ? 4 : atyp === 4 ? 16 : atyp === 3 ? (await reader.take(1, 'tunnel'))[0]! : -1;
@@ -143,8 +154,16 @@ async function socks5Connect(
 }
 
 export function isIpAddress(value: string): boolean {
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return value.split('.').every((part) => Number(part) <= 255);
-  return /^[0-9a-f:]+$/i.test(value) && value.includes(':') && value.length <= 45;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) {
+    return value.split('.').every((part) => Number(part) <= 255 && (part.length === 1 || !part.startsWith('0')));
+  }
+  if (!/^[0-9a-f:.]{2,45}$/i.test(value) || !value.includes(':')) return false;
+  try {
+    // The URL parser is a full RFC 4291 parser; a bracketed host it accepts is an address.
+    return new URL(`http://[${value}]/`).hostname.length > 2;
+  } catch {
+    return false;
+  }
 }
 
 export function isIpv4(value: string): boolean {
@@ -155,9 +174,11 @@ export function isIpv4(value: string): boolean {
 function parseEcho(raw: Uint8Array): string {
   const text = new TextDecoder().decode(raw);
   const split = text.indexOf('\r\n\r\n');
-  const status = text.slice(0, text.indexOf('\r\n'));
-  if (split < 0 || !/^HTTP\/1\.[01] 200\b/.test(status)) {
-    throw new EgressError('echo', `echo answered ${status.slice(0, 40) || 'nothing'}`);
+  // Only the parsed status number leaves this function: the far side of the
+  // tunnel has just been handed the password, so none of its words are kept.
+  const code = /^HTTP\/1\.[01] (\d{3})\b/.exec(text)?.[1] ?? null;
+  if (split < 0 || code !== '200') {
+    throw new EgressError('echo', code === null ? 'echo did not answer HTTP' : `echo answered HTTP ${code}`);
   }
   const ip = text.slice(split + 4).trim();
   if (!isIpAddress(ip)) throw new EgressError('echo', 'echo did not answer an address');
@@ -172,14 +193,14 @@ async function echoThrough(
   let socket: EgressSocket;
   try {
     socket = connect({ hostname: line.host, port: line.port });
-  } catch (x) {
-    throw new EgressError('connect', x instanceof Error ? x.message : String(x));
+  } catch {
+    throw new EgressError('connect', 'could not reach the line');
   }
   try {
     try {
       await socket.opened;
-    } catch (x) {
-      throw new EgressError('connect', x instanceof Error ? x.message : String(x));
+    } catch {
+      throw new EgressError('connect', 'could not reach the line');
     }
     const writer = socket.writable.getWriter();
     const reader = new ByteReader(socket.readable.getReader());
@@ -210,12 +231,17 @@ export async function resolveEgressIp(
 ): Promise<string> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new EgressError('timeout', `no answer in ${timeoutMs} ms`)), timeoutMs);
+    timer = setTimeout(() => {
+      expired = true;
+      reject(new EgressError('timeout', `no answer in ${timeoutMs} ms`));
+    }, timeoutMs);
   });
   // A line that stalls mid-handshake would otherwise hold its socket until the
   // request ends: on timeout every socket opened here is closed, not waited on.
   const opened: EgressSocket[] = [];
+  let expired = false;
   const tracked: EgressConnect = (address) => {
+    if (expired) throw new EgressError('timeout', `no answer in ${timeoutMs} ms`);
     const socket = connect(address);
     opened.push(socket);
     return socket;
@@ -234,9 +260,12 @@ export async function resolveEgressIp(
       throw last;
     })(), timeout]);
   } catch (x) {
+    // Every message here is one of this file's own fixed sentences; anything
+    // else (a stream error, a runtime string) is replaced, never passed on.
     if (x instanceof EgressError) throw new EgressError(x.stage, x.message.slice(0, ERROR_MAX));
-    throw new EgressError('connect', String(x).slice(0, ERROR_MAX));
+    throw new EgressError('tunnel', 'lookup failed');
   } finally {
+    expired = true;
     if (timer !== undefined) clearTimeout(timer);
     for (const socket of opened) {
       try {
@@ -251,7 +280,9 @@ export async function resolveEgressIp(
 type Json = Record<string, unknown>;
 type Fix = Omit<GeoAnswer, 'provider' | 'ok' | 'error' | 'ms'>;
 
-const s = (value: unknown): string | null => (typeof value === 'string' && value.trim() !== '' ? value.trim() : null);
+const s = (value: unknown): string | null => (
+  typeof value === 'string' && value.trim() !== '' ? value.trim().slice(0, FIELD_MAX) : null
+);
 const o = (value: unknown): Json => (value !== null && typeof value === 'object' ? value as Json : {});
 const b = (value: unknown): boolean | null => (typeof value === 'boolean' ? value : null);
 function asn(value: unknown): number | null {
@@ -350,19 +381,50 @@ export const GEO_PROVIDERS: readonly Provider[] = [
 
 const FAILED: Fix = { country: null, region: null, city: null, org: null, asn: null, hosting: null };
 
+/** The body as text, or null past `limit` bytes; the rest of the stream is cancelled, not read. */
+async function boundedText(response: Response, limit: number): Promise<string | null> {
+  if (response.body === null) return '';
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > limit) {
+      void reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    all.set(chunk, at);
+    at += chunk.length;
+  }
+  return new TextDecoder().decode(all);
+}
+
 async function askProvider(provider: Provider, ip: string, fetcher: EgressFetch, timeoutMs: number): Promise<GeoAnswer> {
   const started = Date.now();
   const failed = (error: string): GeoAnswer => ({
     provider: provider.id, ok: false, ...FAILED, error: error.slice(0, ERROR_MAX), ms: Date.now() - started,
   });
   try {
+    // No redirects: the URL list is the whole set of places this asks, and a
+    // tampered 302 from a plain-HTTP provider must not widen it.
     const response = await fetcher(provider.url(ip), {
       headers: { accept: 'application/json', 'user-agent': 'tono-ops/1' },
-      redirect: 'follow',
+      redirect: 'manual',
       signal: AbortSignal.timeout(timeoutMs),
     });
-    const text = await response.text();
-    if (!response.ok) return failed(`HTTP ${response.status}`);
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => undefined);
+      return failed(`HTTP ${response.status}`);
+    }
+    const text = await boundedText(response, PROVIDER_BODY_LIMIT);
+    if (text === null) return failed('answer too large');
     let json: unknown;
     try {
       json = JSON.parse(text);
@@ -385,6 +447,7 @@ export function geolocate(
   providers: readonly Provider[] = GEO_PROVIDERS,
   timeoutMs = PROVIDER_TIMEOUT_MS,
 ): Promise<GeoAnswer[]> {
+  if (!isIpAddress(ip)) return Promise.resolve([]);
   return Promise.all(providers.map((provider) => askProvider(provider, ip, fetcher, timeoutMs)));
 }
 
