@@ -110,6 +110,9 @@ class LocalTunnelDeviceTest {
                 device.findObject(By.clazz("android.widget.EditText")).text = "tester@local.test"
                 device.findObject(By.text(text(R.string.signin_send))).click()
                 assertNotNull("code step", find(text(R.string.signin_code)))
+                // The e-mail field fades out over 220 ms; wait until the code field is the only one.
+                val deadline0 = SystemClock.elapsedRealtime() + 5_000
+                while (device.findObjects(By.clazz("android.widget.EditText")).size != 1 && SystemClock.elapsedRealtime() < deadline0) Thread.sleep(100)
                 // Six digits verify on their own, as when a user types the code from their email.
                 device.findObject(By.clazz("android.widget.EditText")).text = "246810"
                 val connect = find(text(R.string.action_connect), 30_000)
@@ -169,8 +172,10 @@ class LocalTunnelDeviceTest {
                 shot("local-05-disconnected")
 
                 device.findObject(By.desc(text(R.string.settings_title))).click()
-                val signOut = device.wait(Until.findObject(By.text(text(R.string.settings_sign_out))), 3_000)
-                    ?: run { device.findObject(By.scrollable(true))?.scrollUntil(androidx.test.uiautomator.Direction.DOWN, Until.findObject(By.text(text(R.string.settings_sign_out)))) }
+                // Sign out is at the bottom of Settings: scroll to it as a user would.
+                val settings = device.wait(Until.findObject(By.scrollable(true)), 5_000)
+                val signOut = settings?.scrollUntil(androidx.test.uiautomator.Direction.DOWN, Until.findObject(By.text(text(R.string.settings_sign_out))))
+                    ?: device.findObject(By.text(text(R.string.settings_sign_out)))
                 assertNotNull("Sign out in Settings", signOut)
                 signOut!!.click()
                 assertNotNull("signed out", find(text(R.string.signin_title)))
