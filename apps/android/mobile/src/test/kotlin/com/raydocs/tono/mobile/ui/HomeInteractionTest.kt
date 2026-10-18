@@ -131,6 +131,18 @@ class HomeInteractionTest {
         assertEquals(listOf("recheck"), calls)
     }
 
+    /** A stopped hop is "paused" everywhere it is mentioned: the one-line status and its explanation in Details. */
+    @Test fun shortStatusAndItsExplanationNameTheStopTheSameWay() {
+        for ((locale, word) in listOf(java.util.Locale.ENGLISH to "paused", java.util.Locale.SIMPLIFIED_CHINESE to "暂停")) {
+            val conf = android.content.res.Configuration(compose.activity.resources.configuration).apply { setLocale(locale) }
+            val res = compose.activity.createConfigurationContext(conf).resources
+            for (id in listOf(R.string.short_HOME_UNREACHABLE, R.string.reason_HOME_UNREACHABLE, R.string.short_CLOUD_UNREACHABLE, R.string.reason_CLOUD_UNREACHABLE)) {
+                val text = res.getString(id)
+                org.junit.Assert.assertTrue("$locale: \"$text\" says \"$word\"", text.contains(word))
+            }
+        }
+    }
+
     @Test fun connectedLineShowsTheVerifiedExits() {
         show()
         snapshot = UiFixtures.connected()

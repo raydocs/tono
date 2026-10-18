@@ -18,6 +18,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
@@ -37,6 +38,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -391,6 +393,99 @@ class HorizonUiDeviceTest {
     }
 
     /** Window → screen offset for UiDevice coordinates. */
+    /**
+     * Without touch: a keyboard (Tab, Enter), a D-pad or switch access moves focus through Home in the
+     * order the screen reads it, every stop draws a visible ring, and Enter acts. Then the
+     * accessibility action TalkBack sends on a double-tap (ACTION_CLICK on the platform node, not the
+     * Compose test API) works on every Home control. Real key events through Android's input system.
+     */
+    @Test fun u9_keyboardFocusIsVisibleAndAccessibilityActionsWork() {
+        show()
+        set(DeviceFixtures.connected())
+        Thread.sleep(500)
+        val automation = instrumentation.uiAutomation
+        fun ringBand(tag: String): IntArray {
+            val b = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInWindow
+            val top = windowTop()
+            val shot = automation.takeScreenshot()
+            // The outer 3 dp of the control, where the ring is drawn; the label inside is not compared.
+            val inset = (3 * context.resources.displayMetrics.density).toInt()
+            val l = b.left.toInt(); val t = b.top.toInt() + top; val r = b.right.toInt(); val btm = b.bottom.toInt() + top
+            val px = mutableListOf<Int>()
+            for (x in l until r) for (y in t until btm) {
+                if (x - l < inset || r - 1 - x < inset || y - t < inset || btm - 1 - y < inset) px += shot.getPixel(x, y)
+            }
+            return px.toIntArray()
+        }
+        fun changed(a: IntArray, b: IntArray) = a.indices.count { i ->
+            val p = a[i]; val q = b[i]
+            Math.abs(android.graphics.Color.red(p) - android.graphics.Color.red(q)) + Math.abs(android.graphics.Color.green(p) - android.graphics.Color.green(q)) +
+                Math.abs(android.graphics.Color.blue(p) - android.graphics.Color.blue(q)) > 60
+        }.toDouble() / a.size
+        val tags = listOf("primary", "exit", "settings", "details")
+        val unfocused = tags.associateWith(::ringBand)
+        val report = mutableListOf<String>()
+        for ((i, tag) in tags.withIndex()) {
+            device.pressKeyCode(android.view.KeyEvent.KEYCODE_TAB)
+            compose.waitForIdle()
+            Thread.sleep(250)
+            val focused = compose.onAllNodes(androidx.compose.ui.test.isFocused(), useUnmergedTree = true).fetchSemanticsNodes()
+            val holder = focused.firstOrNull()?.let { n ->
+                generateSequence<androidx.compose.ui.semantics.SemanticsNode>(n) { it.parent }.firstNotNullOfOrNull { it.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.TestTag) }
+            }
+            val ring = changed(unfocused.getValue(tag), ringBand(tag))
+            report += "Tab ${i + 1} → ${holder ?: "(nothing focused)"}; ring pixels changed on \"$tag\": ${"%.0f".format(ring * 100)} %"
+            if (i == 0) shot("fixture-25-keyboard-focus")
+            assertEquals("Tab stop ${i + 1}: $report", tag, holder)
+            assertTrue("focus on \"$tag\" is visible: $report", ring > 0.2)
+        }
+        // Back to the capsule (Shift+Tab three times) and act on it with Enter.
+        repeat(3) { device.pressKeyCode(android.view.KeyEvent.KEYCODE_TAB, android.view.KeyEvent.META_SHIFT_ON); compose.waitForIdle() }
+        calls.clear()
+        device.pressKeyCode(android.view.KeyEvent.KEYCODE_ENTER)
+        compose.waitForIdle()
+        report += "Shift+Tab ×3, Enter → ${calls.joinToString().ifEmpty { "(nothing)" }}"
+        assertEquals("Enter on the focused capsule: $report", listOf("disconnect"), calls.toList())
+
+        // TalkBack's double-tap: ACTION_CLICK on the platform accessibility node of each control.
+        fun nodeFor(label: String): android.view.accessibility.AccessibilityNodeInfo? {
+            fun search(n: android.view.accessibility.AccessibilityNodeInfo?): android.view.accessibility.AccessibilityNodeInfo? {
+                if (n == null) return null
+                val own = listOfNotNull(n.contentDescription, n.text).joinToString(" ")
+                if (n.isClickable && (own.contains(label) || (0 until n.childCount).any { n.getChild(it)?.text?.contains(label) == true })) return n
+                return (0 until n.childCount).firstNotNullOfOrNull { search(n.getChild(it)) }
+            }
+            return search(automation.rootInActiveWindow)
+        }
+        val actions = listOf(
+            str(R.string.action_disconnect) to listOf("disconnect"),
+            "Tokyo" to listOf("refreshCatalog"),
+        )
+        for ((label, expected) in actions) {
+            calls.clear()
+            val node = nodeFor(label)
+            assertTrue("platform node for \"$label\"", node != null)
+            assertTrue("ACTION_CLICK accepted on \"$label\"", node!!.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))
+            compose.waitForIdle()
+            report += "ACTION_CLICK \"$label\" → ${calls.joinToString().ifEmpty { "(nothing)" }}"
+            assertEquals("accessibility click on \"$label\": $report", expected, calls.toList())
+            if (label == "Tokyo") { assertTrue("Lines sheet opened", compose.onAllNodesWithText(str(R.string.lines_title)).fetchSemanticsNodes().isNotEmpty()); back() }
+        }
+        for ((label, opened) in listOf(str(R.string.details) to str(R.string.lane_video), str(R.string.settings_title) to str(R.string.settings_title))) {
+            val node = nodeFor(label)
+            assertTrue("platform node for \"$label\"", node != null)
+            assertTrue("ACTION_CLICK accepted on \"$label\"", node!!.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))
+            compose.waitForIdle()
+            Thread.sleep(400)
+            // Text, not a content description: on Home "Settings" is only the gear's description.
+            val shown = compose.onAllNodesWithText(opened).fetchSemanticsNodes().isNotEmpty()
+            report += "ACTION_CLICK \"$label\" → \"$opened\" shown: $shown"
+            assertTrue("accessibility click on \"$label\" opens it: $report", shown)
+            back()
+        }
+        File(out, "keyboard-report.txt").writeText(report.joinToString("\n") + "\n")
+    }
+
     private fun windowTop(): Int {
         val loc = IntArray(2)
         instrumentation.runOnMainSync { compose.activity.window.decorView.getLocationOnScreen(loc) }

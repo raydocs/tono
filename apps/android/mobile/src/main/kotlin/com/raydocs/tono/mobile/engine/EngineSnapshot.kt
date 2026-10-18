@@ -63,6 +63,8 @@ data class EngineSnapshot(
     val underlyingIpv6: Boolean = false,
     val coreVersion: String = "",
     val catalogRevision: Long = 0,
+    /** Debug builds only: the engine talks to a local fixture control plane, not the Tono API ([LocalTestServer]). */
+    val localTestServer: Boolean = false,
 ) {
     val tunnelUp: Boolean get() = phase == Phase.CONNECTED || phase == Phase.DEGRADED
 
@@ -89,6 +91,7 @@ data class EngineSnapshot(
             "ipv6" to underlyingIpv6,
             "core" to coreVersion,
             "revision" to catalogRevision,
+            "localTestServer" to localTestServer,
         ),
     )
 
@@ -128,6 +131,7 @@ data class EngineSnapshot(
                 underlyingIpv6 = m["ipv6"] as Boolean,
                 coreVersion = m["core"] as String,
                 catalogRevision = (m["revision"] as Number).toLong(),
+                localTestServer = m["localTestServer"] as? Boolean ?: false,
             )
         }
     }

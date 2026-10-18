@@ -1,11 +1,8 @@
 package com.raydocs.tono.mobile
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.unit.dp
+import androidx.activity.enableEdgeToEdge
 import com.raydocs.tono.mobile.engine.EngineSnapshot
 import com.raydocs.tono.mobile.engine.ExitProbe
 import com.raydocs.tono.mobile.engine.HomeKind
@@ -74,24 +71,25 @@ object Captures {
 
 /**
  * Every fixture screen carries this mark in the picture itself, so a screenshot passed around on its
- * own cannot be mistaken for a real connection. Hidden from accessibility so it does not change what
- * the screen-reader and ATF checks see.
+ * own cannot be mistaken for a real connection. It sits in the status-bar band, where it covers no
+ * title (round 5 put it over "Apps that bypass Tono"), and is hidden from accessibility so it does
+ * not change what the screen-reader and ATF checks see. The host is drawn edge to edge, as
+ * MainActivity is, so fixture layouts match the shipped app's.
  */
 @androidx.compose.runtime.Composable
 fun FixtureFrame(content: @androidx.compose.runtime.Composable () -> Unit) {
+    val activity = androidx.activity.compose.LocalActivity.current as? androidx.activity.ComponentActivity
+    androidx.compose.runtime.LaunchedEffect(activity) {
+        activity?.enableEdgeToEdge(
+            statusBarStyle = androidx.activity.SystemBarStyle.dark(0),
+            navigationBarStyle = androidx.activity.SystemBarStyle.dark(0),
+        )
+    }
     androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
         content()
-        androidx.compose.material3.Text(
+        com.raydocs.tono.mobile.ui.StatusBandMark(
             "FIXTURE · no tunnel",
-            color = androidx.compose.ui.graphics.Color(0xFF2A1406),
-            style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
-            modifier = androidx.compose.ui.Modifier
-                .align(androidx.compose.ui.Alignment.TopEnd)
-                .statusBarsPadding()
-                .padding(top = 18.dp, end = 16.dp)
-                .background(androidx.compose.ui.graphics.Color(0xFFFFB4A0), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-                .padding(horizontal = 8.dp, vertical = 3.dp)
-                .clearAndSetSemantics { },
+            androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.TopCenter).clearAndSetSemantics { },
         )
     }
 }

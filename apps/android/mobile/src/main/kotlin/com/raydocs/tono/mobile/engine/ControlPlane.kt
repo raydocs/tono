@@ -1,5 +1,6 @@
 package com.raydocs.tono.mobile.engine
 
+import com.raydocs.tono.mobile.BuildConfig
 import com.raydocs.tono.routing.Json
 import com.raydocs.tono.routing.asObject
 import java.io.BufferedInputStream
@@ -32,6 +33,12 @@ class ControlPlane(
     private val base = URI(baseUrl)
     private val host = base.host
     private val basePath = base.path.trimEnd('/')
+    /** Plain HTTP exists only for the debug-build local test server ([LocalTestServer]); never relayed. */
+    private val local = base.scheme == "http"
+
+    init {
+        require(!local || (BuildConfig.DEBUG && LocalTestServer.isAllowed(baseUrl))) { "plain HTTP is only for the local test server" }
+    }
 
     data class Response(val status: Int, val body: Map<String, Any?>?)
 
@@ -42,7 +49,8 @@ class ControlPlane(
 
     private fun call(method: String, path: String, body: String?, bearer: String?): Map<String, Any?> {
         var lastNetwork: IOException? = null
-        val paths = listOf<Pair<String, Pair<String, Int>>>("system_dns" to (host to 443)) + relays.map { "relay" to it }
+        val paths = if (local) listOf("local" to (host to base.port))
+        else listOf<Pair<String, Pair<String, Int>>>("system_dns" to (host to 443)) + relays.map { "relay" to it }
         for ((kind, target) in paths) {
             val response = try {
                 exchange(kind, target.first, target.second, method, path, body, bearer)
@@ -69,6 +77,7 @@ class ControlPlane(
         val raw = Socket()
         raw.connect(InetSocketAddress(dialHost, port), CONNECT_TIMEOUT_MS)
         raw.soTimeout = READ_TIMEOUT_MS
+        if (kind == "local") raw.use { return send(it, method, path, body, bearer, "$host:$port", kind) }
         val socket = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(raw, host, port, true) as SSLSocket
         socket.use { tls ->
             tls.sslParameters = tls.sslParameters.apply {
@@ -79,28 +88,32 @@ class ControlPlane(
             if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(host, tls.session)) {
                 throw IOException("certificate does not match $host")
             }
-            val payload = body?.toByteArray(Charsets.UTF_8)
-            val request = buildString {
-                append("$method $basePath/$path HTTP/1.1\r\n")
-                append("Host: $host\r\n")
-                append("User-Agent: Tono-Android/$clientVersion\r\n")
-                append("Accept: application/json\r\n")
-                append("X-Tono-Client: android/$clientVersion\r\n")
-                append("X-Tono-Path: $kind\r\n")
-                append("Connection: close\r\n")
-                bearer?.let { append("Authorization: Bearer $it\r\n") }
-                if (payload != null) {
-                    append("Content-Type: application/json\r\n")
-                    append("Content-Length: ${payload.size}\r\n")
-                }
-                append("\r\n")
-            }
-            val out = tls.getOutputStream()
-            out.write(request.toByteArray(Charsets.US_ASCII))
-            payload?.let(out::write)
-            out.flush()
-            return readResponse(BufferedInputStream(tls.getInputStream()))
+            return send(tls, method, path, body, bearer, host, kind)
         }
+    }
+
+    private fun send(socket: Socket, method: String, path: String, body: String?, bearer: String?, hostHeader: String, kind: String): Response {
+        val payload = body?.toByteArray(Charsets.UTF_8)
+        val request = buildString {
+            append("$method $basePath/$path HTTP/1.1\r\n")
+            append("Host: $hostHeader\r\n")
+            append("User-Agent: Tono-Android/$clientVersion\r\n")
+            append("Accept: application/json\r\n")
+            append("X-Tono-Client: android/$clientVersion\r\n")
+            append("X-Tono-Path: $kind\r\n")
+            append("Connection: close\r\n")
+            bearer?.let { append("Authorization: Bearer $it\r\n") }
+            if (payload != null) {
+                append("Content-Type: application/json\r\n")
+                append("Content-Length: ${payload.size}\r\n")
+            }
+            append("\r\n")
+        }
+        val out = socket.getOutputStream()
+        out.write(request.toByteArray(Charsets.US_ASCII))
+        payload?.let(out::write)
+        out.flush()
+        return readResponse(BufferedInputStream(socket.getInputStream()))
     }
 
     companion object {

@@ -40,6 +40,32 @@ class EngineUnitTest {
         assertThrows(IOException::class.java) { response("") }
     }
 
+    /** The debug-only local test server: loopback over plain HTTP and nothing else; never relayed. */
+    @Test fun plainHttpOnlyForTheLoopbackTestServer() {
+        for (url in listOf("http://10.0.2.2:28080/api/v1/", "http://192.168.1.2:28080/api/v1/", "http://127.0.0.1/api/v1/",
+            "http://127.0.0.1:28080/other/", "http://localhost:28080/api/v1/", "http://127.0.0.1:28080@evil.example/api/v1/")) {
+            assertFalse(url, LocalTestServer.isAllowed(url))
+            assertThrows(url, IllegalArgumentException::class.java) { ControlPlane(url, "t") }
+        }
+        val server = java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
+        val seen = StringBuilder()
+        val t = Thread {
+            server.accept().use { c ->
+                val input = c.getInputStream().bufferedReader()
+                while (true) { val line = input.readLine() ?: break; if (line.isEmpty()) break; seen.append(line).append('\n') }
+                c.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n{\"ok\":true}".toByteArray())
+            }
+        }.apply { start() }
+        val url = "http://127.0.0.1:${server.localPort}/api/v1/"
+        assertTrue(LocalTestServer.isAllowed(url))
+        // Relays given on purpose: the local path must not fall back to them.
+        val body = ControlPlane(url, "t", relays = listOf("203.0.113.1" to 1)).get("exit-catalog", "tok")
+        t.join(5_000)
+        server.close()
+        assertEquals(true, body["ok"])
+        assertTrue(seen.toString(), seen.startsWith("GET /api/v1/exit-catalog HTTP/1.1\nHost: 127.0.0.1:${server.localPort}\n"))
+    }
+
     @Test fun nonJsonBodyIsNull() {
         assertNull(response("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 5\r\n\r\n<html").body)
     }

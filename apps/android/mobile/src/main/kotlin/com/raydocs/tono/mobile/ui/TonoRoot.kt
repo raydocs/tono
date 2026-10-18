@@ -17,7 +17,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import com.raydocs.tono.mobile.R
 import com.raydocs.tono.mobile.engine.EngineSnapshot
 import com.raydocs.tono.mobile.engine.Phase
 import com.raydocs.tono.routing.RoutingMode
@@ -104,6 +108,10 @@ fun TonoRoot(snapshot: EngineSnapshot?, actions: TonoActions) {
                     )
                 }
             }
+        }
+        // Debug builds pointed at a local fixture server say so on every screen, sign-in included.
+        if (s?.localTestServer == true) {
+            StatusBandMark(stringResource(R.string.local_test_server), Modifier.align(Alignment.TopCenter).testTag("local-test-server"))
         }
     }
 }

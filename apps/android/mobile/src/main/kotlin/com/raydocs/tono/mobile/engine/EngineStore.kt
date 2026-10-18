@@ -22,6 +22,8 @@ data class EngineSettings(
     val catalogKey: String? = null,
     val catalogRevision: Long = -1,
     val catalogFetchedAtMs: Long = 0,
+    /** The control plane the stored account belongs to; null means the Tono API (accounts made before this field). */
+    val accountApi: String? = null,
 )
 
 /**
@@ -55,6 +57,7 @@ class EngineStore(context: Context) {
             catalogKey = parsed["catalogKey"] as String?,
             catalogRevision = (parsed["catalogRevision"] as? Number)?.toLong() ?: -1,
             catalogFetchedAtMs = (parsed["catalogFetchedAtMs"] as? Number)?.toLong() ?: 0,
+            accountApi = parsed["accountApi"] as String?,
         )
     }
 
@@ -68,6 +71,7 @@ class EngineStore(context: Context) {
                     "mode" to s.mode.name, "selectedNode" to s.selectedNode, "excludedPackages" to s.excludedPackages,
                     "wantConnected" to s.wantConnected, "catalogKey" to s.catalogKey,
                     "catalogRevision" to s.catalogRevision, "catalogFetchedAtMs" to s.catalogFetchedAtMs,
+                    "accountApi" to s.accountApi,
                 ),
             ),
         )
@@ -90,7 +94,7 @@ class EngineStore(context: Context) {
 
     fun clearAccount() {
         vault.delete(setOf(ACCESS, REFRESH, CATALOG))
-        update { it.copy(email = null, selectedNode = null, wantConnected = false, catalogKey = null, catalogRevision = -1, catalogFetchedAtMs = 0) }
+        update { it.copy(email = null, selectedNode = null, wantConnected = false, catalogKey = null, catalogRevision = -1, catalogFetchedAtMs = 0, accountApi = null) }
     }
 
     companion object {

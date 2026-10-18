@@ -61,6 +61,23 @@ Round 5 (after two independent reviews, `docs/agent-reports/2026-10-18-mobile-*`
 - Device tests run on two emulators side by side (`system` and `ui` halves), each with one retry on
   a fresh emulator; both halves must pass.
 
+Round 6:
+- **A real tunnel against local stand-ins.** Debug builds can be pointed at a local fixture control
+  plane (`engine/LocalTestServer`). This is only allowed on the phone's own loopback over plain HTTP
+  (CI forwards it with `adb reverse`), only through a file in app-private storage, and only in debug builds. The account is bound
+  to the server it was made on, and every screen shows "Local test server · not Tono" while it is
+  active. Catalog admission is unchanged. `scripts/local-tunnel/fixture-servers.py` runs the stand-in
+  control plane, a VLESS Reality cloud exit and a SOCKS5 Home exit (the pinned sing-box CLI) on the
+  CI host.
+- **Keyboard, D-pad and switch access.** Focus shows a ring on every Home control and on the
+  sign-in buttons; Enter acts.
+- **Other screen shapes.** On a landscape phone, Home keeps a thumb-width column and the sun moves
+  aside. Sign-in centres its card.
+- **Copy.** A stopped hop is "paused" (暂停) everywhere: the status line, Details and the routing
+  scope.
+- **Fixture captures.** The fixture mark sits in the status-bar band, and fixture hosts draw edge to
+  edge as the app does.
+
 ## Where it lives
 
 `rw8/Tono-droid` (Amp) is the source; `scripts/export-android-monorepo.sh <raydocs/tono checkout>`
@@ -202,16 +219,31 @@ internal test builds.
     - The motion frame by frame: the test clock advances 16 ms per frame and the device renders
       each one (`frames/`). This shows timing and easing, not real-time smoothness.
     - Widget and notification states, labelled "Fixture" on screen.
+  - `local-*`: the shipped app on a real tunnel to local stand-in servers, not Tono's
+    (`LocalTunnelDeviceTest`).
+    - The flow: sign-in, Android's consent dialog, Connected after both exit checks, Details,
+      Disconnect (the VPN network goes away) and sign-out.
+    - Requests made from inside the tunnel to a video site, an AI site and an ordinary site. CI
+      checks them against the stand-in exits' own logs: cloud, Home through the cloud, and direct.
+  - Keyboard: Tab order, a visible focus ring and Enter, all through Android's input system; TalkBack's
+    ACTION_CLICK on every Home control's platform node.
+  - A small phone (360 × 640 dp) and landscape: no truncated text, the accessibility contract holds,
+    and every Home control can be reached.
+  - `perf.txt`: cold start, APK size, frame stats and memory on the emulator. These are
+    measurements, not a gate.
 - Screenshots (no emulator needed):
   `./gradlew :android:mobile:testDebugUnitTest -Ptono.screenshots --tests '*ScreenshotRender*'`
   → `android/mobile/build/screenshots/`.
 
 ## Not yet verified
 
-- No real sign-in or connection. That needs an allowlisted Tono account (the code arrives on the
-  user's phone) and a catalog with an assigned Home. TUN, DNS, QUIC fallback, always-on, app
-  exclusion and the Home second hop are therefore untested on Android. The tile, widget and
-  notifications have only been seen signed out (real) or with fixture states.
+- No sign-in or connection against Tono's own service. That needs an allowlisted Tono account (the
+  code arrives on the user's phone) and a catalog with an assigned Home.
+  - What the local stand-ins have covered: the TUN, the three routing classes and the Home second
+    hop, but only against stand-in servers on the CI host.
+  - Still untested: QUIC fallback, always-on, app exclusion, network changes, and Tono's real exits
+    and control plane.
+  - The tile, widget and notifications have only been seen signed out (real) or with fixture states.
 - Real hardware. The CI emulator renders in software (swiftshader, about 5 fps under the animated
   scene), so motion smoothness, GPU blur cost, touch feel and battery are unmeasured. The blur
   itself does render there (stripes behind glass drop to 0.1 %), but its look on a phone panel has

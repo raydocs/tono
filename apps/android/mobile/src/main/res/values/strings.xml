@@ -47,8 +47,8 @@
     <string name="reason_NETWORK">Can\'t reach Tono. Check the network and retry.</string>
     <string name="reason_RATE_LIMITED">Too many attempts. Wait a moment.</string>
     <string name="reason_CORE_START">The tunnel core didn\'t start. Retry; if it keeps failing, restart the phone.</string>
-    <string name="reason_CLOUD_UNREACHABLE">The cloud exit isn\'t answering. Matched traffic is held, not sent direct. Try another line.</string>
-    <string name="reason_HOME_UNREACHABLE">Home isn\'t answering. AI traffic is held, not sent direct. Other apps still work.</string>
+    <string name="reason_CLOUD_UNREACHABLE">The cloud exit isn\'t answering. Matched traffic is paused, not sent direct. Try another line.</string>
+    <string name="reason_HOME_UNREACHABLE">Home isn\'t answering. AI is paused, not sent direct. Other apps still work.</string>
     <string name="reason_REVOKED">Another VPN took over or the permission was removed.</string>
     <string name="reason_DENIED">VPN permission was declined.</string>
     <string name="reason_SESSION_ENDED">Your sign-in ended. Please sign in again.</string>
@@ -89,7 +89,7 @@
     <string name="mode_stable_desc">AI → Home · everything else → cloud</string>
     <string name="mode_applies">Changes apply immediately to the running tunnel.</string>
     <string name="routing_scope_title">What Tono can and cannot recognise</string>
-    <string name="routing_scope">Order: 21 cloud video exceptions → 166 AI / named Home entries (plus the Anthropic address range and the Claude, ChatGPT and Grok apps) → explicit cloud list → everything else direct. Matched traffic that fails is blocked, never retried directly; matched UDP/QUIC is refused so apps fall back to TCP. Apps using ECH, their own DNS-over-HTTPS, or cached addresses can hide an AI service; that traffic then goes direct. Unrecognised AI is not guaranteed to use Home.</string>
+    <string name="routing_scope">Order: 21 cloud video exceptions → 166 AI / named Home entries (plus the Anthropic address range and the Claude, ChatGPT and Grok apps) → explicit cloud list → everything else direct. Matched traffic that fails is paused, never sent direct; matched UDP/QUIC is refused so apps fall back to TCP. Apps using ECH, their own DNS-over-HTTPS, or cached addresses can hide an AI service; that traffic then goes direct. Unrecognised AI is not guaranteed to use Home.</string>
     <string name="routing_platform">On Android all apps, all TCP/UDP ports, IPv4 and IPv6 enter the tunnel. LAN, link-local and multicast stay outside. DNS for direct names uses your network\'s resolver; matched names never reach it. Hotspot clients and apps you exclude below bypass Tono entirely.</string>
     <string name="settings_apps">Apps that bypass Tono</string>
     <string name="settings_apps_none">None — every app uses Tono\'s rules</string>
@@ -143,7 +143,8 @@
     <string name="short_NETWORK">Can\'t reach Tono</string>
     <string name="short_RATE_LIMITED">Too many attempts</string>
     <string name="short_CORE_START">Core didn\'t start</string>
-    <string name="short_CLOUD_UNREACHABLE">Cloud not answering · matched traffic held</string>
+    <string name="short_CLOUD_UNREACHABLE">Cloud not answering · matched traffic paused</string>
+    <string name="local_test_server">Local test server · not Tono</string>
     <string name="short_HOME_UNREACHABLE">Home not answering · AI paused</string>
     <string name="short_REVOKED">Another VPN took over</string>
     <string name="short_DENIED">VPN permission needed</string>

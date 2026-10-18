@@ -56,6 +56,10 @@ class TonoVpnService : VpnService() {
     private val io = Executors.newCachedThreadPool()
     private val listeners = RemoteCallbackList<ITonoEngineListener>()
     private val snapshot = AtomicReference(EngineSnapshot(coreVersion = BuildConfig.SING_BOX_VERSION))
+
+    /** A signed-out snapshot; keeps the local-test-server mark, which belongs to the process, not the account. */
+    private fun signedOut(phase: Phase = Phase.SIGNED_OUT, reasonCode: String? = null, mode: RoutingMode, excluded: List<String> = emptyList()) =
+        EngineSnapshot(coreVersion = BuildConfig.SING_BOX_VERSION, phase = phase, reasonCode = reasonCode, mode = mode, excludedPackages = excluded, localTestServer = localTestServer)
     private lateinit var store: EngineStore
     private lateinit var api: ControlPlane
     private lateinit var monitor: NetworkMonitor
@@ -66,11 +70,16 @@ class TonoVpnService : VpnService() {
     private var trafficTask: ScheduledFuture<*>? = null
     private var foreground = false
     private var generation = 0L
+    private lateinit var apiBase: String
+    private var localTestServer = false
 
     override fun onCreate() {
         super.onCreate()
         store = EngineStore(this)
-        api = ControlPlane(BuildConfig.API_BASE, BuildConfig.VERSION_NAME.substringBefore('-'))
+        val local = LocalTestServer.apiBase(this)
+        localTestServer = local != null
+        apiBase = local ?: BuildConfig.API_BASE
+        api = ControlPlane(apiBase, BuildConfig.VERSION_NAME.substringBefore('-'))
         val connectivity = getSystemService(ConnectivityManager::class.java)
         monitor = NetworkMonitor(connectivity)
         monitor.start()
@@ -132,6 +141,9 @@ class TonoVpnService : VpnService() {
     }
 
     private fun restore() {
+        // An account belongs to the control plane it was made on: switching between the Tono API and a
+        // local test server signs out instead of sending one server's tokens to the other.
+        if (store.refreshToken() != null && (store.settings().accountApi ?: BuildConfig.API_BASE) != apiBase) store.clearAccount()
         val s = store.settings()
         val signedIn = store.refreshToken() != null
         val cached = if (signedIn) store.cachedCatalogBody()?.let { runCatching { CatalogAdmission.admit(Json.parse(it).asObject()) }.getOrNull() } else null
@@ -144,6 +156,7 @@ class TonoVpnService : VpnService() {
                 excludedPackages = s.excludedPackages,
                 selectedNode = s.selectedNode,
                 underlyingIpv6 = monitor.current?.globalIpv6 == true,
+                localTestServer = localTestServer,
             ).withCatalog(cached)
         }
         if (signedIn && cached == null) refreshCatalogQuietly()
@@ -212,7 +225,7 @@ class TonoVpnService : VpnService() {
                     store.saveTokens(access, refresh)
                     accessToken = access
                     val email = ((body["user"] as? Map<*, *>)?.get("email") as? String) ?: login.email
-                    store.update { it.copy(email = email) }
+                    store.update { it.copy(email = email, accountApi = apiBase) }
                     update { it.copy(phase = Phase.IDLE, email = email, login = LoginView(), reasonCode = null) }
                     refreshCatalogQuietly()
                 }.onFailure { e ->
@@ -231,7 +244,7 @@ class TonoVpnService : VpnService() {
         store.clearAccount()
         accessToken = null
         catalog = null
-        update { EngineSnapshot(coreVersion = BuildConfig.SING_BOX_VERSION, mode = it.mode, excludedPackages = it.excludedPackages) }
+        update { signedOut(mode = it.mode, excluded = it.excludedPackages) }
     }
 
     private fun bearer(forceRefresh: Boolean = false): String {
@@ -424,7 +437,7 @@ class TonoVpnService : VpnService() {
         store.clearAccount()
         accessToken = null
         catalog = null
-        update { EngineSnapshot(coreVersion = BuildConfig.SING_BOX_VERSION, phase = Phase.SIGNED_OUT, reasonCode = "SESSION_ENDED", mode = it.mode) }
+        update { signedOut(reasonCode = "SESSION_ENDED", mode = it.mode) }
     }
 
     private fun stopCore() {

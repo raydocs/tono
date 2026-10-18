@@ -89,7 +89,8 @@ fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47
         // Sun travels from below the horizon (night) to just clear of it (connected), staying under
         // the headline so text never sits on the sun.
         val sunR = size.minDimension * 0.13f
-        val sunX = size.width * 0.5f
+        // Wider than tall (a landscape phone): the sun moves off the controls column, towards the moon.
+        val sunX = size.width * if (size.width > size.height) 0.68f else 0.5f
         val sunY = horizonY + sunR * 1.05f - t * sunR * 2.25f
         val glowPulse = if (connecting && !reduce) 0.75f + 0.25f * breath else 1f
         clipRect(bottom = horizonY) {

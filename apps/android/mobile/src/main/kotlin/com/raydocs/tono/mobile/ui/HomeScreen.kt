@@ -17,6 +17,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -38,6 +39,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.shape.CircleShape
@@ -126,7 +128,8 @@ fun HomeScreen(
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 Column(Modifier.fillMaxWidth().verticalScroll(scroll).heightIn(min = maxHeight), verticalArrangement = Arrangement.SpaceBetween) {
                     TopBar()
-                    Column(Modifier.fillMaxWidth().swipeUpTo(onOpenDetails, enabled = scroll.maxValue == 0).navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 8.dp)) {
+                    // A thumb-width column: on a landscape phone or a tablet the capsules do not stretch across the sea.
+                    Column(Modifier.widthIn(max = 560.dp).fillMaxWidth().swipeUpTo(onOpenDetails, enabled = scroll.maxValue == 0).navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 8.dp)) {
                         StateHeader(s)
                         Spacer(Modifier.height(18.dp))
                         PrimaryCapsule(s, onConnect, onDisconnect)
@@ -288,6 +291,7 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = 58.dp)
+                .focusRing(source, shape)
                 .clickable(source, indication = null, enabled = action != PrimaryAction.WAIT, role = Role.Button, onClickLabel = clickLabel) {
                     view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                     when (action) {
@@ -339,9 +343,11 @@ private fun ExitPill(s: EngineSnapshot, onOpenLines: () -> Unit) {
     val name = node?.let { Format.city(it.city, zh) + (if (shared && it.label.isNotBlank()) " · ${it.label}" else "") } ?: stringResource(R.string.line_pick)
     val latency = node?.latencyMs?.let { stringResource(R.string.latency_ms, it.toInt()) }
     val pick = stringResource(R.string.lines_title)
+    val source = remember { MutableInteractionSource() }
     Glass(RoundedCornerShape(24.dp), Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("exit"), tintAlpha = 0.26f) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(role = Role.Button, onClickLabel = pick, onClick = onOpenLines).padding(horizontal = 18.dp),
+            Modifier.fillMaxWidth().heightIn(min = 52.dp).focusRing(source, RoundedCornerShape(24.dp))
+                .clickable(source, LocalIndication.current, role = Role.Button, onClickLabel = pick, onClick = onOpenLines).padding(horizontal = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -358,6 +364,8 @@ private fun Footer(s: EngineSnapshot, onOpenDetails: () -> Unit, onOpenSettings:
     val attention = s.usingCachedCatalog || s.phase == Phase.DEGRADED ||
         (s.tunnelUp && (s.homeProbe.state == ProbeState.FAILED || s.cloudProbe.state == ProbeState.FAILED))
     val settings = stringResource(R.string.settings_title)
+    val gearSource = remember { MutableInteractionSource() }
+    val detailsSource = remember { MutableInteractionSource() }
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
         AnimatedVisibility(s.tunnelUp, enter = fadeIn(tween(350)), exit = fadeOut(tween(220)), modifier = Modifier.weight(1f)) {
             Text(
@@ -370,12 +378,12 @@ private fun Footer(s: EngineSnapshot, onOpenDetails: () -> Unit, onOpenSettings:
         Glass(RoundedCornerShape(24.dp), tintAlpha = 0.24f) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
-                    Modifier.size(48.dp).clickable(role = Role.Button, onClick = onOpenSettings).semantics { contentDescription = settings }.testTag("settings"),
+                    Modifier.size(48.dp).focusRing(gearSource, CircleShape).clickable(gearSource, LocalIndication.current, role = Role.Button, onClick = onOpenSettings).semantics { contentDescription = settings }.testTag("settings"),
                     contentAlignment = Alignment.Center,
                 ) { GlyphIcon(Glyph.GEAR, TonoColors.TextPrimary, size = 20.dp) }
                 Box(Modifier.width(1.dp).height(20.dp).background(TonoColors.Hairline))
                 Row(
-                    Modifier.clickable(role = Role.Button, onClick = onOpenDetails).heightIn(min = 48.dp).padding(start = 14.dp, end = 14.dp).testTag("details"),
+                    Modifier.focusRing(detailsSource, RoundedCornerShape(24.dp)).clickable(detailsSource, LocalIndication.current, role = Role.Button, onClick = onOpenDetails).heightIn(min = 48.dp).padding(start = 14.dp, end = 14.dp).testTag("details"),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (attention) { StatusDot(TonoColors.Warning, size = 6); Spacer(Modifier.width(7.dp)) }

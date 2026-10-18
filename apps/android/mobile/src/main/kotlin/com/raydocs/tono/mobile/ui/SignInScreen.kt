@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -70,7 +71,7 @@ fun SignInScreen(login: LoginView, onSend: (String) -> Unit, onVerify: (String) 
                 Text(stringResource(R.string.signin_intro), style = MaterialTheme.typography.bodyLarge, color = TonoColors.TextSecondary)
             }
             Spacer(Modifier.weight(1f))
-            Glass(RoundedCornerShape(28.dp), Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp), tintAlpha = 0.52f) {
+            Glass(RoundedCornerShape(28.dp), Modifier.align(Alignment.CenterHorizontally).navigationBarsPadding().padding(12.dp).widthIn(max = 560.dp).fillMaxWidth(), tintAlpha = 0.52f) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 AnimatedContent(codeStep, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(220)) }, label = "step") { step ->
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
