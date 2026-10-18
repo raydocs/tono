@@ -20,7 +20,7 @@ struct DetailsSheet: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 18) {
                 Text(L.t("details")).tonoFont(22, .semibold, relativeTo: .title2).foregroundStyle(TonoColor.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
@@ -32,12 +32,6 @@ struct DetailsSheet: View {
                     }
                 }
                 section(L.t("details_routes")) { lanes }
-                section(L.t("settings_check")) {
-                    VStack(alignment: .leading, spacing: 10) { RouteCheck() }
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentCard(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                }
                 section(L.t("details_mode")) { modePicker }
                 Button(action: onSettings) {
                     HStack(spacing: 12) {
@@ -93,6 +87,11 @@ struct DetailsSheet: View {
             LaneDivider()
             Lane(glyph: .apps, name: L.t("lane_other"), dest: L.t(model.mode == .stable ? "lane_cloud" : "lane_local"),
                  probe: model.mode == .stable ? model.cloudProbe : nil, live: live)
+            LaneDivider()
+            // "Where does a site go?" in the same card as where traffic goes (moved out of Settings);
+            // the field's prompt carries the question, so it needs no section of its own.
+            VStack(alignment: .leading, spacing: 8) { RouteCheck() }
+                .padding(.horizontal, 14).padding(.vertical, 10)
         }
         .padding(.vertical, 4)
         .contentCard(RoundedRectangle(cornerRadius: 18, style: .continuous))

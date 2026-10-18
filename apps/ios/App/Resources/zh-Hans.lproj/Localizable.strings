@@ -89,8 +89,7 @@
 "routing_scope_title" = "Tono 能识别什么、不能识别什么";
 "routing_scope" = "优先级：21 项云端视频例外 → 166 项 AI／指定家宽条目（另含 Anthropic 地址段）→ 明确的云端列表 → 其他全部直连。命中的流量失败时会被拦住，不会退回直连；命中的 UDP/QUIC 会被拒绝，应用会改用 TCP。使用 ECH、自带 DoH 或缓存地址的应用可能隐藏 AI 身份，这部分会走直连；无法保证未识别的 AI 走家宽。";
 "routing_platform" = "在 iPhone 上，所有应用、所有 TCP/UDP 端口以及 IPv4、IPv6 都进入隧道；局域网、链路本地、组播，以及 Apple 推送和蜂窝服务（电话、短信）不进入。直连域名用你当前网络的 DNS 解析，命中名单的域名不会发给它。iOS 没有按应用分流：Tono 只按域名和 Anthropic 地址段识别 AI，也无法单独排除或加入某个应用。";
-"settings_check" = "这个网址会怎么走？";
-"check_hint" = "例如 claude.ai";
+"check_hint_inline" = "查一个网址，例如 claude.ai";
 "check_go" = "检查";
 "check_result" = "TCP → %1$@ · UDP → %2$@";
 "verdict_HOME" = "家宽";

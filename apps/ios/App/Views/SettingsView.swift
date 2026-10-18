@@ -175,7 +175,7 @@ struct RouteCheck: View {
         let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
                                                   : AnyLayout(HStackLayout(spacing: 10))
         layout {
-            TonoField(title: L.t("check_hint"), text: $host, wraps: true)
+            TonoField(title: L.t("check_hint_inline"), text: $host, wraps: true)
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()

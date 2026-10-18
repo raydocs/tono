@@ -89,8 +89,7 @@
 "routing_scope_title" = "What Tono can and cannot recognise";
 "routing_scope" = "Order: 21 cloud video exceptions → 166 AI / named Home entries (plus the Anthropic address range) → explicit cloud list → everything else direct. Matched traffic that fails is blocked, never retried directly; matched UDP/QUIC is refused so apps fall back to TCP. Apps using ECH, their own DNS-over-HTTPS, or cached addresses can hide an AI service; that traffic then goes direct. Unrecognised AI is not guaranteed to use Home.";
 "routing_platform" = "On iPhone, all apps, all TCP/UDP ports, IPv4 and IPv6 enter the tunnel. LAN, link-local and multicast stay outside, as do Apple push and cellular services (calls, SMS). DNS for direct names uses your network's resolver; matched names never reach it. iOS has no per-app rules: Tono recognises AI only by domain and the Anthropic address range, and cannot exclude or include individual apps.";
-"settings_check" = "Where does a site go?";
-"check_hint" = "e.g. claude.ai";
+"check_hint_inline" = "Check a site, e.g. claude.ai";
 "check_go" = "Check";
 "check_result" = "TCP → %1$@ · UDP → %2$@";
 "verdict_HOME" = "Home";
