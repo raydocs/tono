@@ -114,3 +114,7 @@ Ops tables after the sequence was unique. Applied in numeric order:
 ## 0101
 
 - `0101_ops_node_profile_port.sql` — nullable `ops_node_profiles.port` (1–65535). The node profile's documented `port` was validated and dropped; node facts already read the column. Existing rows stay NULL.
+
+## 0102
+
+- `0102_home_exit_egress.sql` — `home_exit_egress`: one row per home line holding the latest operator-asked egress lookup (IP seen through the line, per-provider geolocation answers as JSON, or the failed tunnel stage). Replaced on each lookup; orphans after a line delete are joined away on read.

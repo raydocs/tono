@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { nowSec } from '../../src/lib/clock';
+import { egressList, egressLookUp } from './home-egress';
 
 /**
  * The fixture half of the three 设置 sections that publish something.
@@ -493,6 +494,12 @@ function homeExitRoutes(request: PublishRequest): boolean {
     return true;
   }
 
+  if (id === 'egress') {
+    if (req.method !== 'GET') return false;
+    sendJson(res, { lookups: egressList(store) });
+    return true;
+  }
+
   if (id === 'import') {
     if (req.method !== 'POST') return false;
     void readBody(req).then((body) => {
@@ -546,6 +553,18 @@ function homeExitRoutes(request: PublishRequest): boolean {
   const row = store.homeExits[index];
   if (row === undefined) {
     sendEmpty(res, 404);
+    return true;
+  }
+
+  if (parts[2] === 'egress') {
+    if (req.method !== 'POST') return false;
+    const lookup = egressLookUp(store, row, nowSec());
+    if (lookup === null) {
+      refuse(sendJson, res, 409, 'HOME_EGRESS_UNKNOWN', 'A catalog line needs a stored egress address to look up');
+      return true;
+    }
+    note('home.egress', 'home_exit', row.id, row.displayName);
+    sendJson(res, { lookup });
     return true;
   }
 

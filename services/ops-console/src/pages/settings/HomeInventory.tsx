@@ -13,11 +13,14 @@ import { EXIT_STATES, exitState, type ExitState } from '@/lib/residential';
 import { hubApi, type HomeExit } from '@/lib/settings-legacy';
 import { useResource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
+import type { EgressLookup } from '@/lib/home-egress';
 import '@/styles/residential.css';
 import '@/styles/settings-assets.css';
 import { HomeExitDrawer } from './HomeExitDrawer';
 import { ImportDialog } from './ImportDialog';
+import { EgressCell, EgressDrawer } from './home/Egress';
 import { InventoryBand } from './home/InventoryBand';
+import { useEgress } from './home/use-egress';
 import { useWrite } from './use-write';
 
 const words = copy.settings.homeinventory;
@@ -61,6 +64,8 @@ export function HomeInventory() {
   const [filter, setFilter] = useState<Filter>('all');
 
   const rows = useMemo(() => (exits.status === 'ready' ? exits.data : []), [exits]);
+  const egress = useEgress(exits.status === 'ready' ? exits.data : null, exits.reload);
+  const [egressOf, setEgressOf] = useState<HomeExit | null>(null);
 
   /**
    * How many customers each line is carrying, counted from the bindings rather
@@ -110,8 +115,11 @@ export function HomeInventory() {
       },
       onRemove: (row) => setRemoving(row),
       pending: write.pending,
+      egressOf: (row) => egress.byExit.get(row.id),
+      lookingAt: (row) => egress.looking.has(row.id),
+      onEgress: (row) => setEgressOf(row),
     }),
-    [privacy.ip, privacy.email, bound, who, stateOf, write],
+    [privacy.ip, privacy.email, bound, who, stateOf, write, egress.byExit, egress.looking],
   );
 
   const state: PanelState = exits.status === 'loading'
@@ -173,6 +181,15 @@ export function HomeInventory() {
 
       <HomeExitDrawer open={registering} onClose={() => setRegistering(false)} onSaved={reload} />
       <ImportDialog open={importing} onClose={() => setImporting(false)} onSaved={reload} />
+      <EgressDrawer
+        line={egressOf}
+        lookup={egressOf === null ? undefined : egress.byExit.get(egressOf.id)}
+        looking={egressOf !== null && egress.looking.has(egressOf.id)}
+        error={egress.error}
+        ip={privacy.ip}
+        onLookUp={egress.lookUp}
+        onClose={() => setEgressOf(null)}
+      />
 
       <ConfirmDialog
         open={removing !== null}
@@ -206,6 +223,9 @@ function inventoryColumns({
   onToggle,
   onRemove,
   pending,
+  egressOf,
+  lookingAt,
+  onEgress,
 }: {
   ip: (value: string | null) => string;
   email: (value: string) => string;
@@ -215,6 +235,9 @@ function inventoryColumns({
   onToggle: (row: HomeExit) => void;
   onRemove: (row: HomeExit) => void;
   pending: boolean;
+  egressOf: (row: HomeExit) => EgressLookup | undefined;
+  lookingAt: (row: HomeExit) => boolean;
+  onEgress: (row: HomeExit) => void;
 }): DataColumn<HomeExit>[] {
   return [
     {
@@ -236,6 +259,15 @@ function inventoryColumns({
       width: '196px',
       sortValue: (row) => row.socks5Host ?? row.egressIpv4 ?? '',
       cell: (row) => <AddressCell row={row} ip={ip} />,
+    },
+    {
+      id: 'egress',
+      header: board.egress.column,
+      width: '168px',
+      sortValue: (row) => egressOf(row)?.ip ?? '',
+      cell: (row) => (
+        <EgressCell lookup={egressOf(row)} looking={lookingAt(row)} ip={ip} onOpen={() => onEgress(row)} />
+      ),
     },
     {
       id: 'status',
