@@ -40,10 +40,12 @@ struct HomeView: View {
                     .accessibilitySortPriority(0)
                 Group {
                     if typeSize.isAccessibilitySize {
-                        BottomScroll { GlassCluster { controls }.padding(.top, 24) }
+                        BottomScroll { controls.padding(.top, 24) }
                     } else {
                         Spacer(minLength: 0)
-                        GlassCluster { controls }
+                        // No GlassEffectContainer here: it lifts the primary capsule's background glass
+                        // over its label and blurs "Disconnect" (caught by the contrast sweep, run 39097318071).
+                        controls
                     }
                 }
                 .accessibilityElement(children: .contain)

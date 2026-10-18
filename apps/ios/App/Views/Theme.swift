@@ -200,20 +200,6 @@ private struct ContentCard<S: Shape>: ViewModifier {
     }
 }
 
-/// Groups neighbouring glass controls so iOS 26 renders them as one layer (shared sampling of the
-/// sea behind, no glass sampling glass). Shapes this close merge, so it is smaller than any gap.
-struct GlassCluster<Content: View>: View {
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        if #available(iOS 26.0, *) {
-            GlassEffectContainer(spacing: 4) { content }
-        } else {
-            content
-        }
-    }
-}
-
 extension View {
     func tonoAccessibility() -> some View { modifier(TonoAccessibilityRoot()) }
 

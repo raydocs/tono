@@ -71,7 +71,7 @@ struct RootView: View {
 extension View {
     /// DEBUG design preview only: every capture says it shows fixture data, not a real account or
     /// tunnel. Compiled out of Release (CI fails a Release binary that contains `-TonoPreview`).
-    /// `alignment: .bottom` where a navigation bar owns the top of the surface.
+    /// `alignment: .topLeading` where a navigation bar title owns the top centre.
     @ViewBuilder func previewBadge(alignment: Alignment = .top) -> some View {
         #if DEBUG
         if CommandLine.arguments.contains(where: { $0.hasPrefix("-TonoPreview") }) {
@@ -82,6 +82,7 @@ extension View {
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(Color.yellow, in: Capsule())
                     .padding(.top, 2)
+                    .padding(.leading, alignment == .topLeading ? 12 : 0)
                     .allowsHitTesting(false)
                     .accessibilityIdentifier("previewBadge")
             }

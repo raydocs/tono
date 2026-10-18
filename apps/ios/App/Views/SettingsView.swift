@@ -109,7 +109,7 @@ struct SettingsView: View {
                 dismiss()
             }
         }
-        .previewBadge(alignment: .bottom)
+        .previewBadge(alignment: .topLeading)
     }
 
     /// Presented as a sheet: swipe down closes it; the button is for VoiceOver and two-handed use.
