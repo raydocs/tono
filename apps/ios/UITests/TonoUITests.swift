@@ -541,6 +541,7 @@ final class TonoUITests: XCTestCase {
         var found: [String] = []
         var unattributed: [String] = []
         var offscreen: [(String, XCUIElement)] = []
+        var settle: [(String, XCUIElement)] = []
         var dumped = false
         do {
             try app.performAccessibilityAudit { issue in
@@ -563,6 +564,12 @@ final class TonoUITests: XCTestCase {
                     let verdict = ratio >= 4.5 ? "PASSES" : "FAILS"
                     print(line + String(format: " | measured %.1f:1 %@ WCAG AA", ratio, verdict))
                     if ratio >= 4.5 { return true }
+                    // The audit changes the text size while it runs, so a frame read here can belong to
+                    // another layout than the pixels (Details' Settings row read 1.2:1 at the place
+                    // the larger text had moved it, run 39156608142). Measured again once the audit
+                    // has finished and the screen is back at its own size; that measurement decides.
+                    settle.append((line, element))
+                    return true
                 }
                 if atLargestSize, issue.auditType == .textClipped {
                     print(line + " | prediction past the largest size; see the AX5 capture")
@@ -595,6 +602,14 @@ final class TonoUITests: XCTestCase {
                   + "\(sweep.failures.count) below 4.5:1 or under 44x44 pt")
             sweep.failures.forEach { print($0) }
             found += sweep.failures
+        }
+        if !settle.isEmpty { sleep(1) }
+        for (line, element) in settle {
+            let ratio = app.windows.firstMatch.frame.contains(element.frame) ? Self.measuredContrast(element) : nil
+            let result = ratio.map { String(format: "after the audit: measured %.1f:1 %@ WCAG AA", $0, $0 >= 4.5 ? "PASSES" : "FAILS") }
+                ?? "after the audit: not on screen to measure"
+            print(line + " | " + result)
+            if (ratio ?? 0) < 4.5 { found.append(line + " | " + result) }
         }
         for (line, element) in offscreen {
             let window = app.windows.firstMatch.frame
