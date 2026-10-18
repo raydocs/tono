@@ -167,13 +167,30 @@ struct HomeView: View {
         .padding(.leading, 22).padding(.trailing, 16).padding(.top, 4)
     }
 
+    /// At accessibility sizes one word per line, each kept whole (shrunk if it must be): a wrapped
+    /// title broke "Reconnecting" inside the word at AX5 (round 11 capture). Read as one header.
+    @ViewBuilder private func stateTitle(_ title: String) -> some View {
+        if typeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(title.split(separator: " ").enumerated()), id: \.offset) { _, word in
+                    Text(String(word)).lineLimit(1).minimumScaleFactor(0.5)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(title)
+            .accessibilityAddTraits(.isStaticText)
+        } else {
+            Text(title)
+        }
+    }
+
     /// Everything the thumb needs, at the bottom: state, one line, one action, the exit, details.
     private var controls: some View {
         VStack(alignment: .leading, spacing: 0) {
             // The old title leaves before the new one arrives, in place (a ZStack, so they never stack
             // and never show two words at once).
             ZStack(alignment: .leading) {
-                Text(PhaseText.title(model.phase, reason: model.reason))
+                stateTitle(PhaseText.title(model.phase, reason: model.reason))
                     .tracking(0.5)
                     .tonoFont(40, .light, relativeTo: .largeTitle)
                     .foregroundStyle(TonoColor.textPrimary)
