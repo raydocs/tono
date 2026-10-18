@@ -35,6 +35,7 @@ import com.raydocs.tono.mobile.engine.EngineSnapshot
 fun LinesSheet(s: EngineSnapshot, onSelect: (String) -> Unit, onTest: () -> Unit, onDismiss: () -> Unit) {
     val zh = isChinese()
     ModalBottomSheet(
+        dragHandle = { WideDragHandle() },
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = TonoColors.Smoke,

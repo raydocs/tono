@@ -1,6 +1,7 @@
 package com.raydocs.tono.mobile
 
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.VpnService
@@ -27,6 +28,7 @@ import com.raydocs.tono.mobile.ui.MainActivity
 import com.raydocs.tono.mobile.ui.TonoActions
 import com.raydocs.tono.mobile.ui.TonoRoot
 import com.raydocs.tono.mobile.ui.TonoTheme
+import com.raydocs.tono.mobile.ui.rememberSystemReduceMotion
 import com.raydocs.tono.routing.ConfigInput
 import com.raydocs.tono.routing.Fixtures
 import com.raydocs.tono.routing.RoutingMode
@@ -169,6 +171,58 @@ class DeviceEvidenceTest {
         File(out, "real-core.txt").writeText("libbox ${Libbox.version()} go ${Libbox.goVersion()} abi ${android.os.Build.SUPPORTED_ABIS.first()} checkConfig OK for ${RoutingMode.entries}\n")
     }
 
+    /**
+     * The shipped app follows Android's "Remove animations" (animator duration scale 0) live, with no
+     * restart: the night sky's twinkling stars and drifting reflection move at scale 1 and are
+     * pixel-identical frames at scale 0. Compared between the status bar and the sign-in card (no
+     * clock, cursor or keyboard).
+     */
+    @Test fun a5_realAppHonoursRemoveAnimations() {
+        val shell = instrumentation.uiAutomation
+        fun scale(v: String) { shell.executeShellCommand("settings put global animator_duration_scale $v").close() }
+        fun diff(a: Bitmap, b: Bitmap): Double {
+            val top = (a.height * 0.08).toInt()
+            val h = (a.height * 0.62).toInt() // sky and reflection, above the sign-in card
+            val pa = IntArray(a.width * h).also { a.getPixels(it, 0, a.width, 0, top, a.width, h) }
+            val pb = IntArray(b.width * h).also { b.getPixels(it, 0, b.width, 0, top, b.width, h) }
+            return pa.indices.count { pa[it] != pb[it] }.toDouble() / pa.size
+        }
+        fun frames(gapMs: Long): Pair<Bitmap, Bitmap> {
+            dismissForeignAnr()
+            val a = shell.takeScreenshot()
+            Thread.sleep(gapMs)
+            return a to shell.takeScreenshot()
+        }
+        scale("1")
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                assertNotNull("sign-in screen", find(By.text(text(R.string.signin_title)), 20_000))
+                Thread.sleep(1_500)
+                val (m1, m2) = frames(1_500)
+                val moving = diff(m1, m2)
+                scale("0") // while the app is running
+                Thread.sleep(1_500)
+                val (s1, s2) = frames(1_500)
+                val still = diff(s1, s2)
+                scale("1") // and back, still without a restart
+                Thread.sleep(1_500)
+                val (r1, r2) = frames(1_500)
+                val resumed = diff(r1, r2)
+                File(out, "real-06-motion.png").outputStream().use { m1.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                File(out, "real-07-remove-animations.png").outputStream().use { s2.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                File(out, "real-motion.txt").writeText(
+                    "scene pixels changed over 1.5 s (animator_duration_scale): 1 → %.4f %%, 0 → %.4f %%, back to 1 → %.4f %%\n"
+                        .format(moving * 100, still * 100, resumed * 100),
+                )
+                assertTrue("ambient motion at scale 1 ($moving)", moving > 0.0001)
+                assertEquals("no motion with animations removed", 0.0, still, 0.0)
+                assertTrue("motion resumes at scale 1 ($resumed)", resumed > 0.0001)
+            }
+        } finally {
+            scale("1")
+        }
+    }
+
     // ---- fixture renders: real device rendering, fake state --------------------------------
 
     private val nodes = listOf(NodeView("Tokyo · Dawn", "Tokyo", "Dawn", 86), NodeView("Los Angeles · Grove", "Los Angeles", "Grove", 162))
@@ -183,7 +237,7 @@ class DeviceEvidenceTest {
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { a ->
                 a.setContent {
-                    CompositionLocalProvider(LocalReduceMotion provides false) {
+                    CompositionLocalProvider(LocalReduceMotion provides rememberSystemReduceMotion()) {
                         TonoTheme {
                             TonoRoot(state.value, object : TonoActions {
                                 override fun connect() {}

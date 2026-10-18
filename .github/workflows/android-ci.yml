@@ -144,22 +144,30 @@ jobs:
           # (seen on hosted runners) costs one test's evidence rather than all of it.
           set +e
           failed=""
-          for t in a1_realSignInScreenAndLocalValidation a2_realSystemVpnConsentDialog \
-                   a3_realEngineRefusesToConnectWithoutAccount a4_realCoreOnThisAbiAcceptsTheGeneratedConfig \
-                   b1_fixtureStatesRenderedOnDevice b2_fixtureMotionRecordedOnDevice b3_fixtureAtLargeFontScale; do
+          for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog \
+                   DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig \
+                   DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations \
+                   DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice \
+                   DeviceEvidenceTest#b3_fixtureAtLargeFontScale \
+                   HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps \
+                   HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff; do
+            t="${c#*#}"
             rec=""
             if [ "$t" = b2_fixtureMotionRecordedOnDevice ]; then
               # Recorded from the host: a screenrecord started inside the test kept the run open.
               adb shell screenrecord --time-limit 25 --bit-rate 8000000 /sdcard/Download/tono-fixture-motion.mp4 &
               rec=$!
             fi
-            timeout 600 adb shell am instrument -w -r -e class "com.raydocs.tono.mobile.DeviceEvidenceTest#$t" \
+            timeout 600 adb shell am instrument -w -r -e class "com.raydocs.tono.mobile.$c" \
               $APP.test/androidx.test.runner.AndroidJUnitRunner > "evidence/instrument-$t.txt"
             [ -n "$rec" ] && timeout 60 tail --pid="$rec" -f /dev/null
             grep -q '^OK (' "evidence/instrument-$t.txt" && echo "PASS $t" >> evidence/summary.txt || { echo "FAIL $t" >> evidence/summary.txt; failed="$failed $t"; }
             timeout 120 adb pull /sdcard/Android/data/$APP/files/evidence/. evidence/
             [ "$t" = b2_fixtureMotionRecordedOnDevice ] && timeout 120 adb pull /sdcard/Download/tono-fixture-motion.mp4 evidence/fixture-motion.mp4
           done
+          # Leave the shared emulator settings as found, whatever a failed test left behind.
+          adb shell settings put system font_scale 1.0
+          adb shell settings put global animator_duration_scale 1
           timeout 60 adb logcat -d > evidence/logcat.txt
           ls -la evidence
           cat evidence/summary.txt

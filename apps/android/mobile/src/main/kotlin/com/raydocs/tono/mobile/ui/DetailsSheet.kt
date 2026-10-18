@@ -45,6 +45,7 @@ import com.raydocs.tono.routing.RoutingMode
 @Composable
 fun DetailsSheet(s: EngineSnapshot, onRecheck: () -> Unit, onOpenLines: () -> Unit, onOpenSettings: () -> Unit, onDismiss: () -> Unit) {
     ModalBottomSheet(
+        dragHandle = { WideDragHandle() },
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = TonoColors.Smoke, // opaque: device renders showed home text through a 97% sheet

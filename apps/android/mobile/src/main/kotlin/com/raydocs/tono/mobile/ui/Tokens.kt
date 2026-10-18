@@ -9,6 +9,16 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -29,7 +39,8 @@ object TonoColors {
     val Hairline = Color(0x1FFFFFFF)
     val TextPrimary = Color(0xFFF7F3EE)
     val TextSecondary = Color(0xA8F7F3EE)
-    val TextTertiary = Color(0x70F7F3EE)
+    /** 55% white: ≥ 4.5:1 on Night for small text (the previous 44% measured ~4.1:1). */
+    val TextTertiary = Color(0x8CF7F3EE)
 
     val SunCore = Color(0xFFFFE2A8)
     val SunMid = Color(0xFFFFB46A)
@@ -82,4 +93,24 @@ fun TonoTheme(content: @Composable () -> Unit) {
         ),
         content = content,
     )
+}
+
+/**
+ * Android's "Remove animations" (animator duration scale 0) is the system reduce-motion switch.
+ * Observed live, so turning it on while Tono is open stops the scene's ambient motion at once.
+ */
+@Composable
+fun rememberSystemReduceMotion(): Boolean {
+    val context = LocalContext.current
+    val resolver = context.contentResolver
+    fun read() = Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+    var reduce by remember { mutableStateOf(read()) }
+    DisposableEffect(resolver) {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) { reduce = read() }
+        }
+        resolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE), false, observer)
+        onDispose { resolver.unregisterContentObserver(observer) }
+    }
+    return reduce
 }

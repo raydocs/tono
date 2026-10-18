@@ -18,9 +18,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -115,16 +118,20 @@ fun HomeScreen(
     val sky = skyFor(s.phase)
     Box(Modifier.fillMaxSize().background(TonoColors.Night)) {
         BackdropHost(scene = { SeaScene(sky, Modifier.fillMaxSize(), horizon = 0.46f) }, modifier = Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize()) {
-                TopBar(onOpenSettings)
-                Spacer(Modifier.weight(1f))
-                Column(Modifier.fillMaxWidth().swipeUpTo(onOpenDetails).navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 8.dp)) {
-                    StateHeader(s)
-                    Spacer(Modifier.height(18.dp))
-                    PrimaryCapsule(s, onConnect, onDisconnect)
-                    Spacer(Modifier.height(10.dp))
-                    ExitPill(s, onOpenLines)
-                    Footer(s, onOpenDetails)
+            // Top bar at the top, dock at the bottom; when large text makes them taller than the
+            // screen, Home scrolls instead of squeezing the exit and Details rows to nothing.
+            val scroll = rememberScrollState()
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxWidth().verticalScroll(scroll).heightIn(min = maxHeight), verticalArrangement = Arrangement.SpaceBetween) {
+                    TopBar(onOpenSettings)
+                    Column(Modifier.fillMaxWidth().swipeUpTo(onOpenDetails, enabled = scroll.maxValue == 0).navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 8.dp)) {
+                        StateHeader(s)
+                        Spacer(Modifier.height(18.dp))
+                        PrimaryCapsule(s, onConnect, onDisconnect)
+                        Spacer(Modifier.height(10.dp))
+                        ExitPill(s, onOpenLines)
+                        Footer(s, onOpenDetails)
+                    }
                 }
             }
         }
@@ -140,7 +147,7 @@ private fun TopBar(onOpenSettings: () -> Unit) {
         Spacer(Modifier.width(8.dp))
         Text("Tono", style = MaterialTheme.typography.titleMedium, color = TonoColors.TextPrimary)
         Spacer(Modifier.weight(1f))
-        Glass(CircleShape, Modifier.size(44.dp), tintAlpha = 0.30f) {
+        Glass(CircleShape, Modifier.size(48.dp), tintAlpha = 0.30f) {
             Box(
                 Modifier.fillMaxSize().clickable(role = Role.Button, onClick = onOpenSettings).semantics { contentDescription = settings },
                 contentAlignment = Alignment.Center,
@@ -166,7 +173,8 @@ private fun StateHeader(s: EngineSnapshot) {
         AnimatedContent(line to tone, transitionSpec = { crossRise() }, label = "line") { (text, c) ->
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 22.dp)) {
                 if (c != null) { StatusDot(c, size = 7); Spacer(Modifier.width(8.dp)) }
-                Text(text ?: "", style = MaterialTheme.typography.bodyLarge, color = if (c != null) TonoColors.TextPrimary else TonoColors.TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // Up to two lines: at large font sizes the exit or reason wraps instead of being cut off.
+                Text(text ?: "", style = MaterialTheme.typography.bodyLarge, color = if (c != null) TonoColors.TextPrimary else TonoColors.TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -248,7 +256,7 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
         shape,
         Modifier
             .fillMaxWidth()
-            .height(58.dp)
+            .heightIn(min = 58.dp)
             .offset(x = nudge.value.dp)
             .scale(scale)
             .testTag("primary"),
@@ -256,16 +264,20 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
         rimColor = rimColor,
     ) {
         // Warm sun capsule (idle/retry/allow) fades over the glass instead of swapping widgets.
-        Box(Modifier.fillMaxSize().graphicsLayer { alpha = warmAlpha }.background(TonoColors.ActionFill))
+        // matchParentSize, not fillMaxSize: Home scrolls at large text, so the height is unbounded here.
+        Box(Modifier.matchParentSize().graphicsLayer { alpha = warmAlpha }.background(TonoColors.ActionFill))
         // Sunrise progress: a soft band whose leading edge glows like the sun's rim, rounded to the capsule.
-        Box(
-            Modifier.fillMaxHeight().fillMaxWidth(fill.coerceIn(0.001f, 1f)).graphicsLayer { alpha = fillAlpha }
-                .clip(shape)
-                .background(Brush.horizontalGradient(listOf(Color.Transparent, TonoColors.SunEdge.copy(alpha = 0.28f), TonoColors.SunMid.copy(alpha = 0.62f), TonoColors.SunCore.copy(alpha = 0.92f)))),
-        )
+        Box(Modifier.matchParentSize()) {
+            Box(
+                Modifier.fillMaxHeight().fillMaxWidth(fill.coerceIn(0.001f, 1f)).graphicsLayer { alpha = fillAlpha }
+                    .clip(shape)
+                    .background(Brush.horizontalGradient(listOf(Color.Transparent, TonoColors.SunEdge.copy(alpha = 0.28f), TonoColors.SunMid.copy(alpha = 0.62f), TonoColors.SunCore.copy(alpha = 0.92f)))),
+            )
+        }
         Row(
             Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
+                .heightIn(min = 58.dp)
                 .clickable(source, indication = null, enabled = action != PrimaryAction.WAIT, role = Role.Button, onClickLabel = clickLabel) {
                     view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                     when (action) {
@@ -332,13 +344,13 @@ private fun Footer(s: EngineSnapshot, onOpenDetails: () -> Unit) {
         AnimatedVisibility(s.tunnelUp, enter = fadeIn(tween(350)), exit = fadeOut(tween(220)), modifier = Modifier.weight(1f)) {
             Text(
                 stringResource(R.string.speed_line, Format.rate(s.rxBytesPerSec), Format.rate(s.txBytesPerSec)),
-                style = MaterialTheme.typography.labelMedium, color = TonoColors.TextTertiary, maxLines = 1,
+                style = MaterialTheme.typography.labelMedium, color = TonoColors.TextTertiary, maxLines = 2,
             )
         }
         if (!s.tunnelUp) Spacer(Modifier.weight(1f))
-        Glass(RoundedCornerShape(22.dp), Modifier.testTag("details"), tintAlpha = 0.30f) {
+        Glass(RoundedCornerShape(24.dp), Modifier.testTag("details"), tintAlpha = 0.30f) {
             Row(
-                Modifier.clickable(role = Role.Button, onClick = onOpenDetails).heightIn(min = 44.dp).padding(start = 16.dp, end = 14.dp),
+                Modifier.clickable(role = Role.Button, onClick = onOpenDetails).heightIn(min = 48.dp).padding(start = 16.dp, end = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (attention) { StatusDot(TonoColors.Warning, size = 6); Spacer(Modifier.width(7.dp)) }
@@ -350,8 +362,11 @@ private fun Footer(s: EngineSnapshot, onOpenDetails: () -> Unit) {
     }
 }
 
-/** A deliberate upward flick on the dock opens Details; taps on the controls inside are unaffected. */
-private fun Modifier.swipeUpTo(onOpen: () -> Unit): Modifier = pointerInput(onOpen) {
+/**
+ * A deliberate upward flick on the dock opens Details; taps on the controls inside are unaffected.
+ * Off while Home scrolls (large text), so the flick never steals the scroll.
+ */
+private fun Modifier.swipeUpTo(onOpen: () -> Unit, enabled: Boolean): Modifier = if (!enabled) this else pointerInput(onOpen) {
     val threshold = 56.dp.toPx()
     var travelled = 0f
     detectVerticalDragGestures(

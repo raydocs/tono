@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -56,9 +58,9 @@ fun PrimaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifi
 fun QuietButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, color: Color = TonoColors.TextPrimary) {
     Box(
         modifier
-            .heightIn(min = 44.dp)
-            .clip(RoundedCornerShape(22.dp))
-            .border(1.dp, TonoColors.Hairline, RoundedCornerShape(22.dp))
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .border(1.dp, TonoColors.Hairline, RoundedCornerShape(24.dp))
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 18.dp),
         contentAlignment = Alignment.Center,
@@ -89,3 +91,8 @@ fun SmokeCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.()
 fun SectionLabel(text: String) {
     Text(text.uppercase(), style = MaterialTheme.typography.labelMedium, color = TonoColors.TextTertiary, modifier = Modifier.padding(start = 6.dp, top = 18.dp, bottom = 8.dp))
 }
+
+/** Material's sheet handle with its hit area widened to 48 dp; the visible pill is unchanged. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun WideDragHandle() = BottomSheetDefaults.DragHandle(Modifier.padding(horizontal = 8.dp))

@@ -103,7 +103,7 @@ fun SettingsScreen(
             SectionLabel(stringResource(R.string.settings_apps))
             SmokeCard {
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable(role = Role.Button, onClick = onOpenApps),
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onOpenApps),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -158,7 +158,7 @@ private fun Expandable(title: String, content: @Composable () -> Unit) {
     var open by rememberSaveable { mutableStateOf(false) }
     val turn by animateFloatAsState(if (open) 180f else 0f, TonoMotion.state, label = "chevron")
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(MaterialTheme.shapes.small)
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(MaterialTheme.shapes.small)
             .clickable(role = Role.Button, onClickLabel = title) { open = !open }
             .semantics { stateDescription = if (open) "expanded" else "collapsed" },
         verticalAlignment = Alignment.CenterVertically,

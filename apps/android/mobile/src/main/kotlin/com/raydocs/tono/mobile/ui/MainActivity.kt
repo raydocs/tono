@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -33,10 +32,9 @@ class MainActivity : ComponentActivity(), TonoActions {
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(0), navigationBarStyle = SystemBarStyle.dark(0))
         super.onCreate(savedInstanceState)
         client = EngineClient(applicationContext)
-        val reduceMotion = Settings.Global.getFloat(contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
         setContent {
             val snapshot by client.snapshot.collectAsStateWithLifecycle()
-            CompositionLocalProvider(LocalReduceMotion provides reduceMotion) {
+            CompositionLocalProvider(LocalReduceMotion provides rememberSystemReduceMotion()) {
                 TonoTheme { TonoRoot(snapshot, this) }
             }
         }
