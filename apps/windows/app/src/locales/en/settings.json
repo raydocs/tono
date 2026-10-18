@@ -207,7 +207,7 @@
         },
         "fields": {
           "language": "Language",
-          "themeMode": "Theme Mode",
+          "themeMode": "Theme mode",
           "trayClickEvent": "Tray Click Event",
           "copyEnvType": "Copy Env Type",
           "startPage": "Start Page",

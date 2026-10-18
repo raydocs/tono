@@ -67,7 +67,7 @@ extension AppState {
                 protectionBlocked: isProtectionBlocked,
                 connecting: isConnecting
             ) {
-                connect()
+                userConnect()
             }
             return
         }

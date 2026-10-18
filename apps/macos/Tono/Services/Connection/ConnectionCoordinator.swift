@@ -9,6 +9,10 @@ final class ConnectionCoordinator {
     var connectTask: Task<Void, Never>?
     var connectWatchdogTask: Task<Void, Never>?
     var connectAttemptID: UUID?
+    /// Session intent survives automatic teardown/recovery, including failures
+    /// before the runtime is built. Only an explicit release ends this choice.
+    var capturedRoutingMode: String? = AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent")
+        ? "three-tier" : nil
     var protectionOperationGeneration: UInt64 = 0
     private(set) var disconnectSequence: Task<Void, Never>?
     private var disconnectRequestID = 0
@@ -67,6 +71,7 @@ final class ConnectionCoordinator {
     /// writers, and the earlier session's late helper requests carry its
     /// generation. Teardowns still queued cannot publish over the result.
     func beginPreemptiveRelease() {
+        capturedRoutingMode = nil
         bumpGeneration()
         cancelConnectionTasks()
         cancelReconnectTasks()
@@ -120,6 +125,7 @@ final class ConnectionCoordinator {
         disconnectRequestID &+= 1
         let requestID = disconnectRequestID
         let disposition = releaseDisposition ?? (releaseIntent ? .explicit : .preserve)
+        if disposition == .explicit { capturedRoutingMode = nil }
         if disposition == .explicit { explicitReleaseDominatesQuit = true }
         disconnectQueueReleaseIntent = releaseIntent
         let previousDisconnect = disconnectSequence

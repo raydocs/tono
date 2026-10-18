@@ -132,9 +132,7 @@ pub(super) async fn record_connect_failure(
         if session_verified {
             inner.fsm.mark_session_verified();
         }
-        // No Windows preference on this path means the user did not explicitly
-        // enable a strict kill switch, so an exhausted attempt releases.
-        let strict_kill_switch = tono_core::strict_kill_switch_explicit(None);
+        let strict_kill_switch = inner.three_tier_routing;
         let plan = plan_failure(armed, session_verified, was_disconnecting, strict_kill_switch);
         let action: &'static str = if was_disconnecting {
             "racedDisconnect"

@@ -248,6 +248,8 @@ pub struct TonoInner {
     pub installation_id: String,
     /// The core this connect armed. DIRECT in-place reload is mihomo-only.
     pub sing_box_core: bool,
+    /// Captured connect-time routing contract, never a live preference read.
+    pub three_tier_routing: bool,
     pub catalog_tracker: CatalogTracker,
     /// Directory holding `managed-exit-catalog.json` (`app_home_dir()/tono`).
     /// The cache itself is built on demand: `CatalogCache` boxes its safety
@@ -371,6 +373,10 @@ pub struct TonoInner {
     /// and safety checks (`managed-traffic-policy.json`).
     pub policy_tracker: tono_core::policy::PolicyTracker,
     pub traffic_policy: Option<tono_core::policy::TonoTrafficPolicy>,
+    /// The signed response `traffic_policy` was read from, exactly as the control plane served
+    /// it. The Service re-verifies the signature before it admits any sing-box DIRECT rule
+    /// (#1280), so these bytes are forwarded unchanged and never rebuilt from the document.
+    pub traffic_policy_response: Option<tono_core::policy::TonoTrafficPolicyResponse>,
     /// A policy *behavior change* that arrived while the FSM was Connecting
     /// (F5). `handle_network_change_inner` has nothing to act on mid-connect —
     /// no session exists to tear down — so the change is recorded here and the
@@ -822,6 +828,7 @@ impl TonoState {
                 session_marker: Default::default(),
                 installation_id,
                 sing_box_core: false,
+                three_tier_routing: false,
                 catalog_tracker: CatalogTracker::new(),
                 catalog_dir,
                 nodes: Vec::new(),
@@ -865,6 +872,7 @@ impl TonoState {
                 hy2_switch: Default::default(),
                 policy_tracker: tono_core::policy::PolicyTracker::new(),
                 traffic_policy: None,
+                traffic_policy_response: None,
                 pending_policy_change: None,
                 applied_wechat_path_regexes: None,
                 optional_direct_active: false,

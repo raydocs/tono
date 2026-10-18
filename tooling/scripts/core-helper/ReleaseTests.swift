@@ -240,6 +240,40 @@ func runReleaseSelfTests() -> Bool {
     }
     check(ran == 2 && (try? authority.load()) == secured, "emergency without C leaves the record alone")
 
+    // #1571: use the production durable authority API, then reconstruct it
+    // just as a restarted daemon does. A failed replacement cannot retire
+    // strict intent; only the explicitly fenced emergency release can.
+    do {
+        try authority.save(secured)
+        try authority.bindRuntime(generation: 20, digest: "strict-fixture", strict: true, requestedMode: "three-tier")
+        let restarted = ReleaseAuthority(directory: directory, owner: geteuid())
+        let persisted = try restarted.load()
+        var mismatchRefused = false
+        do {
+            try restarted.bindRuntime(generation: 20, digest: "wrong-mode", strict: true, requestedMode: "stable")
+        } catch { mismatchRefused = true }
+        var downgradeRefused = false
+        do {
+            try restarted.bindRuntime(generation: 20, digest: "stable-fixture", strict: false, requestedMode: "stable")
+        } catch { downgradeRefused = true }
+        var replacementRefused = false
+        do {
+            try restarted.bindRuntime(generation: 20, digest: "different-strict-fixture", strict: true, requestedMode: "three-tier")
+        } catch { replacementRefused = true }
+        var blocked = KillSwitchManager.emergencyState(preserving: nil)
+        blocked.strictBlocking = persisted.strictIntent
+        let rules = KillSwitchManager.renderRules(state: blocked, allowedUID: geteuid(), physicalInterfaces: ["en0"])
+        let unchanged = try restarted.load() == persisted
+        _ = runEmergencyUnderReleaseAuthority(authority: restarted) { true }
+        let explicitlyReleased = try restarted.load()
+        check(persisted.strictIntent && unchanged && mismatchRefused && downgradeRefused && replacementRefused
+                && rules.contains("block drop out quick all") && !rules.contains("user root")
+                && !explicitlyReleased.strictIntent && explicitlyReleased.generation > 20,
+              "strict restart and failed replacement retain block; fenced explicit release retires intent")
+    } catch {
+        check(false, "strict restart and failed replacement retain block; fenced explicit release retires intent")
+    }
+
     return passed
 }
 

@@ -65,6 +65,10 @@ pub async fn service_status_snapshot(owner: &AuthenticatedOwner) -> Result<Servi
     let update_attempt_pending = crate::core::update::attempt_pending_read_only();
     #[cfg(not(windows))]
     let update_attempt_pending = None;
+    #[cfg(windows)]
+    let ai_hold_retained = Some(crate::core::selective_layer::ai_hold_retained());
+    #[cfg(not(windows))]
+    let ai_hold_retained = None;
     let (snapshot_generation, active_operation) = crate::core::operation::snapshot();
     Ok(ServiceStatusSnapshot {
         snapshot_generation,
@@ -95,6 +99,7 @@ pub async fn service_status_snapshot(owner: &AuthenticatedOwner) -> Result<Servi
             .ok()
             .map(|record| record.generation),
         kill_switch_held_by_another_user,
+        ai_hold_retained,
     })
 }
 

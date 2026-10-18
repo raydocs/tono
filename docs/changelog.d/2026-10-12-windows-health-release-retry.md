@@ -19,3 +19,6 @@
 - 修复：`claim_health_retry` 在状态锁下、改动槽位之前，若 `generation != self.connect_generation` 直接返回 `None`（`state.rs`）；原有的同代存活令牌拒绝保留。因此该机制是「当前代守卫 + 同代单飞」，不是对任意代数各留一个循环。
 - 测试：先红后绿——`a_late_claim_for_a_retired_generation_cannot_displace_the_current_owner`（红：head fdc680a3 的 ci-gate）；`the_retry_right_passes_to_a_later_generation_and_to_a_dead_loop` 重写为 `the_retry_right_passes_on_when_its_loop_is_gone_and_to_a_later_session`：持有原令牌，丢弃后同代可重新领取，再经真实的 retire 路径推进代数后新会话可领取。
 - 剩余限制：同第 1 轮；仍无实机验证。
+
+### 续记 2026-10-13 · 发现状态
+- 源码已在 main `57776e805`（[#1599](https://github.com/raydocs/tono/pull/1599) 的合并提交）。`WIN-RELEASE-REFUSED-NO-RETRY` 从 `open` 改为 `fixed(57776e805)`。该状态只表示源码进 main。待实机不变：换 Wi-Fi（热点 → 酒店/办公室）后确认重试在 2 秒节拍内放行，且不绕过 Service 的 `still_on_loopback=true` 硬拒绝。

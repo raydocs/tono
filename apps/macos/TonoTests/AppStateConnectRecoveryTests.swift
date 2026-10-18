@@ -41,6 +41,76 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         return app
     }
 
+    func testAutomaticRecoveryKeepsAdmittedModeUntilExplicitSessionEnd() async {
+        let saved = RuntimeState()
+        let defaults = AppProfile.defaults
+        let mode = defaults.object(forKey: SettingsKey.desktopRoutingMode)
+        let strictIntent = defaults.object(forKey: "strictRoutingSessionIntent")
+        let selection = defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        defer {
+            saved.restore()
+            defaults.set(mode, forKey: SettingsKey.desktopRoutingMode)
+            defaults.set(strictIntent, forKey: "strictRoutingSessionIntent")
+            defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+        }
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        KillSwitchService.isArmed = false
+        defaults.removeObject(forKey: "strictRoutingSessionIntent")
+        defaults.set("stable", forKey: SettingsKey.desktopRoutingMode)
+        let app = makeApp()
+        defer {
+            app.connectionCoordinator.cancelConnectionTasks()
+            app.connectionCoordinator.cancelReconnectTasks()
+        }
+        app.proxyRegions = [ProxyRegion(id: AppState.managedCatalogRegionID,
+            name: "TONO CLOUD", nodes: [Fixture.realityNode()])]
+        app.recordConnectBootSession = {}
+
+        // Exercise production admission but cancel before privileged async IO.
+        // This also covers failures before runtime construction captures mode.
+        app.userConnect()
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "stable")
+        app.connectionCoordinator.cancelConnectionTasks()
+        app.isConnecting = false
+        app.isConnected = true
+        defaults.set("three-tier", forKey: SettingsKey.desktopRoutingMode)
+        app.userConnect() // A stale click on a connected session cannot consume it.
+        XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "stable")
+
+        app.disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
+        await app.finishPendingDisconnect()
+        app.connect(preservingUnarmedBackoff: true)
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "stable")
+        app.connectionCoordinator.cancelConnectionTasks()
+
+        app.disconnect(releaseKillSwitch: true)
+        await app.finishPendingDisconnect()
+        app.userConnect()
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "three-tier")
+        app.connectionCoordinator.cancelConnectionTasks()
+        app.isConnecting = false
+        app.isConnected = true
+        defaults.set("stable", forKey: SettingsKey.desktopRoutingMode)
+
+        app.disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
+        await app.finishPendingDisconnect()
+        app.connect()
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "three-tier")
+        app.connectionCoordinator.cancelConnectionTasks()
+
+        app.disconnect(releaseKillSwitch: true)
+        await app.finishPendingDisconnect()
+        app.userConnect()
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertEqual(app.connectionCoordinator.capturedRoutingMode, "stable")
+    }
+
     func testMissingTUNDuringNodeSwitchDoesNotCountTowardPostSwitchVerdict() async {
         let saved = RuntimeState()
         defer { saved.restore() }

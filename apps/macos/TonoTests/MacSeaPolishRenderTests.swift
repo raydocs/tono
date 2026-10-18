@@ -3,6 +3,7 @@ import QuartzCore
 import Darwin
 import ImageIO
 import ScreenCaptureKit
+import ServiceManagement
 import SwiftUI
 import XCTest
 @testable import Tono
@@ -13,6 +14,53 @@ import XCTest
 final class MacSeaPolishRenderTests: XCTestCase {
     private let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("test-results/renders", isDirectory: true)
+
+    /// Production settings in both appearances; only synthetic captured state,
+    /// with no Connect/Disconnect, helper, or protection-release operations.
+    func testRoutingModeSettingsStates() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["TONO_HOSTED_WINDOW_DIAGNOSTIC"] == "1",
+                          "settings evidence requires the hosted macOS WindowServer")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let fixture = try makeFixture()
+        defer { fixture.clean() }
+        let defaults = AppProfile.defaults
+        let keys = [SettingsKey.desktopRoutingMode, SettingsKey.allowLocalNetworkDevices]
+        let previous = keys.map { defaults.object(forKey: $0) }
+        defer {
+            for (key, value) in zip(keys, previous) {
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+        defaults.set(true, forKey: SettingsKey.allowLocalNetworkDevices)
+        for locale in ["en", "zh-Hans"] {
+            for sea in [false, true] {
+                for (name, saved, captured) in [
+                    ("stable", "stable", "stable"),
+                    ("strict-next", "three-tier", "stable"),
+                    ("strict-retained-stable-next", "stable", "three-tier")
+                ] {
+                    defaults.set(saved, forKey: SettingsKey.desktopRoutingMode)
+                    try fixture.app.coreRuntime.captureRoutingMode(captured, physicalInterface: nil)
+                    let root = SettingsView(loginItems: LoginItemPreference(readStatus: { .notRegistered }))
+                        .environment(fixture.app).environment(fixture.account)
+                        .environmentObject(AppUpdater(enabled: false))
+                        .modifier(SeaPageAppearance())
+                        .environment(\.seaAppearanceOverride, sea)
+                        .environment(\.colorScheme, .dark)
+                        .environment(\.locale, Locale(identifier: locale))
+                    let (window, _) = try await makeNativeWindow(size: CGSize(width: 1000, height: 1100), root: root)
+                    defer { close(window) }
+                    await settle(0.4)
+                    try await capture("routing-settings-\(locale)-\(sea ? "sea" : "classic")-\(name)", window: window)
+                    XCTAssertEqual(fixture.app.coreRuntime.routingMode, captured)
+                    XCTAssertEqual(defaults.string(forKey: SettingsKey.desktopRoutingMode), saved)
+                    XCTAssertTrue(defaults.bool(forKey: SettingsKey.allowLocalNetworkDevices),
+                                  "Rendering strict settings must not erase the Stable LAN preference")
+                }
+            }
+        }
+    }
 
     func testWholeWindowStatesAndAccessibility() async throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["TONO_HOSTED_WINDOW_DIAGNOSTIC"] == "1",

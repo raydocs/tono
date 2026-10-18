@@ -15,3 +15,5 @@
 2026-10-13 续记：main 曾按当时已关闭的 head `a5299f0c1` 记过收尾。PR 已重开，继续第 4 轮，状态仍是 in-PR。
 
 2026-10-13 续记（#1605 第 4 轮，Codex FAIL 一个 MAJOR 两个 MINOR）：（1）Connect 在意图写入之前就清掉启动退休的兜底欠债；持久化失败留下旧会话，核心窗口重试拆除 WFP 时不再登记兜底，机器被释放到死解析器上——欠债改为只在新意图写入且 `ARMED` 换成新会话之后清除，提交点之前的错误保留欠债；（2）WFP 锁等待超时的拒绝改为「another network operation is still in progress」，前缀不变，只有 DNS 围栏仍写「still writing DNS」；（3）离线注册表超时测试在桩门面入口记录调用，并断言注册表超时之后没有有效 DNS 读取。状态仍是 in-PR。
+
+2026-10-18 集成续记：#1605 同步 `origin/main` 的 `59082acfb52f31963b39e52595549875d0f01ed4`，生产 strict-bound Connect 同样经过 DNS 写者围栏；启动通用释放保留 strict guard，只有 durable strict 标记存活时脱离兜底也不改 DNS。旧 `8439e5a06` 的 617 passed 仅为历史回执；当前最终 head 的 CI 与独立 Codex high 覆盖见 PR 验证评论。`needs-hardware` 限于 Windows 安装后恢复（DNS/DHCP、NRPT/Encrypted DNS）、SCM 重启失败、恢复与 Connect 交错及 strict 断网保留；源码合并不等于这些验收通过，也不代表新客户包已包含修复。本 PR 不发布、不改 feed。

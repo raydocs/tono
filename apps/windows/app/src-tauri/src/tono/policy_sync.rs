@@ -41,6 +41,7 @@ pub fn seed_from_cache(inner: &mut TonoInner) {
     };
     inner.policy_tracker = PolicyTracker::from_cached(&cached.response);
     inner.traffic_policy = Some(cached.policy);
+    inner.traffic_policy_response = Some(cached.response);
 }
 
 /// Clone → install → persist → commit (M2 pattern): the tracker only
@@ -82,6 +83,7 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
                 let changed = inner.traffic_policy.as_ref() != Some(&policy);
                 inner.policy_tracker = tracker;
                 inner.traffic_policy = Some(policy.clone());
+                inner.traffic_policy_response = Some(response.clone());
                 state.audit().log(AuditEvent::PolicySyncOk {
                     revision: response.revision,
                     domains: policy.domains.len(),

@@ -32,16 +32,22 @@ format and the release script passes and verifies the exact source commit.
 
 ## Current source and published state
 
-Source versions in this tree are **macOS 0.0.75 (build 75)** and **Windows
-0.0.75**. That is not a claim that either candidate is notarised, signed for
-customers, or present on a live update feed. Publication and channel
-promotion are separate gated operations; see
-`apps/macos/release-notes/build75.md` and
-`apps/windows/release-notes/0.0.75.md`. The customer release is 0.0.75: 0.0.74 was
-frozen and built (candidate 7403) but never accepted on the owner's devices or
-published, and the owner retargeted on 2026-10-05 ([decision 061](decisions/061-2026-10-05-release-is-0075.md)). Its `v0.0.74`
-draft, `tono-macos-0.0.73-build73` (older source `bdc75a4e`) and the `v0.0.73` draft
-are not moved or reused.
+Source versions in this tree are **macOS 0.0.77 (build 78)** and **Windows
+0.0.77**, prepared as a new **customer-test candidate** by the owner's
+2026-10-17 request after merging #1571. This is not stable acceptance or customer-feed promotion.
+See `apps/macos/release-notes/build78.md`, `apps/windows/release-notes/0.0.77.md`
+and [the delivery record](changelog.d/2026-10-17-desktop-0077-customer-test.md).
+Both packages must bind the same source and release sequence; share verified
+bytes in a new, explicitly labelled prerelease, never by overwriting old assets.
+Installed-device results are collected after candidate creation, not invented
+as a prerequisite receipt. The 0.0.76 RC and its assets remain immutable.
+G1–G3 still govern stable promotion; the 0.0.75 G3 deferral is not a
+qualification of 0.0.77 upgrades. Three-tier is an explicit opt-in: ordinary
+DIRECT is public IPv4 TCP80/443 only, not UDP/QUIC, IPv6 or LAN support.
+
+0.0.75 and 0.0.74 were built but not customer-published. Their draft releases,
+`tono-macos-0.0.73-build73` (older source `bdc75a4e`) and the `v0.0.73` draft
+are retained unchanged, not moved or reused.
 
 In-tree customer feeds in this checkout (what a control-plane deploy of
 *this* commit would serve) are Sparkle `public/appcast.xml` at **0.0.67**

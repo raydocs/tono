@@ -282,6 +282,58 @@ final class SingBoxConfigTests: XCTestCase {
         let homeRule = try XCTUnwrap(rules.firstIndex { $0["outbound"] as? String == "Tono-Claude-Home" })
         let directRule = try XCTUnwrap(rules.firstIndex { $0["outbound"] as? String == "Tono-China-App" })
         XCTAssertLessThan(homeRule, directRule)
+        let homeSuffixes = try XCTUnwrap(rules[homeRule]["domain_suffix"] as? [String])
+        let udpRule = try XCTUnwrap(rules.firstIndex {
+            $0["network"] as? String == "udp" && $0["action"] as? String == "reject"
+                && ($0["domain_suffix"] as? [String])?.contains("claude.ai") == true
+        })
+        let rejectedSuffixes = try XCTUnwrap(rules[udpRule]["domain_suffix"] as? [String])
+        XCTAssertLessThan(udpRule, directRule)
+        // Independent owner-requested hosts: a missing list entry must fail
+        // even if both compilers faithfully emit the same incomplete list.
+        for host in [
+            "clau.de", "cdn.usefathom.com", "g.ai", "dify.ai", "poe.com",
+            "groq.com", "sora.com", "cursor.sh", "jasper.ai", "openart.ai",
+            "clipdrop.co", "chatgpt.site", "deepmind.com", "ai.google.dev",
+            "gemini.google", "openrouter.ai", "api.github.com", "deepmind.google",
+            "api.jetbrains.ai", "jules.google.com", "notebooklm.google",
+            "antigravity.google", "aida.googleapis.com", "generativeai.google",
+            "makersuite.google.com", "antigravity-unleash.goog", "geller-pa.googleapis.com",
+            "gateway.ai.cloudflare.com", "aisandbox-pa.googleapis.com", "cloudcode-pa.googleapis.com",
+            "robinfrontend-pa.googleapis.com", "alkalicore-pa.clients6.google.com",
+            "daily-cloudcode-pa.googleapis.com", "proactivebackend-pa.googleapis.com",
+            "alkalimakersuite-pa.clients6.google.com",
+            "google.com", "googleapis.com", "github.com", "githubusercontent.com", "githubassets.com",
+            "reddit.com", "redd.it", "redditmedia.com", "redditstatic.com", "reddit.map.fastly.net",
+            "tiktok.com", "tiktokv.com", "tiktokcdn.com", "tiktokcdn-us.com", "ttlivecdn.com",
+        ] {
+            XCTAssertTrue(homeSuffixes.contains(host), host)
+            XCTAssertTrue(rejectedSuffixes.contains(host), host)
+            XCTAssertThrowsError(try ConfigPipeline.validatedWebDirectDomain(host, trusted: true), host)
+        }
+        for shared in ["google.dev", "cloudflare.com", "gstatic.com", "youtube.com",
+                       "bytedance.com", "ibyteimg.com", "fastly.net", "akamaized.net", "edgesuite.net"] {
+            XCTAssertFalse(homeSuffixes.contains(shared), shared)
+        }
+        let cloudRule = try XCTUnwrap(rules.firstIndex {
+            $0["network"] as? String == "tcp" && $0["outbound"] as? String == "Tono-Exit"
+                && ($0["domain_suffix"] as? [String])?.contains("youtubei.googleapis.com") == true
+        })
+        XCTAssertLessThan(cloudRule, homeRule)
+        let cloudSuffixes = try XCTUnwrap(rules[cloudRule]["domain_suffix"] as? [String])
+        for host in ["youtube.com", "googlevideo.com", "youtube.googleapis.com", "youtubei.googleapis.com",
+                     "youtube-ui.l.google.com", "pornhub.com", "phncdn.com"] {
+            XCTAssertTrue(cloudSuffixes.contains(host), host)
+            XCTAssertThrowsError(try ConfigPipeline.validatedWebDirectDomain(host, trusted: true), host)
+        }
+        let yaml = try Fixture.ownedRuntime(overlay: overlay, nodes: nodes(), directPolicy: plan)
+        let googleHome = try XCTUnwrap(yaml.range(of: "DOMAIN-SUFFIX,googleapis.com)),Tono-Claude-Home"))
+        let processHome = try XCTUnwrap(yaml.range(of: "PROCESS-NAME,Claude"))
+        for host in ["youtubei.googleapis.com", "googlevideo.com", "pornhub.com", "phncdn.com"] {
+            let cloud = try XCTUnwrap(yaml.range(of: "DOMAIN-SUFFIX,\(host))),Tono-Exit"))
+            XCTAssertLessThan(cloud.lowerBound, googleHome.lowerBound)
+            XCTAssertLessThan(cloud.lowerBound, processHome.lowerBound)
+        }
         XCTAssertTrue(rules.contains { $0["mode"] as? String == "and" })
         XCTAssertTrue(result.directEndpoints.contains(.init(address: "223.5.5.5", port: 443, transport: "tcp")))
         overlay.selectedNodeName = hy2.name
@@ -515,6 +567,87 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertFalse(on.contains { $0 as NSDictionary == localReject })
         XCTAssertFalse(on.contains { $0["action"] as? String == "resolve" && $0["domain"] == nil })
         XCTAssertEqual(on.count, off.count - 1 - 2 * nameMatchedDirect, "on is main's document")
+    }
+
+    func testThreeTierSnapshotCompilesFixedDNSAndPassesThePackagedParser() throws {
+        let values = try nodes()
+        var overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta", claudeHomeSocks5: .init(
+                host: "9.9.9.8", port: 11080, username: "fixture-user", password: "fixture-password"))
+        let stable = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values, directPlan: nil)
+        let result = try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values, physicalInterface: "en0", fakeIPSlot: 3)
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        XCTAssertTrue(ThreeTierRoutingContract.admits(document))
+        let rules = try XCTUnwrap((document["route"] as? [String: Any])?["rules"] as? [[String: Any]])
+        let video = try XCTUnwrap(rules.firstIndex { ($0["domain_suffix"] as? [String])?.contains("youtubei.googleapis.com") == true && $0["action"] as? String == "route" })
+        let home = try XCTUnwrap(rules.firstIndex { ($0["domain_suffix"] as? [String])?.contains("googleapis.com") == true && $0["action"] as? String == "route" })
+        let domestic = try XCTUnwrap(rules.firstIndex { $0["outbound"] as? String == "Tono-ThreeTier-Direct" })
+        XCTAssertLessThan(video, home)
+        XCTAssertLessThan(home, domestic)
+        XCTAssertEqual(rules[video]["outbound"] as? String, "Tono-Exit")
+        XCTAssertEqual(rules[home]["outbound"] as? String, "Tono-Home-Residential")
+        XCTAssertTrue((rules[domestic]["domain"] as? [String])?.contains("www.bilibili.com") == true)
+        XCTAssertNil(rules[domestic]["domain_suffix"])
+        XCTAssertEqual(rules[domestic]["network"] as? String, "tcp")
+        let cloud = try XCTUnwrap(rules.firstIndex { ($0["domain"] as? [String])?.contains("www.wikipedia.org") == true && $0["action"] as? String == "route" })
+        let ordinary = try XCTUnwrap(rules.firstIndex { $0["outbound"] as? String == "Tono-ThreeTier-Direct" && $0["domain"] == nil })
+        XCTAssertLessThan(home, cloud)
+        XCTAssertLessThan(cloud, ordinary)
+        XCTAssertEqual(rules[cloud]["outbound"] as? String, "Tono-Exit")
+        XCTAssertTrue(NSDictionary(dictionary: rules[ordinary]).isEqual(to: ["network": "tcp", "port": [80, 443], "action": "route", "outbound": "Tono-ThreeTier-Direct"]),
+                      "Unlisted ordinary hosts and public cached IPs use DIRECT without a country-list match")
+        XCTAssertEqual(rules[ordinary - 3]["server"] as? String, "Tono-ThreeTier-China-DNS")
+        XCTAssertEqual(rules[ordinary - 2]["action"] as? String, "reject", "Private DNS answers cannot escape the default path")
+        XCTAssertTrue(NSDictionary(dictionary: rules[ordinary - 1]).isEqual(to: ["network": "tcp", "ip_cidr": ["160.79.104.0/21"], "action": "route", "outbound": "Tono-Home-Residential"]),
+                      "Late ordinary answers must recheck Home CIDRs before DIRECT")
+        XCTAssertTrue(NSDictionary(dictionary: rules[domestic - 1]).isEqual(to: rules[ordinary - 1]),
+                      "An explicit domestic hostname cannot bypass a resolved Home CIDR either")
+        XCTAssertEqual((document["route"] as? [String: Any])?["final"] as? String, "Tono-ThreeTier-Direct")
+        XCTAssertEqual(rules.last?["action"] as? String, "reject")
+        let dns = try XCTUnwrap(document["dns"] as? [String: Any])
+        let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
+        XCTAssertEqual(servers[0]["inet4_range"] as? String, "198.18.176.0/20")
+        XCTAssertEqual(servers[2]["detour"] as? String, "Tono-Home-Residential")
+        XCTAssertEqual(servers[2]["server"] as? String, "1.1.1.1")
+        XCTAssertEqual(servers[3]["detour"] as? String, "Tono-ThreeTier-Direct")
+        XCTAssertEqual(dns["final"] as? String, "Tono-ThreeTier-China-DNS")
+        let dnsRules = try XCTUnwrap(dns["rules"] as? [[String: Any]])
+        XCTAssertTrue(NSDictionary(dictionary: try XCTUnwrap(dnsRules.last)).isEqual(to: ["action": "route", "server": "Tono-ThreeTier-China-DNS"]))
+        XCTAssertTrue(dnsRules.contains { $0["domain"] == nil && $0["domain_suffix"] == nil && $0["inbound"] != nil && $0["server"] as? String == "Tono-FakeIP" })
+        XCTAssertTrue(rules[..<home].contains { $0["action"] as? String == "resolve" && $0["server"] as? String == "Tono-ThreeTier-Home-DNS" })
+        var bad = document
+        var wrongDNS = dns
+        var wrongServers = servers
+        wrongServers[2]["detour"] = "Tono-Exit"
+        wrongDNS["servers"] = wrongServers
+        bad["dns"] = wrongDNS
+        XCTAssertFalse(ThreeTierRoutingContract.admits(bad))
+        var wrongRoute = try XCTUnwrap(document["route"] as? [String: Any])
+        var wrongRules = rules
+        wrongRules[home]["outbound"] = "Tono-ThreeTier-Direct"
+        wrongRoute["rules"] = wrongRules
+        bad = document
+        bad["route"] = wrongRoute
+        XCTAssertFalse(ThreeTierRoutingContract.admits(bad), "Default DIRECT must not weaken a recognized Home match")
+        XCTAssertThrowsError(try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values, physicalInterface: "utun199"))
+        XCTAssertEqual(try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values, directPlan: nil).runtimeJSON, stable.runtimeJSON)
+        overlay.claudeHomeSocks5 = nil
+        XCTAssertThrowsError(try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values, physicalInterface: "en0"))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tono-three-tier-check-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let config = directory.appendingPathComponent("config.json")
+        try result.runtimeJSON.write(to: config)
+        let process = Process()
+        process.executableURL = try XCTUnwrap(CoreRuntimeManager().findBinary())
+        process.arguments = ["check", "-D", directory.path, "-c", config.path]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0, String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
     }
 
     /// The off document, with the reviewed app and web-direct routes it

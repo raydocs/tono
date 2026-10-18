@@ -76,7 +76,7 @@ pub fn plan_failure_using(
             selective_ai_hold: false,
         };
     }
-    if !(armed && session_verified) {
+    if !(armed && (session_verified || strict_kill_switch)) {
         return FailurePlan {
             mark_armed: false,
             stop_core: Some(true),

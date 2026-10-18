@@ -82,6 +82,8 @@ struct KillSwitchState {
     /// restored from disk, so a recovery or heal renders the stricter form
     /// until the app re-arms with the setting.
     let allowLocalNetworkDevices: Bool
+    var strictBlocking = false
+    var strictProof: StrictRuntimeProof? = nil
 }
 
 struct HelperCommandResult {
@@ -142,6 +144,13 @@ final class HelperCommandLaunch: @unchecked Sendable {
 }
 
 final class KillSwitchManager {
+    var strictProof: StrictRuntimeProof?
+    static var strictIntentActive: Bool {
+        do {
+            let record = try ReleaseAuthority().load()
+            return record.strictIntent
+        } catch { return true } // Unknown release history cannot open a strict host.
+    }
     /// Ceiling for the persisted recovery pin set of a single host. Well under
     /// the 128-address limit `validateAddresses` enforces when those pins are
     /// read back, so accumulation can never lock out a future arm.
@@ -242,6 +251,25 @@ final class KillSwitchManager {
         _ object: [String: Any],
         commitAllowed: () -> Bool = { true }
     ) throws -> [String: Any] {
+        var object = object
+        if Self.strictIntentActive {
+            // The root snapshot, not an IPC allowlist, owns every physical
+            // grant. No resolver, relay, LAN or stable media fallback.
+            object["apiHosts"] = [String]()
+            object["exitHints"] = [String]()
+            object["proxyEndpoints"] = [[String: Any]]()
+            object["sessionDirectEndpoints"] = [[String: Any]]()
+            object["tailscaleBootstrapEnabled"] = false
+            object["allowSystemResolution"] = false
+            object["bootstrapPins"] = [String: [String]]()
+            object["reviewedBundleDirect"] = false
+            object["allowLocalNetworkDevices"] = false
+            let tunnels = try Self.validateTunnels(object["tunnelInterfaces"] ?? [])
+            guard tunnels.isEmpty || tunnels == ["utun199"] else {
+                throw HelperFailure.invalid("Strict routing only admits its owned TUN.")
+            }
+            object["tunnelInterfaces"] = tunnels
+        }
         // Name resolution and DERP refresh can block under packet loss. Read a
         // stable fallback snapshot under the manager lock, then perform all
         // network work unlocked so the power callback can close its gate
@@ -375,7 +403,7 @@ final class KillSwitchManager {
             cachedDERPEndpoints = previous?.cachedDERPEndpoints ?? []
         }
 
-        let state = KillSwitchState(
+        var state = KillSwitchState(
             armed: true,
             tailscaleBootstrapEnabled: tailscaleBootstrapEnabled,
             apiHosts: normalizedHosts.filter { !Self.defaultHosts.contains($0) },
@@ -390,6 +418,12 @@ final class KillSwitchManager {
             reviewedBundleDirectEnabled: reviewedBundleDirect,
             allowLocalNetworkDevices: allowLocalNetworkDevices
         )
+        state.strictBlocking = Self.strictIntentActive
+        if let proof = strictProof, let record = try? ReleaseAuthority().load(),
+           record.mode == .secured, record.generation == proof.generation,
+           record.strictRuntimeDigest == proof.digest {
+            state.strictProof = proof
+        }
 
         lock.lock()
         defer { lock.unlock() }
@@ -508,7 +542,7 @@ final class KillSwitchManager {
             let failure = Self.failedArm(
                 error: error,
                 load: load,
-                liveSessionReArm: liveSessionReArm,
+                liveSessionReArm: liveSessionReArm || Self.strictIntentActive,
                 tighteningUnconfirmed: tighteningUnconfirmed,
                 faultHeld: &faultHeld,
                 installStricterBlock: { try Self.installEmergencyBlock(allowedUID: uid) }
@@ -1077,6 +1111,7 @@ final class KillSwitchManager {
     func releaseForQuit() throws -> [String: Any] {
         lock.lock()
         defer { lock.unlock() }
+        guard !Self.strictIntentActive else { throw HelperFailure.invalid("Strict protection requires explicit Restore internet.") }
         var broadProtection = Self.stateFileExists()
         if !broadProtection { broadProtection = try Self.effectiveStatus() }
         let preserve = Self.quitPreservesAIHold(
@@ -1097,6 +1132,7 @@ final class KillSwitchManager {
     }
 
     private func disarmLocked(preserveAIHold: Bool) throws -> [String: Any] {
+        guard !Self.strictIntentActive else { throw HelperFailure.invalid("Strict protection requires the authenticated release worker.") }
         // The anchor flush below opens egress before later steps can still
         // throw. Any arm after a half-completed disarm must therefore take
         // the full state flush — direct PF states established during the open
@@ -1118,6 +1154,10 @@ final class KillSwitchManager {
     /// Also resumes a previously requested narrow layer after broad intent
     /// has already been removed. It never installs a general block.
     static func releasePersistedBlock() {
+        if strictIntentActive {
+            try? installEmergencyBlock(allowedUID: 0)
+            return
+        }
         guard stateFileExists() else {
             reconcileSelectiveRecovery(
                 generalIntentPresent: false,
@@ -1164,6 +1204,7 @@ final class KillSwitchManager {
         release: () throws -> Void = { try KillSwitchManager.releasePersistedBlockUnlocked() },
         applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort
     ) {
+        guard !strictIntentActive else { return }
         do {
             try releaseWithAIHold(
                 preserveAIHold: true,
@@ -1267,12 +1308,12 @@ final class KillSwitchManager {
         lock.lock()
         defer { lock.unlock() }
 
-        var wanted = false
+        var wanted = Self.strictIntentActive
         var live = (try? Self.effectiveStatus()) ?? false
         do {
             var tunnelArmed: Bool?
             if let state = try loadState() {
-                wanted = state.armed
+                wanted = state.armed || Self.strictIntentActive
                 if wanted && live {
                     Self.pinHostsIfUsable(state: state)
                 }
@@ -1447,7 +1488,7 @@ final class KillSwitchManager {
         defer { lock.unlock() }
         var object: [String: Any] = [
             "ok": true,
-            "wantArmed": Self.stateFileExists(),
+            "wantArmed": Self.stateFileExists() || Self.strictIntentActive,
             "repairedSinceArm": repairedSinceArm,
             "version": helperVersion,
         ]
@@ -1516,11 +1557,8 @@ final class KillSwitchManager {
         ]
     }
 
-    /// Does not re-arm. macOS has no user-facing strict kill switch, so a
-    /// state file left by the last session must not block the machine at
-    /// boot, after a crash, or after this daemon is restarted. The hook
-    /// migration already ran in `init`. `SocketServer.run` releases the
-    /// leftover block once the stale Core has been stopped.
+    /// Stable keeps its existing launch release. A secured strict generation
+    /// restores only an emergency block, never saved tunnel/DIRECT grants.
     func restoreAtLaunch() throws {
         // No block at launch. The Core is constructed after this init, so
         // SocketServer.run decides: release a leftover when the Core is not
@@ -1528,6 +1566,9 @@ final class KillSwitchManager {
         // persisted in this boot comes back first, so neither that startup
         // release nor the core-down watchdog lifts its block.
         localNetworkFaultLocked = Self.persistedProtectedFaultHolds()
+        if Self.strictIntentActive {
+            try Self.installEmergencyBlock(allowedUID: allowedUID)
+        }
     }
 
     /// What PF renders when the supervisor reinstalls saved state while the

@@ -21,6 +21,10 @@ use super::*;
 /// WFP recovery channel should still include those ProgramData pins, or a
 /// rotated anycast edge is unreachable until the App connects again.
 pub(super) fn apply_learned_bootstrap_pins(intent: &mut IntentRecord) {
+    if intent.strict_kill_switch {
+        intent.api_host_ips.clear();
+        return;
+    }
     let learned = crate::core::bootstrap_pins::load();
     if learned.addresses.is_empty() {
         return;
@@ -115,19 +119,39 @@ pub(crate) async fn arm_bootstrap(
     app_path: &str,
     owner_key: &str,
 ) -> Result<()> {
-    arm_bootstrap_waiting(config, app_path, owner_key, ARM_FENCE_WAIT).await
+    arm_bootstrap_bound(config, app_path, owner_key, None).await
 }
 
-/// [`arm_bootstrap`] with the time it waits for a network restore to finish writing DNS injected,
-/// so a test models the 5 s wait in milliseconds.
+pub(crate) async fn arm_bootstrap_bound(
+    config: &KillSwitchConfig,
+    app_path: &str,
+    owner_key: &str,
+    strict_contract: Option<StrictContract>,
+) -> Result<()> {
+    arm_bootstrap_waiting(config, app_path, owner_key, strict_contract, ARM_FENCE_WAIT).await
+}
+
+/// [`arm_bootstrap_bound`] with the time it waits for a network restore to finish writing DNS
+/// injected, so a test models the 5 s wait in milliseconds. Both ordinary and strict production
+/// starts use this same writer fence.
 pub(crate) async fn arm_bootstrap_waiting(
     config: &KillSwitchConfig,
     app_path: &str,
     owner_key: &str,
+    strict_contract: Option<StrictContract>,
     fence_wait: std::time::Duration,
 ) -> Result<()> {
+    let mut config = config.clone();
+    if let Some(contract) = &strict_contract {
+        // Home is reached only through the graph's cloud detour. Never turn
+        // caller endpoint lists (including Home itself) into physical permits.
+        config.proxy_endpoints = contract.exit_endpoints.clone();
+        config.bootstrap_api_hosts.clear();
+        config.direct_endpoints.clear();
+        if config.tunnel_interface != "Tono" { bail!("strict session requires the owned Tono TUN"); }
+    }
     ensure_supported()?;
-    validate_config(config)?;
+    validate_config(&config)?;
     if app_path.trim().is_empty() {
         bail!("enabled kill switch requires the staged core path");
     }
@@ -146,6 +170,9 @@ pub(crate) async fn arm_bootstrap_waiting(
     // it when the intent write fails, and the core-window retry would then release WFP without
     // registering the fallback.
     authorize_takeover_for(owner_key).map_err(anyhow::Error::new)?;
+    if strict_kill_switch_enabled() {
+        bail!("strict session must be explicitly disconnected before another StartClash");
+    }
     let inherited_verified = armed_guard().as_ref().is_some_and(|armed| {
         armed.intent.owner_key.as_deref() == Some(owner_key) && armed.intent.is_verified()
     });
@@ -160,7 +187,8 @@ pub(crate) async fn arm_bootstrap_waiting(
             api_host_ips: api_host_ips.iter().map(ToString::to_string).collect(),
             updated_at: now_unix(),
             owner_key: Some(owner_key.to_owned()),
-            strict_kill_switch: false,
+            strict_kill_switch: strict_contract.is_some(),
+            strict_contract,
             reconnect_after_release: false,
             reconnect_owner_key: None,
             apply_narrow_after_release: None,
@@ -174,6 +202,9 @@ pub(crate) async fn arm_bootstrap_waiting(
     };
     // Persist fail-closed intent before touching WFP: a daemon restart installs at least the
     // floor if this process dies during the following transaction.
+    if armed.intent.strict_kill_switch {
+        persist_strict_recovery().await?;
+    }
     atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?).await?;
     CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
     publish_reconnect(false, None);
@@ -231,6 +262,7 @@ pub(crate) async fn replace_proxy_endpoints(endpoints: &[ProxyEndpoint]) -> Resu
         }
     }
     let _operation = WFP_OPERATION.lock().await;
+    refuse_strict_mutation()?;
     let mut armed = armed_guard().clone().context("kill switch is not armed")?;
     if armed.intent.mode != KillSwitchStatusMode::Locked {
         bail!("kill switch must be locked before replacing proxy endpoints");
@@ -369,6 +401,7 @@ async fn lock_unlocked(tunnel_interface: Option<&str>) -> Result<()> {
     let mut armed = armed_guard()
         .clone()
         .context("kill switch is not armed")?;
+    prove_strict_session(&armed).await?;
     let recorded = armed.intent.tunnel_interface.clone();
     if recorded.is_empty() {
         bail!("armed kill switch has no tunnel interface");
@@ -393,6 +426,11 @@ async fn lock_unlocked(tunnel_interface: Option<&str>) -> Result<()> {
     let core_instance = current_core_instance_authoritative()
         .await
         .context("cannot lock a tunnel without a running core")?;
+    if armed.intent.strict_kill_switch && armed.core_instance.is_some()
+        && armed.core_instance != Some(core_instance)
+    {
+        bail!("strict Core instance changed; explicit disconnect is required");
+    }
     let luid = resolve_luid(&recorded).await?;
     armed.tun_luid = Some(luid);
     armed.core_instance = Some(core_instance);

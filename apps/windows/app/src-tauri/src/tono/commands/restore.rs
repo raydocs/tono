@@ -3,7 +3,7 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tauri::{AppHandle, Manager as _};
 use tono_logging::{Type, logging};
-use tono_service_protocol::KillSwitchStatus;
+use tono_service_protocol::{KillSwitchStatus, ServiceStatusSnapshot};
 use tono_core::{
     auth::{ApiError, DEFAULT_DEVICE_LIMIT, User, normalize_installation_id},
     connection::{ConnectStage, UiState},
@@ -31,10 +31,28 @@ enum StoredProtection {
     /// The Service answered and wants the barrier.
     Armed(Box<KillSwitchStatus>),
     /// The Service answered and wants no barrier. The only reading that proves absence.
-    /// `reconnect_after_release` is set only by the crash-window tombstone.
-    ProvenAbsent { reconnect_after_release: bool },
+    /// `reconnect_after_release` is set only by the crash-window tombstone. `ai_hold_retained` is
+    /// the Service's report that a Quit, replacement, crash or failed update left the AI hold with
+    /// no session behind it (decision 125); an older Service omits it and reads as false.
+    ProvenAbsent { reconnect_after_release: bool, ai_hold_retained: bool },
     /// The Service did not answer. Never treated as absence.
     Unknown(String),
+}
+
+/// What an answered status probe proves about the stored barrier.
+fn stored_protection_of(snapshot: ServiceStatusSnapshot) -> StoredProtection {
+    let ai_hold_retained = snapshot.ai_hold_retained == Some(true);
+    match snapshot.kill_switch {
+        Some(status) if status.wanted => StoredProtection::Armed(Box::new(status)),
+        Some(status) => StoredProtection::ProvenAbsent {
+            reconnect_after_release: status.reconnect_after_release,
+            ai_hold_retained,
+        },
+        None => StoredProtection::ProvenAbsent {
+            reconnect_after_release: false,
+            ai_hold_retained,
+        },
+    }
 }
 
 /// Ask the Service about the stored barrier, retrying inside the restore budget.
@@ -43,15 +61,7 @@ async fn probe_stored_protection(deadline: tokio::time::Instant) -> StoredProtec
     for attempt in 0..PROTECTION_PROBE_ATTEMPTS {
         match tokio::time::timeout_at(deadline, service::tono_service_status_snapshot()).await {
             Ok(Ok(snapshot)) => {
-                return match snapshot.kill_switch {
-                    Some(status) if status.wanted => StoredProtection::Armed(Box::new(status)),
-                    Some(status) => StoredProtection::ProvenAbsent {
-                        reconnect_after_release: status.reconnect_after_release,
-                    },
-                    None => StoredProtection::ProvenAbsent {
-                        reconnect_after_release: false,
-                    },
-                };
+                return stored_protection_of(snapshot);
             }
             Ok(Err(error)) => {
                 last_error = error.to_string();
@@ -100,6 +110,7 @@ fn unanswered_probe_outcome(
     if service_stopped == Some(true) && clean_goodbye_recorded {
         StoredProtection::ProvenAbsent {
             reconnect_after_release: false,
+            ai_hold_retained: false,
         }
     } else {
         StoredProtection::Unknown(reason)
@@ -168,7 +179,8 @@ fn apply_stored_protection(inner: &mut TonoInner, protection: &StoredProtection)
             inner.fsm.mark_kill_switch_armed();
         }
         StoredProtection::Unknown(_) => inner.fsm.mark_kill_switch_armed(),
-        StoredProtection::ProvenAbsent { .. } => {}
+        // No barrier, but a hold may remain: an idle Sign Out must still remove it.
+        StoredProtection::ProvenAbsent { ai_hold_retained, .. } => inner.ai_hold_retained |= *ai_hold_retained,
     }
 }
 
@@ -201,7 +213,10 @@ fn fold_superseded_startup_protection(
     match protection {
         StoredProtection::Armed(status) => inner.kill_switch = Some((**status).clone()),
         StoredProtection::Unknown(_) => {}
-        StoredProtection::ProvenAbsent { .. } => return false,
+        StoredProtection::ProvenAbsent { ai_hold_retained, .. } => {
+            inner.ai_hold_retained |= *ai_hold_retained;
+            return false;
+        }
     }
     inner.fsm.mark_kill_switch_armed();
     true
@@ -375,7 +390,8 @@ async fn restore_session_for_generation(
                         matches!(
                             protection,
                             StoredProtection::ProvenAbsent {
-                                reconnect_after_release: true
+                                reconnect_after_release: true,
+                                ..
                             }
                         ),
                         matches!(inner.account_state, AccountState::Ready),
@@ -564,7 +580,9 @@ where
                 return None;
             }
             let release_needed = matches!(protection, StoredProtection::Armed(_));
-            if release_needed {
+            {
+                // Also for a proven-absent barrier: the Service may report a retained AI hold
+                // that a later sign-in's Sign Out still has to release (decision 125).
                 let mut inner = state.lock().await;
                 if inner.sign_in_generation != generation {
                     return None;
@@ -1041,7 +1059,7 @@ mod offline_admission_tests {
         let reason = || "pipe not found".to_string();
         assert!(matches!(
             unanswered_probe_outcome(Some(true), true, reason()),
-            StoredProtection::ProvenAbsent { reconnect_after_release: false }
+            StoredProtection::ProvenAbsent { reconnect_after_release: false, .. }
         ));
     }
 
@@ -1107,6 +1125,7 @@ mod offline_admission_tests {
         let saved_grant = std::fs::read(&grant_path).unwrap();
         let known = || StoredProtection::ProvenAbsent {
             reconnect_after_release: false,
+            ai_hold_retained: false,
         };
 
         assert_eq!(restore_unreachable(&dir, "session-a", known(), None).await, (AccountState::Ready, Some(1_000)),
@@ -1162,6 +1181,7 @@ mod offline_admission_tests {
             "session-b",
             StoredProtection::ProvenAbsent {
                 reconnect_after_release: false,
+                ai_hold_retained: false,
             },
             None,
         )
@@ -1253,4 +1273,119 @@ pub async fn restore_session_guarded(app: AppHandle, state: Arc<TonoState>) {
     // idle blocked state restore settled on must hold its Service-truth poll: a later
     // Service restart retires an unverified barrier and nothing else would re-read that.
     connection::ensure_protection_resync(&state, &app).await;
+}
+
+/// Decision 125: the Service, not this process's memory, says whether a hold is left behind, so a
+/// Sign Out after the App was reopened still removes it.
+#[cfg(test)]
+mod ai_hold_report_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    fn snapshot(ai_hold_retained: Option<bool>) -> ServiceStatusSnapshot {
+        let mut payload = serde_json::json!({
+            "is_active": false,
+            "active_generation": null,
+            "service_state": "Running",
+            "core_pid": null,
+            "core_started_at": null,
+            "last_core_exit_reason": null,
+            "restart_count": 0,
+            "last_recovery_at": null,
+            "desired_core_should_be_running": false,
+            "desired_generation": 0,
+            "desired_updated_at": 0,
+            "kill_switch": {
+                "wanted": false,
+                "verified": false,
+                "live": false,
+                "mode": "blocked",
+                "endpoints": [],
+            },
+        });
+        if let Some(retained) = ai_hold_retained {
+            payload["ai_hold_retained"] = serde_json::json!(retained);
+        }
+        serde_json::from_value(payload).expect("status payload parses")
+    }
+
+    async fn sign_out_releases(reading: Option<bool>) -> bool {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.account_state = AccountState::Ready;
+            apply_stored_protection(&mut inner, &stored_protection_of(snapshot(reading)));
+        }
+        user_sign_out_releases(&state).await
+    }
+
+    async fn user_sign_out_releases(state: &Arc<TonoState>) -> bool {
+        let released = Arc::new(AtomicBool::new(false));
+        let ran = Arc::clone(&released);
+        super::super::account::close_account_with(
+            Arc::clone(state),
+            super::super::account::AccountCloseReason::User,
+            move |_| async move {
+                ran.store(true, Ordering::SeqCst);
+                Ok(())
+            },
+            |_| async { Ok(()) },
+            |_, _| async {},
+            |_| {},
+        )
+        .await
+        .unwrap();
+        released.load(Ordering::SeqCst)
+    }
+
+    #[test]
+    fn the_services_hold_report_is_read_from_the_status_probe() {
+        assert!(matches!(
+            stored_protection_of(snapshot(Some(true))),
+            StoredProtection::ProvenAbsent { ai_hold_retained: true, .. }
+        ));
+        assert!(matches!(
+            stored_protection_of(snapshot(Some(false))),
+            StoredProtection::ProvenAbsent { ai_hold_retained: false, .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn sign_out_after_a_reopen_removes_the_hold_the_service_reports() {
+        assert!(sign_out_releases(Some(true)).await, "a reopened idle App still owes the full release");
+    }
+
+    async fn never_called(
+        _: Arc<crate::tono::state::TonoApiClient>,
+    ) -> Result<tono_core::auth::MeResponse, ApiError> {
+        unreachable!("no stored token, so me() must not run")
+    }
+
+    /// Codex review of #1648: a launch with no stored token took a branch that dropped the
+    /// Service's report, so signing in and out again left the hold behind.
+    #[tokio::test]
+    async fn a_launch_without_a_token_remembers_the_hold_for_the_next_sign_out() {
+        let state = Arc::new(TonoState::for_test());
+        let generation = state.lock().await.sign_in_generation;
+        let restored = restore_account_with(
+            &state,
+            generation,
+            &stored_protection_of(snapshot(Some(true))),
+            tokio::time::Instant::now() + Duration::from_secs(10),
+            never_called,
+            |_| async { Ok(()) },
+            |_| async { Ok(()) },
+            |_| {},
+        )
+        .await;
+        assert!(restored.is_none(), "no token, nothing to restore");
+        state.lock().await.account_state = AccountState::Ready; // a later sign-in
+        assert!(user_sign_out_releases(&state).await, "the hold survived the signed-out launch");
+    }
+
+    #[tokio::test]
+    async fn an_older_service_that_reports_nothing_keeps_todays_behavior() {
+        assert!(!sign_out_releases(None).await, "no report, no hold remembered, no release");
+        assert!(!sign_out_releases(Some(false)).await, "a Service that says no hold owes none");
+    }
 }

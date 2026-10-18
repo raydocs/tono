@@ -1068,12 +1068,16 @@ export interface TranslationResources {
           protectedHttpsFailed: string
           protectionHeldByAnotherUser: string
           protectionReleaseFailed: string
+          releaseInProgress: string
           releaseReconciling: string
+          releaseRecordCorrupt: string
+          releaseUnfinished: string
           remoteSessionConnectRefused: string
           sendDiagnostics: string
           serviceBusy: string
           serviceNotRunning: string
           serviceTooOld: string
+          staleGeneration: string
           tunDataPlaneBroken: string
           tunIngressBroken: string
           wfpEngineWedged: string
@@ -1220,10 +1224,6 @@ export interface TranslationResources {
           recent: string
           recommended: string
           title: string
-        }
-        recovery: {
-          scheduled: string
-          unscheduled: string
         }
         retry: {
           checking: string
@@ -1458,8 +1458,11 @@ export interface TranslationResources {
         protectionUnknownBody: string
         releasedFailureBody: string
         restore: string
+        restoreBusy: string
         restoreConfirmMessage: string
         restoreConfirmTitle: string
+        restorePartial: string
+        restoreUnknown: string
         retryIn: string
         retrying: string
         retryNow: string
@@ -1598,6 +1601,7 @@ export interface TranslationResources {
         explanation: string
         inUse: string
         noEvidence: string
+        others: string
         recommendation: string
         selected: string
       }
@@ -1656,6 +1660,12 @@ export interface TranslationResources {
           launchAtStartupHint: string
           readFailed: string
           reload: string
+          routingEffect: string
+          routingLimits: string
+          routingMode: string
+          routingScope: string
+          routingStable: string
+          routingThreeTier: string
           saveFailed: string
           title: string
         }

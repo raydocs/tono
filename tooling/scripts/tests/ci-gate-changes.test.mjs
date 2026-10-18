@@ -33,6 +33,7 @@ const WINDOWS_PATHS = [
   'apps/windows/crates/**',
   'apps/windows/service/**',
   'apps/windows/app/**',
+  'tooling/scripts/sing-box/three-tier-template.json',
   '.github/workflows/windows-ci.yml',
   '.github/workflows/windows-candidate.yml',
   '.github/workflows/windows-installer-smoke.yml',
@@ -155,6 +156,11 @@ test('a touched path selects the workflow that lists it', () => {
   const sing = matchingWorkflows(['tooling/scripts/sing-box/certify.py'], filters)
   assert.equal(sing.singBox, true)
   assert.equal(sing.macos, true)
+
+  const routing = matchingWorkflows(['tooling/scripts/sing-box/three-tier-template.json'], filters)
+  assert.equal(routing.windows, true)
+  assert.equal(routing.macos, true)
+  assert.equal(routing.singBox, true)
 
   const bench = matchingWorkflows(['tooling/perf/connect-bench/bench.py'], filters)
   assert.equal(bench.connectBench, true)

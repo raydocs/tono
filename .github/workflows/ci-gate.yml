@@ -38,6 +38,12 @@ jobs:
           node-version: 24
       - name: Path-filter unit tests
         run: node --test tooling/scripts/tests/ci-gate-changes.test.mjs
+      # A Rust-only list edit must also check generated Swift, even when the
+      # path filter does not select the native macOS jobs.
+      - name: Desktop routing-domain contract
+        run: |
+          node --test tooling/scripts/tests/routing-domains-sync.test.mjs
+          node tooling/scripts/sync-routing-domains.mjs --check
       - name: Detect changed paths
         id: filter
         run: node tooling/scripts/ci-gate-changes.mjs detect

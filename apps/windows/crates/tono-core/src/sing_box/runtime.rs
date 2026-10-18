@@ -316,6 +316,11 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
     } else {
         home.map(|n| n.name.as_str())
     };
+    // YouTube API children override Google Home; video overrides process
+    // fallbacks too. Match macOS even without Home/DIRECT: HY2 must not turn
+    // the reviewed TCP-only video contract into a UDP forwarding exception.
+    rules.push(json!({"network":"tcp","domain_suffix":config::CLOUD_VIDEO_DOMAINS.to_vec(),"action":"route","outbound":"Tono-Exit"}));
+    rules.push(json!({"network":"udp","domain_suffix":config::CLOUD_VIDEO_DOMAINS.to_vec(),"action":"reject"}));
     if let Some(target) = home_target {
         rules.push(json!({"network":"tcp","domain_suffix":config::CLAUDE_HOME_DOMAINS.to_vec(),"action":"route","outbound":target}));
         rules.push(json!({"network":"tcp","ip_cidr":config::CLAUDE_HOME_IPV4_CIDRS.to_vec(),"action":"route","outbound":target}));
@@ -491,6 +496,46 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
     })
 }
 
+/// Compile the explicit bounded three-tier mode. This does not grant a native
+/// permit, launch a process, or assert strict-session readiness. Stable callers
+/// continue using build_runtime and retain their original document bytes.
+pub fn build_three_tier_runtime(
+    input: RuntimeInput<'_>,
+    physical_interface: &str,
+) -> Result<OwnedSingBoxRuntime, SingBoxError> {
+    if input.direct_plan.is_some() || input.routing.home_socks5.is_none() {
+        return Err(SingBoxError::UnsupportedPolicy);
+    }
+    let mut compiled = build_runtime(input)?;
+    let mut runtime: Value = serde_json::from_str(&compiled.runtime_json)
+        .map_err(|_| SingBoxError::UnsupportedPolicy)?;
+    let fake = runtime["dns"]["servers"][0]["inet4_range"].as_str()
+        .ok_or(SingBoxError::UnsupportedPolicy)?;
+    let graph = crate::three_tier::graph(config::HOME_SOCKS5_OUTBOUND_NAME, physical_interface, fake)
+        .map_err(|_| SingBoxError::UnsupportedPolicy)?;
+    runtime["route"] = graph["route"].clone();
+    runtime["dns"] = graph["dns"].clone();
+    let outbounds = runtime["outbounds"].as_array_mut().ok_or(SingBoxError::UnsupportedPolicy)?;
+    if outbounds.iter().any(|outbound| outbound["tag"] == crate::three_tier::DIRECT) {
+        return Err(SingBoxError::UnsupportedPolicy);
+    }
+    if let Some(home) = outbounds.iter_mut().find(|outbound| outbound["type"] == "socks") {
+        home["network"] = json!("tcp");
+    }
+    outbounds.push(graph["direct_outbound"].clone());
+    if !crate::three_tier::admit_runtime(&runtime).map_err(|_| SingBoxError::UnsupportedPolicy)? {
+        return Err(SingBoxError::UnsupportedPolicy);
+    }
+    compiled.runtime_json = runtime.to_string();
+    if compiled.runtime_json.len() > MAX_BYTES { return Err(SingBoxError::UnsupportedPolicy); }
+    compiled.runtime_sha256 = Sha256::digest(compiled.runtime_json.as_bytes())
+        .iter().map(|byte| format!("{byte:02x}")).collect();
+    compiled.direct_endpoints = vec![DialEndpoint {
+        host: Ipv4Addr::new(223, 5, 5, 5), port: 443, transport: Transport::Tcp,
+    }];
+    Ok(compiled)
+}
+
 fn valid_domain(host: &str) -> bool {
     !host.is_empty()
         && host.len() <= 253
@@ -552,6 +597,105 @@ mod tests {
             direct_process_names: &[],
             fake_ip_slot: 0,
         }
+    }
+
+    #[test]
+    fn three_tier_compiler_keeps_video_home_country_dns_and_unknown_boundaries() {
+        let nodes = nodes();
+        let routing = CatalogRouting {
+            home_socks5: Some(crate::CatalogHomeSocks5 {
+                host: "203.0.113.60".into(), port: 11080,
+                username: "fixture-user".into(), password: "fixture-password".into(),
+            }),
+            ..CatalogRouting::default()
+        };
+        let baseline = build_runtime(input(&nodes, &routing)).unwrap();
+        let compiled = build_three_tier_runtime(input(&nodes, &routing), "Ethernet 7").unwrap();
+        let document: Value = serde_json::from_str(compiled.runtime_json()).unwrap();
+        assert_eq!(crate::three_tier::admit_runtime(&document), Ok(true));
+        let rules = document["route"]["rules"].as_array().unwrap();
+        let video = rules.iter().position(|rule| rule["domain_suffix"].as_array().is_some_and(|hosts| hosts.contains(&json!("youtubei.googleapis.com"))) && rule["action"] == "route").unwrap();
+        let home = rules.iter().position(|rule| rule["domain_suffix"].as_array().is_some_and(|hosts| hosts.contains(&json!("googleapis.com"))) && rule["action"] == "route").unwrap();
+        let domestic = rules.iter().position(|rule| rule["outbound"] == "Tono-ThreeTier-Direct").unwrap();
+        assert!(video < home && home < domestic);
+        assert_eq!(rules[video]["outbound"], "Tono-Exit");
+        assert_eq!(rules[home]["outbound"], "Tono-Home-Residential");
+        assert!(rules[home]["domain_suffix"].as_array().unwrap().contains(&json!("dashscope.aliyuncs.com")));
+        assert_eq!(rules[domestic]["domain"], json!(["www.12306.cn", "kyfw.12306.cn", "www.bilibili.com", "api.bilibili.com", "www.jd.com", "www.taobao.com", "www.tmall.com", "www.meituan.com", "www.dianping.com", "www.amap.com"]));
+        assert!(rules[domestic].get("domain_suffix").is_none());
+        assert_eq!(rules[domestic]["network"], "tcp");
+        assert_eq!(rules[domestic]["port"], json!([80, 443]));
+        let cloud = rules.iter().position(|rule| rule["domain"].as_array().is_some_and(|hosts| hosts.contains(&json!("www.wikipedia.org"))) && rule["action"] == "route").unwrap();
+        let ordinary = rules.iter().position(|rule| rule["outbound"] == "Tono-ThreeTier-Direct" && rule.get("domain").is_none()).unwrap();
+        assert!(home < cloud && cloud < ordinary, "protected routes terminate before ordinary DIRECT");
+        assert_eq!(rules[cloud]["outbound"], "Tono-Exit");
+        // This unconditional supported-port rule also accepts a new ordinary
+        // hostname or public cached IP: no country list admission is needed.
+        assert_eq!(rules[ordinary], json!({"network":"tcp","port":[80,443],"action":"route","outbound":"Tono-ThreeTier-Direct"}));
+        assert_eq!(rules[ordinary - 3], json!({"network":"tcp","port":[80,443],"action":"resolve","server":"Tono-ThreeTier-China-DNS","strategy":"ipv4_only"}));
+        assert_eq!(rules[ordinary - 2]["action"], "reject", "reject private answers after ordinary resolution too");
+        // A sequential graph interpreter with injected DNS answers, not a
+        // network/Core test: resolve enriches metadata and never rewinds to
+        // an earlier CIDR rule. Start with a fake-IP-restored hostname only.
+        let routed = |host: &str, answer: Ipv4Addr| -> String {
+            let mut destination: Option<Ipv4Addr> = None;
+            for rule in rules {
+                if rule.get("ip_version").is_some_and(|value| value != 4)
+                    || rule.get("inbound").is_some_and(|value| !value.as_array().unwrap().contains(&json!("Tono-TUN")))
+                    || rule.get("network").is_some_and(|value| value != "tcp" && !value.as_array().is_some_and(|items| items.contains(&json!("tcp"))))
+                    || rule.get("port").is_some_and(|value| !value.as_array().unwrap().contains(&json!(443)))
+                    || rule.get("domain").is_some_and(|value| !value.as_array().unwrap().contains(&json!(host)))
+                    || rule.get("domain_suffix").is_some_and(|value| !value.as_array().unwrap().iter().any(|suffix| {
+                        let suffix = suffix.as_str().unwrap();
+                        host == suffix || host.ends_with(&format!(".{suffix}"))
+                    }))
+                    || rule.get("ip_cidr").is_some_and(|value| !destination.is_some_and(|ip| value.as_array().unwrap().iter().any(|cidr| {
+                        let (network, bits) = cidr.as_str().unwrap().split_once('/').unwrap();
+                        let mask = u32::MAX << (32 - bits.parse::<u32>().unwrap());
+                        u32::from(ip) & mask == u32::from(network.parse::<Ipv4Addr>().unwrap()) & mask
+                    }))) {
+                    continue;
+                }
+                match rule["action"].as_str().unwrap() {
+                    "resolve" => destination = Some(answer),
+                    "route" => return rule["outbound"].as_str().unwrap().to_owned(),
+                    "reject" => return "reject".into(),
+                    other => panic!("unexpected action for this TCP fixture: {other}"),
+                }
+            }
+            panic!("TCP fixture did not terminate")
+        };
+        assert_eq!(routed("unlisted.example", Ipv4Addr::new(160, 79, 104, 10)), "Tono-Home-Residential");
+        assert_eq!(routed("www.bilibili.com", Ipv4Addr::new(160, 79, 111, 255)), "Tono-Home-Residential");
+        assert_eq!(routed("unlisted.example", Ipv4Addr::new(160, 79, 103, 255)), "Tono-ThreeTier-Direct");
+        assert_eq!(routed("unlisted.example", Ipv4Addr::new(160, 79, 112, 0)), "Tono-ThreeTier-Direct");
+        assert_eq!(routed("www.bilibili.com", Ipv4Addr::new(9, 9, 9, 9)), "Tono-ThreeTier-Direct");
+        assert_eq!(routed("unlisted.example", Ipv4Addr::new(10, 2, 3, 4)), "reject");
+        assert_eq!(routed("youtubei.googleapis.com", Ipv4Addr::new(160, 79, 104, 10)), "Tono-Exit");
+        assert_eq!(routed("www.wikipedia.org", Ipv4Addr::new(160, 79, 104, 10)), "Tono-Exit");
+        assert_eq!(document["route"]["final"], "Tono-ThreeTier-Direct");
+        assert_eq!(rules.first().unwrap()["ip_version"], 6);
+        assert_eq!(rules.last().unwrap(), &json!({"action":"reject","no_drop":true}));
+        assert!(rules[..domestic].iter().any(|rule| rule["network"] == json!(["udp", "icmp"]) && rule["action"] == "reject"));
+        assert_eq!(document["dns"]["servers"][2]["detour"], "Tono-Home-Residential");
+        assert_eq!(document["dns"]["servers"][2]["server"], "1.1.1.1");
+        assert_eq!(document["dns"]["servers"][3]["detour"], "Tono-ThreeTier-Direct");
+        assert_eq!(document["dns"]["final"], "Tono-ThreeTier-China-DNS");
+        assert_eq!(document["dns"]["rules"].as_array().unwrap().last().unwrap(), &json!({"action":"route","server":"Tono-ThreeTier-China-DNS"}));
+        assert!(document["dns"]["rules"].as_array().unwrap().contains(&json!({"inbound":["Tono-TUN","Tono-DNS","Tono-Mixed"],"query_type":["A"],"action":"route","server":"Tono-FakeIP","rewrite_ttl":30})));
+        assert_eq!(compiled.direct_endpoints(), &[DialEndpoint {host: Ipv4Addr::new(223,5,5,5), port:443, transport:Transport::Tcp}]);
+        let mut weakened = document.clone();
+        weakened["route"]["rules"].as_array_mut().unwrap().remove(video);
+        assert!(crate::three_tier::admit_runtime(&weakened).is_err());
+        let mut wrong_dns = document.clone();
+        wrong_dns["dns"]["servers"][2]["detour"] = json!("Tono-Exit");
+        assert!(crate::three_tier::admit_runtime(&wrong_dns).is_err());
+        let mut home_direct = document.clone();
+        home_direct["route"]["rules"][home]["outbound"] = json!("Tono-ThreeTier-Direct");
+        assert!(crate::three_tier::admit_runtime(&home_direct).is_err());
+        assert!(build_three_tier_runtime(input(&nodes, &CatalogRouting::default()), "Ethernet 7").is_err());
+        assert!(build_three_tier_runtime(input(&nodes, &routing), "Tono").is_err());
+        assert_eq!(build_runtime(input(&nodes, &routing)).unwrap().runtime_json(), baseline.runtime_json());
     }
 
     #[test]
@@ -734,10 +878,17 @@ mod tests {
         let runtime = build_runtime(input(&nodes, &routing)).unwrap();
         let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
         assert_eq!(value["outbounds"][3]["detour"], "Tono-Exit");
-        assert_eq!(
-            value["route"]["rules"][4]["outbound"],
-            "Tono-Home-Residential"
-        );
+        let rules = value["route"]["rules"].as_array().unwrap();
+        let home = rules.iter().position(|rule| rule["outbound"] == "Tono-Home-Residential").unwrap();
+        for host in ["google.com", "github.com", "reddit.com", "redd.it", "tiktok.com", "tiktokv.com", "tiktokcdn.com"] {
+            assert!(rules[home]["domain_suffix"].as_array().unwrap().contains(&json!(host)), "{host}");
+        }
+        for host in ["youtubei.googleapis.com", "youtube-ui.l.google.com", "googlevideo.com", "pornhub.com", "phncdn.com"] {
+            let cloud = rules.iter().position(|rule| rule["network"] == "tcp"
+                && rule["outbound"] == "Tono-Exit"
+                && rule["domain_suffix"].as_array().is_some_and(|domains| domains.contains(&json!(host)))).unwrap();
+            assert!(cloud < home, "{host} must override broad Google and process Home rules");
+        }
         assert_eq!(runtime.dial_endpoints().len(), 1);
         assert!(!runtime.redacted_json().contains("sensitive-home-secret"));
         let routing = CatalogRouting {
@@ -802,6 +953,17 @@ mod tests {
         assert!(!selected.runtime_json().contains("disable_chrome_parrot"));
         assert!(!selected.runtime_json().contains("insecure"));
         assert_eq!(selected.unavailable_nodes(), &[2]);
+        // No Home binding or DIRECT plan: video still uses cloud TCP, while
+        // ordinary HY2 UDP remains supported (no unconditional UDP rejection).
+        let value: Value = serde_json::from_str(selected.runtime_json()).unwrap();
+        let rules = value["route"]["rules"].as_array().unwrap();
+        assert!(rules.iter().any(|rule| rule["network"] == "tcp" && rule["action"] == "route"
+            && rule["outbound"] == "Tono-Exit"
+            && rule["domain_suffix"].as_array().is_some_and(|hosts| hosts.contains(&json!("youtubei.googleapis.com")))));
+        assert!(rules.iter().any(|rule| rule["network"] == "udp" && rule["action"] == "reject"
+            && rule["domain_suffix"].as_array().is_some_and(|hosts| hosts.contains(&json!("youtubei.googleapis.com")))));
+        assert!(!rules.iter().any(|rule| rule["network"] == "udp" && rule["action"] == "reject"
+            && rule.get("domain_suffix").is_none() && rule.get("ip_cidr").is_none()));
         nodes[2].tls_fingerprint = None;
         assert_eq!(
             build_runtime(input(&nodes, &routing)).unwrap_err(),
@@ -991,7 +1153,43 @@ mod tests {
         let yaml = runtime.yaml();
         assert!(yaml.contains("fake-ip-range: 198.18.0.1/16"));
         assert!(!yaml.contains("198.18.16.0/20"));
-        let digest = Sha256::digest(yaml.as_bytes());
+        // Pin the approved addition independently of the compiler's domain constant;
+        // every other byte must still match the original fallback document below.
+        let video_rules: Vec<String> = [
+            "youtube.com", "youtube-nocookie.com", "youtu.be", "googlevideo.com", "ytimg.com",
+            "youtube.googleapis.com", "youtubei.googleapis.com", "youtubeembeddedplayer.googleapis.com",
+            "youtube-ui.l.google.com", "wide-youtube.l.google.com", "yt3.googleusercontent.com", "ggpht.com",
+            "pornhub.com", "pornhub.org", "pornhubpremium.com", "phncdn.com", "phprcdn.com",
+            "porngub.com", "pornhub-deutsch.net", "pornhubapparel.com", "gaytube.com",
+        ]
+        .iter()
+        .flat_map(|domain| [
+            format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),Tono-Exit"),
+            format!("AND,((NETWORK,UDP),(DOMAIN-SUFFIX,{domain})),REJECT"),
+        ])
+        .collect();
+        let mut expected = vec![
+            "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve".to_string(),
+            "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
+        ];
+        expected.extend(video_rules.iter().cloned());
+        expected.push("AND,((NETWORK,UDP)),REJECT".to_string());
+        expected.push("MATCH,Tono-Exit".to_string());
+        let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let rules: Vec<_> = parsed["rules"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        assert_eq!(rules, expected);
+        let mut unchanged_yaml = yaml.to_owned();
+        for rule in video_rules {
+            let line = format!("- {rule}\n");
+            assert_eq!(unchanged_yaml.matches(&line).count(), 1);
+            unchanged_yaml = unchanged_yaml.replacen(&line, "", 1);
+        }
+        let digest = Sha256::digest(unchanged_yaml.as_bytes());
         let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
         assert_eq!(hex, PINNED_YAML_SHA256);
     }

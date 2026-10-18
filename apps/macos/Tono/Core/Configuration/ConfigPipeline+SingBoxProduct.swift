@@ -254,6 +254,10 @@ nonisolated extension ConfigPipeline {
             rules.append(["ip_cidr": localNetworkDeviceCIDRs, "action": "reject", "no_drop": true])
         }
         let assistant = home == nil ? exitGroupName : claudeHomeGroupName
+        // Specific video/API exceptions win over Google parents and every
+        // Home/DIRECT process fallback. UDP retries must remain on TCP.
+        rules.append(["network": "tcp", "domain_suffix": cloudVideoDomainSuffixes, "action": "route", "outbound": exitGroupName])
+        rules.append(["network": "udp", "domain_suffix": cloudVideoDomainSuffixes, "action": "reject"])
         // Always, including when no residential hop is bound. Later reviewed-bundle
         // and suffix rules are first-match DIRECT; without these rows a WeChat
         // (or other reviewed) process reaches claude.ai and 160.79.104.0/21 on

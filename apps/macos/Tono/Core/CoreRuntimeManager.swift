@@ -2,6 +2,20 @@ import CryptoKit
 import Foundation
 import Observation
 
+/// Capture the opt-in once. Runtime writers never read mutable preferences.
+enum DesktopRoutingModeAdmission {
+    static func capture(_ persisted: Any?) throws -> String {
+        guard let persisted else { return "stable" }
+        guard let mode = persisted as? String, ["stable", "three-tier"].contains(mode) else {
+            throw CoreRuntimeError.startFailed("Invalid desktopRoutingMode; connection refused.")
+        }
+        return mode
+    }
+    static func requireAvailable(_ persisted: Any?) throws {
+        _ = try capture(persisted)
+    }
+}
+
 /// Serializes runtime-config reads, validation, YAML generation, hashing, and
 /// atomic disk writes away from the main actor. Catalogs are intentionally
 /// bounded, but even a valid large YAML file must not stall SwiftUI while the
@@ -14,10 +28,18 @@ private actor RuntimeConfigWriter {
         outputPath: URL,
         fakeIPRotation: SingBoxFakeIPRotation,
         installedDigest: String?,
-        keepsInstalled: Bool
+        keepsInstalled: Bool,
+        routingMode: String, physicalInterface: String?
     ) throws -> String {
         let document = try fakeIPRotation.document(installed: installedDigest, keeping: keepsInstalled) { slot in
-            try ConfigPipeline.buildSingBoxRuntime(
+            if routingMode == "three-tier" {
+                guard let physicalInterface else { throw CoreRuntimeError.startFailed("No physical interface for strict routing.") }
+                return try ConfigPipeline.buildThreeTierSingBoxRuntime(
+                    overlay: overlay, nodes: customNodes, physicalInterface: physicalInterface,
+                    fakeIPSlot: slot
+                ).runtimeJSON
+            }
+            return try ConfigPipeline.buildSingBoxRuntime(
                 overlay: overlay,
                 nodes: customNodes,
                 directPlan: directPolicy,
@@ -155,6 +177,17 @@ final class CoreRuntimeManager {
     private(set) var runtimeConfigSHA256: String?
     private let configWriter = RuntimeConfigWriter()
     private let fakeIPRotation = SingBoxFakeIPRotation()
+    private(set) var routingMode = AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent") ? "three-tier" : "stable"
+    private var routingInterface: String?
+
+    func captureRoutingMode(_ mode: String, physicalInterface: String?) throws {
+        _ = try DesktopRoutingModeAdmission.capture(mode)
+        guard !isRunning || routingMode == mode else {
+            throw CoreRuntimeError.startFailed("Disconnect before changing routing mode.")
+        }
+        routingMode = mode
+        routingInterface = physicalInterface
+    }
 
     /// Config directory for the owned sing-box runtime.
     var configDirectory: URL {
@@ -187,6 +220,10 @@ final class CoreRuntimeManager {
         installed installedDigest: String? = nil,
         keepsInstalled: Bool = false
     ) async throws -> String {
+        // Capture before crossing the writer actor. A relaunched strict
+        // session must reconnect to acquire a new physical-interface proof.
+        let mode = routingMode
+        let interface = routingInterface
         let digest = try await configWriter.write(
             overlay: overlay,
             customNodes: customNodes,
@@ -194,7 +231,8 @@ final class CoreRuntimeManager {
             outputPath: configFilePath,
             fakeIPRotation: fakeIPRotation,
             installedDigest: installedDigest,
-            keepsInstalled: keepsInstalled
+            keepsInstalled: keepsInstalled,
+            routingMode: mode, physicalInterface: interface
         )
         runtimeConfigSHA256 = digest
         return digest
@@ -209,6 +247,7 @@ final class CoreRuntimeManager {
         helperPrepared: Bool = false,
         precomputedDigest: String? = nil
     ) async throws {
+        let mode = routingMode
         SingBoxDelayGate.suspend()
         let helperStatus = await PrivilegedRuntimeCoordinator.shared.coreStatus()
         if isRunning || (helperStatus.verified && helperStatus.running) {
@@ -241,6 +280,7 @@ final class CoreRuntimeManager {
             try await PrivilegedRuntimeCoordinator.shared.installAndStartCore(
                 configDirectory: configDirectory.path,
                 configSHA256: digest,
+                routingMode: mode,
                 helperPrepared: helperPrepared
             )
         } catch {
@@ -254,6 +294,7 @@ final class CoreRuntimeManager {
             try await PrivilegedRuntimeCoordinator.shared.installAndStartCore(
                 configDirectory: configDirectory.path,
                 configSHA256: digest,
+                routingMode: mode,
                 helperPrepared: helperPrepared
             )
         }

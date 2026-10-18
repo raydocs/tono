@@ -259,13 +259,17 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 &owner.identity,
                 &request.payload.runtime_json,
                 request.payload.restore_previous,
+                request.payload.traffic_policy.as_ref(),
             )
             .await
             {
                 Ok(()) => ok_empty("sing-box runtime replaced and the full tunnel was locked"),
-                Err(error) => service_unavailable(format!(
-                    "Failed to replace sing-box runtime: {error:#}"
-                )),
+                Err(error) => {
+                    warn!("sing-box runtime replacement refused or failed: {error:#}");
+                    service_unavailable(format!(
+                        "Failed to replace sing-box runtime: {error:#}"
+                    ))
+                }
             }
         })
         .post(IpcCommand::CommitSingBoxDirect.as_ref(), |ctx| async move {
@@ -534,11 +538,16 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             // Same owner is not same session (Sol R-F4): a teardown for a session a restore or a
             // newer Connect has replaced is refused before it touches DNS, the Core or WFP.
             // Checked under the lifecycle lock, which StartClash admission also holds.
-            if let Err(refusal) =
-                crate::core::release::check_release_generation(request.payload.release_generation()).await
+            // Restore internet is always the full release (decision 125): a Quit or replacement
+            // release that was queued before it must not reinstall the AI hold it removed.
+            let hold_allowed = match crate::core::release::check_narrow_release(
+                request.payload.release_generation(),
+            )
+            .await
             {
-                return service_error(release_admission_error(&refusal));
-            }
+                Ok(allowed) => allowed,
+                Err(refusal) => return service_error(release_admission_error(&refusal)),
+            };
             let _operation_guard = OperationGuard::begin(
                 ServiceOperationKind::ReleaseKillSwitch,
                 IPC_HANDLER_TIMEOUT,
@@ -597,7 +606,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     }
                 }
             }
-            release_kill_switch_for_platform(request.payload.apply_narrow_layer()).await
+            release_kill_switch_for_platform(request.payload.apply_narrow_layer() && hold_allowed).await
         })
         .post(IpcCommand::EnableProtectedDns.as_ref(), |ctx| async move {
             trace!("Received EnableProtectedDns command");
@@ -788,12 +797,24 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             {
                 return service_error(ServiceError::invalid_proxy_config(error.to_string()));
             }
+            let mut strict_contract = match windows_kill_switch::admit_strict_start(
+                &start_request.runtime,
+                &start_request.proposed_session_token,
+                start_request.windows_kill_switch.is_some(),
+            ).await {
+                Ok(contract) => contract,
+                Err(error) => return bad_request(format!("Strict runtime refused: {error:#}")),
+            };
             #[cfg(all(windows, not(feature = "test")))]
             {
                 let admitted = if crate::core::structure::is_sing_box_core_path(
                     &start_request.runtime.core_path,
                 ) {
-                    crate::core::sing_box_runtime::admit_owned_runtime(&start_request.runtime.yaml)
+                    if strict_contract.is_some() {
+                        crate::core::sing_box_runtime::admit_strict_runtime(&start_request.runtime.yaml)
+                    } else {
+                        crate::core::sing_box_runtime::admit_new_runtime(&start_request.runtime.yaml)
+                    }
                 } else {
                     crate::core::runtime_generation::ensure_owned_runtime_config_is_safe(
                         &start_request.runtime.yaml,
@@ -847,10 +868,17 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     return service_unavailable(format!("Failed to load active owner: {error}"));
                 }
             };
+            if let Err(error) = windows_kill_switch::refuse_strict_mutation() {
+                return service_unavailable(error.to_string());
+            }
             let prepared_runtime = match prepare_runtime(&owner, &start_request.runtime).await {
                 Ok(prepared) => prepared,
                 Err(error) => return service_error(error),
             };
+            if let Some(contract) = strict_contract.as_mut() {
+                contract.config_path = Some(prepared_runtime.clash_config().core_config.config_path.clone());
+                contract.release_generation = release_generation;
+            }
             let disable_kill_switch = start_request
                 .kill_switch
                 .as_ref()
@@ -867,7 +895,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             if let Some(kill_switch) = start_request.windows_kill_switch.as_ref() {
                 let core_path = prepared_runtime.clash_config().core_config.core_path.clone();
                 if let Err(error) =
-                    windows_kill_switch::arm_bootstrap(kill_switch, &core_path, &owner.key).await
+                    windows_kill_switch::arm_bootstrap_bound(kill_switch, &core_path, &owner.key, strict_contract).await
                 {
                     if let Some(refusal) = error.downcast_ref::<ServiceError>() {
                         return service_error(refusal.clone());
@@ -913,6 +941,11 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     return service_error(windows_arm_rollback_error(error, release_error.as_ref()));
                 }
             };
+            if let Err(error) = windows_kill_switch::bind_strict_session(&active).await {
+                let _ = rollback_started_owner(&owner).await;
+                let _ = windows_kill_switch::restrict_bootstrap().await;
+                return service_unavailable(format!("Strict session binding failed; protection retained: {error:#}"));
+            }
             if disable_kill_switch
                 && let Err(error) = macos_kill_switch::release().await
             {
@@ -1096,7 +1129,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 let admitted = if crate::core::structure::is_sing_box_core_path(
                     &request.payload.core_path,
                 ) {
-                    crate::core::sing_box_runtime::admit_owned_runtime(&request.payload.yaml)
+                    crate::core::sing_box_runtime::admit_new_runtime(&request.payload.yaml)
                 } else {
                     crate::core::runtime_generation::ensure_owned_runtime_config_is_safe(
                         &request.payload.yaml,
@@ -1124,6 +1157,9 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             };
             let _operation_guard =
                 OperationGuard::begin(ServiceOperationKind::StageRuntime, IPC_HANDLER_TIMEOUT);
+            if let Err(error) = windows_kill_switch::refuse_strict_mutation() {
+                return service_unavailable(error.to_string());
+            }
             match stage_runtime(&owner, &request.payload).await {
                 Ok(outcome) => ok_json(outcome),
                 Err(error) => service_error(error),

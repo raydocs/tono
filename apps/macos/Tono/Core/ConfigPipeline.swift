@@ -322,33 +322,22 @@ nonisolated struct ConfigPipeline {
 
     /// Dedicated Model Studio APIs within the otherwise DIRECT Alibaba tree.
     /// Regional, coding, workspace, trial and token-plan hosts are descendants.
+    /// Generated with the Home/video arrays below from direct_domains.rs;
+    /// edit that source, then run tooling/scripts/sync-routing-domains.mjs --write.
     static let dedicatedModelAPISuffixes = [
-        "dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com",
-        "dashscope-us.aliyuncs.com", "maas.aliyuncs.com",
+        "dashscope.aliyuncs.com",
+        "dashscope-intl.aliyuncs.com",
+        "dashscope-us.aliyuncs.com",
+        "maas.aliyuncs.com",
     ]
 
-    /// Assistant providers that must egress through the residential hop. They
-    /// score datacenter ranges as abuse, so a shared cloud exit invites
-    /// challenges and blocks that a residential identity avoids.
-    ///
-    /// Emitted before every direct rule, which also guarantees none of this
-    /// traffic can be captured by a China-direct exception later in the chain.
-    /// Deliberately excluded: `x.com`, which is Twitter at large rather than
-    /// Grok, and `google.com` / `googleapis.com` / `gstatic.com` at large.
-    /// Gemini is pinned by its product hostnames so Search, YouTube, and
-    /// Tono's own home-group probe stay off the residential hop.
-    /// Reviewed provider, install, telemetry and payment dependencies belong
-    /// here. Shared payment hosts intentionally retain the same residential
-    /// identity across browsers; unrelated infrastructure is not swept in.
-    /// Shared infrastructure the public AI rule lists bundle in — auth0,
-    /// segment, cloudflare.net, googleapis.com at
-    /// large, and gstatic.com — is used by
-    /// thousands of unrelated apps, so routing it here would push ordinary
-    /// traffic onto a consumer uplink. `gstatic.com` would be actively harmful:
-    /// it is this group's own liveness probe, and sending the probe through the
-    /// hop it is meant to test would mask exactly the stalls we check for.
+    /// Owner-selected residential destinations, before every DIRECT rule.
+    /// Google/GitHub and Reddit/TikTok (including video) deliberately share
+    /// the assigned Home identity. Cloud video exceptions precede this list
+    /// and process fallbacks, including YouTube children of googleapis.com.
+    /// Shared CDN/ByteDance parents, x.com and gstatic.com remain excluded;
+    /// gstatic is also the independent cloud-path probe.
     static let assistantHomeDomainSuffixes = dedicatedModelAPISuffixes + [
-        // Anthropic
         "anthropic.com",
         "claude.ai",
         "claude.com",
@@ -361,11 +350,9 @@ nonisolated struct ConfigPipeline {
         "claudemcpcontent.com",
         "claudeusercontent.com",
         "servd-anthropic-website.b-cdn.net",
-        // Cloudflare Turnstile & Bot Verification for Claude
         "challenges.cloudflare.com",
         "cf-assets.www.cloudflare.com",
         "cloudflareinsights.com",
-        // Claude Telemetry & Feature Gates
         "browser-intake-datadoghq.com",
         "browser-intake-us5-datadoghq.com",
         "browser-intake-us3-datadoghq.com",
@@ -374,50 +361,76 @@ nonisolated struct ConfigPipeline {
         "browser-intake-datadoghq.eu",
         "browser-intake-ddog-gov.com",
         "datadoghq.com",
-        "statsig.com", "statsigapi.net",
+        "statsig.com",
+        "statsigapi.net",
         "featuregates.org",
         "growthbook.io",
-        // Payments, Link, CDN and challenge dependencies intentionally share
-        // the residential identity across every browser (not just Radar).
-        "stripe.com", "stripecdn.com", "link.com", "hcaptcha.com", "stripe.network",
-        // Claude Code install/update dependencies and Claude Desktop essential
-        // telemetry. Exact suffixes avoid sending every node process, Google
-        // API or GitHub request over the residential hop.
+        "cdn.usefathom.com",
+        "stripe.com",
+        "stripecdn.com",
+        "link.com",
+        "hcaptcha.com",
+        "stripe.network",
         "storage.googleapis.com",
         "registry.npmjs.org",
         "raw.githubusercontent.com",
         "formulae.brew.sh",
         "sentry.io",
-        // OpenAI, including Codex. `chat.com` and `ai.com` are OpenAI-owned
-        // entry points that redirect into ChatGPT.
         "chatgpt.com",
         "openai.com",
         "chat.com",
         "ai.com",
         "oaistatic.com",
         "oaiusercontent.com",
-        // xAI. `grok.x.com` is listed on its own so Grok-on-X is covered
-        // without routing the whole of x.com through the residential hop.
+        "sora.com",
         "grok.com",
         "grok.x.com",
         "grokipedia.com",
         "x.ai",
-        // Perplexity
         "perplexity.ai",
         "perplexity.com",
         "pplx.ai",
-        // Gemini product hosts only. Not google.com / googleapis.com / gstatic.com.
         "gemini.google.com",
         "bard.google.com",
         "aistudio.google.com",
         "generativelanguage.googleapis.com",
         "notebooklm.google.com",
-        // Meta Muse
+        "ai.google.dev",
+        "gemini.google",
+        "deepmind.com",
+        "deepmind.google",
+        "notebooklm.google",
+        "antigravity.google",
+        "generativeai.google",
+        "makersuite.google.com",
+        "jules.google.com",
+        "antigravity-unleash.goog",
+        "aida.googleapis.com",
+        "geller-pa.googleapis.com",
+        "aisandbox-pa.googleapis.com",
+        "cloudcode-pa.googleapis.com",
+        "robinfrontend-pa.googleapis.com",
+        "alkalicore-pa.clients6.google.com",
+        "daily-cloudcode-pa.googleapis.com",
+        "proactivebackend-pa.googleapis.com",
+        "alkalimakersuite-pa.clients6.google.com",
+        "g.ai",
+        "dify.ai",
+        "poe.com",
+        "groq.com",
+        "cursor.sh",
+        "jasper.ai",
+        "openart.ai",
+        "clipdrop.co",
+        "chatgpt.site",
+        "openrouter.ai",
+        "api.github.com",
+        "api.jetbrains.ai",
+        "gateway.ai.cloudflare.com",
         "muse.ai",
         "meta.ai",
         "muse.meta.com",
         "www.muse.ai",
-        // Meta & Facebook
         "meta.com",
         "facebook.com",
         "fb.com",
@@ -426,12 +439,10 @@ nonisolated struct ConfigPipeline {
         "fbcdn.net",
         "facebook.net",
         "messenger.com",
-        // Instagram & Threads
         "instagram.com",
         "cdninstagram.com",
         "ig.me",
         "threads.net",
-        // Gmail & Google Auth
         "gmail.com",
         "mail.google.com",
         "googlemail.com",
@@ -441,6 +452,80 @@ nonisolated struct ConfigPipeline {
         "oauth2.googleapis.com",
         "mail-pa.clients6.google.com",
         "gmail.googleapis.com",
+        "google.com",
+        "googleapis.com",
+        "github.com",
+        "githubusercontent.com",
+        "githubassets.com",
+        "redd.it",
+        "reddit.app.link",
+        "reddit.com",
+        "redditblog.com",
+        "reddithelp.com",
+        "redditinc.com",
+        "redditmail.com",
+        "redditmedia.com",
+        "redditspace.com",
+        "redditstatic.com",
+        "redditstatus.com",
+        "reddit.map.fastly.net",
+        "muscdn.com",
+        "musical.ly",
+        "tik-tokapi.com",
+        "tiktok-minis.com",
+        "tiktok-row.net",
+        "tiktok.com",
+        "tiktokcdn-eu.com",
+        "tiktokcdn-us.com",
+        "tiktokcdn.com",
+        "tiktokd.net",
+        "tiktokd.org",
+        "tiktokeu-cdn.com",
+        "tiktokglobalshopv.com",
+        "tiktokminis.us",
+        "tiktokrow-cdn.com",
+        "tiktokv.com",
+        "tiktokv.eu",
+        "tiktokv.us",
+        "tiktokw.eu",
+        "tiktokw.us",
+        "ttcdn-us.com",
+        "ttlivecdn.com",
+        "ttoverseaus.net",
+        "ttwstatic.com",
+        "tiktokcdn-us.com.edgesuite.net",
+        "tiktokcdn.com.akamaized.net",
+        "tiktokcdn.com.edgesuite.net",
+        "tiktokv.com.edgekey.net",
+        "tiktokv.com.edgesuite.net",
+        "p16-tiktokcdn-com.akamaized.net",
+        "p16-tiktok-dm-sticker-sign-sg.ibyteimg.com",
+    ]
+
+    /// Cloud-only video sites/media/APIs, even inside a Home-pinned process.
+    /// TCP pins plus UDP rejection avoid a SOCKS/Reality UDP DIRECT fallback.
+    static let cloudVideoDomainSuffixes = [
+        "youtube.com",
+        "youtube-nocookie.com",
+        "youtu.be",
+        "googlevideo.com",
+        "ytimg.com",
+        "youtube.googleapis.com",
+        "youtubei.googleapis.com",
+        "youtubeembeddedplayer.googleapis.com",
+        "youtube-ui.l.google.com",
+        "wide-youtube.l.google.com",
+        "yt3.googleusercontent.com",
+        "ggpht.com",
+        "pornhub.com",
+        "pornhub.org",
+        "pornhubpremium.com",
+        "phncdn.com",
+        "phprcdn.com",
+        "porngub.com",
+        "pornhub-deutsch.net",
+        "pornhubapparel.com",
+        "gaytube.com",
     ]
     /// Anthropic's own unicast (ARIN AP-2440). Claude Code has been seen
     /// dialing `160.79.104.10` by raw IP, which no DOMAIN-SUFFIX can catch.

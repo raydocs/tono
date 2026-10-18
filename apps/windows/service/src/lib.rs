@@ -17,8 +17,18 @@ pub mod clean_goodbye;
 #[cfg(any(feature = "client", feature = "standalone"))]
 #[path = "../../crates/tono-core/src/direct_domains.rs"]
 pub mod direct_domains;
+// The finite three-tier compiler graph, not a caller-supplied country list.
 #[cfg(any(feature = "client", feature = "standalone"))]
-pub use core::{admit_mihomo_direct_rules, admit_sing_box_runtime};
+#[path = "../../crates/tono-core/src/three_tier.rs"]
+pub mod three_tier;
+// The traffic-policy signature check, compiled from the file the clients use (#1280).
+#[cfg(any(feature = "client", feature = "standalone"))]
+#[path = "../../crates/tono-core/src/policy_signature.rs"]
+pub mod policy_signature;
+#[cfg(any(feature = "client", feature = "standalone"))]
+pub use core::{
+    admit_mihomo_direct_rules, admit_sing_box_runtime, admit_sing_box_runtime_listed_by,
+};
 #[cfg(feature = "standalone")]
 pub mod update_transaction;
 #[cfg(all(feature = "standalone", windows))]
@@ -42,7 +52,7 @@ pub use core::{
     ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, PrepareCoreStartFreshness,
     PrepareCoreStartPayload, RemoteProvider,
     RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
-    ReplaceSingBoxRuntimeRequest, CommitSingBoxDirectRequest,
+    ReplaceSingBoxRuntimeRequest, SignedTrafficPolicy, CommitSingBoxDirectRequest,
     RuntimeAsset, RuntimeBundle,
     LEGACY_SERVICE_PROTOCOL_HEADER, SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN,
     ServiceErrorCode, ServiceLifecycleState,
@@ -188,7 +198,11 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// generation the App last saw and is admitted only under the machine release lock, and the
 /// separate `TonoRelease` service answers Restore internet on its own pipe. An older App sends
 /// no generation and is admitted as before; MIN_REQUIRED stays 14.
-pub const PROTOCOL_REVISION: u16 = 21;
+/// Revision 22 binds sing-box DIRECT to the signed traffic policy (#1280, decision 110):
+/// `ReplaceSingBoxRuntime` may carry `traffic_policy`, the Service verifies it with the policy key
+/// compiled into it and admits only the DIRECT entries it lists. An older App sends none and its
+/// DIRECT document is refused, which only skips the optional overlay. MIN_REQUIRED stays 14.
+pub const PROTOCOL_REVISION: u16 = 22;
 /// Revision that introduced the Service-owned, detached-manifest update transaction.
 pub const MIN_SERVICE_REVISION_FOR_UPDATE_TRANSACTION: u16 = 16;
 /// Revision whose `POST /clash/prepare-start` compares the request's client-snapshotted
@@ -200,6 +214,8 @@ pub const MIN_SERVICE_REVISION_FOR_SING_BOX: u16 = 18;
 /// Revision that restarts sing-box for reviewed-app DIRECT and reads the rules back.
 /// Older Services keep the full tunnel; they do not enter the mihomo reload bracket.
 pub const MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT: u16 = 19;
+/// First revision that verifies the signed traffic policy a sing-box DIRECT document comes from.
+pub const MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT_POLICY: u16 = 22;
 /// First revision that reports the relay permit in rule C (decision 090) to the App.
 pub const MIN_SERVICE_REVISION_FOR_API_RELAY_PERMIT: u16 = 20;
 /// First revision that admits StartClash under the release authority and installs the

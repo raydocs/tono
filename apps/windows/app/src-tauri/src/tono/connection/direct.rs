@@ -297,6 +297,25 @@ pub(super) struct CapturedTrafficPolicy {
     pub(super) document: tono_core::policy::TonoTrafficPolicy,
 }
 
+/// The signed response the captured policy was read from, for the Service to verify (#1280).
+/// Only the exact response the document came from qualifies: same revision, same digest, and a
+/// signature present. Anything else sends no overlay rather than a policy the Service would
+/// have to take on trust.
+pub(super) fn signed_policy_for(
+    response: Option<&tono_core::policy::TonoTrafficPolicyResponse>,
+    policy: &CapturedTrafficPolicy,
+) -> Option<tono_service_protocol::SignedTrafficPolicy> {
+    let response = response?;
+    let signature = response.signature.as_deref().filter(|signature| !signature.is_empty())?;
+    (response.revision == policy.revision && response.sha256 == policy.digest).then(|| {
+        tono_service_protocol::SignedTrafficPolicy {
+            revision: response.revision,
+            json: response.json.clone(),
+            signature: signature.to_owned(),
+        }
+    })
+}
+
 impl CapturedTrafficPolicy {
     /// Whether the document carries any DIRECT-targetable content — the same
     /// emptiness test `apply_cloud_policy` applies before staging the overlay,
@@ -1168,8 +1187,9 @@ pub(super) fn controller_direct_graph_is_active(
     } else if assistant_shield {
         home_rows += config::CLAUDE_HOME_DOMAINS.len() + config::CLAUDE_HOME_IPV4_CIDRS.len();
     }
+    let cloud_rows = 2 * config::CLOUD_VIDEO_DOMAINS.len();
     // + 4 = two loopback rows, the UDP REJECT row, and the final MATCH.
-    let expected_len = expected_direct_rules.len() + 3 + home_rows + 1;
+    let expected_len = expected_direct_rules.len() + 3 + cloud_rows + home_rows + 1;
     if rules.len() != expected_len {
         return Err(format!(
             "controller runtime returned {} rules, expected the exact {expected_len}-rule graph",
@@ -1181,6 +1201,16 @@ pub(super) fn controller_direct_graph_is_active(
     // Home pins are TCP-scoped ANDs so assistant UDP falls through to the REJECT
     // row instead of matching a group that cannot carry it and leaking DIRECT.
     let mut index = 2;
+    // The cloud video prefix is part of the exact staged graph, not an
+    // exception to cardinality/order checking.
+    for domain in config::CLOUD_VIDEO_DOMAINS {
+        expect_rule(rules.get(index), index, "AND",
+            &format!("((Network,tcp) && (DomainSuffix,{domain}))"), EXIT_GROUP_NAME)?;
+        index += 1;
+        expect_rule(rules.get(index), index, "AND",
+            &format!("((Network,udp) && (DomainSuffix,{domain}))"), "REJECT")?;
+        index += 1;
+    }
     if claude_home || assistant_shield {
         let domain_proxy = if claude_home {
             config::CLAUDE_HOME_GROUP_NAME
@@ -1696,10 +1726,12 @@ pub(super) fn classify_optional_direct_resolution<T>(result: Result<T, String>) 
 
 async fn sing_box_direct_service_ready() -> bool {
     match tono_service_protocol::get_version().await {
+        // Revision 22: the Service binds DIRECT to the signed policy we send. An older Service
+        // would accept the document on its shape alone, so it gets no overlay (#1280).
         Ok(response) if response.code == 0 => response
             .data
             .as_ref()
-            .is_some_and(tono_service_protocol::ProtocolInfo::supports_sing_box_direct),
+            .is_some_and(tono_service_protocol::ProtocolInfo::supports_sing_box_direct_policy),
         _ => false,
     }
 }
@@ -1833,12 +1865,25 @@ async fn replace_sing_box_for_direct(
         .await;
         return Ok(None);
     }
+    let signed_policy = {
+        let inner = state.lock().await;
+        signed_policy_for(inner.traffic_policy_response.as_ref(), policy)
+    };
+    let Some(signed_policy) = signed_policy else {
+        skip_optional_direct_policy(
+            state,
+            generation,
+            "no signed traffic policy to bind the sing-box DIRECT overlay to".to_string(),
+        )
+        .await;
+        return Ok(None);
+    };
     let (policy_guard, _mutation_guard) = admit_sing_box_replacement(state, generation, &node.name, policy).await?;
     // #1228: the replacement changes the Core pid. Own it like the mihomo bracket so the monitor
     // does not read it as a crash; the spawned owner clears the marker on every exit.
     mark_direct_reload_in_flight(state, generation).await;
     if let Err(error) =
-        service::tono_replace_sing_box_runtime(session, direct_document.clone(), true).await
+        service::tono_replace_sing_box_runtime(session, direct_document.clone(), true, Some(signed_policy)).await
     {
         skip_optional_direct_policy(
             state,
@@ -1985,7 +2030,7 @@ async fn restore_sing_box_full_tunnel(
     reason: String,
 ) -> Result<Option<PendingDirectCommit>, StageFailure> {
     // restore_previous is false: a failed rollback must not write DIRECT rules back.
-    let _ = service::tono_replace_sing_box_runtime(session, full_tunnel, false).await;
+    let _ = service::tono_replace_sing_box_runtime(session, full_tunnel, false, None).await;
     skip_optional_direct_policy(state, generation, reason).await;
     Ok(None)
 }
@@ -2376,6 +2421,21 @@ mod tests {
         .unwrap();
         assert!(sing_box.contains("process_path_regex"));
         assert_eq!(tono_service_protocol::admit_sing_box_runtime(&sing_box), Ok(()));
+        // #1280: the Service admits DIRECT only when the verified policy lists it, so what the
+        // compiler derives from a plan must be listed by the policy that plan came from.
+        let listing = r#"{"version":3,
+            "domains":[{"host":"qq.com","ports":[443]}],
+            "mediaEndpoints":[{"address":"101.1.2.4","ports":[8000]}],
+            "directSuffixes":[{"host":"aliyuncs.com","ports":[443]},{"host":"bilibili.com","ports":[80]}]}"#;
+        assert_eq!(
+            tono_service_protocol::admit_sing_box_runtime_listed_by(&sing_box, listing, 1),
+            Ok(())
+        );
+        let without_media = listing.replace("101.1.2.4", "101.1.2.99");
+        assert!(
+            tono_service_protocol::admit_sing_box_runtime_listed_by(&sing_box, &without_media, 1).is_err(),
+            "a media address the policy does not list is refused"
+        );
 
         let mihomo = tono_core::config::build_owned_runtime_with_ports(
             &nodes,
@@ -2487,9 +2547,27 @@ mod cancellation_tests {
         assert!(inner.optional_direct_skip.is_none(), "a stale failure must not be attributed to the successor");
     }
 
+    fn signed_response(revision: i64, digest: &str, signature: Option<&str>) -> tono_core::policy::TonoTrafficPolicyResponse {
+        tono_core::policy::TonoTrafficPolicyResponse {
+            revision,
+            json: r#"{"version":1}"#.into(),
+            sha256: digest.into(),
+            updated_at: None,
+            signature: signature.map(str::to_owned),
+        }
+    }
+
     async fn sing_box_replacement_fixture(
         plan: &tono_core::config::DirectPlan,
         current_node: &str,
+    ) -> (Arc<TonoState>, Result<Option<PendingDirectCommit>, StageFailure>) {
+        sing_box_replacement_fixture_with(plan, current_node, Some(signed_response(7, "digest", Some("c2ln")))).await
+    }
+
+    async fn sing_box_replacement_fixture_with(
+        plan: &tono_core::config::DirectPlan,
+        current_node: &str,
+        response: Option<tono_core::policy::TonoTrafficPolicyResponse>,
     ) -> (Arc<TonoState>, Result<Option<PendingDirectCommit>, StageFailure>) {
         let reference: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../../../../docs/reports/sing-box-evaluation/migration-m0/reference.json"
@@ -2520,6 +2598,7 @@ mod cancellation_tests {
             inner.selected_node = Some(current_node.into());
             inner.policy_tracker = tono_core::policy::PolicyTracker::from_installed(7, "digest".into());
             inner.traffic_policy = Some(document);
+            inner.traffic_policy_response = response;
         }
         let session = OwnerSessionProof {
             generation: 3,
@@ -2571,6 +2650,47 @@ mod cancellation_tests {
         assert!(
             matches!(result, Err(StageFailure::Stale)),
             "the compiler must accept the App's plan and the stage must reach admission"
+        );
+    }
+
+    /// #1280: the Service binds DIRECT to the signed policy it is sent, so the App sends the
+    /// exact signed response the captured document came from, or no overlay at all.
+    #[test]
+    fn only_the_signed_response_the_policy_came_from_is_sent_to_the_service() {
+        let policy = CapturedTrafficPolicy {
+            revision: 7,
+            digest: "digest".into(),
+            document: tono_core::policy::TonoTrafficPolicy {
+                version: 1,
+                domains: Vec::new(),
+                media_endpoints: Vec::new(),
+                web_domains: Vec::new(),
+                direct_suffixes: Vec::new(),
+            },
+        };
+        let sent = signed_policy_for(Some(&signed_response(7, "digest", Some("c2ln"))), &policy).unwrap();
+        assert_eq!((sent.revision, sent.json.as_str(), sent.signature.as_str()), (7, r#"{"version":1}"#, "c2ln"));
+        assert!(signed_policy_for(None, &policy).is_none());
+        assert!(signed_policy_for(Some(&signed_response(7, "digest", None)), &policy).is_none());
+        assert!(signed_policy_for(Some(&signed_response(7, "digest", Some(""))), &policy).is_none());
+        assert!(signed_policy_for(Some(&signed_response(8, "digest", Some("c2ln"))), &policy).is_none());
+        assert!(signed_policy_for(Some(&signed_response(7, "other", Some("c2ln"))), &policy).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_missing_signed_policy_skips_the_overlay_and_keeps_the_exit() {
+        let (state, result) =
+            sing_box_replacement_fixture_with(&sing_box_fixture_plan(), "Fixture Beta", None).await;
+        assert!(matches!(result, Ok(None)), "no signed policy must not be a stage error");
+        let inner = state.lock().await;
+        assert!(!inner.optional_direct_active);
+        assert!(
+            inner
+                .optional_direct_skip
+                .as_deref()
+                .is_some_and(|reason| reason.contains("no signed traffic policy")),
+            "{:?}",
+            inner.optional_direct_skip
         );
     }
 

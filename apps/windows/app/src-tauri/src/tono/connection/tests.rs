@@ -53,6 +53,58 @@ fn recovery_preflight_rejects_a_changed_or_cleared_selection() {
 }
 
 #[tokio::test]
+async fn routing_mode_is_captured_only_by_admitted_explicit_connect() {
+    use super::attempt::begin_attempt_with_mode;
+    use crate::core::service;
+    let _epoch = service::RELEASE_EPOCH_TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let state = crate::tono::state::TonoState::for_test();
+    let _admission = state.begin_connect_mutation().await;
+    let mut inner = state.lock().await;
+    let owner = service::claim_user_connect(service::user_connect_stamp()).unwrap();
+    let generation = inner.connect_generation;
+    let (stable, _, _) = begin_attempt_with_mode(&mut inner, generation, Some(owner), Some(false)).await.unwrap();
+    assert!(!inner.three_tier_routing);
+
+    // Saving three-tier must not change Stable on an unarmed retry (including Retry Now).
+    // Fail before compilation: admission, not successful startup, owns the mode latch.
+    inner.fsm.connect_failed();
+    let (retry, _, _) = begin_attempt_with_mode(&mut inner, stable, None, Some(true)).await.unwrap();
+    assert!(!inner.three_tier_routing, "automatic recovery must not consume next-mode preferences");
+    assert!(begin_attempt_with_mode(&mut inner, retry, Some(owner), Some(true)).await.is_none());
+    assert!(!inner.three_tier_routing, "busy explicit Connect must not recapture");
+
+    // End the session: a new explicit Connect now consumes the saved three-tier mode.
+    inner.invalidate_connection(true);
+    inner.fsm.begin_disconnect();
+    inner.fsm.finish_disconnect();
+    let ended = inner.connect_generation;
+    let (strict, _, _) = begin_attempt_with_mode(&mut inner, ended, Some(owner), Some(true)).await.unwrap();
+    assert!(inner.three_tier_routing, "capture must precede readiness/compile failures");
+    inner.fsm.mark_kill_switch_armed();
+    inner.fsm.mark_session_verified();
+    inner.fsm.connect_succeeded().unwrap();
+    inner.invalidate_connection(false);
+    inner.fsm.connect_failed();
+    let recovery = inner.connect_generation;
+    let (recovered, _, _) = begin_attempt_with_mode(&mut inner, recovery, None, Some(false)).await.unwrap();
+    assert!(inner.three_tier_routing, "protected/monitor/transport recovery must retain strict mode");
+
+    inner.fsm.connect_failed();
+    assert!(begin_attempt_with_mode(&mut inner, strict, Some(owner), Some(false)).await.is_none());
+    assert!(inner.three_tier_routing, "stale generation must not consume Stable");
+    let newer_owner = service::claim_user_connect(service::user_connect_stamp()).unwrap();
+    assert!(begin_attempt_with_mode(&mut inner, recovered, Some(owner), Some(false)).await.is_none());
+    assert!(inner.three_tier_routing, "stale user ticket must not consume Stable");
+
+    inner.invalidate_connection(true);
+    inner.fsm.begin_disconnect();
+    inner.fsm.finish_disconnect();
+    let ended = inner.connect_generation;
+    begin_attempt_with_mode(&mut inner, ended, Some(newer_owner), Some(false)).await.unwrap();
+    assert!(!inner.three_tier_routing, "explicit ended-session Connect must capture Stable too");
+}
+
+#[tokio::test]
 async fn retained_failure_keeps_bounded_scrubbed_cause_when_retry_clears_live_error() {
     let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test());
     let first = {
@@ -577,13 +629,16 @@ fn tun_probe_origins_are_staggered_not_bursted() {
 }
 
 #[test]
-fn real_data_plane_probes_only_google_homepage() {
+fn real_data_plane_probes_the_cloud_path_not_home_google() {
     assert_eq!(TUN_DATA_PLANE_PROBES.len(), 1);
-    assert_eq!(TUN_DATA_PLANE_PROBES[0].url, "https://www.google.com");
-    assert_eq!(TUN_DATA_PLANE_PROBES[0].expected_status, 200);
-    assert_eq!(super::probes::EXIT_PROBE_URL, "https://www.google.com");
-    assert_eq!(super::probes::FAKE_IP_LOOKUP_HOST, "www.google.com");
+    assert_eq!(TUN_DATA_PLANE_PROBES[0].url, "https://www.gstatic.com/generate_204");
+    assert_eq!(TUN_DATA_PLANE_PROBES[0].expected_status, 204);
+    assert_eq!(super::probes::EXIT_PROBE_URL, "https://www.gstatic.com/generate_204");
+    assert_eq!(super::probes::FAKE_IP_LOOKUP_HOST, "www.gstatic.com");
     assert_eq!(TUN_DATA_PLANE_PROBES, crate::tono::protected_probe::PROBE_ORIGINS);
+    assert!(!tono_core::config::CLAUDE_HOME_DOMAINS.iter().any(|suffix| {
+        "www.gstatic.com" == *suffix || "www.gstatic.com".ends_with(&format!(".{suffix}"))
+    }));
 }
 
 #[test]
@@ -959,6 +1014,7 @@ fn resumable_startup_runtime() -> (ServiceStatusSnapshot, DnsProtectionStatus) {
             update_attempt_pending: None,
             release_generation: None,
             kill_switch_held_by_another_user: false,
+            ai_hold_retained: None,
         },
         DnsProtectionStatus {
             enabled: true,
@@ -1230,7 +1286,7 @@ fn failure_plan_is_exhaustive() {
             selective_ai_hold: false,
         }
     );
-    // Initial post-arm failure has not crossed the verification barrier: full release.
+    // Initial stable post-arm failure has not crossed the verification barrier: full release.
     assert_eq!(
         plan_failure(true, false, false, false),
         FailurePlan {
@@ -1239,6 +1295,16 @@ fn failure_plan_is_exhaustive() {
             restrict_bootstrap: false,
             selective_ai_hold: false,
         }
+    );
+    assert_eq!(
+        plan_failure(true, false, false, true),
+        FailurePlan {
+            mark_armed: true,
+            stop_core: Some(false),
+            restrict_bootstrap: true,
+            selective_ai_hold: false,
+        },
+        "captured strict intent holds even before the first verification barrier"
     );
     // A raced disconnect owns the release end to end; the failing
     // transaction does nothing, whatever the arm state. Strict does not
@@ -2042,6 +2108,13 @@ fn home_controller_rules(proxy: &str, include_domains: bool) -> Vec<serde_json::
     rules
 }
 
+fn cloud_video_controller_rules() -> Vec<serde_json::Value> {
+    tono_core::config::CLOUD_VIDEO_DOMAINS.iter().flat_map(|domain| [
+        serde_json::json!({"type": "AND", "payload": format!("((Network,tcp) && (DomainSuffix,{domain}))"), "proxy": "Tono-Exit"}),
+        serde_json::json!({"type": "AND", "payload": format!("((Network,udp) && (DomainSuffix,{domain}))"), "proxy": "REJECT"}),
+    ]).collect()
+}
+
 fn controller_rules_graph(
     home_proxy: &str,
     include_home_domains: bool,
@@ -2051,6 +2124,7 @@ fn controller_rules_graph(
         serde_json::json!({"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"}),
         serde_json::json!({"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"}),
     ];
+    rules.extend(cloud_video_controller_rules());
     rules.extend(home_controller_rules(home_proxy, include_home_domains));
     if include_home_domains {
         for mut rule in home_controller_rules("REJECT", true) {
@@ -2073,6 +2147,7 @@ fn controller_rules_with_assistant_shield(extra: Vec<serde_json::Value>) -> serd
         serde_json::json!({"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"}),
         serde_json::json!({"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"}),
     ];
+    rules.extend(cloud_video_controller_rules());
     rules.extend(home_controller_rules("Tono-Exit", true));
     rules.extend(extra);
     rules.push(serde_json::json!({"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"}));
@@ -2154,7 +2229,7 @@ fn controller_readback_requires_the_exact_direct_graph_and_exit_order() {
     );
 
     let home_len = home_controller_rules("Tono-Exit", false).len();
-    let first_direct = 2 + home_len;
+    let first_direct = 2 + cloud_video_controller_rules().len() + home_len;
     let last = rules["rules"].as_array().unwrap().len() - 1;
     let mut wrong_order = rules.clone();
     wrong_order["rules"].as_array_mut().unwrap().swap(first_direct - 1, first_direct);
@@ -2240,13 +2315,17 @@ fn controller_readback_accepts_the_claude_home_split_graph() {
         "split rules without the Tono-Claude-Home group must fail"
     );
 
-    let domain_index = 2 + home_controller_rules("Tono-Claude-Home", false).len();
+    let domain_index = 2 + cloud_video_controller_rules().len() + home_controller_rules("Tono-Claude-Home", false).len();
     let mut wrong_target = split_rules.clone();
     wrong_target["rules"][domain_index]["proxy"] = serde_json::json!("Tono-Exit");
     assert!(
         controller_direct_graph_is_active(&wrong_target, &proxies, &expected, "Ethernet 2", true, false, true).is_err(),
         "a Claude domain leaking to Tono-Exit must fail"
     );
+    let mut video_on_home = split_rules.clone();
+    video_on_home["rules"][2]["proxy"] = serde_json::json!("Tono-Claude-Home");
+    assert!(controller_direct_graph_is_active(&video_on_home, &proxies, &expected,
+        "Ethernet 2", true, false, true).is_err(), "cloud video must not be accepted on Home");
 }
 
 #[test]

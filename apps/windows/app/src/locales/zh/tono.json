@@ -685,6 +685,12 @@
     "general": {
       "title": "通用",
       "effectHint": "更改会自动保存在这台电脑上，不改变当前连接。",
+      "routingMode": "路由模式",
+      "routingStable": "稳定（默认）",
+      "routingThreeTier": "三层路由",
+      "routingScope": "优先级：21 项云端视频例外 → 166 项 AI／指定 Home 条目 → 明确的云端列表 → 其他受支持流量默认 DIRECT 直连（含未分类目标）。命中 Home／云端后失败不会退回直连。ECH、缓存／裸 IP 或应用自带 DoH 可能隐藏 AI 身份而走默认直连；无法保证未识别的 AI 走 Home。",
+      "routingLimits": "普通 DIRECT 仅支持公网 IPv4 的 TCP 80/443 端口；业务 UDP／QUIC、IPv6 及局域网均阻断。Core 停止时仍保持阻断保护。",
+      "routingEffect": "保存后，仅在你显式断开再连接时生效，不会暗中改变当前连接的路由或保护。",
       "launchAtStartup": "登录电脑时打开",
       "launchAtStartupHint": "下次登录 Windows 时打开 Tono。首次连上后默认启用，可在这里更改。",
       "language": "界面语言",
@@ -810,10 +816,6 @@
       "unscheduled": "已拦住直连。没有安排自动重试，可以立即重试或恢复正常网络。",
       "scheduled": "已拦住直连，{{seconds}} 秒后自动重试。",
       "now": "已拦住直连，正在自动重试。"
-    },
-    "recovery": {
-      "scheduled": "已安排自动重试",
-      "unscheduled": "未安排自动重试"
     }
   },
   "seaLines": {
@@ -821,6 +823,7 @@
     "explanation": "线路偏好说明",
     "inUse": "正在使用",
     "all": "全部线路 · {{count}}",
+    "others": "其他线路 · {{count}}",
     "evidence": "近 24 小时内连上过，已通过验证",
     "noEvidence": "暂无近期记录",
     "selected": "已选 {{name}} · {{latency}}"

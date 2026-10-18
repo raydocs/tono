@@ -222,11 +222,31 @@ it('general settings confirm saved choices across navigation and apply language 
     </SWRConfig>
   )
   const { rerender } = render(page(true))
-  const toggle = () => screen.getByRole('switch') as HTMLButtonElement
+  const toggle = () =>
+    screen.getByRole('switch', {
+      name: i18n.language === 'zh' ? '登录电脑时打开' : 'Open at sign-in',
+    }) as HTMLButtonElement
+  const routing = (value: 'stable' | 'three-tier') =>
+    screen.getByRole('button', {
+      name: value === 'stable' ? 'Stable (default)' : 'Three-tier',
+    }) as HTMLButtonElement
   expect(toggle().disabled).toBe(true)
+  expect(routing('three-tier').disabled).toBe(true)
   await act(async () => finishRead())
   await waitFor(() => expect(toggle().disabled).toBe(false))
   expect(toggle().getAttribute('aria-checked')).toBe('false')
+  expect(routing('stable').getAttribute('aria-pressed')).toBe('true')
+  expect(
+    screen.getByText(/Priority: 21 cloud-video exceptions/).textContent,
+  ).toContain(
+    '166 AI/named Home entries → explicit cloud list → other supported traffic DIRECT, including unclassified destinations',
+  )
+  expect(
+    screen.getByText(/ECH, cached\/raw IP or app DoH/).textContent,
+  ).toContain('unidentified AI is not guaranteed Home routing')
+  expect(
+    screen.getByText(/Ordinary DIRECT supports public IPv4/).textContent,
+  ).toContain('TCP ports 80/443 only')
   let refuse!: () => void
   mocks.preferenceRead.mockImplementation(async () => actual)
   mocks.preferenceWrite.mockImplementationOnce(async (value) => {
@@ -278,6 +298,17 @@ it('general settings confirm saved choices across navigation and apply language 
   ).toBe('true')
   expect(screen.getByRole('status').textContent).toBe('已保存')
   expect(toggle().disabled).toBe(false)
+  expect(
+    screen
+      .getByRole('button', { name: '稳定（默认）' })
+      .getAttribute('aria-pressed'),
+  ).toBe('true')
+  expect(
+    screen.getByRole('button', { name: '三层路由' }).hasAttribute('disabled'),
+  ).toBe(false)
+  expect(screen.getByText(/优先级：21 项云端视频例外/).textContent).toContain(
+    '无法保证未识别的 AI 走 Home',
+  )
 
   // A successful write with a failed readback is still unconfirmed, not Saved.
   mocks.preferenceWrite.mockImplementation(async (value) => {
@@ -296,4 +327,49 @@ it('general settings confirm saved choices across navigation and apply language 
   await waitFor(() => expect(i18n.language).toBe('en'))
   expect(toggle().disabled).toBe(false)
   expect(screen.queryByText('Saved')).toBeNull()
+
+  // The routing choice uses the same serialized native write/readback path.
+  fireEvent.click(routing('three-tier'))
+  await waitFor(() =>
+    expect(routing('three-tier').getAttribute('aria-pressed')).toBe('true'),
+  )
+  expect(mocks.preferenceWrite).toHaveBeenLastCalledWith({
+    desktop_routing_mode: 'three-tier',
+  })
+  expect(actual).toMatchObject({ desktop_routing_mode: 'three-tier' })
+  expect(screen.getByRole('status').textContent).toBe('Saved')
+  rerender(page(false))
+  rerender(page(true))
+  expect(routing('three-tier').getAttribute('aria-pressed')).toBe('true')
+
+  mocks.preferenceRead.mockRejectedValueOnce(
+    new Error('Synthetic routing readback failed'),
+  )
+  fireEvent.click(routing('stable'))
+  expect((await screen.findByRole('alert')).textContent).toContain(
+    "Couldn't confirm",
+  )
+  expect(actual).toMatchObject({ desktop_routing_mode: 'stable' })
+  expect(routing('three-tier').getAttribute('aria-pressed')).toBe('true')
+  expect(routing('stable').disabled).toBe(true)
+  expect(toggle().disabled).toBe(true)
+  expect(screen.queryByText('Saved')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Reload saved choices' }))
+  await waitFor(() =>
+    expect(routing('stable').getAttribute('aria-pressed')).toBe('true'),
+  )
+  expect(routing('three-tier').disabled).toBe(false)
+  expect(screen.queryByRole('alert')).toBeNull()
+
+  // The legacy appearance exposes the same persisted choice through a select.
+  setNewAppearance(false)
+  const legacyRouting = () =>
+    screen.getByRole('combobox', { name: 'Routing mode' }) as HTMLSelectElement
+  await waitFor(() => expect(legacyRouting().value).toBe('stable'))
+  fireEvent.change(legacyRouting(), { target: { value: 'three-tier' } })
+  await waitFor(() => expect(legacyRouting().value).toBe('three-tier'))
+  expect(mocks.preferenceWrite).toHaveBeenLastCalledWith({
+    desktop_routing_mode: 'three-tier',
+  })
+  expect(actual).toMatchObject({ desktop_routing_mode: 'three-tier' })
 })

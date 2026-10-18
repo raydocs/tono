@@ -51,6 +51,7 @@ class BuildSourceTests(unittest.TestCase):
                          'apps/macos/Tono/Models/UpdateContractV1.swift',
                          'apps/macos/Tono/Core/ProtectedDNSServiceIdentity.swift',
                          'apps/macos/Tono/Core/ControlPlaneRelays.swift',
+                         'apps/macos/Tono/Core/ThreeTierRoutingContract.swift',
                          'apps/macos/Tono/Core/HelperProtocolVersion.swift'):
                 (repo / name).parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(ROOT / name, repo / name)

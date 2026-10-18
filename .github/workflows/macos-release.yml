@@ -60,9 +60,9 @@ permissions:
 
 # Advance the reviewed candidate contract together; never admit arbitrary PR refs.
 env:
-  CANDIDATE_REF: refs/heads/stability/desktop-0.0.75-20261005
-  CANDIDATE_VERSION: '0.0.75'
-  CANDIDATE_BUILD: '75'
+  CANDIDATE_REF: refs/heads/release/macos
+  CANDIDATE_VERSION: '0.0.77'
+  CANDIDATE_BUILD: '78'
 
 concurrency:
   group: macos-release-${{ inputs.version }}
@@ -158,6 +158,9 @@ jobs:
           chmod +x apps/macos/Tono/Resources/sing-box
           sh tooling/scripts/verify-macos-sing-box.sh
           tooling/scripts/build-core-helper.sh
+          # A stale tracked contract makes the subsequent app stamp dirty.
+          # Commit the builder's exact record before freezing a release source.
+          git diff --exit-code -- tooling/scripts/core-helper/CONTRACT.sha256
 
       - name: Resolve the release keychain path
         # A workflow-env value is never shell-expanded, and the runner context
@@ -380,9 +383,16 @@ jobs:
           version, build = info["CFBundleShortVersionString"], str(info["CFBundleVersion"])
           assert version == os.environ["CANDIDATE_VERSION"]
           assert build == os.environ["CANDIDATE_BUILD"]
+          sequence = os.environ.get("TONO_UPDATE_RELEASE_SEQUENCE") or None
+          if sequence is not None:
+              sequence = int(sequence)
+          stamp = json.loads((app / "Contents/Resources/tono-build-source.json").read_text())
+          assert stamp == {"commit": os.environ["GITHUB_SHA"], "dirty": False,
+                           "configuration": "Release", "releaseSequence": sequence}
           files = [root / (name + ".zip"), app / "Contents/MacOS/Tono",
                    app / "Contents/Resources/tono-core-helper", app / "Contents/Resources/sing-box"]
           report = {"source": os.environ["GITHUB_SHA"], "version": version, "build": int(build),
+                    "releaseSequence": sequence,
                     "candidateOnly": True, "releaseAccepted": False, "developerIDSigned": True,
                     "notarized": True, "sparkleSigned": False,
                     "files": [{"name": str(path.relative_to(root)),

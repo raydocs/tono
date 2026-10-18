@@ -15,6 +15,14 @@ on:
   # already covered by ci-gate; keeping push on that branch runs these jobs
   # twice, because the push ref and the pull_request ref do not share a
   # concurrency group.
+  # release/macos and release/windows still trigger, so a commit that exists
+  # only on a release line is tested. sing-box-input skips the macos-26 jobs
+  # when that push's SHA is already on main (a fast-forward of a tree main
+  # already ran), and when a push to main is a merge commit whose macOS paths
+  # match a pull-request head that already passed (or this SHA itself already
+  # has a successful suite, which is what the merge queue lands). The jobs'
+  # `if` is false, so they are not queued. A direct push, a macOS-path
+  # conflict, or an API failure still runs.
   push:
     branches:
       - main
@@ -38,19 +46,73 @@ jobs:
   sing-box-input:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Release-branch duplicate skip
+        run: node --test tooling/scripts/tests/macos-ci-skip-duplicate.test.mjs
+      - name: Skip a macOS suite that already passed for this tree
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          skip=$(node tooling/scripts/macos-ci-skip-duplicate.mjs --decide)
+          case "$skip" in true|false) ;; *) echo "bad skip token" >&2; exit 1 ;; esac
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          printf 'macos-ci duplicate skip=%s event=%s ref=%s sha=%s\n' "$skip" "$EVENT_NAME" "$REF_NAME" "$GITHUB_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Build and verify fixed darwin-arm64 input
+        if: steps.decide.outputs.skip != 'true'
         run: sh tooling/scripts/prepare-macos-sing-box.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: steps.decide.outputs.skip != 'true'
         with:
           name: sing-box-darwin-arm64
           path: apps/macos/Tono/Resources/sing-box
           if-no-files-found: error
           retention-days: 14
 
-  build:
+  helper:
     needs: sing-box-input
+    if: needs.sing-box-input.result == 'success' && needs.sing-box-input.outputs.skip != 'true'
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Build the privileged helper once
+        run: tooling/scripts/build-core-helper.sh
+
+      - name: Stage the helper and its build record
+        # write-build-source.sh exempts this binary only when the untracked
+        # record matches its hash and the source fingerprint. The record lives
+        # under the git directory, so copy it out before upload.
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/tono-core-helper-artifact"
+          mkdir -p "$stage"
+          cp apps/macos/Tono/Resources/tono-core-helper "$stage/tono-core-helper"
+          record=$(git rev-parse --git-path tono-core-helper.built)
+          case "$record" in
+            /*) ;;
+            *) record="$GITHUB_WORKSPACE/$record" ;;
+          esac
+          test -s "$record"
+          cp "$record" "$stage/tono-core-helper.built"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: tono-core-helper
+          path: ${{ runner.temp }}/tono-core-helper-artifact
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    needs: [sing-box-input, helper]
+    if: needs.sing-box-input.result == 'success' && needs.sing-box-input.outputs.skip != 'true' && needs.helper.result == 'success'
     # The app uses macOS 26 APIs — `glassEffect` among them — so a macos-15 image
     # cannot compile it. On that runner every job that builds the app failed with
     # "value of type 'some View' has no member 'glassEffect'", which reads like a
@@ -70,11 +132,26 @@ jobs:
         with:
           name: sing-box-darwin-arm64
           path: apps/macos/Tono/Resources
-      - name: Verify core and build current helper
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: tono-core-helper
+          path: ${{ runner.temp }}/tono-core-helper-artifact
+      - name: Install the shared helper
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/tono-core-helper-artifact"
+          /usr/bin/install -m 0755 "$stage/tono-core-helper" apps/macos/Tono/Resources/tono-core-helper
+          record=$(git rev-parse --git-path tono-core-helper.built)
+          case "$record" in
+            /*) ;;
+            *) record="$GITHUB_WORKSPACE/$record" ;;
+          esac
+          mkdir -p "$(dirname "$record")"
+          cp "$stage/tono-core-helper.built" "$record"
+      - name: Verify core input
         run: |
           chmod +x apps/macos/Tono/Resources/sing-box
           sh tooling/scripts/verify-macos-sing-box.sh
-          tooling/scripts/build-core-helper.sh
 
       - name: Build the macOS app without signing
         run: |
@@ -125,10 +202,11 @@ jobs:
         # Cargo ones. The Xcode project has no SwiftPM package dependencies;
         # Xcode's incremental build compares timestamps a fresh checkout resets;
         # this job's Release product can feed the paired unsigned candidate
-        # (desktop-update-candidate.yml); the privileged helper is compiled from
-        # source on purpose. So no DerivedData is restored here.
+        # (desktop-update-candidate.yml). The helper binary is the shared
+        # artifact from the helper job, not rebuilt here. So no DerivedData is
+        # restored here.
         run: |
-          line="Swift build cache (macos / build): none — no SwiftPM dependencies; DerivedData and helper are always built from source"
+          line="Swift build cache (macos / build): none — no SwiftPM dependencies; DerivedData is always built from source; the helper is the shared artifact"
           echo "$line"
           echo "$line" >> "$GITHUB_STEP_SUMMARY"
 
@@ -136,7 +214,8 @@ jobs:
     # TonoTests (Debug) run beside the Release build instead of after it, so the
     # macOS critical path is one compile, not two in a row. The Release product
     # and its candidate artifact are built exactly as before in `build`.
-    needs: sing-box-input
+    needs: [sing-box-input, helper]
+    if: needs.sing-box-input.result == 'success' && needs.sing-box-input.outputs.skip != 'true' && needs.helper.result == 'success'
     runs-on: macos-26
     env:
       TONO_UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
@@ -147,11 +226,26 @@ jobs:
         with:
           name: sing-box-darwin-arm64
           path: apps/macos/Tono/Resources
-      - name: Verify core and build current helper
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: tono-core-helper
+          path: ${{ runner.temp }}/tono-core-helper-artifact
+      - name: Install the shared helper
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/tono-core-helper-artifact"
+          /usr/bin/install -m 0755 "$stage/tono-core-helper" apps/macos/Tono/Resources/tono-core-helper
+          record=$(git rev-parse --git-path tono-core-helper.built)
+          case "$record" in
+            /*) ;;
+            *) record="$GITHUB_WORKSPACE/$record" ;;
+          esac
+          mkdir -p "$(dirname "$record")"
+          cp "$stage/tono-core-helper.built" "$record"
+      - name: Verify core input
         run: |
           chmod +x apps/macos/Tono/Resources/sing-box
           sh tooling/scripts/verify-macos-sing-box.sh
-          tooling/scripts/build-core-helper.sh
 
       # The hosted-window flag stays on: MacUsabilityRenderTests fail without it
       # and assert native labels, identifiers and opacity, not pixels. The four
@@ -214,6 +308,7 @@ jobs:
 
   policy-tests:
     needs: sing-box-input
+    if: needs.sing-box-input.result == 'success' && needs.sing-box-input.outputs.skip != 'true'
     runs-on: macos-26
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -306,7 +401,8 @@ jobs:
   # the ones a developer was least likely to have run. Both faults they cover
   # shipped, in consecutive builds. On a runner they run every time.
   privileged-tests:
-    needs: sing-box-input
+    needs: [sing-box-input, helper]
+    if: needs.sing-box-input.result == 'success' && needs.sing-box-input.outputs.skip != 'true' && needs.helper.result == 'success'
     runs-on: macos-26
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -315,13 +411,26 @@ jobs:
         with:
           name: sing-box-darwin-arm64
           path: apps/macos/Tono/Resources
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: tono-core-helper
+          path: ${{ runner.temp }}/tono-core-helper-artifact
+      - name: Install the shared helper
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/tono-core-helper-artifact"
+          /usr/bin/install -m 0755 "$stage/tono-core-helper" apps/macos/Tono/Resources/tono-core-helper
+          record=$(git rev-parse --git-path tono-core-helper.built)
+          case "$record" in
+            /*) ;;
+            *) record="$GITHUB_WORKSPACE/$record" ;;
+          esac
+          mkdir -p "$(dirname "$record")"
+          cp "$stage/tono-core-helper.built" "$record"
       - name: Verify core input
         run: |
           chmod +x apps/macos/Tono/Resources/sing-box
           sh tooling/scripts/verify-macos-sing-box.sh
-
-      - name: Build the privileged helper
-        run: tooling/scripts/build-core-helper.sh
 
       - name: Place what an install would place
         # The core lifecycle test starts the privileged core, so it needs the two

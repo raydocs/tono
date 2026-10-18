@@ -20,6 +20,10 @@ pub struct TonoPreferences {
     #[serde(skip)]
     pub(crate) user_edit: bool,
 
+    /// Advanced desktop routing intent. Never normalize an unsupported opt-in to stable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desktop_routing_mode: Option<String>,
+
     /// app log level
     /// silent | error | warn | info | debug | trace
     pub app_log_level: Option<String>,
@@ -303,6 +307,14 @@ pub struct TonoTheme {
 }
 
 impl TonoPreferences {
+    /// Validate persisted intent; connect captures it once, before any runtime writer.
+    pub fn require_available_desktop_routing_mode(&self) -> Result<()> {
+        match self.desktop_routing_mode.as_deref() {
+            None | Some("stable" | "three-tier") => Ok(()),
+            Some(_) => anyhow::bail!("invalid desktop_routing_mode; expected stable or three-tier"),
+        }
+    }
+
     /// Valid clash core names.
     ///
     /// Windows Tono installs ship a single audited stable binary. Accepting
@@ -658,6 +670,23 @@ impl TonoPreferences {
 #[cfg(test)]
 mod auto_launch_seed {
     use super::TonoPreferences;
+
+    #[test]
+    fn persisted_three_tier_intent_is_preserved_not_downgraded() {
+        let mut prefs: TonoPreferences =
+            serde_yaml_ng::from_str("desktop_routing_mode: three-tier\n").unwrap();
+        assert!(prefs.require_available_desktop_routing_mode().is_ok());
+        prefs.patch_config(&TonoPreferences::default());
+        let saved: TonoPreferences =
+            serde_yaml_ng::from_str(&serde_yaml_ng::to_string(&prefs).unwrap()).unwrap();
+        assert_eq!(saved.desktop_routing_mode.as_deref(), Some("three-tier"));
+        assert!(saved.require_available_desktop_routing_mode().is_ok());
+        prefs.desktop_routing_mode = Some("typo".into());
+        assert!(prefs.require_available_desktop_routing_mode().unwrap_err().to_string().contains("invalid"));
+        prefs.desktop_routing_mode = Some("stable".into());
+        assert!(prefs.require_available_desktop_routing_mode().is_ok());
+        assert!(TonoPreferences::default().require_available_desktop_routing_mode().is_ok());
+    }
 
     #[test]
     fn startup_defaults_to_chinese_without_overwriting_saved_english() {
