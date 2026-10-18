@@ -24,6 +24,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private let reloadQueue = DispatchQueue(label: "tono.tunnel.reload")
     /// One start/reload at a time: app messages, IPv6 changes and core requests can overlap.
     private let serviceLock = NSLock()
+    /// Shared status for widgets and the Control Center switch: written at start and stop, and
+    /// refreshed every `StatusSnapshot.heartbeat` so readers can tell a live tunnel from an old file.
+    private var startedAt: Date?
+    private var heartbeat: DispatchSourceTimer?
 
     override init() {
         LibboxPrepareCrashSignalHandlers()
@@ -52,7 +56,21 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         #if os(iOS)
         if let commandServer { screenObserver = ScreenStateObserver(commandServer: commandServer) }
         #endif
+        startedAt = Date()
+        writeStatus(running: true)
+        let timer = DispatchSource.makeTimerSource(queue: reloadQueue)
+        timer.schedule(deadline: .now() + StatusSnapshot.heartbeat, repeating: StatusSnapshot.heartbeat, leeway: .seconds(30))
+        timer.setEventHandler { [weak self] in self?.writeStatus(running: true) }
+        timer.resume()
+        heartbeat = timer
         Self.log.info("tunnel started")
+    }
+
+    private func writeStatus(running: Bool) {
+        let failure = running ? nil : SharedFiles.loadFailure()?.code
+        let snapshot = StatusSnapshot.fromTunnel(running: running, since: startedAt, failure: failure,
+                                                 previous: StatusStore.load(), now: Date())
+        if StatusStore.save(snapshot) { StatusReload.all() }
     }
 
     override func stopTunnel(with reason: NEProviderStopReason) async {
@@ -69,6 +87,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             commandServer = nil
         }
         underlying.stop()
+        heartbeat?.cancel()
+        heartbeat = nil
+        defer { writeStatus(running: false); startedAt = nil }
         // Stops the system did not ask the user about are worth explaining in the app.
         switch reason {
         case .userInitiated, .providerDisabled, .configurationDisabled, .configurationRemoved, .superceded,
@@ -203,6 +224,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private func fail(_ code: String, _ message: String) -> Error {
         Self.log.error("start failed \(code, privacy: .public): \(message, privacy: .public)")
         SharedFiles.recordFailure(TunnelFailure(code: code, message: message, at: Date()))
+        writeStatus(running: false)
         return NSError(domain: "Tono", code: 3, userInfo: [NSLocalizedDescriptionKey: "\(code): \(message)"])
     }
 }

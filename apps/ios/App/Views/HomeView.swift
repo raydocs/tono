@@ -28,16 +28,25 @@ struct HomeView: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             VStack(spacing: 0) {
+                // VoiceOver reads the state and its controls first (title → status → action → line →
+                // details), then the top bar: the answer to "am I protected?" comes before chrome.
                 topBar
-                if typeSize.isAccessibilitySize {
-                    BottomScroll { controls.padding(.top, 24) }
-                } else {
-                    Spacer(minLength: 0)
-                    controls
+                    .accessibilityElement(children: .contain)
+                    .accessibilitySortPriority(0)
+                Group {
+                    if typeSize.isAccessibilitySize {
+                        BottomScroll { controls.padding(.top, 24) }
+                    } else {
+                        Spacer(minLength: 0)
+                        controls
+                    }
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilitySortPriority(1)
             }
         }
         .sheet(isPresented: $showLines) { LinesSheet().environmentObject(model).tonoAccessibility() }
+        .sheet(isPresented: $model.showVPNPrimer) { VPNPrimerSheet().environmentObject(model).tonoAccessibility() }
         .sheet(isPresented: $showDetails) {
             DetailsSheet(onSettings: openSettingsFromDetails).environmentObject(model).tonoAccessibility()
         }
@@ -49,6 +58,7 @@ struct HomeView: View {
                 showLines = args[i + 1] == "lines"
                 showDetails = args[i + 1] == "details"
                 showSettings = args[i + 1] == "settings"
+                if args[i + 1] == "primer" { model.showVPNPrimer = true }
             }
         }
         #endif
@@ -407,10 +417,12 @@ enum PhaseText {
     /// The line under the title when nothing is wrong.
     @MainActor static func status(_ m: AppModel) -> String? {
         switch m.phase {
-        case .idle: return L.t("sentence_idle")
+        case .idle: return m.offline ? L.t("status_offline") : L.t("sentence_idle")
         case .needsPermission: return L.t("sentence_permission_short")
         case .preparing: return L.t("sentence_preparing")
-        case .connecting: return L.t("sentence_connecting")
+        case .connecting:
+            // iOS reasserting the tunnel after a network change reads differently from a first start.
+            return m.reason == "NETWORK_CHANGED" ? L.t("short_NETWORK_CHANGED") : L.t("sentence_connecting")
         case .connected, .degraded:
             let cloud = m.cloudProbe.state == .ok ? m.cloudProbe.location.map(region) : nil
             let home = m.homeKind == .none ? nil : (m.homeProbe.state == .ok ? m.homeProbe.location.map(region) : nil)
@@ -432,7 +444,7 @@ enum PhaseText {
 
     static let knownReasons: Set<String> = [
         "HOME_UNAVAILABLE", "NETWORK", "RATE_LIMITED", "CORE_START", "CLOUD_UNREACHABLE", "HOME_UNREACHABLE",
-        "REVOKED", "DENIED", "SESSION_ENDED", "CATALOG_ROLLBACK", "CORE_STOPPED",
+        "REVOKED", "DENIED", "SESSION_ENDED", "CATALOG_ROLLBACK", "CORE_STOPPED", "NETWORK_CHANGED",
     ]
 
     static func reason(_ code: String) -> String {

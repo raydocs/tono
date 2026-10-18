@@ -55,6 +55,17 @@ struct SettingsView: View {
                         Text(L.t("system_limit")).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
                     }
 
+                    SectionLabel(text: L.t("settings_lock_screen"))
+                    SmokeCard {
+                        Toggle(isOn: Binding(get: { model.liveActivityEnabled }, set: { model.setLiveActivity($0) })) {
+                            Text(L.t("settings_live_activity")).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
+                        }
+                        .tint(TonoColor.accent)
+                        .accessibilityIdentifier("liveActivityToggle")
+                        para(L.t("settings_live_activity_desc"))
+                        para(L.t("settings_widgets_desc"))
+                    }
+
                     SectionLabel(text: L.t("settings_account"))
                     SmokeCard {
                         Text(model.email ?? "").tonoFont(16, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)

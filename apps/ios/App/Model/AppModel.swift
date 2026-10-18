@@ -45,6 +45,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var mode: RoutingMode = Preferences.mode
     @Published private(set) var selectedNode: String? = Preferences.selectedNode
     @Published private(set) var includeAllNetworks: Bool = Preferences.includeAllNetworks
+    @Published private(set) var liveActivityEnabled: Bool = Preferences.liveActivity
+    /// First run: the one-screen introduction before sign-in.
+    @Published private(set) var showOnboarding: Bool = !Preferences.onboarded
+    /// Shown before the first iOS "Add VPN Configurations" prompt (and after a declined one).
+    @Published var showVPNPrimer = false
+    /// No usable network path right now (shown under the title; connecting stays possible).
+    @Published private(set) var offline = false
+    /// The catalog request in flight (the line picker shows a loading state instead of "no lines").
+    @Published private(set) var catalogLoading = false
 
     private let session: AccountSession
     private let tokens = KeychainTokenStore()
@@ -52,6 +61,9 @@ final class AppModel: ObservableObject {
     private let tunnel = TunnelController()
     private let traffic = TrafficMonitor()
     private let pathMonitor = NWPathMonitor()
+    private let liveActivity = LiveActivityController()
+    /// The primer was answered for the start in progress.
+    private var primerConfirmed = false
     private var catalog: LoadedCatalog?
 
     // Facts behind the phase.
@@ -87,7 +99,11 @@ final class AppModel: ObservableObject {
         tunnel.onStatus = { [weak self] status, since in self?.tunnelChanged(status, since: since) }
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let v6 = path.status == .satisfied && path.supportsIPv6
-            Task { @MainActor in self?.underlyingIPv6 = v6 }
+            let offline = path.status != .satisfied
+            Task { @MainActor in
+                self?.underlyingIPv6 = v6
+                if self?.offline != offline { self?.offline = offline }
+            }
         }
         pathMonitor.start(queue: DispatchQueue(label: "tono.app.path"))
         recompute()
@@ -109,7 +125,14 @@ final class AppModel: ObservableObject {
 
     func onLaunch() async {
         #if DEBUG
-        if previewPhase != nil { return }
+        if previewPhase != nil {
+            // A Live Activity can only start from the foreground: the preview one starts after launch.
+            if CommandLine.arguments.contains("-TonoPreviewLiveActivity") {
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                publishStatus(force: true)
+            }
+            return
+        }
         #endif
         await tunnel.load()
         if signedIn { await refreshCatalog(quiet: true) }
@@ -121,6 +144,8 @@ final class AppModel: ObservableObject {
         if previewPhase != nil { return }
         #endif
         await tunnel.load()
+        // Coming back is a chance to confirm the shared status and move the Live Activity's stale date.
+        publishStatus(force: true)
         if tunnelStatus == .connected, cloudProbe.state != .checking { runProbes() }
         if !tunnelStatus.isUp, let f = SharedFiles.loadFailure(), failure == nil, !userStopping {
             failure = f.code
@@ -191,6 +216,12 @@ final class AppModel: ObservableObject {
 
     func connect() async {
         guard signedIn, !phase.busy else { return }
+        // Before iOS asks to add the VPN configuration, say what it is and why (once per ask).
+        if !tunnel.configured && !primerConfirmed {
+            showVPNPrimer = true
+            return
+        }
+        primerConfirmed = false
         wantOn = true
         failure = nil
         permission = nil
@@ -226,6 +257,37 @@ final class AppModel: ObservableObject {
         if previewPhase != nil { previewToggle(on); return }
         #endif
         Task { on ? await connect() : await disconnect() }
+    }
+
+    /// The primer's Continue: go on to the iOS prompt.
+    func confirmVPNPrimer() {
+        showVPNPrimer = false
+        primerConfirmed = true
+        toggle(true)
+    }
+
+    func dismissVPNPrimer() {
+        showVPNPrimer = false
+        primerConfirmed = false
+    }
+
+    func finishOnboarding() {
+        showOnboarding = false
+        if !isPreview { Preferences.onboarded = true }
+    }
+
+    func setLiveActivity(_ on: Bool) {
+        liveActivityEnabled = on
+        if isPreview { return }
+        Preferences.liveActivity = on
+        publishStatus(force: true)
+    }
+
+    /// The line picker's "Try again" when the catalog could not be loaded.
+    func reloadLines() async {
+        if isPreview { return }
+        await refreshCatalog(quiet: false)
+        recompute()
     }
 
     func recheck() {
@@ -313,6 +375,8 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     private func refreshCatalog(quiet: Bool) async -> Bool {
+        catalogLoading = true
+        defer { catalogLoading = false }
         do {
             let loaded = try await session.loadCatalog()
             apply(loaded)
@@ -431,6 +495,29 @@ final class AppModel: ObservableObject {
             phase = derived.phase
             reason = derived.reason
         }
+        publishStatus()
+    }
+
+    /// The display name of the line in use ("Tokyo · Dawn"), as the exit capsule shows it.
+    var exitName: String? {
+        guard let line = lines.first(where: { $0.name == selectedNode }) ?? lines.first else { return nil }
+        return Format.city(line.city, chinese: L.isChinese) + (line.label.isEmpty ? "" : " · \(line.label)")
+    }
+
+    /// Shares the phase with widgets, the control and the Live Activity. The DEBUG preview never
+    /// writes the shared status: a fixture must not reach a real widget or control.
+    private func publishStatus(force: Bool = false) {
+        let snapshot = StatusSnapshot.fromApp(phase, reason: reason, exit: exitName, since: connectedSince, now: Date())
+        #if DEBUG
+        if previewPhase != nil {
+            if CommandLine.arguments.contains("-TonoPreviewLiveActivity") {
+                liveActivity.sync(snapshot, enabled: true, preview: true)
+            }
+            return
+        }
+        #endif
+        if StatusStore.save(snapshot) || force { StatusReload.all() }
+        liveActivity.sync(snapshot, enabled: liveActivityEnabled)
     }
 
     private static var deviceName: String {
@@ -449,7 +536,15 @@ extension AppModel {
         m.apply(LoadedCatalog(catalog: SampleCatalog.catalog(), body: "", fromCache: false))
         m.lines = m.lines.enumerated().map { var l = $0.element; l.latencyMS = [86, 231][$0.offset % 2]; return l }
         m.email = "preview@example.com"
-        m.previewFailuresLeft = CommandLine.arguments.contains("-TonoPreviewFailFirst") ? 1 : 0
+        let args = CommandLine.arguments
+        m.previewFailuresLeft = args.contains("-TonoPreviewFailFirst") ? 1 : 0
+        m.offline = args.contains("-TonoPreviewOffline")
+        m.showOnboarding = args.contains("-TonoPreviewOnboarding")
+        // `-TonoPreviewLines empty|loading`: the line picker's empty and loading states.
+        if let i = args.firstIndex(of: "-TonoPreviewLines"), i + 1 < args.count {
+            m.lines = []
+            m.catalogLoading = args[i + 1] == "loading"
+        }
         m.show(phase)
         return m
     }
@@ -475,6 +570,12 @@ extension AppModel {
     /// with fixture timings and no tunnel, so UI tests can tap through connect, cancel, fail/retry and
     /// disconnect. `-TonoPreviewFailFirst` makes the first start fail (Home exit unavailable).
     fileprivate func previewToggle(_ on: Bool) {
+        // The primer comes before the (simulated) iOS prompt, as in a real first start.
+        if on, phase == .needsPermission, !primerConfirmed {
+            showVPNPrimer = true
+            return
+        }
+        primerConfirmed = false
         previewRun?.cancel()
         let steps: [(Phase, Double)]
         if on {
@@ -514,7 +615,10 @@ extension AppModel {
             rx = 0
             tx = 0
         }
-        let reason: String? = phase == .degraded ? "HOME_UNREACHABLE" : phase == .failed ? "HOME_UNAVAILABLE" : nil
+        var reason: String? = phase == .degraded ? "HOME_UNREACHABLE" : phase == .failed ? "HOME_UNAVAILABLE" : nil
+        // `-TonoPreviewReason NETWORK_CHANGED|CORE_STOPPED|…` shows another reason for the same phase.
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "-TonoPreviewReason"), i + 1 < args.count, phase != .idle { reason = args[i + 1] }
         previewPhase = (phase, reason)
         recompute()
     }

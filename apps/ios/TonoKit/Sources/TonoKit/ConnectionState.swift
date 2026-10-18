@@ -131,8 +131,12 @@ public enum ConnectionState {
     /// The single place iOS status, probes and failures become the phase the UI shows.
     public static func derive(_ f: ConnectionFacts) -> (phase: Phase, reason: String?) {
         switch f.tunnel {
-        case .connecting, .reasserting:
+        case .connecting:
             return (.connecting, nil)
+        case .reasserting:
+            // The underlying network changed and iOS is re-establishing the tunnel: say so, so the
+            // user does not read a stall as a failure.
+            return (.connecting, "NETWORK_CHANGED")
         case .disconnecting:
             return (.disconnecting, nil)
         case .connected:

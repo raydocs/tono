@@ -85,12 +85,111 @@ final class TonoUITests: XCTestCase {
         waitLabel(button, "Disconnect")
     }
 
-    @MainActor func testPermissionStepConnects() {
+    @MainActor func testPermissionStepExplainsBeforeTheSystemPromptThenConnects() {
         let app = launch("NEEDS_PERMISSION")
         let button = primary(app)
         XCTAssertEqual(button.label, "Allow VPN")
         button.tap()
+        // The primer comes first; "Not now" leaves the state as it was.
+        XCTAssertTrue(app.staticTexts["primerTitle"].waitForExistence(timeout: 4))
+        app.buttons["primerLater"].tap()
+        waitHittable(button)
+        XCTAssertEqual(title(app), "Needs permission")
+        button.tap()
+        let proceed = app.buttons["primerContinue"]
+        XCTAssertTrue(proceed.waitForExistence(timeout: 4))
+        proceed.tap()
         waitLabel(button, "Disconnect")
+    }
+
+    @MainActor func testOnboardingLeadsToSignIn() {
+        let app = launch("SIGNED_OUT", ["-TonoPreviewOnboarding"])
+        XCTAssertTrue(app.staticTexts["onboardTitle"].waitForExistence(timeout: 6))
+        XCTAssertFalse(app.buttons["primaryAction"].exists)
+        app.buttons["onboardContinue"].tap()
+        XCTAssertTrue(app.textFields.firstMatch.waitForExistence(timeout: 4), "sign-in email field after onboarding")
+    }
+
+    @MainActor func testNetworkChangeSaysReconnecting() {
+        let app = launch("CONNECTING", ["-TonoPreviewReason", "NETWORK_CHANGED"])
+        let status = app.staticTexts["statusLine"]
+        XCTAssertTrue(status.waitForExistence(timeout: 6))
+        XCTAssertEqual(status.label, "Network changed · reconnecting")
+        XCTAssertEqual(primary(app).label, "Cancel connecting")
+    }
+
+    @MainActor func testDroppedConnectionExplainsAndOffersRetry() {
+        let app = launch("FAILED", ["-TonoPreviewReason", "CORE_STOPPED"])
+        let reason = app.buttons["reasonLine"]
+        XCTAssertTrue(reason.waitForExistence(timeout: 6))
+        XCTAssertEqual(reason.label, "Connection dropped")
+        XCTAssertEqual(primary(app).label, "Retry")
+    }
+
+    @MainActor func testEmptyLineListOffersRetryAndLoadingSaysSo() {
+        var app = launch("IDLE", ["-TonoPreviewLines", "empty"])
+        app.buttons["exitCapsule"].tap()
+        XCTAssertTrue(app.staticTexts["linesEmpty"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.buttons["linesRetry"].isHittable)
+        app = launch("IDLE", ["-TonoPreviewLines", "loading"])
+        app.buttons["exitCapsule"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["linesLoading"].waitForExistence(timeout: 4))
+        XCTAssertFalse(app.staticTexts["linesEmpty"].exists)
+    }
+
+    /// VoiceOver order on Home: the state and its controls first, then the top bar.
+    @MainActor func testVoiceOverReadsStateBeforeChrome() {
+        let app = launch("CONNECTED")
+        XCTAssertTrue(app.buttons["primaryAction"].waitForExistence(timeout: 6))
+        let wanted = ["stateTitle", "statusLine", "primaryAction", "exitCapsule", "detailsButton", "settingsButton"]
+        let order = app.descendants(matching: .any).allElementsBoundByIndex.map(\.identifier).filter { wanted.contains($0) }
+        var seen: [String] = []
+        for id in order where !seen.contains(id) { seen.append(id) }
+        XCTAssertEqual(seen, wanted)
+    }
+
+    /// The preview Live Activity in the simulator's Dynamic Island (real ActivityKit, fixture
+    /// content tagged Preview). Captures land in `TONO_SHOTS` when the runner passes it.
+    @MainActor func testPreviewLiveActivityShowsInDynamicIsland() throws {
+        let app = launch("CONNECTED", ["-TonoPreviewLiveActivity"])
+        XCTAssertTrue(primary(app).waitForExistence(timeout: 6))
+        sleep(2)
+        XCUIDevice.shared.press(.home)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let island = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Connected")).firstMatch
+        let shown = island.waitForExistence(timeout: 8)
+        save(XCUIScreen.main.screenshot(), "live-activity-island-compact")
+        if shown {
+            island.press(forDuration: 1.2)
+            sleep(2)
+            save(XCUIScreen.main.screenshot(), "live-activity-island-expanded")
+        }
+        XCTAssertTrue(shown, "no Live Activity element in the Dynamic Island:\n\(springboard.debugDescription.prefix(3000))")
+        XCUIDevice.shared.press(.home)
+    }
+
+    /// Simulator CPU / memory while Home shows a connected session (sea animating). Mac-host
+    /// numbers, not an iPhone; printed for the record, no threshold.
+    @MainActor func testSimulatorPerformanceSample() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-TonoPreview", "CONNECTED", "-AppleLanguages", "(en)"]
+        let options = XCTMeasureOptions()
+        options.iterationCount = 3
+        measure(metrics: [XCTCPUMetric(application: app), XCTMemoryMetric(application: app)], options: options) {
+            app.launch()
+            _ = app.buttons["primaryAction"].waitForExistence(timeout: 10)
+            sleep(5)
+        }
+    }
+
+    @MainActor private func save(_ shot: XCUIScreenshot, _ name: String) {
+        let attachment = XCTAttachment(screenshot: shot)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        if let dir = ProcessInfo.processInfo.environment["TONO_SHOTS"], !dir.isEmpty {
+            try? shot.pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
+        }
     }
 
     @MainActor func testSettingsReachableFromDetailsAndCloses() {
@@ -131,6 +230,11 @@ final class TonoUITests: XCTestCase {
         for phase in ["SIGNED_OUT", "IDLE", "NEEDS_PERMISSION", "CONNECTING", "CONNECTED", "DEGRADED", "FAILED"] {
             failures += try audit(launch(phase), name: "home-\(phase)")
         }
+        failures += try audit(launch("SIGNED_OUT", ["-TonoPreviewOnboarding"]), name: "onboarding")
+        failures += try audit(launch("CONNECTING", ["-TonoPreviewReason", "NETWORK_CHANGED"]), name: "home-network-changed")
+        failures += try audit(launch("FAILED", ["-TonoPreviewReason", "CORE_STOPPED"]), name: "home-dropped")
+        failures += try audit(launch("IDLE", ["-TonoPreviewOffline"]), name: "home-offline")
+        failures += try audit(launch("CONNECTED", ["-TonoPreviewWidgets"]), name: "widget-gallery")
         XCTAssertTrue(failures.isEmpty, failures.joined(separator: "\n"))
     }
 
@@ -139,6 +243,9 @@ final class TonoUITests: XCTestCase {
         for sheet in ["lines", "details", "settings"] {
             failures += try audit(launch("DEGRADED", ["-TonoPreviewSheet", sheet, "-TonoLargeSheets"]), name: "sheet-\(sheet)")
         }
+        failures += try audit(launch("NEEDS_PERMISSION", ["-TonoPreviewSheet", "primer", "-TonoLargeSheets"]), name: "sheet-primer")
+        failures += try audit(launch("IDLE", ["-TonoPreviewSheet", "lines", "-TonoPreviewLines", "empty", "-TonoLargeSheets"]),
+                              name: "sheet-lines-empty")
         XCTAssertTrue(failures.isEmpty, failures.joined(separator: "\n"))
     }
 
@@ -148,6 +255,10 @@ final class TonoUITests: XCTestCase {
         failures += try audit(launch("CONNECTED", largest), name: "largest-text-connected")
         failures += try audit(launch("FAILED", largest), name: "largest-text-failed")
         failures += try audit(launch("SIGNED_OUT", largest), name: "largest-text-signin")
+        failures += try audit(launch("SIGNED_OUT", largest + ["-TonoPreviewOnboarding"]), name: "largest-text-onboarding",
+                              atLargestSize: true)
+        failures += try audit(launch("NEEDS_PERMISSION", largest + ["-TonoPreviewSheet", "primer"]), name: "largest-text-primer",
+                              atLargestSize: true)
         // At AX5 "may be clipped at larger sizes" has no larger size to happen at: those predictions are
         // logged, and the AX5 English captures in the artifact are the clipping check for these screens.
         failures += try audit(launch("DEGRADED", largest + ["-TonoPreviewSheet", "details"]), name: "largest-text-details",

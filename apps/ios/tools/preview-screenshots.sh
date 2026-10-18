@@ -51,7 +51,21 @@ for lang in zh-Hans en; do
   shot "$lang-07-lines" "$lang" CONNECTED lines
   shot "$lang-08-settings" "$lang" CONNECTED settings
   shot "$lang-09-details" "$lang" DEGRADED details
+  shot "$lang-10-onboarding" "$lang" SIGNED_OUT "" -TonoPreviewOnboarding
+  shot "$lang-11-vpn-primer" "$lang" NEEDS_PERMISSION primer
+  shot "$lang-12-network-changed" "$lang" CONNECTING "" -TonoPreviewReason NETWORK_CHANGED
+  shot "$lang-13-dropped" "$lang" FAILED "" -TonoPreviewReason CORE_STOPPED
+  shot "$lang-14-offline" "$lang" IDLE "" -TonoPreviewOffline
+  shot "$lang-15-lines-empty" "$lang" IDLE lines -TonoPreviewLines empty
+  shot "$lang-16-lines-loading" "$lang" IDLE lines -TonoPreviewLines loading
+  shot "$lang-17-widgets" "$lang" CONNECTED "" -TonoPreviewWidgets
 done
+# Widget views on a light wallpaper, and the app itself with the system in light appearance
+# (Tono is dark by design and opts out of light mode; this shows it stays legible and unchanged).
+shot "en-17b-widgets-light-wallpaper" en CONNECTED "" -TonoPreviewWidgets -TonoPreviewWidgetsLight
+xcrun simctl ui "$UDID" appearance light || true
+shot "en-18-system-light-appearance" en CONNECTED
+xcrun simctl ui "$UDID" appearance dark || true
 
 # Accessibility captures come after the main set (later after boot, away from the system banners).
 # Large text (Dynamic Type accessibility L) and increased contrast, Chinese, the two busiest screens.
@@ -65,6 +79,9 @@ shot "a11y-largest-text-en-connected" en CONNECTED
 shot "a11y-largest-text-en-details" en DEGRADED details
 shot "a11y-largest-text-en-settings" en DEGRADED settings
 shot "a11y-largest-text-en-idle" en IDLE
+shot "a11y-largest-text-en-onboarding" en SIGNED_OUT "" -TonoPreviewOnboarding
+shot "a11y-largest-text-en-primer" en NEEDS_PERMISSION primer
+shot "a11y-largest-text-en-widgets" en CONNECTED "" -TonoPreviewWidgets
 xcrun simctl ui "$UDID" content_size large
 xcrun simctl ui "$UDID" increase_contrast enabled || true
 shot "a11y-increase-contrast-connected" zh-Hans CONNECTED
@@ -114,4 +131,9 @@ network. The yellow badge on each capture says so. -TonoReduceMotion / -TonoRedu
 feed the same code path as the iOS settings (simctl cannot toggle them). perf.txt is host CPU/RSS
 of the simulator process on a Mac runner, not iPhone performance. These images show layout, copy and motion only;
 they are not evidence of sign-in, connectivity or routing.
+*-17-widgets*: the widget / Live Activity SwiftUI views rendered INSIDE the app with fixture
+readings (each tagged Preview); not the system Home Screen. live-activity-island-*.png (from the
+UI tests): a real ActivityKit Live Activity in the simulator's Dynamic Island, started by the
+preview with fixture content and tagged Preview. Not captured anywhere: the Control Center
+control (iOS 18) and Lock Screen widgets placed by a user; no haptics (a simulator has none).
 EOF

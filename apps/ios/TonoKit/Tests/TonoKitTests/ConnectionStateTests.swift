@@ -29,7 +29,9 @@ final class ConnectionStateTests: XCTestCase {
     }
 
     func testReassertingReadsAsConnectingNotConnected() {
-        XCTAssertEqual(ConnectionState.derive(ConnectionFacts(signedIn: true, tunnel: .reasserting)).phase, .connecting)
+        let (phase, reason) = ConnectionState.derive(ConnectionFacts(signedIn: true, tunnel: .reasserting))
+        XCTAssertEqual(phase, .connecting)
+        XCTAssertEqual(reason, "NETWORK_CHANGED")
     }
 
     func testEndedSessionShowsSignInWithItsReason() {

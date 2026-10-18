@@ -39,15 +39,32 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            if model.phase == .signedOut {
+            #if DEBUG
+            if CommandLine.arguments.contains("-TonoPreviewWidgets") {
+                WidgetGallery()
+            } else {
+                content
+            }
+            #else
+            content
+            #endif
+        }
+        .animation(.easeInOut(duration: 0.35), value: model.phase == .signedOut)
+        .animation(.easeInOut(duration: 0.35), value: model.showOnboarding)
+        .previewBadge()
+        .tonoAccessibility()
+    }
+
+    @ViewBuilder private var content: some View {
+        ZStack {
+            if model.showOnboarding {
+                OnboardingView().transition(.opacity)
+            } else if model.phase == .signedOut {
                 SignInView().transition(.opacity)
             } else {
                 HomeView().transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.35), value: model.phase == .signedOut)
-        .previewBadge()
-        .tonoAccessibility()
     }
 }
 

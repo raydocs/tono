@@ -27,8 +27,13 @@ struct LinesSheet: View {
                 Text(L.t("lines_cached")).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.warning)
             }
             ScrollView {
-                LazyVStack(spacing: 6) {
-                    ForEach(model.lines) { line in row(line) }
+                if model.lines.isEmpty {
+                    // Never an empty list without a word: loading says so, a failed load offers a retry.
+                    if model.catalogLoading { loading } else { empty }
+                } else {
+                    LazyVStack(spacing: 6) {
+                        ForEach(model.lines) { line in row(line) }
+                    }
                 }
             }
         }
@@ -37,6 +42,41 @@ struct LinesSheet: View {
         .modifier(SheetSurface())
         .presentationDetents(ax || DebugAccessibility.largeSheets ? [.large] : [.medium, .large])
         .presentationDragIndicator(.visible)
+    }
+
+    private var loading: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(0..<2, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(TonoColor.smokeHigh.opacity(0.6))
+                    .frame(height: 56)
+                    .overlay(alignment: .leading) {
+                        Capsule().fill(TonoColor.textTertiary.opacity(0.25)).frame(width: 120, height: 12).padding(.leading, 40)
+                    }
+            }
+            HStack(spacing: 8) {
+                ProgressView().tint(TonoColor.textSecondary)
+                Text(L.t("lines_loading")).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
+            }
+            .padding(.top, 6)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(L.t("lines_loading"))
+        .accessibilityIdentifier("linesLoading")
+    }
+
+    private var empty: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L.t("lines_empty_title")).tonoFont(17, .semibold, relativeTo: .body).foregroundStyle(TonoColor.textPrimary)
+                .accessibilityIdentifier("linesEmpty")
+            Text(L.t("lines_empty_body")).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            QuietButton(title: L.t("lines_retry")) { Task { await model.reloadLines() } }
+                .accessibilityIdentifier("linesRetry")
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(TonoColor.smokeHigh.opacity(0.6), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func row(_ line: LineItem) -> some View {

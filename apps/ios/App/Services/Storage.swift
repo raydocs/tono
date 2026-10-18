@@ -100,4 +100,17 @@ enum Preferences {
         get { defaults.string(forKey: "accountEmail") }
         set { defaults.set(newValue, forKey: "accountEmail") }
     }
+
+    /// Live Activity (Lock Screen + Dynamic Island). Off by default: it puts the line name on the
+    /// Lock Screen (decision 130, provisional).
+    static var liveActivity: Bool {
+        get { defaults.bool(forKey: "liveActivity") }
+        set { defaults.set(newValue, forKey: "liveActivity") }
+    }
+
+    /// The first-run introduction was shown (once per install).
+    static var onboarded: Bool {
+        get { defaults.bool(forKey: "onboarded") }
+        set { defaults.set(newValue, forKey: "onboarded") }
+    }
 }
