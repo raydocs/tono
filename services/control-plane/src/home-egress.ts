@@ -166,8 +166,9 @@ export function isIpAddress(value: string): boolean {
   }
 }
 
+/** Dotted-quad only: an IPv4-mapped IPv6 address has dots too, and egress_ipv4 holds neither. */
 export function isIpv4(value: string): boolean {
-  return value.includes('.') && isIpAddress(value);
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(value) && isIpAddress(value);
 }
 
 /** HTTP/1.0 so the echo cannot answer chunked; the body is one address. */

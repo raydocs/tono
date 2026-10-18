@@ -102,9 +102,15 @@ export async function homeEgressResource(
   // The lookup took seconds; an operator may have re-pointed the line in the
   // meantime. Both writes hold only while the line is still the one dialled,
   // so a stale observation is dropped rather than filed under the new line.
+  // A catalog line was looked up by its stored address, so that address is
+  // part of what "the same line" means for it.
+  const catalog = ip !== null && String(home.kind) !== 'socks5';
   const sameLine = `EXISTS (SELECT 1 FROM home_exits WHERE id = ? AND kind IS ? AND socks5_host IS ?
-    AND socks5_port IS ? AND socks5_username IS ? AND socks5_password IS ?)`;
-  const lineKey = [homeId, home.kind, home.socks5_host, home.socks5_port, home.socks5_username, home.socks5_password];
+    AND socks5_port IS ? AND socks5_username IS ? AND socks5_password IS ?${catalog ? ' AND egress_ipv4 IS ?' : ''})`;
+  const lineKey = [
+    homeId, home.kind, home.socks5_host, home.socks5_port, home.socks5_username, home.socks5_password,
+    ...(catalog ? [home.egress_ipv4] : []),
+  ];
   const writes = [
     e.DB.prepare(
       `INSERT INTO home_exit_egress(home_exit_id, ip, checked_at, error_stage, error, answers)

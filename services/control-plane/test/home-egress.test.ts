@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Env } from '../src/env';
 import {
   egressConsensus,
+  isIpv4,
   resolveEgressIp,
   type EgressConnect,
   type EgressFetch,
@@ -164,6 +165,26 @@ describe('home egress lookup', () => {
     expect(home).toEqual({ egress_ipv4: '12.12.115.213' });
     const lookup = await e().DB.prepare('SELECT 1 AS hit FROM home_exit_egress WHERE home_exit_id = ?').bind('egress-moved').first();
     expect(lookup).toBeNull();
+  });
+
+  it('drops a catalog lookup whose stored address was edited while it ran', async () => {
+    await e().DB.prepare(
+      `INSERT INTO home_exits(id, proxy_name, display_name, kind, egress_ipv4, status, created_at, updated_at)
+       VALUES('egress-cat', 'egress-cat', 'Catalog', 'catalog', '204.1.74.87', 'active', ?, ?)`,
+    ).bind(NOW, NOW).run();
+    const editing: EgressFetch = async (url, init) => {
+      await e().DB.prepare("UPDATE home_exits SET egress_ipv4 = '12.12.115.132' WHERE id = 'egress-cat'").run();
+      return geoFetch([])(url, init);
+    };
+    await expect(homeEgressResource(
+      new Request('https://hub.test/api/v1/ops/home-exits/egress-cat/egress', { method: 'POST' }),
+      e(), 'home-exits/egress-cat/egress', 'POST', 'owner@example.com',
+      { connect: fakeLine('48.45.90.215', {}), fetch: editing },
+    )).rejects.toMatchObject({ status: 409, code: 'HOME_EXIT_CHANGED' });
+  });
+
+  it('keeps an IPv4-mapped IPv6 echo out of the IPv4 field', () => {
+    expect([isIpv4('48.45.90.215'), isIpv4('::ffff:192.0.2.1')]).toEqual([true, false]);
   });
 
   it('votes on the region and flags a disagreement instead of averaging it away', () => {
