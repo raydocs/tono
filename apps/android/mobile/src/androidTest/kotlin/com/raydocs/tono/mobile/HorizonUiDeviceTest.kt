@@ -451,8 +451,12 @@ class HorizonUiDeviceTest {
         fun nodeFor(label: String): android.view.accessibility.AccessibilityNodeInfo? {
             fun search(n: android.view.accessibility.AccessibilityNodeInfo?): android.view.accessibility.AccessibilityNodeInfo? {
                 if (n == null) return null
-                val own = listOfNotNull(n.contentDescription, n.text).joinToString(" ")
-                if (n.isClickable && (own.contains(label) || (0 until n.childCount).any { n.getChild(it)?.text?.contains(label) == true })) return n
+                // Like TalkBack: a clickable node is labelled by its own text or by the text of
+                // descendants that are not clickable themselves (Compose nests the label's TextView).
+                fun spoken(m: android.view.accessibility.AccessibilityNodeInfo, top: Boolean): String =
+                    if (!top && m.isClickable) "" else (listOfNotNull(m.contentDescription, m.text) +
+                        (0 until m.childCount).mapNotNull { m.getChild(it) }.map { spoken(it, false) }).joinToString(" ")
+                if (n.isClickable && spoken(n, true).contains(label)) return n
                 return (0 until n.childCount).firstNotNullOfOrNull { search(n.getChild(it)) }
             }
             return search(automation.rootInActiveWindow)

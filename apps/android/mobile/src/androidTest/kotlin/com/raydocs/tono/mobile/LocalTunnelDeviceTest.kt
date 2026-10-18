@@ -79,20 +79,13 @@ class LocalTunnelDeviceTest {
     }
 
     /**
-     * The "Local test server · not Tono" mark is in the app's accessibility tree. It sits in the
-     * status-bar band, which UiAutomator's visible-node search may skip, so the window hierarchy is
-     * read instead; the screenshot that follows shows it.
+     * "Local test server · not Tono" reaches a screen reader: UiAutomator, like TalkBack, only sees
+     * nodes Android reports as visible to the user (not hidden under the status bar). The pill drawn
+     * in the status-bar band shows in the screenshot that follows.
      */
     private fun assertLocalMark(screen: String) {
         val mark = text(R.string.local_test_server)
-        val deadline = SystemClock.elapsedRealtime() + 10_000
-        var dump = ""
-        while (SystemClock.elapsedRealtime() < deadline) {
-            dump = java.io.ByteArrayOutputStream().also { device.dumpWindowHierarchy(it) }.toString()
-            if (dump.contains("text=\"$mark\"")) break
-            Thread.sleep(300)
-        }
-        val found = dump.contains("text=\"$mark\"")
+        val found = device.wait(Until.hasObject(By.desc(mark)), 10_000) == true
         if (!found) diagnose("local-mark-missing-$screen")
         note("mark on $screen: ${if (found) "present" else "MISSING"}")
         assertTrue("$screen says it is a local test server", found)

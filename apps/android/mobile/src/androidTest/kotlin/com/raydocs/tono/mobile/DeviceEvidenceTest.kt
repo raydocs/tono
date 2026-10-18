@@ -91,7 +91,10 @@ class DeviceEvidenceTest {
     private fun shot(name: String) {
         dismissForeignAnr()
         Thread.sleep(400)
-        assertTrue("screenshot $name", device.takeScreenshot(File(out, "$name.png")))
+        // The emulator's screen capture now and then returns nothing once (logged as
+        // "takeScreenshot() returned null"); try again, but a screenshot is still required.
+        val saved = (1..5).any { attempt -> device.takeScreenshot(File(out, "$name.png")).also { if (!it && attempt < 5) Thread.sleep(1_000) } }
+        assertTrue("screenshot $name", saved)
     }
 
     private fun text(id: Int) = context.getString(id)

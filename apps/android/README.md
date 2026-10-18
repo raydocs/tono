@@ -66,7 +66,9 @@ Round 6:
   plane (`engine/LocalTestServer`). This is only allowed on the phone's own loopback over plain HTTP
   (CI forwards it with `adb reverse`), only through a file in app-private storage, and only in debug builds. The account is bound
   to the server it was made on, and every screen shows "Local test server · not Tono" while it is
-  active. Catalog admission is unchanged. `scripts/local-tunnel/fixture-servers.py` runs the stand-in
+  active. The pill sits in the status-bar band; Android hides anything wholly under the status bar
+  from screen readers, so the same words also sit on a hairline node just below it, first in
+  TalkBack's reading order (the tunnel test finds it the way TalkBack would). Catalog admission is unchanged. `scripts/local-tunnel/fixture-servers.py` runs the stand-in
   control plane, a VLESS Reality cloud exit and a SOCKS5 Home exit (the pinned sing-box CLI) on the
   CI host.
 - **Keyboard, D-pad and switch access.** Focus shows a ring on every Home control and on the

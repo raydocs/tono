@@ -10,7 +10,12 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -21,6 +26,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.traversalIndex
+import androidx.compose.ui.unit.dp
 import com.raydocs.tono.mobile.R
 import com.raydocs.tono.mobile.engine.EngineSnapshot
 import com.raydocs.tono.mobile.engine.Phase
@@ -111,7 +121,15 @@ fun TonoRoot(snapshot: EngineSnapshot?, actions: TonoActions) {
         }
         // Debug builds pointed at a local fixture server say so on every screen, sign-in included.
         if (s?.localTestServer == true) {
-            StatusBandMark(stringResource(R.string.local_test_server), Modifier.align(Alignment.TopCenter).testTag("local-test-server"))
+            val mark = stringResource(R.string.local_test_server)
+            StatusBandMark(mark, Modifier.align(Alignment.TopCenter).clearAndSetSemantics {})
+            // Android hides nodes that lie wholly under the status bar from screen readers, so
+            // TalkBack gets the same words from a hairline just below it, first in reading order.
+            Box(
+                Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.statusBars).fillMaxWidth().height(1.dp)
+                    .testTag("local-test-server")
+                    .semantics { contentDescription = mark; traversalIndex = -1f },
+            )
         }
     }
 }

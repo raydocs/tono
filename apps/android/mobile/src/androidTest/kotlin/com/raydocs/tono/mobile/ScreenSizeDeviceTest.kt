@@ -35,7 +35,11 @@ import java.io.File
  * Fixture snapshots; in every Home state and in Details and Settings no text may be cut off, every
  * control keeps the accessibility contract, and every Home control can be brought on screen.
  */
-abstract class ScreenShapeCheck(private val setUp: List<String>, private val tearDown: List<String>) {
+abstract class ScreenShapeCheck(
+    private val setUp: List<String>,
+    private val tearDown: List<String>,
+    private val rotation: Int? = null,
+) {
     protected val instrumentation = InstrumentationRegistry.getInstrumentation()
     protected val context = instrumentation.targetContext
     private val device = UiDevice.getInstance(instrumentation)
@@ -44,8 +48,19 @@ abstract class ScreenShapeCheck(private val setUp: List<String>, private val tea
     private fun shell(cmd: String) = instrumentation.uiAutomation.executeShellCommand(cmd).close()
 
     private val shape = object : ExternalResource() {
-        override fun before() { setUp.forEach(::shell); Thread.sleep(2_000) }
-        override fun after() { tearDown.forEach(::shell); Thread.sleep(1_000) }
+        override fun before() {
+            setUp.forEach(::shell)
+            rotation?.let { instrumentation.uiAutomation.setRotation(it) }
+            Thread.sleep(2_000)
+        }
+        override fun after() {
+            if (rotation != null) {
+                instrumentation.uiAutomation.setRotation(android.app.UiAutomation.ROTATION_FREEZE_0)
+                instrumentation.uiAutomation.setRotation(android.app.UiAutomation.ROTATION_UNFREEZE)
+            }
+            tearDown.forEach(::shell)
+            Thread.sleep(1_000)
+        }
     }
     protected val compose = createAndroidComposeRule<ComponentActivity>()
     @get:Rule val rules: RuleChain = RuleChain.outerRule(shape).around(compose)
@@ -114,8 +129,11 @@ class SmallScreenDeviceTest : ScreenShapeCheck(
 
 @RunWith(AndroidJUnit4::class)
 class LandscapeDeviceTest : ScreenShapeCheck(
-    setUp = listOf("settings put system accelerometer_rotation 0", "settings put system user_rotation 1"),
-    tearDown = listOf("settings put system user_rotation 0"),
+    setUp = emptyList(),
+    tearDown = emptyList(),
+    // As a user turning the phone with auto-rotate on; the platform rotation API, because the
+    // user_rotation setting alone does not turn the display on API 34.
+    rotation = android.app.UiAutomation.ROTATION_FREEZE_90,
 ) {
     @Test fun l3_landscapeKeepsEverythingReadableAndReachable() {
         assertEquals("landscape", android.content.res.Configuration.ORIENTATION_LANDSCAPE, compose.activity.resources.configuration.orientation)
