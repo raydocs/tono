@@ -94,33 +94,32 @@ struct DetailsSheet: View {
 
     private var modePicker: some View {
         VStack(spacing: 0) {
-            modeRow(.threeTier, title: L.t("mode_three_tier_short"), desc: L.t("mode_three_tier_line"))
+            // Titles only: the routes right above already show what the selected mode does, and
+            // they change with it.
+            modeRow(.threeTier, title: L.t("mode_three_tier_short"))
             LaneDivider()
-            modeRow(.stable, title: L.t("mode_stable_short"), desc: L.t("mode_stable_line"))
+            modeRow(.stable, title: L.t("mode_stable_short"))
         }
         .contentCard(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func modeRow(_ mode: RoutingMode, title: String, desc: String) -> some View {
+    private func modeRow(_ mode: RoutingMode, title: String) -> some View {
         let selected = model.mode == mode
         return Button {
             guard !selected else { return }
             Task { await model.setMode(mode) }
         } label: {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(spacing: 12) {
                 Circle()
                     .strokeBorder(selected ? TonoColor.accent : TonoColor.textTertiary, lineWidth: 1.6)
                     .background(Circle().fill(selected ? TonoColor.accent : .clear).padding(5))
                     .frame(width: 20, height: 20)
-                    .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
-                    Text(desc).tonoFont(13, relativeTo: .footnote).foregroundStyle(TonoColor.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(title).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
-            .padding(14)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 50)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

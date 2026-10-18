@@ -86,7 +86,6 @@
 "mode_stable_desc" = "AI → Home as above; every other public destination leaves through the cloud. LAN stays local.";
 "mode_stable_line" = "AI → Home · everything else → cloud";
 "mode_three_tier_line" = "AI → Home · Video → cloud · the rest direct";
-"mode_applies" = "Changes apply immediately to the running tunnel.";
 "routing_scope_title" = "What Tono can and cannot recognise";
 "routing_scope" = "Order: 21 cloud video exceptions → 166 AI / named Home entries (plus the Anthropic address range) → explicit cloud list → everything else direct. Matched traffic that fails is blocked, never retried directly; matched UDP/QUIC is refused so apps fall back to TCP. Apps using ECH, their own DNS-over-HTTPS, or cached addresses can hide an AI service; that traffic then goes direct. Unrecognised AI is not guaranteed to use Home.";
 "routing_platform" = "On iPhone, all apps, all TCP/UDP ports, IPv4 and IPv6 enter the tunnel. LAN, link-local and multicast stay outside, as do Apple push and cellular services (calls, SMS). DNS for direct names uses your network's resolver; matched names never reach it. iOS has no per-app rules: Tono recognises AI only by domain and the Anthropic address range, and cannot exclude or include individual apps.";
@@ -111,7 +110,7 @@
 "ipv6_off" = "IPv6 on this network: no (direct names answer IPv4 only)";
 "system_include_all" = "Include all networks";
 "system_include_all_desc" = "On (recommended): iOS sends all traffic to Tono and holds it while the tunnel restarts instead of letting it out directly. Takes effect the next time Tono connects.";
-"system_include_all_short" = "On (recommended): while Tono restarts, traffic waits instead of leaving directly.";
+"system_include_all_short" = "Recommended: traffic waits while Tono restarts.";
 "system_how_title" = "How this works";
 "system_on_demand" = "Connecting turns on iOS Connect On Demand, so iOS brings Tono back after a crash, an update or a restart; disconnecting turns it off.";
 "system_limit" = "While Tono is off, iOS blocks nothing; some Apple services bypass any VPN.";
@@ -165,8 +164,7 @@
 "lines_retry" = "Try again";
 "settings_lock_screen" = "Lock Screen and widgets";
 "settings_live_activity" = "Live Activity";
-"settings_live_activity_desc" = "Lock Screen and Dynamic Island while Tono is on. Off by default: it shows your line.";
-"settings_widgets_desc" = "Widgets and the Control Center switch show the last status and its time.";
+"settings_live_activity_desc" = "Off by default: it shows your line on the Lock Screen.";
 "widget_unavailable_title" = "Status unavailable";
 "widget_unavailable" = "Open Tono to see the status";
 "widget_as_of" = "As of %1$@";

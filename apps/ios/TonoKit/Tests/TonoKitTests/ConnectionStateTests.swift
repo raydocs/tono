@@ -34,6 +34,13 @@ final class ConnectionStateTests: XCTestCase {
         XCTAssertEqual(reason, "NETWORK_CHANGED")
     }
 
+    func testNetworkChangeHoldsTheSunAboveAFirstStart() {
+        let held = SkyState(.connecting, reason: "NETWORK_CHANGED")
+        XCTAssertEqual(held, .reconnecting)
+        XCTAssertGreaterThan(held.sunRise, SkyState(.connecting).sunRise)
+        XCTAssertLessThan(held.sunRise, SkyState(.connected).sunRise)
+    }
+
     func testEndedSessionShowsSignInWithItsReason() {
         let (phase, reason) = ConnectionState.derive(ConnectionFacts(signedIn: false, tunnel: .disconnected, failure: "SESSION_ENDED"))
         XCTAssertEqual(phase, .signedOut)

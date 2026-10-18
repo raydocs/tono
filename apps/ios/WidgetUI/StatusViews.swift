@@ -60,14 +60,17 @@ struct MarkGlyph: View {
     }
 }
 
-/// "Preview" tag on every fixture rendering (DEBUG gallery, preview Live Activity).
+/// "Preview" tag on every fixture rendering (DEBUG gallery, preview Live Activity). Yellow outline
+/// on a dark fill: it stays unmistakable without a solid yellow block on every card.
 struct PreviewTag: View {
     var body: some View {
         Text(L.t("preview_tag"))
             .font(.caption2.weight(.bold))
-            .foregroundStyle(.black)
+            .foregroundStyle(Color.yellow)
             .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(Color.yellow, in: Capsule())
+            .background(Color.black.opacity(0.55), in: Capsule())
+            .overlay(Capsule().stroke(Color.yellow.opacity(0.8), lineWidth: 1))
+            .fixedSize()
             .accessibilityLabel(L.t("preview_tag_a11y"))
     }
 }
@@ -92,6 +95,8 @@ struct StatusWidgetView: View {
 
     var body: some View {
         content
+            // The tag takes the same corner on every size (it sat mid-card on the medium widget).
+            .overlay(alignment: .topTrailing) { if preview { PreviewTag() } }
             // Widgets have a fixed size: text grows with Dynamic Type up to xxxLarge, then stops
             // (Apple's guidance for widgets); the app itself follows every size.
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
@@ -156,7 +161,6 @@ struct StatusWidgetView: View {
                     MarkGlyph(size: 32).widgetAccentable()
                 }
                 Spacer(minLength: 0)
-                if preview { PreviewTag() }
             }
             Spacer(minLength: 2)
             Text(p.title)
@@ -233,8 +237,8 @@ struct ActivityLockView: View {
         HStack(spacing: 14) {
             HorizonGlyph(sunRise: p.sunRise, warn: p.tone == .warn || p.tone == .error, size: 44)
             VStack(alignment: .leading, spacing: 2) {
-                // The tag sits on its own line, so the title never breaks mid-word ("Connect-ed").
-                if preview { PreviewTag() }
+                // The tag sits in the trailing column, over the timer, so the title keeps its line and
+                // never breaks mid-word ("Connect-ed").
                 Text(p.title).font(.headline).foregroundStyle(TonoColor.textPrimary)
                     .lineLimit(1).minimumScaleFactor(0.8)
                 if let detail = p.detail {
@@ -245,12 +249,15 @@ struct ActivityLockView: View {
                 }
             }
             Spacer(minLength: 0)
-            if let since = p.since {
-                Text(since, style: .timer)
-                    .font(.title3.monospacedDigit().weight(.medium))
-                    .foregroundStyle(TonoColor.textPrimary)
-                    .multilineTextAlignment(.trailing)
-                    .frame(maxWidth: 96, alignment: .trailing)
+            VStack(alignment: .trailing, spacing: 4) {
+                if preview { PreviewTag() }
+                if let since = p.since {
+                    Text(since, style: .timer)
+                        .font(.title3.monospacedDigit().weight(.medium))
+                        .foregroundStyle(TonoColor.textPrimary)
+                        .multilineTextAlignment(.trailing)
+                        .frame(maxWidth: 96, alignment: .trailing)
+                }
             }
         }
         .padding(16)

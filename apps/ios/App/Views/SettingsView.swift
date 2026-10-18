@@ -23,10 +23,10 @@ struct SettingsView: View {
                         ModeRow(title: L.t("mode_three_tier"), desc: L.t("mode_three_tier_line"), selected: model.mode == .threeTier) {
                             Task { await model.setMode(.threeTier) }
                         }
-                        ModeRow(title: L.t("mode_stable"), desc: L.t("mode_stable_line"), selected: model.mode == .stable) {
+                        // The line already says "everything else → cloud"; the title does not repeat it.
+                        ModeRow(title: L.t("mode_stable_short"), desc: L.t("mode_stable_line"), selected: model.mode == .stable) {
                             Task { await model.setMode(.stable) }
                         }
-                        Text(L.t("mode_applies")).tonoFont(12, relativeTo: .caption).foregroundStyle(TonoColor.textTertiary)
                     }
 
                     // The routing boundaries stay one tap away instead of a wall of text on open.
@@ -83,7 +83,6 @@ struct SettingsView: View {
                         .tint(TonoColor.accent)
                         .accessibilityIdentifier("liveActivityToggle")
                         para(L.t("settings_live_activity_desc"))
-                        para(L.t("settings_widgets_desc"))
                     }
 
                     SectionLabel(text: L.t("settings_account"))

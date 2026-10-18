@@ -73,7 +73,8 @@ extension View {
     /// tunnel. Compiled out of Release (CI fails a Release binary that contains `-TonoPreview`).
     @ViewBuilder func previewBadge() -> some View {
         #if DEBUG
-        if PreviewBadge.shown {
+        // The widget gallery carries the badge in its own top strip, above the cards.
+        if PreviewBadge.shown && !CommandLine.arguments.contains("-TonoPreviewWidgets") {
             overlay(alignment: .top) { PreviewBadge().padding(.top, 2) }
         } else {
             self

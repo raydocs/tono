@@ -559,12 +559,17 @@ extension AppModel {
     /// so the state-transition motion can be recorded in a simulator.
     static func previewCycle() -> AppModel {
         let m = preview(.idle)
-        let script: [(Phase, Double)] = [(.idle, 2), (.preparing, 1.2), (.connecting, 2.4), (.connected, 3.4), (.degraded, 3),
-                                          (.connected, 2.6), (.disconnecting, 1.2), (.idle, 2.4), (.connecting, 1.8), (.failed, 3)]
+        // A network change (iOS reasserting the tunnel) sits between two connected stretches, so the
+        // recording shows it next to a first start.
+        let script: [(Phase, Double, String?)] = [
+            (.idle, 2, nil), (.preparing, 1.2, nil), (.connecting, 2.4, nil), (.connected, 3.4, nil), (.degraded, 3, nil),
+            (.connected, 2.6, nil), (.connecting, 3, "NETWORK_CHANGED"), (.connected, 2.4, nil), (.disconnecting, 1.2, nil),
+            (.idle, 2.4, nil), (.connecting, 1.8, nil), (.failed, 3, nil),
+        ]
         Task { @MainActor in
             while true {
-                for (phase, seconds) in script {
-                    m.show(phase)
+                for (phase, seconds, reason) in script {
+                    m.show(phase, reason: reason)
                     try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
                 }
             }
@@ -607,8 +612,12 @@ extension AppModel {
         }
     }
 
-    private func show(_ phase: Phase) {
-        if phase.tunnelUp {
+    private func show(_ phase: Phase, reason override: String? = nil) {
+        if override == "NETWORK_CHANGED" {
+            // Reasserting keeps the session; only the probes restart.
+            cloudProbe = ExitProbe(state: .checking)
+            homeProbe = ExitProbe(state: .checking)
+        } else if phase.tunnelUp {
             connectedSince = connectedSince ?? Date().addingTimeInterval(-47 * 60)
             cloudProbe = ExitProbe(state: .ok, location: "JP", latencyMS: 92)
             homeProbe = phase == .degraded ? ExitProbe(state: .failed) : ExitProbe(state: .ok, location: "US", latencyMS: 210)
@@ -625,6 +634,7 @@ extension AppModel {
         // `-TonoPreviewReason NETWORK_CHANGED|CORE_STOPPED|…` shows another reason for the same phase.
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "-TonoPreviewReason"), i + 1 < args.count, phase != .idle { reason = args[i + 1] }
+        if let override { reason = override }
         previewPhase = (phase, reason)
         recompute()
     }

@@ -30,6 +30,9 @@ enum TonoColor {
 
     static let actionFill = LinearGradient(colors: [Color(hex: 0xFFD6A3), Color(hex: 0xFF9E6B)], startPoint: .topLeading, endPoint: .bottomTrailing)
     static let actionInk = Color(hex: 0x2A1406)
+    /// Default glass tint: the sea's indigo, lighter than the night, so glass reads as a lit surface
+    /// over the water rather than a dark pill.
+    static let glassTint = Color(hex: 0x2B3066)
 }
 
 /// Desktop control-motion contract: press 100 ms, state 220 ms, surface 350 ms, one arrival spring.
@@ -160,9 +163,10 @@ private struct TonoAccessibilityRoot: ViewModifier {
     }
 }
 
-/// Liquid Glass where the system has it (iOS 26), a dark material before that, and an opaque smoke
-/// surface when Reduce Transparency is on. The tint keeps text contrast over a bright sky. Glass is
-/// for the control layer only (buttons floating over the sea); content inside sheets uses
+/// Liquid Glass where the system has it (iOS 26), a material before that, and an opaque smoke
+/// surface when Reduce Transparency is on. A light scene-coloured tint (not the night: that read as
+/// a dark pill) keeps text contrast, and a rim lit from above gives the edge the sky's light. Glass
+/// is for the control layer only (buttons floating over the sea); content inside sheets uses
 /// `contentCard`, so glass never sits on glass.
 private struct GlassSurface<S: Shape>: ViewModifier {
     let shape: S
@@ -178,13 +182,22 @@ private struct GlassSurface<S: Shape>: ViewModifier {
                 .background(TonoColor.smoke, in: shape)
                 .overlay(shape.stroke(Color.white.opacity(contrast == .increased ? 0.4 : 0.12), lineWidth: 1))
         } else if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.tint((tint ?? TonoColor.night).opacity(0.38)).interactive(interactive), in: shape)
+            content
+                .glassEffect(.regular.tint((tint ?? TonoColor.glassTint).opacity(0.3)).interactive(interactive), in: shape)
+                .overlay(rim)
         } else {
             content
-                .background((tint ?? TonoColor.night).opacity(0.42), in: shape)
+                .background((tint ?? TonoColor.glassTint).opacity(0.36), in: shape)
                 .background(.ultraThinMaterial, in: shape)
-                .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+                .overlay(rim)
         }
+    }
+
+    /// Bright where the sky lights the top edge, faint underneath.
+    private var rim: some View {
+        shape.stroke(LinearGradient(colors: [Color.white.opacity(0.34), Color.white.opacity(0.05), Color.white.opacity(0.12)],
+                                    startPoint: .top, endPoint: .bottom), lineWidth: 0.8)
+            .allowsHitTesting(false)
     }
 }
 

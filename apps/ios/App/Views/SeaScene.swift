@@ -3,7 +3,8 @@ import TonoKit
 
 /// Portrait sea scene shared with Android and the desktop: sky, sun or moon, horizon and a
 /// glittering reflection. Night while off, dawn while connecting, day when connected, dusk when a
-/// route is down, ember on failure. Purely decorative; the state text lives above it. Reduced
+/// route is down, ember on failure. A network change keeps the sun near the day height and sends a
+/// light down the reflection (reacquiring), so it never looks like a first start. Purely decorative; the state text lives above it. Reduced
 /// motion renders each destination statically.
 struct SeaScene: View {
     let sky: SkyState
@@ -15,8 +16,9 @@ struct SeaScene: View {
             let t = timeline.date.timeIntervalSinceReferenceDate
             SeaCanvas(sunRise: sky.sunRise, warn: sky.warning ? 1 : 0, horizon: horizon,
                       drift: reduceMotion ? 0 : (t / 26).truncatingRemainder(dividingBy: 1),
-                      breath: (sky == .dawn || sky == .rising) && !reduceMotion ? 0.5 + 0.5 * sin(t * .pi / 2.4) : 1,
-                      animateStars: !reduceMotion)
+                      breath: [.dawn, .rising, .reconnecting].contains(sky) && !reduceMotion ? 0.5 + 0.5 * sin(t * .pi / 2.4) : 1,
+                      animateStars: !reduceMotion,
+                      scan: sky == .reconnecting && !reduceMotion ? (t / 1.6).truncatingRemainder(dividingBy: 1) : nil)
         }
         .animation(reduceMotion ? nil : (sky == .day ? TonoMotion.arrival : TonoMotion.ambient), value: sky)
         .accessibilityHidden(true)
@@ -32,6 +34,8 @@ private struct SeaCanvas: View, Animatable {
     let drift: Double
     let breath: Double
     let animateStars: Bool
+    /// Position (0 at the horizon … 1 at the bottom) of the light travelling down the reflection.
+    var scan: Double? = nil
 
     var animatableData: AnimatablePair<Double, Double> {
         get { AnimatablePair(sunRise, warn) }
@@ -127,7 +131,8 @@ private struct SeaCanvas: View, Animatable {
                 let wave = sin(Double(i) * 1.7 + drift * 2 * .pi * 3)
                 let width = sunR * (0.5 + p * 2.6) * (0.6 + 0.4 * wave * wave)
                 let offset = sin(Double(i) * 2.3 + drift * 2 * .pi * 5) * sunR * 0.25 * p
-                let a = alpha * (1 - p) * (0.35 + 0.5 * Double((i * 37) % 11) / 11)
+                var a = alpha * (1 - p) * (0.35 + 0.5 * Double((i * 37) % 11) / 11)
+                if let scan { a *= 0.4 + 1.1 * exp(-pow((p - scan) * 7, 2)) }
                 var glint = Path()
                 glint.move(to: CGPoint(x: x - width / 2 + offset, y: y))
                 glint.addLine(to: CGPoint(x: x + width / 2 + offset, y: y))

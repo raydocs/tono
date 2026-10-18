@@ -105,10 +105,12 @@ record() { # <file> <seconds> <launch args...>
   echo "recorded $file"
 }
 # Motion: the service states the way a session moves through them (idle → preparing → connecting →
-# connected → degraded → connected → disconnecting → idle → connecting → failed, 23 s loop), then
-# the same loop under Reduce Motion (cross-fades only, still sea, no fill sweep or shake).
+# connected → degraded → connected → network change (reconnecting) → connected → disconnecting →
+# idle → connecting → failed, 28.4 s loop), in Chinese and English, then the same loop under Reduce
+# Motion (sequential fades only, still sea, no fill sweep, light sweep or shake).
 record state-cycle.mp4 32 -TonoPreviewCycle -AppleLanguages "(zh-Hans)" -AppleLocale zh_CN
-record state-cycle-reduce-motion.mp4 28 -TonoPreviewCycle -TonoReduceMotion -AppleLanguages "(zh-Hans)" -AppleLocale zh_CN
+record state-cycle-en.mp4 32 -TonoPreviewCycle -AppleLanguages "(en)" -AppleLocale en_US
+record state-cycle-reduce-motion.mp4 30 -TonoPreviewCycle -TonoReduceMotion -AppleLanguages "(zh-Hans)" -AppleLocale zh_CN
 # Sheets grow out of the control that opened them (iOS 26 zoom from the glass control): Lines from
 # the exit capsule, Details from "Details", Settings from the gear beside it; 12.6 s loop.
 record sheet-zoom.mp4 27 -TonoPreview CONNECTED -TonoPreviewSheetCycle -AppleLanguages "(en)" -AppleLocale en_US

@@ -282,6 +282,58 @@ final class TonoUITests: XCTestCase {
         waitHittable(primary(app))
     }
 
+    /// One-handed back paths: each Home entry sits in the lower half, and each surface it opens
+    /// (Lines, Details, Settings, and Settings reached through Details) closes with a downward
+    /// swipe straight back to Home, with no button at the top of the screen.
+    @MainActor func testEverySheetClosesWithASwipeBackToHome() {
+        let app = launch("CONNECTED")
+        let button = primary(app)
+        let screen = app.windows.firstMatch.frame
+        let paths: [(entry: String, via: String?, marker: XCUIElement)] = [
+            ("exitCapsule", nil, app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Los Angeles")).firstMatch),
+            ("detailsButton", nil, app.buttons["detailsSettings"]),
+            ("settingsButton", nil, app.buttons["settingsClose"]),
+            ("detailsButton", "detailsSettings", app.buttons["settingsClose"]),
+        ]
+        for path in paths {
+            let entry = app.buttons[path.entry]
+            XCTAssertTrue(entry.waitForExistence(timeout: 4), path.entry)
+            XCTAssertGreaterThan(entry.frame.minY, screen.height / 2, "\(path.entry) at \(entry.frame)")
+            entry.tap()
+            if let via = path.via {
+                let row = app.buttons[via]
+                XCTAssertTrue(row.waitForExistence(timeout: 4), via)
+                row.tap()
+            }
+            XCTAssertTrue(path.marker.waitForExistence(timeout: 6), "\(path.entry) → \(path.via ?? "-") did not open")
+            app.swipeDown(velocity: .fast)
+            waitHittable(button)
+            XCTAssertFalse(path.marker.isHittable, "\(path.entry) → \(path.via ?? "-") still open after the swipe")
+        }
+        XCTAssertEqual(button.label, "Disconnect")
+    }
+
+    /// Interrupted start (preview fixture, no tunnel): open the line picker while connecting, leave
+    /// the app and come back; after the sheet closes Home tells the arrived state, not a stale one.
+    @MainActor func testStartInterruptedBySheetAndAppSwitchArrivesConnected() {
+        let app = launch("IDLE", ["-TonoPreviewSlow"])
+        let button = primary(app)
+        button.tap()
+        waitLabel(button, "Cancel connecting", timeout: 2)
+        app.buttons["exitCapsule"].tap()
+        let line = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Los Angeles")).firstMatch
+        XCTAssertTrue(line.waitForExistence(timeout: 4))
+        XCUIDevice.shared.press(.home)
+        sleep(2)
+        app.activate()
+        XCTAssertTrue(line.waitForExistence(timeout: 6), "the line picker should still be open after returning")
+        app.swipeDown(velocity: .fast)
+        waitHittable(button)
+        waitLabel(button, "Disconnect", timeout: 10)
+        XCTAssertEqual(title(app), "Connected")
+        save(XCUIScreen.main.screenshot(), "interrupted-start-arrives-connected")
+    }
+
     @MainActor func testLinePickerSelectsAndCloses() {
         let app = launch("CONNECTED")
         let exit = app.buttons["exitCapsule"]

@@ -86,7 +86,6 @@
 "mode_stable_line" = "AI → 家宽 · 其他全部 → 云";
 "mode_three_tier_line" = "AI → 家宽 · 视频 → 云 · 其他直连";
 "mode_stable_short" = "稳定";
-"mode_applies" = "修改会立即应用到正在运行的连接。";
 "routing_scope_title" = "Tono 能识别什么、不能识别什么";
 "routing_scope" = "优先级：21 项云端视频例外 → 166 项 AI／指定家宽条目（另含 Anthropic 地址段）→ 明确的云端列表 → 其他全部直连。命中的流量失败时会被拦住，不会退回直连；命中的 UDP/QUIC 会被拒绝，应用会改用 TCP。使用 ECH、自带 DoH 或缓存地址的应用可能隐藏 AI 身份，这部分会走直连；无法保证未识别的 AI 走家宽。";
 "routing_platform" = "在 iPhone 上，所有应用、所有 TCP/UDP 端口以及 IPv4、IPv6 都进入隧道；局域网、链路本地、组播，以及 Apple 推送和蜂窝服务（电话、短信）不进入。直连域名用你当前网络的 DNS 解析，命中名单的域名不会发给它。iOS 没有按应用分流：Tono 只按域名和 Anthropic 地址段识别 AI，也无法单独排除或加入某个应用。";
@@ -111,7 +110,7 @@
 "ipv6_off" = "当前网络 IPv6：无（直连域名只返回 IPv4）";
 "system_include_all" = "包含所有网络";
 "system_include_all_desc" = "开启（推荐）：iOS 把所有流量交给 Tono，隧道重启期间先拦住，而不是直接放行。下次连接时生效。";
-"system_include_all_short" = "开启（推荐）：Tono 重启时流量先等待，不会直接放行。";
+"system_include_all_short" = "推荐：Tono 重启时流量等待，不直接放行。";
 "system_how_title" = "工作方式";
 "system_on_demand" = "连接时会开启 iOS“按需连接”，Tono 崩溃、更新或手机重启后由 iOS 自动恢复；断开时关闭。";
 "system_limit" = "Tono 关闭时 iOS 不拦截；部分 Apple 服务可绕过任何 VPN。";
@@ -165,8 +164,7 @@
 "lines_retry" = "重试";
 "settings_lock_screen" = "锁屏与小组件";
 "settings_live_activity" = "实时活动";
-"settings_live_activity_desc" = "Tono 开启时显示在锁屏和灵动岛。默认关闭：它会在锁屏显示你的线路。";
-"settings_widgets_desc" = "小组件和控制中心开关显示最后的状态及时间。";
+"settings_live_activity_desc" = "默认关闭：它会在锁屏显示你的线路。";
 "widget_unavailable_title" = "状态不可用";
 "widget_unavailable" = "打开 Tono 查看状态";
 "widget_as_of" = "截至 %1$@";

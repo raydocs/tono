@@ -22,7 +22,7 @@ struct HomeView: View {
     var body: some View {
         ZStack(alignment: .top) {
             TonoColor.night.ignoresSafeArea()
-            SeaScene(sky: SkyState(model.phase), horizon: 0.42)
+            SeaScene(sky: sky, horizon: 0.42)
             // Legibility scrim behind the lower controls; the sea stays visible above it.
             // Large text pushes the controls up over the sky, so the scrim starts higher there.
             // At accessibility sizes the text sits on the sky itself, so the scrim is near-opaque there.
@@ -110,6 +110,18 @@ struct HomeView: View {
         }
     }
 
+    private var sky: SkyState { SkyState(model.phase, reason: model.reason) }
+
+    /// The glass takes the colour of the sky above it: indigo at night, rose once the sun is up,
+    /// ember when something is wrong.
+    private var glassTint: Color {
+        switch sky {
+        case .night, .dawn: return TonoColor.glassTint
+        case .rising, .reconnecting, .day: return Color(hex: 0x5A2E52)
+        case .duskWarning, .ember: return Color(hex: 0x5A2A2C)
+        }
+    }
+
     private func openLinesFromDetails() {
         showDetails = false
         Task { @MainActor in
@@ -145,7 +157,8 @@ struct HomeView: View {
     /// Everything the thumb needs, at the bottom: state, one line, one action, the exit, details.
     private var controls: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Old and new titles cross-fade in place (a ZStack, so they never stack during the change).
+            // The old title leaves before the new one arrives, in place (a ZStack, so they never stack
+            // and never show two words at once).
             ZStack(alignment: .leading) {
                 Text(PhaseText.title(model.phase, reason: model.reason))
                     .tracking(0.5)
@@ -154,17 +167,15 @@ struct HomeView: View {
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("stateTitle")
                     .id(PhaseText.title(model.phase, reason: model.reason))
-                    // Android `crossRise`: the new word rises in from a third of its height, the old one
-                    // lifts a quarter and fades faster.
-                    .transition(reduceMotion ? AnyTransition.opacity
-                                : AnyTransition.asymmetric(insertion: .opacity.animation(TonoMotion.state.delay(0.06)).combined(with: .offset(y: 16)),
-                                                           removal: .opacity.animation(.easeOut(duration: 0.12)).combined(with: .offset(y: -12))))
+                    // Android `crossRise`: the new word rises in from a third of its height after the old
+                    // one has lifted and gone.
+                    .transition(.swap(rise: 16, reduceMotion: reduceMotion))
             }
             ZStack(alignment: .leading) { statusLine }
                 .frame(minHeight: 32, alignment: .topLeading)
                 .padding(.top, 4)
                 .padding(.bottom, 10)
-            ActionCapsule(phase: model.phase, reason: model.reason, connectedSince: model.connectedSince) { model.toggle($0) }
+            ActionCapsule(phase: model.phase, reason: model.reason, connectedSince: model.connectedSince, glassTint: glassTint) { model.toggle($0) }
                 .zoomSource("primary", in: zoom)
                 .accessibilityIdentifier("primaryAction")
             exitCapsule.padding(.top, 10)
@@ -187,7 +198,7 @@ struct HomeView: View {
                     Button { showSettings = true } label: {
                         GlyphIcon(glyph: .gear, tint: TonoColor.textPrimary, size: gearGlyph)
                             .frame(width: gearGlyph + 26, height: gearGlyph + 26)
-                            .glassSurface(Circle(), interactive: true)
+                            .glassSurface(Circle(), tint: glassTint, interactive: true)
                             .contentShape(Circle())
                     }
                     .buttonStyle(PressScale(glass: true))
@@ -238,12 +249,16 @@ struct HomeView: View {
             .accessibilityLabel(PhaseText.short(reason))
             .accessibilityHint(PhaseText.reason(reason))
             .accessibilityIdentifier("reasonLine")
+            .id(reason)
+            .transition(.swap(rise: 8, reduceMotion: reduceMotion))
         } else if let text = PhaseText.status(model) {
             // The element is the 44 pt row, not the 18 pt glyph run (accessibility audit: hit area).
             Text(text).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
                 .frame(minHeight: 44, alignment: .leading)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("statusLine")
+                .id(text)
+                .transition(.swap(rise: 8, reduceMotion: reduceMotion))
         }
     }
 
@@ -272,7 +287,7 @@ struct HomeView: View {
                     }
                     .padding(.horizontal, 20).padding(.vertical, 14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .glassSurface(RoundedRectangle(cornerRadius: 26, style: .continuous), interactive: true)
+                    .glassSurface(RoundedRectangle(cornerRadius: 26, style: .continuous), tint: glassTint, interactive: true)
                     .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
                 } else {
                     HStack(spacing: 12) {
@@ -287,7 +302,7 @@ struct HomeView: View {
                     }
                     .padding(.horizontal, 18)
                     .frame(minHeight: 52)
-                    .glassSurface(Capsule(), interactive: true)
+                    .glassSurface(Capsule(), tint: glassTint, interactive: true)
                     .contentShape(Capsule())
                 }
             }
@@ -307,6 +322,7 @@ struct ActionCapsule: View {
     let phase: Phase
     var reason: String?
     let connectedSince: Date?
+    var glassTint: Color? = nil
     let onToggle: (Bool) -> Void
     @Environment(\.tonoReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -314,8 +330,12 @@ struct ActionCapsule: View {
     @State private var fillOpacity: Double = 1
     @State private var shake: CGFloat = 0
     @State private var shownPhase: Phase?
+    @State private var shownReconnecting = false
 
     private var action: PrimaryAction { PrimaryAction(phase) }
+    /// iOS reasserting a tunnel that was up: the capsule keeps its warm edge and a light passes
+    /// along it, instead of replaying the sunrise of a first start.
+    private var reconnecting: Bool { phase == .connecting && reason == "NETWORK_CHANGED" }
 
     var body: some View {
         Button {
@@ -329,9 +349,14 @@ struct ActionCapsule: View {
                                                       : AnyLayout(HStackLayout())
             layout {
                 // One line at every text size: shrink rather than hyphenate ("Dis-con-nect") at AX sizes.
-                Text(title).tonoFont(17, .semibold, relativeTo: .body)
-                    .lineLimit(1).minimumScaleFactor(0.6)
-                    .layoutPriority(1)
+                // The old action leaves before the new one shows, so "Connect" and "Cancel" never overlap.
+                ZStack(alignment: .leading) {
+                    Text(title).tonoFont(17, .semibold, relativeTo: .body)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                        .id(title)
+                        .transition(.swap(rise: 0, reduceMotion: reduceMotion))
+                }
+                .layoutPriority(1)
                 if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
                 trailing
             }
@@ -341,7 +366,7 @@ struct ActionCapsule: View {
             .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
             .background { background }
             .overlay {
-                shape.stroke(phase.tunnelUp ? TonoColor.sunMid.opacity(0.55) : .clear, lineWidth: 1)
+                shape.stroke(phase.tunnelUp || reconnecting ? TonoColor.sunMid.opacity(0.55) : .clear, lineWidth: 1)
             }
             .contentShape(shape)
             // One leaf: the timer and arrow are not hit targets of their own; the timer is read in the value.
@@ -350,12 +375,22 @@ struct ActionCapsule: View {
         .buttonStyle(PressScale(glass: !filled))
         .disabled(action.wantsTunnel == nil)
         .modifier(Shake(amount: shake))
-        .onAppear { fill = PrimaryAction.progress(phase); fillOpacity = phase.tunnelUp ? 0 : 1; shownPhase = phase }
+        .onAppear {
+            fill = PrimaryAction.progress(phase)
+            fillOpacity = phase.tunnelUp || reconnecting ? 0 : 1
+            shownPhase = phase
+            shownReconnecting = reconnecting
+        }
         .onChange(of: phase) { next in
-            let wasUp = shownPhase?.tunnelUp == true
+            let wasUp = shownPhase?.tunnelUp == true || shownReconnecting
             shownPhase = next
-            // Connected ⇄ partly working keeps the warm edge; the sunrise plays only on the way up.
-            if wasUp && next.tunnelUp { return }
+            shownReconnecting = reconnecting
+            // Connected ⇄ partly working ⇄ reconnecting keeps the warm edge; the sunrise plays only
+            // on the way up from off.
+            if wasUp && (next.tunnelUp || reconnecting) {
+                fillOpacity = 0
+                return
+            }
             let target = PrimaryAction.progress(next)
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.9)) { fill = target; if target > 0 { fillOpacity = 1 } }
             if next.tunnelUp {
@@ -415,7 +450,7 @@ struct ActionCapsule: View {
             shape.fill(TonoColor.actionFill)
         } else {
             ZStack(alignment: .leading) {
-                Color.clear.glassSurface(shape, interactive: true)
+                Color.clear.glassSurface(shape, tint: glassTint, interactive: true)
                 GeometryReader { geo in
                     shape
                         .fill(LinearGradient(colors: [TonoColor.sunEdge.opacity(0.55), TonoColor.sunCore.opacity(0.85)],
@@ -424,8 +459,38 @@ struct ActionCapsule: View {
                         .opacity(fill > 0 ? fillOpacity : 0)
                 }
                 .clipShape(shape)
+                if reconnecting && !reduceMotion { ReacquireSweep().clipShape(shape) }
             }
         }
+    }
+}
+
+extension AnyTransition {
+    /// Text that changes in place: the old words fade out in 100 ms, then the new ones fade in (and
+    /// rise `rise` points), so two states are never legible on top of each other.
+    static func swap(rise: CGFloat, reduceMotion: Bool) -> AnyTransition {
+        let leave = AnyTransition.opacity.animation(.easeOut(duration: 0.1))
+        let arrive = AnyTransition.opacity.animation(TonoMotion.state.delay(0.1))
+        guard rise > 0, !reduceMotion else { return .asymmetric(insertion: arrive, removal: leave) }
+        return .asymmetric(insertion: arrive.combined(with: .offset(y: rise)), removal: leave.combined(with: .offset(y: -rise * 0.75)))
+    }
+}
+
+/// A soft warm band crossing the capsule every 1.6 s (the reflection's light, in the control),
+/// while iOS reasserts the tunnel. Decorative; Reduce Motion leaves the static warm edge.
+private struct ReacquireSweep: View {
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30)) { timeline in
+            let p = (timeline.date.timeIntervalSinceReferenceDate / 1.6).truncatingRemainder(dividingBy: 1)
+            GeometryReader { geo in
+                let band = geo.size.width * 0.35
+                LinearGradient(colors: [.clear, TonoColor.sunMid.opacity(0.28), .clear], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: band)
+                    .offset(x: -band + (geo.size.width + band) * p)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

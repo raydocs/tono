@@ -59,9 +59,12 @@ struct WidgetGallery: View {
             if CommandLine.arguments.contains("-TonoPreviewWidgetsBottom") { proxy.scrollTo("controls", anchor: .bottom) }
         }
         }
-        // Cards scroll under a strip the colour of the top of the wallpaper, not under the clock.
+        // Cards scroll under a strip the colour of the top of the wallpaper, not under the clock;
+        // the fixtures badge lives in that strip, so it never floats over a card.
         .safeAreaInset(edge: .top, spacing: 0) {
-            Color.clear.frame(height: 0)
+            PreviewBadge()
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
                 .background((light ? Color(hex: 0xDCE6F2) : Color(hex: 0x1B2236)).ignoresSafeArea(edges: .top))
         }
         .background(background.ignoresSafeArea())
