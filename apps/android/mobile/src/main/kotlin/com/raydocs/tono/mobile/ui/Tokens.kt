@@ -66,6 +66,8 @@ object TonoMotion {
     val surface = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 400f)
     val arrival = spring<Float>(dampingRatio = 0.85f, stiffness = 120f)
     val ambient = tween<Float>(1800, easing = CubicBezierEasing(0.25f, 0f, 0.25f, 1f))
+    /** Sky going down after a disconnect or failure: quick enough to follow the state word. */
+    val settle = tween<Float>(650, easing = CubicBezierEasing(0.3f, 0f, 0.2f, 1f))
 }
 
 val LocalReduceMotion = compositionLocalOf { false }

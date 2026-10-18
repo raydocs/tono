@@ -88,11 +88,13 @@ class HorizonUiDeviceTest {
             androidx.compose.ui.platform.LocalResources provides ctx.resources,
         ) {
             TonoTheme {
-                TonoRoot(snapshot, object : TonoActions {
-                    override fun connect() { calls += "connect" }
-                    override fun command(op: String, vararg args: Pair<String, Any?>) { calls += op }
-                    override fun explain(host: String): Map<String, Any?>? = null
-                })
+                FixtureFrame {
+                    TonoRoot(snapshot, object : TonoActions {
+                        override fun connect() { calls += "connect" }
+                        override fun command(op: String, vararg args: Pair<String, Any?>) { calls += op }
+                        override fun explain(host: String): Map<String, Any?>? = null
+                    })
+                }
             }
         }
     }
@@ -114,7 +116,10 @@ class HorizonUiDeviceTest {
         compose.onNodeWithTag("details").performClick(); check("details"); back()
         compose.onNodeWithTag("exit").performClick(); check("lines"); shot("fixture-10-lines-sheet"); back()
         compose.onNodeWithContentDescription(str(R.string.settings_title)).performClick(); check("settings"); shot("fixture-11-settings")
-        compose.onNodeWithText(str(R.string.settings_apps_none)).performScrollTo().performClick(); check("apps"); shot("fixture-12-apps")
+        compose.onNodeWithText(str(R.string.settings_apps_none)).performScrollTo().performClick()
+        // The list, not its loading spinner: wait for the installed apps to arrive.
+        compose.waitUntil(30_000) { compose.onAllNodes(hasTestTag("app-row")).fetchSemanticsNodes().isNotEmpty() }
+        check("apps"); shot("fixture-12-apps")
         File(out, "a11y-report.txt").writeText((report + listOf("", "violations: ${found.size}") + found).joinToString("\n"))
         assertEquals(found.joinToString("\n"), 0, found.size)
     }
@@ -268,14 +273,16 @@ class HorizonUiDeviceTest {
         compose.mainClock.autoAdvance = false
         show(reduceMotion = false)
         val dir = File(out, "frames").apply { deleteRecursively(); mkdirs() }
+        // Each state is held until its sky has settled (sunset 650 ms, arrival spring ~1.5 s), so the
+        // frames show every state at rest as well as the transitions between them.
         val steps = listOf(
-            250L to DeviceFixtures.idle,
-            400L to DeviceFixtures.idle.copy(phase = Phase.PREPARING),
-            600L to DeviceFixtures.idle.copy(phase = Phase.CONNECTING),
-            1_400L to DeviceFixtures.connected(),
-            300L to DeviceFixtures.idle.copy(phase = Phase.DISCONNECTING),
-            600L to DeviceFixtures.idle,
-            800L to DeviceFixtures.failed,
+            400L to DeviceFixtures.idle,
+            600L to DeviceFixtures.idle.copy(phase = Phase.PREPARING),
+            800L to DeviceFixtures.idle.copy(phase = Phase.CONNECTING),
+            1_800L to DeviceFixtures.connected(),
+            500L to DeviceFixtures.idle.copy(phase = Phase.DISCONNECTING),
+            1_000L to DeviceFixtures.idle,
+            1_200L to DeviceFixtures.failed,
         )
         var frame = 0
         val timeline = StringBuilder()
@@ -290,7 +297,7 @@ class HorizonUiDeviceTest {
             }
         }
         File(out, "motion-frames.txt").writeText("$frame frames, 16 ms each, rendered on this device by the Compose test clock\n$timeline")
-        assertTrue("frames rendered: $frame", frame > 200)
+        assertTrue("frames rendered: $frame", frame > 380)
     }
 
     /**
@@ -311,13 +318,22 @@ class HorizonUiDeviceTest {
         compose.enableAccessibilityChecks()
         var continued = 0
         var dismissed = 0
+        // The real sheet over Home, as the app shows it before Android's dialog.
         compose.setContent {
-            TonoTheme {
-                Box(Modifier.fillMaxSize().background(com.raydocs.tono.mobile.ui.TonoColors.Smoke)) {
-                    Box(Modifier.statusBarsPadding().padding(top = 24.dp)) { ConsentContent(onContinue = { continued++ }, onDismiss = { dismissed++ }) }
+            CompositionLocalProvider(LocalReduceMotion provides true) {
+                TonoTheme {
+                    FixtureFrame {
+                        TonoRoot(DeviceFixtures.idle.copy(phase = Phase.NEEDS_PERMISSION), object : TonoActions {
+                            override fun connect() {}
+                            override fun command(op: String, vararg args: Pair<String, Any?>) {}
+                            override fun explain(host: String): Map<String, Any?>? = null
+                        })
+                    }
+                    com.raydocs.tono.mobile.ui.ConsentSheet(onContinue = { continued++ }, onDismiss = { dismissed++ })
                 }
             }
         }
+        compose.waitUntil(10_000) { compose.onAllNodes(androidx.compose.ui.test.hasText(str(R.string.consent_continue))).fetchSemanticsNodes().isNotEmpty() }
         val found = A11yContract.violations(compose, "consent") + A11yContract.truncatedText(compose, "consent")
         shot("fixture-20-consent-explainer")
         compose.onNodeWithText(str(R.string.consent_continue)).performClick()
@@ -365,9 +381,10 @@ class HorizonUiDeviceTest {
         File(out, "screen-reader-order.txt").writeText(seen.joinToString("\n"))
         assertTrue("focusable but silent for a screen reader: $unlabelled", unlabelled.isEmpty())
         fun at(text: String) = seen.indexOfFirst { it.contains(text) }.also { assertTrue("\"$text\" is read: $seen", it >= 0) }
+        // The state first, then the actions in screen order; Settings now sits in the dock beside Details.
         val order = listOf(
-            at(str(R.string.settings_title)), at(str(R.string.state_degraded)), at(str(R.string.action_disconnect)),
-            at("Tokyo"), at(str(R.string.details)),
+            at(str(R.string.state_degraded)), at(str(R.string.action_disconnect)),
+            at("Tokyo"), at(str(R.string.settings_title)), at(str(R.string.details)),
         )
         assertEquals("reading order follows the screen: $seen", order.sorted(), order)
         assertTrue("nothing is announced twice: $seen", seen.none { line -> line.split(", ").let { it.size != it.toSet().size } || Regex("for (\\S+) \\1").containsMatchIn(line) })

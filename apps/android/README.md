@@ -47,6 +47,20 @@ Round 4 (Android-native surfaces and accessibility):
   surface draws its slice of that copy, instead of each surface composing and blurring its own copy
   of the scene.
 
+Round 5 (after two independent reviews, `docs/agent-reports/2026-10-18-mobile-*` in raydocs/tono):
+- Settings moved from the top-right corner into the dock, sharing one glass pill with Details; a
+  screen reader now reads the state, the primary action and the exit before Settings.
+- Shorter copy, aligned with iOS: one-line routing modes, "AI paused", no repeated route summary in
+  Details, "家宽" without "Home", and the line name on Home only when two lines share a city.
+- Motion: state words no longer cross-fade on top of each other; after a disconnect or failure the
+  sun sets in 650 ms (was 1.8 s) so the sky follows the words.
+- Glass: lighter smoke tint and a stronger top sheen so the blurred sea shows through the controls.
+- The consent sheet carries the sun mark and is captured over Home; Apps keeps Done at the bottom
+  and is captured after its list has loaded; every fixture screenshot carries a "FIXTURE · no
+  tunnel" mark in the picture.
+- Device tests run on two emulators side by side (`system` and `ui` halves), each with one retry on
+  a fresh emulator; both halves must pass.
+
 ## Where it lives
 
 `rw8/Tono-droid` (Amp) is the source; `scripts/export-android-monorepo.sh <raydocs/tono checkout>`
@@ -176,8 +190,8 @@ internal test builds.
     - The app under Android's light and dark themes.
     - The Quick Settings tile and the widget inside Android's own Quick Settings and widget host,
       showing this install's real (signed-out) status; a real tap on each opens sign-in.
-  - `fixture-*`: the real UI fed fixture snapshots (no tunnel). Covers states, sheets, Settings and
-    a screenrecord, plus these checks:
+  - `fixture-*`: the real UI fed fixture snapshots (no tunnel), marked "FIXTURE · no tunnel" on
+    screen. Covers states, sheets, Settings and a screenrecord, plus these checks:
     - `A11yContract` together with Google's Accessibility Test Framework.
     - Real taps and a swipe injected through the system.
     - The screen-reader order, read from the accessibility tree.

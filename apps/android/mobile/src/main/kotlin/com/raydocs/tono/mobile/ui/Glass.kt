@@ -90,7 +90,9 @@ fun Glass(
             Modifier
                 .matchParentSize()
                 .background(tint.copy(alpha = if (backdrop != null) tintAlpha else (tintAlpha + 0.38f).coerceAtMost(0.94f)))
-                .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.07f * rim), Color.Transparent, Color.Black.copy(alpha = 0.10f))))
+                // Top sheen and a soft lower shade give the surface a lit volume over the blurred sea;
+                // with only the tint, reviewers saw dark rimmed pills rather than glass.
+                .background(Brush.verticalGradient(0f to Color.White.copy(alpha = 0.13f * rim), 0.45f to Color.White.copy(alpha = 0.02f * rim), 1f to Color.Black.copy(alpha = 0.12f)))
                 .border(1.dp, Brush.verticalGradient(listOf(rimColor.copy(alpha = 0.40f * rim), rimColor.copy(alpha = 0.08f * rim), rimColor.copy(alpha = 0.16f * rim))), shape),
         )
         content()

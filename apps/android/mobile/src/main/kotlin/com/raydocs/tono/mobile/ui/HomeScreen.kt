@@ -125,14 +125,14 @@ fun HomeScreen(
             val scroll = rememberScrollState()
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 Column(Modifier.fillMaxWidth().verticalScroll(scroll).heightIn(min = maxHeight), verticalArrangement = Arrangement.SpaceBetween) {
-                    TopBar(onOpenSettings)
+                    TopBar()
                     Column(Modifier.fillMaxWidth().swipeUpTo(onOpenDetails, enabled = scroll.maxValue == 0).navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 8.dp)) {
                         StateHeader(s)
                         Spacer(Modifier.height(18.dp))
                         PrimaryCapsule(s, onConnect, onDisconnect)
                         Spacer(Modifier.height(10.dp))
                         ExitPill(s, onOpenLines)
-                        Footer(s, onOpenDetails)
+                        Footer(s, onOpenDetails, onOpenSettings)
                     }
                 }
             }
@@ -141,20 +141,13 @@ fun HomeScreen(
     PhaseHaptics(s.phase)
 }
 
+/** Brand only; Settings lives in the thumb zone next to Details, and screen readers reach it after the state. */
 @Composable
-private fun TopBar(onOpenSettings: () -> Unit) {
-    val settings = stringResource(R.string.settings_title)
-    Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 20.dp, end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun TopBar() {
+    Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 54.dp).padding(start = 20.dp, end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Image(painterResource(R.drawable.tono_sun_mark), contentDescription = null, modifier = Modifier.size(26.dp))
         Spacer(Modifier.width(8.dp))
         Text("Tono", style = MaterialTheme.typography.titleMedium, color = TonoColors.TextPrimary)
-        Spacer(Modifier.weight(1f))
-        Glass(CircleShape, Modifier.size(48.dp), tintAlpha = 0.30f) {
-            Box(
-                Modifier.fillMaxSize().clickable(role = Role.Button, onClick = onOpenSettings).semantics { contentDescription = settings },
-                contentAlignment = Alignment.Center,
-            ) { GlyphIcon(Glyph.GEAR, TonoColors.TextSecondary, size = 20.dp) }
-        }
     }
 }
 
@@ -188,7 +181,9 @@ private fun StateHeader(s: EngineSnapshot) {
 }
 
 private fun <T> androidx.compose.animation.AnimatedContentTransitionScope<T>.crossRise() =
-    (fadeIn(tween(220, delayMillis = 60)) + slideInVertically(tween(220)) { it / 3 }) togetherWith (fadeOut(tween(120)) + slideOutVertically(tween(160)) { -it / 4 })
+    // The outgoing words are gone before the incoming ones appear: frame-by-frame review found two
+    // half-transparent labels on top of each other mid-transition.
+    (fadeIn(tween(180, delayMillis = 100)) + slideInVertically(tween(260)) { it / 3 }) togetherWith (fadeOut(tween(90)) + slideOutVertically(tween(160)) { -it / 4 })
 
 /** One short line under the state word: the exit when connected, the short reason otherwise. */
 @Composable
@@ -267,7 +262,7 @@ private fun PrimaryCapsule(s: EngineSnapshot, onConnect: () -> Unit, onDisconnec
             .offset(x = nudge.value.dp)
             .scale(scale)
             .testTag("primary"),
-        tintAlpha = 0.40f,
+        tintAlpha = 0.32f,
         rimColor = rimColor,
     ) {
         // Warm sun capsule (idle/retry/allow) fades over the glass instead of swapping widgets.
@@ -339,10 +334,12 @@ private fun ConnectedTimer(since: Long) {
 private fun ExitPill(s: EngineSnapshot, onOpenLines: () -> Unit) {
     val zh = isChinese()
     val node = s.nodes.firstOrNull { it.name == s.selectedNode } ?: s.nodes.firstOrNull()
-    val name = node?.let { Format.city(it.city, zh) + (if (it.label.isNotBlank()) " · ${it.label}" else "") } ?: stringResource(R.string.line_pick)
+    // The line's own name only when another line shares the city; otherwise the city says it all.
+    val shared = node != null && s.nodes.count { it.city.equals(node.city, ignoreCase = true) } > 1
+    val name = node?.let { Format.city(it.city, zh) + (if (shared && it.label.isNotBlank()) " · ${it.label}" else "") } ?: stringResource(R.string.line_pick)
     val latency = node?.latencyMs?.let { stringResource(R.string.latency_ms, it.toInt()) }
     val pick = stringResource(R.string.lines_title)
-    Glass(RoundedCornerShape(24.dp), Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("exit"), tintAlpha = 0.34f) {
+    Glass(RoundedCornerShape(24.dp), Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("exit"), tintAlpha = 0.26f) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(role = Role.Button, onClickLabel = pick, onClick = onOpenLines).padding(horizontal = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -357,9 +354,10 @@ private fun ExitPill(s: EngineSnapshot, onOpenLines: () -> Unit) {
 }
 
 @Composable
-private fun Footer(s: EngineSnapshot, onOpenDetails: () -> Unit) {
+private fun Footer(s: EngineSnapshot, onOpenDetails: () -> Unit, onOpenSettings: () -> Unit) {
     val attention = s.usingCachedCatalog || s.phase == Phase.DEGRADED ||
         (s.tunnelUp && (s.homeProbe.state == ProbeState.FAILED || s.cloudProbe.state == ProbeState.FAILED))
+    val settings = stringResource(R.string.settings_title)
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
         AnimatedVisibility(s.tunnelUp, enter = fadeIn(tween(350)), exit = fadeOut(tween(220)), modifier = Modifier.weight(1f)) {
             Text(
@@ -368,15 +366,23 @@ private fun Footer(s: EngineSnapshot, onOpenDetails: () -> Unit) {
             )
         }
         if (!s.tunnelUp) Spacer(Modifier.weight(1f))
-        Glass(RoundedCornerShape(24.dp), Modifier.testTag("details"), tintAlpha = 0.30f) {
-            Row(
-                Modifier.clickable(role = Role.Button, onClick = onOpenDetails).heightIn(min = 48.dp).padding(start = 16.dp, end = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (attention) { StatusDot(TonoColors.Warning, size = 6); Spacer(Modifier.width(7.dp)) }
-                Text(stringResource(R.string.details), style = MaterialTheme.typography.labelLarge, color = TonoColors.TextPrimary)
-                Spacer(Modifier.width(6.dp))
-                GlyphIcon(Glyph.CHEVRON_UP, TonoColors.TextSecondary, size = 14.dp)
+        // One quiet glass segment for both secondary entries: Settings within thumb reach, then Details.
+        Glass(RoundedCornerShape(24.dp), tintAlpha = 0.24f) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(48.dp).clickable(role = Role.Button, onClick = onOpenSettings).semantics { contentDescription = settings }.testTag("settings"),
+                    contentAlignment = Alignment.Center,
+                ) { GlyphIcon(Glyph.GEAR, TonoColors.TextPrimary, size = 20.dp) }
+                Box(Modifier.width(1.dp).height(20.dp).background(TonoColors.Hairline))
+                Row(
+                    Modifier.clickable(role = Role.Button, onClick = onOpenDetails).heightIn(min = 48.dp).padding(start = 14.dp, end = 14.dp).testTag("details"),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (attention) { StatusDot(TonoColors.Warning, size = 6); Spacer(Modifier.width(7.dp)) }
+                    Text(stringResource(R.string.details), style = MaterialTheme.typography.labelLarge, color = TonoColors.TextPrimary)
+                    Spacer(Modifier.width(6.dp))
+                    GlyphIcon(Glyph.CHEVRON_UP, TonoColors.TextSecondary, size = 14.dp)
+                }
             }
         }
     }

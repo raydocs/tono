@@ -1,5 +1,6 @@
 package com.raydocs.tono.mobile.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -19,6 +21,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -48,7 +51,11 @@ fun ConsentContent(onContinue: () -> Unit, onDismiss: () -> Unit) {
         Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text(stringResource(R.string.consent_title), style = MaterialTheme.typography.titleLarge, color = TonoColors.TextPrimary, modifier = Modifier.semantics { heading() })
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Image(painterResource(R.drawable.tono_sun_mark), contentDescription = null, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.width(12.dp))
+            Text(stringResource(R.string.consent_title), style = MaterialTheme.typography.titleLarge, color = TonoColors.TextPrimary, modifier = Modifier.semantics { heading() })
+        }
         Point(Glyph.KEY, stringResource(R.string.consent_ask))
         Point(Glyph.CLOUD, stringResource(R.string.consent_routes))
         Point(Glyph.STOP, stringResource(R.string.consent_stop))

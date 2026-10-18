@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -79,14 +80,15 @@ fun AppsScreen(excluded: List<String>, onBack: () -> Unit, onSave: (List<String>
         )
         val list = apps
         if (list == null) {
-            Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = TonoColors.Accent) }
+            // Takes the list's place, so Done stays at the bottom while apps load.
+            Box(Modifier.weight(1f).fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = TonoColors.Accent) }
         } else {
             val q = query.trim().lowercase()
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 items(list.filter { q.isEmpty() || it.label.lowercase().contains(q) || it.pkg.contains(q) }, key = { it.pkg }) { app ->
                     val on = app.pkg in chosen
                     Row(
-                        Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                        Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("app-row")
                             .toggleable(on, role = Role.Checkbox) { chosen = if (it) chosen + app.pkg else chosen - app.pkg }
                             .padding(horizontal = 20.dp),
                         verticalAlignment = Alignment.CenterVertically,

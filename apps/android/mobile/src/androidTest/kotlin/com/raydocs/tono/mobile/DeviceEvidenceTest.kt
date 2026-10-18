@@ -257,11 +257,13 @@ class DeviceEvidenceTest {
                 a.setContent {
                     CompositionLocalProvider(LocalReduceMotion provides rememberSystemReduceMotion()) {
                         TonoTheme {
-                            TonoRoot(state.value, object : TonoActions {
-                                override fun connect() {}
-                                override fun command(op: String, vararg args: Pair<String, Any?>) {}
-                                override fun explain(host: String): Map<String, Any?>? = null
-                            })
+                            FixtureFrame {
+                                TonoRoot(state.value, object : TonoActions {
+                                    override fun connect() {}
+                                    override fun command(op: String, vararg args: Pair<String, Any?>) {}
+                                    override fun explain(host: String): Map<String, Any?>? = null
+                                })
+                            }
                         }
                     }
                 }

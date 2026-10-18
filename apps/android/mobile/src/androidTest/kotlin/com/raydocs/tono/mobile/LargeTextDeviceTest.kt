@@ -58,11 +58,13 @@ class LargeTextDeviceTest {
         compose.setContent {
             CompositionLocalProvider(LocalReduceMotion provides true) {
                 TonoTheme {
-                    TonoRoot(snapshot, object : TonoActions {
-                        override fun connect() {}
-                        override fun command(op: String, vararg args: Pair<String, Any?>) {}
-                        override fun explain(host: String): Map<String, Any?>? = null
-                    })
+                    FixtureFrame {
+                        TonoRoot(snapshot, object : TonoActions {
+                            override fun connect() {}
+                            override fun command(op: String, vararg args: Pair<String, Any?>) {}
+                            override fun explain(host: String): Map<String, Any?>? = null
+                        })
+                    }
                 }
             }
         }

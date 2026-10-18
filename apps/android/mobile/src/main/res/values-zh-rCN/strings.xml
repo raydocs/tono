@@ -33,7 +33,7 @@
     <string name="lane_ai">AI 与指定服务</string>
     <string name="lane_video">视频</string>
     <string name="lane_other">其他应用</string>
-    <string name="lane_home">家宽 Home</string>
+    <string name="lane_home">家宽</string>
     <string name="lane_home_node">家宽 · %1$s</string>
     <string name="lane_cloud">云</string>
     <string name="lane_cloud_no_home">云（未分配家宽）</string>
@@ -83,9 +83,9 @@
     <string name="settings_routing">路由模式</string>
     <string name="mode_three_tier">三层路由（默认）</string>
     <string name="mode_three_tier_short">三层路由</string>
-    <string name="mode_three_tier_desc">AI 与 Home 名单 → 云 → 家宽 · 视频 → 云 · 其余（含局域网）直连</string>
+    <string name="mode_three_tier_desc">AI → 家宽 · 视频 → 云 · 其他直连</string>
     <string name="mode_stable">稳定（全部经云）</string>
-    <string name="mode_stable_desc">AI → 云 → 家宽 · 其余公网 → 云 · 局域网仍走本地</string>
+    <string name="mode_stable_desc">AI → 家宽 · 其他全部 → 云</string>
     <string name="mode_stable_short">稳定</string>
     <string name="mode_applies">修改会立即应用到正在运行的连接。</string>
     <string name="routing_scope_title">Tono 能识别什么、不能识别什么</string>

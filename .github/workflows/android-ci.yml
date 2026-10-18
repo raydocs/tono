@@ -101,6 +101,12 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 130
+    # Two emulators side by side, each running half of the device tests: an emulator lives half as
+    # long (hosted emulators were seen dying 15+ minutes in), and both halves must pass for a green run.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [system, ui]
     defaults:
       run:
         working-directory: .
@@ -147,18 +153,23 @@ jobs:
           # Streamed from the host, so an emulator that dies mid-run still leaves its last log lines.
           adb logcat -v threadtime > evidence/logcat-live.txt 2>&1 &
           logcat=$!
-          for c in DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog \
-                   DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig \
-                   DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme \
-                   SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp \
-                   SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates \
-                   DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice \
-                   DeviceEvidenceTest#b3_fixtureAtLargeFontScale \
-                   HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps \
-                   HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt \
-                   HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome \
-                   HorizonUiDeviceTest#u7_simplifiedChineseCopyFitsEveryScreen HorizonUiDeviceTest#u8_motionFrameByFrameAt60fps \
-                   LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff; do
+          case "$SHARD" in
+            system) tests="DeviceEvidenceTest#a1_realSignInScreenAndLocalValidation DeviceEvidenceTest#a2_realSystemVpnConsentDialog
+            DeviceEvidenceTest#a3_realEngineRefusesToConnectWithoutAccount DeviceEvidenceTest#a4_realCoreOnThisAbiAcceptsTheGeneratedConfig
+            DeviceEvidenceTest#a5_realAppHonoursRemoveAnimations DeviceEvidenceTest#a6_realAppUnderSystemLightAndDarkTheme
+            SystemSurfacesDeviceTest#s1_realQuickSettingsTileShowsSharedStatusAndOpensTheApp
+            SystemSurfacesDeviceTest#s2_realWidgetInAndroidsWidgetHost SystemSurfacesDeviceTest#s3_fixtureWidgetAndNotificationStates
+            DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice
+            DeviceEvidenceTest#b3_fixtureAtLargeFontScale" ;;
+            ui) tests="HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps
+            HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt
+            HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome
+            HorizonUiDeviceTest#u7_simplifiedChineseCopyFitsEveryScreen HorizonUiDeviceTest#u8_motionFrameByFrameAt60fps
+            LargeTextDeviceTest#l1_largestSystemTextIsNeverCutOff" ;;
+            *) echo "unknown shard $SHARD"; exit 1 ;;
+          esac
+          echo "shard $SHARD" > evidence/shard.txt
+          for c in $tests; do
             t="${c#*#}"
             rec=""
             if [ "$t" = b2_fixtureMotionRecordedOnDevice ]; then
@@ -205,7 +216,7 @@ jobs:
           profile: pixel_6
           disable-animations: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: bash evidence.sh
+          script: SHARD=${{ matrix.shard }} bash evidence.sh
       # One bounded retry: software-GPU emulators on hosted runners occasionally die mid-run.
       - name: Retry once on a fresh emulator
         if: steps.attempt1.outcome == 'failure'
@@ -218,7 +229,7 @@ jobs:
           profile: pixel_6
           disable-animations: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: bash evidence.sh
+          script: SHARD=${{ matrix.shard }} bash evidence.sh
       # Why an emulator went offline: its own crash reports, the host kernel log (OOM kills) and memory.
       - name: Host diagnostics for emulator crashes
         if: always()
@@ -232,7 +243,7 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: android-emulator-evidence
+          name: android-emulator-evidence-${{ matrix.shard }}
           path: |
             evidence/
             evidence-attempt-*/

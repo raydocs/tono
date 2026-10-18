@@ -46,7 +46,15 @@ fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47
         SkyState.DUSK_WARNING -> 0.72f
         SkyState.EMBER -> 0.28f
     }
-    val sunRise by animateFloatAsState(target, if (reduce) tween(0) else if (sky == SkyState.DAY) TonoMotion.arrival else TonoMotion.ambient, label = "sun")
+    // The sun sets in step with the words: "Not connected" or "Didn't connect" under a full daylight
+    // sky for the ambient 1.8 s read as a contradiction in the frame-by-frame review.
+    val spec = when {
+        reduce -> tween(0)
+        sky == SkyState.DAY -> TonoMotion.arrival
+        sky == SkyState.NIGHT || sky == SkyState.EMBER -> TonoMotion.settle
+        else -> TonoMotion.ambient
+    }
+    val sunRise by animateFloatAsState(target, spec, label = "sun")
     val warn by animateFloatAsState(if (sky == SkyState.DUSK_WARNING || sky == SkyState.EMBER) 1f else 0f, if (reduce) tween(0) else TonoMotion.ambient, label = "warn")
     // Reduced motion runs no infinite animation at all (also saves battery); values stay at rest.
     val still = remember { mutableFloatStateOf(0f) }

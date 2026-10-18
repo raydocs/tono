@@ -35,17 +35,6 @@ fun phaseTitle(p: Phase): String = stringResource(
     },
 )
 
-/** One-line summary of where traffic goes in the current mode (Details). */
-@Composable
-fun routingSummary(s: EngineSnapshot): String = stringResource(
-    when {
-        s.homeKind == HomeKind.NONE && s.mode == RoutingMode.STABLE -> R.string.sentence_connected_stable_no_home
-        s.homeKind == HomeKind.NONE -> R.string.sentence_connected_no_home
-        s.mode == RoutingMode.STABLE -> R.string.sentence_connected_stable
-        else -> R.string.sentence_connected_three_tier
-    },
-)
-
 @Composable
 fun reasonText(code: String): String = when (code) {
     "HOME_UNAVAILABLE" -> stringResource(R.string.reason_HOME_UNAVAILABLE)

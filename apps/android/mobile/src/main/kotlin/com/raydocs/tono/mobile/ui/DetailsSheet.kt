@@ -78,7 +78,7 @@ fun DetailsContent(s: EngineSnapshot, onRecheck: () -> Unit, onOpenLines: () -> 
         if (s.usingCachedCatalog) Text(stringResource(R.string.lines_cached), style = MaterialTheme.typography.bodySmall, color = TonoColors.Warning)
 
         Text(stringResource(R.string.details_routes), style = MaterialTheme.typography.labelMedium, color = TonoColors.TextTertiary)
-        Text(routingSummary(s), style = MaterialTheme.typography.bodyMedium, color = TonoColors.TextSecondary)
+        // The lanes are the explanation; a one-line summary above them said the same thing twice.
         Lanes(s)
 
         Row(

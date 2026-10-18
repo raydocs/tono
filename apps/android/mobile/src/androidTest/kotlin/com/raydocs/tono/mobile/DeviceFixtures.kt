@@ -1,5 +1,11 @@
 package com.raydocs.tono.mobile
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.unit.dp
 import com.raydocs.tono.mobile.engine.EngineSnapshot
 import com.raydocs.tono.mobile.engine.ExitProbe
 import com.raydocs.tono.mobile.engine.HomeKind
@@ -63,5 +69,29 @@ object Captures {
                 Math.abs(android.graphics.Color.blue(p) - android.graphics.Color.blue(first)) > 12) return false
         }
         return true
+    }
+}
+
+/**
+ * Every fixture screen carries this mark in the picture itself, so a screenshot passed around on its
+ * own cannot be mistaken for a real connection. Hidden from accessibility so it does not change what
+ * the screen-reader and ATF checks see.
+ */
+@androidx.compose.runtime.Composable
+fun FixtureFrame(content: @androidx.compose.runtime.Composable () -> Unit) {
+    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
+        content()
+        androidx.compose.material3.Text(
+            "FIXTURE · no tunnel",
+            color = androidx.compose.ui.graphics.Color(0xFF2A1406),
+            style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
+            modifier = androidx.compose.ui.Modifier
+                .align(androidx.compose.ui.Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(top = 18.dp, end = 16.dp)
+                .background(androidx.compose.ui.graphics.Color(0xFFFFB4A0), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                .padding(horizontal = 8.dp, vertical = 3.dp)
+                .clearAndSetSemantics { },
+        )
     }
 }
