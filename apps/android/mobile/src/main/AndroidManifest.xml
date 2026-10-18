@@ -60,8 +60,9 @@
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
-            <!-- Redrawn when the engine asks (requestListeningState), not polled. -->
-            <meta-data android:name="android.service.quicksettings.ACTIVE_TILE" android:value="true" />
+            <!-- Not an active tile: Android re-asks it every time Quick Settings opens, so it re-reads the
+                 shared status (and its staleness rule) whenever someone can see it. The engine also asks
+                 for a redraw on every state change while the panel is open. -->
             <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE" android:value="true" />
         </service>
 

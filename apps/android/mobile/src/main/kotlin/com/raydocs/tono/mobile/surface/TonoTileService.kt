@@ -2,6 +2,7 @@ package com.raydocs.tono.mobile.surface
 
 import android.annotation.SuppressLint
 import android.app.PendingIntent
+import android.content.ComponentName
 import android.content.Intent
 import android.graphics.drawable.Icon
 import android.net.VpnService
@@ -19,6 +20,8 @@ import com.raydocs.tono.mobile.ui.MainActivity
  */
 class TonoTileService : TileService() {
     override fun onStartListening() = render()
+
+    override fun onTileAdded() = requestListeningState(this, ComponentName(this, TonoTileService::class.java))
 
     override fun onClick() {
         if (isLocked) unlockAndRun(::act) else act()

@@ -65,6 +65,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -326,7 +327,8 @@ private fun ConnectedTimer(since: Long) {
     val sec = ((now - since) / 1000).coerceAtLeast(0)
     val text = if (sec >= 3600) String.format(Locale.ROOT, "%d:%02d:%02d", sec / 3600, sec / 60 % 60, sec % 60) else String.format(Locale.ROOT, "%02d:%02d", sec / 60, sec % 60)
     val a11y = stringResource(R.string.a11y_connected_for, text)
-    Text(text, style = MaterialTheme.typography.titleSmall, color = TonoColors.TextSecondary, modifier = Modifier.semantics { contentDescription = a11y })
+    // Replaces the digits for screen readers; the device check heard "Connected for 23:00, 23:00".
+    Text(text, style = MaterialTheme.typography.titleSmall, color = TonoColors.TextSecondary, modifier = Modifier.clearAndSetSemantics { contentDescription = a11y })
 }
 
 @Composable

@@ -272,6 +272,7 @@ class HorizonUiDeviceTest {
             at("Tokyo"), at(str(R.string.details)),
         )
         assertEquals("reading order follows the screen: $seen", order.sorted(), order)
+        assertTrue("nothing is announced twice: $seen", seen.none { line -> line.split(", ").let { it.size != it.toSet().size } || Regex("for (\\S+) \\1").containsMatchIn(line) })
     }
 
     /** Window → screen offset for UiDevice coordinates. */
