@@ -212,12 +212,20 @@ export async function resolveEgressIp(
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new EgressError('timeout', `no answer in ${timeoutMs} ms`)), timeoutMs);
   });
+  // A line that stalls mid-handshake would otherwise hold its socket until the
+  // request ends: on timeout every socket opened here is closed, not waited on.
+  const opened: EgressSocket[] = [];
+  const tracked: EgressConnect = (address) => {
+    const socket = connect(address);
+    opened.push(socket);
+    return socket;
+  };
   try {
     return await Promise.race([(async () => {
       let last: unknown;
       for (const echo of ECHOES) {
         try {
-          return await echoThrough(line, echo, connect);
+          return await echoThrough(line, echo, tracked);
         } catch (x) {
           last = x;
           if (x instanceof EgressError && x.stage !== 'echo') throw x;
@@ -230,6 +238,13 @@ export async function resolveEgressIp(
     throw new EgressError('connect', String(x).slice(0, ERROR_MAX));
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+    for (const socket of opened) {
+      try {
+        void Promise.resolve(socket.close()).catch(() => undefined);
+      } catch {
+        // Already closed.
+      }
+    }
   }
 }
 

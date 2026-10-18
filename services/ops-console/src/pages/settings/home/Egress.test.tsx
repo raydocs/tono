@@ -22,7 +22,7 @@ it('shows the echoed IP with the majority place in the warning tone when the dat
     <EgressCell lookup={lookup({})} looking={false} ip={(value) => value ?? ''} onOpen={() => undefined} />,
   );
   expect(html).toContain('48.45.90.215');
-  expect(html).toMatch(/tone-warn[^>]*>Houston, Texas · /);
+  expect(html).toMatch(/tone-warn tone-fg[^>]*>.*Houston, Texas.*5\/6/s);
   expect(html).toContain(words.votes(5, 6));
 });
 

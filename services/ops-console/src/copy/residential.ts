@@ -30,7 +30,7 @@ export const residentialCopy = {
         lookUp: '查 IP',
         again: '重新查',
         looking: '正在查…',
-        failed: (stage: string) => `没查到 · ${stage}`,
+        failed: (stage: string) => `没查到：${stage}`,
         stage: {
           connect: '连不上线路',
           auth: '账号密码不对',

@@ -1,5 +1,6 @@
 import { Action } from '@/components/ops/Action';
 import { DetailDrawer } from '@/components/ops/DetailDrawer';
+import { DotJoined } from '@/components/ops/DotJoined';
 import { copy } from '@/copy/copy';
 import { formatWhen, formatWhenAgo } from '@/lib/display';
 import { placeWord, type EgressLookup, type GeoAnswer } from '@/lib/home-egress';
@@ -25,7 +26,7 @@ export function EgressCell({
   onOpen: () => void;
 }) {
   let first: string;
-  let second: string | null = null;
+  let second: string[] | null = null;
   let tone: 'warn' | 'sev' | null = null;
   if (looking) {
     first = words.looking;
@@ -38,22 +39,28 @@ export function EgressCell({
     first = ip(lookup.ip);
     const { consensus } = lookup;
     const place = placeWord(consensus) ?? words.noAnswer;
-    second = consensus.of === 0 ? place : `${place} · ${words.votes(consensus.votes, consensus.of)}`;
+    second = consensus.of === 0 ? [place] : [place, words.votes(consensus.votes, consensus.of)];
     if (consensus.conflict) tone = 'warn';
   }
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="flex w-full min-w-0 flex-col items-start text-left leading-tight"
+      className="group -mx-1 flex w-[calc(100%+0.5rem)] min-w-0 cursor-pointer flex-col px-1 items-start rounded-[4px] text-left leading-tight focus-visible:outline-offset-[-2px]"
       title={lookup?.consensus.conflict ? words.conflict : undefined}
     >
-      <span className={cn('truncate', lookup?.ip ? 'font-mono' : 'text-[var(--muted-foreground)]', tone === 'sev' && 'tone-sev tone-fg')}>
+      <span
+        className={cn(
+          'max-w-full truncate decoration-[var(--hairline)] underline-offset-2 group-hover:underline',
+          lookup?.ip ? 'font-mono' : 'text-[var(--muted-foreground)]',
+          tone === 'sev' && 'tone-sev tone-fg',
+        )}
+      >
         {first}
       </span>
       {second === null ? null : (
         <span className={cn('max-w-full truncate text-[11px] text-[var(--muted-foreground)]', tone === 'warn' && 'tone-warn tone-fg')}>
-          {second}
+          <DotJoined parts={second} />
         </span>
       )}
     </button>
@@ -106,13 +113,19 @@ export function EgressDrawer({
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-body">
           <dt className="text-[var(--muted-foreground)]">{words.ip}</dt>
           <dd className={cn(lookup.ip === null ? 'tone-sev tone-fg' : 'font-mono')}>
-            {lookup.ip === null ? `${stageWord(lookup.errorStage)} · ${lookup.error ?? ''}` : ip(lookup.ip)}
+            {lookup.ip === null
+              ? <DotJoined parts={[stageWord(lookup.errorStage), ...(lookup.error === null ? [] : [lookup.error])]} />
+              : ip(lookup.ip)}
           </dd>
           <dt className="text-[var(--muted-foreground)]">{words.place}</dt>
           <dd className={cn(lookup.consensus.conflict && 'tone-warn tone-fg')}>
-            {placeWord(lookup.consensus) ?? copy.missing}
-            {lookup.consensus.of > 0 ? ` · ${words.votes(lookup.consensus.votes, lookup.consensus.of)}` : ''}
-            {lookup.consensus.conflict ? ` · ${words.conflict}` : ''}
+            <DotJoined
+              parts={[
+                placeWord(lookup.consensus) ?? copy.missing,
+                ...(lookup.consensus.of > 0 ? [words.votes(lookup.consensus.votes, lookup.consensus.of)] : []),
+                ...(lookup.consensus.conflict ? [words.conflict] : []),
+              ]}
+            />
           </dd>
           <dt className="text-[var(--muted-foreground)]">{words.checkedAt}</dt>
           <dd title={formatWhen(lookup.checkedAt)}>{formatWhenAgo(lookup.checkedAt)}</dd>
@@ -121,10 +134,10 @@ export function EgressDrawer({
       {lookup === undefined || lookup.answers.length === 0 ? null : (
         <table className="egress-answers w-full text-[12px]">
           <thead>
-            <tr className="text-left text-[var(--muted-foreground)]">
+            <tr className="text-micro font-medium text-[var(--muted-foreground)]">
               <th scope="col">{words.columns.provider}</th>
               <th scope="col">{words.columns.place}</th>
-              <th scope="col">{words.columns.org}</th>
+              <th scope="col" className="max-[640px]:hidden">{words.columns.org}</th>
             </tr>
           </thead>
           <tbody>
@@ -134,11 +147,24 @@ export function EgressDrawer({
               return (
                 <tr key={answer.provider}>
                   <th scope="row" className="font-mono font-normal">{answer.provider}</th>
-                  <td className={cn(!answer.ok && 'text-[var(--muted-foreground)]', odd && 'tone-warn tone-fg')}>
-                    {answer.ok ? answerPlace(answer) : answer.error ?? words.noAnswer}
-                    {answer.hosting === true ? ` · ${words.hosting}` : ''}
+                  <td>
+                    <span className={cn('block', !answer.ok && 'text-[var(--muted-foreground)]', odd && 'tone-warn tone-fg')}>
+                      <DotJoined
+                        parts={answer.ok
+                          ? [answerPlace(answer), ...(answer.hosting === true ? [words.hosting] : [])]
+                          : [words.noAnswer, ...(answer.error === null ? [] : [answer.error])]}
+                      />
+                    </span>
+                    {answer.ok ? (
+                      <span className="hidden text-[11px] text-[var(--muted-foreground)] max-[640px]:block">{answerOrg(answer)}</span>
+                    ) : null}
                   </td>
-                  <td className="text-[var(--muted-foreground)]">{answer.ok ? answerOrg(answer) : ''}</td>
+                  <td
+                    className="text-[var(--muted-foreground)] max-[640px]:hidden"
+                    title={answer.ok ? answerOrg(answer) : undefined}
+                  >
+                    {answer.ok ? answerOrg(answer) : ''}
+                  </td>
                 </tr>
               );
             })}
