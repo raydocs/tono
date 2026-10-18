@@ -114,7 +114,8 @@ final class TonoUITests: XCTestCase {
         let app = launch("CONNECTING", ["-TonoPreviewReason", "NETWORK_CHANGED"])
         let status = app.staticTexts["statusLine"]
         XCTAssertTrue(status.waitForExistence(timeout: 6))
-        XCTAssertEqual(status.label, "Network changed · reconnecting")
+        XCTAssertEqual(title(app), "Reconnecting")
+        XCTAssertEqual(status.label, "Network changed")
         XCTAssertEqual(primary(app).label, "Cancel connecting")
     }
 
@@ -122,8 +123,36 @@ final class TonoUITests: XCTestCase {
         let app = launch("FAILED", ["-TonoPreviewReason", "CORE_STOPPED"])
         let reason = app.buttons["reasonLine"]
         XCTAssertTrue(reason.waitForExistence(timeout: 6))
-        XCTAssertEqual(reason.label, "Connection dropped")
+        // A session that dropped is not a start that failed ("Didn't connect").
+        XCTAssertEqual(title(app), "Connection dropped")
+        XCTAssertEqual(reason.label, "iOS will try to reconnect")
         XCTAssertEqual(primary(app).label, "Retry")
+    }
+
+    /// The cloud exit is not answering: "Other line" in Details leads to the line picker, not just
+    /// back to Home.
+    @MainActor func testCloudFailureOtherLineOpensTheLinePicker() {
+        let app = launch("FAILED", ["-TonoPreviewReason", "CLOUD_UNREACHABLE"])
+        let reason = app.buttons["reasonLine"]
+        XCTAssertTrue(reason.waitForExistence(timeout: 6))
+        reason.tap()
+        let other = app.buttons["Other line"]
+        XCTAssertTrue(other.waitForExistence(timeout: 4))
+        other.tap()
+        let line = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Los Angeles")).firstMatch
+        XCTAssertTrue(line.waitForExistence(timeout: 4), "line picker did not open after Other line")
+        save(XCUIScreen.main.screenshot(), "other-line-opens-lines")
+    }
+
+    /// A widget reading older than its freshness window never says "Connected" as its title.
+    @MainActor func testStaleWidgetSaysStatusUnknown() {
+        let app = launch("CONNECTED", ["-TonoPreviewWidgets"])
+        let stale = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Status unknown, Last known: Connected at")).firstMatch
+        XCTAssertTrue(stale.waitForExistence(timeout: 8), "no stale card reading \"Status unknown, Last known: Connected at …\"")
+        let staleConnected = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "Connected", "Last known")).firstMatch
+        XCTAssertFalse(staleConnected.exists, "a stale card still leads with Connected: \(staleConnected.label)")
     }
 
     @MainActor func testEmptyLineListOffersRetryAndLoadingSaysSo() {
@@ -155,6 +184,51 @@ final class TonoUITests: XCTestCase {
         }
         XCTAssertTrue(shown, "no Live Activity element in the Dynamic Island:\n\(springboard.debugDescription.prefix(3000))")
         XCUIDevice.shared.press(.home)
+    }
+
+    /// Best effort: places the real Tono widget on the simulator's Home Screen through SpringBoard
+    /// and captures it. The preview never writes the shared status, so a correct widget says
+    /// "Status unavailable" here. SpringBoard's edit-mode labels differ between iOS releases; if a
+    /// step is not found the test is skipped with a capture of where it stopped (not a pass).
+    /// Named to run last, so a Home Screen left in edit mode cannot disturb another test.
+    @MainActor func testZZRealHomeScreenWidget() throws {
+        let app = launch("IDLE")
+        XCTAssertTrue(primary(app).waitForExistence(timeout: 6))
+        XCUIDevice.shared.press(.home)
+        sleep(2)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        func step(_ element: XCUIElement, _ name: String) throws {
+            guard element.waitForExistence(timeout: 4) else {
+                save(XCUIScreen.main.screenshot(), "real-widget-stopped-at-\(name)")
+                XCUIDevice.shared.press(.home)
+                throw XCTSkip("SpringBoard step not found: \(name)")
+            }
+            element.tap()
+            sleep(1)
+        }
+        springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7)).press(forDuration: 1.6)
+        sleep(1)
+        let edit = springboard.buttons.matching(NSPredicate(format: "label == 'Edit' OR identifier == 'edit-mode-button'")).firstMatch
+        try step(edit, "edit")
+        let addWidget = springboard.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'Add Widget'")).firstMatch
+        try step(addWidget, "add-widget")
+        let search = springboard.searchFields.firstMatch
+        try step(search, "search")
+        search.typeText("Tono")
+        sleep(2)
+        let result = springboard.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Tono'")).firstMatch
+        try step(result, "result")
+        save(XCUIScreen.main.screenshot(), "real-widget-gallery")
+        let add = springboard.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'Add Widget'")).firstMatch
+        try step(add, "add")
+        XCUIDevice.shared.press(.home)
+        sleep(2)
+        XCUIDevice.shared.press(.home)
+        sleep(2)
+        save(XCUIScreen.main.screenshot(), "real-widget-home-screen")
+        let widget = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Status unavailable")).firstMatch
+        // A label SpringBoard does not expose is "not read", not a pass: the capture above is the evidence.
+        if !widget.waitForExistence(timeout: 6) { throw XCTSkip("widget text not exposed to XCUITest; see real-widget-home-screen") }
     }
 
     /// Simulator CPU / memory while Home shows a connected session (sea animating). Mac-host

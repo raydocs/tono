@@ -71,21 +71,10 @@ struct RootView: View {
 extension View {
     /// DEBUG design preview only: every capture says it shows fixture data, not a real account or
     /// tunnel. Compiled out of Release (CI fails a Release binary that contains `-TonoPreview`).
-    /// `alignment: .topLeading` where a navigation bar title owns the top centre.
-    @ViewBuilder func previewBadge(alignment: Alignment = .top) -> some View {
+    @ViewBuilder func previewBadge() -> some View {
         #if DEBUG
-        if CommandLine.arguments.contains(where: { $0.hasPrefix("-TonoPreview") }) {
-            overlay(alignment: alignment) {
-                Text(L.isChinese ? "预览 · 夹具 · 无账号/隧道" : "Preview · fixtures · no account/tunnel")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color.black)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Color.yellow, in: Capsule())
-                    .padding(.top, 2)
-                    .padding(.leading, alignment == .topLeading ? 12 : 0)
-                    .allowsHitTesting(false)
-                    .accessibilityIdentifier("previewBadge")
-            }
+        if PreviewBadge.shown {
+            overlay(alignment: .top) { PreviewBadge().padding(.top, 2) }
         } else {
             self
         }
@@ -94,3 +83,20 @@ extension View {
         #endif
     }
 }
+
+#if DEBUG
+/// The yellow "fixtures" badge on every DEBUG preview surface.
+struct PreviewBadge: View {
+    static var shown: Bool { CommandLine.arguments.contains(where: { $0.hasPrefix("-TonoPreview") }) }
+
+    var body: some View {
+        Text(L.isChinese ? "预览 · 夹具 · 无账号/隧道" : "Preview · fixtures · no account/tunnel")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(Color.black)
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(Color.yellow, in: Capsule())
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("previewBadge")
+    }
+}
+#endif

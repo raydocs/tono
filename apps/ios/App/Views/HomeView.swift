@@ -16,6 +16,8 @@ struct HomeView: View {
     @State private var hapticPhase: Phase?
     /// Sheets zoom out of the control that opened them.
     @Namespace private var zoom
+    @ScaledMetric(relativeTo: .body) private var gearScaled: CGFloat = 20
+    private var gearGlyph: CGFloat { min(gearScaled, 36) }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -63,7 +65,7 @@ struct HomeView: View {
                 .zoomTransition("primary", in: zoom, enabled: !reduceMotion)
         }
         .sheet(isPresented: $showDetails) {
-            DetailsSheet(onSettings: openSettingsFromDetails).environmentObject(model).tonoAccessibility()
+            DetailsSheet(onSettings: openSettingsFromDetails, onOtherLine: openLinesFromDetails).environmentObject(model).tonoAccessibility()
                 .zoomTransition("details", in: zoom, enabled: !reduceMotion)
         }
         #if DEBUG
@@ -108,6 +110,14 @@ struct HomeView: View {
         }
     }
 
+    private func openLinesFromDetails() {
+        showDetails = false
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            showLines = true
+        }
+    }
+
     private func openSettingsFromDetails() {
         showDetails = false
         Task { @MainActor in
@@ -119,7 +129,11 @@ struct HomeView: View {
     private var topBar: some View {
         HStack(spacing: 8) {
             TonoMark(size: 24)
-            Text("Tono").tonoFont(17, .semibold, relativeTo: .headline).foregroundStyle(TonoColor.textPrimary)
+            // The wordmark is a name, not content: at accessibility sizes the mark alone keeps the
+            // room for the state and its controls.
+            if !typeSize.isAccessibilitySize {
+                Text("Tono").tonoFont(17, .semibold, relativeTo: .headline).foregroundStyle(TonoColor.textPrimary)
+            }
             Spacer()
         }
         // Settings lives in the bottom row with Details, inside the thumb's reach; the top bar
@@ -133,13 +147,13 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Old and new titles cross-fade in place (a ZStack, so they never stack during the change).
             ZStack(alignment: .leading) {
-                Text(PhaseText.title(model.phase))
+                Text(PhaseText.title(model.phase, reason: model.reason))
                     .tracking(0.5)
                     .tonoFont(40, .light, relativeTo: .largeTitle)
                     .foregroundStyle(TonoColor.textPrimary)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("stateTitle")
-                    .id(model.phase)
+                    .id(PhaseText.title(model.phase, reason: model.reason))
                     // Android `crossRise`: the new word rises in from a third of its height, the old one
                     // lifts a quarter and fades faster.
                     .transition(reduceMotion ? AnyTransition.opacity
@@ -150,7 +164,7 @@ struct HomeView: View {
                 .frame(minHeight: 32, alignment: .topLeading)
                 .padding(.top, 4)
                 .padding(.bottom, 10)
-            ActionCapsule(phase: model.phase, connectedSince: model.connectedSince) { model.toggle($0) }
+            ActionCapsule(phase: model.phase, reason: model.reason, connectedSince: model.connectedSince) { model.toggle($0) }
                 .zoomSource("primary", in: zoom)
                 .accessibilityIdentifier("primaryAction")
             exitCapsule.padding(.top, 10)
@@ -168,12 +182,15 @@ struct HomeView: View {
                 }
                 if !typeSize.isAccessibilitySize { Spacer() }
                 HStack(spacing: 2) {
+                    // A glass circle like the old top-right gear, so it reads as a control; the
+                    // glyph grows with the text size.
                     Button { showSettings = true } label: {
-                        GlyphIcon(glyph: .gear, tint: TonoColor.textSecondary, size: 18)
-                            .frame(width: 48, height: 48)
-                            .contentShape(Rectangle())
+                        GlyphIcon(glyph: .gear, tint: TonoColor.textPrimary, size: gearGlyph)
+                            .frame(width: gearGlyph + 26, height: gearGlyph + 26)
+                            .glassSurface(Circle(), interactive: true)
+                            .contentShape(Circle())
                     }
-                    .buttonStyle(PressScale())
+                    .buttonStyle(PressScale(glass: true))
                     .zoomSource("settings", in: zoom)
                     .accessibilityLabel(L.t("settings_title"))
                     .accessibilityIdentifier("settingsButton")
@@ -232,7 +249,7 @@ struct HomeView: View {
 
     private var exitCapsule: some View {
         let line = model.lines.first { $0.name == model.selectedNode } ?? model.lines.first
-        let name = line.map { Format.city($0.city, chinese: L.isChinese) + ($0.label.isEmpty ? "" : " · \($0.label)") } ?? L.t("line_pick")
+        let name = line.map(model.displayName) ?? L.t("line_pick")
         let latency = line?.latencyMS.map { L.t("latency_ms", $0) } ?? L.t("line_untested")
         let ax = typeSize.isAccessibilitySize
         let nameText = Text(name).tonoFont(16, .medium, relativeTo: .callout).foregroundStyle(TonoColor.textPrimary)
@@ -288,9 +305,11 @@ struct HomeView: View {
 /// session timer while connected.
 struct ActionCapsule: View {
     let phase: Phase
+    var reason: String?
     let connectedSince: Date?
     let onToggle: (Bool) -> Void
     @Environment(\.tonoReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var fill: Double = 0
     @State private var fillOpacity: Double = 1
     @State private var shake: CGFloat = 0
@@ -304,21 +323,27 @@ struct ActionCapsule: View {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             onToggle(want)
         } label: {
-            HStack {
+            // Accessibility sizes: the action gets the full width and the session timer goes under
+            // it, instead of the label shrinking beside a fixed-width timer.
+            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                                                      : AnyLayout(HStackLayout())
+            layout {
                 // One line at every text size: shrink rather than hyphenate ("Dis-con-nect") at AX sizes.
                 Text(title).tonoFont(17, .semibold, relativeTo: .body)
                     .lineLimit(1).minimumScaleFactor(0.6)
-                Spacer(minLength: 8)
+                    .layoutPriority(1)
+                if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
                 trailing
             }
+            .padding(.vertical, typeSize.isAccessibilitySize ? 10 : 0)
             .foregroundStyle(filled ? TonoColor.actionInk : TonoColor.textPrimary.opacity(action == .disconnecting ? 0.5 : 1))
             .padding(.horizontal, 22)
-            .frame(maxWidth: .infinity, minHeight: 56)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
             .background { background }
             .overlay {
-                Capsule().strokeBorder(phase.tunnelUp ? TonoColor.sunMid.opacity(0.55) : .clear, lineWidth: 1)
+                shape.stroke(phase.tunnelUp ? TonoColor.sunMid.opacity(0.55) : .clear, lineWidth: 1)
             }
-            .contentShape(Capsule())
+            .contentShape(shape)
             // One leaf: the timer and arrow are not hit targets of their own; the timer is read in the value.
             .accessibilityElement(children: .ignore)
         }
@@ -347,9 +372,15 @@ struct ActionCapsule: View {
 
     private var accessibilityValue: String {
         if phase.tunnelUp, let connectedSince {
-            return PhaseText.title(phase) + ", " + L.t("a11y_connected_for", PhaseText.clock(since: connectedSince, now: Date()))
+            return PhaseText.title(phase, reason: reason) + ", " + L.t("a11y_connected_for", PhaseText.clock(since: connectedSince, now: Date()))
         }
-        return PhaseText.title(phase)
+        return PhaseText.title(phase, reason: reason)
+    }
+
+    /// A capsule, or a rounded rectangle once accessibility text makes it two lines tall (a tall
+    /// capsule's round ends would cut into the label).
+    private var shape: AnyShape {
+        typeSize.isAccessibilitySize ? AnyShape(RoundedRectangle(cornerRadius: 28, style: .continuous)) : AnyShape(Capsule())
     }
 
     private var filled: Bool { action == .connect || action == .retry || action == .allowVPN }
@@ -368,7 +399,7 @@ struct ActionCapsule: View {
 
     @ViewBuilder private var trailing: some View {
         if filled {
-            GlyphIcon(glyph: .arrow, tint: TonoColor.actionInk, size: 18)
+            if !typeSize.isAccessibilitySize { GlyphIcon(glyph: .arrow, tint: TonoColor.actionInk, size: 18) }
         } else if phase.tunnelUp, let connectedSince {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 Text(PhaseText.clock(since: connectedSince, now: context.date))
@@ -381,18 +412,18 @@ struct ActionCapsule: View {
 
     @ViewBuilder private var background: some View {
         if filled {
-            Capsule().fill(TonoColor.actionFill)
+            shape.fill(TonoColor.actionFill)
         } else {
             ZStack(alignment: .leading) {
-                Color.clear.glassSurface(Capsule(), interactive: true)
+                Color.clear.glassSurface(shape, interactive: true)
                 GeometryReader { geo in
-                    Capsule()
+                    shape
                         .fill(LinearGradient(colors: [TonoColor.sunEdge.opacity(0.55), TonoColor.sunCore.opacity(0.85)],
                                              startPoint: .leading, endPoint: .trailing))
                         .frame(width: max(geo.size.height, geo.size.width * fill))
                         .opacity(fill > 0 ? fillOpacity : 0)
                 }
-                .clipShape(Capsule())
+                .clipShape(shape)
             }
         }
     }
@@ -449,7 +480,11 @@ struct UnevenSheetShape: Shape {
 
 /// Phase copy (Android `Text.kt`).
 enum PhaseText {
-    static func title(_ p: Phase) -> String {
+    /// The state title. A start that failed and a session that dropped are different stories, as
+    /// are a first start and iOS reconnecting after a network change.
+    static func title(_ p: Phase, reason: String? = nil) -> String {
+        if p == .failed, reason == "CORE_STOPPED" { return L.t("state_dropped") }
+        if p == .connecting, reason == "NETWORK_CHANGED" { return L.t("state_reconnecting") }
         switch p {
         case .signedOut: return L.t("state_signed_out")
         case .idle: return L.t("state_idle")
@@ -478,12 +513,12 @@ enum PhaseText {
         case .preparing: return L.t("sentence_preparing")
         case .connecting:
             // iOS reasserting the tunnel after a network change reads differently from a first start.
-            return m.reason == "NETWORK_CHANGED" ? L.t("short_NETWORK_CHANGED") : L.t("sentence_connecting")
+            return m.reason == "NETWORK_CHANGED" ? L.t("status_network_changed") : L.t("sentence_connecting")
         case .connected, .degraded:
-            let cloud = m.cloudProbe.state == .ok ? m.cloudProbe.location.map(region) : nil
+            // The exit capsule already names the cloud line (a city); this line adds only where
+            // Home leaves from, so the screen does not show two naming systems (city and country).
             let home = m.homeKind == .none ? nil : (m.homeProbe.state == .ok ? m.homeProbe.location.map(region) : nil)
-            if let cloud, let home { return L.t("status_exit_both", cloud, home) }
-            if let cloud { return L.t("status_exit_cloud", cloud) }
+            if let home { return L.t("status_protected_home", home) }
             return L.t("status_protected")
         default: return nil
         }

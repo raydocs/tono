@@ -232,10 +232,10 @@ struct ActivityLockView: View {
         HStack(spacing: 14) {
             HorizonGlyph(sunRise: p.sunRise, warn: p.tone == .warn || p.tone == .error, size: 44)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(p.title).font(.headline).foregroundStyle(TonoColor.textPrimary)
-                    if preview { PreviewTag() }
-                }
+                // The tag sits on its own line, so the title never breaks mid-word ("Connect-ed").
+                if preview { PreviewTag() }
+                Text(p.title).font(.headline).foregroundStyle(TonoColor.textPrimary)
+                    .lineLimit(1).minimumScaleFactor(0.8)
                 if let detail = p.detail {
                     Text(detail).font(.subheadline).foregroundStyle(TonoColor.textSecondary).lineLimit(1)
                 }

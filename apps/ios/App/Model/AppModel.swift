@@ -498,10 +498,16 @@ final class AppModel: ObservableObject {
         publishStatus()
     }
 
-    /// The display name of the line in use ("Tokyo · Dawn"), as the exit capsule shows it.
+    /// The display name of the line in use, as the exit capsule shows it.
     var exitName: String? {
         guard let line = lines.first(where: { $0.name == selectedNode }) ?? lines.first else { return nil }
-        return Format.city(line.city, chinese: L.isChinese) + (line.label.isEmpty ? "" : " · \(line.label)")
+        return displayName(line)
+    }
+
+    /// "Tokyo" (localised city); "Tokyo · Dawn" only when another line is also in Tokyo.
+    func displayName(_ line: LineItem) -> String {
+        let city = Format.city(line.city, chinese: L.isChinese)
+        return LineNaming.showsLabel(line.name, among: lines.map(\.name)) ? "\(city) · \(line.label)" : city
     }
 
     /// Shares the phase with widgets, the control and the Live Activity. The DEBUG preview never

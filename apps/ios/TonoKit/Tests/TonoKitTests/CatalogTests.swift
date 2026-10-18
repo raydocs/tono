@@ -51,6 +51,15 @@ final class CatalogTests: XCTestCase {
         XCTAssertNoThrow(try CatalogAdmission.admit(SampleCatalog.body(routing: nil)))
     }
 
+    func testLineLabelShowsOnlyWhenACityHasTwoLines() {
+        let two = ["Tokyo · Dawn", "Los Angeles · Grove"]
+        XCTAssertFalse(LineNaming.showsLabel("Tokyo · Dawn", among: two))
+        let sameCity = ["Tokyo · Dawn", "tokyo · Dusk", "Los Angeles · Grove"]
+        XCTAssertTrue(LineNaming.showsLabel("Tokyo · Dawn", among: sameCity))
+        XCTAssertFalse(LineNaming.showsLabel("Los Angeles · Grove", among: sameCity))
+        XCTAssertFalse(LineNaming.showsLabel("Tokyo", among: ["Tokyo", "Tokyo · Dusk"]))
+    }
+
     func testHy2BlockIsStrippedNotAdmittedAsASecondIdentity() throws {
         let yaml = SampleCatalog.yaml + "  - {name: \"Tokyo · Dawn · hy2\", type: hysteria2, server: 8.8.4.4, port: 443, password: x}\n"
         let nodes = try CatalogAdmission.admitYAML(yaml)

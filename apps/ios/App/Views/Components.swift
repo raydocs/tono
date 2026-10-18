@@ -141,7 +141,13 @@ private struct PressScaleBody: View {
 struct StatusDot: View {
     let color: Color
     var size: CGFloat = 8
-    var body: some View { Circle().fill(color).frame(width: size, height: size).accessibilityHidden(true) }
+    /// Grows with the text beside it (up to twice), so a dot still reads at accessibility sizes.
+    @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
+
+    var body: some View {
+        let side = size * min(scale, 2)
+        Circle().fill(color).frame(width: side, height: side).accessibilityHidden(true)
+    }
 }
 
 /// Smoked card used for settings sections; same surface as the home sheet.
@@ -200,9 +206,12 @@ struct TonoField: View {
     let title: String
     @Binding var text: String
     var large = false
+    /// Grows to a second and third line instead of clipping large text (the field in a narrow row);
+    /// the caller turns a typed return into submit.
+    var wraps = false
 
     var body: some View {
-        TextField("", text: $text, prompt: Text(title).foregroundColor(TonoColor.textTertiary))
+        field
             .tonoFont(large ? 24 : 17, large ? .medium : .regular, relativeTo: large ? .title2 : .body, design: large ? .rounded : .default)
             .foregroundStyle(TonoColor.textPrimary)
             .tint(TonoColor.accent)
@@ -210,6 +219,16 @@ struct TonoField: View {
             .frame(minHeight: 54)
             .background(TonoColor.nightDeep.opacity(0.4), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(TonoColor.hairline, lineWidth: 1))
+    }
+
+    @ViewBuilder private var field: some View {
+        let prompt = Text(title).foregroundColor(TonoColor.textTertiary)
+        if wraps {
+            TextField("", text: $text, prompt: prompt, axis: .vertical).lineLimit(1...3)
+                .padding(.vertical, 12)
+        } else {
+            TextField("", text: $text, prompt: prompt)
+        }
     }
 }
 

@@ -10,6 +10,12 @@
 "state_degraded" = "Partly working";
 "state_disconnecting" = "Disconnecting";
 "state_failed" = "Didn't connect";
+"widget_last_known" = "Last known: %1$@ at %2$@";
+"widget_stale_title" = "Status unknown";
+"status_protected_home" = "Protected · Home in %1$@";
+"status_network_changed" = "Network changed";
+"state_reconnecting" = "Reconnecting";
+"state_dropped" = "Connection dropped";
 "sentence_idle" = "Pick a line and switch on.";
 "sentence_preparing" = "Checking account and lines…";
 "sentence_connecting" = "Building the encrypted route…";
@@ -119,8 +125,6 @@
 "action_disconnecting" = "Disconnecting…";
 "a11y_cancel_connect" = "Cancel connecting";
 "action_disconnect" = "Disconnect";
-"status_exit_both" = "Cloud %1$@ · Home %2$@";
-"status_exit_cloud" = "Cloud %1$@";
 "status_protected" = "Protected";
 "sentence_permission_short" = "Allow the VPN once to start";
 "short_HOME_UNREACHABLE" = "Home not answering · AI paused";
@@ -133,7 +137,7 @@
 "short_RATE_LIMITED" = "Too many attempts";
 "short_SESSION_ENDED" = "Please sign in again";
 "short_CATALOG_ROLLBACK" = "Line list refused (older than before)";
-"short_CORE_STOPPED" = "Connection dropped";
+"short_CORE_STOPPED" = "iOS will try to reconnect";
 "details" = "Details";
 "details_routes" = "Where traffic goes";
 "details_why" = "What happened";
@@ -166,7 +170,6 @@
 "widget_unavailable_title" = "Status unavailable";
 "widget_unavailable" = "Open Tono to see the status";
 "widget_as_of" = "As of %1$@";
-"widget_stale" = "Last known · %1$@";
 "widget_open" = "Open Tono";
 "widget_on_short" = "On";
 "widget_off_short" = "Off";

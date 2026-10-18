@@ -10,9 +10,12 @@ struct DetailsSheet: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     /// Settings from inside the sheet as well (Home has it in the bottom row).
     private let onSettings: () -> Void
+    /// "Other line" (the cloud exit is not answering) closes Details and opens the line picker.
+    private let onOtherLine: () -> Void
 
-    init(onSettings: @escaping () -> Void = {}) {
+    init(onSettings: @escaping () -> Void = {}, onOtherLine: @escaping () -> Void = {}) {
         self.onSettings = onSettings
+        self.onOtherLine = onOtherLine
     }
 
     var body: some View {
@@ -63,7 +66,7 @@ struct DetailsSheet: View {
     private func perform(_ action: BannerAction) {
         switch action {
         case .allow, .retry: model.toggle(true); dismiss()
-        case .otherLine: dismiss()
+        case .otherLine: onOtherLine()
         case .recheck: model.recheck()
         case .none: break
         }

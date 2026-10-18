@@ -14,6 +14,10 @@ struct SettingsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
+                    #if DEBUG
+                    // In the content, under the navigation bar, so it never covers the sheet's edge.
+                    if PreviewBadge.shown { PreviewBadge().padding(.leading, 6).padding(.top, 4) }
+                    #endif
                     SectionLabel(text: L.t("settings_routing"))
                     SmokeCard {
                         ModeRow(title: L.t("mode_three_tier"), desc: L.t("mode_three_tier_line"), selected: model.mode == .threeTier) {
@@ -112,7 +116,6 @@ struct SettingsView: View {
                 dismiss()
             }
         }
-        .previewBadge(alignment: .topLeading)
     }
 
     /// Presented as a sheet: swipe down closes it; the button is for VoiceOver and two-handed use.
@@ -168,14 +171,25 @@ private struct RouteCheck: View {
     @State private var host = ""
     @State private var result: String?
 
+    @Environment(\.dynamicTypeSize) private var typeSize
+
     var body: some View {
-        HStack(spacing: 10) {
-            TonoField(title: L.t("check_hint"), text: $host)
+        // Accessibility sizes: Check goes under the field, which then has the full width.
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+                                                  : AnyLayout(HStackLayout(spacing: 10))
+        layout {
+            TonoField(title: L.t("check_hint"), text: $host, wraps: true)
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
                 .onSubmit(run)
+                .onChange(of: host) { value in
+                    // A wrapping field types return as a newline: treat it as Search.
+                    guard value.contains("\n") else { return }
+                    host = value.replacingOccurrences(of: "\n", with: "")
+                    run()
+                }
             QuietButton(title: L.t("check_go"), action: run)
         }
         if let result {

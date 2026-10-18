@@ -9,7 +9,8 @@ import WidgetKit
 /// the Preview tag. `-TonoPreviewWidgetsLight` puts them on a light wallpaper.
 struct WidgetGallery: View {
     private let now = Date()
-    private var exit: String { Format.city("Tokyo", chinese: L.isChinese) + " · Dawn" }
+    /// As the app names it: the city alone while no other line shares it.
+    private var exit: String { Format.city("Tokyo", chinese: L.isChinese) }
     private var light: Bool { CommandLine.arguments.contains("-TonoPreviewWidgetsLight") }
 
     private var on: StatusReading {
@@ -57,6 +58,11 @@ struct WidgetGallery: View {
             // `-TonoPreviewWidgetsBottom`: start at the Control Center row (screenshots cannot scroll).
             if CommandLine.arguments.contains("-TonoPreviewWidgetsBottom") { proxy.scrollTo("controls", anchor: .bottom) }
         }
+        }
+        // Cards scroll under a strip the colour of the top of the wallpaper, not under the clock.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            Color.clear.frame(height: 0)
+                .background((light ? Color(hex: 0xDCE6F2) : Color(hex: 0x1B2236)).ignoresSafeArea(edges: .top))
         }
         .background(background.ignoresSafeArea())
         .accessibilityIdentifier("widgetGallery")

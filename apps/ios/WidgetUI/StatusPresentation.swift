@@ -38,16 +38,31 @@ struct StatusPresentation: Equatable {
         stale = !fresh
         isOn = fresh && s.state.switchOn
         let time = Self.time(s.updatedAt)
-        footnote = fresh ? L.t("widget_as_of", time) : L.t("widget_stale", time)
         since = fresh && s.state.tunnelUp ? s.since : nil
+        let stateTitle: String
+        let stateTone: Tone
         switch s.state {
-        case .on: title = L.t("state_connected"); tone = .on
-        case .degraded: title = L.t("state_degraded"); tone = .warn
-        case .connecting: title = L.t("state_connecting"); tone = .busy
-        case .off: title = L.t("state_idle"); tone = .off
-        case .failed: title = L.t("state_failed"); tone = .error
-        case .signedOut: title = L.t("state_signed_out"); tone = .off
+        case .on: stateTitle = L.t("state_connected"); stateTone = .on
+        case .degraded: stateTitle = L.t("state_degraded"); stateTone = .warn
+        case .connecting:
+            stateTitle = L.t(s.reason == "NETWORK_CHANGED" ? "state_reconnecting" : "state_connecting"); stateTone = .busy
+        case .off: stateTitle = L.t("state_idle"); stateTone = .off
+        case .failed: stateTitle = L.t(s.reason == "CORE_STOPPED" ? "state_dropped" : "state_failed"); stateTone = .error
+        case .signedOut: stateTitle = L.t("state_signed_out"); stateTone = .off
         }
+        guard fresh else {
+            // An old report is never stated as now: the title says the status is unknown and the
+            // last known state moves into the small print with its time (as Android does).
+            title = L.t("widget_stale_title")
+            tone = .unknown
+            detail = nil
+            footnote = L.t("widget_last_known", stateTitle, time)
+            action = .openApp
+            return
+        }
+        title = stateTitle
+        tone = stateTone
+        footnote = L.t("widget_as_of", time)
         let reasonText = s.reason.flatMap(Self.short)
         switch s.state {
         case .on, .connecting: detail = reasonText ?? s.exit
@@ -55,7 +70,7 @@ struct StatusPresentation: Equatable {
         case .off, .signedOut: detail = nil
         }
         // Only a fresh, signed-in reading offers a switch; anything else opens the app first.
-        if !fresh || s.state == .signedOut {
+        if s.state == .signedOut {
             action = .openApp
         } else {
             action = s.state.switchOn ? .disconnect : .connect

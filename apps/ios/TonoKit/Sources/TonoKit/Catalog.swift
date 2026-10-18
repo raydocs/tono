@@ -331,3 +331,19 @@ public enum Net {
         return true
     }
 }
+
+/// How a line is named on Home, widgets and the Live Activity: its city, plus the line's own label
+/// only when another admitted line is in the same city (Dawn and Dusk in Tokyo). A name without a
+/// label never repeats itself ("Tokyo · Tokyo"). The Lines sheet still lists every label.
+public enum LineNaming {
+    public static func city(_ name: String) -> String {
+        guard let r = name.range(of: " · ") else { return name.trimmingCharacters(in: .whitespaces) }
+        return String(name[..<r.lowerBound]).trimmingCharacters(in: .whitespaces)
+    }
+
+    public static func showsLabel(_ name: String, among names: [String]) -> Bool {
+        guard name.contains(" · ") else { return false }
+        let own = city(name).lowercased()
+        return names.contains { $0 != name && city($0).lowercased() == own }
+    }
+}
