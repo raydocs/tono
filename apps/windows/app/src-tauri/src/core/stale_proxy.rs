@@ -66,7 +66,11 @@ pub fn classify_stale_proxy(
         return StaleProxyAction::Leave { alive_loopback: true };
     }
     if let Some(owned) = marker {
-        if owned.proxy_server.trim().eq_ignore_ascii_case(snap.proxy_server.trim()) {
+        // A saved snapshot that had the proxy on would set ProxyEnable back to 1.
+        // Tono never enables the system proxy, so that marker is not restored.
+        if owned.proxy_server.trim().eq_ignore_ascii_case(snap.proxy_server.trim())
+            && !owned.saved.proxy_enable
+        {
             return StaleProxyAction::Restore(owned.saved.clone());
         }
     }
@@ -343,6 +347,18 @@ mod tests {
         };
         assert!(matches!(
             classify_stale_proxy(&snap(true, "127.0.0.1:10090", ""), |_| false, Some(&other)),
+            StaleProxyAction::Bypass { .. }
+        ));
+    }
+
+    #[test]
+    fn an_enabled_saved_proxy_is_not_restored() {
+        let marker = OwnershipMarker {
+            proxy_server: "127.0.0.1:10090".to_string(),
+            saved: snap(true, "10.1.2.3:8080", ""),
+        };
+        assert!(matches!(
+            classify_stale_proxy(&snap(true, "127.0.0.1:10090", ""), |_| false, Some(&marker)),
             StaleProxyAction::Bypass { .. }
         ));
     }

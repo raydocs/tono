@@ -185,16 +185,19 @@ pub fn disable_proxy_enable_and_notify() -> Result<()> {
 }
 
 /// Put back a previously saved Internet Settings record and notify WinINet.
-/// Used only when a Tono ownership marker matches a stale loopback proxy.
+/// `enable` must be false: this function does not turn the system proxy on.
 pub fn restore_internet_proxy_settings(
     enable: bool,
     server: &str,
     bypass: &str,
     pac_url: &str,
 ) -> Result<()> {
+    if enable {
+        return Err(crate::Error::RefusingToEnableProxy);
+    }
     let hkcu = RegKey::predef(enums::HKEY_CURRENT_USER);
     let key = hkcu.open_subkey_with_flags(SUB_KEY, enums::KEY_SET_VALUE)?;
-    key.set_value("ProxyEnable", &u32::from(enable))?;
+    key.set_value("ProxyEnable", &0u32)?;
     key.set_value("ProxyServer", &server)?;
     key.set_value("ProxyOverride", &bypass)?;
     if pac_url.is_empty() {

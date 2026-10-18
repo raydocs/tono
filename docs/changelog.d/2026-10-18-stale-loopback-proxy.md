@@ -11,3 +11,4 @@
 
 ## 2026-10-18 · 续记
 - #1674 合入 main（`c39a9c17d`）后变基。线路页同时留下「重新准备出口身份」和「清理失效代理」。
+- 独立审查指出：归属标记里若 `proxyEnable` 为真，恢复会把系统代理再次打开。分类改为这种标记不自动恢复，按钮只关 `ProxyEnable`；`restore_internet_proxy_settings` 在 `enable` 为真时不写注册表。
