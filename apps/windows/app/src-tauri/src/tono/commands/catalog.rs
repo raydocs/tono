@@ -75,6 +75,7 @@ fn catalog_status_of(inner: &TonoInner) -> TonoCatalogStatus {
         node_count: inner.nodes.len(),
         last_synced_at_ms: inner.catalog_last_synced_at_ms,
         error: inner.catalog_sync_error.clone(),
+        stale_system_proxy: inner.stale_system_proxy.clone(),
     }
 }
 
@@ -105,6 +106,15 @@ pub async fn tono_refresh_catalog(
     }
     result?;
     Ok(catalog_status_of(&inner))
+}
+
+/// Disable `ProxyEnable` only after a fresh check still shows a dead loopback
+/// proxy. A listener that answers is left exactly as found.
+#[tauri::command]
+pub async fn tono_disable_stale_system_proxy(
+    state: tauri::State<'_, Arc<TonoState>>,
+) -> Result<(), String> {
+    crate::core::stale_proxy::disable_if_still_stale(state.inner()).await
 }
 
 pub(super) async fn test_server_endpoint(

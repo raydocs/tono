@@ -460,6 +460,18 @@ describe('describeTonoActionError', () => {
     ).toBe('translated:tono.dashboard.errors.serviceBusy')
   })
 
+  it('says a dead loopback system proxy is the problem', () => {
+    expect(
+      describeTonoActionError(
+        new Error('TONO_STALE_SYSTEM_PROXY: 127.0.0.1:10090'),
+        t,
+      ),
+    ).toEqual({ message: 'translated:tono.nodes.staleSystemProxyNotice' })
+    expect(
+      describeTonoActionError(new Error('Failed to connect to proxy'), t),
+    ).toEqual({ message: 'translated:tono.nodes.staleSystemProxyNotice' })
+  })
+
   it('returns a localized fallback and the raw text as detail when nothing matches', () => {
     const raw =
       'sc.exe start TonoService failed: os error 10061; HKLM\\SYSTEM\\CurrentControlSet'

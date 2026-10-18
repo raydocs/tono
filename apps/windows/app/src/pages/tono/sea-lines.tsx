@@ -70,6 +70,8 @@ interface Props {
   onPreferencesRetry: () => void
   catalogError: { message: string; detail?: string | null } | null
   identityStuck: boolean
+  staleProxy: string | null
+  onClearStaleProxy: () => void
   feedback: string | null
   refreshing: boolean
   refreshDisabled: boolean
@@ -104,6 +106,8 @@ export const SeaLines = ({
   error,
   catalogError,
   identityStuck,
+  staleProxy,
+  onClearStaleProxy,
   refreshDisabled,
   onRefresh,
   readError,
@@ -435,6 +439,20 @@ export const SeaLines = ({
         </SeaAttentionCard>
       )}
       {error && <SeaAttentionCard>{error}</SeaAttentionCard>}
+      {staleProxy && (
+        <SeaAttentionCard>
+          {t('tono.nodes.staleSystemProxy', {
+            server: staleProxy.replace(/^TONO_STALE_SYSTEM_PROXY:\s*/, ''),
+          })}
+          <SeaButton
+            variant="text"
+            disabled={refreshDisabled}
+            onClick={onClearStaleProxy}
+          >
+            {t('tono.nodes.clearStaleProxy')}
+          </SeaButton>
+        </SeaAttentionCard>
+      )}
       {catalogError && (
         <SeaAttentionCard>
           {t('tono.nodes.catalogError', { error: catalogError.message })}

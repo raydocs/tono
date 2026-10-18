@@ -65,6 +65,7 @@ export interface TonoCatalogStatus {
   nodeCount: number
   lastSyncedAtMs: number | null
   error: string | null
+  staleSystemProxy?: string | null
 }
 
 export interface TonoServerTestResult {
@@ -324,6 +325,7 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   // Ahead of the English propagating sentence: the stuck prefix contains that
   // sentence, and the short-retry copy must not win.
   { prefix: 'TONO_EXIT_IDENTITY_STUCK', key: 'tono.nodes.identityStuck' },
+  { prefix: 'TONO_STALE_SYSTEM_PROXY', key: 'tono.nodes.staleSystemProxyNotice' },
 ]
 
 const MESSAGE_ERROR_KEYS: Array<{ match: RegExp; key: string }> = [
@@ -363,6 +365,10 @@ const MESSAGE_ERROR_KEYS: Array<{ match: RegExp; key: string }> = [
   {
     match: /secure exit identity is still being prepared/i,
     key: 'tono.nodes.identityPropagating',
+  },
+  {
+    match: /proxy.*127\.0\.0\.1|127\.0\.0\.1:\d+.*proxy|Failed to connect to proxy/i,
+    key: 'tono.nodes.staleSystemProxyNotice',
   },
 ]
 
@@ -569,6 +575,9 @@ export const tonoCatalogStatus = () =>
 
 export const tonoRefreshCatalog = () =>
   call<TonoCatalogStatus>('tono_refresh_catalog')
+
+export const tonoDisableStaleSystemProxy = () =>
+  call<void>('tono_disable_stale_system_proxy')
 
 export const tonoSelectServer = (
   name: string,

@@ -7,6 +7,7 @@ pub(crate) mod owner_identity;
 pub mod proxy_control;
 pub mod runstate;
 pub mod service;
+pub mod stale_proxy;
 pub mod sysopt;
 pub mod tray;
 

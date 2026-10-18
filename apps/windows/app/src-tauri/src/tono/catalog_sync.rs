@@ -430,6 +430,7 @@ pub(crate) async fn sync_with_retries_for_auth_generation(
 }
 
 async fn sync_with_retries_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generation: u64) -> Result<(), String> {
+    crate::core::stale_proxy::inspect(state).await;
     let _operation = state.lock_catalog_sync().await;
     if state.lock().await.sign_in_generation != auth_generation {
         return Ok(());
