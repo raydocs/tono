@@ -102,10 +102,9 @@
 "settings_account" = "Account";
 "settings_sign_out" = "Sign out";
 "settings_about" = "About";
-"about_version" = "Tono %1$@ · test build";
+"about_version" = "Tono %1$@ · test build, not from the App Store";
 "about_core" = "Core: sing-box %1$@ (GPL-3.0-or-later; source: github.com/SagerNet/sing-box)";
 "about_contract" = "Routing lists: desktop contract, digest %1$@";
-"about_test" = "Test build for evaluation. Not an App Store release.";
 "ipv6_on" = "IPv6 on this network: yes";
 "ipv6_off" = "IPv6 on this network: no (direct names answer IPv4 only)";
 "system_include_all" = "Include all networks";

@@ -102,10 +102,9 @@
 "settings_account" = "账号";
 "settings_sign_out" = "退出登录";
 "settings_about" = "关于";
-"about_version" = "Tono %1$@ · 测试版";
+"about_version" = "Tono %1$@ · 测试版，非 App Store 版本";
 "about_core" = "内核：sing-box %1$@（GPL-3.0-or-later，源码：github.com/SagerNet/sing-box）";
 "about_contract" = "路由名单：桌面合同，摘要 %1$@";
-"about_test" = "供评估的测试版，不是 App Store 正式版。";
 "ipv6_on" = "当前网络 IPv6：有";
 "ipv6_off" = "当前网络 IPv6：无（直连域名只返回 IPv4）";
 "system_include_all" = "包含所有网络";

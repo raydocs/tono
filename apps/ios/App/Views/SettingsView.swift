@@ -39,6 +39,7 @@ struct SettingsView: View {
                                 para(L.t("routing_scope"))
                                 para(L.t("routing_platform"))
                                 Text(L.t(model.underlyingIPv6 ? "ipv6_on" : "ipv6_off")).tonoFont(12, .medium, relativeTo: .caption).foregroundStyle(TonoColor.textTertiary)
+                                small(L.t("about_contract", String(DesktopRoutingContract.sourceDigest.prefix(12))))
                             }
                             .padding(.top, 8)
                         } label: {
@@ -50,8 +51,7 @@ struct SettingsView: View {
                     }
                     .padding(.top, 16)
 
-                    SectionLabel(text: L.t("settings_check"))
-                    SmokeCard { RouteCheck() }
+                    // "Where does a site go?" lives in Details, next to where traffic goes.
 
                     SectionLabel(text: L.t("settings_system"))
                     SmokeCard {
@@ -95,8 +95,6 @@ struct SettingsView: View {
                     SmokeCard {
                         Text(L.t("about_version", AppModel.appVersion)).tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textPrimary)
                         small(L.t("about_core", model.coreVersion.isEmpty ? "—" : model.coreVersion))
-                        small(L.t("about_contract", String(DesktopRoutingContract.sourceDigest.prefix(12))))
-                        Text(L.t("about_test")).tonoFont(12, relativeTo: .caption).foregroundStyle(TonoColor.textTertiary)
                     }
                 }
                 .padding(.horizontal, 16).padding(.bottom, 24)
@@ -164,8 +162,8 @@ private struct ModeRow: View {
     }
 }
 
-/// "Where does this site go?" against the same graph the tunnel runs.
-private struct RouteCheck: View {
+/// "Where does this site go?" against the same graph the tunnel runs (shown in Details).
+struct RouteCheck: View {
     @EnvironmentObject private var model: AppModel
     @State private var host = ""
     @State private var result: String?

@@ -32,6 +32,12 @@ struct DetailsSheet: View {
                     }
                 }
                 section(L.t("details_routes")) { lanes }
+                section(L.t("settings_check")) {
+                    VStack(alignment: .leading, spacing: 10) { RouteCheck() }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentCard(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
                 section(L.t("details_mode")) { modePicker }
                 Button(action: onSettings) {
                     HStack(spacing: 12) {

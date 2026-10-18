@@ -122,6 +122,16 @@ struct HomeView: View {
         }
     }
 
+    /// The reflection column the glass sits in: the sun's at the centre, the moon's to the right
+    /// (the moon is drawn at 78% of the width; the capsules start 22 pt in).
+    private var catchLight: (color: Color, x: CGFloat)? {
+        switch sky {
+        case .night: return (TonoColor.moon.opacity(0.6), 0.81)
+        case .dawn, .rising, .reconnecting, .day: return (TonoColor.sunMid, 0.5)
+        case .duskWarning, .ember: return (TonoColor.sunEdge.opacity(0.8), 0.5)
+        }
+    }
+
     private func openLinesFromDetails() {
         showDetails = false
         Task { @MainActor in
@@ -175,7 +185,8 @@ struct HomeView: View {
                 .frame(minHeight: 32, alignment: .topLeading)
                 .padding(.top, 4)
                 .padding(.bottom, 10)
-            ActionCapsule(phase: model.phase, reason: model.reason, connectedSince: model.connectedSince, glassTint: glassTint) { model.toggle($0) }
+            ActionCapsule(phase: model.phase, reason: model.reason, connectedSince: model.connectedSince, glassTint: glassTint,
+                          catchLight: catchLight) { model.toggle($0) }
                 .zoomSource("primary", in: zoom)
                 .accessibilityIdentifier("primaryAction")
             exitCapsule.padding(.top, 10)
@@ -287,7 +298,7 @@ struct HomeView: View {
                     }
                     .padding(.horizontal, 20).padding(.vertical, 14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .glassSurface(RoundedRectangle(cornerRadius: 26, style: .continuous), tint: glassTint, interactive: true)
+                    .glassSurface(RoundedRectangle(cornerRadius: 26, style: .continuous), tint: glassTint, light: catchLight, interactive: true)
                     .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
                 } else {
                     HStack(spacing: 12) {
@@ -302,7 +313,7 @@ struct HomeView: View {
                     }
                     .padding(.horizontal, 18)
                     .frame(minHeight: 52)
-                    .glassSurface(Capsule(), tint: glassTint, interactive: true)
+                    .glassSurface(Capsule(), tint: glassTint, light: catchLight, interactive: true)
                     .contentShape(Capsule())
                 }
             }
@@ -323,6 +334,7 @@ struct ActionCapsule: View {
     var reason: String?
     let connectedSince: Date?
     var glassTint: Color? = nil
+    var catchLight: (color: Color, x: CGFloat)? = nil
     let onToggle: (Bool) -> Void
     @Environment(\.tonoReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -456,7 +468,7 @@ struct ActionCapsule: View {
             shape.fill(TonoColor.actionFill)
         } else {
             ZStack(alignment: .leading) {
-                Color.clear.glassSurface(shape, tint: glassTint, interactive: true)
+                Color.clear.glassSurface(shape, tint: glassTint, light: catchLight, interactive: true)
                 GeometryReader { geo in
                     shape
                         .fill(LinearGradient(colors: [TonoColor.sunEdge.opacity(0.55), TonoColor.sunCore.opacity(0.85)],

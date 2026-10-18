@@ -51,6 +51,7 @@ for lang in zh-Hans en; do
   shot "$lang-07-lines" "$lang" CONNECTED lines
   shot "$lang-08-settings" "$lang" CONNECTED settings
   shot "$lang-09-details" "$lang" DEGRADED details
+  shot "$lang-09b-details-full" "$lang" DEGRADED details -TonoLargeSheets
   shot "$lang-10-onboarding" "$lang" SIGNED_OUT "" -TonoPreviewOnboarding
   shot "$lang-11-vpn-primer" "$lang" NEEDS_PERMISSION primer
   shot "$lang-12-network-changed" "$lang" CONNECTING "" -TonoPreviewReason NETWORK_CHANGED

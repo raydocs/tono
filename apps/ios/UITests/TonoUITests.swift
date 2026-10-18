@@ -334,6 +334,23 @@ final class TonoUITests: XCTestCase {
         save(XCUIScreen.main.screenshot(), "interrupted-start-arrives-connected")
     }
 
+    /// "Where does a site go?" moved from Settings to Details (next to where traffic goes) and still
+    /// answers there.
+    @MainActor func testRouteCheckInDetailsAnswers() {
+        let app = launch("DEGRADED", ["-TonoPreviewSheet", "details", "-TonoLargeSheets"])
+        // The wrapping field is a text view on iOS 26; Details has no other input.
+        let field = app.descendants(matching: .any).matching(NSPredicate(format: "elementType == %d OR elementType == %d",
+                                                                        XCUIElement.ElementType.textField.rawValue,
+                                                                        XCUIElement.ElementType.textView.rawValue)).firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 6), "route check field missing from Details")
+        if !field.isHittable { app.swipeUp() }
+        field.tap()
+        field.typeText("claude.ai\n")
+        let answer = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "TCP →")).firstMatch
+        XCTAssertTrue(answer.waitForExistence(timeout: 4), "no route answer in Details")
+        save(XCUIScreen.main.screenshot(), "details-route-check")
+    }
+
     @MainActor func testLinePickerSelectsAndCloses() {
         let app = launch("CONNECTED")
         let exit = app.buttons["exitCapsule"]

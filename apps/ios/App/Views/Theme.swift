@@ -171,6 +171,9 @@ private struct TonoAccessibilityRoot: ViewModifier {
 private struct GlassSurface<S: Shape>: ViewModifier {
     let shape: S
     let tint: Color?
+    /// Where the scene's light (the sun's or moon's reflection) catches the top edge: a colour and
+    /// its horizontal position (0…1). Small, so it lights the glass without lifting the label's background.
+    let light: (color: Color, x: CGFloat)?
     /// Tappable glass: iOS 26 answers the touch itself (scale, highlight).
     let interactive: Bool
     @Environment(\.tonoReduceTransparency) private var reduceTransparency
@@ -183,11 +186,13 @@ private struct GlassSurface<S: Shape>: ViewModifier {
                 .overlay(shape.stroke(Color.white.opacity(contrast == .increased ? 0.4 : 0.12), lineWidth: 1))
         } else if #available(iOS 26.0, *) {
             content
+                .background(catchLight)
                 .background(sheen)
                 .glassEffect(.regular.tint((tint ?? TonoColor.glassTint).opacity(0.3)).interactive(interactive), in: shape)
                 .overlay(rim)
         } else {
             content
+                .background(catchLight)
                 .background(sheen)
                 .background((tint ?? TonoColor.glassTint).opacity(0.36), in: shape)
                 .background(.ultraThinMaterial, in: shape)
@@ -197,8 +202,23 @@ private struct GlassSurface<S: Shape>: ViewModifier {
 
     /// Light falling on the upper half, over the glass and under the label.
     private var sheen: some View {
-        shape.fill(LinearGradient(colors: [Color.white.opacity(0.07), .clear], startPoint: .top, endPoint: .center))
+        shape.fill(LinearGradient(colors: [Color.white.opacity(0.08), .clear], startPoint: .top, endPoint: .center))
             .allowsHitTesting(false)
+    }
+
+    @ViewBuilder private var catchLight: some View {
+        if let light {
+            GeometryReader { geo in
+                let r = min(geo.size.width * 0.24, 110)
+                Ellipse()
+                    .fill(RadialGradient(colors: [light.color.opacity(0.32), light.color.opacity(0)], center: .center,
+                                         startRadius: 0, endRadius: r))
+                    .frame(width: r * 2, height: r * 1.1)
+                    .position(x: geo.size.width * light.x, y: 0)
+            }
+            .clipShape(shape)
+            .allowsHitTesting(false)
+        }
     }
 
     /// Bright where the sky lights the top edge, faint underneath.
@@ -234,8 +254,9 @@ extension View {
         }
     }
 
-    func glassSurface<S: Shape>(_ shape: S, tint: Color? = nil, interactive: Bool = false) -> some View {
-        modifier(GlassSurface(shape: shape, tint: tint, interactive: interactive))
+    func glassSurface<S: Shape>(_ shape: S, tint: Color? = nil, light: (color: Color, x: CGFloat)? = nil,
+                                interactive: Bool = false) -> some View {
+        modifier(GlassSurface(shape: shape, tint: tint, light: light, interactive: interactive))
     }
 
     func contentCard<S: Shape>(_ shape: S) -> some View {
