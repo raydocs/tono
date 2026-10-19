@@ -53,6 +53,13 @@ final class AIHomeRoutingModeTests: XCTestCase {
     func testAIHomeIsAnAdmittedModeAndSendsTheScopeFieldOnlyForItsSession() throws {
         XCTAssertEqual(try DesktopRoutingModeAdmission.capture("ai-home"), "ai-home")
         XCTAssertThrowsError(try DesktopRoutingModeAdmission.capture("AI-Home"))
+        // Decision 131: never chosen means AI Home, and without a Home line
+        // the session runs Stable. Every saved choice is kept.
+        XCTAssertEqual(try DesktopRoutingModeAdmission.capture(nil), "ai-home")
+        XCTAssertEqual(try DesktopRoutingModeAdmission.capture("stable"), "stable")
+        XCTAssertEqual(DesktopRoutingModeAdmission.effective("ai-home", homeAvailable: true), "ai-home")
+        XCTAssertEqual(DesktopRoutingModeAdmission.effective("ai-home", homeAvailable: false), "stable")
+        XCTAssertEqual(DesktopRoutingModeAdmission.effective("three-tier", homeAvailable: false), "three-tier")
         XCTAssertEqual(HelperManager.aiHomeArmFields(true) as NSDictionary, ["aiHomeScoped": true])
         XCTAssertTrue(HelperManager.aiHomeArmFields(false).isEmpty, "other sessions send nothing")
     }

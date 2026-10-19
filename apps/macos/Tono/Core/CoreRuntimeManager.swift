@@ -4,8 +4,9 @@ import Observation
 
 /// Capture the opt-in once. Runtime writers never read mutable preferences.
 enum DesktopRoutingModeAdmission {
+    /// Never chosen in Settings: AI Home (decision 131).
     static func capture(_ persisted: Any?) throws -> String {
-        guard let persisted else { return "stable" }
+        guard let persisted else { return "ai-home" }
         guard let mode = persisted as? String, SettingsKey.desktopRoutingModeOptions.contains(mode) else {
             throw CoreRuntimeError.startFailed("Invalid desktopRoutingMode; connection refused.")
         }
@@ -21,6 +22,11 @@ enum DesktopRoutingModeAdmission {
         if AppProfile.defaults.bool(forKey: "strictRoutingSessionIntent") { return "three-tier" }
         if AppProfile.defaults.bool(forKey: SettingsKey.aiHomeRoutingSession) { return "ai-home" }
         return nil
+    }
+    /// AI Home needs the account's Home line. Without one the session runs
+    /// Stable, which is what such an account had before AI Home existed.
+    static func effective(_ mode: String, homeAvailable: Bool) -> String {
+        mode == "ai-home" && !homeAvailable ? "stable" : mode
     }
     /// The owned graph a captured mode compiles; nil for Stable.
     static func ownedGraph(_ mode: String) -> ThreeTierRoutingContract.Variant? {
