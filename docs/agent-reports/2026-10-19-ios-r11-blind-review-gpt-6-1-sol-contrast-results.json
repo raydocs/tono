@@ -1,0 +1,97 @@
+{
+  "method": "Independent PNG-only check. Run: uv run --with pillow --with numpy python this-file.py\n\nNo app execution is claimed. Coordinates refer to original 1206px-wide artifact PNGs.\nThe full-capsule metric reproduces UITests' algorithm; local glyph contrast instead\nuses bright, near-white glyph cores and text-free scanlines at the same x coordinate.\nScanline interpolation is a local background estimate, not a new compliance oracle.\n",
+  "images": {
+    "en-03-connecting.png": {
+      "sha256": "9a959e2cc2a922610bbcda8f72eb7cc7ac31425684ab8348127107f4f0b7ef97",
+      "size": [
+        1206,
+        2622
+      ],
+      "whole_capsule": {
+        "box_px": [
+          66,
+          1998,
+          1140,
+          2166
+        ],
+        "new_metric": 4.783483638040494,
+        "old_metric": 5.778412855066028,
+        "ink_percent": 52.99337146404186
+      },
+      "label_only": {
+        "glyph_box_px": [
+          132,
+          2060,
+          300,
+          2105
+        ],
+        "background_scanlines_y": [
+          2050,
+          2115
+        ],
+        "core_pixels": 1805,
+        "min": 3.447270170498381,
+        "median": 3.9257747578232793,
+        "max": 4.512234434599892,
+        "fraction_below_4_5": 0.997229916897507,
+        "top_scanline_only_median": 3.839144741710144,
+        "bottom_scanline_only_median": 3.9961142748132215
+      }
+    },
+    "en-03a-preparing.png": {
+      "sha256": "dba337a452fd6a8ce203c946c648254fc749c14ec7b71ad8356316d8fe26f9b9",
+      "size": [
+        1206,
+        2622
+      ],
+      "whole_capsule": {
+        "box_px": [
+          66,
+          1998,
+          1140,
+          2166
+        ],
+        "new_metric": 7.768606580971421,
+        "old_metric": 7.860155503030611,
+        "ink_percent": 34.15746652478496
+      },
+      "label_only": {
+        "glyph_box_px": [
+          132,
+          2060,
+          300,
+          2105
+        ],
+        "background_scanlines_y": [
+          2050,
+          2115
+        ],
+        "core_pixels": 1863,
+        "min": 2.3642711474898297,
+        "median": 3.0345006161988124,
+        "max": 4.016840103984981,
+        "fraction_below_4_5": 1.0,
+        "top_scanline_only_median": 2.992022563179167,
+        "bottom_scanline_only_median": 3.0698588821184853
+      }
+    },
+    "details-mode-unconfirmed.png": {
+      "sha256": "a37fbb635743961c530916094f19bdafe98472eda0bd2cb07abaf77f480b84ca",
+      "size": [
+        1206,
+        2622
+      ],
+      "sparse_settings_row": {
+        "box_px": [
+          61,
+          1828,
+          1145,
+          1984
+        ],
+        "new_metric": 15.268105742638815,
+        "old_metric": 1.1886690011956933,
+        "ink_percent": 2.347076355378938
+      }
+    }
+  }
+}

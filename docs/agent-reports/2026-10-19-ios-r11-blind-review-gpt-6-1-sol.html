@@ -1,0 +1,989 @@
+<!doctype html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>PR1672 第11轮独立盲审：84分，不通过</title>
+		<style>
+			:root {
+				color-scheme: light dark;
+				--bg: #ffffff;
+				--surface: #f6f7f9;
+				--border: #e1e4ea;
+				--line: #aeb6c4;
+				--text: #1b1f27;
+				--muted: #5d6675;
+				--accent: #2f5fd0;
+				--accent-soft: #eaf0fd;
+				--ok: #1f7a4d;
+				--ok-soft: #e4f4ec;
+				--warn: #8a5a00;
+				--warn-soft: #fdf1d8;
+				--bad: #b3261e;
+				--bad-soft: #fde8e6;
+				--sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+				--mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+			}
+			@media (prefers-color-scheme: dark) {
+				:root {
+					--bg: #14161a;
+					--surface: #1c1f25;
+					--border: #2c313a;
+					--line: #566070;
+					--text: #e7e9ee;
+					--muted: #9ba3b1;
+					--accent: #8fb0ff;
+					--accent-soft: #1e2a47;
+					--ok: #6fd3a0;
+					--ok-soft: #173326;
+					--warn: #f0c36a;
+					--warn-soft: #3a2e12;
+					--bad: #ff9d94;
+					--bad-soft: #401f1c;
+				}
+			}
+			* {
+				box-sizing: border-box;
+			}
+			html {
+				scroll-behavior: smooth;
+			}
+			body {
+				margin: 0;
+				background: var(--bg);
+				color: var(--text);
+				font: 16px/1.55 var(--sans);
+				-webkit-text-size-adjust: 100%;
+			}
+			.layout {
+				display: grid;
+				grid-template-columns: minmax(0, 1fr);
+				max-width: 46rem;
+				margin: 0 auto;
+				/* Bottom space keeps the last block clear of the review button in the corner. */
+				padding: 2.5rem 1.25rem 6rem;
+			}
+			.toc {
+				display: none;
+			}
+			@media (min-width: 64rem) {
+				.layout {
+					grid-template-columns: 13rem minmax(0, 46rem);
+					gap: 3rem;
+					max-width: 64rem;
+				}
+				.toc {
+					display: block;
+					position: sticky;
+					top: 2.5rem;
+					align-self: start;
+					max-height: calc(100vh - 5rem);
+					overflow-y: auto;
+					font-size: 0.875rem;
+				}
+			}
+			.toc ol {
+				list-style: none;
+				margin: 0;
+				padding: 0;
+			}
+			.toc a {
+				display: block;
+				padding: 0.3rem 0.6rem;
+				border-left: 2px solid var(--border);
+				color: var(--muted);
+				text-decoration: none;
+			}
+			.toc a:hover,
+			.toc a[aria-current='true'] {
+				border-left-color: var(--accent);
+				color: var(--text);
+			}
+			h1,
+			h2,
+			h3 {
+				line-height: 1.25;
+				text-wrap: balance;
+			}
+			h1 {
+				margin: 0.4rem 0 0.75rem;
+				font-size: 2rem;
+				letter-spacing: -0.01em;
+			}
+			h2 {
+				margin: 0 0 0.9rem;
+				font-size: 1.3rem;
+			}
+			h3 {
+				margin: 0;
+				font-size: 1.02rem;
+			}
+			p,
+			ul,
+			ol,
+			dl,
+			figure,
+			pre {
+				margin: 0 0 0.9rem;
+			}
+			a {
+				color: var(--accent);
+			}
+			section {
+				margin-top: 2.75rem;
+			}
+			[id] {
+				scroll-margin-top: 1.5rem;
+			}
+			.kicker,
+			.meta {
+				margin: 0;
+				color: var(--muted);
+				font-size: 0.875rem;
+			}
+			.meta {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 0.5rem 0.75rem;
+				align-items: center;
+			}
+			.lede {
+				font-size: 1.15rem;
+				color: var(--text);
+			}
+
+			/* Summary: the part every reader sees. */
+			.facts {
+				display: grid;
+				gap: 1px;
+				margin: 0;
+				border: 1px solid var(--border);
+				border-radius: 10px;
+				background: var(--border);
+				overflow: hidden;
+			}
+			.facts > div {
+				display: grid;
+				grid-template-columns: 8.5rem minmax(0, 1fr);
+				gap: 1rem;
+				padding: 0.7rem 1rem;
+				background: var(--surface);
+			}
+			.facts dt {
+				color: var(--muted);
+				font-size: 0.875rem;
+				font-weight: 600;
+			}
+			.facts dd {
+				margin: 0;
+			}
+			/* The first row is what the reader is asked to do, so it stands out from the rest. */
+			.facts > .ask {
+				background: var(--accent-soft);
+			}
+			.facts > .ask dt {
+				color: var(--accent);
+			}
+			@media (max-width: 34rem) {
+				h1 {
+					font-size: 1.6rem;
+				}
+				.facts > div {
+					grid-template-columns: minmax(0, 1fr);
+					gap: 0.15rem;
+				}
+			}
+
+			/* Items: one decision, step, or alternative per block, so one comment hits one thing. */
+			.items {
+				list-style: none;
+				margin: 0;
+				padding: 0;
+				display: grid;
+				gap: 0.75rem;
+			}
+			.item {
+				padding: 0.9rem 1rem;
+				border: 1px solid var(--border);
+				border-radius: 10px;
+			}
+			.item > :last-child {
+				margin-bottom: 0;
+			}
+			.item-head {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 0.5rem 0.6rem;
+				align-items: center;
+				margin-bottom: 0.5rem;
+			}
+			.item-head h3 {
+				flex: 1 1 12rem;
+			}
+			.tag {
+				padding: 0.05rem 0.4rem;
+				border-radius: 5px;
+				background: var(--accent-soft);
+				color: var(--accent);
+				font: 600 0.8rem/1.5 var(--mono);
+				white-space: nowrap;
+			}
+			:target {
+				outline: 2px solid var(--accent);
+				outline-offset: 3px;
+				border-radius: 10px;
+			}
+			.chip {
+				display: inline-block;
+				padding: 0.05rem 0.55rem;
+				border-radius: 999px;
+				background: var(--surface);
+				border: 1px solid var(--border);
+				color: var(--muted);
+				font-size: 0.78rem;
+				font-weight: 600;
+				white-space: nowrap;
+			}
+			.chip.review,
+			.chip.doing {
+				background: var(--warn-soft);
+				border-color: transparent;
+				color: var(--warn);
+			}
+			.chip.done,
+			.chip.pick {
+				background: var(--ok-soft);
+				border-color: transparent;
+				color: var(--ok);
+			}
+			.chip.blocked {
+				background: var(--bad-soft);
+				border-color: transparent;
+				color: var(--bad);
+			}
+			.options {
+				padding-left: 1.2rem;
+				list-style: disc;
+			}
+			.options li {
+				margin-bottom: 0.3rem;
+			}
+			.detail {
+				display: grid;
+				grid-template-columns: 4.5rem minmax(0, 1fr);
+				gap: 0.25rem 0.75rem;
+				font-size: 0.92rem;
+			}
+			.detail dt {
+				color: var(--muted);
+				font-weight: 600;
+			}
+			.detail dd {
+				margin: 0;
+			}
+			.quiet {
+				color: var(--muted);
+				font-size: 0.92rem;
+			}
+
+			.note {
+				margin: 0 0 0.9rem;
+				padding: 0.75rem 1rem;
+				border-left: 3px solid var(--accent);
+				border-radius: 0 8px 8px 0;
+				background: var(--accent-soft);
+			}
+			.note.warn {
+				border-left-color: var(--warn);
+				background: var(--warn-soft);
+			}
+			.note > :last-child {
+				margin-bottom: 0;
+			}
+
+			.table-wrap {
+				margin: 0 0 0.9rem;
+				overflow-x: auto;
+				border: 1px solid var(--border);
+				border-radius: 10px;
+			}
+			table {
+				width: 100%;
+				/* On a phone the table scrolls sideways instead of squeezing its columns. */
+				min-width: 34rem;
+				border-collapse: collapse;
+				font-size: 0.92rem;
+			}
+			th,
+			td {
+				padding: 0.55rem 0.8rem;
+				border-bottom: 1px solid var(--border);
+				text-align: left;
+				vertical-align: top;
+			}
+			th {
+				background: var(--surface);
+				color: var(--muted);
+				font-size: 0.82rem;
+			}
+			tr:last-child td {
+				border-bottom: 0;
+			}
+			td:has(> .tag:only-child) {
+				width: 1%;
+				white-space: nowrap;
+			}
+
+			code {
+				padding: 0.1em 0.3em;
+				border-radius: 4px;
+				background: var(--surface);
+				font: 0.88em var(--mono);
+				overflow-wrap: anywhere;
+			}
+			pre {
+				padding: 0.8rem 1rem;
+				border: 1px solid var(--border);
+				border-radius: 10px;
+				background: var(--surface);
+				overflow-x: auto;
+				font: 0.84rem/1.45 var(--mono);
+			}
+			pre code {
+				padding: 0;
+				background: none;
+				font: inherit;
+				overflow-wrap: normal;
+			}
+			/* Box-drawing diagrams need tight lines, or the vertical strokes show gaps. */
+			figure pre {
+				line-height: 1.2;
+			}
+			/* Before and After side by side; the panes stack when the page is narrow. */
+			.compare {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+				gap: 0.75rem;
+				margin: 0 0 0.9rem;
+			}
+			.compare > div {
+				min-width: 0;
+			}
+			.compare pre {
+				margin: 0;
+			}
+			.pane {
+				margin: 0 0 0.3rem;
+				color: var(--muted);
+				font-size: 0.82rem;
+				font-weight: 600;
+			}
+			/* The script at the end of the page adds these classes. */
+			pre .hot {
+				color: var(--accent);
+			}
+			.line {
+				display: block;
+			}
+			.line.add {
+				background: var(--ok-soft);
+				color: var(--ok);
+			}
+			.line.del {
+				background: var(--bad-soft);
+				color: var(--bad);
+			}
+			/* Visuals. .viz frames one picture. .flow, .parts, and .bars are ready-made pictures. */
+			.viz {
+				container-type: inline-size;
+				padding: 1.1rem 1rem;
+				border: 1px solid var(--border);
+				border-radius: 10px;
+				background: var(--surface);
+				overflow-x: auto;
+			}
+			.viz > :last-child {
+				margin-bottom: 0;
+			}
+			.viz svg {
+				margin: 0 auto;
+				color: var(--text);
+				font-family: var(--sans);
+			}
+			.compare > div {
+				display: flex;
+				flex-direction: column;
+			}
+			.compare .viz {
+				flex: 1;
+			}
+
+			/* A flow: nodes joined by edges, top to bottom. */
+			.flow {
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+			}
+			.node {
+				min-width: 6.5rem;
+				max-width: 100%;
+				padding: 0.45rem 0.85rem;
+				border: 1.5px solid var(--line);
+				border-radius: 8px;
+				background: var(--bg);
+				font-size: 0.92rem;
+				font-weight: 600;
+				line-height: 1.3;
+				text-align: center;
+			}
+			.node small {
+				display: block;
+				margin-top: 0.15rem;
+				color: var(--muted);
+				font-size: 0.8rem;
+				font-weight: 400;
+			}
+			.node.hot {
+				border-color: var(--accent);
+				background: var(--accent-soft);
+			}
+			.node.ok {
+				border-color: var(--ok);
+				background: var(--ok-soft);
+			}
+			.node.bad {
+				border-color: var(--bad);
+				background: var(--bad-soft);
+			}
+			.node.gone {
+				border-style: dashed;
+				background: none;
+				color: var(--muted);
+			}
+			/* The line is a background, the arrowhead is ::after, and ::before is the moving dot. */
+			.edge {
+				position: relative;
+				align-self: stretch;
+				display: grid;
+				grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+				column-gap: 1.2rem;
+				min-height: 2.5rem;
+				margin: 2px 0;
+				color: var(--line);
+				background: linear-gradient(currentColor, currentColor) top center / 1.5px calc(100% - 5px)
+					no-repeat;
+			}
+			.edge::after {
+				content: '';
+				position: absolute;
+				left: 50%;
+				bottom: 0;
+				translate: -50% 0;
+				border: 5px solid transparent;
+				border-top: 7px solid currentColor;
+				border-bottom-width: 0;
+			}
+			.edge > span {
+				grid-column: 2;
+				align-self: center;
+				padding: 0.4rem 0 0.6rem;
+				color: var(--muted);
+				font-size: 0.8rem;
+				line-height: 1.25;
+			}
+			.edge.hot,
+			.edge.hot > span {
+				color: var(--accent);
+			}
+			/* Nodes that belong together or run in parallel. */
+			.group {
+				position: relative;
+				display: flex;
+				flex-wrap: wrap;
+				align-items: flex-start;
+				justify-content: center;
+				gap: 0.5rem;
+				max-width: 100%;
+				padding: 1.7rem 0.6rem 0.6rem;
+				border: 1.5px dashed var(--line);
+				border-radius: 10px;
+			}
+			.group::before {
+				content: attr(data-label);
+				position: absolute;
+				top: 0.35rem;
+				left: 0.7rem;
+				color: var(--muted);
+				font-size: 0.75rem;
+				font-weight: 600;
+			}
+			/* Left to right, when the picture is wide enough. */
+			@container (min-width: 34rem) {
+				.flow.row {
+					flex-direction: row;
+					justify-content: center;
+				}
+				.flow.row > .edge {
+					align-self: center;
+					flex: 1 1 3rem;
+					min-width: 3rem;
+					max-width: 10rem;
+					grid-template-columns: minmax(0, 1fr);
+					grid-template-rows: 1fr 1fr;
+					min-height: 2.6rem;
+					margin: 0 2px;
+					background-position: left center;
+					background-size: calc(100% - 5px) 1.5px;
+				}
+				.flow.row > .edge::after {
+					left: auto;
+					right: 0;
+					bottom: auto;
+					top: 50%;
+					translate: 0 -50%;
+					border: 5px solid transparent;
+					border-left: 7px solid currentColor;
+					border-right-width: 0;
+				}
+				.flow.row > .edge > span {
+					grid-column: 1;
+					grid-row: 1;
+					align-self: end;
+					padding: 0 0.6rem 0.3rem 0.2rem;
+					text-align: center;
+				}
+				.flow.row > .group {
+					flex-direction: column;
+					align-items: stretch;
+				}
+			}
+
+			/* One text split into labelled parts. */
+			.parts {
+				display: grid;
+				gap: 0.5rem;
+			}
+			.parts > div {
+				display: grid;
+				grid-template-columns: 8.5rem minmax(0, 1fr);
+				gap: 0.75rem;
+				align-items: start;
+			}
+			.parts dt {
+				padding-top: 0.55rem;
+				color: var(--muted);
+				font-size: 0.8rem;
+				font-weight: 600;
+			}
+			.parts dd {
+				margin: 0;
+				padding: 0.5rem 0.8rem;
+				border: 1.5px solid var(--line);
+				border-radius: 8px;
+				background: var(--bg);
+				font-size: 0.92rem;
+			}
+			.parts.code dd {
+				font: 0.84rem/1.5 var(--mono);
+				white-space: pre-wrap;
+				overflow-wrap: anywhere;
+			}
+			.parts > .hot dt {
+				color: var(--accent);
+			}
+			.parts > .hot dd {
+				border-color: var(--accent);
+				background: var(--accent-soft);
+			}
+			@container (max-width: 26rem) {
+				.parts > div {
+					grid-template-columns: minmax(0, 1fr);
+					gap: 0.15rem;
+				}
+				.parts dt {
+					padding-top: 0;
+				}
+			}
+
+			/* Bars: --v on each row is its length in percent of the longest bar. */
+			.bars {
+				display: grid;
+				grid-template-columns: auto minmax(3rem, 1fr) auto;
+				gap: 0.45rem 0.7rem;
+				padding: 0;
+				list-style: none;
+				font-size: 0.9rem;
+			}
+			.bars li {
+				display: grid;
+				grid-column: 1 / -1;
+				grid-template-columns: subgrid;
+				align-items: center;
+			}
+			.bars li::after {
+				content: '';
+				grid-column: 2;
+				grid-row: 1;
+				width: calc(var(--v, 0) * 1%);
+				min-width: 2px;
+				height: 0.85rem;
+				border-radius: 3px;
+				background: var(--line);
+				/* A script that changes --v gets a smooth change. */
+				transition: width 0.25s ease-out;
+			}
+			.bars li > span {
+				grid-column: 1;
+				max-width: 11rem;
+			}
+			.bars li > b {
+				grid-column: 3;
+				font: 600 0.84rem var(--mono);
+			}
+			.bars li.hot::after {
+				background: var(--accent);
+			}
+			.bars li.hot > b {
+				color: var(--accent);
+			}
+
+			/* Motion. Every picture is complete when it stands still: in print, in a screenshot, and
+			   for a reader who turned motion off. */
+			@media screen and (prefers-reduced-motion: no-preference) {
+				/* A dot travels along a live edge. Use it for the path that the data takes. */
+				.edge.live::before {
+					content: '';
+					position: absolute;
+					left: 50%;
+					top: 0;
+					width: 7px;
+					height: 7px;
+					margin: -3.5px;
+					border-radius: 50%;
+					background: var(--accent);
+					animation: travel-down 1.8s linear infinite;
+				}
+				@keyframes travel-down {
+					0% {
+						top: 0;
+						opacity: 0;
+					}
+					15%,
+					80% {
+						opacity: 1;
+					}
+					100% {
+						top: calc(100% - 6px);
+						opacity: 0;
+					}
+				}
+				@container (min-width: 34rem) {
+					.flow.row > .edge.live::before {
+						left: 0;
+						top: 50%;
+						animation-name: travel-right;
+					}
+				}
+				@keyframes travel-right {
+					0% {
+						left: 0;
+						opacity: 0;
+					}
+					15%,
+					80% {
+						opacity: 1;
+					}
+					100% {
+						left: calc(100% - 6px);
+						opacity: 0;
+					}
+				}
+				/* The script at the end of the page adds .play when the figure scrolls into view. */
+				.play .seq > * {
+					animation: appear 0.45s ease-out both;
+					animation-delay: calc(var(--i, 0) * 0.3s);
+				}
+				.play .bars li::after {
+					transform-origin: left;
+					animation: grow 0.8s ease-out both;
+				}
+				@keyframes appear {
+					from {
+						opacity: 0;
+						transform: translateY(-6px);
+					}
+				}
+				@keyframes grow {
+					from {
+						transform: scaleX(0);
+					}
+				}
+			}
+			.replay {
+				margin-left: 0.5rem;
+				padding: 0;
+				border: 0;
+				background: none;
+				color: var(--accent);
+				font: inherit;
+				text-decoration: underline;
+				cursor: pointer;
+			}
+			@media print {
+				.replay {
+					display: none;
+				}
+			}
+			figure svg,
+			figure img {
+				display: block;
+				max-width: 100%;
+				height: auto;
+			}
+			figcaption {
+				margin-top: 0.4rem;
+				color: var(--muted);
+				font-size: 0.875rem;
+			}
+			details {
+				margin: 0 0 0.6rem;
+				border: 1px solid var(--border);
+				border-radius: 10px;
+			}
+			summary {
+				padding: 0.6rem 1rem;
+				cursor: pointer;
+				font-weight: 600;
+			}
+			details > :not(summary) {
+				margin-left: 1rem;
+				margin-right: 1rem;
+			}
+			@media print {
+				.toc {
+					display: none;
+				}
+				.layout {
+					display: block;
+					max-width: none;
+					padding: 0;
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<div class="layout">
+			<nav class="toc" aria-label="目录"></nav>
+			<main>
+				<header id="top">
+					<p class="kicker">独立只读盲审 · raydocs/tono PR #1672 · 第11轮</p>
+					<h1>PR1672 第11轮独立盲审：84分，不通过</h1>
+					<p class="lede">未知路由仍显示确定的流量去向，触发严重状态误导否决。新对比度算法也会放过真实低对比度；CI 绿色不能代替设计与状态安全验收。</p>
+					<p class="meta"><span class="chip blocked">不通过 · 有否决项</span><span>2026-10-19 · 固定源码与原始收据审查</span></p>
+				</header>
+				<section id="summary" data-toc="结论与范围">
+					<h2>84分；可访问性低于分项门槛，另有状态误导否决</h2>
+					<dl class="facts">
+						<div class="ask" id="summary-ask"><dt>Needs from you</dt><dd>无待答问题。本报告供本次验收使用；尚不能据此宣称 ≥95 或发布就绪。</dd></div>
+						<div id="summary-result"><dt>结论</dt><dd>84/100，低于85；可访问性6.5/10＝65%，低于70%；F2单独触发严重状态误导否决。主操作未发现难找；低对比度没有夸大为“全局不可读”否决。</dd></div>
+						<div id="summary-code"><dt>固定对象</dt><dd><code>c2f8762977360d8f2c953bf787651b8c5ad825df</code>。tip <code>f63a947e0a4e2fe0a71115aa356a944b4e4e2973</code>仅在一个changelog增加7行；两者apps/ios树相同。</dd></div>
+						<div id="summary-method"><dt>独立性</dt><dd>本人读取固定源码、指定原始CI和artifact；PR仅提取Rubric节。未读旧评分、评审/实施线程、密封自评、agent-reports或其余PR正文/评论；未建子线程、使用评审代理或联系实施方。产品未改、无commit/push/GitHub发帖。</dd></div>
+						<div id="summary-limits"><dt>证据边界</dt><dd>PNG原图、录屏抽帧、测试执行日志与源码推论分别标注。未在本orb重跑iOS/Swift/真机；未注入真实NetworkExtension故障，不报告“实测泄漏”。</dd></div>
+					</dl>
+				</section>
+				<section id="scores" data-toc="逐维评分">
+					<h2>视觉完成度高，但真实性不能由fixture补足</h2>
+					<div class="table-wrap"><table id="score-table"><thead><tr><th>维度</th><th>得分</th><th>比例</th><th>判断依据</th></tr></thead><tbody>
+						<tr id="score-hierarchy"><td>信息层级减字</td><td>18/20</td><td>90%</td><td>首页状态→一句解释→主操作→线路，信息清楚。Details的未知提示与确定路由表互相冲突，不能只凭减字给满分。</td></tr>
+						<tr id="score-interaction"><td>交互连贯单手</td><td>17/20</td><td>85%</td><td>主操作与选线靠下；sheet关闭、失败重试、输入后答案可见、选线pending有执行收据。AX5需滚动；连续失败恢复的状态义务仍有漏洞。</td></tr>
+						<tr id="score-brand"><td>高级克制及最新桌面品牌一致</td><td>14/15</td><td>93.3%</td><td>海平线、暖日、倒影与固定SHA的桌面SeaScene/SeaControls语汇一致，非旧紫色主题。大面积景观留白有辨识度；小字号副文案和状态色仍有可读性成本。未把源码比对冒充桌面同屏实测。</td></tr>
+						<tr id="score-glass"><td>Liquid Glass材质</td><td>13/15</td><td>86.7%</td><td>iOS26真实glassEffect API、互动玻璃控制与较实的内容卡分层；原图与sheet录屏采样可见边缘和背景变化。暖填充与白标签相冲突，静态/抽帧不证明全程折射或帧率。</td></tr>
+						<tr id="score-motion"><td>状态动效</td><td>12/15</td><td>80%</td><td>首连、网络重连、部分可用、失败及减少动态区分清楚；主动reload不设置reasserting。未知态未贯穿所有状态表述；动画主要为fixture演示，真实故障切换未运行。</td></tr>
+						<tr id="score-accessibility"><td>可访问性适配</td><td>6.5/10</td><td>65%：不达标</td><td>AX5重排、44pt目标和AX标签有进步；Cancel真实低对比度被算法放过，172次访问不能证明全覆盖；widget大字截断，真机VoiceOver听读未验证。</td></tr>
+						<tr id="score-authenticity"><td>真实性性能</td><td>3.5/5</td><td>70%</td><td>真实编译、31项交互测试和69项单测有原始日志；gallery标注Preview诚实。无真实NE故障注入、共享磁盘跨进程链、实机功耗/FPS/VoiceOver；系统widget仍不可用。</td></tr>
+					</tbody><tfoot><tr><th>总分</th><th>84/100</th><th>不通过</th><td>不按目标95补分，也不改变4.5:1与44pt阈值。</td></tr></tfoot></table></div>
+				</section>
+				<section id="findings" data-toc="关键发现">
+					<h2>未知状态与测量假阳性仍是验收阻塞</h2>
+					<ol class="items">
+						<li class="item" id="finding-contrast"><div class="item-head"><span class="tag">F1</span><h3>Cancel白字覆盖亮填充，新算法测到的不是glyph core</h3><span class="chip blocked">高 · 原图＋数值复算</span></div>
+							<p><code>HomeView.swift:430–443</code>给Cancel白字；背景升亮时不换墨色。<code>TonoUITests.swift:621–648</code>用整个元素的亮度中位数做背景，把任意方向差异≥1.5:1的像素都算“ink”，再取其90th百分位；未填充的暗背景也成为“文字”。</p>
+							<p>CI <code>ui-tests.log:443</code>把Cancel报为4.8:1、ink53.04%。原图同胶囊复算4.7835:1、ink52.993%，而英文白字局部背景估计的中位数为3.9258:1；Preparing为3.0345:1（全胶囊算法反而报7.7686）。前者99.72%、后者100%的所选字芯像素低于4.5:1。</p>
+							<p>独立方法只选择RGB接近(247,243,238)的1805/1863个字芯；以同x的无字扫描行y=2050/2115估计局部背景。两条扫描行单独算，Connecting中位数3.839/3.996，Preparing2.992/3.070，结论不依赖插值方向。它是原图复算，不冒充运行期像素或新合规检测器。</p>
+							<p>应补混合明暗/渐变胶囊负控，按实际文字与其局部背景测量；不能用元素中最有利的像素代表最不利文字。阈值仍4.5:1，不借17pt字号改用3:1。</p>
+						</li>
+						<li class="item" id="finding-unknown"><div class="item-head"><span class="tag">F2</span><h3>双重无答已被识别，流量表仍断言旧模式正在生效</h3><span class="chip blocked">高 · 严重状态误导否决</span></div>
+							<p><code>RouteApply.run</code>对reload与status均无答正确返回unconfirmed，模式段不选中，域名查询也不答。但<code>AppModel.swift:431–434,654–667</code>没有把未知纳入连接状态事实；<code>DetailsSheet.swift:89–103</code>仍用旧mode、旧probe和phase.tunnelUp绘制当前流量去向。</p>
+							<p>原图<code>details-mode-unconfirmed.png</code>同时显示“无法确认哪些routes在用”和“WHERE TRAFFIC GOES / Other apps / Local direct”，AI与Video还带旧的绿色地区。此处是当前路由说明，不是标明“上次确认”的历史值。Stable与Three-tier影响直连/代理选择，两者都未知时不能只在picker和查询里承认未知。</p>
+							<p>这足以否决状态表述安全；不是已经实测出流量泄漏。指定XCUITest只断言两个段未选中和无routeAnswer，没有检查流量表，故能在矛盾画面上通过。所需结果：未知态贯穿首页/Details/Settings及对外状态，旧结果若保留必须明确标为历史、不得继续作当前健康证明。</p>
+						</li>
+						<li class="item" id="finding-restore"><div class="item-head"><span class="tag">F3</span><h3>一次恢复失败后，再一次保存失败会丢掉恢复义务</h3><span class="chip">中 · 源码推论，未注入</span></div>
+							<p>序列：A运行→请求B落盘→B被拒→恢复A写失败，unsavedRoutes=A。下次change先retryPutBack；若仍失败，记录保留。随后保存新请求再失败，<code>RouteApply.swift:99–104</code>返回默认unsaved=nil；<code>AppModel.swift:415</code>直接覆盖旧记录为nil。</p>
+							<p>磁盘仍可能是被拒的B，却不再显示/重试恢复A；后续On Demand可能读取B。现有单测只覆盖首次恢复失败，preview“putback”也未执行真实I/O。此处是明确的源码状态丢失路径，尚无本轮真实文件故障执行收据；不能称实测泄漏。新请求未成功保存时，不应清除尚未履行的恢复义务。</p>
+						</li>
+						<li class="item" id="finding-writer"><div class="item-head"><span class="tag">F4</span><h3>安全heartbeat仍可被未确认的app旧状态覆盖</h3><span class="chip">高影响风险 · 源码推论，未注入</span></div>
+							<p><code>AppModel.onForeground:180–184</code>先publishStatus(force:true)，后readStatus；<code>StatusStore.swift:29–36</code>没有writer优先级。若NE已写ROUTES_STOPPED，而app仍持有旧connected且status消息无答，app会把旧phase重新写为新鲜状态；NE下次心跳才可能纠正。</p>
+							<p>新TunnelGraph单测仅证明“旧app状态→失败heartbeat”一个方向，不证明反向写入安全。本项是对特定跨进程序列的条件推论；尚未在真实NE/App Group上运行，不能给出现网发生频率、持续时间或网络泄漏结论。所需验证应包含失败heartbeat之后app前台无答与反向写入，而非再演示一次gallery。</p>
+						</li>
+					</ol>
+				</section>
+				<section id="contrast" data-toc="测量方法专项">
+					<h2>稀疏行的旧误测解释成立，不能推出新算法普遍正确</h2>
+					<p id="contrast-old">Settings原图行[61,1828,1145,1984]复算：旧97th方法1.1887:1，新方法15.2681:1，ink2.347%。这支持“字占比不足3%时旧百分位读到背景”的机制；固定截图的颜色空间/边界可造成与声称2.1%的小差异。不需要借audit-race才能解释该行，旧race说法没有独立执行证据可认定。</p>
+					<p id="contrast-calibration">校准确实执行：日志2638/2646/2654为3.3、4.4、16.2；测试断言前二低于4.5、primary通过。它们验证平坦稀疏短字行，不验证“亮填充＋暗未填充＋白标签”的胶囊，不能排除F1假阳性。</p>
+					<div class="table-wrap"><table id="contrast-table"><thead><tr><th>原图区域</th><th>元素算法</th><th>字芯局部背景中位数</th><th>判断</th></tr></thead><tbody>
+						<tr><td>Connecting Cancel</td><td>4.7835:1</td><td>3.9258:1</td><td>假阳性；99.72%所选字芯低于4.5</td></tr>
+						<tr><td>Preparing Cancel</td><td>7.7686:1</td><td>3.0345:1</td><td>假阳性；100%所选字芯低于4.5</td></tr>
+						<tr><td>Settings稀疏行</td><td>15.2681:1</td><td>未另作局部字芯估计</td><td>旧97th仅1.1887，不支持旧低对比结论</td></tr>
+					</tbody></table></div>
+					<p id="contrast-ax5">AX5独立sweep原始汇总10+11+13+24+35+44+35＝172，属元素访问次数，不是172个唯一且全部可见的控件；有滚动后重复和sheet下面的Home元素。Lines的1.0:1非hittable结果被排除；排除有日志，但isHittable不是可见性的充分证明。扫描没有覆盖首连/Preparing胶囊；audit中Cancel已被同一算法判为4.8通过。</p>
+					<p id="contrast-audit">hit-area仍以44×44pt、contrast以4.5:1判断，没有发现代码直接下调这两个门槛。AX5的textClipped预测与固定widget的dynamicType/textClipped被人工豁免，因此“0失败”不等于Apple原始audit零问题。AX5原图普遍重排良好，但小widget标题可见“Connection dr…”/“Status unavail…”截断；不能据绿灯宣称全字号无截断或VoiceOver已听验。</p>
+				</section>
+				<section id="visuals" data-toc="原图与动效观察">
+					<h2>材料与交互可见，图像只证明其所处的执行层</h2>
+					<figure id="fig-evidence"><style>#fig-evidence .shots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}#fig-evidence img{width:100%;height:auto;display:block;border:1px solid var(--border)}#fig-evidence .label{font-size:.85rem;color:var(--muted)}@media(max-width:520px){#fig-evidence .shots{grid-template-columns:minmax(0,1fr)}}</style><div class="shots"><div><p class="label">F2：未知路由却仍给出当前去向</p><img src="media/details-mode-unconfirmed.png" alt="Details同时承认未知和断言Local direct" loading="lazy"></div><div><p class="label">F1：Preparing白色Cancel位于亮填充上</p><img src="media/en-03a-preparing.png" alt="Preparing胶囊低对比度Cancel标签" loading="lazy"></div></div><figcaption>原artifact截图，未重画、未改字；点名的是状态语义和字芯局部对比，不把fixture当真实网络。</figcaption></figure>
+					<p id="visual-method">已逐张浏览全部79张PNG的contact sheet并放大关键原图。5段原MP4以抽帧检查：四段短片约每秒一帧，1062.922秒UI录屏约每10秒一帧；不是逐帧全程播放，不能证明无一帧闪烁、掉帧、实际触感或全程无重叠。原视频保留在media/，并由原始zip哈希约束。</p>
+					<p id="visual-observed">观察：首连太阳上升与填充、网络重连保留暖边与计时、部分可用降低天空状态、失败收日与Retry，减少动态版本有相应收敛。sheet-zoom是preview自动打开，不含用户点按；UI测试视频/日志才是点击与关闭的执行层。选线pending原图保留Tokyo和spinner，执行测试确认随后才改为Los Angeles。</p>
+					<p id="visual-brand">真玻璃API和减少透明度分支在固定源码可见；内容卡没有处处叠加玻璃。夜/晨/日暖色与固定SHA桌面海平线、倒影一致，首页景观强、控制克制。浅色系统外观图仍采用产品暗色场景；本轮没有把它当完整浅色主题覆盖。</p>
+				</section>
+				<section id="execution" data-toc="CI与证据分层">
+					<h2>31项交互、69项单测成立；真实NE与系统扩展故障链未成立</h2>
+					<div class="table-wrap"><table id="execution-table"><thead><tr><th>层级</th><th>可确认</th><th>不可推出</th></tr></thead><tbody>
+						<tr id="exec-ci"><td>iOS CI 39184374749</td><td>固定code SHA，attempt1，success；hosted Linux 69 tests/0 failures；macOS亦有69；XCUITest日志31个passed、0个skipped，1031.796秒。</td><td>测试数量不证明设计合格；测试在fixture app中，不是31项真实VPN用例。</td></tr>
+						<tr id="exec-build"><td>真实target编译</td><td>CI构建固定Libbox、unsigned Release设备App/PacketTunnel/Widgets以及Debug模拟器。</td><td>不是签名安装、实际NE运行、权限成功或故障注入；所谓stub typecheck更不能提升为运行收据。指定日志未包含单独stub/mutation-red执行证据。</td></tr>
+						<tr id="exec-graph"><td>纯逻辑heartbeat</td><td>TunnelGraphTests:10–30注入新/旧start均拒；断言无running graph、内存“file”恢复A；编码解码后StatusWording为ROUTES_STOPPED/off/Retry。Linux原始日志354–355证实执行通过。</td><td>“file”是局部变量，beat.encoded→decode也在内存；没有共享磁盘跨进程读写、真实libbox失败/恢复。没有本轮mutation-red原始收据，故不核准该声称。</td></tr>
+						<tr id="exec-gallery"><td>真实Widget view的app gallery</td><td>WidgetGallery:31–40构造graph并在内存序列化；StatusWidgetView实际渲染ROUTES_STOPPED/Retry。Control label也存在。</td><td>View真实不等于extension运行；Control是gallery手工控件＋同一wording，不是实际ControlWidget provider/系统Control Center交互。</td></tr>
+						<tr id="exec-system"><td>系统容器</td><td>real-widget-home-screen.png确在模拟器系统Home Screen，显示Status unavailable；Dynamic Island为真实ActivityKit容器里的Preview内容。</td><td>没有真实状态文件的system widget故障呈现；没有实际Control Center与Lock Screen交互验收。</td></tr>
+						<tr id="exec-gate"><td>gate 39184377684</td><td>固定SHA成功；job metadata已保留。</td><td>ios-ci.yml:3–8明确iOS尚不在ci-gate内；gate不是额外iOS覆盖，也不是设计裁决。</td></tr>
+						<tr id="exec-perf"><td>模拟器性能</td><td>日志CPU Time平均7.228秒、Physical约59824kB、Peak约62708kB；perf.txt宿主进程RSS约210MB、动画CPU7–10.6%，reduce-motion约0.1–1%。</td><td>不是iPhone功耗/热量/稳定FPS/NE的jetsam内存；视频600/1元数据不是屏幕实际600FPS。无真机VoiceOver听读与haptic验收。</td></tr>
+					</tbody></table></div>
+					<p id="exec-reload">主动reload在<code>PacketTunnelProvider.swift:114–120</code>不设置reasserting；网络/core reloadInPlace:250–264才设置。源码支持“不把主动切线冒充网络变化”，但这不是实际NE重载录屏或日志证明。</p>
+				</section>
+				<section id="rubric" data-toc="原文与核验命令">
+					<h2>评分只使用Rubric原文与固定对象</h2>
+					<blockquote id="rubric-verbatim">统一100分：信息层级减字20、交互连贯单手20、高级克制及最新桌面品牌一致15、Liquid Glass材质15、状态动效15、可访问性适配10、真实性性能5；&gt;=85且各项&gt;=70%，严重状态误导/主操作难发现/不可读一票否决。</blockquote>
+					<p>PR的指定节提取原文在<code>raw/rubric-verbatim.md</code>。不访问其中引用的旧报告。目标≥95不是给分要求。</p>
+					<details id="evidence-commands"><summary>关键可复核命令与决定性输出</summary><pre><code>git diff --numstat c2f8762977360d8f2c953bf787651b8c5ad825df f63a947e0a4e2fe0a71115aa356a944b4e4e2973
+7  0  docs/changelog.d/2026-10-17-ios-singbox-horizon.md
+git rev-parse &lt;code-or-tip&gt;:apps/ios
+6934aafa6283c886a3f657895838c6b8aa8d885c (both)
+grep -c 'Test Case.*passed' media/ui-tests.log → 31
+grep -c 'Test Case.*skipped' media/ui-tests.log → 0
+uv run --with pillow --with numpy python analysis/contrast-reproduction.py
+Connecting: element4.7835, glyph-local median3.9258
+Preparing: element7.7686, glyph-local median3.0345
+sha256sum raw/artifact-12159295214.zip
+f765c76f21301c3cfc16a8b5c209aae3924578717281318c773f4bfe45b44e7f
+GitHub artifact digest matches; zip content: 79PNG + 5MP4 + 7 other files.</code></pre></details>
+				</section>
+				<section id="evidence" data-toc="保留文件与哈希">
+					<h2>证据保存在本线程，不写入产品仓库历史</h2>
+					<p id="evidence-root">根目录：<code>/home/user/workspace/repo/.amp/in/artifacts/pr1672-r11/</code>。本报告为<code>report.html</code>，逐文件绝对路径与SHA256在<code>SHA256SUMS</code>；该清单不包含自身以避免循环哈希。报告与清单自身哈希另在最终回复提供。</p>
+					<ul id="evidence-inventory"><li><code>raw/fixed-source.tar.gz</code>：固定SHA的apps/ios、iOS/gate workflow、桌面Views/Resources；SHA256 <code>e2cd11fdd513c138bb625ccb973d7ec7194536fa6eb23b2a5a454de116636f31</code>。</li><li><code>raw/ios-39184374749.zip</code>：原始CI日志；SHA256 <code>2b4d61cb4055d92d88d5099ec2c457afb849dfc271d082199a425ccfd6d1fb86</code>。</li><li><code>raw/gate-39184377684.zip</code>：原始gate日志；SHA256 <code>b24272e934a2ec759e59463dc6c31d20317fe72e54f7b1b9d9f7151008c956f0</code>。</li><li><code>raw/artifact-12159295214.zip</code>：原始79PNG/5MP4 artifact；SHA256 <code>f765c76f21301c3cfc16a8b5c209aae3924578717281318c773f4bfe45b44e7f</code>。</li><li><code>raw/*jobs.json</code>、<code>raw/run-*.json</code>、<code>raw/artifact-12159295214.json</code>：GitHub元数据；<code>raw/tip-delta.numstat</code>、<code>raw/ios-tree-identity.txt</code>：tip边界。</li><li><code>media/</code>：91个原artifact提取文件，原PNG/MP4/日志/README/perf/provenance均保留。</li><li><code>analysis/contrast-reproduction.py</code>、<code>analysis/contrast-results.json</code>：可重放数值分析；<code>analysis/log-excerpts.txt</code>：带行号的原始日志摘录，不代替完整zip。</li></ul>
+					<p id="evidence-source-lines">所有源码行号均指固定SHA的文件；可从source tar解出。复算仅依赖原PNG；没有修改产品、降低检测阈值、删除测试或重跑CI来制造绿灯。复核范围外的旧分数、他人报告和讨论不构成本结论依据。</p>
+				</section>
+			</main>
+		</div>
+		<script>
+			// Builds the side contents list from the sections, so it cannot drift from the page.
+			const toc = document.querySelector('.toc')
+			const sections = [...document.querySelectorAll('main > section[id]')]
+			const list = document.createElement('ol')
+			const links = new Map()
+			for (const section of sections) {
+				const label = section.dataset.toc || section.querySelector('h2')?.textContent.trim()
+				if (!label) continue
+				const link = document.createElement('a')
+				link.href = `#${section.id}`
+				link.textContent = label
+				const count = section.querySelectorAll('.item, tbody > tr[id]').length
+				if (count > 0) link.textContent += ` (${count})`
+				links.set(section, link)
+				const entry = document.createElement('li')
+				entry.append(link)
+				list.append(entry)
+			}
+			toc.append(list)
+			const observer = new IntersectionObserver(
+				(entries) => {
+					for (const entry of entries) {
+						if (!entry.isIntersecting) continue
+						for (const link of links.values()) link.removeAttribute('aria-current')
+						links.get(entry.target)?.setAttribute('aria-current', 'true')
+					}
+				},
+				{ rootMargin: '0px 0px -70% 0px' },
+			)
+			for (const section of links.keys()) observer.observe(section)
+
+			// A line break before the end tag of a view would show as an empty last line.
+			for (const pre of document.querySelectorAll('figure pre')) {
+				const last = pre.lastChild
+				if (last?.nodeType === Node.TEXT_NODE) last.data = last.data.trimEnd()
+			}
+
+			// Colors the heavy glyphs in a drawing, so the changed parts stand out from the light lines.
+			const heavy = /([━┃┏┓┗┛┣┫┳┻╋▶◀▲▼●◆■]+)/
+			for (const pre of document.querySelectorAll('pre.diagram')) {
+				const walker = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT)
+				const texts = []
+				while (walker.nextNode()) texts.push(walker.currentNode)
+				for (const text of texts) {
+					const parts = text.data.split(heavy)
+					if (parts.length === 1) continue
+					const pieces = parts.map((part, index) => {
+						if (index % 2 === 0) return part
+						const span = document.createElement('span')
+						span.className = 'hot'
+						span.textContent = part
+						return span
+					})
+					text.replaceWith(...pieces)
+				}
+			}
+
+			// Colors the added and removed lines in a diff view. The view holds text only.
+			for (const pre of document.querySelectorAll('pre.diff')) {
+				const lines = pre.textContent.split('\n').map((line) => {
+					const span = document.createElement('span')
+					span.className = line.startsWith('+') ? 'line add' : line.startsWith('-') ? 'line del' : 'line'
+					span.textContent = line === '' ? ' ' : line
+					return span
+				})
+				pre.replaceChildren(...lines)
+			}
+
+			// Plays the one-shot motion of a picture when it scrolls into view, and adds a Replay
+			// button. Without this script the pictures are complete and still.
+			if (matchMedia('(prefers-reduced-motion: no-preference)').matches) {
+				const play = new IntersectionObserver((entries) => {
+					for (const entry of entries) {
+						if (!entry.isIntersecting) continue
+						entry.target.classList.add('play')
+						play.unobserve(entry.target)
+					}
+				})
+				for (const figure of document.querySelectorAll('figure')) {
+					if (!figure.querySelector('.seq, .bars')) continue
+					for (const sequence of figure.querySelectorAll('.seq')) {
+						;[...sequence.children].forEach((child, index) => child.style.setProperty('--i', index))
+					}
+					play.observe(figure)
+					// A picture with its own controls needs no Replay button.
+					if (figure.querySelector('input, select, button')) continue
+					const button = document.createElement('button')
+					button.type = 'button'
+					button.className = 'replay'
+					button.textContent = 'Replay'
+					button.addEventListener('click', () => {
+						figure.classList.remove('play')
+						void figure.offsetWidth
+						figure.classList.add('play')
+					})
+					const caption = figure.querySelector('figcaption') ?? figure
+					caption.append(button)
+				}
+			}
+		</script>
+	</body>
+</html>
