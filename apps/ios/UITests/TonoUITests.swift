@@ -668,10 +668,13 @@ final class TonoUITests: XCTestCase {
 
     /// Contrast of a label drawn in known inks against its local background, from the element's own
     /// pixels (round 11's reviews: a whole-element median is not the background on a gradient).
-    /// Glyph cores are pixels within 12 of an ink in every channel; the text band is the rows that
+    /// Glyph cores are pixels within 12 of an ink in every channel whose four neighbours are too: a
+    /// stroke's interior. A one-pixel anti-aliased fringe of another colour can pass through an ink's
+    /// value (round 12: orange text's edges over black matched the dark ink and read 1.2:1, while
+    /// the text is 9.6:1); offline on round 11's captures the eroded cores read Cancel at 2.99:1
+    /// (Preparing) and 3.81:1 (Connecting), as the reviews measured. The text band is the rows that
     /// hold them; each core is compared with the mean of the non-glyph pixels in its own column
-    /// 2-5 px above and, separately, 2-5 px below the band (both inside the element), and the worse
-    /// side counts. Returns the
+    /// 2-5 px above and, separately, 2-5 px below the band, and the worse side counts. Returns the
     /// median over the cores and the share under 4.5:1; nil when no glyph core is found.
     @MainActor static func labelContrast(_ element: XCUIElement, inks: [(Int, Int, Int)]) -> (median: Double, below: Double, cores: Int)? {
         guard let cg = element.screenshot().image.cgImage else { return nil }
@@ -690,9 +693,13 @@ final class TonoUITests: XCTestCase {
             let i = (y * w + x) * 4
             return 0.2126 * lin(px[i]) + 0.7152 * lin(px[i + 1]) + 0.0722 * lin(px[i + 2])
         }
-        func core(_ x: Int, _ y: Int) -> Bool {
+        func near(_ x: Int, _ y: Int, _ ink: (Int, Int, Int)) -> Bool {
+            guard x >= 0, x < w, y >= 0, y < h else { return false }
             let i = (y * w + x) * 4
-            return inks.contains { abs(Int(px[i]) - $0.0) <= 12 && abs(Int(px[i + 1]) - $0.1) <= 12 && abs(Int(px[i + 2]) - $0.2) <= 12 }
+            return abs(Int(px[i]) - ink.0) <= 12 && abs(Int(px[i + 1]) - ink.1) <= 12 && abs(Int(px[i + 2]) - ink.2) <= 12
+        }
+        func core(_ x: Int, _ y: Int) -> Bool {
+            inks.contains { near(x, y, $0) && near(x + 1, y, $0) && near(x - 1, y, $0) && near(x, y + 1, $0) && near(x, y - 1, $0) }
         }
         var rows = [Int](repeating: 0, count: h)
         for y in 0..<h { for x in 0..<w where core(x, y) { rows[y] += 1 } }
@@ -705,10 +712,9 @@ final class TonoUITests: XCTestCase {
         for y in top...bottom {
             for x in 0..<w where core(x, y) {
                 let l = lum(x, y)
-                // Both sides inside the element: a band at its edge is another element's text
-                // reaching in (a widget title's descenders over the line under it), not this label.
-                guard let above = side(x, Array((top - 5)...(top - 2))), let below = side(x, Array((bottom + 2)...(bottom + 5))) else { continue }
-                ratios.append([above, below].map { (max(l, $0) + 0.05) / (min(l, $0) + 0.05) }.min()!)
+                let sides = [side(x, Array((top - 5)...(top - 2))), side(x, Array((bottom + 2)...(bottom + 5)))].compactMap { $0 }
+                guard !sides.isEmpty else { continue }
+                ratios.append(sides.map { (max(l, $0) + 0.05) / (min(l, $0) + 0.05) }.min()!)
             }
         }
         guard !ratios.isEmpty else { return nil }
