@@ -507,7 +507,12 @@ nonisolated enum HelperProtocolVersion {
     ///   strict intent. The reply echoes `aiHomeScoped` as rendered. Quit,
     ///   Core death and Restore internet release as before (AI hold kept on
     ///   quit and failure). An older daemon refuses the unknown field.
-    static let current = "4.52.60"
+    /// - 4.52.60 → 4.52.61: before the core starts (and after a sync stop),
+    ///   the helper binds each loopback port the config needs the way the core
+    ///   would. A port another program holds refuses the start with
+    ///   `CORE_PORT_IN_USE` and a fixed message naming the port, transport and
+    ///   holding process, instead of the core exiting with a bare status.
+    static let current = "4.52.61"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

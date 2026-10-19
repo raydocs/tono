@@ -218,6 +218,9 @@ final class CoreManager {
     private func launchValidatedSnapshotLocked(configPath: String, startAllowed: () -> Bool) throws {
         // Recheck the root-owned binary at launch, including after a sync stop.
         _ = try secureMetadata(mihomoPath, type: mode_t(S_IFREG), owner: 0)
+        // After a sync stop too: the old core has exited, so anything still on
+        // these ports belongs to another program and the core would only exit.
+        try CoreListenPreflight.check(configPath: configPath)
         let child = Process()
         child.executableURL = URL(fileURLWithPath: mihomoPath)
         child.arguments = ["run", "-D", runtimeDirectory, "-c", configPath]
@@ -526,5 +529,151 @@ final class CoreManager {
             try terminateOwnedCore(identity.pid, expectedPath: identity.executablePath)
         }
         try? removePIDFile()
+    }
+}
+
+/// A loopback socket the core binds when it starts.
+struct CoreListenSocket: Hashable {
+    let port: UInt16
+    let udp: Bool
+}
+
+/// Finds a loopback port the core needs that another program already holds,
+/// before the core starts. The core itself only exits with a status: a Docker
+/// or dnsmasq resolver on port 53 then reads as an ordinary failed connection,
+/// and the app retries something that can never succeed.
+enum CoreListenPreflight {
+    static let portInUseCode = "CORE_PORT_IN_USE"
+
+    /// The sockets the validated runtime config binds: TCP for every direct
+    /// and mixed inbound and for the controller, UDP as well for a direct
+    /// inbound (Tono-DNS) whose network is not TCP only.
+    static func sockets(inConfig bytes: Data) -> [CoreListenSocket] {
+        guard let parsed = try? JSONSerialization.jsonObject(with: bytes),
+              let object = goFoldedJSONKeys(parsed) as? [String: Any] else { return [] }
+        var sockets: [CoreListenSocket] = []
+        func add(_ port: Int, udp: Bool) {
+            guard (1...65_535).contains(port) else { return }
+            let socket = CoreListenSocket(port: UInt16(port), udp: udp)
+            if !sockets.contains(socket) { sockets.append(socket) }
+        }
+        for inbound in object["inbounds"] as? [[String: Any]] ?? [] {
+            guard let port = inbound["listen_port"] as? Int else { continue }
+            switch inbound["type"] as? String {
+            case "direct":
+                let network = inbound["network"] as? String
+                if network != "udp" { add(port, udp: false) }
+                if network != "tcp" { add(port, udp: true) }
+            case "mixed":
+                add(port, udp: false)
+            default:
+                continue
+            }
+        }
+        if let experimental = object["experimental"] as? [String: Any],
+           let api = experimental["clash_api"] as? [String: Any],
+           let controller = api["external_controller"] as? String,
+           let port = controller.split(separator: ":").last.flatMap({ Int($0) }) {
+            add(port, udp: false)
+        }
+        return sockets
+    }
+
+    /// Binds each socket the way the core's Go runtime does — SO_REUSEADDR on
+    /// TCP listeners, none on UDP — so a port counts as taken exactly when the
+    /// core's own bind would fail. Any error other than EADDRINUSE is left for
+    /// the core to report.
+    static func firstBusy(_ sockets: [CoreListenSocket]) -> CoreListenSocket? {
+        sockets.first { socket in
+            let fd = Darwin.socket(AF_INET, socket.udp ? SOCK_DGRAM : SOCK_STREAM, 0)
+            guard fd >= 0 else { return false }
+            defer { close(fd) }
+            if !socket.udp {
+                var one: Int32 = 1
+                _ = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, socklen_t(MemoryLayout<Int32>.size))
+            }
+            var address = sockaddr_in()
+            address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            address.sin_family = sa_family_t(AF_INET)
+            address.sin_port = socket.port.bigEndian
+            address.sin_addr.s_addr = inet_addr("127.0.0.1")
+            let bound = withUnsafePointer(to: &address) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+            return bound != 0 && errno == EADDRINUSE
+        }
+    }
+
+    /// The process holding a local socket on this port and protocol (a TCP
+    /// listener, or a bound UDP socket), as its short name and PID.
+    static func holder(of socket: CoreListenSocket) -> (name: String, pid: Int32)? {
+        let capacity = proc_listallpids(nil, 0)
+        guard capacity > 0 else { return nil }
+        var pids = [Int32](repeating: 0, count: Int(capacity) + 32)
+        let count = pids.withUnsafeMutableBytes {
+            proc_listallpids($0.baseAddress, Int32($0.count))
+        }
+        guard count > 0 else { return nil }
+        for pid in pids.prefix(Int(count)) where pid > 0 && holds(pid: pid, socket) {
+            var name = [CChar](repeating: 0, count: 256)
+            guard proc_name(pid, &name, UInt32(name.count)) > 0 else { return ("", pid) }
+            return (String(cString: name), pid)
+        }
+        return nil
+    }
+
+    private static func holds(pid: Int32, _ socket: CoreListenSocket) -> Bool {
+        let fdSize = MemoryLayout<proc_fdinfo>.stride
+        let needed = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
+        guard needed > 0 else { return false }
+        var fds = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(needed) / fdSize + 16)
+        let filled = fds.withUnsafeMutableBytes {
+            proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count))
+        }
+        guard filled > 0 else { return false }
+        for fd in fds.prefix(Int(filled) / fdSize) where fd.proc_fdtype == UInt32(PROX_FDTYPE_SOCKET) {
+            var info = socket_fdinfo()
+            let size = Int32(MemoryLayout<socket_fdinfo>.size)
+            guard proc_pidfdinfo(pid, fd.proc_fd, PROC_PIDFDSOCKETINFO, &info, size) == size else { continue }
+            let family = info.psi.soi_family
+            guard family == AF_INET || family == AF_INET6 else { continue }
+            let kind = info.psi.soi_kind
+            let localPort: Int32
+            if socket.udp {
+                guard kind == Int32(SOCKINFO_IN), info.psi.soi_type == SOCK_DGRAM else { continue }
+                localPort = info.psi.soi_proto.pri_in.insi_lport
+            } else {
+                guard kind == Int32(SOCKINFO_TCP),
+                      info.psi.soi_proto.pri_tcp.tcpsi_state == TSI_S_LISTEN else { continue }
+                localPort = info.psi.soi_proto.pri_tcp.tcpsi_ini.insi_lport
+            }
+            if UInt16(bigEndian: UInt16(truncatingIfNeeded: localPort)) == socket.port { return true }
+        }
+        return false
+    }
+
+    /// The coded refusal for a taken port. The message keeps one fixed shape
+    /// because the app reads the port, protocol and holder back out of it.
+    static func failure(for socket: CoreListenSocket, holder: (name: String, pid: Int32)?) -> HelperFailure {
+        let proto = socket.udp ? "UDP" : "TCP"
+        var message = "Port \(socket.port) (\(proto)) on 127.0.0.1 is already in use"
+        if let holder {
+            let name = String(holder.name.unicodeScalars.filter {
+                $0.value >= 0x20 && $0.value != 0x7F && $0 != "(" && $0 != ")"
+            }.prefix(64))
+            message += " by \(name.isEmpty ? "another program" : name) (PID \(holder.pid))."
+        } else {
+            message += " by another program."
+        }
+        return .coded(code: portInUseCode, message: message)
+    }
+
+    /// Throws the coded refusal when a port the config at `configPath` needs is taken.
+    static func check(configPath: String) throws {
+        guard let bytes = FileManager.default.contents(atPath: configPath),
+              let busy = firstBusy(sockets(inConfig: bytes)) else { return }
+        throw failure(for: busy, holder: holder(of: busy))
     }
 }
