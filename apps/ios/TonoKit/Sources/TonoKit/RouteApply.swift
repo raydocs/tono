@@ -80,11 +80,19 @@ public struct RouteApplyReport: Equatable, Sendable {
     /// Put-back of the inputs file that failed: what the file should hold and does not. The app
     /// retries it, and says so, instead of swallowing the error.
     public var unsaved: RouteSettings?
+    /// Whether any write of the inputs file succeeded in this run.
+    public var wrote: Bool
 
-    public init(_ outcome: RouteApplyOutcome, unsaved: RouteSettings? = nil) {
+    public init(_ outcome: RouteApplyOutcome, unsaved: RouteSettings? = nil, wrote: Bool = true) {
         self.outcome = outcome
         self.unsaved = unsaved
+        self.wrote = wrote
     }
+
+    /// What the inputs file still has to be put back to after this run, given what was owed before
+    /// it. An earlier failed put-back stays owed until a write of the file succeeds: a run whose
+    /// saves all failed left the file as it was, holding the refused routes.
+    public func owed(before: RouteSettings?) -> RouteSettings? { wrote ? unsaved : unsaved ?? before }
 }
 
 /// Changing the mode or line: save the inputs, ask a running tunnel to rebuild, and report only
@@ -98,7 +106,7 @@ public enum RouteApply {
             try save(requested)
         } catch {
             // The inputs file is written atomically: it still holds the previous choice.
-            return RouteApplyReport(.notApplied(code: "SAVE_FAILED", inEffect: previous))
+            return RouteApplyReport(.notApplied(code: "SAVE_FAILED", inEffect: previous), wrote: false)
         }
         guard tunnelUp else { return RouteApplyReport(.saved(requested)) }
         var unsaved: RouteSettings?

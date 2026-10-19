@@ -210,3 +210,5 @@
 "route_unsaved" = "当前路由也没能保存，Tono 会重试。";
 "check_unconfirmed" = "无法确认当前使用的路由，暂不作答。";
 "line_unconfirmed" = "未确认";
+"lane_unconfirmed" = "未确认";
+"settings_mode_unconfirmed" = "无法确认当前是哪个模式，详见「详情」。";

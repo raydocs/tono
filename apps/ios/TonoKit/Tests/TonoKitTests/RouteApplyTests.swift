@@ -46,6 +46,24 @@ final class RouteApplyTests: XCTestCase {
         XCTAssertEqual(report.unsaved, threeTier)
     }
 
+    /// Round 11 (GPT F3): the put-back failed, its retry failed, then the next request's save
+    /// failed too. The file still holds the refused routes, so the put-back is still owed.
+    func testAPutBackStaysOwedWhenTheNextRequestCannotWriteTheFileEither() async {
+        var file = stable
+        var writable = true
+        let first = await RouteApply.run(stable, previous: threeTier, tunnelUp: true,
+                                         save: { if !writable { throw WriteFailed() }; file = $0; writable = false },
+                                         reload: { ReloadReply.refused(code: "CORE_START", running: self.threeTier).encoded },
+                                         status: { nil })
+        var owed = first.owed(before: nil)
+        XCTAssertEqual(owed, threeTier)
+        let second = await RouteApply.run(RouteSettings(mode: .threeTier, node: "osaka-1"), previous: threeTier, tunnelUp: true,
+                                          save: { _ in throw WriteFailed() }, reload: { nil }, status: { nil })
+        owed = second.owed(before: owed)
+        XCTAssertEqual(file, stable, "the file still holds the refused routes")
+        XCTAssertEqual(owed, threeTier, "the unfinished put-back was dropped")
+    }
+
     func testRefusedReloadReportsTheGraphTheExtensionStillRuns() async {
         var file: RouteSettings?
         let outcome = await RouteApply.run(stable, previous: threeTier, tunnelUp: true, save: { file = $0 },

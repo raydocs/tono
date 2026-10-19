@@ -419,27 +419,18 @@ struct ActionCapsule: View {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             onToggle(want)
         } label: {
-            // Accessibility sizes: the action gets the full width and the session timer goes under
-            // it, instead of the label shrinking beside a fixed-width timer.
-            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-                                                      : AnyLayout(HStackLayout())
-            layout {
-                // One line at every text size: shrink rather than hyphenate ("Dis-con-nect") at AX sizes.
-                // The old action leaves before the new one shows, so "Connect" and "Cancel" never overlap.
-                ZStack(alignment: .leading) {
-                    Text(title).tonoFont(17, .semibold, relativeTo: .body)
-                        .lineLimit(1).minimumScaleFactor(0.6)
-                        .id(title)
-                        .transition(.swap(rise: 0, reduceMotion: reduceMotion))
+            labelRow(filled ? TonoColor.actionInk : TonoColor.textPrimary.opacity(action == .disconnecting ? 0.5 : 1))
+                // The sunrise fill is opaque and light: over it the label is drawn in the action ink
+                // (8.6:1 or more on the fill), over the glass beside it in white. White on the fill
+                // read 3.0:1 (Preparing) and 3.9:1 (Connecting) in round 11's captures.
+                .overlay {
+                    if !filled {
+                        labelRow(TonoColor.actionInk)
+                            .mask(alignment: .leading) { fillMask }
+                            .opacity(fill > 0 ? fillOpacity : 0)
+                            .accessibilityHidden(true)
+                    }
                 }
-                .layoutPriority(1)
-                if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
-                trailing
-            }
-            .padding(.vertical, typeSize.isAccessibilitySize ? 10 : 0)
-            .foregroundStyle(filled ? TonoColor.actionInk : TonoColor.textPrimary.opacity(action == .disconnecting ? 0.5 : 1))
-            .padding(.horizontal, 22)
-            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
             .background { background }
             .overlay {
                 shape.stroke(phase.tunnelUp || reconnecting ? TonoColor.sunMid.opacity(0.55) : .clear, lineWidth: 1)
@@ -512,6 +503,39 @@ struct ActionCapsule: View {
         }
     }
 
+    /// The label row at full capsule width, in one ink.
+    private func labelRow(_ ink: Color) -> some View {
+        // Accessibility sizes: the action gets the full width and the session timer goes under
+        // it, instead of the label shrinking beside a fixed-width timer.
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                                                  : AnyLayout(HStackLayout())
+        return layout {
+            // One line at every text size: shrink rather than hyphenate ("Dis-con-nect") at AX sizes.
+            // The old action leaves before the new one shows, so "Connect" and "Cancel" never overlap.
+            ZStack(alignment: .leading) {
+                Text(title).tonoFont(17, .semibold, relativeTo: .body)
+                    .lineLimit(1).minimumScaleFactor(0.6)
+                    .id(title)
+                    .transition(.swap(rise: 0, reduceMotion: reduceMotion))
+            }
+            .layoutPriority(1)
+            if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
+            trailing
+        }
+        .padding(.vertical, typeSize.isAccessibilitySize ? 10 : 0)
+        .foregroundStyle(ink)
+        .padding(.horizontal, 22)
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+    }
+
+    /// The filled part of the capsule, the same width as the sunrise fill.
+    private var fillMask: some View {
+        GeometryReader { geo in
+            // The fill's own shape (round right end), so ink never lands on the glass beside it.
+            shape.frame(width: max(geo.size.height, geo.size.width * fill), height: geo.size.height)
+        }
+    }
+
     @ViewBuilder private var trailing: some View {
         if filled {
             if !typeSize.isAccessibilitySize { GlyphIcon(glyph: .arrow, tint: TonoColor.actionInk, size: 18) }
@@ -539,7 +563,8 @@ struct ActionCapsule: View {
                 Color.clear.glassSurface(shape, tint: glassTint, interactive: true)
                 GeometryReader { geo in
                     shape
-                        .fill(LinearGradient(colors: [TonoColor.sunEdge.opacity(0.55), TonoColor.sunCore.opacity(0.85)],
+                        // Opaque, the Connect capsule's own warm gradient: the ink label over it is 8.6:1 or more.
+                        .fill(LinearGradient(colors: [Color(hex: 0xFF9E6B), Color(hex: 0xFFD6A3)],
                                              startPoint: .leading, endPoint: .trailing))
                         .frame(width: max(geo.size.height, geo.size.width * fill))
                         .opacity(fill > 0 ? fillOpacity : 0)

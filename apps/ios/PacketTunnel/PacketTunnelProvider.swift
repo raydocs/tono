@@ -26,6 +26,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private let reloadQueue = DispatchQueue(label: "tono.tunnel.reload")
     /// One start/reload at a time: app messages, IPv6 changes and core requests can overlap.
     private let serviceLock = NSLock()
+    /// Serialises this process's status writes (heartbeat timer, app reloads, start and stop).
+    private let statusLock = NSLock()
     /// Shared status for widgets and the Control Center switch: written at start and stop, and
     /// refreshed every `StatusSnapshot.heartbeat` so readers can tell a live tunnel from an old file.
     private var startedAt: Date?
@@ -68,20 +70,25 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         Self.log.info("tunnel started")
     }
 
-    /// Not called with `serviceLock` held.
+    /// Not called with `serviceLock` held. One tunnel write at a time, each with the graph as it is
+    /// when it writes: a heartbeat that read the graph before a reload cannot land after the reload's
+    /// own write. The file lock is taken only after the graph is read, never while a reload runs.
     private func writeStatus(running: Bool) {
-        let previous = StatusStore.load()
-        let snapshot: StatusSnapshot
+        statusLock.lock()
+        defer { statusLock.unlock() }
+        var current: TunnelGraph?
         if running {
             serviceLock.lock()
-            let current = graph
+            current = graph
             serviceLock.unlock()
-            snapshot = current.heartbeat(since: startedAt, previous: previous, now: Date())
-        } else {
-            snapshot = StatusSnapshot.fromTunnel(running: false, since: startedAt, failure: SharedFiles.loadFailure()?.code,
-                                                 previous: previous, now: Date())
         }
-        if StatusStore.save(snapshot) { StatusReload.all() }
+        let since = startedAt
+        let failure = running ? nil : SharedFiles.loadFailure()?.code
+        let wrote = StatusStore.update { previous in
+            if let current { return current.heartbeat(since: since, previous: previous, now: Date()) }
+            return StatusSnapshot.fromTunnel(running: false, since: since, failure: failure, previous: previous, now: Date())
+        }
+        if wrote { StatusReload.all() }
     }
 
     override func stopTunnel(with reason: NEProviderStopReason) async {

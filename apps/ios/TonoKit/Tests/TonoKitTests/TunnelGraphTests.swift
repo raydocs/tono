@@ -21,10 +21,15 @@ final class TunnelGraphTests: XCTestCase {
         // An On Demand restart reads the file: it holds the graph that last ran, not the refused one.
         XCTAssertEqual(file, threeTier)
 
-        // The app said Connected before the switch; then the extension's heartbeat writes the shared file.
-        let app = StatusSnapshot.fromApp(.connected, reason: nil, exit: "Tokyo · Dawn", since: t0, now: t0)
-        let beat = graph.heartbeat(since: t0, previous: app, now: t0.addingTimeInterval(300))
-        let shared = StatusSnapshot.decode(beat.encoded())
+        // The app said Connected before the switch; then the extension's heartbeat writes the shared
+        // file, on disk, and a widget process reads it back.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("tono-graph-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let status = StatusFile(url: dir.appendingPathComponent("status.json"))
+        status.update { _ in StatusSnapshot.fromApp(.connected, reason: nil, exit: "Tokyo · Dawn", since: self.t0, now: self.t0) }
+        status.update { graph.heartbeat(since: self.t0, previous: $0, now: self.t0.addingTimeInterval(300)) }
+        let shared = StatusFile(url: status.url).load()
         let reading = StatusReading.read(shared, now: t0.addingTimeInterval(301))
         guard case .fresh = reading else { return XCTFail("heartbeat reading is not fresh: \(reading)") }
         XCTAssertEqual(StatusWording(reading), StatusWording(titleKey: "state_routes_stopped", switchOn: false, action: .retry))

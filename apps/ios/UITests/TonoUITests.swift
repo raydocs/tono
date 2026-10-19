@@ -456,6 +456,16 @@ final class TonoUITests: XCTestCase {
         XCTAssertEqual(note.label, "Couldn't confirm the switch to Stable")
         XCTAssertFalse(app.buttons["mode_THREE_TIER"].isSelected, "Three-tier is claimed although the switch may have run")
         XCTAssertFalse(stable.isSelected, "Stable is claimed although the tunnel never confirmed it")
+        // Where traffic goes states no destination and no old-graph health (round 11: "Other apps,
+        // Local direct" and green regions stayed beside "couldn't confirm").
+        for id in ["lane_ai", "lane_video", "lane_other"] {
+            let lane = app.descendants(matching: .any)[id]
+            XCTAssertTrue(lane.waitForExistence(timeout: 4), id)
+            XCTAssertTrue(lane.label.contains("Not confirmed"), "\(id) still states a route: \(lane.label)")
+            for claim in ["Local direct", "Cloud", "Home broadband", "Japan", "United States"] {
+                XCTAssertFalse(lane.label.contains(claim), "\(id) claims \(claim): \(lane.label)")
+            }
+        }
         checkSite(app, "example.com")
         let message = app.descendants(matching: .any)["routeCheckMessage"]
         XCTAssertTrue(message.waitForExistence(timeout: 4))
@@ -529,7 +539,7 @@ final class TonoUITests: XCTestCase {
 
     @MainActor func testAccessibilityAuditHomeStates() throws {
         var failures: [String] = []
-        for phase in ["SIGNED_OUT", "IDLE", "NEEDS_PERMISSION", "CONNECTING", "CONNECTED", "DEGRADED", "FAILED"] {
+        for phase in ["SIGNED_OUT", "IDLE", "NEEDS_PERMISSION", "PREPARING", "CONNECTING", "CONNECTED", "DEGRADED", "FAILED"] {
             failures += try audit(launch(phase), name: "home-\(phase)")
         }
         failures += try audit(launch("SIGNED_OUT", ["-TonoPreviewOnboarding"]), name: "onboarding")
@@ -579,10 +589,14 @@ final class TonoUITests: XCTestCase {
     /// Contrast at the largest text size measured without Apple's audit: the audit changes the text
     /// size while it runs, so its in-place flags are re-measured after it (above). This sweep takes
     /// every text and control on screen at AX5, at rest, from its own pixels (4.5:1), scrolling each
-    /// sheet once, so a contrast problem that exists only at large sizes cannot pass unseen.
+    /// sheet once. It counts element visits and, separately, distinct elements (a scrolled sheet is
+    /// visited twice). Its whole-element metric cannot separate glyphs from a gradient (round 11:
+    /// it passed Cancel on the sunrise fill at 4.8:1); the primary capsule's label is measured
+    /// against its local background by `testPrimaryActionLabelContrastInEveryPhase`.
     @MainActor func testLargestTextContrastSweep() {
         let largest = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         let screens: [(String, String, [String])] = [
+            ("preparing", "PREPARING", []), ("connecting", "CONNECTING", []),
             ("connected", "CONNECTED", []), ("degraded", "DEGRADED", []), ("failed", "FAILED", []),
             ("network-changed", "CONNECTING", ["-TonoPreviewReason", "NETWORK_CHANGED"]),
             ("details", "DEGRADED", ["-TonoPreviewSheet", "details"]), ("lines", "DEGRADED", ["-TonoPreviewSheet", "lines"]),
@@ -590,6 +604,7 @@ final class TonoUITests: XCTestCase {
         ]
         var failures: [String] = []
         var checked = 0
+        var distinct = 0
         for (name, phase, extra) in screens {
             let app = launch(phase, largest + extra)
             XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
@@ -599,13 +614,16 @@ final class TonoUITests: XCTestCase {
                 app.swipeUp(velocity: .slow)
                 sleep(1)
                 let lower = Self.sweep(app, name: "largest-\(name)-scrolled")
-                result = (result.checked + lower.checked, result.failures + lower.failures)
+                result = (result.checked + lower.checked, result.failures + lower.failures, result.keys.union(lower.keys))
             }
-            print("SWEEP largest-\(name): checked \(result.checked) texts/controls, \(result.failures.count) below 4.5:1 or under 44x44 pt")
+            print("SWEEP largest-\(name): \(result.checked) element visits, \(result.keys.count) distinct elements, "
+                  + "\(result.failures.count) below 4.5:1 or under 44x44 pt")
             result.failures.forEach { print($0) }
             checked += result.checked
+            distinct += result.keys.count
             failures += result.failures
         }
+        print("SWEEP largest total: \(checked) element visits, \(distinct) distinct elements (per screen) on \(screens.count) screens")
         XCTAssertGreaterThan(checked, 40, "the sweep measured almost nothing")
         XCTAssertTrue(failures.isEmpty, failures.joined(separator: "\n"))
     }
@@ -646,6 +664,98 @@ final class TonoUITests: XCTestCase {
         print(String(format: "MEASURE id=%@ label=%@: glyph core %.1f:1 (ink %.2f%%), 97th percentile %.1f:1",
                      element.identifier, String(element.label.prefix(40)), core, Double(ink.count) * 100 / Double(lum.count), percentile))
         return core
+    }
+
+    /// Contrast of a label drawn in known inks against its local background, from the element's own
+    /// pixels (round 11's reviews: a whole-element median is not the background on a gradient).
+    /// Glyph cores are pixels within 12 of an ink in every channel; the text band is the rows that
+    /// hold them; each core is compared with the mean of the non-glyph pixels in its own column
+    /// 2-5 px above and, separately, 2-5 px below the band, and the worse side counts. Returns the
+    /// median over the cores and the share under 4.5:1; nil when no glyph core is found.
+    @MainActor static func labelContrast(_ element: XCUIElement, inks: [(Int, Int, Int)]) -> (median: Double, below: Double, cores: Int)? {
+        guard let cg = element.screenshot().image.cgImage else { return nil }
+        let w = cg.width, h = cg.height
+        guard w > 8, h > 12 else { return nil }
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        func lin(_ c: UInt8) -> Double {
+            let v = Double(c) / 255
+            return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        }
+        func lum(_ x: Int, _ y: Int) -> Double {
+            let i = (y * w + x) * 4
+            return 0.2126 * lin(px[i]) + 0.7152 * lin(px[i + 1]) + 0.0722 * lin(px[i + 2])
+        }
+        func core(_ x: Int, _ y: Int) -> Bool {
+            let i = (y * w + x) * 4
+            return inks.contains { abs(Int(px[i]) - $0.0) <= 12 && abs(Int(px[i + 1]) - $0.1) <= 12 && abs(Int(px[i + 2]) - $0.2) <= 12 }
+        }
+        var rows = [Int](repeating: 0, count: h)
+        for y in 0..<h { for x in 0..<w where core(x, y) { rows[y] += 1 } }
+        guard let top = rows.firstIndex(where: { $0 >= 2 }), let bottom = rows.lastIndex(where: { $0 >= 2 }) else { return nil }
+        func side(_ x: Int, _ ys: [Int]) -> Double? {
+            let values = ys.filter { $0 >= 0 && $0 < h && !core(x, $0) }.map { lum(x, $0) }
+            return values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+        }
+        var ratios: [Double] = []
+        for y in top...bottom {
+            for x in 0..<w where core(x, y) {
+                let l = lum(x, y)
+                let sides = [side(x, Array((top - 5)...(top - 2))), side(x, Array((bottom + 2)...(bottom + 5)))].compactMap { $0 }
+                guard !sides.isEmpty else { continue }
+                ratios.append(sides.map { (max(l, $0) + 0.05) / (min(l, $0) + 0.05) }.min()!)
+            }
+        }
+        guard !ratios.isEmpty else { return nil }
+        ratios.sort()
+        let below = Double(ratios.filter { $0 < 4.5 }.count) / Double(ratios.count)
+        return (ratios[ratios.count / 2], below, ratios.count)
+    }
+
+    private static let primaryInks = [(247, 243, 238), (42, 20, 6)] // textPrimary, actionInk
+
+    /// Negative and positive control for `labelContrast`, drawn by the DEBUG probe: round 11's white
+    /// "Cancel" over the translucent sunrise fill must fail (both reviews measured 3.0-3.9:1 on the
+    /// real capsule), and the real capsule while preparing must pass.
+    @MainActor func testLocalLabelMeasureFailsTheRound11FillAndPassesTheNewOne() {
+        let app = launch("CONNECTED", ["-TonoPreviewContrastProbe"])
+        for (id, passes) in [("probeOldFill", false), ("probeNewFill", true)] {
+            let capsule = app.descendants(matching: .any)[id]
+            XCTAssertTrue(capsule.waitForExistence(timeout: 6), id)
+            guard let m = Self.labelContrast(capsule, inks: Self.primaryInks) else { return XCTFail("\(id): no label glyphs found") }
+            print(String(format: "LABEL %@: median %.2f:1, %.1f%% of %d cores under 4.5:1 | element glyph-core metric %.1f:1",
+                         id, m.median, m.below * 100, m.cores, Self.measuredContrast(capsule) ?? 0))
+            XCTAssertEqual(m.median >= 4.5, passes, String(format: "%@ label median %.2f:1", id, m.median))
+        }
+    }
+
+    /// The primary capsule's label against its own local background in every phase that shows it,
+    /// including Preparing and the sunrise fill, at the default and the largest text size.
+    @MainActor func testPrimaryActionLabelContrastInEveryPhase() {
+        let largest = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        var failures: [String] = []
+        let cases: [(String, [String])] = [
+            ("IDLE", []), ("PREPARING", []), ("CONNECTING", []), ("CONNECTING", ["-TonoPreviewReason", "NETWORK_CHANGED"]),
+            ("CONNECTED", []), ("DEGRADED", []), ("FAILED", []),
+            ("PREPARING", largest), ("CONNECTING", largest), ("CONNECTED", largest),
+        ]
+        for (phase, extra) in cases {
+            let app = launch(phase, extra)
+            let button = primary(app)
+            sleep(2)
+            let name = phase + (extra.isEmpty ? "" : " " + extra.joined(separator: " "))
+            guard let m = Self.labelContrast(button, inks: Self.primaryInks) else {
+                failures.append("\(name): no label glyphs found in \(button.label)")
+                continue
+            }
+            print(String(format: "LABEL %@ (%@): median %.2f:1, %.1f%% of %d cores under 4.5:1", name, button.label, m.median, m.below * 100, m.cores))
+            if m.median < 4.5 { failures.append(String(format: "%@: label median %.2f:1 under WCAG AA", name, m.median)) }
+            save(XCUIScreen.main.screenshot(), "primary-label-" + phase.lowercased() + (extra.isEmpty ? "" : "-" + (extra.contains("NETWORK_CHANGED") ? "network-changed" : "ax5")))
+        }
+        XCTAssertTrue(failures.isEmpty, failures.joined(separator: "\n"))
     }
 
     /// Calibration of `measuredContrast` on CI: a DEBUG probe draws rows built like Details'
@@ -757,17 +867,19 @@ final class TonoUITests: XCTestCase {
 
     /// Every text and control on screen: controls at least 44x44 pt, text and controls at least
     /// 4.5:1 measured from their own pixels.
-    @MainActor static func sweep(_ app: XCUIApplication, name: String) -> (checked: Int, failures: [String]) {
+    @MainActor static func sweep(_ app: XCUIApplication, name: String) -> (checked: Int, failures: [String], keys: Set<String>) {
         let window = app.windows.firstMatch.frame
         let controls: Set<XCUIElement.ElementType> = [.button, .switch, .textField, .secureTextField, .link, .slider]
         var checked = 0
         var failures: [String] = []
+        var keys: Set<String> = []
         for element in app.descendants(matching: .any).allElementsBoundByIndex {
             let type = element.elementType
             guard type == .staticText || controls.contains(type), element.identifier != "previewBadge" else { continue }
             let frame = element.frame
             guard !frame.isEmpty, window.contains(frame) else { continue }
             checked += 1
+            keys.insert("\(type.rawValue)|\(element.identifier)|\(element.label)")
             let what = "\(type.rawValue) id=\(element.identifier) label=\(element.label) frame=\(frame)"
             if controls.contains(type), element.isHittable, frame.width < 44 || frame.height < 44 {
                 failures.append("SWEEP \(name): hit area under 44x44 pt | \(what)")
@@ -787,6 +899,6 @@ final class TonoUITests: XCTestCase {
                 }
             }
         }
-        return (checked, failures)
+        return (checked, failures, keys)
     }
 }

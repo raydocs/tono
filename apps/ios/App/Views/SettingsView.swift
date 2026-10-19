@@ -22,7 +22,8 @@ struct SettingsView: View {
                     // The mode is chosen in one place, Details (one tap from Home, next to where traffic
                     // goes); Settings names it and keeps the full descriptions in the disclosure below.
                     SectionLabel(text: L.t("settings_routing"))
-                    Text(L.t("settings_mode_where", ModeText.name(model.mode)))
+                    Text(model.routesUnconfirmed && model.unsettled(\.mode) != nil
+                         ? L.t("settings_mode_unconfirmed") : L.t("settings_mode_where", ModeText.name(model.mode)))
                         .tonoFont(15, relativeTo: .subheadline).foregroundStyle(TonoColor.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 4).padding(.bottom, 8)

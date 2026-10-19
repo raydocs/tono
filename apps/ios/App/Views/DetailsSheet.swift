@@ -94,13 +94,22 @@ struct DetailsSheet: View {
         case .catalogNode(let city): homeDest = L.t("lane_home_node", Format.city(city, chinese: L.isChinese))
         }
         let live = model.phase.tunnelUp
+        // A switch the tunnel never answered: no lane states a destination, and the probes (taken on
+        // the graph before the switch) are not shown as current health.
+        let unsure = model.routesUnconfirmed
+        let unconfirmed = L.t("lane_unconfirmed")
         return VStack(spacing: 0) {
-            Lane(glyph: .ai, name: L.t("lane_ai"), dest: homeDest, probe: model.homeKind == .none ? model.cloudProbe : model.homeProbe, live: live)
+            Lane(glyph: .ai, name: L.t("lane_ai"), dest: unsure ? unconfirmed : homeDest,
+                 probe: unsure ? nil : model.homeKind == .none ? model.cloudProbe : model.homeProbe, live: live)
+                .accessibilityIdentifier("lane_ai")
             LaneDivider()
-            Lane(glyph: .video, name: L.t("lane_video"), dest: L.t("lane_cloud"), probe: model.cloudProbe, live: live)
+            Lane(glyph: .video, name: L.t("lane_video"), dest: unsure ? unconfirmed : L.t("lane_cloud"),
+                 probe: unsure ? nil : model.cloudProbe, live: live)
+                .accessibilityIdentifier("lane_video")
             LaneDivider()
-            Lane(glyph: .apps, name: L.t("lane_other"), dest: L.t(model.mode == .stable ? "lane_cloud" : "lane_local"),
-                 probe: model.mode == .stable ? model.cloudProbe : nil, live: live)
+            Lane(glyph: .apps, name: L.t("lane_other"), dest: unsure ? unconfirmed : L.t(model.mode == .stable ? "lane_cloud" : "lane_local"),
+                 probe: unsure || model.mode != .stable ? nil : model.cloudProbe, live: live)
+                .accessibilityIdentifier("lane_other")
             LaneDivider()
             // "Where does a site go?" in the same card as where traffic goes (moved out of Settings);
             // the field's prompt carries the question, so it needs no section of its own.

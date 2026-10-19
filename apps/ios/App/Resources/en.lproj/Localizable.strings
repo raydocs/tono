@@ -210,3 +210,5 @@
 "route_unsaved" = "Couldn't save the routes in use either; Tono will retry.";
 "check_unconfirmed" = "Tono couldn't confirm which routes are in use, so there's no answer yet.";
 "line_unconfirmed" = "Unconfirmed";
+"lane_unconfirmed" = "Not confirmed";
+"settings_mode_unconfirmed" = "Tono couldn't confirm which mode is on. See Details.";

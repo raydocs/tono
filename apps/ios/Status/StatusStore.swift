@@ -16,28 +16,20 @@ enum StatusStore {
         return dir.appendingPathComponent("status.json")
     }
 
-    static func load() -> StatusSnapshot? {
-        guard let url, let data = try? Data(contentsOf: url) else { return nil }
-        return StatusSnapshot.decode(data)
+    /// The file, read and written under the lock `StatusFile` shares between the processes.
+    static var file: StatusFile? {
+        // Readable after first unlock, so a Lock Screen widget can read it on a locked phone.
+        url.map { StatusFile(url: $0, options: .completeFileProtectionUntilFirstUserAuthentication) }
     }
+
+    static func load() -> StatusSnapshot? { file?.load() }
 
     static func reading(now: Date = Date()) -> StatusReading { StatusReading.read(load(), now: now) }
 
-    /// Writes the snapshot when it says something new (state, line, session, reason) or the last one
-    /// is at least a minute old; returns whether it wrote.
+    /// `next` gets what is on disk and returns what to write (nil: leave it); written only when it
+    /// says something new or the last write is a minute old. Returns whether it wrote.
     @discardableResult
-    static func save(_ snapshot: StatusSnapshot) -> Bool {
-        guard let url else { return false }
-        if let old = load(), old.state == snapshot.state, old.exit == snapshot.exit, old.since == snapshot.since,
-           old.reason == snapshot.reason, snapshot.updatedAt.timeIntervalSince(old.updatedAt) < 60 {
-            return false
-        }
-        // Readable after first unlock, so a Lock Screen widget can read it on a locked phone.
-        return (try? snapshot.encoded().write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])) != nil
-    }
+    static func update(_ next: (StatusSnapshot?) -> StatusSnapshot?) -> Bool { file?.update(next) ?? false }
 
-    static func clear() {
-        guard let url else { return }
-        try? FileManager.default.removeItem(at: url)
-    }
+    static func clear() { file?.clear() }
 }

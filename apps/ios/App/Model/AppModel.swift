@@ -72,6 +72,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var routeChange: RouteChange?
     /// The tunnel is up but its graph was closed by a refused rebuild and could not be restored.
     @Published private(set) var routesStopped = false
+    /// When the tunnel last told this app whether (and which) graph runs: a status reply or a rebuild
+    /// answer. The shared status keeps a newer tunnel write over an app write from older knowledge.
+    private var routingKnownAt: Date?
     /// The inputs file should hold these (the routes in use) but the put-back after a refusal failed.
     /// Retried on the next change, foreground and connect; said in the change's note meanwhile.
     @Published private(set) var unsavedRoutes: RouteSettings?
@@ -178,10 +181,12 @@ final class AppModel: ObservableObject {
         if previewPhase != nil { return }
         #endif
         await tunnel.load()
-        // Coming back is a chance to confirm the shared status and move the Live Activity's stale date.
+        // Ask the tunnel what runs first: the phase from before the app was suspended may be older
+        // than its last heartbeat (which can say ROUTES_STOPPED). Then confirm the shared status and
+        // move the Live Activity's stale date.
+        if tunnelStatus == .connected { await readStatus() }
         publishStatus(force: true)
         if tunnelStatus == .connected, cloudProbe.state != .checking { runProbes() }
-        if tunnelStatus == .connected { await readStatus() }
         retryPutBack()
         if !tunnelStatus.isUp, let f = SharedFiles.loadFailure(), failure == nil, !userStopping {
             failure = f.code
@@ -371,7 +376,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private var unconfirmed: Bool { if case .unconfirmed = routeChange { return true }; return false }
+    /// A switch the tunnel never answered: which routes run is unknown, so no screen states any.
+    var routesUnconfirmed: Bool { if case .unconfirmed = routeChange { return true }; return false }
 
     /// Mode and line changes. The screens show the request as pending and keep describing the
     /// routes in effect until the tunnel confirms; a refusal is said where the change was made and
@@ -379,7 +385,7 @@ final class AppModel: ObservableObject {
     private func change(_ requested: RouteSettings, retry: Bool = false) async {
         let previous = routeSettings
         // After an unconfirmed switch either choice is a real request, including the previous one.
-        guard !changingRoutes, retry || unconfirmed || requested != previous else { return }
+        guard !changingRoutes, retry || routesUnconfirmed || requested != previous else { return }
         routeChange = .pending(requested)
         let report: RouteApplyReport
         #if DEBUG
@@ -403,6 +409,19 @@ final class AppModel: ObservableObject {
         finish(report, requested: requested)
     }
 
+    /// Asks the tunnel again what it runs (2, 5 and 10 s later) instead of waiting for the next
+    /// foreground or connection event.
+    private func settleUnconfirmed() {
+        if isPreview { return }
+        Task { [weak self] in
+            for delay: UInt64 in [2, 5, 10] {
+                try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+                guard let self, self.routesUnconfirmed, self.tunnelStatus.isUp else { return }
+                await self.readStatus()
+            }
+        }
+    }
+
     /// Writes the routes in use back to the inputs file after an earlier put-back failed.
     private func retryPutBack() {
         guard let s = unsavedRoutes, !isPreview, let loaded = catalog else { return }
@@ -412,8 +431,11 @@ final class AppModel: ObservableObject {
     }
 
     private func finish(_ report: RouteApplyReport, requested: RouteSettings) {
-        unsavedRoutes = report.unsaved
+        unsavedRoutes = report.owed(before: unsavedRoutes)
         let outcome = report.outcome
+        // The tunnel answered what runs (a rebuild reply or its status), except when the save failed.
+        if case .applied = outcome { routingKnownAt = Date() }
+        if case .notApplied(let code, _) = outcome, code != "SAVE_FAILED" { routingKnownAt = Date() }
         switch outcome {
         case .applied(let s), .saved(let s):
             setInEffect(s)
@@ -431,6 +453,7 @@ final class AppModel: ObservableObject {
         case .unconfirmed:
             routeChange = .unconfirmed(requested)
             recompute()
+            settleUnconfirmed()
             if let note = routeNote(full: true) { UIAccessibility.post(notification: .announcement, argument: note) }
         }
     }
@@ -499,7 +522,7 @@ final class AppModel: ObservableObject {
         // No graph runs: no rule-based answer would describe this phone right now.
         if routesStopped { return .routesStopped }
         // Which graph runs is not known: an answer from either mode's rules could be wrong.
-        if unconfirmed { return .unconfirmed }
+        if routesUnconfirmed { return .unconfirmed }
         guard let answer = explain(typed) else { return .noLines }
         return .answer(answer)
     }
@@ -597,6 +620,7 @@ final class AppModel: ObservableObject {
         if let v6 = json["ipv6"]?.bool { underlyingIPv6 = v6 }
         // What the extension actually runs; null when a refused rebuild left no graph.
         if let running = json["running"], !changingRoutes {
+            routingKnownAt = Date()
             let settings = RouteSettings(running)
             if case .unconfirmed(let requested) = routeChange, settings != requested {
                 // The unanswered switch did not take: say so, and keep the file on what runs.
@@ -669,6 +693,8 @@ final class AppModel: ObservableObject {
 
     /// The display name of the line in use, as the exit capsule shows it.
     var exitName: String? {
+        // The line itself is unconfirmed: no exit is named (widgets, Live Activity).
+        if routesUnconfirmed, unsettled(\.node) != nil { return nil }
         guard let line = lines.first(where: { $0.name == selectedNode }) ?? lines.first else { return nil }
         return displayName(line)
     }
@@ -691,8 +717,17 @@ final class AppModel: ObservableObject {
             return
         }
         #endif
-        if StatusStore.save(snapshot) || force { StatusReload.all() }
-        liveActivity.sync(snapshot, enabled: liveActivityEnabled)
+        // The tunnel's newer word on whether a graph runs is kept over this phase when the app has
+        // not heard it yet; the app then asks the tunnel and writes again from what it says.
+        var overruled = false
+        let wrote = StatusStore.update { current in
+            let admitted = StatusSnapshot.admitFromApp(snapshot, knownAt: routingKnownAt, over: current, now: snapshot.updatedAt)
+            overruled = admitted == nil
+            return admitted
+        }
+        if wrote || force { StatusReload.all() }
+        liveActivity.sync(overruled ? StatusStore.load() ?? snapshot : snapshot, enabled: liveActivityEnabled)
+        if overruled, tunnelStatus.isUp { Task { await self.readStatus() } }
     }
 
     private static var deviceName: String {
