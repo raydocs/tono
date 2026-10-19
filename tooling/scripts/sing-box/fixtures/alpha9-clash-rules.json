@@ -1,0 +1,978 @@
+{
+  "source": "SagerNet/sing-box v1.15.0-alpha.9 132b38e9 /rules, captured with clash_rules.py capture",
+  "runtime": {
+    "dns": {
+      "final": "Tono-DoH",
+      "rules": [
+        {
+          "action": "predefined",
+          "query_type": [
+            "AAAA"
+          ],
+          "rcode": "NOERROR"
+        },
+        {
+          "action": "route",
+          "domain": [
+            "qq.com",
+            "weixin.qq.com"
+          ],
+          "inbound": [
+            "Tono-TUN",
+            "Tono-DNS",
+            "Tono-Mixed"
+          ],
+          "query_type": [
+            "A"
+          ],
+          "server": "Tono-Hosts"
+        },
+        {
+          "action": "route",
+          "inbound": [
+            "Tono-TUN",
+            "Tono-DNS",
+            "Tono-Mixed"
+          ],
+          "query_type": [
+            "A"
+          ],
+          "rewrite_ttl": 30,
+          "server": "Tono-FakeIP"
+        },
+        {
+          "action": "evaluate",
+          "server": "Tono-DoH",
+          "tag": "primary"
+        },
+        {
+          "action": "respond",
+          "match_response": "primary",
+          "response_rcode": "NOERROR"
+        },
+        {
+          "action": "evaluate",
+          "server": "Tono-DoH-Backup",
+          "tag": "backup"
+        },
+        {
+          "action": "respond",
+          "match_response": "backup"
+        }
+      ],
+      "servers": [
+        {
+          "inet4_range": "198.18.128.0/20",
+          "tag": "Tono-FakeIP",
+          "type": "fakeip"
+        },
+        {
+          "detour": "Tono-Exit",
+          "path": "/dns-query",
+          "server": "1.1.1.1",
+          "server_port": 443,
+          "tag": "Tono-DoH",
+          "tls": {
+            "alpn": [
+              "h2"
+            ],
+            "enabled": true,
+            "server_name": "1.1.1.1"
+          },
+          "type": "https"
+        },
+        {
+          "detour": "Tono-Exit",
+          "path": "/dns-query",
+          "server": "8.8.8.8",
+          "server_port": 443,
+          "tag": "Tono-DoH-Backup",
+          "tls": {
+            "alpn": [
+              "h2"
+            ],
+            "enabled": true,
+            "server_name": "dns.google"
+          },
+          "type": "https"
+        },
+        {
+          "predefined": {
+            "qq.com": [
+              "101.1.2.3"
+            ],
+            "weixin.qq.com": [
+              "101.1.2.4"
+            ]
+          },
+          "tag": "Tono-Hosts",
+          "type": "hosts"
+        }
+      ],
+      "strategy": "ipv4_only"
+    },
+    "experimental": {
+      "cache_file": {
+        "enabled": false
+      },
+      "clash_api": {
+        "access_control_allow_origin": [
+          "tauri://localhost"
+        ],
+        "access_control_allow_private_network": false,
+        "default_mode": "rule",
+        "external_controller": "127.0.0.1:29191",
+        "secret": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+      }
+    },
+    "inbounds": [
+      {
+        "address": [
+          "198.18.0.1/30"
+        ],
+        "auto_route": true,
+        "dns_address": [
+          "198.18.0.2"
+        ],
+        "dns_mode": "disabled",
+        "interface_name": "Tono",
+        "mtu": 1500,
+        "multi_queue": false,
+        "route_exclude_address": [
+          "9.9.9.9/32"
+        ],
+        "strict_route": false,
+        "tag": "Tono-TUN",
+        "type": "tun"
+      },
+      {
+        "listen": "127.0.0.1",
+        "listen_port": 53,
+        "tag": "Tono-DNS",
+        "type": "direct"
+      },
+      {
+        "listen": "127.0.0.1",
+        "listen_port": 29190,
+        "tag": "Tono-Mixed",
+        "type": "mixed"
+      }
+    ],
+    "log": {
+      "level": "warn"
+    },
+    "outbounds": [
+      {
+        "flow": "xtls-rprx-vision",
+        "server": "8.8.4.4",
+        "server_port": 443,
+        "tag": "Fixture Alpha",
+        "tls": {
+          "enabled": true,
+          "reality": {
+            "enabled": true,
+            "public_key": "3p7bfXt9wbTTW2HC7OQ1Nz-DQ8hbeGdNrfx-FG-IK08",
+            "short_id": "a1b2"
+          },
+          "server_name": "alpha.example",
+          "utls": {
+            "enabled": true,
+            "fingerprint": "chrome"
+          }
+        },
+        "type": "vless",
+        "uuid": "11111111-1111-4111-8111-111111111111"
+      },
+      {
+        "server": "9.9.9.9",
+        "server_port": 8443,
+        "tag": "Fixture Beta",
+        "tls": {
+          "enabled": true,
+          "reality": {
+            "enabled": true,
+            "public_key": "3p7bfXt9wbTTW2HC7OQ1Nz-DQ8hbeGdNrfx-FG-IK08",
+            "short_id": "c3d4e5"
+          },
+          "server_name": "beta.example",
+          "utls": {
+            "enabled": true,
+            "fingerprint": "chrome"
+          }
+        },
+        "type": "vless",
+        "uuid": "22222222-2222-4222-8222-222222222222"
+      },
+      {
+        "default": "Fixture Beta",
+        "interrupt_exist_connections": true,
+        "outbounds": [
+          "Fixture Beta",
+          "Fixture Alpha"
+        ],
+        "tag": "Tono-Exit",
+        "type": "selector"
+      },
+      {
+        "detour": "Tono-Exit",
+        "password": "fixture-password",
+        "server": "isp.example.net",
+        "server_port": 10078,
+        "tag": "Tono-Home-Residential",
+        "type": "socks",
+        "username": "fixture-user",
+        "version": "5"
+      },
+      {
+        "bind_interface": "以太网 2",
+        "tag": "Tono-China-Direct",
+        "type": "direct"
+      }
+    ],
+    "route": {
+      "auto_detect_interface": true,
+      "default_domain_resolver": "Tono-DoH",
+      "final": "Tono-Exit",
+      "rules": [
+        {
+          "action": "reject",
+          "ip_version": 6
+        },
+        {
+          "action": "hijack-dns",
+          "inbound": [
+            "Tono-DNS"
+          ]
+        },
+        {
+          "action": "hijack-dns",
+          "port": [
+            53
+          ]
+        },
+        {
+          "action": "reject",
+          "ip_cidr": [
+            "198.18.128.0/17",
+            "198.18.16.0/20"
+          ],
+          "no_drop": true
+        },
+        {
+          "action": "route",
+          "domain_suffix": [
+            "youtube.com",
+            "youtube-nocookie.com",
+            "youtu.be",
+            "googlevideo.com",
+            "ytimg.com",
+            "youtube.googleapis.com",
+            "youtubei.googleapis.com",
+            "youtubeembeddedplayer.googleapis.com",
+            "youtube-ui.l.google.com",
+            "wide-youtube.l.google.com",
+            "yt3.googleusercontent.com",
+            "ggpht.com",
+            "pornhub.com",
+            "pornhub.org",
+            "pornhubpremium.com",
+            "phncdn.com",
+            "phprcdn.com",
+            "porngub.com",
+            "pornhub-deutsch.net",
+            "pornhubapparel.com",
+            "gaytube.com"
+          ],
+          "network": "tcp",
+          "outbound": "Tono-Exit"
+        },
+        {
+          "action": "reject",
+          "domain_suffix": [
+            "youtube.com",
+            "youtube-nocookie.com",
+            "youtu.be",
+            "googlevideo.com",
+            "ytimg.com",
+            "youtube.googleapis.com",
+            "youtubei.googleapis.com",
+            "youtubeembeddedplayer.googleapis.com",
+            "youtube-ui.l.google.com",
+            "wide-youtube.l.google.com",
+            "yt3.googleusercontent.com",
+            "ggpht.com",
+            "pornhub.com",
+            "pornhub.org",
+            "pornhubpremium.com",
+            "phncdn.com",
+            "phprcdn.com",
+            "porngub.com",
+            "pornhub-deutsch.net",
+            "pornhubapparel.com",
+            "gaytube.com"
+          ],
+          "network": "udp"
+        },
+        {
+          "action": "route",
+          "domain_suffix": [
+            "dashscope.aliyuncs.com",
+            "dashscope-intl.aliyuncs.com",
+            "dashscope-us.aliyuncs.com",
+            "maas.aliyuncs.com",
+            "anthropic.com",
+            "claude.ai",
+            "claude.com",
+            "claude.app",
+            "claude.site",
+            "clau.de",
+            "anthropic.ai",
+            "claudestudio.com",
+            "claudemcpclient.com",
+            "claudemcpcontent.com",
+            "claudeusercontent.com",
+            "servd-anthropic-website.b-cdn.net",
+            "challenges.cloudflare.com",
+            "cf-assets.www.cloudflare.com",
+            "cloudflareinsights.com",
+            "browser-intake-datadoghq.com",
+            "browser-intake-us5-datadoghq.com",
+            "browser-intake-us3-datadoghq.com",
+            "browser-intake-ap1-datadoghq.com",
+            "browser-intake-ap2-datadoghq.com",
+            "browser-intake-datadoghq.eu",
+            "browser-intake-ddog-gov.com",
+            "datadoghq.com",
+            "statsig.com",
+            "statsigapi.net",
+            "featuregates.org",
+            "growthbook.io",
+            "cdn.usefathom.com",
+            "stripe.com",
+            "stripecdn.com",
+            "link.com",
+            "hcaptcha.com",
+            "stripe.network",
+            "storage.googleapis.com",
+            "registry.npmjs.org",
+            "raw.githubusercontent.com",
+            "formulae.brew.sh",
+            "sentry.io",
+            "chatgpt.com",
+            "openai.com",
+            "chat.com",
+            "ai.com",
+            "oaistatic.com",
+            "oaiusercontent.com",
+            "sora.com",
+            "grok.com",
+            "grok.x.com",
+            "grokipedia.com",
+            "x.ai",
+            "perplexity.ai",
+            "perplexity.com",
+            "pplx.ai",
+            "gemini.google.com",
+            "bard.google.com",
+            "aistudio.google.com",
+            "generativelanguage.googleapis.com",
+            "notebooklm.google.com",
+            "ai.google.dev",
+            "gemini.google",
+            "deepmind.com",
+            "deepmind.google",
+            "notebooklm.google",
+            "antigravity.google",
+            "generativeai.google",
+            "makersuite.google.com",
+            "jules.google.com",
+            "antigravity-unleash.goog",
+            "aida.googleapis.com",
+            "geller-pa.googleapis.com",
+            "aisandbox-pa.googleapis.com",
+            "cloudcode-pa.googleapis.com",
+            "robinfrontend-pa.googleapis.com",
+            "alkalicore-pa.clients6.google.com",
+            "daily-cloudcode-pa.googleapis.com",
+            "proactivebackend-pa.googleapis.com",
+            "alkalimakersuite-pa.clients6.google.com",
+            "g.ai",
+            "dify.ai",
+            "poe.com",
+            "groq.com",
+            "cursor.sh",
+            "jasper.ai",
+            "openart.ai",
+            "clipdrop.co",
+            "chatgpt.site",
+            "openrouter.ai",
+            "api.github.com",
+            "api.jetbrains.ai",
+            "gateway.ai.cloudflare.com",
+            "muse.ai",
+            "meta.ai",
+            "muse.meta.com",
+            "www.muse.ai",
+            "meta.com",
+            "facebook.com",
+            "fb.com",
+            "fb.me",
+            "fb.watch",
+            "fbcdn.net",
+            "facebook.net",
+            "messenger.com",
+            "instagram.com",
+            "cdninstagram.com",
+            "ig.me",
+            "threads.net",
+            "gmail.com",
+            "mail.google.com",
+            "googlemail.com",
+            "inbox.google.com",
+            "accounts.google.com",
+            "myaccount.google.com",
+            "oauth2.googleapis.com",
+            "mail-pa.clients6.google.com",
+            "gmail.googleapis.com",
+            "google.com",
+            "googleapis.com",
+            "github.com",
+            "githubusercontent.com",
+            "githubassets.com",
+            "redd.it",
+            "reddit.app.link",
+            "reddit.com",
+            "redditblog.com",
+            "reddithelp.com",
+            "redditinc.com",
+            "redditmail.com",
+            "redditmedia.com",
+            "redditspace.com",
+            "redditstatic.com",
+            "redditstatus.com",
+            "reddit.map.fastly.net",
+            "muscdn.com",
+            "musical.ly",
+            "tik-tokapi.com",
+            "tiktok-minis.com",
+            "tiktok-row.net",
+            "tiktok.com",
+            "tiktokcdn-eu.com",
+            "tiktokcdn-us.com",
+            "tiktokcdn.com",
+            "tiktokd.net",
+            "tiktokd.org",
+            "tiktokeu-cdn.com",
+            "tiktokglobalshopv.com",
+            "tiktokminis.us",
+            "tiktokrow-cdn.com",
+            "tiktokv.com",
+            "tiktokv.eu",
+            "tiktokv.us",
+            "tiktokw.eu",
+            "tiktokw.us",
+            "ttcdn-us.com",
+            "ttlivecdn.com",
+            "ttoverseaus.net",
+            "ttwstatic.com",
+            "tiktokcdn-us.com.edgesuite.net",
+            "tiktokcdn.com.akamaized.net",
+            "tiktokcdn.com.edgesuite.net",
+            "tiktokv.com.edgekey.net",
+            "tiktokv.com.edgesuite.net",
+            "p16-tiktokcdn-com.akamaized.net",
+            "p16-tiktok-dm-sticker-sign-sg.ibyteimg.com"
+          ],
+          "network": "tcp",
+          "outbound": "Tono-Home-Residential"
+        },
+        {
+          "action": "route",
+          "ip_cidr": [
+            "160.79.104.0/21"
+          ],
+          "network": "tcp",
+          "outbound": "Tono-Home-Residential"
+        },
+        {
+          "action": "route",
+          "network": "tcp",
+          "outbound": "Tono-Home-Residential",
+          "process_name": [
+            "Claude.exe",
+            "claude.exe",
+            "Claude Helper.exe",
+            "ChatGPT.exe",
+            "chatgpt.exe",
+            "Codex.exe",
+            "codex.exe",
+            "Cursor.exe",
+            "Code.exe",
+            "Code Helper.exe",
+            "Windsurf.exe",
+            "Trae.exe",
+            "Zed.exe",
+            "VSCodium.exe",
+            "Cursor Helper.exe",
+            "Windsurf Helper.exe",
+            "Grok.exe",
+            "grok.exe",
+            "Grok Helper.exe"
+          ]
+        },
+        {
+          "action": "route",
+          "network": "tcp",
+          "outbound": "Tono-Home-Residential",
+          "process_path_regex": [
+            "[Aa][Nn][Tt][Hh][Rr][Oo][Pp][Ii][Cc][Cc][Ll][Aa][Uu][Dd][Ee]",
+            "[Cc][Ll][Aa][Uu][Dd][Ee][\\\\/][Vv][Ee][Rr][Ss][Ii][Oo][Nn][Ss]",
+            "\\.[Ll][Oo][Cc][Aa][Ll][\\\\/][Ss][Hh][Aa][Rr][Ee][\\\\/][Cc][Ll][Aa][Uu][Dd][Ee]",
+            "[Cc][Ll][Aa][Uu][Dd][Ee]-[Cc][Oo][Dd][Ee]",
+            "@[Aa][Nn][Tt][Hh][Rr][Oo][Pp][Ii][Cc]-[Aa][Ii][\\\\/][Cc][Ll][Aa][Uu][Dd][Ee]-[Cc][Oo][Dd][Ee]",
+            "@[Aa][Nn][Tt][Hh][Rr][Oo][Pp][Ii][Cc]-[Aa][Ii]\\+[Cc][Ll][Aa][Uu][Dd][Ee]-[Cc][Oo][Dd][Ee]",
+            "[Cc][Hh][Aa][Tt][Gg][Pp][Tt]",
+            "[Oo][Pp][Ee][Nn][Aa][Ii][\\\\/][Cc][Oo][Dd][Ee][Xx]",
+            "[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Ss][\\\\/][Cc][Uu][Rr][Ss][Oo][Rr]",
+            "[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt] [Vv][Ss] [Cc][Oo][Dd][Ee]",
+            "[Ww][Ii][Nn][Dd][Ss][Uu][Rr][Ff]",
+            "[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Ss][\\\\/][Tt][Rr][Aa][Ee]",
+            "[Vv][Ss][Cc][Oo][Dd][Ii][Uu][Mm]",
+            "[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Ss][\\\\/][Gg][Rr][Oo][Kk]"
+          ]
+        },
+        {
+          "action": "reject",
+          "domain_suffix": [
+            "dashscope.aliyuncs.com",
+            "dashscope-intl.aliyuncs.com",
+            "dashscope-us.aliyuncs.com",
+            "maas.aliyuncs.com",
+            "anthropic.com",
+            "claude.ai",
+            "claude.com",
+            "claude.app",
+            "claude.site",
+            "clau.de",
+            "anthropic.ai",
+            "claudestudio.com",
+            "claudemcpclient.com",
+            "claudemcpcontent.com",
+            "claudeusercontent.com",
+            "servd-anthropic-website.b-cdn.net",
+            "challenges.cloudflare.com",
+            "cf-assets.www.cloudflare.com",
+            "cloudflareinsights.com",
+            "browser-intake-datadoghq.com",
+            "browser-intake-us5-datadoghq.com",
+            "browser-intake-us3-datadoghq.com",
+            "browser-intake-ap1-datadoghq.com",
+            "browser-intake-ap2-datadoghq.com",
+            "browser-intake-datadoghq.eu",
+            "browser-intake-ddog-gov.com",
+            "datadoghq.com",
+            "statsig.com",
+            "statsigapi.net",
+            "featuregates.org",
+            "growthbook.io",
+            "cdn.usefathom.com",
+            "stripe.com",
+            "stripecdn.com",
+            "link.com",
+            "hcaptcha.com",
+            "stripe.network",
+            "storage.googleapis.com",
+            "registry.npmjs.org",
+            "raw.githubusercontent.com",
+            "formulae.brew.sh",
+            "sentry.io",
+            "chatgpt.com",
+            "openai.com",
+            "chat.com",
+            "ai.com",
+            "oaistatic.com",
+            "oaiusercontent.com",
+            "sora.com",
+            "grok.com",
+            "grok.x.com",
+            "grokipedia.com",
+            "x.ai",
+            "perplexity.ai",
+            "perplexity.com",
+            "pplx.ai",
+            "gemini.google.com",
+            "bard.google.com",
+            "aistudio.google.com",
+            "generativelanguage.googleapis.com",
+            "notebooklm.google.com",
+            "ai.google.dev",
+            "gemini.google",
+            "deepmind.com",
+            "deepmind.google",
+            "notebooklm.google",
+            "antigravity.google",
+            "generativeai.google",
+            "makersuite.google.com",
+            "jules.google.com",
+            "antigravity-unleash.goog",
+            "aida.googleapis.com",
+            "geller-pa.googleapis.com",
+            "aisandbox-pa.googleapis.com",
+            "cloudcode-pa.googleapis.com",
+            "robinfrontend-pa.googleapis.com",
+            "alkalicore-pa.clients6.google.com",
+            "daily-cloudcode-pa.googleapis.com",
+            "proactivebackend-pa.googleapis.com",
+            "alkalimakersuite-pa.clients6.google.com",
+            "g.ai",
+            "dify.ai",
+            "poe.com",
+            "groq.com",
+            "cursor.sh",
+            "jasper.ai",
+            "openart.ai",
+            "clipdrop.co",
+            "chatgpt.site",
+            "openrouter.ai",
+            "api.github.com",
+            "api.jetbrains.ai",
+            "gateway.ai.cloudflare.com",
+            "muse.ai",
+            "meta.ai",
+            "muse.meta.com",
+            "www.muse.ai",
+            "meta.com",
+            "facebook.com",
+            "fb.com",
+            "fb.me",
+            "fb.watch",
+            "fbcdn.net",
+            "facebook.net",
+            "messenger.com",
+            "instagram.com",
+            "cdninstagram.com",
+            "ig.me",
+            "threads.net",
+            "gmail.com",
+            "mail.google.com",
+            "googlemail.com",
+            "inbox.google.com",
+            "accounts.google.com",
+            "myaccount.google.com",
+            "oauth2.googleapis.com",
+            "mail-pa.clients6.google.com",
+            "gmail.googleapis.com",
+            "google.com",
+            "googleapis.com",
+            "github.com",
+            "githubusercontent.com",
+            "githubassets.com",
+            "redd.it",
+            "reddit.app.link",
+            "reddit.com",
+            "redditblog.com",
+            "reddithelp.com",
+            "redditinc.com",
+            "redditmail.com",
+            "redditmedia.com",
+            "redditspace.com",
+            "redditstatic.com",
+            "redditstatus.com",
+            "reddit.map.fastly.net",
+            "muscdn.com",
+            "musical.ly",
+            "tik-tokapi.com",
+            "tiktok-minis.com",
+            "tiktok-row.net",
+            "tiktok.com",
+            "tiktokcdn-eu.com",
+            "tiktokcdn-us.com",
+            "tiktokcdn.com",
+            "tiktokd.net",
+            "tiktokd.org",
+            "tiktokeu-cdn.com",
+            "tiktokglobalshopv.com",
+            "tiktokminis.us",
+            "tiktokrow-cdn.com",
+            "tiktokv.com",
+            "tiktokv.eu",
+            "tiktokv.us",
+            "tiktokw.eu",
+            "tiktokw.us",
+            "ttcdn-us.com",
+            "ttlivecdn.com",
+            "ttoverseaus.net",
+            "ttwstatic.com",
+            "tiktokcdn-us.com.edgesuite.net",
+            "tiktokcdn.com.akamaized.net",
+            "tiktokcdn.com.edgesuite.net",
+            "tiktokv.com.edgekey.net",
+            "tiktokv.com.edgesuite.net",
+            "p16-tiktokcdn-com.akamaized.net",
+            "p16-tiktok-dm-sticker-sign-sg.ibyteimg.com"
+          ],
+          "network": "udp"
+        },
+        {
+          "action": "reject",
+          "ip_cidr": [
+            "160.79.104.0/21"
+          ],
+          "network": "udp"
+        },
+        {
+          "action": "reject",
+          "network": "udp",
+          "process_name": [
+            "Claude.exe",
+            "claude.exe",
+            "Claude Helper.exe",
+            "ChatGPT.exe",
+            "chatgpt.exe",
+            "Codex.exe",
+            "codex.exe",
+            "Cursor.exe",
+            "Code.exe",
+            "Code Helper.exe",
+            "Windsurf.exe",
+            "Trae.exe",
+            "Zed.exe",
+            "VSCodium.exe",
+            "Cursor Helper.exe",
+            "Windsurf Helper.exe",
+            "Grok.exe",
+            "grok.exe",
+            "Grok Helper.exe"
+          ]
+        },
+        {
+          "action": "reject",
+          "network": "udp",
+          "process_path_regex": [
+            "[Aa][Nn][Tt][Hh][Rr][Oo][Pp][Ii][Cc][Cc][Ll][Aa][Uu][Dd][Ee]",
+            "[Cc][Ll][Aa][Uu][Dd][Ee][\\\\/][Vv][Ee][Rr][Ss][Ii][Oo][Nn][Ss]",
+            "\\.[Ll][Oo][Cc][Aa][Ll][\\\\/][Ss][Hh][Aa][Rr][Ee][\\\\/][Cc][Ll][Aa][Uu][Dd][Ee]",
+            "[Cc][Ll][Aa][Uu][Dd][Ee]-[Cc][Oo][Dd][Ee]",
+            "@[Aa][Nn][Tt][Hh][Rr][Oo][Pp][Ii][Cc]-[Aa][Ii][\\\\/][Cc][Ll][Aa][Uu][Dd][Ee]-[Cc][Oo][Dd][Ee]",
+            "@[Aa][Nn][Tt][Hh][Rr][Oo][Pp][Ii][Cc]-[Aa][Ii]\\+[Cc][Ll][Aa][Uu][Dd][Ee]-[Cc][Oo][Dd][Ee]",
+            "[Cc][Hh][Aa][Tt][Gg][Pp][Tt]",
+            "[Oo][Pp][Ee][Nn][Aa][Ii][\\\\/][Cc][Oo][Dd][Ee][Xx]",
+            "[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Ss][\\\\/][Cc][Uu][Rr][Ss][Oo][Rr]",
+            "[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt] [Vv][Ss] [Cc][Oo][Dd][Ee]",
+            "[Ww][Ii][Nn][Dd][Ss][Uu][Rr][Ff]",
+            "[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Ss][\\\\/][Tt][Rr][Aa][Ee]",
+            "[Vv][Ss][Cc][Oo][Dd][Ii][Uu][Mm]",
+            "[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Ss][\\\\/][Gg][Rr][Oo][Kk]"
+          ]
+        },
+        {
+          "action": "route",
+          "mode": "and",
+          "outbound": "Tono-China-Direct",
+          "rules": [
+            {
+              "domain": [
+                "qq.com"
+              ],
+              "network": "tcp",
+              "port": 443
+            },
+            {
+              "ip_cidr": [
+                "101.1.2.3/32"
+              ]
+            }
+          ],
+          "type": "logical"
+        },
+        {
+          "action": "route",
+          "mode": "and",
+          "outbound": "Tono-China-Direct",
+          "rules": [
+            {
+              "domain": [
+                "weixin.qq.com"
+              ],
+              "network": "tcp",
+              "port": 80
+            },
+            {
+              "ip_cidr": [
+                "101.1.2.4/32"
+              ]
+            }
+          ],
+          "type": "logical"
+        },
+        {
+          "action": "route",
+          "network": "tcp",
+          "outbound": "Tono-China-Direct",
+          "port": [
+            80,
+            443
+          ],
+          "process_path_regex": [
+            "^[Cc]:[\\\\/][Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss][\\\\/][Tt][Ee][Nn][Cc][Ee][Nn][Tt][\\\\/][Ww][Ee][Ii][Xx][Ii][Nn][\\\\/]",
+            "^[Dd]:[\\\\/]软件[\\\\/][Ww][Ee][Cc][Hh][Aa][Tt][\\\\/][Ww][Ee][Cc][Hh][Aa][Tt]\\.[Ee][Xx][Ee]$",
+            "^[Cc]:[\\\\/][Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss] \\x28[Xx]86\\x29[\\\\/][Tt][Ee][Nn][Cc][Ee][Nn][Tt][\\\\/][Ww][Ee][Cc][Hh][Aa][Tt][\\\\/]",
+            "^[Ee]:[\\\\/][Ww][Ee][Cc][Hh][Aa][Tt][\\\\/]"
+          ]
+        },
+        {
+          "action": "route",
+          "ip_cidr": [
+            "101.1.2.6/32"
+          ],
+          "network": "udp",
+          "outbound": "Tono-China-Direct",
+          "port": 8000,
+          "process_name": [
+            "WeChat.exe",
+            "Weixin.exe",
+            "xwechat.exe",
+            "WeChatAppEx.exe",
+            "WeChatPlayer.exe",
+            "WeixinPlay.exe",
+            "WeChatApp.exe",
+            "WeixinApp.exe",
+            "WeChatBrowser.exe",
+            "DingTalk.exe",
+            "dingtalk.exe",
+            "DingTalkHelper.exe",
+            "DingTalkLauncher.exe",
+            "Feishu.exe",
+            "feishu.exe",
+            "Lark.exe",
+            "lark.exe"
+          ]
+        },
+        {
+          "action": "route",
+          "ip_cidr": [
+            "101.1.2.6/32"
+          ],
+          "network": "udp",
+          "outbound": "Tono-China-Direct",
+          "port": 8000,
+          "process_path_regex": [
+            "^[Cc]:[\\\\/][Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss][\\\\/][Tt][Ee][Nn][Cc][Ee][Nn][Tt][\\\\/][Ww][Ee][Ii][Xx][Ii][Nn][\\\\/]",
+            "^[Dd]:[\\\\/]软件[\\\\/][Ww][Ee][Cc][Hh][Aa][Tt][\\\\/][Ww][Ee][Cc][Hh][Aa][Tt]\\.[Ee][Xx][Ee]$",
+            "^[Cc]:[\\\\/][Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss] \\x28[Xx]86\\x29[\\\\/][Tt][Ee][Nn][Cc][Ee][Nn][Tt][\\\\/][Ww][Ee][Cc][Hh][Aa][Tt][\\\\/]",
+            "^[Ee]:[\\\\/][Ww][Ee][Cc][Hh][Aa][Tt][\\\\/]"
+          ]
+        },
+        {
+          "action": "reject",
+          "network": [
+            "udp",
+            "icmp"
+          ]
+        }
+      ]
+    }
+  },
+  "rules": [
+    {
+      "type": "default",
+      "payload": "ip_version=6",
+      "proxy": "reject"
+    },
+    {
+      "type": "default",
+      "payload": "inbound=Tono-DNS",
+      "proxy": "hijack-dns"
+    },
+    {
+      "type": "default",
+      "payload": "port=53",
+      "proxy": "hijack-dns"
+    },
+    {
+      "type": "default",
+      "payload": "ip_cidr=[198.18.128.0/17 198.18.16.0/20]",
+      "proxy": "reject"
+    },
+    {
+      "type": "default",
+      "payload": "network=tcp domain_suffix=[youtube.com youtube-nocookie.com youtu.be...]",
+      "proxy": "route(Tono-Exit)"
+    },
+    {
+      "type": "default",
+      "payload": "network=udp domain_suffix=[youtube.com youtube-nocookie.com youtu.be...]",
+      "proxy": "reject"
+    },
+    {
+      "type": "default",
+      "payload": "network=tcp domain_suffix=[dashscope.aliyuncs.com dashscope-intl.aliyuncs.com dashscope-us.aliyuncs.com...]",
+      "proxy": "route(Tono-Home-Residential)"
+    },
+    {
+      "type": "default",
+      "payload": "network=tcp ip_cidr=160.79.104.0/21",
+      "proxy": "route(Tono-Home-Residential)"
+    },
+    {
+      "type": "default",
+      "payload": "network=tcp process_name=[Claude.exe claude.exe Claude Helper.exe ChatGPT.exe chatgpt.exe Codex.exe codex.exe Cursor.exe Code.exe Code Helper.exe Windsurf.exe Trae.exe Zed.exe VSCodium.exe Cursor Helper.exe Windsurf Helper.exe Grok.exe grok.exe Grok Helper.exe]",
+      "proxy": "route(Tono-Home-Residential)"
+    },
+    {
+      "type": "default",
+      "payload": "network=tcp process_path_regex=[[Aa][Nn][Tt][Hh][Rr][Oo][Pp][Ii][Cc][Cc][Ll][Aa][Uu][Dd][Ee] [Cc][Ll][Aa][Uu][Dd][Ee][\\\\/][Vv][Ee][Rr][Ss][Ii][Oo][Nn][Ss] \\.[Ll][Oo][Cc][Aa][Ll][\\\\/][Ss][Hh][Aa][Rr][Ee][\\\\/][Cc][Ll][Aa][Uu][Dd][Ee]]",
+      "proxy": "route(Tono-Home-Residential)"
+    },
+    {
+      "type": "default",
+      "payload": "network=udp domain_suffix=[dashscope.aliyuncs.com dashscope-intl.aliyuncs.com dashscope-us.aliyuncs.com...]",
+      "proxy": "reject"
+    },
+    {
+      "type": "default",
+      "payload": "network=udp ip_cidr=160.79.104.0/21",
+      "proxy": "reject"
+    },
+    {
+      "type": "default",
+      "payload": "network=udp process_name=[Claude.exe claude.exe Claude Helper.exe ChatGPT.exe chatgpt.exe Codex.exe codex.exe Cursor.exe Code.exe Code Helper.exe Windsurf.exe Trae.exe Zed.exe VSCodium.exe Cursor Helper.exe Windsurf Helper.exe Grok.exe grok.exe Grok Helper.exe]",
+      "proxy": "reject"
+    },
+    {
+      "type": "default",
+      "payload": "network=udp process_path_regex=[[Aa][Nn][Tt][Hh][Rr][Oo][Pp][Ii][Cc][Cc][Ll][Aa][Uu][Dd][Ee] [Cc][Ll][Aa][Uu][Dd][Ee][\\\\/][Vv][Ee][Rr][Ss][Ii][Oo][Nn][Ss] \\.[Ll][Oo][Cc][Aa][Ll][\\\\/][Ss][Hh][Aa][Rr][Ee][\\\\/][Cc][Ll][Aa][Uu][Dd][Ee]]",
+      "proxy": "reject"
+    },
+    {
+      "type": "logical",
+      "payload": "network=tcp domain=qq.com port=443 && ip_cidr=101.1.2.3/32",
+      "proxy": "route(Tono-China-Direct)"
+    },
+    {
+      "type": "logical",
+      "payload": "network=tcp domain=weixin.qq.com port=80 && ip_cidr=101.1.2.4/32",
+      "proxy": "route(Tono-China-Direct)"
+    },
+    {
+      "type": "default",
+      "payload": "network=tcp port=[80 443] process_path_regex=[^[Cc]:[\\\\/][Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss][\\\\/][Tt][Ee][Nn][Cc][Ee][Nn][Tt][\\\\/][Ww][Ee][Ii][Xx][Ii][Nn][\\\\/] ^[Dd]:[\\\\/]软件[\\\\/][Ww][Ee][Cc][Hh][Aa][Tt][\\\\/][Ww][Ee][Cc][Hh][Aa][Tt]\\.[Ee][Xx][Ee]$ ^[Cc]:[\\\\/][Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss] \\x28[Xx]86\\x29[\\\\/][Tt][Ee][Nn][Cc][Ee][Nn][Tt][\\\\/][Ww][Ee][Cc][Hh][Aa][Tt][\\\\/]]",
+      "proxy": "route(Tono-China-Direct)"
+    },
+    {
+      "type": "default",
+      "payload": "network=udp ip_cidr=101.1.2.6/32 port=8000 process_name=[WeChat.exe Weixin.exe xwechat.exe WeChatAppEx.exe WeChatPlayer.exe WeixinPlay.exe WeChatApp.exe WeixinApp.exe WeChatBrowser.exe DingTalk.exe dingtalk.exe DingTalkHelper.exe DingTalkLauncher.exe Feishu.exe feishu.exe Lark.exe lark.exe]",
+      "proxy": "route(Tono-China-Direct)"
+    },
+    {
+      "type": "default",
+      "payload": "network=udp ip_cidr=101.1.2.6/32 port=8000 process_path_regex=[^[Cc]:[\\\\/][Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss][\\\\/][Tt][Ee][Nn][Cc][Ee][Nn][Tt][\\\\/][Ww][Ee][Ii][Xx][Ii][Nn][\\\\/] ^[Dd]:[\\\\/]软件[\\\\/][Ww][Ee][Cc][Hh][Aa][Tt][\\\\/][Ww][Ee][Cc][Hh][Aa][Tt]\\.[Ee][Xx][Ee]$ ^[Cc]:[\\\\/][Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss] \\x28[Xx]86\\x29[\\\\/][Tt][Ee][Nn][Cc][Ee][Nn][Tt][\\\\/][Ww][Ee][Cc][Hh][Aa][Tt][\\\\/]]",
+      "proxy": "route(Tono-China-Direct)"
+    },
+    {
+      "type": "default",
+      "payload": "network=[udp icmp]",
+      "proxy": "reject"
+    }
+  ]
+}

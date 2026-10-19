@@ -34,6 +34,7 @@ const WINDOWS_PATHS = [
   'apps/windows/service/**',
   'apps/windows/app/**',
   'tooling/scripts/sing-box/three-tier-template.json',
+  'tooling/scripts/sing-box/fixtures/alpha9-clash-rules.json',
   '.github/workflows/windows-ci.yml',
   '.github/workflows/windows-candidate.yml',
   '.github/workflows/windows-installer-smoke.yml',
