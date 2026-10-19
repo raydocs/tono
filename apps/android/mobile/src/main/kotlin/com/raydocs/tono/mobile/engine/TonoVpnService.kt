@@ -702,7 +702,6 @@ class TonoVpnService : VpnService() {
 
         fun errorCode(e: Throwable): String = when (e) {
             is ApiException -> when {
-                e.code == "CATALOG_UNAVAILABLE" -> "HOME_UNAVAILABLE"
                 e.status == 429 -> "RATE_LIMITED"
                 else -> e.code
             }

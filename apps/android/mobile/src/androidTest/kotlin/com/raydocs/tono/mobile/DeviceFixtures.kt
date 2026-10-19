@@ -23,7 +23,7 @@ object DeviceFixtures {
         cloudProbe = ExitProbe(ProbeState.OK, "JP"), homeProbe = ExitProbe(ProbeState.OK, "US"), rxBytesPerSec = 2_340_000, txBytesPerSec = 81_000,
     )
     fun degraded() = connected().copy(phase = Phase.DEGRADED, reasonCode = "HOME_UNREACHABLE", homeProbe = ExitProbe(ProbeState.FAILED))
-    val failed = idle.copy(phase = Phase.FAILED, reasonCode = "HOME_UNAVAILABLE")
+    val failed = idle.copy(phase = Phase.FAILED, reasonCode = "CATALOG_UNAVAILABLE")
 
     val homeStates = listOf(
         "idle" to idle,

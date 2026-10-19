@@ -1,4 +1,3 @@
-package com.raydocs.tono.mobile
 
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.semantics.SemanticsActions
@@ -13,8 +12,8 @@ import kotlin.math.roundToInt
 /**
  * Shared accessibility contract (JVM and device; the androidTest copy differs only in package).
  * [violations]: every actionable node is laid out at least 48×48 dp (stricter than the platform's
- * touch expansion, which would accept a smaller visible control) and announces something.
- * [truncatedText]: no text is ellipsized or clipped by its own layout.
+ * touch expansion, which would accept a smaller visible control) and announces something, whatever its role.
+ * [truncatedText]: no text is ellipsized or overflows its own layout, in height or width.
  * Both return human-readable violations, empty when the screen passes.
  */
 object A11yContract {
@@ -39,7 +38,8 @@ object A11yContract {
                 report?.add("$screen \"$name\" visible ${"%.0f".format(lw)}×${"%.0f".format(lh)} dp" + if (clipped) " (partly scrolled out)" else ", touch ${"%.0f".format(w)}×${"%.0f".format(h)} dp")
                 if (lw < 47.5f || lh < 47.5f) out += "$screen: \"$name\" visible control ${"%.0f".format(lw)}×${"%.0f".format(lh)} dp < 48"
                 if (!clipped && (w < 47.5f || h < 47.5f)) out += "$screen: \"$name\" touch target ${"%.0f".format(w)}×${"%.0f".format(h)} dp < 48"
-                if (label.isEmpty() && cfg.getOrNull(SemanticsProperties.Role) != null) out += "$screen: actionable node#${n.id} has no label"
+                // Any actionable node, with or without a role: a screen reader would say only "button" or nothing.
+                if (label.isEmpty()) out += "$screen: actionable node#${n.id} has no label"
             }
             n.children.forEach(::visit)
         }
@@ -53,9 +53,11 @@ object A11yContract {
             n.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.let { get ->
                 val results = mutableListOf<TextLayoutResult>()
                 if (get(results)) results.forEach { r ->
-                    // Width is not checked: a wrapped paragraph is always laid out at the full constraint width.
-                    if ((0 until r.lineCount).any(r::isLineEllipsized) || r.multiParagraph.didExceedMaxLines || r.didOverflowHeight) {
-                        out += "$screen: \"${r.layoutInput.text}\" is cut off"
+                    // Width: any line wider than the text's own box (an unbreakable run, a no-wrap label). Line
+                    // width, not its right edge: centred lines are offset within the paragraph, not the box.
+                    val wide = (0 until r.lineCount).any { r.getLineRight(it) - r.getLineLeft(it) > r.size.width + 0.5f }
+                    if ((0 until r.lineCount).any(r::isLineEllipsized) || r.multiParagraph.didExceedMaxLines || r.didOverflowHeight || wide) {
+                        out += "$screen: \"${r.layoutInput.text}\" is cut off" + if (wide) " (line ${(0 until r.lineCount).maxOf { r.getLineRight(it) - r.getLineLeft(it) }} px wide, box ${r.size.width} px)" else ""
                     }
                 }
             }

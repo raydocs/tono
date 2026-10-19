@@ -43,7 +43,7 @@
 
     <string name="speed_line">↓\u00A0%1$s · ↑\u00A0%2$s</string>
 
-    <string name="reason_HOME_UNAVAILABLE">分配给你的家宽出口暂时不可用。Tono 不会悄悄改走别的出口，请稍后再试。</string>
+    <string name="reason_CATALOG_UNAVAILABLE">Tono 暂时无法下发你的线路：服务器或分配给你的家宽出口暂不可用。不会绕开它们直连；请稍后重试。</string>
     <string name="reason_NETWORK">连不上 Tono。请检查网络后重试。</string>
     <string name="reason_RATE_LIMITED">尝试过多，请稍后再试。</string>
     <string name="reason_CORE_START">隧道内核没能启动。请重试；一直失败请重启手机。</string>
@@ -128,7 +128,7 @@
     <string name="action_allow_vpn">允许 VPN</string>
     <string name="action_disconnecting">断开中…</string>
     <string name="a11y_cancel_connect">取消连接</string>
-    <string name="a11y_connected_for">已连接 %1$s</string>
+    <string name="a11y_connected_for">隧道已运行 %1$s</string>
     <string name="details">详情</string>
     <string name="details_routes">流量去向</string>
     <string name="details_mode">路由模式</string>
@@ -141,7 +141,7 @@
     <string name="status_rechecking">正在重新检查出口</string>
     <string name="a11y_expanded">已展开</string>
     <string name="a11y_collapsed">已收起</string>
-    <string name="short_HOME_UNAVAILABLE">家宽出口暂不可用</string>
+    <string name="short_CATALOG_UNAVAILABLE">线路暂不可用</string>
     <string name="short_NETWORK">连不上 Tono</string>
     <string name="short_RATE_LIMITED">尝试太频繁</string>
     <string name="short_CORE_START">内核没能启动</string>
@@ -160,7 +160,7 @@
     <string name="surface_open_to_check">打开 Tono 查看</string>
     <!-- Home while the engine's last word is not current (it is restarting, or the app just came back). -->
     <string name="engine_waiting">正在向 Tono 引擎确认</string>
-    <string name="engine_lost">引擎已停止 · 正在重新确认</string>
+    <string name="engine_lost">Tono 未响应 · 正在重新确认</string>
     <string name="surface_last_known">最后已知：%2$s %1$s</string>
     <string name="surface_open_to_sign_in">打开 Tono 登录</string>
     <string name="surface_open_to_allow">打开 Tono 授权 VPN</string>
@@ -169,6 +169,7 @@
     <string name="surface_open">打开</string>
     <string name="widget_description">Tono 状态与一键连接</string>
     <string name="notif_stopped_title">Tono 已停止</string>
+    <string name="notif_stopped_no_vpn">系统无 VPN 网络 · 打开 Tono 重新连接</string>
     <string name="consent_title">系统询问之前</string>
     <string name="consent_ask">Android 会询问一次是否允许 Tono 建立 VPN，请在系统弹窗中点“确定”。</string>
     <string name="consent_routes">AI 与视频经 Tono 出口，其余应用直连。</string>

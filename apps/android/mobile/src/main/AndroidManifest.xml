@@ -75,5 +75,9 @@
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/tono_widget_info" />
         </receiver>
+        <!-- Keeps the engine's notification honest after the engine's process died (alarm from the engine). -->
+        <receiver
+            android:name=".surface.NotificationWatchdog$Receiver"
+            android:exported="false" />
     </application>
 </manifest>

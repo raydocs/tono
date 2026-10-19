@@ -84,7 +84,7 @@ class EngineUnitTest {
     }
 
     @Test fun homeOutageMapsToItsOwnReason() {
-        assertEquals("HOME_UNAVAILABLE", TonoVpnService.errorCode(ApiException(503, "CATALOG_UNAVAILABLE", "")))
+        assertEquals("CATALOG_UNAVAILABLE", TonoVpnService.errorCode(ApiException(503, "CATALOG_UNAVAILABLE", "")))
         assertEquals("RATE_LIMITED", TonoVpnService.errorCode(ApiException(429, "TOO_MANY", "")))
         assertTrue(TonoVpnService.isSessionEnded(ApiException(401, "INVALID_REFRESH_TOKEN", "")))
         assertFalse(TonoVpnService.isSessionEnded(ApiException(401, "INVALID_OR_EXPIRED_CODE", "")))

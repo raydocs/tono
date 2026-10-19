@@ -303,7 +303,7 @@ class DeviceEvidenceTest {
             "fixture-02-connecting" to idle.copy(phase = Phase.CONNECTING),
             "fixture-03-connected" to connected(),
             "fixture-04-degraded" to connected().copy(phase = Phase.DEGRADED, reasonCode = "HOME_UNREACHABLE", homeProbe = ExitProbe(ProbeState.FAILED)),
-            "fixture-05-failed" to idle.copy(phase = Phase.FAILED, reasonCode = "HOME_UNAVAILABLE"),
+            "fixture-05-failed" to idle.copy(phase = Phase.FAILED, reasonCode = "CATALOG_UNAVAILABLE"),
         )
         for ((name, s) in states) {
             set(s)
@@ -351,7 +351,7 @@ class DeviceEvidenceTest {
             700L to idle.copy(phase = Phase.DISCONNECTING),
             2_000L to idle,
             1_000L to idle.copy(phase = Phase.PREPARING),
-            2_400L to idle.copy(phase = Phase.FAILED, reasonCode = "HOME_UNAVAILABLE"),
+            2_400L to idle.copy(phase = Phase.FAILED, reasonCode = "CATALOG_UNAVAILABLE"),
         )
         for ((ms, s) in steps) { set(s); Thread.sleep(ms) }
     }

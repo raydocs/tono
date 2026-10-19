@@ -32,6 +32,7 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import com.raydocs.tono.mobile.engine.LocalTestServer
+import com.raydocs.tono.mobile.engine.Phase
 import com.raydocs.tono.mobile.surface.PublicStatusStore
 import com.raydocs.tono.mobile.surface.SurfaceRules
 import com.raydocs.tono.mobile.surface.SurfaceState
@@ -39,6 +40,8 @@ import com.raydocs.tono.mobile.ui.MainActivity
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.rules.TestName
 import org.junit.runner.Description
 import org.junit.runners.model.Statement
 import org.junit.Test
@@ -64,6 +67,7 @@ import java.util.regex.Pattern
 @RunWith(AndroidJUnit4::class)
 class LocalTunnelDeviceTest {
     // Compose semantics of the real MainActivity, for the text-size contract (t4); idle otherwise.
+    @get:Rule val testName = TestName()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
     private val device = UiDevice.getInstance(instrumentation)
@@ -89,7 +93,11 @@ class LocalTunnelDeviceTest {
         File(out, "$name.xml").outputStream().use { device.dumpWindowHierarchy(it) }
     }
 
-    private fun note(line: String) { report += line; File(out, "local-tunnel.txt").writeText(report.joinToString("\n") + "\n") }
+    /** One notes file per test (local-tunnel-t1.txt …): CI pulls the evidence after each test. */
+    private fun note(line: String) {
+        report += line
+        File(out, "local-tunnel-${testName.methodName.substringBefore('_')}.txt").writeText(report.joinToString("\n") + "\n")
+    }
 
     private fun vpnUp(): Boolean {
         val cm = context.getSystemService(ConnectivityManager::class.java)
@@ -418,24 +426,43 @@ class LocalTunnelDeviceTest {
         return false
     }
 
+    /** Turns the display to [surfaceRotation] (also between the two landscapes, where the orientation stays the same). */
+    private fun rotateTo(rotation: Int, surfaceRotation: Int): Boolean {
+        instrumentation.uiAutomation.setRotation(rotation)
+        val deadline = SystemClock.elapsedRealtime() + 15_000
+        while (SystemClock.elapsedRealtime() < deadline) {
+            var now: Int? = null
+            onResumed { now = it.display?.rotation }
+            if (now == surfaceRotation) { Thread.sleep(1_500); return true }
+            Thread.sleep(250)
+        }
+        return false
+    }
+
     private fun insets(scenario: ActivityScenario<MainActivity>): WindowInsetsCompat? {
         var found: WindowInsetsCompat? = null
         onResumed { a -> found = ViewCompat.getRootWindowInsets(a.window.decorView) }
         return found
     }
 
-    /** Text and controls on screen that overlap the display cutout (camera), as found. */
-    private fun underCutout(scenario: ActivityScenario<MainActivity>): List<String> {
+    /**
+     * Text and controls on screen that overlap the display cutout (camera), as found. The cutout's
+     * own rectangles go into the report, and there must be one: an empty cutout would pass anything.
+     */
+    private fun underCutout(scenario: ActivityScenario<MainActivity>, where: String): List<String> {
         val cutouts = mutableListOf<Rect>()
         onResumed { a -> a.window.decorView.rootWindowInsets?.displayCutout?.boundingRects?.let { cutouts += it } }
+        note("$where: display cutout $cutouts, display ${device.displayWidth}×${device.displayHeight}")
+        assertTrue("$where: the emulator reports a display cutout to check against", cutouts.isNotEmpty())
         val hits = mutableListOf<String>()
         for (o in device.findObjects(By.pkg(context.packageName))) {
             val label = runCatching { o.text ?: o.contentDescription }.getOrNull() ?: continue
             // The local-server mark's screen-reader line spans the window's width on purpose.
             if (label.isBlank() || label == text(R.string.local_test_server)) continue
             val r = runCatching { o.visibleBounds }.getOrNull() ?: continue
-            // A sheet's scrim ("Close sheet") is a dismiss area covering the whole window by design.
-            if (r.width() >= device.displayWidth && r.height() >= device.displayHeight) continue
+            // A sheet's scrim is a dismiss area covering the whole window by design: only that node,
+            // by its Material label and its size, is not counted.
+            if (label == "Close sheet" && r.width() >= device.displayWidth && r.height() >= device.displayHeight) continue
             if (cutouts.any { Rect.intersects(it, r) }) hits += "\"$label\" $r"
         }
         return hits
@@ -491,19 +518,27 @@ class LocalTunnelDeviceTest {
             if (connect == null) diagnose("local-landscape-signin-failed")
             assertNotNull("signed in, Home in landscape", connect)
             assertLocalMark("landscape Home")
-            val homeCutout = underCutout(scenario)
+            val homeCutout = underCutout(scenario, "landscape (90°) Home")
             note("landscape Home: under the camera cutout: ${homeCutout.ifEmpty { listOf("nothing") }}")
             shot("local-07-landscape-home")
             assertTrue("nothing on landscape Home is under the cutout: $homeCutout", homeCutout.isEmpty())
 
             device.findObject(By.text(text(R.string.details))).click()
             assertNotNull("Details in landscape", find(text(R.string.details_routes), 15_000))
-            val detailsCutout = underCutout(scenario)
+            val detailsCutout = underCutout(scenario, "landscape (90°) Details")
             note("landscape Details: under the camera cutout: ${detailsCutout.ifEmpty { listOf("nothing") }}")
             shot("local-07b-landscape-details")
             assertTrue("nothing on landscape Details is under the cutout: $detailsCutout", detailsCutout.isEmpty())
             device.pressBack()
             Thread.sleep(800)
+
+            // Turned the other way, the camera is on the other side.
+            assertTrue("turned to 270°", rotateTo(UiAutomation.ROTATION_FREEZE_270, android.view.Surface.ROTATION_270))
+            assertNotNull("Home at 270°", find(text(R.string.action_connect), 10_000))
+            val home270 = underCutout(scenario, "landscape (270°) Home")
+            note("landscape 270° Home: under the camera cutout: ${home270.ifEmpty { listOf("nothing") }}")
+            shot("local-07c-landscape-270-home")
+            assertTrue("nothing on landscape Home at 270° is under the cutout: $home270", home270.isEmpty())
 
             // Consent was withdrawn: Connect shows Tono's explanation first. Turning the phone keeps it.
             find(text(R.string.action_connect), 10_000)!!.click()
@@ -669,7 +704,9 @@ class LocalTunnelDeviceTest {
 
             val idle = sky("local-10-real-idle"); val connected = sky("local-12-real-connected")
             val partlySky = sky("local-13-real-partly-working"); val failedSky = sky("local-14-real-failed")
-            note("sky luminance (0–255): not connected %.1f, connected %.1f, partly working %.1f, failed %.1f".format(idle, connected, partlySky, failedSky))
+            // Connecting is captured the moment the word appears, while the sky may still be rising: noted, not asserted.
+            val connectingSky = if (File(out, "local-11-real-connecting.png").exists()) "%.1f".format(sky("local-11-real-connecting")) else "not captured"
+            note("sky luminance (0–255): not connected %.1f, connecting $connectingSky, connected %.1f, partly working %.1f, failed %.1f".format(idle, connected, partlySky, failedSky))
             assertTrue("day sky when connected: %.1f vs night %.1f".format(connected, idle), connected > idle + 30)
             assertTrue("partly working is lit but below connected: %.1f".format(partlySky), partlySky > idle + 15 && partlySky < connected - 5)
             assertTrue("failed keeps an ember, below connected: %.1f".format(failedSky), failedSky > idle + 8 && failedSky < connected - 10)
@@ -684,10 +721,133 @@ class LocalTunnelDeviceTest {
         assertFalse("no VPN left behind", vpnUp())
     }
 
+    /** The engine's ongoing notification only (id 7): its title and the phase the engine stamped on it, if any. */
+    private fun ongoingNotice(): Pair<String?, String?> {
+        val n = context.getSystemService(NotificationManager::class.java).activeNotifications
+            .firstOrNull { it.id == com.raydocs.tono.mobile.engine.TonoNotifications.ONGOING_ID } ?: return null to null
+        return n.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() to
+            com.raydocs.tono.mobile.engine.TonoNotifications.claimedPhase(n.notification)?.name
+    }
+
+    private fun engineProcessAlive(): Boolean = context.getSystemService(ActivityManager::class.java)
+        .runningAppProcesses.orEmpty().any { it.processName == "${context.packageName}:vpn" }
+
+    /** Android's notification shade, captured for evidence, then closed. */
+    private fun shadeShot(name: String, expect: String) {
+        device.openNotification()
+        device.wait(Until.hasObject(By.pkg("com.android.systemui").text(expect)), 10_000)
+        Thread.sleep(800)
+        Captures.drawn(File(out, "$name.png"), attempts = 2)
+        shell("cmd statusbar collapse")
+        Thread.sleep(800)
+    }
+
+    /**
+     * Fault injection with no app open: Connected through the real app, then MainActivity is closed
+     * (its ViewModel cleared, so the app holds no binding to the engine and nothing in the app
+     * watches it), the phone goes to the home screen, and the engine's `:vpn` process is killed.
+     * Nothing then replaces the engine's notification but the watchdog the engine left armed. For up
+     * to 150 s, samples Android's VPN network, the notification and whether Android restarted the
+     * engine. The notification may not say Connected without a VPN network for longer than the
+     * watchdog's bound (inexact alarm: 10–70 s after the death; asserted against the shared status's
+     * staleness limit, 90 s); if Android kept it, it must end up saying Tono stopped, replaced by the
+     * watchdog (its log says so). Android removing it, or restarting the engine, is recorded too.
+     *
+     * Not covered: the app's main process stays alive (it hosts this test), so the watchdog's alarm
+     * reaches a running process rather than starting one; the phone stays awake (no Doze).
+     */
+    @Test fun t5_engineDiesWithNoAppOpen() {
+        useLocalServers()
+        stillScene(true)
+        val connected = text(R.string.state_connected)
+        val claims = setOf(Phase.PREPARING, Phase.CONNECTING, Phase.CONNECTED, Phase.DEGRADED, Phase.DISCONNECTING).map { it.name }.toSet()
+        try {
+            val app = ActivityScenario.launch(MainActivity::class.java)
+            signInWithCode()
+            find(text(R.string.action_connect), 10_000)!!.click()
+            val explained = find(text(R.string.consent_continue), 20_000)
+            assertNotNull("Tono's explanation before Android's VPN dialog", explained)
+            explained!!.click()
+            answerSystemConsent()
+            assertNotNull("Connected", find(connected, 90_000))
+            assertTrue("Android shows a VPN network", vpnUp())
+            val noticeDeadline = SystemClock.elapsedRealtime() + 15_000
+            while (ongoingNotice().first != connected && SystemClock.elapsedRealtime() < noticeDeadline) Thread.sleep(250)
+            assertEquals("the engine's notification says Connected", connected, ongoingNotice().first)
+            shadeShot("local-19-no-app-shade-connected", connected)
+
+            app.close()
+            var open = 0
+            instrumentation.runOnMainSync {
+                val reg = androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                open = listOf(androidx.test.runner.lifecycle.Stage.CREATED, androidx.test.runner.lifecycle.Stage.STARTED,
+                    androidx.test.runner.lifecycle.Stage.RESUMED, androidx.test.runner.lifecycle.Stage.PAUSED, androidx.test.runner.lifecycle.Stage.STOPPED)
+                    .sumOf { reg.getActivitiesInStage(it).size }
+            }
+            assertEquals("no app activity left", 0, open)
+            device.pressHome()
+            Thread.sleep(2_000)
+            File(out, "local-t5-engine-bindings.txt").writeText(shell("dumpsys activity services ${context.packageName}"))
+            note("t5: MainActivity closed (no activity left, ViewModel cleared, no app binding to the engine); home screen in front")
+            shell("logcat -c")
+
+            assertTrue("an engine process to kill", killEngineProcess() > 0)
+            val killed = SystemClock.elapsedRealtime()
+            var vpnDown = -1L
+            var honestAt = -1L
+            var restartedAt = -1L
+            var reconnectedAt = -1L
+            var claimedAfterDeath = false
+            val lies = mutableListOf<String>()
+            val samples = mutableListOf<String>()
+            while (SystemClock.elapsedRealtime() - killed < 150_000) {
+                val t = SystemClock.elapsedRealtime() - killed
+                val vpn = vpnUp()
+                val (title, phase) = ongoingNotice()
+                val alive = engineProcessAlive()
+                if (!vpn && vpnDown < 0) vpnDown = t
+                if (alive && restartedAt < 0) restartedAt = t
+                val claiming = phase != null && phase in claims
+                if (!vpn && claiming) claimedAfterDeath = true
+                if (!vpn && claiming && t > NotificationWatchdogBoundMs) lies += "${t}ms notification \"$title\" ($phase) without a VPN network"
+                if (honestAt < 0 && !claiming) honestAt = t
+                if (samples.isEmpty() || samples.last().substringAfter(' ') != "vpn=$vpn title=$title phase=$phase engine=$alive") samples += "${t}ms vpn=$vpn title=$title phase=$phase engine=$alive"
+                if (honestAt >= 0 && t - honestAt > 10_000) break
+                // If Android does restart the engine, it reconnects (the user still wants the tunnel).
+                if (restartedAt >= 0 && vpn && phase == Phase.CONNECTED.name) { reconnectedAt = t; break }
+                Thread.sleep(500)
+            }
+            val watchdogLog = shell("logcat -d -s TonoWatchdog:I").lines().filter { "replaced" in it }
+            note("t5: engine killed; VPN network gone after ${vpnDown}ms; notification stopped claiming a tunnel after ${honestAt}ms; " +
+                "Android restarted the engine: ${if (restartedAt >= 0) "after ${restartedAt}ms, reconnected after ${reconnectedAt}ms" else "no (within the window)"}")
+            note("t5: watchdog log: ${watchdogLog.ifEmpty { listOf("none") }}")
+            samples.forEach { note("t5: $it") }
+            lies.take(10).forEach { note("t5: $it") }
+            val finalTitle = ongoingNotice().first
+            if (finalTitle != null) shadeShot("local-20-no-app-shade-after-death", finalTitle)
+            if (lies.isNotEmpty() || honestAt < 0) diagnose("local-t5-notification")
+            assertTrue("the engine's notification stopped claiming a tunnel, or a restarted engine reconnected", honestAt >= 0 || reconnectedAt >= 0)
+            assertTrue("no Connected notification without a VPN network beyond ${NotificationWatchdogBoundMs}ms: $lies", lies.isEmpty())
+            note("t5: notification still claimed a tunnel after the VPN network went: $claimedAfterDeath; final title: $finalTitle")
+            if (restartedAt < 0 && claimedAfterDeath) {
+                // Android kept it and nothing else could have replaced it: the watchdog did, and says so.
+                assertTrue("the watchdog replaced the notification (no engine restart, no app open)", watchdogLog.isNotEmpty())
+                assertEquals("the notification now says Tono stopped", text(R.string.notif_stopped_title), finalTitle)
+            }
+        } finally {
+            stillScene(false)
+            override.delete()
+            stopEngineProcess()
+        }
+    }
+
+    private val NotificationWatchdogBoundMs = com.raydocs.tono.mobile.surface.SurfaceRules.STALE_MS
+
     /**
      * The real MainActivity at Android's largest text size (200 %) with animations removed, against
-     * the stand-ins (counterpart of the fixture-host b3/l1): sign-in, the code step, Home, Details and
-     * Settings keep every text uncut and every control at 48 dp with a label.
+     * the stand-ins (counterpart of the fixture-host b3/l1): sign-in, the code step, Home (not connected,
+     * then a real Connected, partly working and failed connect), Details and Settings keep every text
+     * uncut and every control at 48 dp with a label.
      *
      * The Compose test rule is applied only around this test and the test drives the app through it:
      * under the rule, the app's composition advances only when the rule synchronises, so the
@@ -705,6 +865,7 @@ class LocalTunnelDeviceTest {
                 override fun evaluate() = largestText(rule)
             }, Description.createTestDescription(javaClass, "t4_realAppAtLargestSystemText")).evaluate()
         } finally {
+            runCatching { scenario("normal") }
             shell("settings put system font_scale 1.0")
             shell("settings put global animator_duration_scale 1")
             override.delete()
@@ -758,8 +919,35 @@ class LocalTunnelDeviceTest {
             device.pressBack()
             compose.waitForIdle()
 
+            // The live states at 200 %, against the stand-ins as in t3: Connected, partly working, failed.
+            fun connect() {
+                tap(compose.onNodeWithText(text(R.string.action_connect)))
+                // Consent was given in t1/t3; if Android asks again, the same explanation and dialog.
+                runCatching { compose.waitUntil(3_000) { shown(text(R.string.consent_continue)) } }
+                if (shown(text(R.string.consent_continue))) { tap(compose.onNodeWithText(text(R.string.consent_continue))); answerSystemConsent(thenNotifications = true) }
+            }
+            fun disconnect() {
+                tap(compose.onNodeWithText(text(R.string.action_disconnect)))
+                await("Not connected", text(R.string.state_idle), 20_000)
+            }
+            scenario("normal")
+            connect()
+            await("Connected", text(R.string.state_connected), 90_000)
+            check("Connected"); shot("local-16b-real-font-2.0-connected")
+            disconnect()
+            scenario("home-down")
+            connect()
+            await("partly working", text(R.string.state_degraded), 90_000)
+            check("partly working"); shot("local-16c-real-font-2.0-partly-working")
+            disconnect()
+            scenario("catalog-unavailable")
+            connect()
+            await("failed", text(R.string.state_failed), 60_000)
+            check("failed"); shot("local-16d-real-font-2.0-failed")
+            scenario("normal")
+
             File(out, "real-font-2.0-report.txt").writeText(
-                if (found.isEmpty()) "real MainActivity at font scale 2.0: no text cut off, every control ≥ 48 dp and labelled on sign-in, the code step, Home, Details and Settings\n"
+                if (found.isEmpty()) "real MainActivity at font scale 2.0: no text cut off, every control ≥ 48 dp and labelled on sign-in, the code step, Home (not connected, Connected, partly working, failed), Details and Settings\n"
                 else found.joinToString("\n") + "\n",
             )
             assertEquals(found.joinToString("\n"), 0, found.size)

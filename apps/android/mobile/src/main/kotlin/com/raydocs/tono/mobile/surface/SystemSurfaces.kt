@@ -5,6 +5,7 @@ import android.content.Context
 import android.service.quicksettings.TileService
 import com.raydocs.tono.mobile.R
 import com.raydocs.tono.mobile.engine.EngineSnapshot
+import com.raydocs.tono.mobile.engine.Phase
 
 /** Same glyph family as the status bar and desktop tray: only a verified tunnel gets the filled sun. */
 object SurfaceGlyph {
@@ -19,6 +20,7 @@ object SurfaceGlyph {
 /** Engine side (`:vpn`): publishes the shared status and asks the tile and widgets to redraw. */
 object SystemSurfaces {
     @Volatile private var last: PublicStatus? = null
+    private val TUNNEL_PHASES = setOf(Phase.PREPARING, Phase.CONNECTING, Phase.CONNECTED, Phase.DEGRADED, Phase.DISCONNECTING)
 
     fun publish(context: Context, s: EngineSnapshot, nowMs: Long = System.currentTimeMillis()) {
         val previous = last
@@ -28,6 +30,8 @@ object SystemSurfaces {
         if (!changed && previous != null && nowMs - previous.updatedAtMs < SurfaceRules.HEARTBEAT_MS) return
         runCatching { PublicStatusStore.write(context, next) }.onFailure { return }
         last = next
+        // Pushed back on every write while a tunnel is up or starting; fires only if the engine stops writing.
+        runCatching { NotificationWatchdog.arm(context, live = s.phase in TUNNEL_PHASES) }
         val wasStale = previous != null && nowMs - previous.updatedAtMs > SurfaceRules.STALE_MS
         if (changed || wasStale) refresh(context)
     }

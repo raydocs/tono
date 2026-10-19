@@ -37,7 +37,7 @@ fun phaseTitle(p: Phase): String = stringResource(
 
 @Composable
 fun reasonText(code: String): String = when (code) {
-    "HOME_UNAVAILABLE" -> stringResource(R.string.reason_HOME_UNAVAILABLE)
+    "CATALOG_UNAVAILABLE" -> stringResource(R.string.reason_CATALOG_UNAVAILABLE)
     "NETWORK" -> stringResource(R.string.reason_NETWORK)
     "RATE_LIMITED" -> stringResource(R.string.reason_RATE_LIMITED)
     "CORE_START" -> stringResource(R.string.reason_CORE_START)
@@ -53,7 +53,7 @@ fun reasonText(code: String): String = when (code) {
 
 /** Short reason resource for a known code; unknown codes are shown with the code itself. */
 fun shortReasonRes(code: String): Int? = when (code) {
-    "HOME_UNAVAILABLE" -> R.string.short_HOME_UNAVAILABLE
+    "CATALOG_UNAVAILABLE" -> R.string.short_CATALOG_UNAVAILABLE
     "NETWORK" -> R.string.short_NETWORK
     "RATE_LIMITED" -> R.string.short_RATE_LIMITED
     "CORE_START" -> R.string.short_CORE_START

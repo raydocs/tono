@@ -43,7 +43,7 @@
 
     <string name="speed_line">↓\u00A0%1$s · ↑\u00A0%2$s</string>
 
-    <string name="reason_HOME_UNAVAILABLE">Your assigned Home exit is unavailable right now. Tono won\'t quietly send AI elsewhere; try again later.</string>
+    <string name="reason_CATALOG_UNAVAILABLE">Tono can\'t hand out your lines right now: its servers or your assigned Home exit are unavailable. Nothing is sent around them; try again later.</string>
     <string name="reason_NETWORK">Can\'t reach Tono. Check the network and retry.</string>
     <string name="reason_RATE_LIMITED">Too many attempts. Wait a moment.</string>
     <string name="reason_CORE_START">The tunnel core didn\'t start. Retry; if it keeps failing, restart the phone.</string>
@@ -129,7 +129,7 @@
     <string name="action_allow_vpn">Allow VPN</string>
     <string name="action_disconnecting">Disconnecting…</string>
     <string name="a11y_cancel_connect">Cancel connecting</string>
-    <string name="a11y_connected_for">Connected for %1$s</string>
+    <string name="a11y_connected_for">Tunnel up for %1$s</string>
     <string name="details">Details</string>
     <string name="details_routes">Where traffic goes</string>
     <string name="details_mode">Routing mode</string>
@@ -142,7 +142,7 @@
     <string name="status_rechecking">Checking the exits again</string>
     <string name="a11y_expanded">Expanded</string>
     <string name="a11y_collapsed">Collapsed</string>
-    <string name="short_HOME_UNAVAILABLE">Home exit unavailable</string>
+    <string name="short_CATALOG_UNAVAILABLE">Lines unavailable right now</string>
     <string name="short_NETWORK">Can\'t reach Tono</string>
     <string name="short_RATE_LIMITED">Too many attempts</string>
     <string name="short_CORE_START">Core didn\'t start</string>
@@ -161,7 +161,7 @@
     <string name="surface_open_to_check">Open Tono to check</string>
     <!-- Home while the engine's last word is not current (it is restarting, or the app just came back). -->
     <string name="engine_waiting">Checking with Tono\'s engine</string>
-    <string name="engine_lost">Engine stopped · checking again</string>
+    <string name="engine_lost">Tono stopped responding · checking again</string>
     <string name="surface_last_known">Last known: %1$s at %2$s</string>
     <string name="surface_open_to_sign_in">Open Tono to sign in</string>
     <string name="surface_open_to_allow">Open Tono to allow the VPN</string>
@@ -170,6 +170,7 @@
     <string name="surface_open">Open</string>
     <string name="widget_description">Tono status and one-tap connect</string>
     <string name="notif_stopped_title">Tono stopped</string>
+    <string name="notif_stopped_no_vpn">No VPN network · Open Tono to reconnect</string>
     <string name="consent_title">Before Android asks</string>
     <string name="consent_ask">Android will ask once whether Tono may set up a VPN. Tap OK there.</string>
     <string name="consent_routes">AI and video go through Tono\'s exits; other apps go out directly.</string>

@@ -70,7 +70,7 @@ class MotionPreview {
             450L to idle.copy(phase = Phase.DISCONNECTING),
             800L to idle,
             700L to idle.copy(phase = Phase.PREPARING),
-            1400L to idle.copy(phase = Phase.FAILED, reasonCode = "HOME_UNAVAILABLE"),
+            1400L to idle.copy(phase = Phase.FAILED, reasonCode = "CATALOG_UNAVAILABLE"),
         )
     }
 

@@ -61,7 +61,7 @@ class ScreenshotRender {
     @Test fun connecting() = home("04-home-connecting-cancelable", base.copy(phase = Phase.CONNECTING))
     @Test fun connected() = home("05-home-connected", UiFixtures.connected())
     @Test fun degraded() = home("06-home-degraded-home-down", UiFixtures.degraded())
-    @Test fun failed() = home("07-home-failed-home-unavailable", base.copy(phase = Phase.FAILED, reasonCode = "HOME_UNAVAILABLE"))
+    @Test fun failed() = home("07-home-failed-home-unavailable", base.copy(phase = Phase.FAILED, reasonCode = "CATALOG_UNAVAILABLE"))
     @Test fun permission() = home("08-home-needs-permission", base.copy(phase = Phase.NEEDS_PERMISSION, reasonCode = "DENIED"))
     @Test fun stableNoHome() = home(
         "09-home-connected-stable-no-home",

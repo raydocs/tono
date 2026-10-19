@@ -94,6 +94,8 @@ jobs:
           path: |
             apps/android/routing/build/reports/
             apps/android/mobile/build/reports/
+            apps/android/routing/build/test-results/
+            apps/android/mobile/build/test-results/
           retention-days: 30
           if-no-files-found: ignore
 
@@ -256,7 +258,7 @@ jobs:
             tunnel) tests="DeviceEvidenceTest#b1_fixtureStatesRenderedOnDevice DeviceEvidenceTest#b2_fixtureMotionRecordedOnDevice
             DeviceEvidenceTest#b3_fixtureAtLargeFontScale LocalTunnelDeviceTest#t2_realAppTurnsWithKeyboardAndConsentOpen
             LocalTunnelDeviceTest#t1_realTunnelThroughLocalFixtureServers LocalTunnelDeviceTest#t3_realAppStatesAndSkyOnMainActivity
-            LocalTunnelDeviceTest#t4_realAppAtLargestSystemText" ;;
+            LocalTunnelDeviceTest#t4_realAppAtLargestSystemText LocalTunnelDeviceTest#t5_engineDiesWithNoAppOpen" ;;
             ui) tests="HorizonUiDeviceTest#u1_accessibilityContractAndAtfOnEveryScreen HorizonUiDeviceTest#u2_primaryControlActsThroughRealTaps
             HorizonUiDeviceTest#u3_swipeUpOnTheDockOpensDetails HorizonUiDeviceTest#u4_glassBlursTheSceneBehindIt
             HorizonUiDeviceTest#u5_consentExplainedBeforeTheSystemDialog HorizonUiDeviceTest#u6_screenReaderOrderAndLabelsOnHome
@@ -343,6 +345,9 @@ jobs:
           kill $logcat
           if [ "$SHARD" = system ] && [ "$(timeout 30 adb get-state 2>/dev/null)" = device ]; then
             # Measurements only, on an emulator with a software GPU: not a phone, not a pass/fail gate.
+            # Animations back on first: the last test ran with them removed, which left gfxinfo with no
+            # frames to count (run 39176556620).
+            adb shell settings put global animator_duration_scale 1
             { set +x; } 2>/dev/null
             {
               echo "emulator $(cat evidence/device.txt | tr '\n' ' ')"

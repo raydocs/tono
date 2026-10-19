@@ -40,8 +40,9 @@ fun SeaScene(sky: SkyState, modifier: Modifier = Modifier, horizon: Float = 0.47
     val reduce = LocalReduceMotion.current
     val target = when (sky) {
         SkyState.NIGHT -> 0f
-        SkyState.DAWN -> 0.5f
-        SkyState.RISING -> 0.7f
+        SkyState.DAWN -> 0.32f
+        // Connecting stays clearly below the connected day (review: the two skies read alike at 0.7).
+        SkyState.RISING -> 0.5f
         SkyState.DAY -> 1f
         SkyState.DUSK_WARNING -> 0.72f
         SkyState.EMBER -> 0.28f

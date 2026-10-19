@@ -184,7 +184,7 @@ class SystemSurfacesDeviceTest {
             "connected" to SurfaceRules.view(st(Phase.CONNECTED, cloud = "JP", home = "US"), now, boot, true),
             "degraded" to SurfaceRules.view(st(Phase.DEGRADED, "HOME_UNREACHABLE", cloud = "JP"), now, boot, true),
             "off" to SurfaceRules.view(st(Phase.IDLE), now, boot, false),
-            "failed" to SurfaceRules.view(st(Phase.FAILED, "HOME_UNAVAILABLE"), now, boot, false),
+            "failed" to SurfaceRules.view(st(Phase.FAILED, "CATALOG_UNAVAILABLE"), now, boot, false),
             "connected 10 min ago, no heartbeat since" to SurfaceRules.view(st(Phase.CONNECTED, cloud = "JP", age = 10 * 60_000), now, boot, true),
         )
         assertEquals(SurfaceState.UNKNOWN, cases.last().second.state)

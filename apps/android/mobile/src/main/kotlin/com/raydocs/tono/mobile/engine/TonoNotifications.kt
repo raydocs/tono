@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
+import android.os.Bundle
 import com.raydocs.tono.mobile.R
 import com.raydocs.tono.mobile.ui.Format
 import com.raydocs.tono.mobile.ui.shortReasonRes
@@ -14,6 +15,11 @@ object TonoNotifications {
     const val CHANNEL = "tunnel"
     const val ONGOING_ID = 7
     const val NOTICE_ID = 8
+    /** The engine's phase when it posted its ongoing notification; replacements carry none. */
+    private const val EXTRA_PHASE = "com.raydocs.tono.mobile.PHASE"
+
+    fun claimedPhase(n: Notification): Phase? =
+        n.extras.getString(EXTRA_PHASE)?.let { name -> runCatching { Phase.valueOf(name) }.getOrNull() }
 
     /** Ongoing while the tunnel runs: state, verified exits (or the line), and Disconnect. */
     fun ongoing(c: Context, s: EngineSnapshot, open: PendingIntent, disconnect: PendingIntent): Notification {
@@ -44,6 +50,7 @@ object TonoNotifications {
         return Notification.Builder(c, CHANNEL)
             .setSmallIcon(icon)
             .setColor(0xFFFFAD74.toInt())
+            .addExtras(Bundle().apply { putString(EXTRA_PHASE, s.phase.name) })
             .setContentTitle(title)
             .setContentText(text)
             .setOngoing(true)
@@ -82,6 +89,26 @@ object TonoNotifications {
             .setContentIntent(open)
             .setCategory(Notification.CATEGORY_STATUS)
             .build()
+
+    /**
+     * Posted from the app's main process by [com.raydocs.tono.mobile.surface.NotificationWatchdog]
+     * when the engine's notification outlived the engine. [tunnelGone]: Android has no VPN network,
+     * so the phone is not protected; otherwise the state cannot be vouched for either way.
+     */
+    fun engineGone(c: Context, tunnelGone: Boolean): Notification {
+        val open = PendingIntent.getActivity(
+            c, 0, c.packageManager.getLaunchIntentForPackage(c.packageName), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        return Notification.Builder(c, CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_standby)
+            .setColor(0xFFFFAD74.toInt())
+            .setContentTitle(c.getString(if (tunnelGone) R.string.notif_stopped_title else R.string.surface_unknown))
+            .setContentText(c.getString(if (tunnelGone) R.string.notif_stopped_no_vpn else R.string.surface_open_to_check))
+            .setOnlyAlertOnce(true)
+            .setContentIntent(open)
+            .setCategory(Notification.CATEGORY_STATUS)
+            .build()
+    }
 
     /** Replaces the engine's ongoing notification, if one is up, with [engineLost]. */
     fun replaceAfterEngineLoss(c: Context) {

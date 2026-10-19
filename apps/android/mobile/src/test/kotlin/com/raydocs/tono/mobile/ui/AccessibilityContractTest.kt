@@ -41,7 +41,7 @@ class AccessibilityContractTest {
         "connecting" to UiFixtures.idle.copy(phase = Phase.CONNECTING),
         "connected" to UiFixtures.connected(),
         "degraded" to UiFixtures.degraded(),
-        "failed" to UiFixtures.idle.copy(phase = Phase.FAILED, reasonCode = "HOME_UNAVAILABLE"),
+        "failed" to UiFixtures.idle.copy(phase = Phase.FAILED, reasonCode = "CATALOG_UNAVAILABLE"),
         "signin" to UiFixtures.idle.copy(phase = Phase.SIGNED_OUT),
     )
 
