@@ -568,11 +568,15 @@ final class KillSwitchManager {
             lastCommittedLocalNetwork = nil
             let uid = self.allowedUID
             var faultHeld = localNetworkFaultLocked
+            let tightening = Self.failedArmTightening(
+                localNetwork: tighteningUnconfirmed, next: state, previous: previous, load: load
+            )
             let failure = Self.failedArm(
                 error: error,
                 load: load,
                 liveSessionReArm: liveSessionReArm || Self.strictIntentActive,
-                tighteningUnconfirmed: tighteningUnconfirmed,
+                tighteningUnconfirmed: tightening.unconfirmed,
+                faultSubject: tightening.subject,
                 faultHeld: &faultHeld,
                 installStricterBlock: { try Self.installEmergencyBlock(allowedUID: uid) }
             )
@@ -629,6 +633,7 @@ final class KillSwitchManager {
         load: KernelLoadOutcome,
         liveSessionReArm: Bool,
         tighteningUnconfirmed: Bool,
+        faultSubject: String = "Allow local network devices off",
         faultHeld: inout Bool,
         release: () -> Void = { KillSwitchManager.releaseInstalledBlock() },
         installStricterBlock: () throws -> Void,
@@ -654,13 +659,13 @@ final class KillSwitchManager {
         case .faultStricterBlock:
             return (HelperFailure.coded(
                 code: localNetworkFaultCode,
-                message: "Could not apply Allow local network devices off: \(detail). "
+                message: "Could not apply \(faultSubject): \(detail). "
                     + "Every connection is blocked until protection is applied again." + unpersisted
             ), true)
         case .faultStopCore:
             return (HelperFailure.coded(
                 code: localNetworkFaultStopCoreCode,
-                message: "Could not apply Allow local network devices off, and the stricter "
+                message: "Could not apply \(faultSubject), and the stricter "
                     + "block could not be installed; the Core is stopped and protection stays armed."
                     + unpersisted
             ), true)
@@ -994,6 +999,35 @@ final class KillSwitchManager {
             }
             return false
         }
+    }
+
+    /// A switch from the whole-host block to AI Home whose load may have
+    /// committed before the arm failed: the kernel may now hold the narrower
+    /// AI-only set, so the failure is settled like a failed tightening (the
+    /// stricter block). A load that never ran or was rejected left the
+    /// whole-host rules in place.
+    static func aiHomeWideningMayBeLoaded(
+        next: KillSwitchState,
+        previous: KillSwitchState?,
+        load: KernelLoadOutcome
+    ) -> Bool {
+        next.aiHomeScoped && previous?.aiHomeScoped != true && !strictIntentActive && load == .acceptedOrUnknown
+    }
+
+    /// The tightening `arm` hands `failedArm`: a failed LAN tightening, or a
+    /// switch to AI Home whose load may have committed, and what the fault
+    /// message names.
+    static func failedArmTightening(
+        localNetwork: Bool,
+        next: KillSwitchState,
+        previous: KillSwitchState?,
+        load: KernelLoadOutcome
+    ) -> (unconfirmed: Bool, subject: String) {
+        if localNetwork { return (true, "Allow local network devices off") }
+        if aiHomeWideningMayBeLoaded(next: next, previous: previous, load: load) {
+            return (true, "AI Home protection")
+        }
+        return (false, "Allow local network devices off")
     }
 
     /// What `arm` saves before its load: the requested state, except that AI

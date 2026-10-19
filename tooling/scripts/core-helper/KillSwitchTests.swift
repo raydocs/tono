@@ -2595,6 +2595,27 @@ extension KillSwitchManager {
             && !scopeBeforeCommit(next: scoped, previous: nil).aiHomeScoped)
         check("ai-home-rearm-saves-scope", scopeBeforeCommit(next: scoped, previous: scoped).aiHomeScoped)
         check("tightening-saves-whole-host", !scopeBeforeCommit(next: whole, previous: scoped).aiHomeScoped)
+        // A failed switch to AI Home whose load may have committed takes the
+        // stricter block; one that never loaded keeps the whole-host rules.
+        check("widening-loaded-is-tightening", aiHomeWideningMayBeLoaded(next: scoped, previous: whole, load: .acceptedOrUnknown)
+            && aiHomeWideningMayBeLoaded(next: scoped, previous: nil, load: .acceptedOrUnknown))
+        check("widening-unloaded-keeps", !aiHomeWideningMayBeLoaded(next: scoped, previous: whole, load: .rejected)
+            && !aiHomeWideningMayBeLoaded(next: scoped, previous: whole, load: .notIssued))
+        check("same-scope-or-tightening-not-widening", !aiHomeWideningMayBeLoaded(next: scoped, previous: scoped, load: .acceptedOrUnknown)
+            && !aiHomeWideningMayBeLoaded(next: whole, previous: scoped, load: .acceptedOrUnknown))
+        var stricterInstalled = false
+        var fault = false
+        let tightening = failedArmTightening(localNetwork: false, next: scoped, previous: whole, load: .acceptedOrUnknown)
+        check("widening-tightening-wiring", tightening.unconfirmed
+            && !failedArmTightening(localNetwork: false, next: scoped, previous: whole, load: .rejected).unconfirmed
+            && failedArmTightening(localNetwork: true, next: whole, previous: whole, load: .notIssued)
+                == (true, "Allow local network devices off"))
+        let widened = failedArm(error: HelperFailure.system("verify"), load: .acceptedOrUnknown, liveSessionReArm: true,
+                                tighteningUnconfirmed: tightening.unconfirmed, faultSubject: tightening.subject,
+                                faultHeld: &fault, release: {}, installStricterBlock: { stricterInstalled = true }, persist: { nil })
+        check("widening-failure-installs-stricter-block", stricterInstalled && fault
+            && (widened.error as? HelperFailure)?.code == localNetworkFaultCode
+            && (widened.error as? HelperFailure)?.message.hasPrefix("Could not apply AI Home protection:") == true)
         // The update's bootstrap re-arm keeps the session's scope.
         let retain = UpdateRuntime.retainBootstrapRequest(previous: scoped)
         check("update-retain-keeps-scope", (try? aiHomeScopedField(retain["aiHomeScoped"])) == true

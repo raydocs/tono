@@ -23,3 +23,9 @@
   （`scopeBeforeCommit`），失败时保存的仍是整机范围。
 - minor：原生更新准备（`retainBootstrap`）重新 arm 时丢失范围。改为带上保存的 `aiHomeScoped`（`retainBootstrapRequest`）。
 - 自测新增：两个方向的切换都完整清理、同范围重 arm 保留状态、加载前保存的范围、更新准备保持范围。
+
+2026-10-19 续（Codex 审查 `82ec92407`：block）：
+- major：整机切到 AI Home 时，PF 已装入只拦 AI 的规则，但随后的状态清理或验证失败，失败处理按普通重 arm 保留内核规则，
+  整机保护实际被放宽。现在这种失败按收紧失败处理（`failedArmTightening`）：装入全封锁并进入受保护故障，
+  装不上则停止 Core；错误提示写明是「AI Home protection」。加载未执行或被拒时，旧的整机规则仍在，处理不变。
+- 自测新增：加载可能生效的切换算作收紧、未加载或被拒的不算、同范围与切回整机不算，以及经 `failedArm` 装入全封锁并锁定故障。
