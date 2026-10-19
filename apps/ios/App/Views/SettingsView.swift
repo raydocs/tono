@@ -131,7 +131,8 @@ struct SettingsView: View {
     /// Presented as a sheet: swipe down closes it; the button is for VoiceOver and two-handed use.
     private var closeButton: some View {
         Button { dismiss() } label: {
-            Image(systemName: "xmark").font(.body.weight(.semibold)).foregroundStyle(TonoColor.textPrimary)
+            // Fixed glyph inside the fixed 44 pt circle: at AX5 a body-scaled xmark grew past the circle.
+            Image(systemName: "xmark").font(.system(size: 17, weight: .semibold)).foregroundStyle(TonoColor.textPrimary)
                 .frame(width: 44, height: 44)
                 .glassSurface(Circle(), interactive: true)
                 .contentShape(Circle())
