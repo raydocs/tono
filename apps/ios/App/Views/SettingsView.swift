@@ -111,10 +111,10 @@ struct SettingsView: View {
             .background(TonoColor.night.ignoresSafeArea())
             .navigationTitle(L.t("settings_title"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) { closeButton }
-            }
         }
+        // Over the bar, not in it: iOS 26 holds toolbar items to 36 pt tall, under the 44 pt minimum
+        // (the AX5 sweep measured 48 x 36 with a 44 pt frame inside the toolbar).
+        .overlay(alignment: .topTrailing) { closeButton.padding(.top, 14).padding(.trailing, 14) }
         // One detent: nothing to drag between, so no grabber (a swipe down still closes it). At AX5
         // the grabber's 76 x 25 pt target was flagged by the contrast/hit-area sweep.
         .presentationDragIndicator(.hidden)
@@ -130,10 +130,11 @@ struct SettingsView: View {
     private var closeButton: some View {
         Button { dismiss() } label: {
             Image(systemName: "xmark").font(.body.weight(.semibold)).foregroundStyle(TonoColor.textPrimary)
-                // 44 pt target (was 32 x 36 at AX5).
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
+                .frame(width: 44, height: 44)
+                .glassSurface(Circle(), interactive: true)
+                .contentShape(Circle())
         }
+        .buttonStyle(.plain)
         .accessibilityLabel(L.t("settings_close"))
         .accessibilityIdentifier("settingsClose")
     }
