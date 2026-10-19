@@ -72,7 +72,7 @@ if (-not (Test-Path -LiteralPath $singBoxPath -PathType Leaf)) {
 $singBoxSha256 = (Get-FileHash -LiteralPath $singBoxPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $expectedSingBox = 'b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027'
 if ($singBoxSha256 -ne $expectedSingBox) {
-    throw "sing-box sidecar $singBoxSha256 is not the pinned alpha.9 digest $expectedSingBox"
+    throw "sing-box sidecar $singBoxSha256 is not the pinned alpha.12 digest $expectedSingBox"
 }
 $env:TONO_SING_BOX_SHA256 = $singBoxSha256
 Set-Content -LiteralPath (Join-Path $resourceRoot 'sing-box-sha256.txt') -Value $singBoxSha256 -Encoding ascii

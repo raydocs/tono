@@ -1165,10 +1165,10 @@ test('leftover Verge sidecar names are refused', () => {
   )
 })
 
-test('sing-box digest accepts only the pinned alpha.9 bytes', () => {
+test('sing-box digest accepts only the pinned alpha.12 bytes', () => {
   assert.equal(validateSingBoxDigest(WINDOWS_SING_BOX_SHA256), null)
-  assert.match(validateSingBoxDigest('ab'.repeat(32)), /not the pinned alpha\.9/)
-  assert.match(validateSingBoxDigest(''), /not the pinned alpha\.9/)
+  assert.match(validateSingBoxDigest('ab'.repeat(32)), /not the pinned alpha\.12/)
+  assert.match(validateSingBoxDigest(''), /not the pinned alpha\.12/)
 })
 
 test('externalBin accepts only the stable sidecar and pinned sing-box', () => {

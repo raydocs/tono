@@ -31,7 +31,7 @@ concurrency:
 jobs:
   pinned-core:
     uses: ./.github/workflows/windows-core.yml
-  # sing-box.exe is not in git (#1159). Rebuild the reviewed alpha.9 input from the
+  # sing-box.exe is not in git (#1159). Rebuild the reviewed alpha.12 input from the
   # pinned source; the script refuses any bytes but the pinned digest.
   sing-box-input:
     runs-on: ubuntu-24.04
@@ -117,7 +117,7 @@ jobs:
           $singBoxSha256 = (Get-FileHash -LiteralPath $singBox -Algorithm SHA256).Hash.ToLowerInvariant()
           $expectedSingBox = 'b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027'
           if ($singBoxSha256 -ne $expectedSingBox) {
-            throw "sing-box sidecar $singBoxSha256 is not the pinned alpha.9 digest $expectedSingBox"
+            throw "sing-box sidecar $singBoxSha256 is not the pinned alpha.12 digest $expectedSingBox"
           }
           $env:TONO_SING_BOX_SHA256 = $singBoxSha256
           "TONO_SING_BOX_SHA256=$singBoxSha256" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append

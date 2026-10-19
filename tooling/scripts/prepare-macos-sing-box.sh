@@ -16,7 +16,7 @@ git init -q "$work/source"
 attempt=0
 while true; do
   if git -C "$work/source" fetch -q --depth=1 https://github.com/SagerNet/sing-box \
-    132b38e9caaba1a1959354d518e54d2d08419afe; then
+    25b0d5ea3e466d246c708ac0f20d0448110e566c; then
     break
   fi
   attempt=$((attempt + 1))
@@ -32,11 +32,11 @@ export GOFLAGS=-mod=readonly GOTELEMETRY=off
 # Explicit cache preparation, not a fallback inside the offline builder.
 go -C "$work/source" mod download
 sh "$repo/tooling/scripts/build-sing-box.sh" build \
-  --candidate "$repo/tooling/scripts/sing-box/candidates/v1.15.0-alpha.9.json" \
+  --candidate "$repo/tooling/scripts/sing-box/candidates/v1.15.0-alpha.12.json" \
   --source "$work/source" --go "$work/go/bin/go" \
   --target darwin-arm64 --output "$work/darwin"
 sh "$repo/tooling/scripts/build-sing-box.sh" verify \
-  --candidate "$repo/tooling/scripts/sing-box/candidates/v1.15.0-alpha.9.json" \
+  --candidate "$repo/tooling/scripts/sing-box/candidates/v1.15.0-alpha.12.json" \
   --go "$work/go/bin/go" --target darwin-arm64 \
   --binary "$work/darwin/sing-box" --manifest "$work/darwin/manifest.json" \
   --manifest-sha256 4932227756b774f2132f272878d554574584c7ebb69454c3c3ae44ccd1e1a40c
