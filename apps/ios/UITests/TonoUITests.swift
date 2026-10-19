@@ -717,6 +717,19 @@ final class TonoUITests: XCTestCase {
 
     private static let primaryInks = [(247, 243, 238), (42, 20, 6)] // textPrimary, actionInk
 
+    /// The ratio a contrast check decides on: the element metric above, and where the element holds
+    /// enough glyphs in the app's two label inks, also those glyphs against their local background;
+    /// the lower of the two counts (the element metric alone passed Cancel on the sunrise fill at
+    /// 4.8:1 in round 11). The note gives both for the log.
+    @MainActor static func decidingContrast(_ element: XCUIElement) -> (ratio: Double, note: String)? {
+        guard let whole = measuredContrast(element) else { return nil }
+        guard let label = labelContrast(element, inks: primaryInks), label.cores >= 20 else {
+            return (whole, String(format: "%.1f:1", whole))
+        }
+        return (min(whole, label.median), String(format: "%.1f:1 (element %.1f, label on local background %.1f, %d cores)",
+                                                  min(whole, label.median), whole, label.median, label.cores))
+    }
+
     /// Negative and positive control for `labelContrast`, drawn by the DEBUG probe: round 11's white
     /// "Cancel" over the translucent sunrise fill must fail (both reviews measured 3.0-3.9:1 on the
     /// real capsule), and the real capsule while preparing must pass.
@@ -800,9 +813,9 @@ final class TonoUITests: XCTestCase {
                     offscreen.append((line, element))
                     return true
                 }
-                if issue.auditType == .contrast, let element, let ratio = Self.measuredContrast(element) {
+                if issue.auditType == .contrast, let element, case let (ratio, note)? = Self.decidingContrast(element) {
                     let verdict = ratio >= 4.5 ? "PASSES" : "FAILS"
-                    print(line + String(format: " | measured %.1f:1 %@ WCAG AA", ratio, verdict))
+                    print(line + " | measured \(note) \(verdict) WCAG AA")
                     if ratio >= 4.5 { return true }
                     // The audit changes the text size while it runs, so a frame read here can belong to
                     // another layout than the pixels (Details' Settings row read 1.2:1 at the place
@@ -845,22 +858,22 @@ final class TonoUITests: XCTestCase {
         }
         if !settle.isEmpty { sleep(1) }
         for (line, element) in settle {
-            let ratio = app.windows.firstMatch.frame.contains(element.frame) ? Self.measuredContrast(element) : nil
-            let result = ratio.map { String(format: "after the audit: measured %.1f:1 %@ WCAG AA", $0, $0 >= 4.5 ? "PASSES" : "FAILS") }
+            let m = app.windows.firstMatch.frame.contains(element.frame) ? Self.decidingContrast(element) : nil
+            let result = m.map { "after the audit: measured \($0.note) \($0.ratio >= 4.5 ? "PASSES" : "FAILS") WCAG AA" }
                 ?? "after the audit: not on screen to measure"
             print(line + " | " + result)
-            if (ratio ?? 0) < 4.5 { found.append(line + " | " + result) }
+            if (m?.ratio ?? 0) < 4.5 { found.append(line + " | " + result) }
         }
         for (line, element) in offscreen {
             let window = app.windows.firstMatch.frame
             for _ in 0..<4 where !window.contains(element.frame) {
                 app.swipeUp(velocity: .slow)
             }
-            let ratio = window.contains(element.frame) ? Self.measuredContrast(element) : nil
-            let result = ratio.map { String(format: "measured %.1f:1 %@ WCAG AA", $0, $0 >= 4.5 ? "PASSES" : "FAILS") }
+            let m = window.contains(element.frame) ? Self.decidingContrast(element) : nil
+            let result = m.map { "measured \($0.note) \($0.ratio >= 4.5 ? "PASSES" : "FAILS") WCAG AA" }
                 ?? "could not scroll into view"
             print(line + " | " + result)
-            if (ratio ?? 0) < 4.5 { found.append(line + " | " + result) }
+            if (m?.ratio ?? 0) < 4.5 { found.append(line + " | " + result) }
         }
         return found
     }
@@ -888,14 +901,14 @@ final class TonoUITests: XCTestCase {
             // text is exposed as its own static texts is measured through them: over a 358 pt glass
             // capsule the few text pixels fall below the percentile used here.
             let hasText = controls.contains(type) && element.staticTexts.count > 0
-            if element.isEnabled, !hasText, let ratio = measuredContrast(element), ratio < 4.5 {
+            if element.isEnabled, !hasText, case let (ratio, note)? = decidingContrast(element), ratio < 4.5 {
                 // XCUITest lists Home's elements under an open sheet too (the AX5 Lines sweep measured
                 // Home's "86 ms" at 1.0:1: the sheet's own background). Only a failing element that is
                 // also not hittable is taken as covered; it is logged, never silently dropped.
                 if !element.isHittable {
-                    print(String(format: "SWEEP %@: %.1f:1 but not hittable (covered by a sheet), not counted | %@", name, ratio, what))
+                    print("SWEEP \(name): \(note) but not hittable (covered by a sheet), not counted | \(what)")
                 } else {
-                    failures.append(String(format: "SWEEP %@: measured %.1f:1 under WCAG AA | %@", name, ratio, what))
+                    failures.append("SWEEP \(name): measured \(note) under WCAG AA | \(what)")
                 }
             }
         }
