@@ -8,3 +8,4 @@
 - 未运行：正式 Gradle/Android/Robolectric/AndroidTest 编译与设备测试、真机/真实服务；历史 CI 仅覆盖原基线，没有本批冻结评分。
 - 候选/发布：WIP 源码验证，无客户候选或 release；云验证未通过前不更新 PR 分支。
 - 剩余限制：owner 已取消本机组件安装要求；正式编译/测试改到已准备的 Devin Linux KVM 快照，按精确 SHA 留证。通知/widget 调度时延、重载 openTun、API29/OEM owner UID、通知替换竞争仍待验证。
+- 2026-10-19 Devin 首轮续记：WIP 629849a1c 编译/lint 成功、routing 16/16、矩阵类 75/75；全 mobile 103 项中 1 失败、17 opt-in skip。保留失败；修正序列化 fixture 的确认字段，不减测试/不改产品规则。云会话及原件摘要见 docs/agent-reports/2026-10-19-android-devin-state-r1.md。

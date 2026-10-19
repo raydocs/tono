@@ -100,7 +100,10 @@ class EngineUnitTest {
             cloudProbe = ExitProbe(ProbeState.OK, "JP", 140), homeProbe = ExitProbe(ProbeState.FAILED),
             rxBytesPerSec = 5_000_000_000, txBytesPerSec = 7, usingCachedCatalog = true, alwaysOn = true, lockdown = false,
             underlyingIpv6 = true, coreVersion = "1.15.0-alpha.12", catalogRevision = 42,
+            session = "unit-engine", version = 7, attempt = 2,
+            applied = AppliedTunnel(2, "LA", RoutingMode.STABLE),
         )
+        assertTrue(s.tunnelUp)
         assertEquals(s, EngineSnapshot.fromJson(s.toJson()))
     }
 }
