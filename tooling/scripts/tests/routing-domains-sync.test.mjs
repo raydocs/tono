@@ -18,8 +18,11 @@ test('the CLI preserves ordered policy, detects drift and refuses ambiguous sour
     writeFileSync(snapshot, JSON.stringify({ version: 2, scope: 'bounded-service-classification-not-IP-geolocation',
       domestic_full: ['www.local.test'], overseas_full: ['www.foreign.test'],
       graph: { rules: ['$home_suffixes', '$video_suffixes', '$domestic_full', '$overseas_full', '$home_cidrs', '$home_target'] } }))
+    writeFileSync(path.join(root, 'tooling/scripts/sing-box/ai-home-template.json'), JSON.stringify({ version: 1,
+      scope: 'ai-home-kill-switch-direct-default', graph: { rules: ['$home_suffixes', '$overseas_full', '$home_target'] } }))
     const contract = path.join(root, 'apps/macos/Tono/Core/ThreeTierRoutingContract.swift')
-    writeFileSync(contract, '    private static let templateJSON = #"""\n    {}\n    """#\n')
+    writeFileSync(contract, '    private static let templateJSON = #"""\n    {}\n    """#\n'
+      + '    private static let aiHomeTemplateJSON = #"""\n    {}\n    """#\n')
     const source = path.join(root, 'apps/windows/crates/tono-core/src/direct_domains.rs')
     const target = path.join(root, 'apps/macos/Tono/Core/ConfigPipeline.swift')
     const rust = `pub const DEDICATED_MODEL_API_SUFFIXES: [&str; 1] = ["ai.vendor.cn"];
@@ -59,9 +62,11 @@ pub const CLAUDE_HOME_IPV4_CIDRS: [&str; 1] = ["160.79.104.0/21"];`
     assert.equal(readFileSync(target, 'utf8'), expected)
     assert.equal(run('--check').status, 0)
     const generated = readFileSync(contract, 'utf8')
-    const graph = JSON.parse(generated.match(/#"""\n([\s\S]*?)\n    """#/)[1])
+    const [graph, aiHomeGraph] = [...generated.matchAll(/#"""\n([\s\S]*?)\n    """#/g)].map(match => JSON.parse(match[1]))
     assert.deepEqual(graph.rules, [['ai.vendor.cn', 'z.example.com', 'a.example.com'],
       ['video.z.example.com'], ['www.local.test'], ['www.foreign.test'], ['160.79.104.0/21'], '$home_target'])
+    assert.deepEqual(aiHomeGraph.rules, [['ai.vendor.cn', 'z.example.com', 'a.example.com'], ['www.foreign.test'], '$home_target'],
+      'AI Home shares the same Home and overseas bindings')
     // The more-specific cloud video child is legitimate, not a reason to sort
     // or deduplicate away its wider Home parent. An exact duplicate is not.
     writeFileSync(source, rust.replace('"a.example.com"', '"z.example.com"'))

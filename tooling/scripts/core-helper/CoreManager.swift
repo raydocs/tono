@@ -111,6 +111,12 @@ final class CoreManager {
         return runtimeConfigPath
     }
 
+    /// The runtime as admission and start read it: keys folded the way the
+    /// core matches them, so a `DNS` or `OUTBOUNDS` key cannot hide the mode.
+    static func foldedRuntime(_ data: Data) -> [String: Any]? {
+        (try? JSONSerialization.jsonObject(with: data)).flatMap(goFoldedJSONKeys) as? [String: Any]
+    }
+
     /// Validate the root snapshot before binding any intent or PF grants.
     func bindRuntime(configDirectory: String, digest: String, generation: UInt64?, mode: String?) throws -> StrictRuntimeProof? {
         lock.lock(); defer { lock.unlock() }
@@ -123,13 +129,14 @@ final class CoreManager {
         }
         _ = try snapshot(configDirectory, expectedSHA256: digest, binding: true)
         let data = try Data(contentsOf: URL(fileURLWithPath: runtimeConfigPath))
-        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        guard let object = Self.foldedRuntime(data) else {
             throw HelperFailure.invalid("Invalid runtime.")
         }
-        let strict = ThreeTierRoutingContract.isThreeTierRuntime(object)
-        guard mode == nil || mode == (strict ? "three-tier" : "stable") else {
+        guard let runtimeMode = ThreeTierRoutingContract.routingMode(of: object),
+              mode == nil || mode == runtimeMode else {
             throw HelperFailure.invalid("Routing mode/runtime mismatch.")
         }
+        let strict = runtimeMode == "three-tier"
         // Headerless /core/sync cannot bind a strict graph to the stable child
         // it would replace. A proof is minted only with no live Core; start
         // then verifies this digest before launching the sole owned child.
@@ -145,7 +152,7 @@ final class CoreManager {
         }
         let proof = strict ? try StrictRuntimeProof(object, generation: generation, digest: digest) : nil
         try ReleaseAuthority().bindRuntime(generation: generation, digest: digest,
-            strict: strict, requestedMode: mode)
+            runtimeMode: runtimeMode, requestedMode: mode)
         return proof
     }
 
