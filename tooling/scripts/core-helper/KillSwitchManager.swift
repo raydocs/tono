@@ -578,7 +578,12 @@ final class KillSwitchManager {
                 tighteningUnconfirmed: tightening.unconfirmed,
                 faultSubject: tightening.subject,
                 faultHeld: &faultHeld,
-                installStricterBlock: { try Self.installEmergencyBlock(allowedUID: uid) }
+                installStricterBlock: {
+                    try Self.installTighteningBarrier(
+                        holdingAI: tightening.subject == Self.aiHomeFaultSubject,
+                        install: { try Self.installEmergencyBlock(allowedUID: uid) }
+                    )
+                }
             )
             localNetworkFaultLocked = faultHeld
             if failure.bumpsGeneration { stateGeneration &+= 1 }
@@ -661,6 +666,15 @@ final class KillSwitchManager {
                 code: localNetworkFaultCode,
                 message: "Could not apply \(faultSubject): \(detail). "
                     + "Every connection is blocked until protection is applied again." + unpersisted
+            ), true)
+        case .faultStopCore where faultSubject == aiHomeFaultSubject:
+            // The kernel may hold the AI-only rules: only AI traffic is
+            // known to be held, so the message does not claim the block.
+            return (HelperFailure.coded(
+                code: localNetworkFaultStopCoreCode,
+                message: "Could not apply \(faultSubject), and the stricter block could not be installed; "
+                    + "the Core is stopped and AI traffic is held, but other traffic may not be blocked."
+                    + unpersisted
             ), true)
         case .faultStopCore:
             return (HelperFailure.coded(
@@ -1025,9 +1039,29 @@ final class KillSwitchManager {
     ) -> (unconfirmed: Bool, subject: String) {
         if localNetwork { return (true, "Allow local network devices off") }
         if aiHomeWideningMayBeLoaded(next: next, previous: previous, load: load) {
-            return (true, "AI Home protection")
+            return (true, aiHomeFaultSubject)
         }
         return (false, "Allow local network devices off")
+    }
+
+    static let aiHomeFaultSubject = "AI Home protection"
+
+    /// The stricter block for a failed tightening. When a failed switch to
+    /// AI Home cannot install it either, PF is not taking rules and the
+    /// kernel may hold the AI-only set: the AI hold that does not depend on
+    /// PF (resolver sinkholes and blackhole routes) is applied before the
+    /// failure goes on to stop the Core. The next committed arm removes it.
+    static func installTighteningBarrier(
+        holdingAI: Bool,
+        install: () throws -> Void,
+        applyAIHold: () -> Void = SelectiveFailOpenInstaller.applyBestEffort
+    ) throws {
+        do {
+            try install()
+        } catch {
+            if holdingAI { applyAIHold() }
+            throw error
+        }
     }
 
     /// What `arm` saves before its load: the requested state, except that AI

@@ -2616,6 +2616,27 @@ extension KillSwitchManager {
         check("widening-failure-installs-stricter-block", stricterInstalled && fault
             && (widened.error as? HelperFailure)?.code == localNetworkFaultCode
             && (widened.error as? HelperFailure)?.message.hasPrefix("Could not apply AI Home protection:") == true)
+        // When the stricter block cannot be installed either, the AI hold is
+        // applied and the message does not claim the block.
+        struct InstallFailed: Error {}
+        var aiHeld = 0
+        var stopFault = false
+        let stopped = failedArm(error: HelperFailure.system("verify"), load: .acceptedOrUnknown, liveSessionReArm: true,
+                                tighteningUnconfirmed: true, faultSubject: tightening.subject, faultHeld: &stopFault,
+                                release: {}, installStricterBlock: {
+                                    try installTighteningBarrier(holdingAI: true, install: { throw InstallFailed() },
+                                                             applyAIHold: { aiHeld += 1 })
+                                }, persist: { nil })
+        let stoppedMessage = (stopped.error as? HelperFailure)?.message ?? ""
+        check("widening-stop-core-holds-ai", aiHeld == 1 && stopFault
+            && (stopped.error as? HelperFailure)?.code == localNetworkFaultStopCoreCode
+            && stoppedMessage.contains("other traffic may not be blocked")
+            && !stoppedMessage.contains("protection stays armed"))
+        var lanHeld = 0
+        _ = try? installTighteningBarrier(holdingAI: false, install: { throw InstallFailed() }, applyAIHold: { lanHeld += 1 })
+        var okHeld = 0
+        _ = try? installTighteningBarrier(holdingAI: true, install: {}, applyAIHold: { okHeld += 1 })
+        check("stricter-block-ai-hold-only-on-ai-failure", lanHeld == 0 && okHeld == 0)
         // The update's bootstrap re-arm keeps the session's scope.
         let retain = UpdateRuntime.retainBootstrapRequest(previous: scoped)
         check("update-retain-keeps-scope", (try? aiHomeScopedField(retain["aiHomeScoped"])) == true
