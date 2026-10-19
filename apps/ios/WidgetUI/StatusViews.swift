@@ -167,18 +167,20 @@ struct StatusWidgetView: View {
         }
     }
 
-    /// The card's lines. A widget has a fixed size, so at large text sizes the first layout whose
-    /// lines all fit whole is used: the detail line goes first, then the timer, then the glyph. The
-    /// state and the "as of / last known" line always stay; nothing is cut mid-word ("Connection
-    /// dr…" at xxxLarge in round 11). VoiceOver reads every line from the label either way.
+    /// The card's lines. A widget has a fixed size, so the first layout whose lines all fit whole is
+    /// used: the glyph shrinks, then goes, then the timer, and only then the detail line (what is
+    /// wrong: "Home not answering"). The state and the "as of / last known" line always stay;
+    /// nothing is cut mid-word ("Connection dr…" at xxxLarge in round 11). VoiceOver reads every
+    /// line from the label either way.
     private var summary: some View {
         ViewThatFits(in: .vertical) {
-            summaryLines(glyph: true, timer: true, detail: true)
-            summaryLines(glyph: true, timer: true, detail: false)
-            summaryLines(glyph: true, timer: false, detail: false)
-            summaryLines(glyph: false, timer: false, detail: false)
+            summaryLines(glyph: 40, timer: true, detail: true)
+            summaryLines(glyph: 28, timer: true, detail: true)
+            summaryLines(glyph: 0, timer: true, detail: true)
+            summaryLines(glyph: 0, timer: false, detail: true)
+            summaryLines(glyph: 0, timer: false, detail: false)
             // Last resort, never expected at xxxLarge: shrink rather than drop the state.
-            summaryLines(glyph: false, timer: false, detail: false, whole: false)
+            summaryLines(glyph: 0, timer: false, detail: false, whole: false)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
@@ -187,15 +189,15 @@ struct StatusWidgetView: View {
 
     /// `whole`: each line takes the height it needs (so `ViewThatFits` rejects a layout that would
     /// truncate) instead of being cut to the space left.
-    private func summaryLines(glyph: Bool, timer: Bool, detail: Bool, whole: Bool = true) -> some View {
+    private func summaryLines(glyph: CGFloat, timer: Bool, detail: Bool, whole: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            if glyph {
+            if glyph > 0 {
                 HStack(alignment: .top) {
                     // Tinted and clear Home Screens (iOS 18 / 26) draw one colour: the mark, accented.
                     if renderingMode == .fullColor {
-                        HorizonGlyph(sunRise: p.sunRise, warn: p.tone == .warn || p.tone == .error, size: 40)
+                        HorizonGlyph(sunRise: p.sunRise, warn: p.tone == .warn || p.tone == .error, size: glyph)
                     } else {
-                        MarkGlyph(size: 32).widgetAccentable()
+                        MarkGlyph(size: glyph * 0.8).widgetAccentable()
                     }
                     Spacer(minLength: 0)
                 }
