@@ -273,6 +273,9 @@ extension AppState {
                     physicalInterface = await PrivilegedRuntimeCoordinator.shared
                         .primaryNetworkInterface()
                 }
+                // A Disconnect during the queries above retired this session's
+                // record; a cancelled attempt must not write it back.
+                try Task.checkCancellation()
                 try coreRuntime.captureRoutingMode(capturedRoutingMode, physicalInterface: physicalInterface)
                 let policyIsEmpty = trafficPolicy.domains.isEmpty
                     && trafficPolicy.webDomains.isEmpty

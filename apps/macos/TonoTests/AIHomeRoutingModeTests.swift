@@ -181,6 +181,27 @@ final class AIHomeRoutingModeTests: XCTestCase {
         KillSwitchService.isArmed = false
     }
 
+    /// Review P2: a connect cancelled by an explicit Disconnect can record its
+    /// mode after the request retired it. The queue retires it again once that
+    /// work drained, so a relaunch holds no session.
+    @MainActor
+    func testExplicitReleaseRetiresARecordWrittenByDrainedConnectWork() async {
+        KillSwitchService.isArmed = false
+        AppProfile.defaults.removeObject(forKey: SettingsKey.routingSession)
+        let (gate, open) = AsyncStream<Void>.makeStream()
+        let staleConnect = Task { @MainActor in
+            for await _ in gate { break }
+            AppProfile.defaults.set("stable", forKey: SettingsKey.routingSession)
+        }
+        let coordinator = ConnectionCoordinator()
+        coordinator.enqueueDisconnect(waitingFor: [staleConnect], releaseIntent: true) { _ in }
+        open.yield()
+        open.finish()
+        await coordinator.finishPendingDisconnect()
+        XCTAssertNil(AppProfile.defaults.object(forKey: SettingsKey.routingSession))
+        XCTAssertNil(ConnectionCoordinator().capturedRoutingMode)
+    }
+
     func testHelperReportedFaultKeepsTheAIHomeClassification() {
         LocalNetworkDevicesSync.recordHelperReportedFault(aiHomeSession: true)
         XCTAssertEqual(LocalNetworkDevicesSync.fault, .aiHomeProtection("reported by the helper"))

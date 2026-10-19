@@ -140,6 +140,12 @@ final class ConnectionCoordinator {
         disconnectSequence = Task {
             await previousDisconnect?.value
             for task in pendingTasks { await task.value }
+            // Cancelled work drained: a connect past its last check may still
+            // have recorded its mode. No new connect captures before this
+            // queue finishes (`connectAfterDisconnect`).
+            if disposition == .explicit {
+                AppProfile.defaults.removeObject(forKey: SettingsKey.routingSession)
+            }
             await HelperSessionGeneration.$current.withValue(session) {
                 await operation(requestID)
             }
