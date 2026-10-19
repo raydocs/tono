@@ -22,37 +22,46 @@ ROOT = Path(__file__).resolve().parents[3]
 FIXTURE = ROOT / "tooling/scripts/sing-box/fixtures/alpha9-clash-rules.json"
 
 
-def free_port():
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
+def free_ports(count):
+    """Distinct loopback ports: every probe stays bound until all are chosen."""
+    probes = [socket.socket() for _ in range(count)]
+    try:
+        for probe in probes:
+            probe.bind(("127.0.0.1", 0))
+        return [probe.getsockname()[1] for probe in probes]
+    finally:
+        for probe in probes:
+            probe.close()
 
 
-def unprivileged(runtime, controller, secret):
+def unprivileged(runtime, ports, secret):
+    """Every listener moves to its own fresh loopback port; route rules are untouched."""
     runtime = json.loads(json.dumps(runtime))
+    ports = iter(ports)
     for inbound in runtime.get("inbounds", []):
         if inbound["type"] == "tun":
             tag = inbound["tag"]
             inbound.clear()
-            inbound.update({"type": "mixed", "tag": tag, "listen": "127.0.0.1", "listen_port": free_port()})
-        elif inbound.get("listen_port") == 53:
-            inbound["listen_port"] = free_port()
+            inbound.update({"type": "mixed", "tag": tag, "listen": "127.0.0.1", "listen_port": next(ports)})
+        elif "listen_port" in inbound:
+            inbound["listen_port"] = next(ports)
     for outbound in runtime.get("outbounds", []):
         outbound.pop("bind_interface", None)
     runtime["route"].pop("auto_detect_interface", None)
     runtime["route"].pop("default_interface", None)
-    runtime["experimental"]["clash_api"]["external_controller"] = controller
+    runtime["experimental"]["clash_api"]["external_controller"] = f"127.0.0.1:{next(ports)}"
     runtime["experimental"]["clash_api"]["secret"] = secret
     return runtime
 
 
 def live_rules(binary, runtime):
-    # A fresh port and secret per replay: a leftover core cannot answer for this one.
-    controller = f"127.0.0.1:{free_port()}"
+    # Fresh ports and secret per replay: a leftover core cannot answer for this one.
     secret = secrets.token_urlsafe(24)
+    started = unprivileged(runtime, free_ports(len(runtime.get("inbounds", [])) + 1), secret)
+    controller = started["experimental"]["clash_api"]["external_controller"]
     with tempfile.TemporaryDirectory() as work:
         config = Path(work) / "runtime.json"
-        config.write_text(json.dumps(unprivileged(runtime, controller, secret)))
+        config.write_text(json.dumps(started))
         core = subprocess.Popen(
             [binary, "run", "-c", str(config)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
         )

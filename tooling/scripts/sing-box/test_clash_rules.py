@@ -43,7 +43,9 @@ class ClashRulesReplayTests(unittest.TestCase):
             core = Path(work) / "sing-box"
             core.write_text("#!/bin/sh\nsleep 0.5\necho 'listen: address already in use'\nexit 1\n")
             core.chmod(0o755)
-            with mock.patch.object(clash_rules, "free_port", create=True, return_value=OLD_CONTROLLER_PORT):
+            with mock.patch.object(
+                clash_rules, "free_ports", create=True, side_effect=lambda count: [OLD_CONTROLLER_PORT] * count
+            ):
                 with self.assertRaises(SystemExit):
                     clash_rules.live_rules(str(core), FIXTURE["runtime"])
 
