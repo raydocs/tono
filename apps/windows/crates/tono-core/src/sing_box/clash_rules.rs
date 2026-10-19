@@ -100,7 +100,7 @@ fn render_default_payload(rule: &Value) -> Result<String, String> {
     refuse_unknown_keys(rule)?;
     let mut items = Vec::new();
     if let Some(value) = rule.get("inbound") {
-        items.push(format!("inbound={}", list_body(&strings(value)?, false)));
+        items.push(format!("inbound={}", list_body(&strings(value)?)));
     }
     if let Some(value) = rule.get("ip_version") {
         let version = value
@@ -110,12 +110,12 @@ fn render_default_payload(rule: &Value) -> Result<String, String> {
         items.push(format!("ip_version={version}"));
     }
     if let Some(value) = rule.get("network") {
-        items.push(format!("network={}", list_body(&strings(value)?, false)));
+        items.push(format!("network={}", list_body(&strings(value)?)));
     }
     if rule.get("domain").is_some() || rule.get("domain_suffix").is_some() {
         let mut description = String::new();
         if let Some(value) = rule.get("domain") {
-            description.push_str(&format!("domain={}", list_body(&strings(value)?, true)));
+            description.push_str(&format!("domain={}", list_body_truncated(&strings(value)?, true)));
         }
         if let Some(value) = rule.get("domain_suffix") {
             if !description.is_empty() {
@@ -123,21 +123,21 @@ fn render_default_payload(rule: &Value) -> Result<String, String> {
             }
             description.push_str(&format!(
                 "domain_suffix={}",
-                list_body(&strings(value)?, true)
+                list_body_truncated(&strings(value)?, true)
             ));
         }
         items.push(description);
     }
     if let Some(value) = rule.get("ip_cidr") {
-        items.push(format!("ip_cidr={}", list_body(&strings(value)?, true)));
+        items.push(format!("ip_cidr={}", list_body_truncated(&strings(value)?, true)));
     }
     if let Some(value) = rule.get("port") {
-        items.push(format!("port={}", list_body(&numbers(value)?, false)));
+        items.push(format!("port={}", list_body(&numbers(value)?)));
     }
     if let Some(value) = rule.get("process_name") {
         items.push(format!(
             "process_name={}",
-            list_body(&strings(value)?, false)
+            list_body(&strings(value)?)
         ));
     }
     if let Some(value) = rule.get("process_path_regex") {
@@ -150,8 +150,13 @@ fn render_default_payload(rule: &Value) -> Result<String, String> {
     Ok(items.join(" "))
 }
 
-fn list_body(values: &[String], ellipsis: bool) -> String {
-    list_body_truncated(values, ellipsis)
+/// `inbound`, `network`, `port` and `process_name` print every item: their `String()`
+/// joins the whole list, unlike the domain, CIDR and process-path descriptions.
+fn list_body(values: &[String]) -> String {
+    if values.len() == 1 {
+        return values[0].clone();
+    }
+    format!("[{}]", values.join(" "))
 }
 
 fn list_body_truncated(values: &[String], ellipsis: bool) -> String {
