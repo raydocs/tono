@@ -493,7 +493,12 @@ nonisolated enum HelperProtocolVersion {
     ///   holds every component busy when the kernel shows it is neither root
     ///   nor platform code, so a user's app updated while it runs cannot
     ///   block Connect. Root and platform processes stay unidentified.
-    static let current = "4.52.58"
+    /// - 4.52.58 → 4.52.59: owned-runtime admission and runtime binding accept
+    ///   a third mode, `ai-home` (the exact AI Home graph: AI on Home, the
+    ///   rest DIRECT). It binds non-strict: no strict intent is recorded, so
+    ///   quit and failure release ordinary traffic, and it cannot replace a
+    ///   strict three-tier session. Stable and three-tier are unchanged.
+    static let current = "4.52.59"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

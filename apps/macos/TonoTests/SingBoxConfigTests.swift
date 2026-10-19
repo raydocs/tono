@@ -650,6 +650,88 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertEqual(process.terminationStatus, 0, String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
     }
 
+    /// AI Home: the three-tier AI rules, Home DNS and Home outbound, but every
+    /// other flow (UDP, LAN, unlisted hosts) goes DIRECT; only AI UDP is refused.
+    func testAIHomeSnapshotKeepsAIOnHomeAndSendsTheRestDirect() throws {
+        let values = try nodes()
+        var overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta", claudeHomeSocks5: .init(
+                host: "9.9.9.8", port: 11080, username: "fixture-user", password: "fixture-password"))
+        let threeTier = try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values, physicalInterface: "en0", fakeIPSlot: 3)
+        let result = try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values,
+            physicalInterface: "en0", fakeIPSlot: 3, variant: .aiHome)
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        let strict = try XCTUnwrap(JSONSerialization.jsonObject(with: threeTier.runtimeJSON) as? [String: Any])
+        XCTAssertTrue(ThreeTierRoutingContract.admitsAIHome(document))
+        XCTAssertFalse(ThreeTierRoutingContract.admits(document))
+        XCTAssertFalse(ThreeTierRoutingContract.isThreeTierRuntime(document), "the helper must not bind it strict")
+        XCTAssertEqual(ThreeTierRoutingContract.routingMode(of: document), "ai-home")
+        XCTAssertFalse(ThreeTierRoutingContract.admitsAIHome(strict))
+        let route = try XCTUnwrap(document["route"] as? [String: Any])
+        let rules = try XCTUnwrap(route["rules"] as? [[String: Any]])
+        XCTAssertEqual(route["final"] as? String, "Tono-AIHome-Direct")
+        XCTAssertFalse(rules.contains { $0["action"] as? String == "reject" && $0.keys.sorted() == ["action"] },
+                       "no catch-all reject: unlisted traffic reaches the DIRECT final")
+        XCTAssertFalse(rules.contains { ($0["network"] as? [String])?.contains("udp") == true && $0["domain_suffix"] == nil
+                           && $0["ip_cidr"] == nil && $0["domain"] == nil },
+                       "ordinary UDP is not refused")
+        let homeRoutes = rules.indices.filter { rules[$0]["outbound"] as? String == "Tono-Home-Residential" }
+        XCTAssertEqual(homeRoutes.count, 4)
+        for index in homeRoutes {
+            let rule = rules[index]
+            XCTAssertEqual(rule["network"] as? String, "tcp")
+            let next = rules[index + 1]
+            XCTAssertEqual(next["network"] as? [String], ["udp", "icmp"])
+            XCTAssertEqual(next["action"] as? String, "reject")
+            for key in ["domain_suffix", "ip_cidr"] {
+                XCTAssertEqual(next[key] as? NSObject, rule[key] as? NSObject, key)
+            }
+        }
+        XCTAssertTrue(rules.last.map { NSDictionary(dictionary: $0).isEqual(to: rules[homeRoutes.last! + 1]) } == true,
+                      "every flow resolved late rechecks the Home CIDRs before the DIRECT final")
+        let strictRoute = try XCTUnwrap(strict["route"] as? [String: Any])
+        let strictRules = try XCTUnwrap(strictRoute["rules"] as? [[String: Any]])
+        let strictHome = strictRules.filter { $0["outbound"] as? String == "Tono-Home-Residential" }
+        XCTAssertTrue(NSArray(array: homeRoutes.map { rules[$0] }).isEqual(to: strictHome), "AI matches equal three-tier's")
+        XCTAssertFalse(rules.contains { ($0["domain_suffix"] as? [String])?.contains("anthropic.com") == true
+                           && ["Tono-AIHome-Direct", "Tono-Exit"].contains($0["outbound"] as? String ?? "") })
+        let dns = try XCTUnwrap(document["dns"] as? [String: Any])
+        let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
+        XCTAssertEqual(servers[2]["tag"] as? String, "Tono-AIHome-Home-DNS")
+        XCTAssertEqual(servers[2]["detour"] as? String, "Tono-Home-Residential")
+        XCTAssertEqual(servers[3]["detour"] as? String, "Tono-AIHome-Direct")
+        let rename = { (text: String) in text.replacingOccurrences(of: "Tono-ThreeTier-", with: "Tono-AIHome-") }
+        let strictDNS = try JSONSerialization.data(withJSONObject: try XCTUnwrap(strict["dns"]), options: [.sortedKeys])
+        XCTAssertEqual(try JSONSerialization.data(withJSONObject: dns, options: [.sortedKeys]),
+                       Data(rename(String(decoding: strictDNS, as: UTF8.self)).utf8), "DNS equals three-tier's modulo tags")
+        var leaking = document
+        var leakingRoute = route
+        var leakingRules = rules
+        leakingRules[homeRoutes[0]]["outbound"] = "Tono-AIHome-Direct"
+        leakingRoute["rules"] = leakingRules
+        leaking["route"] = leakingRoute
+        XCTAssertFalse(ThreeTierRoutingContract.admitsAIHome(leaking), "an AI match sent DIRECT is refused")
+        overlay.allowLocalNetworkDevices = true
+        XCTAssertNoThrow(try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values,
+            physicalInterface: "en0", variant: .aiHome))
+        XCTAssertThrowsError(try ConfigPipeline.buildThreeTierSingBoxRuntime(overlay: overlay, nodes: values, physicalInterface: "en0"))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tono-ai-home-check-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let config = directory.appendingPathComponent("config.json")
+        try result.runtimeJSON.write(to: config)
+        let process = Process()
+        process.executableURL = try XCTUnwrap(CoreRuntimeManager().findBinary())
+        process.arguments = ["check", "-D", directory.path, "-c", config.path]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0, String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+    }
+
     /// The off document, with the reviewed app and web-direct routes it
     /// rewrites, is one the packaged sing-box accepts (`sing-box check`,
     /// what the helper runs before it starts the Core).

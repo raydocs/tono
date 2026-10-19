@@ -317,10 +317,14 @@ struct ReleaseAuthority {
     }
 
     /// Called only after validation of the root snapshot and its bounded graph.
-    func bindRuntime(generation: UInt64, digest: String, strict: Bool, requestedMode: String?) throws {
+    /// `runtimeMode` is the graph's own (`ThreeTierRoutingContract.routingMode`);
+    /// only three-tier is strict.
+    func bindRuntime(generation: UInt64, digest: String, runtimeMode: String, requestedMode: String?) throws {
+        let strict = runtimeMode == "three-tier"
         try withLock(timeout: 1.5) { _ in
             var record = try load()
-            guard requestedMode == nil || requestedMode == (strict ? "three-tier" : "stable"),
+            guard ["stable", "three-tier", "ai-home"].contains(runtimeMode),
+                  requestedMode == nil || requestedMode == runtimeMode,
                   generation == record.generation, record.mode == .secured,
                   record.strictRuntimeDigest == nil || (strict && record.strictRuntimeDigest == digest) else {
                 throw Failure.unsafe("Routing mode/runtime mismatch or strict session downgrade. Explicitly disconnect first.")

@@ -126,10 +126,11 @@ final class CoreManager {
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw HelperFailure.invalid("Invalid runtime.")
         }
-        let strict = ThreeTierRoutingContract.isThreeTierRuntime(object)
-        guard mode == nil || mode == (strict ? "three-tier" : "stable") else {
+        guard let runtimeMode = ThreeTierRoutingContract.routingMode(of: object),
+              mode == nil || mode == runtimeMode else {
             throw HelperFailure.invalid("Routing mode/runtime mismatch.")
         }
+        let strict = runtimeMode == "three-tier"
         // Headerless /core/sync cannot bind a strict graph to the stable child
         // it would replace. A proof is minted only with no live Core; start
         // then verifies this digest before launching the sole owned child.
@@ -145,7 +146,7 @@ final class CoreManager {
         }
         let proof = strict ? try StrictRuntimeProof(object, generation: generation, digest: digest) : nil
         try ReleaseAuthority().bindRuntime(generation: generation, digest: digest,
-            strict: strict, requestedMode: mode)
+            runtimeMode: runtimeMode, requestedMode: mode)
         return proof
     }
 

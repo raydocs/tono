@@ -248,20 +248,20 @@ func runReleaseSelfTests() -> Bool {
     // strict intent; only the explicitly fenced emergency release can.
     do {
         try authority.save(secured)
-        try authority.bindRuntime(generation: 20, digest: "strict-fixture", strict: true, requestedMode: "three-tier")
+        try authority.bindRuntime(generation: 20, digest: "strict-fixture", runtimeMode: "three-tier", requestedMode: "three-tier")
         let restarted = ReleaseAuthority(directory: directory, owner: geteuid())
         let persisted = try restarted.load()
         var mismatchRefused = false
         do {
-            try restarted.bindRuntime(generation: 20, digest: "wrong-mode", strict: true, requestedMode: "stable")
+            try restarted.bindRuntime(generation: 20, digest: "wrong-mode", runtimeMode: "three-tier", requestedMode: "stable")
         } catch { mismatchRefused = true }
         var downgradeRefused = false
         do {
-            try restarted.bindRuntime(generation: 20, digest: "stable-fixture", strict: false, requestedMode: "stable")
+            try restarted.bindRuntime(generation: 20, digest: "stable-fixture", runtimeMode: "stable", requestedMode: "stable")
         } catch { downgradeRefused = true }
         var replacementRefused = false
         do {
-            try restarted.bindRuntime(generation: 20, digest: "different-strict-fixture", strict: true, requestedMode: "three-tier")
+            try restarted.bindRuntime(generation: 20, digest: "different-strict-fixture", runtimeMode: "three-tier", requestedMode: "three-tier")
         } catch { replacementRefused = true }
         var blocked = KillSwitchManager.emergencyState(preserving: nil)
         blocked.strictBlocking = persisted.strictIntent
@@ -275,6 +275,28 @@ func runReleaseSelfTests() -> Bool {
               "strict restart and failed replacement retain block; fenced explicit release retires intent")
     } catch {
         check(false, "strict restart and failed replacement retain block; fenced explicit release retires intent")
+    }
+
+    // AI Home is fail-closed for AI only: its bind records no strict intent,
+    // a stable graph cannot claim it, and it cannot replace a strict session.
+    do {
+        try authority.save(secured)
+        try authority.bindRuntime(generation: 20, digest: "ai-home-fixture", runtimeMode: "ai-home", requestedMode: "ai-home")
+        let aiHome = try authority.load()
+        var claimRefused = false
+        do {
+            try authority.bindRuntime(generation: 20, digest: "stable-fixture", runtimeMode: "stable", requestedMode: "ai-home")
+        } catch { claimRefused = true }
+        try authority.bindRuntime(generation: 20, digest: "strict-fixture", runtimeMode: "three-tier", requestedMode: "three-tier")
+        var downgradeRefused = false
+        do {
+            try authority.bindRuntime(generation: 20, digest: "ai-home-fixture", runtimeMode: "ai-home", requestedMode: "ai-home")
+        } catch { downgradeRefused = true }
+        check(!aiHome.strictIntent && aiHome.strictRuntimeDigest == nil && claimRefused && downgradeRefused,
+              "AI Home binds without strict intent and cannot replace a strict session")
+        try authority.save(secured)
+    } catch {
+        check(false, "AI Home binds without strict intent and cannot replace a strict session")
     }
 
     return passed

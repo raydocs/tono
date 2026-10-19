@@ -362,10 +362,14 @@ func ownedRuntimeConfigIsSafe(_ contents: String) -> Bool {
         if let array = value as? [Any] { return array.allSatisfy(safe) }
         return true
     }
-    return safe(object)
-        && (ThreeTierRoutingContract.isThreeTierRuntime(object)
-            ? ThreeTierRoutingContract.admits(object)
-            : route["final"] as? String == "Tono-Exit")
+    let admitted: Bool
+    switch ThreeTierRoutingContract.routingMode(of: object) {
+    case "three-tier": admitted = ThreeTierRoutingContract.admits(object)
+    case "ai-home": admitted = ThreeTierRoutingContract.admitsAIHome(object)
+    case "stable": admitted = route["final"] as? String == "Tono-Exit"
+    default: admitted = false
+    }
+    return safe(object) && admitted
 }
 
 /// The refusal matrix that keeps an unprivileged user from getting root to run a
@@ -864,6 +868,35 @@ func runOwnedRuntimeContractSelfTests() -> Bool {
         runtime["route"] = route
         guard !ThreeTierRoutingContract.admits(runtime),
               !ownedRuntimeConfigIsSafe(String(decoding: try JSONSerialization.data(withJSONObject: runtime), as: UTF8.self)) else { return false }
+
+        // AI Home: the exact graph is admitted as its own non-strict mode. A
+        // recognized AI match sent DIRECT, or a graph carrying both variants'
+        // tags, is refused.
+        let aiGraph = try ThreeTierRoutingContract.graph(home: "Tono-Home-Residential",
+            physicalInterface: "en0", fakeRange: "198.18.176.0/20", variant: .aiHome)
+        var aiHome = runtime
+        aiHome["route"] = aiGraph["route"]
+        aiHome["dns"] = aiGraph["dns"]
+        var aiOutbounds = (runtime["outbounds"] as! [[String: Any]]).filter { $0["type"] as? String != "direct" }
+        aiOutbounds.append(aiGraph["direct_outbound"] as! [String: Any])
+        aiHome["outbounds"] = aiOutbounds
+        let aiText = { (object: [String: Any]) in
+            String(decoding: (try? JSONSerialization.data(withJSONObject: object)) ?? Data(), as: UTF8.self)
+        }
+        guard ThreeTierRoutingContract.admitsAIHome(aiHome), !ThreeTierRoutingContract.admits(aiHome),
+              ThreeTierRoutingContract.routingMode(of: aiHome) == "ai-home",
+              !ThreeTierRoutingContract.isThreeTierRuntime(aiHome), ownedRuntimeConfigIsSafe(aiText(aiHome)) else { return false }
+        var aiRoute = aiHome["route"] as! [String: Any]
+        var aiRules = aiRoute["rules"] as! [[String: Any]]
+        let aiHomeRule = aiRules.firstIndex { $0["outbound"] as? String == "Tono-Home-Residential" }!
+        aiRules[aiHomeRule]["outbound"] = ThreeTierRoutingContract.aiHomeDirect
+        aiRoute["rules"] = aiRules
+        var leaking = aiHome
+        leaking["route"] = aiRoute
+        var mixed = aiHome
+        mixed["outbounds"] = aiOutbounds + [graph["direct_outbound"] as! [String: Any]]
+        guard !ThreeTierRoutingContract.admitsAIHome(leaking), !ownedRuntimeConfigIsSafe(aiText(leaking)),
+              ThreeTierRoutingContract.routingMode(of: mixed) == nil, !ownedRuntimeConfigIsSafe(aiText(mixed)) else { return false }
     } catch { return false }
     return ownedRuntimeConfigIsSafe(valid)
         // DIRECT final is only legal inside the exact protected three-tier
@@ -872,6 +905,12 @@ func runOwnedRuntimeContractSelfTests() -> Bool {
             valid.replacingOccurrences(
                 of: #""final":"Tono-Exit""#,
                 with: #""final":"Tono-ThreeTier-Direct""#
+            )
+        )
+        && !ownedRuntimeConfigIsSafe(
+            valid.replacingOccurrences(
+                of: #""final":"Tono-Exit""#,
+                with: #""final":"Tono-AIHome-Direct""#
             )
         )
         && !ownedRuntimeConfigIsSafe(

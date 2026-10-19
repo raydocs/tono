@@ -92,14 +92,23 @@ try {
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, expand(v)]))
     return value
   }
+  // The AI Home variant shares the bindings; only its graph differs (open
+  // DIRECT final, AI-only UDP/ICMP reject, LAN direct, its own tags).
+  const aiHome = JSON.parse(readFileSync(path.join(root, 'tooling/scripts/sing-box/ai-home-template.json'), 'utf8'))
+  if (aiHome.version !== 1 || aiHome.scope !== 'ai-home-kill-switch-direct-default') {
+    throw new Error('unrecognized AI Home snapshot contract')
+  }
   const contractTarget = path.join(root, 'apps/macos/Tono/Core/ThreeTierRoutingContract.swift')
   const contractOriginal = readFileSync(contractTarget, 'utf8')
-  const section = /    private static let templateJSON = #"""[\s\S]*?\n    """#/g
-  if ([...contractOriginal.matchAll(section)].length !== 1) throw new Error('expected one shared Swift graph template')
-  const graphJSON = JSON.stringify(expand(snapshot.graph), null, 2)
-  if (graphJSON.includes('"""#')) throw new Error('unsafe generated Swift delimiter')
-  const contractUpdated = contractOriginal.replace(section,
-    `    private static let templateJSON = #"""\n${graphJSON.split('\n').map(line => `    ${line}`).join('\n')}\n    """#`)
+  let contractUpdated = contractOriginal
+  for (const [name, graph] of [['templateJSON', snapshot.graph], ['aiHomeTemplateJSON', aiHome.graph]]) {
+    const section = new RegExp(`    private static let ${name} = #"""[\\s\\S]*?\\n    """#`, 'g')
+    if ([...contractUpdated.matchAll(section)].length !== 1) throw new Error(`expected one Swift graph template ${name}`)
+    const graphJSON = JSON.stringify(expand(graph), null, 2)
+    if (graphJSON.includes('"""#')) throw new Error('unsafe generated Swift delimiter')
+    contractUpdated = contractUpdated.replace(section,
+      `    private static let ${name} = #"""\n${graphJSON.split('\n').map(line => `    ${line}`).join('\n')}\n    """#`)
+  }
   // Validate and render both targets before either write. CI --check also
   // catches a partially interrupted generation across the two output files.
   if (args[0] === '--write') {
