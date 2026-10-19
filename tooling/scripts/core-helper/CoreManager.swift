@@ -111,6 +111,12 @@ final class CoreManager {
         return runtimeConfigPath
     }
 
+    /// The runtime as admission and start read it: keys folded the way the
+    /// core matches them, so a `DNS` or `OUTBOUNDS` key cannot hide the mode.
+    static func foldedRuntime(_ data: Data) -> [String: Any]? {
+        (try? JSONSerialization.jsonObject(with: data)).flatMap(goFoldedJSONKeys) as? [String: Any]
+    }
+
     /// Validate the root snapshot before binding any intent or PF grants.
     func bindRuntime(configDirectory: String, digest: String, generation: UInt64?, mode: String?) throws -> StrictRuntimeProof? {
         lock.lock(); defer { lock.unlock() }
@@ -123,7 +129,7 @@ final class CoreManager {
         }
         _ = try snapshot(configDirectory, expectedSHA256: digest, binding: true)
         let data = try Data(contentsOf: URL(fileURLWithPath: runtimeConfigPath))
-        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        guard let object = Self.foldedRuntime(data) else {
             throw HelperFailure.invalid("Invalid runtime.")
         }
         guard let runtimeMode = ThreeTierRoutingContract.routingMode(of: object),

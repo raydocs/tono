@@ -17,3 +17,7 @@
 - 验证：见 PR 验证评论。本机未编译（MacBook 不跑 swiftc），由托管 macOS CI 构建并运行。
 - 候选/发布：仅源码，App 尚未提供该模式（PR2 补 AI 范围的 PF 保持，PR3 接入设置，PR4 实机测试后改默认）。
 - 剩余限制：只识别名单内的 AI 域名与 Anthropic 网段；经 DoH、ECH、共享 CDN 或未收录 IP 访问的 AI 会走直连。
+
+2026-10-19 续（Codex 审查 `cd2e1b524`：approve-with-fixes）：
+- minor：`CoreManager.bindRuntime` 判断模式时没有像准入和启动那样折叠键名，`DNS`/`OUTBOUNDS` 大写键的 AI Home 图可被声明为
+  stable 绑定。改为同一份折叠后的对象（`CoreManager.foldedRuntime`），`--self-test` 新增大小写键回归。

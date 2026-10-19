@@ -897,6 +897,14 @@ func runOwnedRuntimeContractSelfTests() -> Bool {
         mixed["outbounds"] = aiOutbounds + [graph["direct_outbound"] as! [String: Any]]
         guard !ThreeTierRoutingContract.admitsAIHome(leaking), !ownedRuntimeConfigIsSafe(aiText(leaking)),
               ThreeTierRoutingContract.routingMode(of: mixed) == nil, !ownedRuntimeConfigIsSafe(aiText(mixed)) else { return false }
+        // Binding classifies the same folded keys admission accepted, so a
+        // case-changed AI Home graph cannot be bound as stable.
+        var cased = aiHome
+        cased["DNS"] = cased.removeValue(forKey: "dns")
+        cased["OUTBOUNDS"] = cased.removeValue(forKey: "outbounds")
+        guard ownedRuntimeConfigIsSafe(aiText(cased)),
+              let bound = CoreManager.foldedRuntime(Data(aiText(cased).utf8)),
+              ThreeTierRoutingContract.routingMode(of: bound) == "ai-home" else { return false }
     } catch { return false }
     return ownedRuntimeConfigIsSafe(valid)
         // DIRECT final is only legal inside the exact protected three-tier
