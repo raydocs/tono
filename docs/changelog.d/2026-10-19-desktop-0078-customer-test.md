@@ -3,7 +3,7 @@
 - 来源：分支`release/desktop-0.0.78-test-20261019`，基于0.0.77冻结[647cf263](https://github.com/raydocs/tono/commit/647cf2633956e6bd9f6eda7af51cab7a1cdbed57)之后的main。最终冻结SHA/run/包摘要产生后续记，不提前声称构建或验签成功。
 - 收录（均已合main，本准备提交只做版本与记录）：
   - [#1685](https://github.com/raydocs/tono/pull/1685) `5e2866edb`：Windows可选DIRECT的`/rules`证明按alpha.9实际`String()`打印完整`process_name`/`inbound`/`network`/`port`列表；客户"国内直连未开、微信走隧道"（#1684）的根因修复，CI真实核心重放`/rules`。
-  - [#1686](https://github.com/raydocs/tono/pull/1686)：双端sing-box由`v1.15.0-alpha.9`升至`v1.15.0-alpha.12`（`25b0d5ea`），三目标candidate/manifest与全部准入摘要同步；独立Codex审查approve，owner决定先进本RC再实机。
+  - [#1686](https://github.com/raydocs/tono/pull/1686) `95fe1ca18`：双端sing-box由`v1.15.0-alpha.9`升至`v1.15.0-alpha.12`（`25b0d5ea`），三目标candidate/manifest与全部准入摘要同步；独立Codex审查approve，owner决定先进本RC再实机。
   - [#1605](https://github.com/raydocs/tono/pull/1605) `17a588f53`：Windows Service精确DNS恢复失败后走限定DHCP回退（WIN-NRPT-KEPT-AFTER-EMERGENCY-DISARM）。
   - [#1674](https://github.com/raydocs/tono/pull/1674) `c39a9c17d`：未确认的出口不再挡住已确认目录（EXIT-IDENTITY-UNHEALTHY-BLOCKS）。
   - [#1675](https://github.com/raydocs/tono/pull/1675) `6ae39607e`：失效的本机系统代理不再挡住线路（STALE-LOOPBACK-PROXY）。
