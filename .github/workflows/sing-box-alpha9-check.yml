@@ -1,8 +1,11 @@
-name: sing-box alpha.9 check
+name: sing-box alpha.12 check
 
-# Parser check of the pinned v1.15.0-alpha.9 linux core. Not a customer install
+# Parser check of the pinned v1.15.0-alpha.12 linux core. Not a customer install
 # and not a Mac Studio soak. The frozen M0 candidate stays the default of
-# certify.py; this workflow passes the alpha.9 candidate explicitly.
+# certify.py; this workflow passes the alpha.12 candidate explicitly.
+# The file keeps its alpha9 name so ci-gate and its path filters stay unchanged.
+# darwin-arm64 and windows-amd64-v2 are rebuilt and digest-checked by
+# prepare-macos-sing-box.sh and prepare-windows-sing-box.sh in their own CI.
 on:
   # pull_request and merge_group enter through ci-gate.yml.
   workflow_call:
@@ -36,12 +39,12 @@ jobs:
           trap 'rm -rf "$work"' EXIT
           git init -q "$work/source"
           git -C "$work/source" fetch -q --depth=1 https://github.com/SagerNet/sing-box \
-            132b38e9caaba1a1959354d518e54d2d08419afe
+            25b0d5ea3e466d246c708ac0f20d0448110e566c
           git -C "$work/source" checkout -q --detach FETCH_HEAD
           export GOENV=off GOWORK=off GOTOOLCHAIN=local
           export GOFLAGS=-mod=readonly GOTELEMETRY=off
           go -C "$work/source" mod download
-          cand=tooling/scripts/sing-box/candidates/v1.15.0-alpha.9.json
+          cand=tooling/scripts/sing-box/candidates/v1.15.0-alpha.12.json
           python3 tooling/scripts/sing-box/certify.py build \
             --candidate "$cand" \
             --source "$work/source" --go "$(command -v go)" \
@@ -83,7 +86,7 @@ jobs:
             --emitted tooling/scripts/sing-box/fixtures/hy2-certificate-sha256.json \
             --emitted "$work/three-tier.json" \
             --output "$work/check"
-          cmp "$work/linux/manifest.json" tooling/scripts/sing-box/manifests/alpha9/linux-amd64-v2.json
+          cmp "$work/linux/manifest.json" tooling/scripts/sing-box/manifests/alpha12/linux-amd64-v2.json
           # #1684: the Windows App proves a DIRECT reload against these /rules strings.
           python3 -m unittest discover -s tooling/scripts/sing-box -p 'test_clash_rules.py'
           python3 tooling/scripts/sing-box/clash_rules.py check --binary "$work/linux/sing-box"

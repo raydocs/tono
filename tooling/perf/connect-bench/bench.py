@@ -8,7 +8,7 @@ handshake visible; the same delay is applied to every profile.
 Pinned cores:
   mihomo v1.19.30 (the client under test, stock build, not the Tono patch)
   sing-box 1.14.2 (local protocol servers)
-  sing-box 1.15.0-alpha.9 (third client, stock upstream tarball, same
+  sing-box 1.15.0-alpha.12 (third client, stock upstream tarball, same
   revision the certified build names; not the Tono-signed binary)
 
 Tono's owned runtime admits only VLESS+Reality and Hysteria2. Trojan, VMess,
@@ -46,8 +46,8 @@ MIHOMO_URL = "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.30/mih
 MIHOMO_SHA = "cf06ce2c7d1421bdbda14ee4a5b6046672dc35ebf8eecd8e77504ec3c0ed9a84"
 SINGBOX_URL = "https://github.com/SagerNet/sing-box/releases/download/v1.14.2/sing-box-1.14.2-linux-amd64.tar.gz"
 SINGBOX_SHA = "a684484d7477d1437282ee411f4d131d0340aaad60a7868841ebd5d87dd8a0c6"
-SINGBOX_CLIENT_URL = "https://github.com/SagerNet/sing-box/releases/download/v1.15.0-alpha.9/sing-box-1.15.0-alpha.9-linux-amd64.tar.gz"
-SINGBOX_CLIENT_SHA = "8aede1f5935a856d939c61413677dc2e7e3eb0046efbc22b9a869229e6da279f"
+SINGBOX_CLIENT_URL = "https://github.com/SagerNet/sing-box/releases/download/v1.15.0-alpha.12/sing-box-1.15.0-alpha.12-linux-amd64.tar.gz"
+SINGBOX_CLIENT_SHA = "b107528ec7d989333d986573c097d840b9ef1afa9bb177f8eb03e0767f370514"
 UUID = "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d"
 SHORT_ID = "0123456789abcdef"
 ORIGIN_HOST = "bench.tono.test"
@@ -143,10 +143,10 @@ def unpack_binary(archive: Path, dest: Path, member: str | None = None) -> None:
 
 
 def ensure_singbox_client() -> Path:
-    archive = CACHE / "sing-box-1.15.0-alpha.9.tar.gz"
+    archive = CACHE / "sing-box-1.15.0-alpha.12.tar.gz"
     download(SINGBOX_CLIENT_URL, archive, SINGBOX_CLIENT_SHA)
-    dest = CACHE / "sing-box-1.15.0-alpha.9"
-    unpack_binary(archive, dest, "sing-box-1.15.0-alpha.9-linux-amd64/sing-box")
+    dest = CACHE / "sing-box-1.15.0-alpha.12"
+    unpack_binary(archive, dest, "sing-box-1.15.0-alpha.12-linux-amd64/sing-box")
     return dest
 
 
@@ -909,7 +909,7 @@ def filter_servers(sing: Path, work: Path, material: dict) -> list[str]:
 
 
 def singbox_config(protocol: str, material: dict, mixed: int, controller: int, dns_port: int, work: Path) -> dict:
-    """Stock alpha.9 client. Same shape as the owned emitter: chrome uTLS,
+    """Stock alpha.12 client. Same shape as the owned emitter: chrome uTLS,
     fake-ip for the dial, DoH only for a real lookup, no QUIC DNS.
     """
     started = time.perf_counter()
