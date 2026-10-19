@@ -5,6 +5,7 @@ import {
 } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { sha256 } from '../src/crypto';
+import { canonicalTrafficPolicy } from '../src/traffic-policy';
 import worker, { type Env } from '../src/index';
 import {
   ADMIN_TOKEN,
@@ -664,6 +665,32 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       dryRun: true,
     }, 'PUT');
     expect(preview.status).toBe(200);
+  });
+
+  // A dry run canonicalises as trusted, so the PUT above never reaches the
+  // allowlists. The unsigned path is what a published policy is read back through.
+  it('admits China Mobile Cloud and the MIIT filing site without a signature', () => {
+    const policy = canonicalTrafficPolicy({
+      version: 3,
+      domains: [],
+      mediaEndpoints: [],
+      webDomains: [
+        { host: 'ecloud.10086.cn', ports: [443] },
+        { host: 'console.cmecloud.cn', ports: [443] },
+        { host: 'beian.miit.gov.cn', ports: [443] },
+      ],
+      directSuffixes: [
+        { host: '10086.cn', ports: [80, 443] },
+        { host: 'cmecloud.cn', ports: [80, 443] },
+        { host: 'miit.gov.cn', ports: [80, 443] },
+      ],
+    }, false);
+    expect(policy.directSuffixes?.map((entry) => entry.host)).toEqual(['10086.cn', 'cmecloud.cn', 'miit.gov.cn']);
+    expect(policy.webDomains?.map((entry) => entry.host)).toEqual(['beian.miit.gov.cn', 'console.cmecloud.cn', 'ecloud.10086.cn']);
+    expect(() => canonicalTrafficPolicy({
+      version: 3, domains: [], mediaEndpoints: [], webDomains: [],
+      directSuffixes: [{ host: 'gov.cn', ports: [443] }],
+    }, false)).toThrow();
   });
 
   it('clears a stored signature when an unsigned policy replaces a signed one', async () => {
