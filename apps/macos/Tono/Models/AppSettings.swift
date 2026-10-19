@@ -6,7 +6,11 @@ import Foundation
 enum SettingsKey {
     /// Next explicit connection only; the runtime owns its captured session mode.
     nonisolated static let desktopRoutingMode = "desktopRoutingMode"
-    nonisolated static let desktopRoutingModeOptions = ["stable", "three-tier"]
+    nonisolated static let desktopRoutingModeOptions = ["stable", "three-tier", "ai-home"]
+    /// Whether the session the runtime last captured is AI Home (decision
+    /// 130). Written when a connect captures its mode, so every arm of that
+    /// session, and a relaunch inside it, asks the helper for the AI scope.
+    nonisolated static let aiHomeRoutingSession = "aiHomeRoutingSession"
     static let launchAtStartup = "launchAtStartup"
     static let interfaceLanguage = "interfaceLanguage"
     static let subscriptionURL = "subscriptionURL"

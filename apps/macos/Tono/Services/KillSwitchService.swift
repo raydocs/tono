@@ -19,6 +19,8 @@ nonisolated enum KillSwitchService {
         case localNetworkHelperTooOld
         /// A re-arm of the live session failed; the helper kept the block.
         case protectionUpdateFailed(String)
+        /// An AI Home arm whose reply does not confirm the AI scope.
+        case aiHomeScopeUnconfirmed
 
         var errorDescription: String? {
             switch self {
@@ -38,6 +40,8 @@ nonisolated enum KillSwitchService {
                 String(localized: "The network helper is too old to block local network devices. Reconnect to update it.")
             case .protectionUpdateFailed:
                 String(localized: "Tono couldn't update protection, so it keeps blocking traffic. Disconnect or reconnect to continue.")
+            case .aiHomeScopeUnconfirmed:
+                String(localized: "The network helper did not confirm AI Home protection. Reconnect to update it.")
             }
         }
     }
@@ -60,8 +64,14 @@ nonisolated enum KillSwitchService {
     typealias ArmReply = (
         armed: Bool, wanted: Bool, live: Bool,
         healed: Bool, flushedStates: Bool, killedHosts: Int,
-        localNetworkDevices: Bool?
+        localNetworkDevices: Bool?, aiHomeScoped: Bool?
     )
+
+    /// Whether this arm belongs to an AI Home session (decision 130). Tests
+    /// replace it.
+    static var readAIHomeSession: () -> Bool = {
+        AppProfile.defaults.bool(forKey: SettingsKey.aiHomeRoutingSession)
+    }
 
     /// Helper IPC boundary of `arm`. Production delivers the prepared
     /// `/killswitch/arm` request and reads `/killswitch/status`; tests replace
@@ -169,6 +179,7 @@ nonisolated enum KillSwitchService {
             // every other outcome records unknown at this generation, which
             // never overwrites a newer result (`LocalNetworkDevicesSync`).
             let localNetwork = LocalNetworkDevicesSync.desired
+            let aiHomeScoped = readAIHomeSession()
             var localNetworkOutcome = LocalNetworkDevicesSync.Applied.unknown(
                 generation: localNetwork.generation
             )
@@ -197,7 +208,8 @@ nonisolated enum KillSwitchService {
                 tailscaleBootstrapEnabled: tailscaleBootstrapEnabled,
                 allowSystemResolution: allowSystemResolution,
                 reviewedBundleDirect: reviewedBundleDirect,
-                allowLocalNetworkDevices: localNetwork.allow
+                allowLocalNetworkDevices: localNetwork.allow,
+                aiHomeScoped: aiHomeScoped
             )
             guard status.armed, status.wanted, status.live else {
                 // The helper answered, so the outcome is known: a reply that
@@ -244,6 +256,11 @@ nonisolated enum KillSwitchService {
                 throw Error.localNetworkHelperTooOld
             }
             localNetworkOutcome = .known(localNetwork)
+            // Armed, but not with the scope this session needs: fail the arm
+            // rather than run AI Home under a ruleset that filters its DIRECT.
+            if aiHomeScoped, status.aiHomeScoped != true {
+                throw Error.aiHomeScopeUnconfirmed
+            }
         } catch HelperIPCError.forbidden {
             throw Error.helperRejected
         } catch HelperIPCError.commandFailed(let message, let code?)
@@ -307,7 +324,8 @@ nonisolated enum KillSwitchService {
         tailscaleBootstrapEnabled: Bool?,
         allowSystemResolution: Bool,
         reviewedBundleDirect: Bool,
-        allowLocalNetworkDevices: Bool
+        allowLocalNetworkDevices: Bool,
+        aiHomeScoped: Bool
     ) throws -> ArmReply {
         func attempt() throws -> ArmReply {
             try armIPC.deliver {
@@ -321,7 +339,8 @@ nonisolated enum KillSwitchService {
                     allowSystemResolution: allowSystemResolution,
                     bootstrapPins: bootstrapPins,
                     reviewedBundleDirect: reviewedBundleDirect,
-                    allowLocalNetworkDevices: allowLocalNetworkDevices
+                    allowLocalNetworkDevices: allowLocalNetworkDevices,
+                    aiHomeScoped: aiHomeScoped
                 )
             }
         }

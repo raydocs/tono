@@ -188,19 +188,36 @@ struct SettingsView: View {
                                options: SettingsKey.desktopRoutingModeOptions)
                     .accessibilityIdentifier("settings.routingMode")
             }
-            Text("Priority: 21 cloud-video exceptions → 166 AI/named Home entries → explicit cloud list → other supported traffic DIRECT, including unclassified destinations. Failed Home/cloud matches never fall back DIRECT. ECH, cached/raw IP or app DoH can hide AI identity and take default DIRECT; unidentified AI is not guaranteed Home routing.")
-                .font(.system(size: seaEnabled ? 12 : 11))
-                .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("Ordinary DIRECT supports public IPv4 TCP ports 80/443 only. Application UDP/QUIC, IPv6 and LAN are blocked, even if Allow local network devices was enabled. If Core stops, protection stays fail-closed.")
-                .font(.system(size: seaEnabled ? 12 : 11))
-                .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            // Only the selected mode's notes; Stable needs none.
+            if desktopRoutingMode == "three-tier" {
+                Text("Priority: 21 cloud-video exceptions → 166 AI/named Home entries → explicit cloud list → other supported traffic DIRECT, including unclassified destinations. Failed Home/cloud matches never fall back DIRECT. ECH, cached/raw IP or app DoH can hide AI identity and take default DIRECT; unidentified AI is not guaranteed Home routing.")
+                    .font(.system(size: seaEnabled ? 12 : 11))
+                    .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Ordinary DIRECT supports public IPv4 TCP ports 80/443 only. Application UDP/QUIC, IPv6 and LAN are blocked, even if Allow local network devices was enabled. If Core stops, protection stays fail-closed.")
+                    .font(.system(size: seaEnabled ? 12 : 11))
+                    .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if desktopRoutingMode == "ai-home" {
+                Text("AI Home: AI and named Home services use your Home line through the cloud, DNS included. Listed overseas sites and video use the cloud. Everything else goes DIRECT, including UDP and LAN. If the Home line or the cloud fails, AI stays blocked and never falls back to DIRECT.")
+                    .font(.system(size: seaEnabled ? 12 : 11))
+                    .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Only listed AI domains and Anthropic's IPv4 range are recognized. ECH, cached or raw IP, or app DoH can hide other AI services, which then go DIRECT. If Tono quits or Core stops, ordinary traffic stays online and listed AI services stay blocked until you reconnect or choose Restore internet.")
+                    .font(.system(size: seaEnabled ? 12 : 11))
+                    .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
     private var strictLANUnavailable: Bool {
         desktopRoutingMode == "three-tier" || appState.coreRuntime.routingMode == "three-tier"
+    }
+
+    /// AI Home routes and passes the LAN whatever the setting says.
+    private var aiHomeLANAlwaysOn: Bool {
+        desktopRoutingMode == "ai-home" || appState.coreRuntime.routingMode == "ai-home"
     }
 
     private var preferencesCard: some View {
@@ -253,7 +270,14 @@ struct SettingsView: View {
                     set: setAllowLocalNetworkDevices
                 )
             )
-            .disabled(strictLANUnavailable)
+            .disabled(strictLANUnavailable || aiHomeLANAlwaysOn)
+
+            if !strictLANUnavailable, aiHomeLANAlwaysOn {
+                Text("AI Home always allows local network devices. Your LAN preference is kept for Stable.")
+                    .font(.system(size: seaEnabled ? 12 : 11))
+                    .foregroundStyle(seaEnabled ? SeaTheme.muted : Color.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if strictLANUnavailable {
                 Text("LAN access is unavailable while Three-tier is selected or retained by the session. Your LAN preference is kept for Stable. Select Stable, then explicitly disconnect and reconnect to use it.")

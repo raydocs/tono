@@ -12,7 +12,7 @@ final class RuntimeConfigTests: XCTestCase {
         }
         defaults.removeObject(forKey: SettingsKey.desktopRoutingMode)
         XCTAssertEqual(try DesktopRoutingModeAdmission.capture(defaults.object(forKey: SettingsKey.desktopRoutingMode)), "stable")
-        XCTAssertEqual(SettingsKey.desktopRoutingModeOptions, ["stable", "three-tier"])
+        XCTAssertEqual(SettingsKey.desktopRoutingModeOptions, ["stable", "three-tier", "ai-home"])
         let runtime = CoreRuntimeManager()
         defaults.set("three-tier", forKey: SettingsKey.desktopRoutingMode)
         let mode = try DesktopRoutingModeAdmission.capture(defaults.object(forKey: SettingsKey.desktopRoutingMode))
