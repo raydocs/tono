@@ -21,6 +21,7 @@ import com.raydocs.tono.mobile.BuildConfig
 import com.raydocs.tono.mobile.R
 import com.raydocs.tono.mobile.ipc.ITonoEngine
 import com.raydocs.tono.mobile.ipc.ITonoEngineListener
+import com.raydocs.tono.mobile.surface.NotificationWatchdog
 import com.raydocs.tono.mobile.surface.SystemSurfaces
 import com.raydocs.tono.routing.CatalogAdmission
 import com.raydocs.tono.routing.CatalogRejected
@@ -83,6 +84,8 @@ class TonoVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        // First: a fresh process has no tunnel, whatever notification Android re-posted for it.
+        runCatching { NotificationWatchdog.engineStarting(this) }
         store = EngineStore(this)
         val local = LocalTestServer.apiBase(this)
         localTestServer = local != null

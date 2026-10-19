@@ -84,4 +84,13 @@ class NotificationWatchdogTest {
         assertEquals(false, NotificationWatchdog.confirmStopped(app, vpnPresent = false))
         assertEquals(app.getString(R.string.state_connecting), title())
     }
+
+    @Test fun aStartingEngineReplacesTheDeadOnesRepostedClaim() {
+        // Android re-posts a crashed engine's last notification when it restarts the service.
+        postEngineNotification(Phase.CONNECTED)
+        assertEquals(Phase.CONNECTED, NotificationWatchdog.engineStarting(app))
+        assertEquals(false, title() == app.getString(R.string.state_connected))
+        // Nothing claimed: nothing to do.
+        assertNull(NotificationWatchdog.engineStarting(app))
+    }
 }

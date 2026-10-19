@@ -794,7 +794,9 @@ class LocalTunnelDeviceTest {
      * up to [windowMs]. A tunnel claim in the notification without a VPN network may last at most
      * [boundMs] from the moment the VPN network is seen gone. Returns the watchdog log lines.
      */
-    private fun killEngineAndSample(tag: String, withWatch: Boolean, boundMs: Long, windowMs: Long): List<String> {
+    private class DeathRun(val log: List<String>, val restartedAt: Long, val claimedAfterDeath: Boolean)
+
+    private fun killEngineAndSample(tag: String, withWatch: Boolean, boundMs: Long, windowMs: Long): DeathRun {
         val claims = setOf(Phase.PREPARING, Phase.CONNECTING, Phase.CONNECTED, Phase.DEGRADED, Phase.DISCONNECTING).map { it.name }.toSet()
         val watchBefore = pidsOf("watch")
         note("$tag: watch process before the kill: ${watchBefore.ifEmpty { "none" }}")
@@ -802,13 +804,21 @@ class LocalTunnelDeviceTest {
         shell("logcat -c")
         val doomed = pidsOf("vpn")
         assertTrue("an engine process to kill", doomed.isNotEmpty())
-        if (withWatch) watchBefore.forEach { Process.killProcess(it) }
+        // With the watch: frozen first (SIGSTOP) so it cannot act on the binder death, the engine
+        // killed, then the watch killed. Killing the watch first changes what Android does with the
+        // engine (run 39193223160: it then dropped the notification and restarted the engine).
+        if (withWatch) watchBefore.forEach { Process.sendSignal(it, 19) }
         doomed.forEach { Process.killProcess(it) }
         val killed = SystemClock.elapsedRealtime()
+        if (withWatch) { Thread.sleep(300); watchBefore.forEach { Process.killProcess(it) } }
         // The kill only counts once it is seen: the old process gone and the tunnel with it (run
         // 39181991820 sampled the engine still alive right after the signal and took that as a
         // reconnect). A restart is a :vpn process with a new pid.
         var diedAt = -1L; var vpnDown = -1L; var honestAt = -1L; var restartedAt = -1L; var reconnectedAt = -1L
+        var claimedAfterDeath = false
+        // Android re-posts a crashed engine's last notification when it restarts it; the new engine
+        // replaces it first thing. Measured, and held to under 1 s.
+        var restartClaimFrom = -1L; var restartClaimTo = -1L
         val lies = mutableListOf<String>()
         val samples = mutableListOf<String>()
         while (SystemClock.elapsedRealtime() - killed < windowMs) {
@@ -824,7 +834,12 @@ class LocalTunnelDeviceTest {
             if (!vpn && vpnDown < 0) vpnDown = t
             if (alive && restartedAt < 0) restartedAt = t
             val claiming = phase != null && phase in claims
-            if (!vpn && claiming && vpnDown >= 0 && t - vpnDown > boundMs) lies += "${t}ms notification \"$title\" ($phase) without a VPN network"
+            if (!vpn && claiming && restartedAt < 0) claimedAfterDeath = true
+            if (alive && !vpn && (phase == Phase.CONNECTED.name || phase == Phase.DEGRADED.name)) {
+                if (restartClaimFrom < 0) restartClaimFrom = t
+                restartClaimTo = t
+            }
+            if (!vpn && claiming && vpnDown >= 0 && t - vpnDown > boundMs && restartedAt < 0) lies += "${t}ms notification \"$title\" ($phase) without a VPN network"
             if (!vpn && surface in setOf(SurfaceState.CONNECTED, SurfaceState.DEGRADED)) lies += "${t}ms tile/widget status $surface without a VPN network"
             if (honestAt < 0 && !claiming && diedAt >= 0) honestAt = t
             val line = "vpn=$vpn title=$title phase=$phase surface=$surface engine=$alive watch=${watch.ifEmpty { "none" }}"
@@ -842,13 +857,17 @@ class LocalTunnelDeviceTest {
         shell("logcat -d -b main,system -s ActivityManager:I").lines().filter { ":vpn" in it || ":watch" in it || "TonoVpnService" in it || "EngineWatch" in it }.take(12)
             .forEach { note("$tag: ActivityManager: ${it.trim()}") }
         samples.forEach { note("$tag: $it") }
+        if (restartClaimFrom >= 0) {
+            note("$tag: restarted engine's notification said ${Phase.CONNECTED.name}/${Phase.DEGRADED.name} without a VPN network from ${restartClaimFrom}ms to ${restartClaimTo}ms (sampled)")
+            if (restartClaimTo - restartClaimFrom >= 1_000) lies += "restarted engine claimed a tunnel without a VPN network for ${restartClaimTo - restartClaimFrom}ms"
+        }
         lies.take(10).forEach { note("$tag: $it") }
         if (lies.isNotEmpty() || honestAt < 0) diagnose("local-$tag-notification")
         assertTrue("the killed engine process went away within 10 s", diedAt >= 0)
         assertTrue("the tunnel went down with the engine", vpnDown >= 0)
         assertTrue("the engine's notification stopped claiming a tunnel, or a restarted engine reconnected", honestAt >= 0 || reconnectedAt >= 0)
         assertTrue("no tunnel claim without a VPN network beyond ${boundMs}ms: $lies", lies.isEmpty())
-        return watchdogLog
+        return DeathRun(watchdogLog, restartedAt, claimedAfterDeath)
     }
 
     /** Pid of a logcat line (threadtime format: date time pid tid level tag: message). */
@@ -870,7 +889,7 @@ class LocalTunnelDeviceTest {
         try {
             connectThenCloseTheApp("t5", "local-19-no-app-shade-connected")
             val watch = pidsOf("watch")
-            val log = killEngineAndSample("t5", withWatch = false, boundMs = WatchBoundMs, windowMs = 60_000)
+            val log = killEngineAndSample("t5", withWatch = false, boundMs = WatchBoundMs, windowMs = 60_000).log
             val finalTitle = ongoingNotice().first
             if (finalTitle != null) shadeShot("local-20-no-app-shade-after-death", finalTitle)
             note("t5: final title: $finalTitle")
@@ -905,7 +924,7 @@ class LocalTunnelDeviceTest {
             val idle = shell("dumpsys deviceidle get deep").trim()
             note("t6-doze: deviceidle deep state before the kill: $idle")
             assertEquals("the phone is in deep Doze", "IDLE", idle)
-            val dozeLog = killEngineAndSample("t6-doze", withWatch = false, boundMs = WatchBoundMs, windowMs = 30_000)
+            val dozeLog = killEngineAndSample("t6-doze", withWatch = false, boundMs = WatchBoundMs, windowMs = 30_000).log
             note("t6-doze: deviceidle deep state after: ${shell("dumpsys deviceidle get deep").trim()}")
             assertTrue("the watch replaced the notification in Doze: $dozeLog", dozeLog.any { "engine died: replaced" in it })
             shell("dumpsys deviceidle unforce")
@@ -915,11 +934,20 @@ class LocalTunnelDeviceTest {
 
             connectThenCloseTheApp("t6-both", null)
             val watch = pidsOf("watch")
-            val bothLog = killEngineAndSample("t6-both", withWatch = true, boundMs = 60_000, windowMs = 90_000)
-            val stale = bothLog.filter { "replaced a stale" in it }
-            assertTrue("the alarm replaced the notification with the watch dead too: $bothLog", stale.isNotEmpty())
-            assertTrue("in a freshly started watch process (not ${watch}): $stale", stale.all { pidOf(it) != null && pidOf(it) !in watch })
-            assertTrue("nothing heard the binder die: $bothLog", bothLog.none { "engine died" in it })
+            // The backstop must be armed before the fault: the engine's pending check alarm.
+            val armed = shell("dumpsys alarm").lines().filter { "NOTIFICATION_CHECK" in it }.map { it.trim() }
+            armed.forEach { note("t6-both: pending alarm: $it") }
+            assertTrue("the engine keeps the backstop alarm armed while connected", armed.isNotEmpty())
+            val both = killEngineAndSample("t6-both", withWatch = true, boundMs = 60_000, windowMs = 90_000)
+            assertTrue("nothing heard the binder die: ${both.log}", both.log.none { "engine died" in it })
+            if (both.restartedAt < 0 && both.claimedAfterDeath) {
+                // Android kept the notification and did not restart the engine: only the alarm was left.
+                val stale = both.log.filter { "replaced a stale" in it }
+                assertTrue("the alarm replaced the notification with the watch dead too: ${both.log}", stale.isNotEmpty())
+                assertTrue("in a freshly started watch process (not ${watch}): $stale", stale.all { pidOf(it) != null && pidOf(it) !in watch })
+            } else {
+                note("t6-both: the alarm path was not needed: Android ${if (both.restartedAt >= 0) "restarted the engine" else "removed the notification"}")
+            }
         } finally {
             runCatching { shell("dumpsys deviceidle unforce") }
             runCatching { shell("dumpsys battery reset") }

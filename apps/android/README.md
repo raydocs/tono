@@ -191,8 +191,16 @@ Round 9 (after the round-8 blind reviews, `docs/agent-reports/2026-10-19-android
   from the watch's process (its log line and pid); the status the tile and widget read may never say
   Connected without a VPN network. t6 repeats the fault in forced deep Doze (`dumpsys deviceidle
   force-idle deep`, checked with `get deep` = `IDLE`) with the same 3 s limit, and with the watch
-  killed in the same instant as the engine, where the alarm must start a fresh watch process and
-  replace the notification (window measured, asserted below 60 s).
+  dead too (frozen, the engine killed, then the watch killed): the backstop alarm must be pending
+  before the fault (`dumpsys alarm`), and if Android keeps the notification without restarting the
+  engine, the alarm must start a fresh watch process and replace it (window measured, asserted below
+  60 s). If Android instead restarts the engine or drops the notification, that is recorded and the
+  alarm path is not exercised in that run.
+- **A restarted engine replaces the dead one's notification first thing.** When Android itself
+  restarts a crashed engine it re-posts the dead engine's last notification (run 39193223160:
+  "Connected" with no VPN network for about 0.2 s until the new engine said Connecting). The new
+  engine process now replaces any leftover claim in its first step; t5/t6 hold such a claim from a
+  restarted engine to under 1 s (Android's own re-post comes before the new process runs).
 - **Failed no longer looks like connecting.** On a failed connect the sun sets below the horizon and
   only its ember afterglow stays; connecting keeps a rising half sun. The sea's reflection is a soft
   column of light (under the sun only, kept narrow: the first, wider version coincided with slower

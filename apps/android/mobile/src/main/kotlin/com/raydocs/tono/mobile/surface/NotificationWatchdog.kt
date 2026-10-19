@@ -81,6 +81,21 @@ object NotificationWatchdog {
         return claimed
     }
 
+    /**
+     * A new engine process starting: it cannot have a tunnel yet, but when Android restarts a crashed
+     * engine it re-posts the dead one's last notification first (run 39193223160: "Connected" with no
+     * VPN network until the new engine said Connecting). Replaced before anything else runs.
+     */
+    fun engineStarting(context: Context): Phase? {
+        val nm = context.getSystemService(NotificationManager::class.java) ?: return null
+        val n = nm.activeNotifications.firstOrNull { it.id == TonoNotifications.ONGOING_ID } ?: return null
+        val claimed = TonoNotifications.claimedPhase(n.notification) ?: return null
+        val vpn = PublicStatusStore.vpnPresent(context)
+        nm.notify(TonoNotifications.ONGOING_ID, TonoNotifications.engineGone(context, tunnelGone = vpn == false))
+        Log.i(TAG, "engine starting: replaced a leftover ${claimed.name} notification (VPN network $vpn)")
+        return claimed
+    }
+
     /** After a replacement that said "Status unknown": once Android has no VPN network, say Tono stopped. */
     fun confirmStopped(context: Context, vpnPresent: Boolean?): Boolean {
         if (vpnPresent != false) return false
