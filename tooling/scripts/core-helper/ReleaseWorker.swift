@@ -679,8 +679,13 @@ enum ReleaseChildren {
             let state = ReleaseProcessTable.state(of: pid)
             if state == .gone { continue }
             guard let path = ReleaseProcessTable.path(of: pid) else {
-                // An executable that cannot be read could be any of them.
-                if ReleaseProcessTable.state(of: pid) != .gone { unidentified.append(pid) }
+                // An executable that cannot be read could be any of them,
+                // unless the kernel says it is not platform code: every tool
+                // and shell above is a platform binary on the sealed system
+                // volume. An app updated while it runs has no path either,
+                // and must not hold every component busy.
+                if ReleaseProcessTable.isPlatformBinary(pid) != false,
+                   ReleaseProcessTable.state(of: pid) != .gone { unidentified.append(pid) }
                 continue
             }
             let verdict = classify(path: path, arguments: ReleaseProcessTable.arguments(of: pid),

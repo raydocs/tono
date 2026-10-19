@@ -472,8 +472,10 @@ enum ReleaseProcessTable {
     static func state(of pid: pid_t) -> State {
         guard pid > 0 else { return .gone }
         var info = proc_bsdinfo()
+        // A nonzero arg also finds an unreaped zombie; with 0 a zombie is
+        // ESRCH here while kill(pid, 0) still succeeds, which read as unknown.
         let size = withUnsafeMutablePointer(to: &info) { pointer in
-            proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, pointer, Int32(MemoryLayout<proc_bsdinfo>.size))
+            proc_pidinfo(pid, PROC_PIDTBSDINFO, 1, pointer, Int32(MemoryLayout<proc_bsdinfo>.size))
         }
         if size == MemoryLayout<proc_bsdinfo>.size {
             // A zombie has exited: it can no longer change anything.
@@ -499,6 +501,15 @@ enum ReleaseProcessTable {
         }
         guard size == MemoryLayout<proc_bsdinfo>.size else { return nil }
         return pid_t(info.pbi_ppid)
+    }
+
+    /// Whether the kernel marks `pid`'s running code as Apple platform code,
+    /// or nil when its status could not be read. The flag is set at exec from
+    /// the code signature, so the process cannot claim it.
+    static func isPlatformBinary(_ pid: pid_t) -> Bool? {
+        var flags: UInt32 = 0
+        guard csops(pid, csOpsStatus, &flags, MemoryLayout<UInt32>.size) == 0 else { return nil }
+        return flags & csPlatformBinary != 0
     }
 
     static func path(of pid: pid_t) -> String? {
@@ -565,3 +576,9 @@ enum ReleaseProcessTable {
         return arguments.count == argc ? arguments : nil
     }
 }
+
+/// `csops(2)`: exported by libsystem_kernel, declared by no SDK module.
+@_silgen_name("csops")
+private func csops(_ pid: pid_t, _ ops: UInt32, _ useraddr: UnsafeMutableRawPointer?, _ usersize: Int) -> Int32
+private let csOpsStatus: UInt32 = 0 // CS_OPS_STATUS
+private let csPlatformBinary: UInt32 = 0x0400_0000 // CS_PLATFORM_BINARY
