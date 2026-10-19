@@ -2552,10 +2552,10 @@ extension KillSwitchManager {
 
         let expected = [
             "# Managed by Tono AI Home — do not edit",
-            "pass in quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
-            "pass out quick on lo0 all no state label \"tono-loopback\"",
-            "pass in quick on utun199 all keep state (if-bound) label \"tono-tunnel\"",
-            "pass out quick on utun199 all keep state (if-bound) label \"tono-tunnel\"",
+            "pass in quick on lo0 all keep state (if-bound) label \"tono-ai-home-loopback\"",
+            "pass out quick on lo0 all no state label \"tono-ai-home-loopback\"",
+            "pass in quick on utun199 all keep state (if-bound) label \"tono-ai-home-tunnel\"",
+            "pass out quick on utun199 all keep state (if-bound) label \"tono-ai-home-tunnel\"",
             "block drop out quick inet to { 160.79.104.0/21 } label \"tono-ai-home\"",
         ].joined(separator: "\n") + "\n"
         let rendered = renderRules(state: scoped, allowedUID: 501, physicalInterfaces: ["en0"])
@@ -2582,6 +2582,24 @@ extension KillSwitchManager {
             && renderRules(state: powerTransitionState(preserving: whole), allowedUID: 501, physicalInterfaces: ["en0"])
                 .contains("block drop out quick all"))
         check("emergency-is-whole-host", !emergencyState(preserving: scoped).aiHomeScoped)
+
+        // A switch in either direction flushes the states made under the
+        // other scope; a re-arm in the same scope keeps them.
+        let aiPasses = passRules(in: rendered)
+        let wholePasses = passRules(in: wholeRules)
+        check("ai-home-to-whole-host-flushes", stateDisposal(replacing: aiPasses, with: wholePasses) == .full)
+        check("whole-host-to-ai-home-flushes", stateDisposal(replacing: wholePasses, with: aiPasses) == .full)
+        check("ai-home-rearm-keeps", stateDisposal(replacing: aiPasses, with: aiPasses) == .keep)
+        // The saved scope widens only after a committed load.
+        check("first-ai-home-arm-saves-whole-host", !scopeBeforeCommit(next: scoped, previous: whole).aiHomeScoped
+            && !scopeBeforeCommit(next: scoped, previous: nil).aiHomeScoped)
+        check("ai-home-rearm-saves-scope", scopeBeforeCommit(next: scoped, previous: scoped).aiHomeScoped)
+        check("tightening-saves-whole-host", !scopeBeforeCommit(next: whole, previous: scoped).aiHomeScoped)
+        // The update's bootstrap re-arm keeps the session's scope.
+        let retain = UpdateRuntime.retainBootstrapRequest(previous: scoped)
+        check("update-retain-keeps-scope", (try? aiHomeScopedField(retain["aiHomeScoped"])) == true
+            && (try? validateKillSwitchArmFields(retain)) != nil
+            && (try? aiHomeScopedField(UpdateRuntime.retainBootstrapRequest(previous: whole)["aiHomeScoped"])) == false)
 
         func field(_ json: String) -> Bool? {
             guard let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] else { return nil }

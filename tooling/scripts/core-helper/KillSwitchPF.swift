@@ -613,12 +613,15 @@ extension KillSwitchManager {
     static func renderAIHomeRules(state: KillSwitchState) -> String {
         var lines = [
             "# Managed by Tono AI Home — do not edit",
-            "pass in quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
-            "pass out quick on lo0 all no state label \"tono-loopback\"",
+            // Labels of their own: the whole-host ruleset carries the same
+            // passes, so a switch in either direction must still read as a
+            // withdrawal and flush the states made under the other scope.
+            "pass in quick on lo0 all keep state (if-bound) label \"tono-ai-home-loopback\"",
+            "pass out quick on lo0 all no state label \"tono-ai-home-loopback\"",
         ]
         for interface in state.tunnelInterfaces.sorted() {
-            lines.append("pass in quick on \(interface) all keep state (if-bound) label \"tono-tunnel\"")
-            lines.append("pass out quick on \(interface) all keep state (if-bound) label \"tono-tunnel\"")
+            lines.append("pass in quick on \(interface) all keep state (if-bound) label \"tono-ai-home-tunnel\"")
+            lines.append("pass out quick on \(interface) all keep state (if-bound) label \"tono-ai-home-tunnel\"")
         }
         lines.append(
             "block drop out quick inet to { \(ThreeTierRoutingContract.aiHomeHeldCIDRs.joined(separator: ", ")) } "

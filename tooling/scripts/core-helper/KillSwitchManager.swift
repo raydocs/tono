@@ -491,8 +491,11 @@ final class KillSwitchManager {
         // If this arm is interrupted, its fallback remains selective.
         try Self.saveSelectiveRecoveryDisposition(true)
         let renderedRules = try Self.writeRules(state: state, allowedUID: allowedUID)
-        // Persist fail-closed intent before activating the new rules.
-        try saveState(state)
+        // Persist fail-closed intent before activating the new rules. A newly
+        // requested AI Home scope is saved only after its load commits, so a
+        // failed switch leaves heal and sleep rendering the whole-host block.
+        let persistedBeforeCommit = Self.scopeBeforeCommit(next: state, previous: previous)
+        try saveState(persistedBeforeCommit)
         Self.pinHostsIfUsable(state: state)
         // A machine-wide state flush is a security requirement only when the
         // new rule set revokes a previously granted permission. Node switches
@@ -518,6 +521,11 @@ final class KillSwitchManager {
         lastLoadedPassRules = nil
         try Self.ensureAnchorLoaded(disposal: disposal, loadOutcome: &load)
         lastLoadedPassRules = passRules
+        if persistedBeforeCommit.aiHomeScoped != state.aiHomeScoped {
+            // Best effort: a failure leaves the saved scope whole-host, which
+            // a later heal or sleep barrier renders as the stricter block.
+            try? saveState(state)
+        }
         lastCommittedLocalNetwork = !state.tunnelInterfaces.isEmpty && state.allowLocalNetworkDevices
         if Self.commitEndsProtectedFault(state) {
             localNetworkFaultLocked = false
@@ -986,6 +994,14 @@ final class KillSwitchManager {
             }
             return false
         }
+    }
+
+    /// What `arm` saves before its load: the requested state, except that AI
+    /// Home is recorded only if the saved state already had it.
+    static func scopeBeforeCommit(next: KillSwitchState, previous: KillSwitchState?) -> KillSwitchState {
+        var state = next
+        state.aiHomeScoped = next.aiHomeScoped && previous?.aiHomeScoped == true
+        return state
     }
 
     /// The sleep/wake barrier: every exception and the TUN pass are dropped.

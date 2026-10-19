@@ -15,3 +15,11 @@
 - 验证：见 PR 验证评论。本机未编译，由托管 macOS CI 构建并以 root 运行。
 - 候选/发布：仅源码。App 尚未发送该字段（PR3 接入）。
 - 剩余限制：只拦 IPv4 的 Anthropic 网段；共享 CDN 上的其他 AI 服务、DoH、ECH 与 IPv6 不在此层覆盖（见决定 130）。
+
+2026-10-19 续（Codex 审查 `8cceb5415`：block）：
+- major：AI Home 的放行规则与整机规则相同，切回整机时不会清理连接状态。AI Home 的放行改用独立标签
+  （`tono-ai-home-loopback`、`tono-ai-home-tunnel`），任一方向切换都会被识别为撤回并完整清理状态。
+- major：切换到 AI Home 的加载失败后，磁盘已记录新范围，睡眠或自愈会按 AI 范围渲染。现在新范围只在加载成功后写入
+  （`scopeBeforeCommit`），失败时保存的仍是整机范围。
+- minor：原生更新准备（`retainBootstrap`）重新 arm 时丢失范围。改为带上保存的 `aiHomeScoped`（`retainBootstrapRequest`）。
+- 自测新增：两个方向的切换都完整清理、同范围重 arm 保留状态、加载前保存的范围、更新准备保持范围。
