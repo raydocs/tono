@@ -408,6 +408,16 @@ struct ActionCapsule: View {
     @State private var shownPhase: Phase?
     @State private var shownReconnecting = false
 
+    /// DEBUG negative control for the label measurement (`-TonoPreviewRound11Fill`): round 11's
+    /// translucent fill with the white label only, in the real scene. Always false in Release.
+    static let round11Fill: Bool = {
+        #if DEBUG
+        return CommandLine.arguments.contains("-TonoPreviewRound11Fill")
+        #else
+        return false
+        #endif
+    }()
+
     private var action: PrimaryAction { PrimaryAction(phase) }
     /// iOS reasserting a tunnel that was up: the capsule keeps its warm edge and a light passes
     /// along it, instead of replaying the sunrise of a first start.
@@ -424,7 +434,7 @@ struct ActionCapsule: View {
                 // (8.6:1 or more on the fill), over the glass beside it in white. White on the fill
                 // read 3.0:1 (Preparing) and 3.9:1 (Connecting) in round 11's captures.
                 .overlay {
-                    if !filled {
+                    if !filled && !Self.round11Fill {
                         labelRow(TonoColor.actionInk)
                             .mask(alignment: .leading) { fillMask }
                             .opacity(fill > 0 ? fillOpacity : 0)
@@ -564,8 +574,11 @@ struct ActionCapsule: View {
                 GeometryReader { geo in
                     shape
                         // Opaque, the Connect capsule's own warm gradient: the ink label over it is 8.6:1 or more.
-                        .fill(LinearGradient(colors: [Color(hex: 0xFF9E6B), Color(hex: 0xFFD6A3)],
-                                             startPoint: .leading, endPoint: .trailing))
+                        .fill(Self.round11Fill
+                              ? LinearGradient(colors: [TonoColor.sunEdge.opacity(0.55), TonoColor.sunCore.opacity(0.85)],
+                                               startPoint: .leading, endPoint: .trailing)
+                              : LinearGradient(colors: [Color(hex: 0xFF9E6B), Color(hex: 0xFFD6A3)],
+                                               startPoint: .leading, endPoint: .trailing))
                         .frame(width: max(geo.size.height, geo.size.width * fill))
                         .opacity(fill > 0 ? fillOpacity : 0)
                 }

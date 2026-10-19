@@ -43,7 +43,7 @@ struct RootView: View {
             if CommandLine.arguments.contains("-TonoPreviewWidgets") {
                 WidgetGallery()
             } else if CommandLine.arguments.contains("-TonoPreviewContrastProbe") {
-                ContrastProbe(capsules: CommandLine.arguments.contains("-TonoPreviewContrastProbeCapsules"))
+                ContrastProbe()
             } else {
                 content
             }

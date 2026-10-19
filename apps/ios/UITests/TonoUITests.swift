@@ -738,20 +738,20 @@ final class TonoUITests: XCTestCase {
                                                   min(whole, label.median), whole, label.median, label.cores))
     }
 
-    /// Negative and positive control for `labelContrast`, drawn by the DEBUG probe: round 11's white
-    /// "Cancel" over the translucent sunrise fill must fail (both reviews measured 3.0-3.9:1 on the
-    /// real capsule), and the real capsule while preparing must pass.
-    @MainActor func testLocalLabelMeasureFailsTheRound11FillAndPassesTheNewOne() {
-        let app = launch("CONNECTED", ["-TonoPreviewContrastProbe", "-TonoPreviewContrastProbeCapsules"])
-        sleep(2)
-        save(XCUIScreen.main.screenshot(), "contrast-probe-capsules")
-        for (id, passes) in [("probeOldFill", false), ("probeNewFill", true)] {
-            let capsule = app.descendants(matching: .any)[id]
-            XCTAssertTrue(capsule.waitForExistence(timeout: 6), id)
-            guard let m = Self.labelContrast(capsule, inks: Self.primaryInks) else { return XCTFail("\(id): no label glyphs found") }
-            print(String(format: "LABEL %@: median %.2f:1, %.1f%% of %d cores under 4.5:1 | element glyph-core metric %.1f:1",
-                         id, m.median, m.below * 100, m.cores, Self.measuredContrast(capsule) ?? 0))
-            XCTAssertEqual(m.median >= 4.5, passes, String(format: "%@ label median %.2f:1", id, m.median))
+    /// Negative control for `labelContrast` in the real scene: Home while preparing and connecting
+    /// with only the capsule switched back to round 11's style (`-TonoPreviewRound11Fill`: white
+    /// label over the translucent sunrise fill). Both reviews measured it at 3.0-3.9:1 on round 11's
+    /// captures; the measure must fail it here too, or it cannot be trusted to pass the new one.
+    @MainActor func testLocalLabelMeasureFailsRound11sFillInTheRealScene() {
+        for phase in ["PREPARING", "CONNECTING"] {
+            let app = launch(phase, ["-TonoPreviewRound11Fill"])
+            let button = primary(app)
+            sleep(2)
+            save(XCUIScreen.main.screenshot(), "primary-label-round11-fill-" + phase.lowercased())
+            guard let m = Self.labelContrast(button, inks: Self.primaryInks) else { return XCTFail("\(phase): no label glyphs found") }
+            print(String(format: "LABEL round-11 fill %@: median %.2f:1, %.1f%% of %d cores under 4.5:1 | element glyph-core metric %.1f:1",
+                         phase, m.median, m.below * 100, m.cores, Self.measuredContrast(button) ?? 0))
+            XCTAssertLessThan(m.median, 4.5, "\(phase): round 11's white Cancel on the fill passed the label measure")
         }
     }
 
@@ -787,8 +787,6 @@ final class TonoUITests: XCTestCase {
     /// measurement that passes everything cannot go unnoticed.
     @MainActor func testContrastMeasureFailsLowContrastTextInASparseRow() {
         let app = launch("CONNECTED", ["-TonoPreviewContrastProbe"])
-        sleep(1)
-        save(XCUIScreen.main.screenshot(), "contrast-probe-rows")
         for (id, passes) in [("probe3", false), ("probe4", false), ("probePrimary", true)] {
             let row = app.descendants(matching: .any)[id]
             XCTAssertTrue(row.waitForExistence(timeout: 6), id)
